@@ -1,84 +1,107 @@
 # progress.md — Business OS live ledger
 
-*Rewritten 13 Oct 2026 (6.0.149); reconciled 19 Oct 2026 (6.0.850) against current source, preserved work and the owner’s full-consolidation instruction. Compact on purpose: implementation, verification, deployment and acceptance stay separate.*
+*Reorganised 27 Oct 2026 (6.0.998) into a board: status, lanes, queue by area, owner questions, rules. Rewritten 13 Oct 2026 (6.0.149) and reconciled 19 Oct 2026 (6.0.850) before that; the text those passes left here that is now history moved verbatim to `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998"). Implementation, verification, deployment and acceptance stay separate.*
 
-This is the shared coordination ledger for every session (Claude, Codex, Copilot): where production stands, the permanent Golden Rules, the owner's decisions, every open or unfinished task, the actions that stay gated, and a one-line-per-release done log. The previous 16,757-line chronological ledger (Parts, checkpoints, lane narratives, evidence, and real customer data that does not belong in a public repository) is archived verbatim and PRIVATELY at `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Archive/progress-2026-10-13-full.md`; a section-by-section loss map sits beside it (`progress-2026-10-13-map.md`). Narrative history stays in `docs/history/session-log.md`. Live lane state is in the private local `Records/Recovery/LANES.md` and `Records/Recovery/HANDOFF-LATEST.md`: read both before resuming (neither is in this repository; this file does not repeat their contents).
+This is the shared coordination ledger for every session: where production stands, which lanes are moving, every open task by area, the questions waiting on the owner, the owner's decisions, the permanent Golden Rules and the actions that stay gated. Finished work and release narrative live in `docs/history/session-log.md`. The private local `Records/Recovery/LANES.md`, `Records/Recovery/COMMIT-VERSIONS.json` and `Records/Recovery/DEPLOYMENT-WINDOWS.json` hold the live lane log, version reservations and deploy slots (none of them is in this repository; this file summarises their state, it does not copy them). The previous 16,757-line chronological ledger is archived PRIVATELY at `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Archive/progress-2026-10-13-full.md`, with its loss map `progress-2026-10-13-map.md` beside it.
 
 How to read the evidence pointers: `archive L<n>` is line n of the private archive file; `#<n>` is observation n of the 428-row obligation index (`Records/Recovery/HANDOFF-COVERAGE-AUDIT-20261012/obligation-index.json`) with its code status in `Records/Lanes/2026-10-13/BACKLOG-COVERAGE.md` (BC) Appendix A; every other name is a report in `Records/Lanes/2026-10-12/` or `Records/Lanes/2026-10-13/`. Status words: OPEN (live, not done), PARTIAL, MISSING (checked in code, absent), UNCERTAIN (needs a device, data or owner statement), OWNER (waits for an owner decision or action), DEVICE (physical-device acceptance), DATA (production data repair, owner-gated), HOLD (deliberately not shipping), DONE (code verified present, not necessarily deployed).
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
+## Contents
+
+1. [Status snapshot](#status-snapshot--27-oct-2026-cambodia-utc7)
+2. [Current status (lanes)](#current-status)
+3. [Release history since release 2e](#release-history-since-release-2e)
+4. [Standing release process](#standing-release-process)
+5. [Open owner questions](#open-owner-questions)
+6. [Golden Rules](#golden-rules)
+7. [Owner decisions index](#owner-decisions-index)
+8. [Queue by area](#queue-by-area-open-task-queue): [Sales & money](#sales--money) · [Stock & products](#stock--products) · [Returns](#returns) · [Contacts](#contacts) · [Shift, receipts, Telegram](#shift-receipts-telegram) · [Permissions](#permissions) · [Public site](#public-site) · [Platform & ops](#platform--ops)
+9. [Holds and production-only actions](#holds-and-production-only-actions)
+
 ---
 
-## Status snapshot — 19 Oct 2026 (Cambodia, UTC+7)
+## Status snapshot — 27 Oct 2026 (Cambodia, UTC+7)
 
-- **Inventory count workspace is implemented locally, unshipped — 6.0.820–6.0.849.** Main navigation now opens Products, Sessions and Issues. Received dates select the product population and the same sales/customer period; stock stays current and starting membership/quantities stay fixed. Narrow configurable Employee grants, creator-only edits/admin-all, immutable events, optional permitted customer ranking, nullable stock diagnostics and four-ledger comparisons are composed. Shared Issues resume the original session. Counts never write stock or money. Unknown saves recover the same receipt; account/authority/server/branch/session changes fence stale responses. Real unsaved-work protection locks scope controls. Sole-branch discovery retains typed filters; unavailable original products stay visible read-only and renamed members retain starting identity. Existing cost-review tags obey cost permissions. None of this is a production or physical-device acceptance claim.
+- **Live:** `efaac4452` = RC1 (`rc/20261026b`: lanes 6.0.983, 6.0.984, 6.0.986, 6.0.987, 6.0.993), deployed 26 Oct 14:58Z by deploy run 40322968341, live revision `efaac4452aa9`, tier paid. Health pack HEALTHY; the 18:19Z retention recheck confirmed every ephemeral cron slice ran. **main = `74577d8e3`** (tree equals the release).
+- **Deploying now (27 Oct, slot 1):** RC2b `a8dbbe1fc` (`rc/20261027b` = RC2 `3ed6badeb` with lanes 6.0.985, 6.0.989, 6.0.991, plus the exchange statement-budget fix). Exact-SHA gate 40382886386 GREEN (Worker 1077/1077, frontend 981/981); independent Opus delta READY WITH EXCEPTIONS (the paid exchange request sits exactly at the 50-statement budget). Deploy run 40436430026. Ships migration 0272. Rollback = redeploy `efaac4452` through deploy.yml; never `wrangler rollback`, because the 6.0.984 cron change is not versioned.
+- **Next:** RC2b postflight and main promotion; then RC3 = 6.0.988 + 6.0.992 (6.0.990 merged into it) + 6.0.982 (+ 6.0.994), each only after its own exact gate and independent review; 6.0.997 S3/S4 after the owner answers its questions; turn the 27 Oct app-wide page analysis into proposals.
+- **Migrations:** production is applied through 0271 (0269 on 22 Oct, 0270 + 0271 on 24 Oct). 0272 rides RC2b; 0273 is allocated to 6.0.988; 0274 is held for the 6.0.983 customers index if the owner approves. New numbers need both the `d1_migrations` check and every ref's files.
+- **Deploy slots:** at most two per Cambodia date (07:00, and one after 20:00 with fresh `open_today=0`); since 22 Oct the owner allows a daytime deploy once the work is finished, gated and reviewed.
 
-- **Inventory verification and efficiency are bounded, with full release gates pending.** Actual session13/product8/HTTP7 groups and focused permission/navigation/mounted controls pass; earlier failing controls and test-fixture corrections are retained privately. Independent Astra has reviewed the saved dependency slices. Local full-index Free/Paid tests previously completed62 requests, at most44 statements and14 binds; 8,000-product warm reads measured about0.73–0.75s with equal responses across plans. Final840 full-index62-request rerun includes identity/tag readers and preserves these counts; Free/Paid 8,000-product full responses match. Earlier12 Chromium/WebKit EN/KM320/390/1280 journeys pass with mocked HTTP and actual transport, strict body-focus Escape/nested menus/Tab/dates/drafts/retries/cost gates,19 runtime pins unchanged during that run; the visible-before-listener WebKit fault is fixed by842; the identical rapid-open probe improved from7/32 misses to32/32 first Escapes handled. The composed build initially caught a public-catalog→authentication dependency;839 fixes the pure-helper chunk boundary without weakening the assertion. Earlier production build/startup/public preloads and273-chunk zero-cycle checks passed; the final composed build is pending; the existing SheetJS warning remains. The actual20-request browser-to-full-Worker journey changed only the three count tables;189 other tables stayed unchanged. Exact final GitHub gate, final Astra, remote CPU/quotas, physical phones/PWA and approved deployment/postflight remain separate.
+## Current status
 
-- **Required gate repairs are saved, unshipped — 6.0.845–6.0.849.** Exact843 Gate39215523692 ran all1,871 files;18 remained red after retries and the final clean-tree check refused four modified files. The original failures are preserved. Repairs cover immutable Inventory reference/audit/export/storage policies, measured date-index coverage without changing date semantics, the missing scroll root and review link, Khmer terms, and obsolete fixture/contracts. Receipt hashes remain intact through encrypted export/load and actual same-request replay; changed requests still refuse. Orphan checks now fail stale SQL without rewriting it. Matching generated runtime files keep their bytes and timestamps, with LF/CRLF Git-clean and original-writer controls. Status rows now show blank/tick/one issue, with localized accessible labels and verified selected colors. Each bounded slice has independent Astra GO. The composed build, current end-to-end flows and one new exact-SHA full gate/raw-artifact review remain pending; the earlier844 run certifies none of these later changes.
+States: planned · in progress · review · gate · ready · live. "Review" covers an independent review round or the fixes it sent back; "ready" means gate and review are both green and the lane waits for a release candidate.
 
-- **0259 and the count-only role preflight remain unapplied to production.** The named query counts Employee roles and invalid permission objects before any stock fence. Seventeen fixtures compare actual Ops refusal with the unchanged0259 migration guard; two wrong checks fail. Local Wrangler proves four grant/denial/refusal cases while preserving189 existing business tables and214 triggers. Six browser/full-Worker/local-R2 photo save/read/decode cases pass; production storage and physical camera/HEIC/phone/PWA acceptance remain open. Current full-schema storage counts require0259 and cannot be used as a pre-rollout baseline. Fresh main/Ops/deployment approval and postflight are still required.
+| version | lane | state | branch / sha | blocker |
+| --- | --- | --- | --- | --- |
+| RC2b | release candidate: 6.0.985 + 6.0.989 + 6.0.991 + exchange budget fix, migration 0272 | live-deploying (27 Oct slot 1) | `rc/20261027b` @ `a8dbbe1fc` | postflight, then promote main |
+| 6.0.982 | sale payments S4: checkout and settle writers record payment events; instalments | review (round 6) | `claude/pay-s4-20261026` @ `5db44b22b` | owner 27 Oct answers to apply; gate 40373482121 red (unused-locals budget, zombie imports) |
+| 6.0.988 | Conflicts lists unknown-cost and empty-barcode products (migration 0273) | review (fixing the delta-4 P2) | `claude/conflicts-list-20261026` @ `0656c4138` | P2: the pending "Confirm $0 cost" summary shows cost to reviewers without cost view |
+| 6.0.992 (+6.0.990) | locked old-format returns: managers update the money details; money copy merged in | gate | `61e0aa60d` | gate 40439056367 and Opus delta pending |
+| 6.0.994 | RC2 P3 follow-ups (Khmer export errors, cached crossing probe, narrower restock seek) | gate | `claude/rc2-p3-20261027` @ `54a2b03fa` | gate 40438883172; certified with exceptions |
+| 6.0.995 | read-only ops query: `returns.created_at` shape census | ready | `claude/ops-returns-shapes-20261027` @ `070340767` | run through the ops workflow after it reaches main |
+| 6.0.996 | RC3 dry-run compose (read-only rehearsal) | review | none (rehearsal `7d06eeff4`, not pushed) | redo after the 982/988/992 rounds |
+| 6.0.997 | hand-edit current-format (money v1) returns | in progress (S1, S2 running) | `claude/return-v1-edit-20261027` | S3/S4 wait on owner questions Q1–Q4 |
+| 6.0.998 | this board | review | `claude/progress-organize-20261027` | lead merges |
+| analysis | app-wide page/function/float analysis, 8 read-only areas | in progress | `Records/Analysis/2026-10-27/` (private) | proposals follow |
+| 6.0.969 | multi-client line: merge main into the multi-client branch | in progress | `claude/mc-merge-20261023` | branch only; Leang keeps its deploy path |
+| 6.0.980–981 | first admin and client secrets generated at deploy (multi-client) | in progress (committed locally) | `claude/first-admin-at-deploy-20261025` | not pushed |
+| 6.0.973, 975, 976, 979 | read-only ops queries | live (on main) | main | none |
+| 6.0.985 | review queue: approve performs the merge, idempotent pending actions, strict `?fields` | live-deploying in RC2b | `claude/review-queue-20261026` @ `018611110` | owner questions (see below) |
+| 6.0.989 | returns finding G (refuse restore after repricing) + paged complete returns exports | live-deploying in RC2b | `claude/returns-g-20261026` @ `9ad8f68b2` | owner questions (see below) |
+| 6.0.991 | low/out-of-stock alert only when a sale crosses the threshold (migration 0272) | live-deploying in RC2b | `claude/tg-lowstock-20261026` @ `798c899ec` | P3 follow-up lane later |
+| 6.0.983 | D1 reads wave 2 (product search/list, customers list) | live (RC1) | `9c0171dad` | customers index migration waits on the owner |
+| 6.0.984 | cron split so every scheduled step fits the Free 10 ms CPU | live (RC1) | `ae0aa6521` | rollback only by redeploying the prior sha |
+| 6.0.986 | atomic login lockout + payment-method replace step-up | live (RC1) | `1f468116b` | owner question (see below) |
+| 6.0.987 | Contacts tabs hide controls without permission + QuickAddModal unsaved guard | live (RC1) | `51157f3b5` | none |
+| 6.0.993 | rollback guard on cron change, system-owned settings keys, atomic portal lockout, settings-stamp fix | live (RC1) | `963b6ee99` | none |
 
-- **Latest owner priority: Inventory first.** Implement the main resumable count workspace, stock/product/low/out statistics and scoped sales/customer context; one scrolling date/preset row, search, then scrolling filter/sort row. Photos/keyboards/received dates/sole-branch and physical mobile/PWA acceptance follow. Other backlog implementation is parked except strict dependencies, with all tasks/evidence retained. Inventory is implemented locally and remains IN PROGRESS until combined verification, release and acceptance: five independent design passes, anonymous critiques and chair verdict are complete; shared date-rail browser checks are bounded. All owner choices are settled: received-date product population plus the same sales/customer period; all permitted staff view sessions, creators edit their own/admins all; fixed baselines with current-stock drift; optional permitted customer ranking. The approved migration-name-only Ops read passed;0259 is committed locally and unapplied, with no production change authorized.
+## Release history since release 2e
 
-- **Current work is not deployed.** 6.0.812 adds atomic phase/status admission so delayed messages cannot apply or reanalyze a job waiting for fresh review;811 retains terminal-job replay protection and810 atomic image recovery. Their bounded regressions pass, with legitimate recovery and fresh approval preserved. Complete809 recovery independently preserves17,326 files plus Git history. Production last re-read19Oct00:51UTC remains2bb192bcbd5f/Paid, source stamp8d993eb8e1fd99a2; remote main last observed8b7888402ac280f2c0e4a419dafe4afe7bc149b5. Shared Source, dirty originals and unknown work remain protected.
-- **806 passed the application gate but its deployment workflow was invalid.** Gate39166796272 passed976 Worker/877 frontend files, both typechecks, translations/build/chunk graph, with zero failed attempts/retries; actual Astra and root separately checked the exact artifact census. GitHub run39166792753 then revealed invalid job-level runner.temp expressions, before any job. This was missed by the earlier workflow review. Do not deploy806 or treat its gate as808 approval.
-- **807 corrected the release-workflow blocker;808 full verification is complete.** Exact808 gate39184329355 passed977 Worker/877 frontend files with independent Astra raw-artifact identity/census review. One storefront test failed initially with504 Outdated Optimize Dep and passed its isolated retry; this is not a zero-retry pass. Workflow controls remain green. This gate certifies808 only;809–812 require their own exact combined gate and independent composition review before release.
-- **Deployment evidence remains separate from acceptance.**805's ciphertext-only run/attempt records retain partial or conflicting failure evidence using existing crypto/key. Download artifacts promptly (three-day retention). Actual source/guard/snapshot/migration/live identity, authenticated artifact binding and semantic postflight must pass; opaque capture or matching context is not approval. Private receipt tools must target the eventual delivered SHA before use. No production migration, deployment or main promotion occurred in this audit.
-- **Seven intended migrations remain pending:**0243,0251,0255–0259; stage0243 then0258 with pinned guards. Conditional exact201 baseline,203 installed stage and208 final ledger require fresh proof. Held counted/damaged conversion, full restore, old repairs and cutover remain excluded. Current merge-cost/manual-fallback/review-tag, loyalty reset/default-OFF, receiving, urgent date/keyboard/photo/session and guarded-writer changes are saved; their production acceptance is pending.
-- **The wider backlog is unfinished.** Inventory count sessions, issue reasons, compact horizontal filters, statistics and adjustable visibility are composed locally; combined release and acceptance remain open. Image-only received-date filters remain queued after Inventory. Physical iOS/Android camera/library/HEIC, save/reopen, keyboards and installed-PWA acceptance remain OPEN; owner has not tested current phone photos. Synthetic32 Chromium/32 WebKit long-content scenarios are not device acceptance. Whole-app compatibility, Free/scale, persistent cache/account boundaries, parked work, security/compliance, reports and polish remain PARTIAL/OPEN/HOLD below.
-- **Cross-source custody checked, not discarded.** Refreshed local inventory identifies734 registered worktrees across two Git stores,79 detached and129 dirty. Twelve legacy tips and two stashes are absent from Source;4.26GB of untracked work remains HOLD. Earlier remote census719 heads,206 unpublished local tips and271 ancestry-only cleanup candidates remain historical inventory, not deletion approval. All9 PR discussions/reviews and0 issues were previously checked; PR9 is an old draft already in main/candidate ancestry. Preserve unknown, unique, ignored and recovery work.
-- **Full consolidation is ACTIVE.** The latest owner attachment supersedes the bounded release-then-pause scope and old BLOCKED narrative: reconcile all requirements and saved work, implement non-destructive fixes in controlled batches, verify the combined result and prepare safe cleanup checkpoints. Fresh owner approval is required before production changes, historical-data rewrites or irreversible cleanup; no old message grants it. Schedules and recurring snapshots remain PAUSED. Root coordinates publication; deployment windows/census/reservation and exact gate/Astra/postflight remain safeguards, not permission to dispatch.
+Dates are UTC. Gate, review and postflight evidence for each row is in the private lane log; the session log carries the narrative.
 
-- [~] **CONSOL-J — executor authority and import recovery:**809–811 have bounded Astra GO. A six-case role/reassignment/policy/cancel matrix passes, with synthetic-policy and queue-entry limits recorded.812 adds a phase/status comparison inside the existing atomic lease claim: actual811 review bypass is now refused without changing product, review, audit, stock or cache; separate fresh approval succeeds. Twelve production-SQL controls and two deliberately wrong implementations distinguish phase admission from a stale status read. Generic product Free budgets remain a confirmed gap: actual inline start55/approve77 attempted statements exceed the configured50. Same-phase stale runs, ambiguous queued/failed intent, expired holders, staging/DLQ publication and full lost-ACK recovery remain OPEN. Final combined gate, Astra composition and production acceptance are pending.
-- [~] **CONSOL-F — paid basket growth:** real HTTP808 confirms paid10/total10 plus Add20 becomes total30/paid10 while still Completed, absent from Not Paid; Overview collected rises10→30. Five independent first passes, anonymous cross-critiques (one disclosed substitute) and chair verdict are saved. Implementation remains OPEN: retained money/status, replay, collection/debt reports and settlement must agree; preserve actual change and correction authority. Debt-first return allocation is settled below; no financial runtime fix acceptance is claimed.
-- [~] **CONSOL-RECONCILE — full task ledger:** stable requirement/source/test/donor/release/acceptance mapping is underway. Inventory count sessions are in progress and image-only received-date filters remain queued; date/session/baseline/customer decisions are settled; their composed implementation and acceptance remain open. Physical devices/PWA, licence/compliance, broader correctness/performance and safe cleanup remain OPEN/HOLD. Preserve the entire historical queue below; old MISSING or checked rows need current evidence.
+| date | sha | what shipped |
+| --- | --- | --- |
+| 14 Oct | `2bb192bcb` | release 2e (see the session log done log) |
+| 21 Oct | `d3b02a072` | owner-requested release checkpoint; health pack HEALTHY with 214 migrations recorded |
+| 22 Oct | `169215b95` | next-20261022, migration 0269 (owner daytime override) |
+| 22 Oct | `db2440bb9` | follow-up release (replaced candidate `c2f27dce6`) |
+| 23 Oct | `96bdb1cf6` | owner daytime override |
+| 24 Oct | `cc735e89e` | 6.0.968 iPhone camera, 6.0.970 D1 read cuts |
+| 24 Oct | `e8613f438` | 6.0.966 follow-ups, 6.0.967 permission consistency (part A), 6.0.972 sale payments S1+S2 (migrations 0270, 0271) |
+| 25 Oct | `f07fcf82e` | 6.0.974 sale payments S3 readers |
+| 25 Oct | `0da8f9f52` | 6.0.977 scanner test deflake, 6.0.978 iPhone camera stops on close |
+| 26 Oct | `efaac4452` | RC1: 6.0.983, 6.0.984, 6.0.986, 6.0.987, 6.0.993 (live) |
+| 27 Oct | `a8dbbe1fc` | RC2b: 6.0.985, 6.0.989, 6.0.991, exchange budget fix, migration 0272 (deploying) |
 
-### Cross-chat owner decisions and omissions reconciled
+## Standing release process
 
-- Later14October owner replies confirm Resend verification and matching email/Google details, with no live email/Google test requested; Drive is self-managed and no longer an agent setup blocker. Record owner confirmation without claiming a technical end-to-end certificate. Telegram token rotation is owner-confirmed14October; do not rotate again from an old pending row. Distinct Cloudinary/malformed-credential issues remain separate.
-- Carry forward unverified cutover WAF/Bot Fight exception cleanup and temporary operator-credential removal in Worker/GitHub production; endpoint retirement/dark status is a separate follow-through decision. No closure was found in searched later evidence. Never rerun cutover or expose credential values.
-- Audit B63979fb4aa545a1cba36a7ee858699342ea9efbe remains local-copy-first with bounded grouping/composite-key caveats; A/C/D retain their recorded dispositions. Latest owner answers: approvals use the reviewer’s CURRENT permissions and recheck the record despite requester revocation; replacements use the ORIGINAL sale FX. Earlier stock/sale/return reverts follow the merged survivor while preserving ORIGINAL sale/refund money. MERGE UNDO ITSELF is separate; retain the earlier refusal when later transactions depend on it. The later correction and clarification concern earlier actions, not permission to split a depended-on merge or change original financial amounts.
-- Current Inventory answers are settled: resumable checks never change actual stock/money/history; blank=unstarted, tick=done, one issue state with reasons. Optional ranking has no owner-selected default measure; image-only range means received date. Older red/yellow severity and already-answered date questions are superseded.
-- Historical high-confidence official-description work was owner-delegated and reported delivered; later73-name recertification/current-stock/Excel approval is a separate hold. Older unsellable-damage wording is superseded by the later counted/sellable-tag ruling; preserve applicable compensation history without reviving a separate pool.
-- Read depth and gaps are explicit in private19October Codex/Claude/Git status reports. The3,955 overlapping historical records,428 observations and1,327 request rows are preserved evidence, not completion counts. Many branches/chats remain inventory-only rather than behavior-audited; no reliable overall completion percentage is claimed.
-
-- Partial-payment returns reduce debt first. Example sale10/payment3/debt7/return4 leaves debt3 and cash refund0. Keep the sale, payment, original debt, return and resulting debt trace visible; distinguish commercial value/debt reduction from actual cash movements. This owner decision is settled; implementation remains OPEN.
-
-### Earlier checkpoints and retained context
-
-The entries below preserve historical evidence. The current status above supersedes their pending-check and deployment wording; the task queue and Golden Rules remain authoritative.
-
-- **Saved checkpoint662, not deployed:** root `a1840f095c7b59b4fe16bdeb96a80ecf8567cb29` composes current merge-cost work, urgent keyboard/date/loyalty fixes, large-lot graph receipts and guarded writers. Independently reviewed658–661 repair scoped test contracts;660 also fixes API bootstrap under maintenance so reads and authorized maintenance clearing remain available while stock writes stay fenced. Original-source regression controls and targeted checks pass. Main and production remain unchanged. Exact final full GitHub gate, independent final artifact review and postflight are still required.
-- **Owner scope: finish current merge-cost work plus urgent fixes and required dependencies, deploy, then pause.** Start no independent backlog lanes. Older held damaged-stock conversion and full restore are excluded. Schedules and the snapshot loop remain paused; only manual recovery snapshots run.
-- **Saved and locally verified:** UI632 resolves all eight older frontend gate failures and passes focused tests, types, i18n and build, with unchanged catalog31-chunk and unused40 limits. Deferred confirmation rechecks actor/product/lifetime before writing. Backend631 proves actual Paid77-lot Apply/Undo/Redo within binding limits. Backend640 preserves all guards and returns truthful409 conflict responses; persistent source changes still refuse same-generation replay. It passes14 concurrent,26 four-ledger and27 sibling controls. Independent bounded Astra review supports these fixes; this is not final-release approval.
-- **Explicit cost confirmation and recovery:** bulk625/626 actual Worker requests pass on Free/Paid, including rollback and exact retry; maxima16/15 counted business operations. Import620 passes18 invocations per plan, maxima43/42, retaining review for echo/blank/KHR/computed averages. The composed authenticated grouped receipt-recovery seam passes, including interrupted finalization, original-generation Check, revoked/foreign actor refusals and unchanged physical/history tables. High-query pair/group operations and large Free merges remain explicit capacity limitations; no blanket Free acceptance is claimed.
-- **Identified runtime dependencies are saved and composed:**645 admits physical sale amendments, including equal-quantity replacement, while preserving maintenance and receipt rules.651 corrects its maintenance-race setup and proves the marker exists with no transient permit before the business batch; original non-discriminating race evidence is retained separately.644 passes14 concurrent,26 four-ledger and30 native orphan controls, including actual line removal and merge replay.654 passes received-date40/barcode7/set-to-zero5 controls. Independent reviews support completed bounded slices; final composition review is still required. Guarded fixture repairs retain original assertions and admit only explicit setup or the actual low-level caller contract. They do not certify the remaining static candidate list.
-- **Rollout protection:**606 stages0243 and0258 before0251/0255/0256/0257. Local pinned Wrangler proof reaches207 migrations and23 guards, no permit and no pending migration. Actual old-production requests crossing guard installation refuse before mutation or recover an existing receipt without a second fold. Use a workflow branch containing606 and `run_migrations=true`. No remote migration has run. Immutable history and authorized reset rules remain intact.
-- **Remaining release checks:** reconcile diagnostic637 gate38762817448 and657 gate38767903464, run the current clean composed SHA through the full GitHub gate and independent Astra/threat/secrets review, then fresh Ops and daily-slot/window checks, Paid deployment and production postflight. Earlier594 gate38740685254 is RED and superseded as diagnostic evidence. Physical iOS/Android keyboard, photo and installed-PWA acceptance remain OPEN. After verified release, PAUSE the broad goal and agents; do not mark the full backlog complete.
-
-- **Historical16October scope, superseded by the18October entry above:** finish only the owner-selected current merge-cost work, urgent fixes and demonstrated release dependencies, then deploy/postflight and pause. Root owns integration/publication; exact path custody and isolated worktrees remain required. The owner replied "finish deployment" after the night cutoff notice; this is being treated as a one-off continuation, without waiving CI, Astra, fresh Ops or daily release limits. Unattended schedules and snapshot loop remain paused. Actual native capacity is root plus three delegates. Latest complete manual snapshot: `snap-20261016-015037`. Wider backlog and physical-device acceptance remain open.
-
-- **Production = release 2e = `2bb192bcb`** (`claude/release-2e-20261015`), live since 14 Oct 15:33Z: Paid deploy 38575646057, Worker version f228f677-f99a-4e71-8d11-80b567e6f472, migration 0250 applied (production migrations now through 0250, with 0243–0249 never applied), runtime/version revision `2bb192bcbd5f` sourceHash 8d993eb8e1fd99a2, not dirty. **main = `8b7888402`**: 2bb192bcb plus read-only ops postflight queries (6.0.437) and progress documentation (6.0.439), so the Worker code on main equals production. Release 1 `c9fd83121` (13 Oct 14:05Z) was production before it. Main alone never proves deployment: production claims need recorded commit and deployment provenance, and the runtime/version revision is re-read before every deploy.
-- **Release 2e = release 2d `04a5b24a8` (18 lanes + migration 0250; see Done log, 14 Oct) + login-refresh `3eb0fd9cd` (6.0.412–414: the read-fence identity ignores profile text and expiry) + avatar `0f9f43b09` (6.0.415–416: the session user carries avatar_path and updated_at).** Exact-SHA gate 38556360473 green (cloudflare 931/931, frontend 865/865); independent Opus 5.5 review GO WITH CONDITIONS (`Records/Lanes/2026-10-14/OPUS-RELEASE-REVIEW-2E.md`; L1, the grant string re-parse at actorReadScope.ts:465, is queued for release 3); secrets scan clean; fresh open_today=0 (ops 38575173256) before the after-20:00 deploy. Owner accepted on device on 14 Oct: the Restart-now bar shows, the dashboard loads after login without a refresh, and the avatar shows the photo.
-  - Postflight PASS (ops runs 38590556878–38594783414): migrations through 0250; no inactive products with stock; lots ≤ branch_stock and branch_stock ≤ lots on 3,700 pairs; removals_open_after_mark_lot_before 0; 0 reopened shifts; 0 sale_refused; loyalty 6.0.133 moved 6 customers (points disabled, so no visible effect); retention health normal.
-  - **Audit retention postflight PASS**: Ops 38660368158 after the 15 Oct daily purge preserved the kept-class counts against the 14 Oct baseline; encrypted artifact inspected during reconciliation. **Still open**: the first close after 2e must show shift formula 2 (`postflight-shift-formula`). Fresh Ops 38667876461 found zero post-2e closes; this remains pending, not a failing formula. Temporary plaintext exports were deleted.
-- **Last verified remote main = `8b7888402ac280f2c0e4a419dafe4afe7bc149b5`**, rechecked 15 Oct. Fresh read-only Ops38724464808/artifact11968150314 confirms201 applied migrations through0250.0243–0249 and0251–0256 remain unapplied. The latest allocation census covered711 remote objects,2384 local refs and687 worktrees;0256 adds validated current cost triggers.0253 zero proof,0254 proof restore and0255 merge review remain separate held work. Plaintext export deleted; encrypted evidence retained.
-- **Loyalty plus urgent keyboard release — exact full gate PASS, NOT DEPLOYED**: frozen combined candidate560 `60a9905459d8e6e7c6d5336d3ab07d86a19a0c5b` is pushed; gate38715216535 passed Worker933/933 and frontend868/868, both typechecks, i18n and build. Artifact11967210541 verifies the exact tested SHA and frontend build; one storefront browser test retried successfully after a Vite dependency-cache timeout, with the first failure retained. Independent Astra source/threat review supports the exact candidate. Only migration0251 is new. Frozen loyalty485 `fb180eca667f57c7b5fed169ecd7a64b2c109846` remains an independently gated fallback; choose one candidate for the evening slot. Owner rules remain: pre-reset unpaid/pending activity never earns later; OFF-created activity never earns after enable; an ON-created unpaid sale first paid while OFF permanently skips points. Next: after20:00 Cambodia, fresh daily-slot and Ops open_today=0 checks, Paid deploy, basic independent postflight, verified fast-forward of main, then the newly published loyalty-reset-check and remaining semantic postflight. Generic Ops success does not certify the reset; inspect aggregate values and preserve history. Physical devices and installed PWA remain OPEN.
-- **Release 3 saved, not release-ready**: original `claude/release-3a-20261014` @ `0616df162954d82eb4c1c0455ddf8708de2ad630` and all dirty Claude worktrees remain protected. S12 `472e5eb18`, S11 charts `11a6e5120`, S9 core `9e3c311259`, separate cost-history redaction `e05d21fa10`, S8 `476c4c14f` and S10 `c5cc1a215` have bounded evidence; none is an exact composed-release certificate. S9 original heavy import-budget timeout, cancelled portal check and unrun backup checks remain recorded. Worker NULL-cost changes must not ship before complete frontend reader coverage. S7b is cancelled: real $0 remains real and is excluded from on-hand averaging. Plan: private `Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md`; latest saved custody/evidence: `Records/Coordination/2026-10-15/`.
-  - **S13a merge cost — owner policy settled, composed checkpoint580, feature RELEASE HOLD**: received-lot authority wins; without usable lot cost, retain the valid latest manual override, otherwise the keeper known value or NULL, with **Cost needs review**. Manual7 wins over catalog5 without rounding away its stored precision; earlier history or a retained fallback does not clear review. Clear only after valid lot evidence or authorized deliberate known-cost confirmation, including genuine0. Root580 composes independently reviewed577 `9efcdd1e5802f1bb8468a4f4fd1e3ad539e65787` and579 `717944ed2f4dfc5b92bd3f60f3302517b5df9592`: prior563–574 fixes preserve fallback/history precision and bind initial/repeated undo/redo to committed graph receipts;577 aligns validated current formula, cost breakdown and seven replacement triggers without altering0195/0255 or historical events.579 shares permission reads within each phase and removes unused wrappers. Composition passes14 focused Worker files, frontend replay, both package typechecks, i18n and build; final composition review is recorded privately. Actual parent578 undo/redo each saved two statements/two calls, with unchanged runtime logic in579; current merge/redo still exceed Free limits. A real old574 Worker on0256 confirms the release compatibility defect: inventory Add1@8 succeeds but changes canonical8 to3.2. Held maintenance refuses a new request; in-flight safety is unproven. Existing0243 admission work is a reuse candidate, not composed or accepted here.0255/0256 stay LF-only and unapplied; urgent560 excludes them. Authoritative preview, group/bulk/import/approval, explicit confirmation, retention, readers/redaction, backup, cache, physical/PWA, Free/scale/CPU and old-writer compatibility remain OPEN.
-  - **S13b import/receiving**: receiving537 `2c7821e1630b95c90d53c5292bd0d3b98e33b135` composes reviewed backend527 and frontend539 into supplier/Inventory531. Independent Astra composition GO,26 focused checks, all package gates and9 actual frontend-builder/transport-to-authenticated-Worker cases pass; each preview leaves application tables unchanged. Mixed-mode same-product and frozen-retry previews are unavailable; original533 REDs remain evidence. Prior broad128 browser checks and final24 eligibility cases cover Chromium/WebKit EN/KM narrow/wide separately. Import502/receiving508/feedback515 remain included. Baseline143-file-plus-package failures were resolved through the popup correction and two isolated native retries. Actual import budgets: Paid600 receipts/4 invocations/max990 statements; Free600/291/max43. No exact full cost-release GitHub gate or production approval; physical/PWA, full browser-to-Worker and large product-history CPU/daily quota remain open.
-  - **S13b supplier returns/reports**: reviewed524 `ef6ba16308f3dec0a104a0bc4274d2572e6ece80` composed in530 `b20dd4c3a`; its11 blobs are identical. Composition focused tests and all package gates pass. Actual supplier requests measured13 invocations per plan, maximum31 statements on Free/Paid. Reader follow-up531 `068c6098924bd87c5be4ab55664d404603729c66` fixes Inventory NULL-to-zero, KHR and partial-cost detail/export through the shared formatter; independent Astra GO,5 focused tests, package gates and40 browser cases across8 profiles pass. Actual Close-button touch/Enter works; StatsStrip Escape support remains a wider keyboard task. Full-app/physical/PWA and XLSX/PDF execution remain unverified; no full-release certificate is implied.
-  - **Zero-cost proof and restore — RELEASE HOLD**: prototype509 `82980af0e77bfe8a080b98597d99d2165426bc7b`, safeguard517 and restore549 `14b30d0e0a3b6e282bf9befd1d075fb016e0f5ff` remain uncomposed with merge review. Independent bounded GO549 covers55 native groups,8 actual authenticated Paid endpoint groups and18 backup siblings; restore measured508 statements including background work. Duplicate numeric/string audit-ID refusals were repaired before destructive writes; original REDs remain. The original full legacy fixture exceeds single-invocation capacity; the original replay fixture still stops at its copied-product proof guard. Free/Paid continuation, full roundtrip and wider old-Worker overlap remain OPEN. Feedback569 `143a4bb47d1949c2e61136ed0f91a96d56b542d1` extends reviewed544 with truthful EN/KM merge-review restore refusal: six focused files, package checks,40 browser cases across8 profiles and independent Astra bounded GO; partial-failure/password controls remain intact. Scratch composition confirms that explicit zero proof alone does not clear the merge-review tag: a future combined operation must satisfy both identities atomically. Writer protected-field lists and both source/live backup admissions must be combined, preserving predelete refusal until review restore is supported.0253/0254 remain unapplied; neither feedback nor small fixtures certify full restore.
-  - **Detail and Adjust Stock keyboard — exact full release gate PASS, NOT DEPLOYED**: detail548 is composed in cost554; the urgent loyalty-based candidate560 also contains556/557/558/566 keyboard and selected-date fixes plus567 test-fixture correction. Shared prompt focus stays contained and returns to the right dialog; header paging scrolls the inner region; Add review shows the selected received date. Runtime566 passed896 browser checks across Chromium/WebKit, EN/KM and375/1440 widths, plus48 generic Modal checks and saving/header controls.567 preserves every ProductForm assertion while correcting its zero-layout fixture. Exact560 full gate38715216535 passed, and saved-source/bundle identities plus independent Astra review are retained. The fixture includes730 dates across2025/2026 in newest-first order; authenticated date-write, physical iOS/Android keyboards and installed-PWA acceptance remain OPEN. Only0251 belongs to this release; cost/restore0252–0255 are excluded. Allowed Paid deployment and independent production postflight remain required.
-  - **S14 and full backlog** remain OPEN: Conflicts UI/navigation/permission counts, top-bar sizing, applicable parked work, physical devices and the full owner/recovery coverage. No task below is closed solely because a nearby lane was committed.
-- **Release 3 = the queue** in "Open task queue → Release 3 queue" (owner decisions of 14 Oct, refute follow-ups, review-queue slice A, efficiency lanes). The earlier review-queue completion plan (OPUS-PLAN-REVIEW-QUEUE-COMPLETION): slices B (pending-review tag), C (Telegram alert per review) and D (permission catalog) shipped in release2e; slice A (approve-performs-merge) stays open. The order of that plan was D1 → C, B, D2–D4 → A; its owner questions Q1, Q3–Q6 and Q8–Q12 were asked in chat and are non-blocking. Efficiency lanes (OPUS-EFFICIENCY-REVIEW-R2): E-TG, E-RET, E-ECHO, E-SNAP, E-PUT, E-STOCKIN, E-CLEAN.
-- **Counted-stock family remains HOLD:** the historical `bbd692ee` chain contains damaged-as-sellable-tag conversion, merge v2 replay and customer-return handling that are not included in this bounded release. Historical migration-range shorthand is not an authorization to apply that chain. The current release separately includes0243 stock-schema admission as a required cost-review dependency, together with0251 and0255–0258;0244–0249 and0253/0254 remain excluded. Owner ruling13Oct: ship in slices, live-app fixes first (BC §4 Q1).
-- **Owner audit requests (13 Oct)**: licence, compliance gap (Cambodian e-commerce, consumer, data-protection, VAT/invoice, cosmetics, accessibility, third-party terms; not legal advice) and a whole-app ASVS L2 security audit with no loopholes. Findings were routed into the sec-sale-time, sec-sessions, sec-settings-reset, sec-sheet-worker, license-compliance and storefront-compliance lanes (all in the release 2 candidate); what remains is in the Release 3 queue (the queued briefs are in `Records/Recovery/QUEUED-BRIEFS-2026-10-13.md`). The own-code licence is decided (14 Oct, proprietary, all rights reserved); the LICENSE file is a release 3 item.
 - **Release gate** for every new candidate: exact-SHA full GitHub gate, independent Astra review, adversarial/threat review and secrets scan, authorized Paid workflow and independent production postflight. Earlier Opus reviews remain evidence for their historical releases, not new Astra certificates.
 - **Versions**: `Records/Recovery/COMMIT-VERSIONS.json` is the authority. Reserve before committing; titles use `n.n.n — concise description` and brief clear bodies; new commits only, never rewrite pushed history.
 - **Privacy**: the GitHub repository is PUBLIC (verified 12 Oct). Customer names and phones lived in the old `progress.md` and in four lines of `docs/history/session-log.md`, and remain in git history. Owner ruling 13 Oct: scrub and purge history later (force-push, after the current lanes merge), keep customer data organised in local Records, keep a regularly pushed private mirror. Not urgent. A Haiku scan of seven pushed branches (13 Oct) found no real secret, token, phone, email or chat id in added lines; the commit author identity is the owner's configured git user, already in main history (owner info, no rewrite). See Privacy in the queue.
+
+## Open owner questions
+
+Plain-language questions that are blocking or shaping current lanes, newest first. Answered ones move to the Owner decisions index.
+
+1. **Fixing a return on a later day (6.0.997 Q1):** when a manager fixes a return's refund on a later day, does the difference go through today's drawer, or was it a typing mistake so the return's own day is corrected? Recommended: today by default, with a "typing mistake: fix the original day" choice. (The 27 Oct answer for payment corrections, "counts on the day it is made", points the same way.)
+2. **Changing a return's date (6.0.997 Q2):** may a manager change the date of a return? Recommended: no.
+3. **Typing a refund amount (6.0.997 Q3):** may a manager type a refund different from what the items add up to (for example less for an opened box)? Recommended: no for now.
+4. **Cancelling an old return today (6.0.997 Q4):** should a cancel also count in today's drawer, like an edit? Recommended: yes, as its own follow-up lane.
+5. **Approving a rename (6.0.985):** when an admin approves a queued rename, should the other queued changes (price, image, cost) also apply to the kept product if the admin may make them, or only the name and barcode? And should Undo of that merge give the retired product back its old name and barcode?
+6. **Asking for the password again (6.0.986):** besides replacing a payment method, should other money-changing settings also ask for the password again?
+7. **Returns export and repricing (6.0.989):** are these defaults right: up to 20,000 returns per export, one year at most, 250 rows per page on Free? Old returns (before the current money format) carry no price record, so a later discount on the whole sale cannot be detected: accept that? Adding an item to a sale with a whole-sale discount changes every line's share and currently blocks restoring earlier returns: keep that refusal? Review-tier staff cannot export returns: confirm.
+8. **Conflict marks (6.0.988):** should "this $0 cost is real" and "no barcode is correct" marks be kept forever in the audit log (today they follow normal retention)? Should word barcodes such as "N/A" also be listed? Is a list of existing marks to un-mark from wanted?
+9. **Customers search index (6.0.983):** may the customers list get a new database index (migration 0274) to cut reads?
+10. **Cancelled sales:** only Completed and Not Paid exist as statuses (20 Oct); the lanes keep Cancelled as it was. Confirm that Cancelled stays.
+11. **Older questions.** BC-Q2, Q3/Q4, Q7, Q10 and Q11 were answered on 13 Oct and Q5 by the "replacements use the ORIGINAL sale FX" ruling; the rest stand:
+   - **Owner questions awaiting answers (BC §4, at most four at a time; non-blocking unless noted)**
+     - BC-Q1 how the counted-stock family reaches production (blocks N2/N4b/N10; recommended: ship in slices — ruling 13 Oct says slices); BC-Q2 restore after repricing (answered 13 Oct: refuse); BC-Q3/Q4 apply-first questions (cancelled by the queue-first ruling); BC-Q5 replacement priced on an older Not-Paid sale: original rate, today's rate or USD-only (blocks finding E).
+     - BC-Q6 same-day equal-cost receipts from different suppliers; BC-Q7 review-tier create matching an existing product (answered 13 Oct: hold for approval); BC-Q8 reject with a blank reason; BC-Q9 historical lot total greater than branch total; BC-Q10 rounding (answered 13 Oct: payable stays cents); BC-Q11 customer data in tracked docs (answered 13 Oct: Option 3).
+     - BC-Q12 four permission clean-ups; BC-Q13 loyalty redemption step; BC-Q14 unknown phone in the POS picker; BC-Q15 short display ids; BC-Q16 stock-in session defaults; BC-Q17 receipt times and courier cost; BC-Q18 bulk edit discount/expiry and batch view; BC-Q19 what "labels manage" manages; BC-Q20 inventory statistics scope.
+     - BC-Q21 POS print queue persistence; BC-Q22 commission rule; BC-Q23 website theme memory, badges, page-size selector, old shop name; BC-Q24 touch targets, POS confirmations, chips vs cards; BC-Q25 abuse limits, AI quota, CSP report endpoint, video fallback; BC-Q26 import review parity.
 
 ## Golden Rules
 
@@ -152,6 +175,45 @@ The entries below preserve historical evidence. The current status above superse
 ## Owner decisions index
 
 One line per decision, newest rules win. Dates are when the owner said it (Cambodia). Fuller wording lives in the memory notes named in brackets and in the archive; do not re-ask these. Memory notes: `C:/Users/mrkl6/.claude/projects/C--Users-mrkl6-Downloads-business-os-v1/memory/` (private, local).
+
+**19–27 Oct 2026 owner decisions (newest; they supersede anything older) [memory owner-answers-19-oct, -20-oct, -21-oct-shift-cash, -21-oct-design, -22-oct, -24-oct-sale-additions, -26-oct, -27-oct, owner-ask-19-oct-design-pass]**
+- 27 Oct — Locked old-format returns: admins AND managers (full Returns access) may convert or edit them by hand; UI copy calls it updating the return's money details, never a "format".
+- 27 Oct — A review-tier staff member who confirms a $0 cost or a missing barcode as correct is queued for admin approval, not refused.
+- 27 Oct — A later payment correction counts on the day it is made (the shift that made it), never back-dated.
+- 27 Oct — A riel payment that leaves under 100 riel unpaid is fully paid: Completed, with no "payment incomplete" flag on the shift.
+- 27 Oct — More subagents are fine with care for CPU and usage: tests run serially, no parallel full sweeps.
+- 26 Oct — No "Show all" on the Sales list (it would collapse the site); use the Previous/Next paging used elsewhere. Never ship an unbounded "load everything" list.
+- 26 Oct — A refusal must never be a dead end: every refusal that blocks staff needs an admin resolution path in the app (for example convert or edit by hand) with audit and undo.
+- 24 Oct — A sale is Not Paid or Completed; a part-paid sale stays Not Paid with a "Part paid" tag (បង់ខ្លះ), no third status. Instalments are allowed; each payment records method, $/៛, time, cashier and shift, and the sale turns Completed when fully paid. Sale lines carry an origin tag (POS / added later) and a paid / unpaid tag; additions to a paid sale may be paid on the spot as an extra payment. A return on a sale that still owes lowers the debt first; cash goes back only for anything left over.
+- 23–24 Oct — The five old "Completed but paid less than total" sales are flagged Not Paid; staff record the payment with its real date, marked "recorded late" and kept out of current drawers, and can then complete them.
+- 23 Oct — This supervisor session works on Leang Cosmetics only; BM Shop belongs to its own session.
+- 22 Oct — A return replacement has no quantity cap: it is an exchange plus add. Only units covered by the returned quantity of the same product keep the original sale price; extra units and other products are a normal sale.
+- 22 Oct — Imported sale lines with no riel price: the riel floor is the recorded dollar price × that sale's rate, rounded down.
+- 22 Oct — Khmer text is short and carries the essence, not a literal translation; show new Khmer strings to the owner with their English meaning.
+- 22 Oct — Camera scanner: one tap opens the camera, ask only if it fails to start, never leave the camera on when the scanner is not showing, no red text unless there is a real block. (25 Oct: always stop the camera on close.)
+- 22 Oct — Daytime deploys are allowed once work is finished, gated and reviewed; the two-per-date cap stays; staff tap "Restart now" between customers.
+- 22 Oct — Exchanges: one step in Returns for every sale (refund + replacement/extras, difference paid or given back); cancelling such a return asks whether to cancel the replacements too (some or all); replacements the customer keeps become Not Paid for the unpaid credit share.
+- 21 Oct — "Full" on a permission module grants only its main access; costs, destructive imports, Security / Google Drive settings, backup restore/reset and Suppliers stay separate switches, consistently in every module, preset, review, user detail and the server.
+- 21 Oct — No continuous scanning (scan, camera closes, tap); scan feedback is vibration + green flash, no beep; Inventory Count works page by page.
+- 21 Oct — Shift cash: a later payment on a Not Paid sale counts in the shift that took the money; cancelling a sale that already had a cash refund gives back only the rest; riel refunds round DOWN to 100៛; the "Not Paid" line on shift reports and Telegram shows the amount still owed.
+- 20 Oct — Only two sale statuses, Completed and Not Paid; everything else (partial return, returned, delivery pending) is a tag. A fully returned sale keeps its status, its amount drops and it is flagged for confirmation (new full returns only); confirming may offer an explicit "mark Completed, $0 paid". Never turn Not Paid into Paid; wrongly converted past records are found and corrected, and past statuses are normalised to the two statuses plus tags (held migration).
+- 20 Oct — Reports and the dashboard show revenue both with and without Not Paid (without = whole Not Paid sales excluded).
+- 20 Oct — Existing website accounts re-agree to the age-16 wording (consent version bump, no trapping flow) and the age confirmation is stored; the privacy policy names the AI provider and its retention; storefront stock freshness uses combined caching strategies with a security review; loyalty is OFF and must cost nothing while off; barcodes only (no QR/DataMatrix).
+- 20 Oct — Employee defaults: Contacts tier Full; Dashboard off (grantable per role).
+- 20 Oct — Use more subagents (about 10–15 concurrent across the 5-hour window, one writer per file set); supersedes the older 5–6 cap.
+- 19 Oct — Public header: social icons on their own scrolling row showing the real username (picker for several accounts); the install-app band stays and must work; footer line "Leang Cosmetics is an independent beauty retailer in Cambodia."; design pass for every public page, Inventory and Permissions (admin design language, compact, all useful information).
+- 19 Oct — Barcode search is allowed for everyone who can search; Employee defaults: product details without cost, edit every product detail except prices and supplier; Products default to the Excel-style table.
+
+**Cross-chat owner decisions and omissions reconciled (15–19 Oct, carried from the 19 Oct status)**
+
+- Later14October owner replies confirm Resend verification and matching email/Google details, with no live email/Google test requested; Drive is self-managed and no longer an agent setup blocker. Record owner confirmation without claiming a technical end-to-end certificate. Telegram token rotation is owner-confirmed14October; do not rotate again from an old pending row. Distinct Cloudinary/malformed-credential issues remain separate.
+- Carry forward unverified cutover WAF/Bot Fight exception cleanup and temporary operator-credential removal in Worker/GitHub production; endpoint retirement/dark status is a separate follow-through decision. No closure was found in searched later evidence. Never rerun cutover or expose credential values.
+- Audit B63979fb4aa545a1cba36a7ee858699342ea9efbe remains local-copy-first with bounded grouping/composite-key caveats; A/C/D retain their recorded dispositions. Latest owner answers: approvals use the reviewer’s CURRENT permissions and recheck the record despite requester revocation; replacements use the ORIGINAL sale FX. Earlier stock/sale/return reverts follow the merged survivor while preserving ORIGINAL sale/refund money. MERGE UNDO ITSELF is separate; retain the earlier refusal when later transactions depend on it. The later correction and clarification concern earlier actions, not permission to split a depended-on merge or change original financial amounts.
+- Current Inventory answers are settled: resumable checks never change actual stock/money/history; blank=unstarted, tick=done, one issue state with reasons. Optional ranking has no owner-selected default measure; image-only range means received date. Older red/yellow severity and already-answered date questions are superseded.
+- Historical high-confidence official-description work was owner-delegated and reported delivered; later73-name recertification/current-stock/Excel approval is a separate hold. Older unsellable-damage wording is superseded by the later counted/sellable-tag ruling; preserve applicable compensation history without reviving a separate pool.
+- Read depth and gaps are explicit in private19October Codex/Claude/Git status reports. The3,955 overlapping historical records,428 observations and1,327 request rows are preserved evidence, not completion counts. Many branches/chats remain inventory-only rather than behavior-audited; no reliable overall completion percentage is claimed.
+
+- Partial-payment returns reduce debt first. Example sale10/payment3/debt7/return4 leaves debt3 and cash refund0. Keep the sale, payment, original debt, return and resulting debt trace visible; distinguish commercial value/debt reduction from actual cash movements. This owner decision is settled; implementation remains OPEN.
 
 **14 Oct 2026 owner decisions (newest; they supersede anything older) [LANES 13 Oct 22:50Z "OWNER ANSWERS", 14 Oct 00:17Z "OWNER ANSWERS 2", 00:36Z "OWNER RULE cost-unknown"; memory owner-answers-14-oct]**
 - Repository: make it private LATER, not now (a private repository costs Actions minutes, Windows runners count double). The privacy purge of history stays as recorded under Privacy.
@@ -289,367 +351,714 @@ One line per decision, newest rules win. Dates are when the owner said it (Cambo
 - Notification re-alert is client-side (localStorage, per-item last-seen timestamp); `receipt_settings` permission is `settings`; the POS branch tiebreaker is alphabetically-first branch with stock, else alphabetically-first, else null.
 - Multi-select transfer/import grouping: name + details match excluding branch is one row; same name with other differences is a child row of the same group; a different name is always separate. Products import modes: `merge` (default, never removes) and `replace_all` (soft-deactivates untouched active products; owner 13 Oct: a reviewer-"skip" row keeps its product).
 
-## Open task queue
+## Queue by area (open task queue)
+
+Each item is numbered `Q<n>` (stable within this revision) and marked: **owner-decided** = the owner has ruled on what to build; **needs owner** = at least one part waits on an owner answer, action or device check; **ready** = can be worked without owner input (not a claim that code is done or verified). The marker is derived from the item text (OWNER status words and owner-ruling references); notes in *italics* after `→` were reconciled on 27 Oct from the private lane log. Source sections of the 13–19 Oct queue are kept as sub-headings; nothing was dropped.
 
 Every open or unfinished task from the old ledger, the 12–13 Oct lane reports and the 428-observation register, by area. Format: `ID#n STATUS description`. `#n` points at the register row and its code status (BC Appendix A); `BC-Qn` are the owner questions in BC §4; `archive L<n>` is a line of the private archive; a trailing `[...]` names the report that holds the evidence. Items marked DONE or SUPERSEDED stay listed once so the register stays complete. Statuses are as checked 13 Oct (code at `0baa53f2`, equal to production for the Worker); the old ledger's unchecked boxes older than 12 Oct were reconciled against the register, later `[x]` entries in the ledger, and the lane reports.
-
-### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
-
 Rows below retain the complete historical scope. Current saved, verified and deployed states are distinguished in the Status snapshot; older lane descriptions remain evidence until their specific acceptance is reconciled. Order is not priority, and actual available agent capacity governs concurrency.
 
-- **Owner-decision lanes (14 Oct)**
-  - cost-unknown + Conflicts: $0 cost = $0 loss, NULL cost = unknown and flagged, every unknown-cost item and empty-barcode product listed in Conflicts; sweep EVERY cost reader (reports, salesAnalytics, removalLosses, conflicts). Also closes the Reports courier column that prints a hidden figure as $0.00, and multilot NOTE 1 (a $0-cost lot disposal valued at catalog price).
-  - sheetjs-0.20: 0.20.3 is approved and verified (tarball 2,409,319 bytes, vendored untracked in the sheet worktree). Parity found 30 of 30 .xlsx and 8 of 16 .xls identical; 8 legacy HTML-as-xls differ (numeric cells keep leading zeros, text cells gain spaces around separators, a few text cells become ISO dates) and the `t="d"` date reader reads one day early. Rework the reader, normalise the HTML-export whitespace, decide leading-zero handling (barcodes benefit), re-run parity; then commit PART B separately.
-  - LICENSE file: "All rights reserved — Leang Cosmetics".
-  - Returns policy page: 7 days, unopened, with receipt, same as the store.
-  - Receipt TIN and licences: Khmer and English receipt, TIN and licence fields in settings printed on the receipt (accountant to confirm the invoice format).
-  - Admin reset code: an admin-issued one-time code replaces the authenticator-only reset.
-  - Forced-change neutral copy: the forced password-change screen says "publicly known", which is wrong for a short seeded password; neutral EN/KM wording.
-  - Per-cashier shift report: open and close, per-cashier totals, all-cashier summary (design in the shift-cash report).
-  - Review before/after records: a before/after record for every action and a record viewer (owner 14 Oct).
-  - Storefront minimum age 16.
-  - Telegram admin-only check: the full phone number may be shown only where the audience is verified admin-only; add the check and a test.
-  - Offline queue removal slices S0, S5, S6 (tills drained; unblocked).
-- **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)**
-  - F1/F6: creating a request never broadcasts, so the pending tag appears only on the next visit; the ProductDuplicatesTab conflict apply does not refresh. F2: the second removal-alert site is unpinned. F3: `?fields` edge values (empty, array, case, repeated) are not answered 400. F4: more invisible characters to strip (U+2060, U+00AD, U+3164 and similar; keep ZWSP, ZWNJ, ZWJ and Khmer). F5: a retried create, edit or fee delete with the same client_request_id queues two pending rows and two alerts (`createPendingAction` is not idempotent).
-  - Also: a false "Products merged" alert on a removal-only conflict review (pre-existing); 30 alerts in 3 seconds have no rate limit; slice A still open (approve-performs-merge, details name, Khmer reader, bounded duplicate F8, 12-alert burst); create-fold must also require `merge_duplicates` (parity with merge-permission-fold, defaults granted per owner 14 Oct).
-- **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)**
-  - Drift-guard hardening: the retention writer scan can be fooled by a dynamic import, a new helper in `lib/audit.ts`, a reused allowlist expression, multi-row VALUES, `.js` files, and migrations are unscanned.
-  - `payment-methods/replace` (linked scope) rewrites the payment method on sales with a settings permission only and no password: add the step-up.
-  - Stock Set undo/redo writes no audit row. Owner questions (all prunable today): promotions, `product/delete` with stock, loyalty `award_points`, whether review rejects matter after 21 days; also award_points and promotion replay receipts after 21 days, a record of the purge itself, and a purge cost that grows.
-  - `sale_refused` is missing from the audit vocabulary (Khmer label); the Server page shows an English refusal text; per-user rate limit on refused sales (refusal rows are already collapsed per account, reason and request id per day).
-  - Courier blind write: an amender with the courier-cost switch off can still write the courier cost through the API (write-side gate).
-  - NOTE C: `actorReadScope.ts` org field shape flip (interacts with the H7 epochs).
-  - Remaining non-aborting uploads: product, import and avatar uploads still use wrappers that do not abort.
-- **Imports, stock and money**
-  - Import approve costs about 2,170 statements against the Paid 1,000-per-invocation limit: HIGH, VERIFY the production path before relying on large imports (multilot r3 refute).
-  - A 150-row plain CSV Add becomes one batch of 301 statements, over the 300 chunk (pre-existing, CPU split makes it harmless today): fold into the import lane.
-  - Exchange replacement sale: loyalty accrual must follow the programme switch. SELECT-only ops audits: pre-6.0.131 replace-all deactivations, pre-6.0.134 grouped-return statuses, and the affected-customer count for the restored loyalty points (run in the postflight).
-  - Multilot: movements written in the deploy window above the watermark revert aggregate-only; the 0250 runbook must cover "migration applied but publish failed" and Worker-only rollback windows.
-  - Shift-cash leftovers: amend opened_at later, sales between close and reopen (resolved by the round 6 parent-close float), admin time edits that leave money outside a shift.
-- **Efficiency (Free 50-statement paths) and hygiene**
-  - Free-plan paths over 50 statements: the conflict review loop alone, Dashboard startup at about 4.2k sales (view-more lists now 2–3 statements after the card); lanes E-TG, E-RET, E-ECHO, E-SNAP, E-PUT, E-STOCKIN, E-CLEAN stay queued behind slice A.
-  - Comments sweep: mechanical comment cleanup per package (517 to shorten, 50 to remove, the 4-decimal rule stated once), then the tokenizer strip; also one raiseIfSql builder (59 copies), casts through unknown, storage-key constants exported once, shared late-picker queue, BranchField, i18n duplicate-key check (516 duplicate keys per pack), productIdentity LIMIT 200 group cap, importEngine NaN delta, hard-coded Telegram 2000.
-  - fees-k leftovers N1, N4, N5, N6 and the ProductForm duplicate-warning state; storefront leftovers (pattern filter not exact, unused assistant* keys, stored FAQ text in production settings may still promise something).
-- **Data and platform**
-  - K8b needs migration number 0249 or later (pending_actions requested_device_name/_tz; 0250 is now taken by the multilot watermark, so pick a free number against `d1_migrations` and every ref's files).
-  - Privacy purge of history (scrub and force-push after the lanes merge; keep the private mirror), see Privacy below; repository private later (owner 14 Oct).
+### Sales & money
 
-### Stock, catalog, contacts and suppliers
+#### Consolidation lanes (last recorded state 19 Oct)
 
-- **Historical release 2 lane scope (shipped inside release 2e; unresolved follow-ups and device acceptance remain open)**
-  - multilot-revert (6.0.113–116) OPEN — Revert of a multi-lot removal restores branch_stock but not lots (`stockRevert.ts:547`, CSV path since 6.0.56) plus ops query `branch-exceeds-lots.sql` [OPUS-AREA-REVIEW-R2-STOCK-RETURNS F1, CLAUDE-MULTILOT-REVERT]. import-returns-followups (6.0.131–136) OPEN — import skip keeps product, create-fold typed qty becomes stock-in, imported-sale returns must not subtract loyalty points (`contacts.ts:827`), bulk status ignores imported units, three import row codes English-only, misleading "Pricing changed" on stock conflict [same review F3–F7]. ui-polish-r2 (6.0.121–124) OPEN — undated-only Set starts on an empty lot, failed photo tile cramped and Save silently drops it, old-iOS picker can lock the form, storefront picker has no cancel [SONNET-AREA-REVIEW-R2-REPORTS-UI F3,F6–F8].
-- **N5**
-  - F4#11 MISSING — a return restock raises the lot's `received_quantity` (`productBatches.ts:349`); REVERT-ATOMIC-AUDIT#19 PARTIAL — stock_revert audit written after the revert (`inventory.ts:3133`); after STAB/N1 [BC §3 N5].
-- **N6**
-  - D4#372 / D4-historical-dates#230 OPEN — Worker default received date is the UTC day, business day is Cambodia UTC+7 (`productBatches.ts:190,295,628`, `batches.ts:500`); 38 other `toISOString().slice(0,10)` sites need triage [BC §3 N6].
-- **N8**
-  - PRODUCT-DISMISS-REOPEN#115 MISSING — no undismiss/includeDismissed for product clusters (`products.ts:5816,5825`); SUPPLIER-LOT-IDENTITY#87 MISSING OWNER — same-day equal-cost receipts from different suppliers share one lot (BC-Q6); SUPPLIER-E3-E4-E5#82 UNCERTAIN FIFO drain mirror / predicate divergence / numeric ref collision.
-- **Counted-stock family (HOLD, root chain only; BC-Q1)**
-  - P1-STOCK-PREREQ#0 (durable dated-count receipts, count admission), P1-DAMAGED#1 (counted sellable tagged stock), inline damaged amount on the Set row (owner ruling 12 Oct), 31 COUNTED-* rows (OPTION-CONSUMERS, CONDITION-HISTORY, SCOPED-SET, SHARED-QUANTITY, TAG-UI, STANDALONE-REVERT, SALE-AMENDMENTS, RECEIVING-EXACT, TRANSFER-EXACT, INVENTORY-ADJUST-ADAPTER, SUPPLIER-RETURN-EXACT, BACKUP-RESTORE, CONVERSION-FRACTIONS ...), N10 merge-consumer seams (sale cancel single/group, return cancel/group Undo/Redo, stockRevert, transfer replay), customer1be COUNTED-MERGE-FOLD-EXACT (`1be0918a6`), replay `15fbdc8e0` (+ replay-conditions `6f96c7cf7` certified with exceptions), customer-return-backend `8070f00` (Opus BLOCK, fix plan: keep return_items.product_id = sold product, keeper only on stock-side rows) [BC §1.2, §3 N10, OPUS-REVIEW-CUSTOMER-RETURN-BACKEND, SONNET-REFUTE-REPLAY-CONDITIONS].
-- **Stock UI/logic leftovers**
-  - REASON-CODE#83 PARTIAL (only `full_access_required` is coded, `inventory.ts:1182`); N6-NAV-RETRY#55 MISSING (session retry handle is component state); PIN-products-branch-move#298 and PIN-inventory-drain#299 MISSING (pin refetched rows only from authoritative stock); MERGE-COST-WARNING#157 PARTIAL (server sends `costOutliers`, dialog never renders it).
-  - S4-27#151 PARTIAL (undated lots get English-only batch word); S4-19b#147 PARTIAL (`MAX(batch_number)+1` on TEXT, `productBatches.ts:365`); S4-17b#146 UNCERTAIN (survey and undoable fold of cost-forked twins); P9-9#72 UNCERTAIN (tagged stock needs a signed-in live check); S4-SESSION-ID#154, S4-SESSION-PAYMENT#155, S4-SESSION-COST-PREFILL#156 UNCERTAIN OWNER (BC-Q16).
-  - STOCK-STATS-SCOPE#107 PARTIAL OWNER (BC-Q20); LABEL-MANAGE#14 UNCERTAIN OWNER (BC-Q19); LOT-NO-SUPPLIER-CONFLICT#15 PARTIAL (conflict type for lots with no supplier); PRODUCT-REMOVE-REVERSIBLE#17 PARTIAL (Remove refuses while a stock-in session is reversible, `productDelete.ts`); BATCH-historical-parity#351 PARTIAL; BATCH-view-readonly#324 UNCERTAIN OWNER and BATCH-branch-view#325 SUPERSEDED.
-  - BATCH-group-picker#310 CLOSED; BULK-discount-expiry#313 UNCERTAIN OWNER (BC-Q18); TRANSFER-example#311 OPEN OWNER; Z1-writer#233 OPEN (default two-branch writer lot attribution) and Z1-display-conflict#234 SUPERSEDED; STOCK-CHANGE-RIDEALONG#127 UNCERTAIN (stale residue, close); DETAIL-status-gap#295 OPEN OWNER; KERNEL-stock#364 OPEN (one on-hand/reserved/available/threshold helper across Dashboard, Inventory, Branches, POS, resolver).
-  - G1 filter/preview#374 OPEN.
-- **Catalog and product detail**
-  - D3#166 / D3-detail-filters#213 PARTIAL (movement filters, full Date/Type/Batch/Qty/Running-balance/Reference table); D3-detail-search#214 OPEN (search by supplier/batch attributes); D5a#167 DONE and D5a-read#215 OPEN (supplier attribution across read surfaces); D2b#165 / D2-date-row#212 OPEN (Date row under search on Products and Inventory).
-  - D6 (archive L11303) OPEN (rename cascades with before→after preview); IDENTITY-rename-regroup#342 PARTIAL (rename does not regroup); IDENTITY-auto-merge-evidence#343 PARTIAL (auto-merge flag/filter and losing values); GROUP-image-owner#346 PARTIAL; PRODUCT-detail-density#287 PARTIAL; PRODUCT-edit-layout-confirm#288 OWNER.
-  - PRODUCT-MOBILE-DESCRIPTION#116 PARTIAL (hide inline descriptions on mobile); EXACT-DUP-CLICK-ACCEPTANCE#126 UNCERTAIN (not verified live); INVENTORY-EXCISION-LEFTOVERS#125 PARTIAL (unused catalog collectors, repoint `#product-` notification anchors); POS-price-condition-picker#347 PARTIAL (SP/VIP/condition tiers, never show cost in POS).
-  - K7-edit-jump#227 UNCERTAIN (edit-form section jumps); PICKER-GUARD#69 DONE; REASON-DIRTY#84 DONE.
-- **Contacts and suppliers**
-  - P10-14#66 OPEN (872 customers with blank gender: report and make fixable); GEN-MEMBERSHIP#57 OPEN (shared General customer's legacy membership value: clear and verify); CONTACT-CLEANUP#99 UNCERTAIN (membership-blocked customer cluster, supplier profile confirmation); Q4-data-review#378 OPEN OWNER (two duplicate-phone customer pairs: the owner merges them in the Duplicates tab).
-  - CUSTOMER-membership-prefix#427 OPEN OWNER (exact legacy prefix only if authorised); CONTACT-compare-review#334 PARTIAL, CONTACT-bulk-reviewed#336 PARTIAL (no pair-order implicit bulk merge, 3+ clusters explicit), CONTACT-identity-index#337 PARTIAL (normalised indexed identity keys), CONTACT-duplicate-km#285 OPEN (real Khmer for Resolve/Dismiss/search), CONTACT-merge-scope#283 DONE, CONTACT-merge-atomic#335 DONE, CONTACT-dismiss-sync#284 SUPERSEDED.
-  - F72-unknown-phone#409 UNCERTAIN OWNER (BC-Q14); Supplier-residual-invoice-ledger#384 PARTIAL (historical invoice monetary residual without double stock); SUPPLIER-AUTO-BACKFILL#120 PARTIAL DATA (18,996 blank-supplier lots, 7,340 source receipt lines carry a supplier); LOT-BACKFILL#68 DATA (19,914 untraced legacy lots); UNCOSTED10#77 DATA (10 genuinely uncosted removal rows).
-- **Official names and duplicates**
-  - OFFICIAL-NAMES#22,#117 OWNER (sourced official-name Excel for the owner's review, no import without it; waits for the owner's current-stock confirmation; 6030/6031 "Abercrombie" copy); Product-duplicate-correction-remainder#406 DATA (remaining eligible groups with a fresh manifest and reversible receipts); Product-7091-inactive#405 SUPERSEDED.
-- **Legacy ledger leftovers (not in the register)**
-  - ADJUST-SIBLING-IDENTITY OPEN — post-commit audit/read uncertainty and concurrent new-barcode sibling identity (adjust candidate `a22d3b1e` rejected, archive L657); SEP1-3-LEGACY-DEDUCT HOLD — Sep 1–3 legacy-import sales stay un-deducted by owner ruling (held file `ops/scripts/migration/held/legacy_sep2_3_import_stock_deduction.sql`, 107 units, archive L1775).
-  - LEGACY-SHORT-LINES OWNER — two legacy invoices live but each one line short, held out of the paid flip (archive L2614); P3-DEFAULTS OWNER — Program 3 design defaults the owner may overrule (losses, compat cost keys admin-only, reason optional, shift-amend gating, archive L1917).
-  - the 8 Oct STOCK-ACTIVE pre-gate checklist (archive L155–L166: no active/inactive products, newest-first lots, active-branch display, image upload, nested-loading recovery, Free/Paid profiles, review repairs) shipped through the 8–9 Oct releases and is closed except the counted-damage conversion and the physical-device checks listed here.
-- **Early-Sep ledger leftovers (archive L3001–L6543; most were closed by later releases, verify before any work)**
-  - CATALOG-INTEGRITY items 2–5 OPEN verify (merge reparenting of sales, supplier backfill of 18,996 lots across 2,667 products, `/detail-report` suppliers name-only, fuzzy name duplicate detection, each with undo, archive L3476–L3490); BATCHES-SET-SIGN OPEN verify (`batches.ts` set-sign write bug, task chip spawned, plus the uncommitted `Products.tsx` onAdd one-liner that hides the catalog Add-Product on Stock Changes, archive L4226–L4237).
-  - PDUP-REOPEN OPEN verify (= PRODUCT-DISMISS-REOPEN#115; Products duplicates tab reopen through includeDismissed + undismiss in `products.ts`, archive L3184); S4-32-COST-GUARD OPEN verify (cost mean only across similar costs: 2x guard over 353 merge-candidate groups, worst case 1.58x so the threshold fires on nothing today, take the highest above the threshold with a visible flag; no closure seen, archive L6190–L6215).
-  - S4-29-MEASURED DATA (one same-name unbarcoded pair, 1,695 leading-zero barcode groups over 3,411 rows, placeholder product id 10185 "Ysl New Item" to delete by owner ruling 4 Sep; migration 0112 was written unrun, confirm it ran, archive L5375, L5660).
-  - SEP2-PROD-APPLY DATA (the 2 Sep production apply left four defects; twin products 3,881 and 15,004 rewritten receipt numbers were repaired later by 0109 and 0107; STILL OPEN: 27,278 lot quantities zeroed into 9,921 RECON lots, where 0108 only relabelled the codes and the zeroed quantities are not shown repaired, and the Delivery label that became a courier contact, with no closure seen; the forward fix `twin-merge.sql` was never applied and the pre-change Time Travel bookmark is never restored, archive L3028–L3035).
-  - PROD-CLAIMS-UNVERIFIED OWNER (supplier-attribution and naming-convention drift stay unverified until the owner names a concrete offending record; six other corruption claims were refuted by read-only SELECT, archive L3313).
-- Evidence: BC §1.3, §2.8, §3, App. A; lane reports named above; archive grep by ID.
+- **Q1** [owner-decided] [~] **CONSOL-F — paid basket growth:** real HTTP808 confirms paid10/total10 plus Add20 becomes total30/paid10 while still Completed, absent from Not Paid; Overview collected rises10→30. Five independent first passes, anonymous cross-critiques (one disclosed substitute) and chair verdict are saved. Implementation remains OPEN: retained money/status, replay, collection/debt reports and settlement must agree; preserve actual change and correction authority. Debt-first return allocation is settled below; no financial runtime fix acceptance is claimed. → *27 Oct: sale payments S1–S3 are live; S4 is 6.0.982 (review).*
 
-### Returns, sales money, shifts and expenses
+#### Returns, sales money, shifts and expenses
 
-- **Findings still MISSING on production**
-  - (repro tests RED by design, kept out of release candidates): C imported returned quantity ignored in capacity (`returns.ts:733`; N1 returns-capacity landed 6.0.82–86 for release 2, check composition); D partial return on Not Paid leaves the Not Paid list, settlement refused, drawer pays out (`sales.ts:2420`); E replacement on a Not Paid sale booked as Cash (`returns.ts:101`; BC-Q5 rate rule).
-  - F paid sale that grows stays Completed, $20 unsettleable (`saleLineAddition.ts:592`); G restore after same-line repricing (owner ruling 12 Oct: refuse with "record a new return"); M return id N collides with sale-keyed movements (first blocking id 16780, latent); capacity float-sum refusal (`returnCreateAction.ts:355`) [BC §1.3, §3 N1, N2 (needs BC-Q1, Q4, Q5), OPUS-AREA-REVIEW-R2-STOCK-RETURNS, FINAL-a3e831ad6cc0d4e8c].
-- **Returns register**
-  - F2#10 PARTIAL (Not Paid returns until RETURNS-MONEY 0204; held migration 0238 backfill: see Holds); RETURN-atomicity#248 / PART77-RETURNS-ATOMIC#185 PARTIAL (cross-step atomic create/edit, unpaged/N+1 sites); RETURN-replacement#330 PARTIAL (same-name replacement/settlement, unified chooser); RETURN-cancel-policy#296 PARTIAL OWNER (cancellation semantics for refund/stock/COGS).
-  - SALE-RETURN-ID#97 UNCERTAIN (equal sale/return ids, finding M); RETURN-SUBCENT#96 DONE; legacy v0 customer return create/edit does per-line N+1 capacity reads (Free-plan P1, OPUS-EFFICIENCY-REVIEW-R2 W2); two-line mixed CREATE over Free budget (CRB spin-off); edit/create `batch_id` asymmetry; EditReturnModal never sends `stock_condition` (7077327 finding 1), PATCH not actor-fenced (finding 8).
-- **Sales and POS**
-  - S4R3-7#137 PARTIAL (ask payment method when completing an unpaid sale); S4R3-9#139 MISSING OWNER (receipt opened/closed time, BC-Q17); S4-30-UNIT-PRICE#153 OPEN OWNER (real decision stays open); S4-3/4/5#142 PARTIAL (status/stock/confirmation sibling lane); AR-POS-ENTRY#118 PARTIAL (receivable panel unmounted, POS on-credit deferred).
-  - SALES-TIMESTAMP#61 PARTIAL (`sales.updated_at` mixed formats); POS-PRINT-QUEUE#59 PARTIAL OWNER (BC-Q21); POS-ADMIN-RECOVERY#60 MISSING OWNER (admin recovering an employee's crashed sale); V1-OLDCLIENT-CODE#92 MISSING (`money_precision_review_needed` has no EN/KM key); S4R6-1#421 PARTIAL (Sales expenses beside stats per day and shift).
-  - S4R6-2#422 PARTIAL (today Show-all with bounded cursor); S4R5-2#423 DONE; POS-quickadd-permission#348 UNCERTAIN; PRODUCT-REVENUE-ALLOCATION#113 PARTIAL OWNER (line sums ignore whole-sale discounts); KERNEL-pricing#363 UNCERTAIN, KERNEL-sale-return#365 OPEN (one subtotal/discount/fee/tax/reversal helper); tax on an added sale line (archive L5584) OWNER (no stored tax rate: schema + pricing policy decision).
-  - S4R4-1..4,6,10 and S4R5-3b,4 (archive L16432–L16538, L16401–L16414) legacy-OPEN, likely closed by the 10–11 Sep sale-detail releases, verify.
-- **Money rules and loyalty**
-  - REDEEM-1000#204, LOYALTY-khr-step#249 UNCERTAIN OWNER (BC-Q13); FX-forward-only#264, Currency-forward-only#388 PARTIAL (lock behaviour with a test and explain "applies to new sales" beside the rate editor); CHANGE-RATE-STAMP#195 DONE; Loyalty-switch-balance-acceptance#413 OWNER; Loyalty lookup disabled by policy#417 DONE (keep disabled unless the owner changes it).
-  - Actual-courier-receipt-printing#418 UNCERTAIN OWNER; Delivery-fee-authority#415 PARTIAL (unlinked courier fees enter delivery cost without double counting); S4R5-3b delivery reports read courier payments (legacy-open, verify, archive L16404).
-- **Shifts and expenses**
-  - S4-10#145 DONE; SHIFT20-COUNT#58 DATA (shift 20 closing-count amendment); Historical-Sep4-shift-close#412 DATA OWNER; N46#420 DATA OWNER (expense note 993000 vs 99300 KHR before any write).
-  - N43 (shift open/close cash semantics) and N44 (field-specific compact input sizing) legacy-OPEN (archive L15949, L15966; shift lines now covered by shift-cash-everywhere 6.0.104–107 + 6.0.154–157 refuter fixes in flight: telegram-topics pin, Additional on the shift list card, per-shift drawer mutation guard, reopen/close actor named).
-  - fees/expenses K lane done, fees-k-frontend (6.0.137–140, in flight: deleteFee expected_updated_at + 409, ReviewQueue reject 512 cap + EN/KM for reason_too_long/invalid_reason/review_entity_changed/review_already_decided, 409 undo_history_stale refresh, Backups 503 guidance) OPEN [CLAUDE-FEES-K-FIX-FINAL, CLAUDE-FEES-K-FRONTEND]. K backlog: K5 pattern in label replace/classify, sale cancel fees, contact-merge repoint.
-  - review audit best-effort; six sites name the freshest-session device; `PATCH /action-history` unconditional flip; K8b needs a migration (pending_actions.requested_device_name/_tz, number 0249+).
-- **Data forensics (DATA, owner-gated)**
-  - FORENSICS#23 (sales 16671 and 16835, three closed shifts with the riel-twin refund bug, 7 lots with inflated received_quantity, past sale-line costs); S4-1#140 (row 160 fake undo, nine units), S4-2-HISTORICAL-DATA#141; HEADERONLY-SALES#100 and Historical-zero-line-sales#402 (older 16917/16827: only with source snapshot evidence).
-  - DRIVER-SALE-LINK#101; Historical-settlement-repairs#398 (seven status changes, nine unreversed stock deductions, no blind flip); Data-correctness-reassertion#397; Production-data-audit-residual#403; Historical-identity-evidence-census#401; N45 historical warehouse-sale audit (archive L15979) and N47–N54 ledger items (archive L16001–L16087).
-  - BH-1 bug hunt 27 Sep fix lanes (archive L223, `Records/Bugs/2026-09-27/`).
-- **Legacy ledger leftovers (not in the register)**
-  - RETURNS-ENDPOINT OPEN — returns endpoint/UI `66399fef` isolated pending lifecycle integration; list/export 500/1000 loaded-row cap is a separate completeness issue (archive L1081); P1-RULINGS-PRECISION OWNER — non-blocking rulings on Precision v1: cached old PWA `409 money_precision_review_needed`, preview page-size key, zero-result pager, sub-cent return cancel, spurious `write_conflict` on return create (archive L1947).
-  - F-register tasks F69–F73, U16–U20 (Sep 8): F73 transfer receipt/audit retry gap, F71 Library mounted review needs sync-event consumption repair, U20 broader device layout coverage (archive L14800; the full F-register lives in the obligation index).
-- **Early-Sep ledger leftovers (archive L3001–L6543)**
-  - S4-11b OPEN (record who made each status update; the S4-6 one-line status-message change waits for it; S4-11a is live, archive L5629, L5961); S4-8/9-CANCELLED OPEN verify (`/report` does not exclude cancelled receipts: a pre-existing definition that belongs to the revenue-definition lane, archive L5957); S4-30 window (120 minutes from the sale; 0 = admin-only) shipped with migration 0115, whose application on production is not confirmed here.
-- Evidence: BC §1.3 (A–M), §3 N1/N2, App. A; the three R2 area reviews.
+**Sales and POS**
 
-### Reports, exports and receipts
+- **Q2** [needs owner] S4R3-7#137 PARTIAL (ask payment method when completing an unpaid sale); S4R3-9#139 MISSING OWNER (receipt opened/closed time, BC-Q17); S4-30-UNIT-PRICE#153 OPEN OWNER (real decision stays open); S4-3/4/5#142 PARTIAL (status/stock/confirmation sibling lane); AR-POS-ENTRY#118 PARTIAL (receivable panel unmounted, POS on-credit deferred).
 
-- **Lane work**
-  - reports-L landed (L1–L4, 4-decimal split reports, overview 70→30 statements); money-surfaces-r2 (6.0.117–120) OPEN — courier cost readable on `GET /api/sales/:id/records` by any sales reader, Dashboard payment/branch cards exclude the rounding adjustment (cents), Sales strip shows $0.00 for absent cost, dead legacy SQL [SONNET-AREA-REVIEW-R2-REPORTS-UI F1,F4,F5, CLAUDE-MONEY-SURFACES-R2]. Export totals vs rows can differ up to 0.0001 for legacy 5-decimal sales and when returned cost exceeds cost (owner info).
-- **Register**
-  - REPORT-CENTER#56 PARTIAL (broader reports, other exports, Telegram report images); REPORTS-TWO-VERSIONS#106 OPEN (held redesign); S4R3-3#133 PARTIAL (edge/security-layer message for 5xx: `http.ts:501`); S4R3-1/2/4/5/6/8#131,#132,#134,#135,#136,#138 DONE; S4-7#144 DONE; REPORT-DELIVERY-COST#112 DONE (L4 courier cost inferable from profit separate and open).
-  - Discount-report-port#414 PARTIAL (pending costs and item discounts across report and Telegram consumers); EXPORT-post-addsale-audit#281 UNCERTAIN; STATS-defined-audit#282 UNCERTAIN; H1-EXPORT-OPTIONS#202 / H1-options-confirm#241 OPEN OWNER; DATE-filenames#289 PARTIAL (UTC-stamped export filenames vs business date); RECEIPT-locale#255 DONE.
-  - RECEIPT-PERSISTED-DEFAULTS#110 DONE; B5/A2#369 DEVICE (both receipt paper sizes on the real print flow); Y4#176 / Y4-print-scroll#231 UNCERTAIN (print/reprint scroll).
-- **Legacy ledger leftovers (not in the register)**
-  - STATEMENT-EXPORTS OPEN (one-year complete statement exports unwired, archive L1216); DATE-SEMANTICS OPEN (remaining date semantics, hardware/data evidence, public work and safe folder consolidation, archive L1219); NEWASKS-SEP3 PARTIAL (Sep 3 owner asks: sale-detail redesign, drop the KHR line per item/discount/membership/delivery while keeping Grand Total, relabel Driver → Delivery; add-products-to-sale shipped as S4-24b; KHR needs template normalisation or an owner toggle, archive L2997).
-  - the "biggest open item" of 4 Sep (in-app Discounts figure excluded line-level discounts; fix `1d67e895` on `rc/deploy-2026-09-04`) is tracked as Discount-report-port#414.
-- **Early-Sep ledger leftovers (archive L3001–L6543)**
-  - RCPT-KHR-DEFAULTS OWNER (the four `show_*_khr` defaults are duplicated in `constants.ts` and `receiptAppliedConfig.ts`; flipping them does not change the live receipt because the saved template merges over them: the owner toggles the four switches or approves a one-time normalisation, same decision as NEWASKS-SEP3, archive L3001–L3007).
-  - S4R3-2-SUBTOTAL-REPAIR DATA OWNER (22 legacy-import sales with a 0 subtotal, about $3,462, depress Dashboard revenue; the writer fix `625830d5` is in the base, the one-time 22-row repair is staged and NOT run and needs owner sanction, archive L4836, L15886, L16563); DELIVERY-FIELDS-UI OPEN verify (surface the delivery fields in the UI and verify capture of `delivery_actual_cost_count`, archive L3081).
-  - P581-LEFTOVERS OPEN (rename link-over spec, permission-sweep leftovers, reports plan, stock-reason presets, user-gated production forward fixes, archive L3018–L3019, L3035).
-- **Completeness-pass additions (archive L6544–L16757)**
-  - REVENUE-DEFINITION-DRIFT OPEN verify (`compat.ts` still holds un-apportioned `- COALESCE(rf.refund_usd, 0)` copies near lines 390/400/434/444 and `attributedLineRevenue` near 345, and the Dashboard summary tiles use `SUM(total_usd)` over non-cancelled sales, a third revenue definition, so the tiles and the Analytics panel disagree on the same screen, archive L16605–L16611; related Discount-report-port#414).
-- Evidence: BC App. A; SONNET-AREA-REVIEW-R2-REPORTS-UI.
+- **Q3** [needs owner] SALES-TIMESTAMP#61 PARTIAL (`sales.updated_at` mixed formats); POS-PRINT-QUEUE#59 PARTIAL OWNER (BC-Q21); POS-ADMIN-RECOVERY#60 MISSING OWNER (admin recovering an employee's crashed sale); V1-OLDCLIENT-CODE#92 MISSING (`money_precision_review_needed` has no EN/KM key); S4R6-1#421 PARTIAL (Sales expenses beside stats per day and shift).
 
-### Next owner scope — Inventory, image-only filters and permissions (18 October)
+- **Q4** [needs owner] S4R6-2#422 PARTIAL (today Show-all with bounded cursor); S4R5-2#423 DONE; POS-quickadd-permission#348 UNCERTAIN; PRODUCT-REVENUE-ALLOCATION#113 PARTIAL OWNER (line sums ignore whole-sale discounts); KERNEL-pricing#363 UNCERTAIN, KERNEL-sale-return#365 OPEN (one subtotal/discount/fee/tax/reversal helper); tax on an added sale line (archive L5584) OWNER (no stored tax rate: schema + pricing policy decision). → *26 Oct owner: no Show all; Previous/Next paging instead (6.0.990 removed it).*
 
-- **OPEN — Main Inventory page:** promote the existing Branches > Products/Inventory surface into primary navigation, using compact Products-like rows on desktop and mobile. Group related details instead of many sparse columns. Keep the active branch visible even when there is only one. Resolve the existing Branches-specific activity gate and preserve old navigation/deep-link behavior.
-- **OPEN — Resumable count sessions:** save checks, counted quantities and issue reasons in resumable sessions without changing actual stock, financial records or history. Provide compact sections for all product checking rows, sessions and issues. A tick means checked/completed, no mark means unchecked, and there is one issue state with different reasons; this supersedes the earlier red/yellow severity proposal. Icons and accessible labels distinguish states without relying on color alone. Put compact horizontally scrollable filter rows immediately below search, including issue reasons and stock status, with a separate date range. Sale ranking is an optional filter/sort; the owner has not selected a default ranking measure. Keep current stock distinct from period sales metrics and rank on the server before pagination.
-- **OPEN — Image-only upload:** add a product received-date range and stock/filter menus alongside existing category/brand controls. The owner explicitly selected received date. Preserve restricted grants across listing, totals, filter choices and ranking so hidden data cannot be inferred. Reuse existing upload/preview/save paths.
-- **OPEN — Configurable permissions:** extend existing Full/Review/View/Hidden tiers and per-action controls rather than create a competing permission system. Custom users must be able to configure shown, hidden and partial information. Inventory hides cost from non-admins by default, with page-specific configurable permissions analogous to Products image-only. Trace the remaining partial fields and role defaults before changing them. Enforce redaction and actions on the server, including export, direct links, background requests and filter/count responses.
-- **Required acceptance:** EN/KM, dd/mm/yyyy, narrow/wide and long content; keyboard focus, touch, horizontal filter scrolling and no page overflow; iOS/Android/PWA fallbacks; account/branch/session changes and cache isolation; Free/Paid query limits; discriminating permission, ordering, date-boundary and pagination tests. Physical device checks remain explicitly unverified. The first-principles source map is private in Records; a full design council, session collaboration/conflict handling and ranking semantics remain pending. Resumable persistence and one issue state are owner decisions. Nothing here is implemented or deployed yet.
-### UI, mobile and device acceptance
+- **Q5** [ready] S4R4-1..4,6,10 and S4R5-3b,4 (archive L16432–L16538, L16401–L16414) legacy-OPEN, likely closed by the 10–11 Sep sale-detail releases, verify.
 
-- **Owner daily-use UI (DU-A/B/C)**
-  - DU-A landed (picker cancel and late change, instant preview + Retry, keyboard/inert/44px Close, 6.0.24–29).
-  - DU-B landed (newest-first lots, sole-branch chip, fences, 6.0.30–35, 6.0.90). **DU-C OPEN (queued after DU-A)**: `ProductsImageOnlyView:227` lot order, StockSessionLineEntry `isComposing` guard, inputMode/visual-viewport pins, ProductForm `<form>`/Enter, Modal keyboard opt-in + focus trap/restore (FastStockInModal Esc), image preview/save/reopen mounted test + Safari compression fallback test, EN/KM `new_batch`/`open_files`/`export_format_excel` [HAIKU-DAILY-USE-COVERAGE]. Remaining sole-branch chip sites per OWNER-BRANCH and Haiku map (ManageBatchesModal, VariantFormModal, NewSupplierReturnModal, POS CartItem, POS ProductDetailSheet) were widened into DU-B: verify composed.
-- **Physical devices (DEVICE, owner action; NOT RUN)**
-  - P1-PHYSICAL#5, Physical-authenticated-acceptance#404 — iOS/Android camera and library photo (preview immediate, survives save/reopen), HEIC from library, native keyboard and Add/Remove/Set, installed-PWA restart bar, Android back, printing, installed-PWA lifecycle; checklist `Lanes/2026-10-12/OWNER-DEVICE-ACCEPTANCE-RECEIVING.md` (steps 1–12 for release 1). Owner has not tested the live photo fix on a phone.
-- **Open owner-UI register**
-  - P1-OWNER-UI#6 PARTIAL umbrella; RESPONSIVE-PASS#71 / ADMIN-responsive-live#317 PARTIAL (full compact, mobile, public, portal pass); VISUAL14#104 PARTIAL (14-reference pagination/precision/security matrices); QA-initial-live#316, QA-page-pass#358, UI-label-live#300, MODAL-live#305, ROLE-live#307, SYNC-live#301 OPEN live verification after deploy.
-  - Q-MINIMIZE#16, F3-DRAFT-CHROME#168, F3-tabs#216 PARTIAL (only 14 flow kinds can park; about 30 dirty-state modals cannot; universal minimize for the other 24 draft modals, one modal per slice, last); S4-20#148 PARTIAL (Save at page end, minimize across forms); S4-21#149 PARTIAL (shared Discard/Back contract; QuickAddModal has no guard).
-  - S4-22#150 PARTIAL (global Khmer line-height/clipping); S4R4-11#426 PARTIAL (sale-detail scan button); S4R4-7#424, S4R4-8/9#425 DONE; B1-STATS#164 / B1-stats-sweep#211 PARTIAL; N3a/N3#174, N3-palette#219 OWNER (palette confirmation), N3-section-sweep#220 PARTIAL (SectionCard rows page by page); Y16#177 / Y16-toolbar#232 PARTIAL (History/Manage join the chip row on six hubs).
-  - Z5#179 / Z5-currency#235 PARTIAL (currency-symbol contrast), Z5-receipt-settings#236 OWNER, Z5-live-check#237; Z7#181 / Z7-spacing#239 UNCERTAIN; SELECTION-columns#344 PARTIAL, SELECTION-header-conflict#345 SUPERSEDED; STATSTRIP-DORMANT-DATE#124 MISSING (close: precondition unmet); ADVISORY-ANCHOR#89 and LAYER-REASON-INLINE#186 UNCERTAIN (need a render).
-  - TOUCH-TARGETS#189 MISSING OWNER (BC-Q24: 44px on touch only?); PAGER-visual-check#293; PAGESIZE-KEYBOARD#95 SUPERSEDED; ZERO-PAGER#94 DONE; UI-theme-audit#269 UNCERTAIN; SETTINGS-visual#290 UNCERTAIN; Profile-modal-redesign#394 UNCERTAIN; Archived-visual-verification#386 OPEN; Thumbnail-simultaneous-detail#387 OPEN (verify with a real image).
-  - VIEWER-LOCALE-SURVIVORS#187 PARTIAL (day/numeric grouping in sync, banner, branch, backup, audit, export); K7-path-input#228 PARTIAL (backup path input width: owner must point at the input); Q18#31 UNCERTAIN OWNER (short display ids, BC-Q15); I18N-GOOGLE-LOGIN#161, I18N-ORPHAN-KEYS#160, I18N-unused-km#268, Unused-i18n-keys#393 (see Docs).
-  - NATIVE-DIALOG-SWEEP#191 / CONFIRM-SWEEP#121 PARTIAL (11 native alert/prompt sites remain: ProductForm x6, PrintSettings x2, Receipt, ReviewQueue, Settings; needs an input dialog; U-confirm); ASYNC-UNMOUNT-TIMERS#190 PARTIAL; PERMISSION-UI-HIDING#128 PARTIAL (Add/Edit controls for users without contacts add/edit: `CustomersTab`, Suppliers, Delivery tabs).
-  - STAT-FOLD-PERSISTENCE#129 UNCERTAIN; DEFAULTS-unnamed#292 OWNER; U1 backlog: rows per page (current defaults accepted, 1 Oct), N44 input sizing, cross-page consistency checklist (archive L8862), request batches of 18 and 20 Aug (archive L8297, L8156: re-triaged in the register).
-- **Legacy ledger leftovers (not in the register)**
-  - SW-OPEN-RESIDUALS OPEN (service-worker stale-shell residuals: redirect dropping the query, un-aborted timed-out fetch, 200-HTML interstitial caching, archive L638); STOREFRONT-404 OPEN (one unidentified console 404 on the storefront after deploy, archive L1750).
-  - SW-LIVE-SMOKE, SMOKE-ENDSHIFT, PHYSICAL-PRINT, P4-IOS-LAG DEVICE (legacy browser upgrade warm-reload proof; signed-in POS End Shift smoke; physical receipt print with the driver-forms default of the four Print Settings modes; iOS PWA lag re-measure after wave 2); P4-KM-DUPKEY OWNER (Khmer for `contact_duplicate_will_use_existing` composed in-file, needs a native-speaker check).
-  - KHMER-WORKBOOK-4 HOLD (four whitespace-only Khmer workbook edits intentionally held: JSX supplies the separators); PW-EXPECTED-RED PARTIAL (Playwright findings not fixed: blocked-site-data login, bootstrap prefetch catch, iOS 16px inputs, account-handover POS filters, Vary: Accept, English last_error); COMPACT-PUBLIC-POLISH OPEN (broad compact/public/customer-portal visual polish).
-  - OWNER-ADDS-SEP7 PARTIAL (same-session duplicate feedback, sale-row eye removal, branch-vs-total stock alert parity, action minimization/permissions, gross/net clarity); F49-BROWSER-API OPEN (deprecated browser API console warning attribution); STAFF-DATE-TYPING OWNER (tell counter staff that typing 9032026 now means 9 March, day-first).
-  - DEBLOAT-I18N-927 OPEN (927 dead i18n keys about 160 KB queued behind FX-ui; unused is not dead, list for the owner); RETAINED-UI-REQUESTS#111 PARTIAL (delivery-contact rename parity, stock reason presets, 375px Products overflow); SCAN-sales-returns-live#304 OPEN (live check of the new Sales/Returns scan placement and camera flow).
-- **Completeness-pass additions (archive L6544–L16757)**
-  - PARITY-SWEEP OPEN (every capability must exist on every surface that plausibly needs it; the named gap is POS quick-add creating plain contacts while the full contact forms support multi-option contacts; sweep POS quick-adds, manual add-stock vs import validation, receive-batch vs the §12 rules, edit forms vs import normalisers, and list every gap as its own item before fixing: Track F, archive L6861, L10483).
-  - QA-TRACK-E DEVICE (infra-dependent live checks: `wrangler tail` during a real transfer, reset, backup and import to watch D1 write contention and a Free-plan CPU trip, a real-device responsive pass, and a concurrent two-tab edit race on the same product or branch stock, archive L10481).
-  AUG25-BATCH-LEFTOVERS UNCERTAIN verify (Aug 25–27 request batches, no closure found in the ledger: POS group-option display and picking for the "multiple pricings" request, related POS-price-condition-picker#347, archive L13672; import CPU efficiency, whole-CSV re-decode per window and sales re-partition per chunk, archive L13677; the message `Write blocked - server unavailable (operation: data:reset)` was reported and never investigated, archive L13504; `mode='all'` reset cleans R2 with a blanket prefix wipe instead of exact keys, related N7 dataset lifecycle, archive L13168).
-- **Early-Sep UI leftovers (archive L3208, L5415, L6113)**
-  - PRODCARD-MOBILE-DESC OPEN (hide the inline mobile-card description, `ExpandableDescription` at `Products.tsx:3442`); S4-26-VISUAL DEVICE (reports hub density was verified only from emitted CSS, not visually, because rc worktree previews serve the main checkout); S4-33-AMEND-RECHECK OPEN (re-check that the S4-30 amendment ledger shows dates day-first).
-- **Early-Sep defect lists (Part 549 / Part 539 / Part 77, archive L6435–L6492; verify each against current code)**
-  - layering HIGH — InfoHint `z-[1000]` renders under Modal `z-[1050]` (move to `z-[1055]`); InventoryReasonManagerModal (RenameCascadeModal was fixed in `352ed476`) `z-50` are buried; about 19 inline `fixed inset-0` overlays and the `Sidebar.tsx:498` backdrop remain.
-  - Date and locale sites — `App.tsx:1253`, `Branches.tsx:270`, `Backup.tsx:708`, `AuditLog.tsx:164/184`, `inventoryExport.ts:119`, `recordFilters.ts:59` (UTC midnight) and `.toLocaleString` digit grouping (tracked as VIEWER-LOCALE-SURVIVORS#187). the mouse-wheel number-input guard `e273e127` is already in the base (DONE); POS touch targets under 40px (#189).
-  - 10 unguarded fetch-then-setState sites and 6 uncleaned timers (#190); 65 native confirm/prompt/alert calls (#191); Part 539 LOW — POS needs a reload to see changed settings.
-  - storefront sign-up with a blank membership uses a native `window.confirm`. Part 77 MEDIUM (review-tier bypasses, offline-sale timestamps and Suppliers/Delivery sort were fixed) — still open: import-review parity, failed-job "Queued 0%" (offline-sale timestamps are moot after the offline removal; Suppliers/Delivery sort and pagination were fixed in `92648cef`).
-- Evidence: HAIKU-DAILY-USE-COVERAGE, SONNET-AREA-REVIEW-R2-REPORTS-UI, BC §1.4, §2.4, §2.8, App. A.
+**Money rules and loyalty**
 
-### Accounts, sessions and drafts
+- **Q6** [needs owner] REDEEM-1000#204, LOYALTY-khr-step#249 UNCERTAIN OWNER (BC-Q13); FX-forward-only#264, Currency-forward-only#388 PARTIAL (lock behaviour with a test and explain "applies to new sales" beside the rate editor); CHANGE-RATE-STAMP#195 DONE; Loyalty-switch-balance-acceptance#413 OWNER; Loyalty lookup disabled by policy#417 DONE (keep disabled unless the owner changes it).
 
-- **receiving-f2 (6.0.108–110, 141–142 done; round 7 6.0.147–148 in flight)**
-  - login-duration change no longer forgets; storage-mode default unified to 'always'; draft prefix and every idempotency/pending record kept through resets with account binding; round 7: an unresolved checkout result survives a confirmed sign-out for the same account (cart still cleared) and the server origin joins retry-record keys.
-  - frozen sale/return attempts survive all resets bound by actor+org only [OPUS-REVIEW-RECEIVING-F2, SONNET-REFUTE-RECEIVING-F2, CLAUDE-RECEIVING-F1].
-- **account-isolation-2 OPEN (queued after receiving-f1)**
-  - server switch does not reset the account (`AppContext.tsx:1903-1909`); import `apiFormPost` server-switch fence only (keep the same-server pin in `privateTransportScope.test.ts:84-90`); server component in actor-scoped pending keys (fee create, transfer run, shift, return/sale mutations, POS carts) with read-new-then-legacy, never delete.
-  - FeeForm/BranchForm/Branches/FeesPage recompute draft keys per render (partly in DU-B 6.0.34).
-- **Register**
-  - P1-ACCOUNT-DRAFTS#7 DONE; Q15#28 / Profile-modal#394 PARTIAL OWNER (full profile page, photo, sign-in linking, OTP/2FA, annotated EN/KM tutorials); Q-DRAFTS2#35 MISSING DEFERRED (server-side cross-device drafts); F54-BOUNDARY#102 and F54-persistent-callback#410 PARTIAL (persistent queryCache/IDB callbacks and already-started results outside the shared HTTP fence).
-  - F53/F55 (archive L16733, L16741: permission-refresh coalescing; pending offline work across hard runtime changes, moot after offline removal); Z6#180 / Z6-otp-live#238 OPEN (OTP enable/validation live end to end); MAIL-domain#258 OWNER-CONFIRMED14Oct (Resend verified; email/Google details match and no live test requested; owner confirmation is not an end-to-end certificate).
-  - OAUTH-redirect#259 OWNER-CONFIRMED14Oct (matching details; no live Google test requested); W3 login batching + atomic lockout (`loginLockout.ts:96`, non-atomic read-modify-write) OPEN; customer self-service password reset (P9-6#81, #362, #379) MISSING (staff-issued temporary password is the only path; Telegram share + Resend email chosen 5 Oct; starts after portal-csrf merges; high conflict on `portal.ts`).
-  - SMS reset#379 SUPERSEDED.
-- **Legacy ledger leftovers (not in the register)**
-  - POSTUPLOAD-RECHECK OPEN (post-upload account/permission recheck; product save actor fence, archive L750); OFFLINE-DRAIN / U-DRAIN#13 OPEN (one-time automatic upload of queued sales/outbox rows, then remove the snapshot/mirror code, the POS checkout gate and copy; owner 26 Sep and 1 Oct; census 29 Sep: 7 uncommitted files, no commits; related F1 snapshot-loop removal in Efficiency).
-  - SETTINGS-wire-images-idea#349 UNCERTAIN (optional Settings entry point).
-- **Completeness-pass additions (archive L16735–L16743)**
-  - FRESHNESS-FIXES OPEN verify (frontend cache freshness found on 8–9 Sep: an own-user update followed by an unrelated-user update inside the debounce loses the required bootstrap and a payloadless role refresh misses it, experiment `e24fc25e`, fix from `9654562d`; an invalidation during a pending read let the next read reuse stale in-flight work and an old response repopulate the shared cache, fix `538d65ee` in `http.ts`, and a late local fallback can replace a fresher server cache; these SHAs exist only on `archive/*` branches, not on origin/main or the release-2 base, so treat the fixes as not integrated; related F54-BOUNDARY#102 and F53/F55 above).
-- Evidence: BC §1.4, §2.8; CLAUDE-RECEIVING-F1.
+- **Q7** [needs owner] Actual-courier-receipt-printing#418 UNCERTAIN OWNER; Delivery-fee-authority#415 PARTIAL (unlinked courier fees enter delivery cost without double counting); S4R5-3b delivery reports read courier payments (legacy-open, verify, archive L16404).
 
-### Permissions, review queue, audit and undo
+**Data forensics (DATA, owner-gated)**
 
-- **Review-queue completion plan (OPUS-PLAN-REVIEW-QUEUE-COMPLETION): historical B, C and D shipped in release2e; sliceA and the listed follow-ups remain OPEN**
-  - A approve-performs-merge (shared `runIdentityEditFold`, `confirm_merge_into` preview, reviewer merge/image/survivor-price/cost checks, approval inside the merge batch, undo restores identity, Free budget refusal); B mini pending-review tag + shared store (Products, Inventory, Fees, Branches, reasons); C Telegram alert per review + queue route (`reviewAlert.ts`, `requestDefer.ts`, reviewGate, reviewQueue, telegram.ts/telegramLang.ts, Settings).
-  - D permission catalog and all copy (permissions-catalog lane 6.0.143–146: D1 packs, D2 editor rows with on/off action rows, D3 defaults after owner, D4 parity test + hidden rows + sign-up toggle). Open owner calls: only changed fields move on a merge (Q1), Free refuses over-budget merge approval (Q3), queue scope beyond today (Q4), Employee defaults union on fresh installs (Q5), hide `security_settings`/`drive_credentials` (Q6), create-fold spelling needs edit permission (Q8), who sees tags (Q9), reject reason in Telegram up to 120 chars (Q10), Website Editor sign-up toggle off (Q11), merge stays off for Employee (Q12).
-- **R2 security review conditions**
-  - (OPUS-AREA-REVIEW-R2-SECURITY, PASS-WITH-CONDITIONS): F3 inventory `unlockPricing` discount compare mirror (sub-cent); F4 role-editor descriptions/labels stale, branches add/delete absent from editor (always refused), `inventory:edit_reasons` default mismatch, no Website Editor sign-up toggle → permissions-audit lane; F5 late picker photo upload not owner-bound (attribution only).
-  - create-fold lets add-without-edit rewrite barcode spelling (BC-Q8). OPUS-CORRECTNESS-HUNT-R2 H1 SHOULD-FIX: new review refusal codes (`review_action_full_required`, `review_entity_changed`, `review_already_decided`, `invalid_reason`, `reason_too_long`) reach a Khmer reviewer in English (fees-k-frontend covers part).
-- **Register**
-  - Q14#27 OPEN OWNER (branch-scoped order visibility + per-branch KPI in profile); VIS1#103 MISSING (cashier self / non-admin / all visibility; foundation `389244dc` not an ancestor); Q16#29 PARTIAL (undo broadcasts); Q17#30 / Review-UI-decision-notification#392 PARTIAL (before→after preview of the actual change in the real screen format, submitter notified; N4b apply-first redesign CANCELLED by the 13 Oct queue-first ruling).
-  - AUDIT-PER-RECORD#18 PARTIAL; AUDIT-FILTER-CAP#20 PARTIAL (cheap: cap values per filter, `auditLogQuery.ts:208-216`); K1#169, K1-create-delete#221, K1-scopes#222, K1-remaining#383 PARTIAL (server undo/redo appliers missing for contacts, files, lookups, users/roles, settings, fees, sale/return create); UNDO-status-conflict#322 DONE.
-  - K6#171 DONE; PERM-action-editor#244 PARTIAL (direct per-action admin selection, preset bundles; BC-Q12); Custom-permissions#391 PARTIAL (reject unsupported combinations, `users.ts:1014-1075`); SECURITY-SETTINGS#41 UNCERTAIN OWNER (keep or remove the unused key); REPAIR-permission-rule#247 UNCERTAIN OWNER (`POST /repair-integrity` backup-or-settings gate).
-  - PERM-library-fallback#270 UNCERTAIN (transitional "Full library OR settings"); PERM-import-contradiction#297 PARTIAL; REVIEW-source-sections#291 PARTIAL (source-page grouping, device/user/time identity in approval/audit/users); HISTORY-scope-example#271 UNCERTAIN; CONTACT-compare-review#334; N3 import-authority step 2 root-only (re-check inside the final-deactivate commit guard, donor per-row-group/rename guards, frontend Confirm/Retry that will 403) PARTIAL.
-  - Wide-Records-cascades#407 PARTIAL; permission deep-walk (archive L9374, L8614, L9385) legacy-OPEN; Organization-concept removal ORG-removal#306 OPEN OWNER (audit read sites before removing or hard-coding the default business); donors PERM-PROMO-DISC `86c3a2fb3`, PROD-PERM `c7d8529ee` PARTIAL.
-- **Correctness hunt R2 follow-ups (OPUS-CORRECTNESS-HUNT-R2, 13 Oct 09:15Z; no blocker)**
-  - H3 OPEN (an approved review's exact discount differs from the direct-edit rounding: review-queue slice A); H7 OPEN (a same-user network blip causes a permission refresh and `resetActorReadSession`, which locks the Fee/Branch forms with a false "account changed" and drops typed text: fees-k-frontend 6.0.158–160 puts a shared `useFrozenDraftAuthority` on the write identity, also efficiency A6).
-  - H6 dead SQL tails in `getSalesGroupedTotals` and `getProductSalesRanking` go to money-surfaces (6.0.161).
-- Evidence: OPUS-AREA-REVIEW-R2-SECURITY, OPUS-PLAN-REVIEW-QUEUE-COMPLETION, OPUS-CORRECTNESS-HUNT-R2, BC §1.2, §2.5.
+- **Q8** [needs owner] FORENSICS#23 (sales 16671 and 16835, three closed shifts with the riel-twin refund bug, 7 lots with inflated received_quantity, past sale-line costs); S4-1#140 (row 160 fake undo, nine units), S4-2-HISTORICAL-DATA#141; HEADERONLY-SALES#100 and Historical-zero-line-sales#402 (older 16917/16827: only with source snapshot evidence).
 
-### Telegram and notifications
+- **Q9** [needs owner] DRIVER-SALE-LINK#101; Historical-settlement-repairs#398 (seven status changes, nine unreversed stock deductions, no blind flip); Data-correctness-reassertion#397; Production-data-audit-residual#403; Historical-identity-evidence-census#401; N45 historical warehouse-sale audit (archive L15979) and N47–N54 ledger items (archive L16001–L16087).
 
-- Pending-tag + Telegram-per-review lane (release 3 slice C, above); Khmer wording unification (Stock-in session, import row codes, Audit Log context block English labels "Before", "Created By", "Pending Action Id", "Requested By", km "sale" is bare លក់ where ការលក់ is more natural, 18 uses) OPEN [CLAUDE-RELEASE-2-GATE-FIXES, P-KM key map KM-STOCKIN-WORDING-KEYS].
-- TG-TOPICS-OPS#37 / OPS-settings OPEN OWNER (guarded deployment-only write of the six Telegram topic ids supplied by the owner 27 Sep; production stores none; single-tenant per organization, never a migration); Telegram-live-shift-acceptance#399 OPEN (live shift-close behaviour); S4-6#143 PARTIAL (status message names the actual updater; amend message now names the actor in shift-cash-everywhere); TG-ASTRAL#88 PARTIAL (shared astral-character fixture for `cleanLine` and `saleItemNameLayout`); Notifications low/out alerts only on a sale crossing the threshold (donor NOTIF-V2 `ca36cfb3b`, `telegram.ts:1024` still a standing list) MISSING; Telegram carries profit/courier chat-wide by design (owner info); LOYALTY-notification manual adjustment#416 DONE; QUEUE-ERROR-CODE#91 PARTIAL (raw English `last_error`); Telegram report images (REPORT-CENTER#56).
-- **Legacy ledger leftovers (not in the register)**
-  - CP3B1-SETTOPIC OPEN (PENDING entry for the /settopic broadcast, U-broadcast, archive L184); BP-10 OWNER (Telegram settings permissions question left open after CP-3d, archive L188); amend message names the actor (done in shift-cash-everywhere), but who amended a sale/return status in older status messages: S4-6#143.
-- **Early-Sep ledger leftovers (archive L5953)**: TG-REPORT-DATE-INPUT PARTIAL (the `/report` command refused dd-mm-yyyy input before the owner ruled the whole app day-first, so the refusal now inverts; parser state not stated).
-- Evidence: BC §2.5, §2.6; CLAUDE-SHIFT-TELEGRAM-ADDITIONAL, CLAUDE-SHIFT-CASH-EVERYWHERE.
+- **Q10** [needs owner] BH-1 bug hunt 27 Sep fix lanes (archive L223, `Records/Bugs/2026-09-27/`).
 
-### Imports, exports and legacy migration
+**Early-Sep ledger leftovers (archive L3001–L6543)**
 
-- **Lane**
-  - import-authority landed (finding J step 1, 6.0.73–75); J step 2 and donor ports are root-only (see Permissions). import-returns-followups in flight (above).
-- **Register**
-  - P1-IMPORT-RETRY#2 PARTIAL (apply retries must keep applied-group identity; delayed CSV upload); F13#12 PARTIAL (re-importing an export adds stock; Fill-missing ignores quantity); N1b#183 / N1b-options#217 PARTIAL (calculation choices: discounts, notifications, duplicate policy); N1c#184 / N1c-intake#218 PARTIAL (one entry point, one or many files).
-  - P7-f#175 / P7-f-inventory-add#229 / H2#375 PARTIAL (inventory ADD import lacks supplier/payment_status/credit_due_date columns); Z1b#178 DONE, Z1-writer#233; S4-28#152 PARTIAL (wholesale tier through import/clone/export); WHOLESALE-PERIPHERALS#123 DONE; M6#173, M6-adjustments#208, M6-drawers#209, M6-suppliers#210 OPEN (930 historical stock adjustments, 755 cash sessions, supplier invoices; `stock_adjustments`/`drawer_sessions` ledgers deferred).
-  - LEGACY-BARCODE-AUDIT#105 PARTIAL (normaliser strips `Libre10ml` to `10`); CSV-general-replace-wizard#274, CSV-addsale-new-product#275, CSV-replace-columns#276, CSV-replace-match#277 PARTIAL, CSV-wipe-reimport#278 UNCERTAIN, CSV-layer-status#279 SUPERSEDED, CSV-cost-tolerance#280 OWNER, CSV-mode-timing-status#315 SUPERSEDED.
-  - DATED-frontdoor#272 DONE, DATED-rerun-status#273 SUPERSEDED; IMPORT-review-parity#256 PARTIAL OWNER (BC-Q26: Sales/Inventory have no in-modal Cancel); IMPORT-gallery-choice#314 PARTIAL (multi-image import or document single image); IMPORT-tracker-dwell#320 UNCERTAIN; UNIFIED-live-verify#321, SALES-roundtrip-live#352, QA-import-ripple#357, PERF-import-live#312 OPEN/UNCERTAIN live checks.
-  - D1b(a)#370 DONE; D6b#373 PARTIAL; Sales/returns-fold-import#385 MISSING (populate `search_normalized` in `salesImportCommit.ts:361`, `stockActionCommit.ts:787`; cheap, Sonnet); KERNEL-adjust-deltas#366 OPEN; COMMISSION-SERVICE#201 / RULE-commission#240 OWNER (rule never stated); IMPORT-old-flow-supersession#353 SUPERSEDED.
-  - XLSX/CSV mode tabs untranslated (`ProductImportModeTabs.tsx:10-13`, CSV-general#274); import row-code translations (R2 F5).
-- **Legacy ledger leftovers (not in the register)**
-  - BARCODEKEY-BOUND OPEN (legacy-import barcode normaliser mis-keys SKU-style codes; re-run the applied Sep 1 and Sep 2 batches under both helpers and diff product_id per line; `legacy-preflight.mjs:77` still calls the old helper, archive L2618); MIG-0106-ALIAS HOLD (release-candidate `0106_barcode_aliases.sql` never applied; renumber and rebase if that line is ever merged, archive L2980).
-  - HO24-PARKED-MIGR HOLD (migrations 0185–0191 parked in `ops/scripts/migration/held/`; 0192–0207 are applied, verify which held ones remain, archive L493); D1b(b)#371 PARTIAL (consistent branch/supplier/date sibling reports); WHOLESALE-THRESHOLD#122 CLOSED; J3/N3a#376 DONE.
-- **Early-Sep ledger leftovers (archive L3421, L6531)**: MIG-AUG31-DAY PARTIAL (the 31 Aug day report import was prepared and verified but never recorded as applied; the AR half is live through 0094 and 13,244 invoices) (commission fields: BC-Q22).
-- **Import robustness lane (queued; OPUS-CORRECTNESS-HUNT-R2 H2/H4, 13 Oct)**
-  - IMPORT-VERDICT-DRIFT OPEN (an import chunk throws 500/failed when a row's verdict changes between Analyze and Approve: Remove newly through insufficient stock in release 2, Set already before; no production imports have been applied yet); IMPORT-UTC-LOT-DATE OPEN (counted and import lots are dated by the UTC date, so 00:00–06:59 KH lands on the previous day, also `productBatches.ts:190/295/686`; use `businessToday()`).
-- Evidence: BC §3 N3, §2.4 B, App. A.
+- **Q11** [ready] S4-11b OPEN (record who made each status update; the S4-6 one-line status-message change waits for it; S4-11a is live, archive L5629, L5961); S4-8/9-CANCELLED OPEN verify (`/report` does not exclude cancelled receipts: a pre-existing definition that belongs to the revenue-definition lane, archive L5957); S4-30 window (120 minutes from the sale; 0 = admin-only) shipped with migration 0115, whose application on production is not confirmed here.
 
-### Efficiency, performance and Free/Paid
+Evidence: BC §1.3 (A–M), §3 N1/N2, App. A; the three R2 area reviews.
 
-- **Release-2 efficiency review (OPUS-EFFICIENCY-REVIEW-R2, COMPLETE 13 Oct 09:05Z, no blocking bug)**
-  - W1 P2 `PUT /api/products/:id` reads the same row 7–8 times before one write (`products.ts` 2413–2507, `productWrites.ts:140`); W2 P1 on Free — legacy v0 customer return create/edit does per-line N+1 capacity reads duplicating a set-based check; W3 P1 on Free — Telegram overview and /report re-read the same sales snapshot up to five times per message.
-  - W4 P2 every report snapshot does two full read passes plus three restore checks (one D1 batch is already a consistent snapshot); W5 P3 duplicate reads in the identity-fold and approval paths; A1 `removeStockFromBatch` superseded in production code; A2 six hand-rolled 4-place rounders with two half-way rules; A3 the L4 goods-profit rule exists in three shapes.
-  - A4 "exactly one row changed" guard pasted 9 times; A5 second AsyncLocalStorage/WeakMap/global hook to carry the device.
-- **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)**
-  - A0 metrics (per-request rows_read/rows_written/statements/ms in Server-Timing and Analytics Engine) PARTIAL; A1 hygiene (awaited broadcasts → waitUntil, awaited cache-version bumps, ETag/304) OPEN; A2-RETENTION#45 PARTIAL (`job_runs` table; retention must skip every FK/JSON-referenced `action_history` row, never expire `undo_snapshots`; owner ruling keeps expenses and reverts forever; `ephemeralRetention.ts:233`).
-  - A3-CATALOG#46 PARTIAL (one scan per page, parallel stock reads, cached filters); A4-DASHBOARD#47 PARTIAL (20 s startup cache keyed by permissions + versions); A5-SEARCH#48 UNCERTAIN (Khmer tokenizer probe, FTS only if confirmed); A6-THUMBNAILS#49 PARTIAL (wire w160/320/640 + srcset, orphan audit report-only); A7-R2-LIFECYCLE#50 UNCERTAIN (imports 7 d, quarantine 30 d, aborted multipart 1 d, backups in their own bucket).
-  - A8-READ-MODELS#51 UNCERTAIN (only if 7 days of A0 numbers cross thresholds); F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) OPEN; F2 Durable Object auto-pong and pause polls while the tab is hidden, F3 stop pre-downloading every route on deploy OPEN; B1 backups keyset paging instead of OFFSET, full backup at 03:00 local, separate backups bucket (owner decision) OPEN.
-  - W1-W2-W3#53 PARTIAL (sale create 18–20 D1 trips → 3–4, report reader one-batch snapshot, login batching); PROD-Q1-Q9#52 DATA (read-only production counts via ops d1-export); MEASURE-TOKEN#54 OWNER (Account Analytics Read scope); V-location (every binding and external call checked for distance from Cambodia) PARTIAL; PD-1 precomputed search/catalog read model (archive L317) OPEN.
-  - U-receipt duplicate receipt numbers possible (no UNIQUE since 0107, probe outside the batch) OPEN; PD-1 audit lanes I1–I10 and adversarial audits A1–A3 of Codex work (archive L368–L380) historical, reports in `Records/Performance/2026-09-25`.
-- **Release-3 efficiency lanes (OPUS-EFFICIENCY-REVIEW-R2 queue, disjoint file sets)**
-  - E-TG (W3: Telegram overview and /report read the sales snapshot once; after shift-cash lands; `telegram.ts`); E-RET (W2 set-based v0 return capacity + F2 returns PATCH refetch; `returns.ts`, `Returns.tsx`); E-ECHO (F1: every write re-read 2–4x, writeId on every channel; AppContext and page sync handlers); E-SNAP (W4: single-batch report snapshot, measure first; `salesAnalytics.ts`).
-  - E-PUT (W1/W5: product PUT row reads; after review-queue slice A); E-STOCKIN (W6: stock-in one line per request on Free); E-CLEAN (A1–A6: delete `removeStockFromBatch`, one `roundPlaces`, shared costViewProfit, shared one-row-changed guard, one device context, frozen-draft block); also I1 identity lookup unindexable (migration, owner-scheduled), I2 audit insert session sort, C1 expense delete never sends `expected_updated_at` (in fees-k-frontend).
-- **Register**
-  - P1-SW-FALLBACK-LIMITS#4 PARTIAL (forever-pending storage operations, install/activation failures); PERF-CPU-WORKLOAD#65 DATA (real Free-account measurement, 500 MB check, daily read budget); PERF-7-SITES#188 PARTIAL (non-sargable report/stat/audit WHERE, audit indexes); PERF-inventory-summary#250 (`inventory.ts:759` unpaged `SELECT p.*`), PERF-customers#251, PERF-sales-date#252, PERF-returns-date#253 (`datetime(col)` windows) PARTIAL (measure p95 first).
-  - SEARCH-movement-diacritics#254 MISSING (33 scattered INSERT sites; practical loss nil); STATS-status-conflict#323; A4a-paid#207 OPEN (Paid `cpu_ms` 300000 and queue batch 5 re-basing; continuation unlock M4); K4#170, K4-live-staging#223, K4-sentry#224, K4-remaining#382 PARTIAL (live R2 NDJSON staging; Sentry beyond reportError).
-  - K7#172, K7-perf#225, K7-portal#226 PARTIAL; UMBRELLA#182 OPEN (media policy, storage/job hardening, final gate); STORAGE-baseline#327 OPEN; JOBS-finite-other#328; D1-contention-conditional#319 UNCERTAIN (only on a real recurring thrown error); SENTRY-X#73, SENTRY-6#74, SENTRY-1F#75 OPEN (D1 CPU limit 58 events; expression tree too large; product identity review).
-  - SENTRY-decision#262 OWNER; BLOAT-DEFERRED#119 PARTIAL (FTS optimize, portal screenshot GC, upload/orphan GC); PRELOAD-DEFERRAL#70 DONE; P1-FREE-REUSE#3 DONE; OWNER-PLANS (Free/Paid both profiles build; storefront budget unchanged); Free-plan budgets: restore 38 and add-items 41 statements near the 50 limit.
-- **Legacy ledger leftovers (not in the register)**
-  - FREE-CAPACITY OPEN (actual CPU/query/storage/daily budgets for the Free plan; restore dependency discovery exceeds the Free query budget, archive L665); INC-FREE-READY OPEN (Free-plan readiness unfinished; Free and Paid stay separate profiles, never switched silently, archive L187); P1-RULINGS-FREE OWNER (non-blocking: free-account measurement deploy, live D1 size read vs the 500 MB cap, bulk re-import about 150k writes vs the 100k/day cap, last_error_code migration, archive L1933).
-  - U-SYNC PARTIAL (sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers: phase 1 done, refuter was running, shipping not seen, archive L305); C3V4-NEWITEMS OPEN (tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, version bumps into the D1 write batch before the money cache, W2 7-day shadow compare; `Records/Performance/2026-09-27/C3v4-council-synthesis.md`).
-  - P4-WAVE2 PARTIAL (inventory `/adjust` round trips, contacts create audit, stockSession pre-reads, returns N+1, batches audits, products FTS fallback, archive L1892); CP3B1-F3 OPEN (F3 rework held after R-F1F3 was not certified; stop pre-downloading every route on deploy).
-- **Early-Sep ledger leftovers (archive L3475, L6435, L6444; verify)**
-  - D1-BLOAT deferred (FTS optimize, portal-screenshot GC, `uploads/` orphan GC, `inventory_movements` retention); 36 non-sargable `date(created_at)` sites and the movements-search REPLACE chain (Part 77), of which 7 hot ones are `returns.ts:492`, `sales.ts:1758/1774` and three audit-log retention sites (sargable lanes `67b8e3b9`, `3c36bfba`, `60df8ba0`, `bd2f0680` fixed contacts/compat and some sites; the `sales.ts` datetime wrap is deliberate, archive L16612).
-  - `audit_logs` has no indexes; unpaged reads and N+1 (also in Returns).
-- **Completeness-pass additions (archive L14894)**
-  - F58-CHUNK-POLICY OPEN (isolated frontend chunk-policy candidate `57854fd6` cut measured asset loading and removed static import cycles; independent certification and integration were pending and it was excluded from the 8 Sep small release; the SHA exists only on `archive/*` branches).
-- Evidence: OPUS-EFFICIENCY-REVIEW-R2, BC §2.8 (query cost), App. A.
+#### Reports, exports and receipts
 
-### Privacy, security and secrets
+**Lane work**
 
-- **Owner-requested audits (13 Oct)**
-  - **Reports COMPLETE (13 Oct), follow-ups OPEN**: OPUS-SECURITY-AUDIT-WHOLE-APP covers11 checklist areas (7 MEDIUM findings); LICENSE-AUDIT inventories shipped/dev dependencies, assets and terms. Their original candidate was `dde1ba879`; the reports do not certify current code. The owner settled the project licence on14 Oct: proprietary, all rights reserved. The LICENSE file, package metadata, THIRD_PARTY_NOTICES and remaining remediation stay in Release3.
-  - COMPLIANCE-GAP-REVIEW is **COMPLETE (13 Oct)**: Cambodian commerce, consumer/data/cookie, invoice, cosmetics, accessibility and third-party gaps are mapped to code, owner information or professional review. This technical report is not legal advice. Its unresolved code/content and external actions remain in Release3 and Owner/external actions; completed research is not completed remediation. [QUEUED-BRIEFS-2026-10-13]
-- **Public-repo customer data (owner Option 3, not urgent)**
-  - Q21#34 MISSING — customer names/phones remain in tracked docs (old `progress.md`, four lines of `docs/history/session-log.md`) and in git history. Steps: (1) this rewrite removed them from `progress.md`; (2) scrub `docs/history/session-log.md` (use ids); (3) after the current lanes merge, purge history (force-push; breaks open branches; Haiku privacy scan ace55b9 of pushed branches reports).
-  - (4) create a private GitHub copy pushed regularly; (5) customer data stays organised in local Records. Do not rewrite history before then.
-- **Security register**
-  - ERROR-5XX-REDACTION#21 PARTIAL (44 route-level 5xx responses still return raw messages: `system.ts` x7, `compat.ts` x7, `sales.ts` x6, `users.ts:596`, `actionHistory.ts` x4; shared handler is sanitised); ADMIN-VARY#90 MISSING (`Vary: Accept` on the admin document rewrite); IMAGE-validate-entrypoints#331 PARTIAL (decode/pixel/bomb/orientation parity across upload, camera, ZIP, dataURL, avatar, promotion, portal).
-  - IMAGE-cap-atomic#333 PARTIAL (three-image cap race in `importJobs.ts:827,835`); ABUSE-bindings#338 PARTIAL (Workers Rate Limiting binding + Turnstile, BC-Q25); AI-quota-gateway#339 PARTIAL (daily quota, AI Gateway, validated tools); SECURITY-header-rollout#340 PARTIAL (CSP enforce vs report-only); METRICS-dashboard#341 PARTIAL.
-  - Unsafe-method-origin / return body admission#408 PARTIAL; PUBLIC-INTERNAL-ID#197 DONE; MEMBERSHIP-ORACLE#198 DONE; OWNER-SECURITY#36 OWNER (no stray `admin` user; 2FA on Cloudflare and GitHub; remove old-domain OAuth redirect URIs; delete the old zone later; confirm the test password is not a real one); Q20#33 UNCERTAIN (SEC-3 P3 items: recover from the original report).
-  - SECRET-rotate-confirm#261 OWNER (confirm the replaced Cloudinary secret); Malformed-secret-credential-name#400 OWNER (rotation and cleanup of the legacy malformed secret name); Deploy-build-state-evidence#419 PARTIAL (record build-time full SHA and dirty paths in the release record); R2-OLD-BUCKET#42 OWNER (keep only the latest; permanent delete is the owner's action).
-  - donor SEC-SALES `f69b0edfa` MISSING (cashier LIKE filter open to any viewer, future-skew-only client timestamp bound); Haiku privacy/secrets scan of seven pushed branches (HAIKU-PRIVACY-SCAN-BRANCHES, 13 Oct) found no real secret, token, phone, email or chat id in added lines; about 51 name-shaped test literals were not individually cleared (27 already on main).
-- **Early-Sep ledger leftovers (archive L6492)**
-  - the Part 539 portal findings (`aiProviderId` in `/config`, the membership-existence oracle on `POST /portal/submissions`) are DONE as PUBLIC-INTERNAL-ID#197 and MEMBERSHIP-ORACLE#198; the `portal_password_resets` table and RFID stub tables are dead schema (zombie cleanup, see Docs); the production portal settings carry the brand name in four user-editable fields (owner decided the brand 27 Sep).
-- Evidence: BC §2.8, §4 Q11/Q12/Q25; OPUS-AREA-REVIEW-R2-SECURITY.
+- **Q12** [ready] reports-L landed (L1–L4, 4-decimal split reports, overview 70→30 statements); money-surfaces-r2 (6.0.117–120) OPEN — courier cost readable on `GET /api/sales/:id/records` by any sales reader, Dashboard payment/branch cards exclude the rounding adjustment (cents), Sales strip shows $0.00 for absent cost, dead legacy SQL [SONNET-AREA-REVIEW-R2-REPORTS-UI F1,F4,F5, CLAUDE-MONEY-SURFACES-R2]. Export totals vs rows can differ up to 0.0001 for legacy 5-decimal sales and when returned cost exceeds cost (owner info).
 
-### Branch cleanup and repository hygiene
+**Register**
 
-- **Branch cleanup checkpoint COMPLETE (13 Oct); new cleanup requires fresh proof**
-  - Historical BRANCH-CLEANUP-MANIFEST inventoried1096 remote refs/996 tips with merged, patch-equivalent, release-only and unique classes. The independently reviewed13 Oct run deleted416 branches after preserving all tips, a53-tip bundle and47 keep tags; its postflight retained main, releases and protected PR refs. Evidence: LANES.md13 Oct11:14Z and private branch backup logs. No new cleanup has run. Revalidate current tips, claims, open PR heads/bases and redundancy before any further expected-SHA deletion; preserve active, unmerged and uncertain work.
-- PR9#44 OWNER (`codex/verified-resume-20260925` fully contained in urgent; close after RELEASE-1 with the owner's OK); P-public (archive L277) OPEN — `claude/p-public-20260925` (`97587c5b`, 19 commits) was never merged, the earlier [x] was wrong; reconcile lane queued ahead of storefront lanes; RC-UNMERGED-CANDIDATES#108 PARTIAL (merge-cost, customer/POS performance, indexed barcode, Reports, bulk actions); P1-PARKED#8 PARTIAL (freshly composed parked lanes: P-DON donor ports P-RET, SEC-SALES, SALE-CORNER-TAG `163d6c989`, DATE-UI `30c23c558`/DATE-W `39cf7331f`, DATA-AUDIT-B `63979fb4a`, REVERT-SET `ceb9af819`, NOTIF-V2, G38 members/telegram, G37-P2 HOLD, DEBLOAT `d08348422`, PROD-PERM; Codex 2 Oct stock family and PR9 DROP); P10-18#67 parked patch; U-branch-prep (retire Shop into Store; execution done by the cutover; never rerun); Q12#25 OWNER (private main + public sanitized mirror; new repo from `archive/docker-postgres-2026-07-26`, owner OK before creating any repo); downloads/worktrees: one checkout rule, push archive/<name> for anything unmerged, then remove.
+- **Q13** [ready] REPORT-CENTER#56 PARTIAL (broader reports, other exports, Telegram report images); REPORTS-TWO-VERSIONS#106 OPEN (held redesign); S4R3-3#133 PARTIAL (edge/security-layer message for 5xx: `http.ts:501`); S4R3-1/2/4/5/6/8#131,#132,#134,#135,#136,#138 DONE; S4-7#144 DONE; REPORT-DELIVERY-COST#112 DONE (L4 courier cost inferable from profit separate and open).
 
-- **Legacy ledger leftovers (not in the register)**
-  - RC-LINE OWNER (`rc/coordinated-2026-09-02` with 149 commits plus `rc/p2-*`, `rc/sec-*` are never deployable; the 4 Sep inventory calls them probably dead, confirm before deleting, archive L2824); HO24-BRANCH-DELETE OWNER (branch deletions per the 24 Sep manifest `docs/fleet/2026-09-24-branch-cleanup-manifest.md` run from the owner machine; superseded by the 13 Oct manifest).
-  - HO24-WEBSITE-POSTS HOLD (`rc/website-posts-api-20260924` needs its frontend; bulk settings save drops posts, archive L502).
-  - CP-3d held lanes of 30 Sep, status unverified because several landed in the 5–7 Oct releases (check the cleanup manifest before treating any as open): RETURNS-MONEY / RET-A (findings D/E/F still MISSING), IMPORT-U12, SALES-W1, IDX, PERM-WORKER, HEALTH-Q and AUTH-P1b (certified with exceptions), BULK-STATUS, CRON-OBS, PLAN-GUARD (token decision), READS-CUT (not certified), UI redesign lanes (ui-stock-1/2/3, ui-conflicts-1/2, ui-detail-1), SCAN1/SCAN2, A2+B1 (needs owner approval of the deletes), U-cost3 0200 repair.
-  - CP4-UBRANCH DONE (Shop to Store executed by the 5–6 Oct cutover).
+- **Q14** [needs owner] Discount-report-port#414 PARTIAL (pending costs and item discounts across report and Telegram consumers); EXPORT-post-addsale-audit#281 UNCERTAIN; STATS-defined-audit#282 UNCERTAIN; H1-EXPORT-OPTIONS#202 / H1-options-confirm#241 OPEN OWNER; DATE-filenames#289 PARTIAL (UTC-stamped export filenames vs business date); RECEIPT-locale#255 DONE.
 
-### Docs, tooling and code hygiene
+- **Q15** [ready] RECEIPT-PERSISTED-DEFAULTS#110 DONE; B5/A2#369 DEVICE (both receipt paper sizes on the real print flow); Y4#176 / Y4-print-scroll#231 UNCERTAIN (print/reprint scroll).
 
-- progress.md rewrite — DONE by this commit (6.0.149); remaining documentation debt: `docs/history/session-log.md` customer-data lines (Privacy); LOG-PROTOCOL-BACKFILL#130 PARTIAL (board-only records / missing narrative 545/546/554/556); Q19#32 PARTIAL (tidy ledgers and folders); HYGIENE#24 PARTIAL (dead code, naming, no comments; final pass at the end on one release branch with the tokenizer strip); SONNET-NO-COMMENTS-SIMPLIFY-R2 (766 new comment lines in 78 files in release 2 to remove or shorten; defers to the `no-comments` skill) OPEN; TOOLING#38 OPEN (agent-friendly CDP/devtools verification skills, isolated parallel worktree instances, timeout-8 browser tests); I18N-ORPHAN-KEYS#160 MISSING (remove `special_price*` x4; `returns_count_label`, `still_need_decision` dormant → owner list), I18N-GOOGLE-LOGIN#161 (ask the Khmer reviewer), Unused-i18n-keys#393, I18N-unused-km#268; ZOMBIE-ROUTES-TABLES#194 UNCERTAIN (delete four dead GET routes in `compat.ts:1191,1200,1201,1205` after a route-order test; 28 uncalled routes, password-reset table, RFID stubs), ZOMBIE-OTHER#200 PARTIAL, CONTACT-LEGACY-404#192 DONE, BOOTSTRAP-PHANTOM-FIELDS#193 MISSING, ZOMBIE-DATED-OLD#199 SUPERSEDED, PROMO-wired-audit#266 PARTIAL (all ten routes live), Part535/dead-state#381 MISSING; P3-CDP-TIMEOUT OPEN (raw CDP send()/evaluate() without timeout in eight browser tests; unreachable `bulkImport*` wrappers); DEBLOAT-REMAINDER OPEN (114 exported symbols with no production caller, 40 unused-local diagnostics, BulkImportModal dead review-conflict UI x17; unused is not dead, so list for the owner); PICKER-GUARD-WIDEN OPEN (searchablePickersP6 watches only category|brand|supplier|unit: widen to product name and barcode bindings; row #69 itself is DONE); the U-1 per-lane checklist (refuter per lane, hygiene sweep per lane, discriminating tests registered in `test:utils`, docs updated when behaviour changes) is standing process for every lane; per-checkpoint exact-SHA gates replaced the old CERT sweep.
+**Legacy ledger leftovers (not in the register)**
 
-- **Early-Sep ledger leftovers (archive L4690, L5715, L6170, L6492; unused is not dead: list for the owner, never delete on sight)**
-  - zombie/orphan cleanup lane — the custom-tables cluster, DatedStockReconciliationModal chain, `lib/businessMetrics.ts`, `__lightbox_test_entry.tsx`, the `utils/index.ts` barrel, PublicCatalogPage dead membership machinery, duplicates (`users.ts` normalizePhoneLookup, three escapeHtml copies, `localDb.ts` dead CSV exports), about 28 uncalled routes plus 4 shadowed compat import-jobs routes (ZOMBIE-ROUTES#194), 2 never-sent AppBootstrapPayload fields, contact bulk-import transports that call a removed route.
-  - Orphaned language keys `special_price`, `special_price_hint`, `special_price_usd_full`, `special_price_khr_full`, `returns_count_label`, `still_need_decision` (no call site; deletion goes in one dedicated commit, S4-28). Session-log backfill: entries 545, 546, 554, 556 are missing and 553 is vacant; Part numbers are assigned at log time, not in commit messages (standing rule). Stale test `performanceLoadingUx.test.ts` (~line 1568, `salesGroupMode`) was RED at that head: one-line fix, probably already fixed.
+- **Q16** [ready] STATEMENT-EXPORTS OPEN (one-year complete statement exports unwired, archive L1216); DATE-SEMANTICS OPEN (remaining date semantics, hardware/data evidence, public work and safe folder consolidation, archive L1219); NEWASKS-SEP3 PARTIAL (Sep 3 owner asks: sale-detail redesign, drop the KHR line per item/discount/membership/delivery while keeping Grand Total, relabel Driver → Delivery; add-products-to-sale shipped as S4-24b; KHR needs template normalisation or an owner toggle, archive L2997). → *27 Oct: paged complete Returns exports are in 6.0.989 (RC2b); the other statements stay open.*
 
-### Public website, storefront and membership
+- **Q17** [ready] the "biggest open item" of 4 Sep (in-app Discounts figure excluded line-level discounts; fix `1d67e895` on `rc/deploy-2026-09-04`) is tracked as Discount-report-port#414.
 
-- **Rulings not yet in code**
-  - W-SITE#39 PARTIAL — `frontend/index.html:16` sets `maximum-scale=1, user-scalable=no` for every host (owner: zoom on public only); no footer/About independent-retailer line; thorough minimalist EN/KM overhaul; W-ADMIN#40 OPEN (admin landing in the same design language).
-  - P9-3#78 PARTIAL (stale policy text "official distributors", "Business OS" wording in FAQ/privacy copy: `faqStarterText.ts:17,36`, `en.json:3571,3631,3659`, `km.json:3571`, `portalContentI18n.ts:59`; do not touch `legalContent.ts:118`), P9-4#79 assistant chat-box first MISSING DEFERRED, P9-5#80 featured/trending/bestseller on the front page PARTIAL DEFERRED (the Worker never sends ranks; BC-Q23b), P9-6#81 customer forgot-password MISSING.
-  - P10-20-PUBLIC#76 OPEN OWNER (rows per page change under the exception); PORTAL-EDITOR#85 DONE; PREVIEW-PROMOTIONS#86 MISSING (Website Editor preview builds `catalogTabProps` without `promotionRules`, `CatalogPage.tsx:3139`); PREVIEW-PAGESIZE#93 MISSING (shared localStorage key); PORTAL-OLD-SHOP-NAME#203 / A6-portal-data#242 OWNER (production portal businessName/title/intro/submissionInstructions only through owner-authorised editing).
-  - PORTAL-structured-details#286 PARTIAL; PORTAL-preferences-scope#308 PARTIAL (anonymous theme/language persistence, install/download presentation; BC-Q23a); PORTAL-sticky-pagesize-live#309, PORTAL-embedded-cache#360 UNCERTAIN (reproduce first); PORTAL-grouped-pagination#361 SUPERSEDED; PORTAL-guest-accounts#362 PARTIAL; PORTAL-small-targets#318 OWNER.
-  - SCAN-public-decision#302, SCAN-editor#303 OWNER (camera barcode search for shoppers; recommended-products scanner); K7-portal#226; DNS-old-domain#260 OWNER (old `leangcosmetics` domain redirects need DNS on Cloudflare); CONTENT-stories#265, Stories/posts/comments#389, Canva-like promotions editor#396, PROMO-editor-deferred#245, CANVA-PROMOTIONS#205 DEFERRED.
-  - Part535 translations#380 DONE; Portal Contact us#395 CLOSED; sign-up toggle in Website Editor (R2 F4, plan slice D4) OPEN; portal membership lookup disabled by policy (keep).
-- Evidence: BC §2.8 (W-SITE), §4 Q23; 27 Sep owner decisions above.
+**Early-Sep ledger leftovers (archive L3001–L6543)**
 
-### Backup, restore, Library and production data
+- **Q18** [needs owner] RCPT-KHR-DEFAULTS OWNER (the four `show_*_khr` defaults are duplicated in `constants.ts` and `receiptAppliedConfig.ts`; flipping them does not change the live receipt because the saved template merges over them: the owner toggles the four switches or approves a one-time normalisation, same decision as NEWASKS-SEP3, archive L3001–L3007).
 
-- **Register**
-  - N7 / G49 dataset lifecycle MISSING (BC §3 N7: unbounded `listObjects` in `system.ts:615,1319`, reset text "product images" while images stay, `datasetOperationStore.ts` unused, no bounded cleanup for six growing tables, transfer-receipt retirement has no caller); FULL-LIFECYCLE#62 PARTIAL (durable reset/restore/export/transfer/journal continuation).
-  - 0098-REPLAY#63 UNCERTAIN; RESTORE-UI-ASSETS#64 / BACKUP-restore-C#246 PARTIAL (typed-phrase danger confirm, use the server dry-run, `restorable` flag read nowhere, "validated" toast after a real restore, resumable restore; restore is Paid-only; maintenance write-blocking; design K10a = replace with the backup); DRIVE-connect#257 / A3#163,#367 OWNER-MANAGED14Oct (owner handles Drive; no agent setup task; backup/asset integrity checks remain separate).
-  - DRIVE-assets-restore#267, Drive-asset-mirror#390 PARTIAL (manifest + referenced assets, retry 401/403/429/5xx, checksums, round trip, cancel UI); BACKUP-finalize-sets#329 (newest 2 valid R2 sets); QA-reset-ripple#355, QA-restore-assets-ripple#356, QA-infra-pass#359, QA-transfer-ripple#354 OPEN live checks; MIGRATION-RECOVERY#43 (every data-changing migration writes a backup table first and ships tested recovery SQL: migrate → recover → byte-identical).
-  - K3 video#377 MISSING (container pipeline is paid-only: free fallback = store as is, BC-Q25d); IMAGE-provider#243 DONE; IMAGE-variants-audit#332 PARTIAL (bound thumb192/card640/detail1600, audit orphans); A2-live#206 / A2#162 OPEN (live verification checklist after deploy: reset, products, POS lots, iPhone install, import round trip, R2 two finalized sets, bare receipt id, Phnom Penh labels).
-  - POS-LIVE-RECEIPT-CHECK#109; four live data gaps measured 4 Sep (archive L15151) and `RECON` lot code S4-19 (DATE-STORED-ADJ#159 DONE: display day-first, stored code unchanged; rewrite of 6,031 month-first stored lots is a separate data job); "Sentry" and Resend/Drive/OAuth/DNS items are owner actions (below).
+- **Q19** [needs owner] S4R3-2-SUBTOTAL-REPAIR DATA OWNER (22 legacy-import sales with a 0 subtotal, about $3,462, depress Dashboard revenue; the writer fix `625830d5` is in the base, the one-time 22-row repair is staged and NOT run and needs owner sanction, archive L4836, L15886, L16563); DELIVERY-FIELDS-UI OPEN verify (surface the delivery fields in the UI and verify capture of `delivery_actual_cost_count`, archive L3081).
 
-- **Legacy ledger leftovers (not in the register)**
-  - LIFECYCLE OPEN (dataset lifecycle: sales-reset route, atomic generation/journal, import fencing, backup/restore orchestration, R2 staging, principal recovery; migrations 0185–0191 parked, archive L807); LIFECYCLE-0188-HOLD (never apply 0188 remotely: its guards affect receipt deletion and backup/reset paths do not yet preserve permanent retirement evidence; wire the 0188 retirement trigger into the reset route first, archive L818, L640).
-  - RESTORE-TOCTOU OPEN (restore admission-read TOCTOU and restore effects after force-clear, archive L815); RESTORE-UI-CONFIRM-ASSETS (#64) and Free restore capacity; HIST-HEADER-ONLY-SALES / HIST-DUP-CONTACTS data items are listed under Returns and Contacts.
+- **Q20** [ready] P581-LEFTOVERS OPEN (rename link-over spec, permission-sweep leftovers, reports plan, stock-reason presets, user-gated production forward fixes, archive L3018–L3019, L3035).
 
-### Owner and external actions
+**Completeness-pass additions (archive L6544–L16757)**
 
-- A2 live verification (owner, since 31 Aug): reset-data, a POS sale with lots and bare receipt ids, storefront install on iPhone, import round-trip, R2 keeps exactly two finalised sets (archive L4560, L6320); A3 connect Google Drive in Settings → Backup (archive L6326).
-- P07 / P05 owner statements of 8 Sep (archive L14844, L14896): the owner said the Telegram bot token was rotated, and repeated confirmation on14Oct; retain owner-confirmed status and do not re-rotate from an old pending entry; the owner says most images are first-party photography, so the image-rights review covers exceptions only; business, market and image-rights facts remain an owner-register item.
-- Owner-only (not code): Drive is owner-managed; Resend verification/email/Google details are owner-confirmed14Oct, with no live email/Google test requested; move DNS if old-domain redirects are wanted; confirm the replaced Cloudinary secret; rotate the legacy malformed secret name; create a Sentry project or drop it; edit the four production portal rebrand fields; Account Analytics Read token scope; point at the too-wide backup path input; name the fixed dropdowns that should become user-defined (OPTIONS-user-defined#263); decide the `redeemValueKhrStep` (BC-Q13); stray `admin` user, 2FA on Cloudflare/GitHub; delete the old R2 bucket and old zone after verification; confirm the Shop→Store official-names Excel after the owner's stock reconciliation.
-- **Owner questions awaiting answers (BC §4, at most four at a time; non-blocking unless noted)**
-  - BC-Q1 how the counted-stock family reaches production (blocks N2/N4b/N10; recommended: ship in slices — ruling 13 Oct says slices); BC-Q2 restore after repricing (answered 13 Oct: refuse); BC-Q3/Q4 apply-first questions (cancelled by the queue-first ruling); BC-Q5 replacement priced on an older Not-Paid sale: original rate, today's rate or USD-only (blocks finding E).
-  - BC-Q6 same-day equal-cost receipts from different suppliers; BC-Q7 review-tier create matching an existing product (answered 13 Oct: hold for approval); BC-Q8 reject with a blank reason; BC-Q9 historical lot total greater than branch total; BC-Q10 rounding (answered 13 Oct: payable stays cents); BC-Q11 customer data in tracked docs (answered 13 Oct: Option 3).
-  - BC-Q12 four permission clean-ups; BC-Q13 loyalty redemption step; BC-Q14 unknown phone in the POS picker; BC-Q15 short display ids; BC-Q16 stock-in session defaults; BC-Q17 receipt times and courier cost; BC-Q18 bulk edit discount/expiry and batch view; BC-Q19 what "labels manage" manages; BC-Q20 inventory statistics scope.
-  - BC-Q21 POS print queue persistence; BC-Q22 commission rule; BC-Q23 website theme memory, badges, page-size selector, old shop name; BC-Q24 touch targets, POS confirmations, chips vs cards; BC-Q25 abuse limits, AI quota, CSP report endpoint, video fallback; BC-Q26 import review parity.
-- **Owner rulings of 5–6 Oct not (fully) in code (BC §2.6, sampled at 0baa53f2)**
-  - changed-fields-only saves PARTIAL (Settings main form done; receipt settings, roles and Website Editor unchecked); products have no created-date filter UNCERTAIN (use received date); every return must link to a sale PARTIAL (NewReturnModal requires one, the Worker still accepts none: `returns.ts:1519`); Not Paid return lowers the debt MISSING (finding D).
-  - import slash dates read day-first unless the header says mm/dd/yyyy MISSING (`batchCode.ts:50`, donors DATE-UI `30c23c558` / DATE-W `39cf7331f`); low/out alerts only when a sale crosses the threshold MISSING (`telegram.ts:1024`); website phone sign-ups OFF MISSING until portal-csrf ships (6.0.44, default `portal.ts:531` still true).
-  - sale corner tag (payment chip + return ribbon) MISSING (donor SALE-CORNER-TAG `163d6c989`); shop closing time forces open shifts closed UNCERTAIN (only per-shift `shift_close_time` found); category/brand import "Main - Sub" UNCERTAIN (import parsing unread); stock-in edit adjusts quantity without booking a loss UNCERTAIN.
-  - role editor Sales "View", oversized fixed discount refusal, merge default logic, employee cost/price limits and product-edit Telegram alert switch are DONE on main.
-- **Cheap safe list (BC §2.4, Sonnet, disjoint from lanes)**
-  - AUDIT-FILTER-CAP#20, TG-ASTRAL#88, PERMISSION-UI-HIDING#128, ZOMBIE-ROUTES#194, ADMIN-VARY#90, PIN-products-branch-move#298, S4-21 QuickAddModal guard#149, Sales/returns-fold-import#385, S4R4-11#426, docs-only #266/#70/#124; then the language-pack batch #160, #274, #157, #286/#78, #264/#388 after DU-A and receiving-f1 merge.
-  - then #86, #93, #179, #83, #272 comment, #97 after their file owners.
-- **Groups G40–G64 (5 Oct triage, 8 days stale, re-check before any lane)**
-  - G40 products list/columns 10, G42 form/Conflicts pager 5, G44 stats strip/range row 9, G45 POS/shift forms 5, G46 money messages 2, G56 route sweep gate 6, G57 iOS PWA/device checks 7 (P2); G41 detail floats 8, G43 inventory/branches 4, G47 selection actions 2, G48 short ids 1, G50 import polish 6, G51 role editor 2, G52 storefront polish 5, G53 app shell 4, G54 UI hints/i18n 8, G55 settings hub 5, G58 shared UI kit 3, G59 admin design pass 4, G60 deploy slimming 1, G61 field identity/autocomplete 2 (P3).
-  - G49 dataset lifecycle (N7); G62 security hardening, G63 toolchain/lint gate, G64 backup page copy/Drive folders; G01–G39 mostly live-verified. Index of the full requests/rules populations: obligation index (1,327 requests, 290 rules, 86 questions, 1,121 register rows).
+- **Q21** [ready] REVENUE-DEFINITION-DRIFT OPEN verify (`compat.ts` still holds un-apportioned `- COALESCE(rf.refund_usd, 0)` copies near lines 390/400/434/444 and `attributedLineRevenue` near 345, and the Dashboard summary tiles use `SUM(total_usd)` over non-cancelled sales, a third revenue definition, so the tiles and the Analytics panel disagree on the same screen, archive L16605–L16611; related Discount-report-port#414).
+
+Evidence: BC App. A; SONNET-AREA-REVIEW-R2-REPORTS-UI.
+
+#### Added 27 Oct from the lane log
+
+- **Q22** [owner-decided] Sale payments S5–S8: the remaining slices of the 24 Oct payments design after S1–S3 (live) and S4 (6.0.982), including the five flagged old short sales (record the payment with its real date, "recorded late", kept out of current drawers).
+
+- **Q23** [ready] 6.0.982 P3 follow-ups: a credit-only sale is counted and its revision bumped by the linked rename; add tests for the preview, audit and summary counts.
+
+- **Q24** [owner-decided] Past sale statuses normalised to Completed / Not Paid plus tags, and records wrongly turned from Not Paid into Paid corrected (owner 20 Oct; held migration; state not re-checked here since 20 Oct).
+
+### Stock & products
+
+#### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
+
+**Owner-decision lanes (14 Oct)**
+
+- **Q25** [owner-decided] cost-unknown + Conflicts: $0 cost = $0 loss, NULL cost = unknown and flagged, every unknown-cost item and empty-barcode product listed in Conflicts; sweep EVERY cost reader (reports, salesAnalytics, removalLosses, conflicts). Also closes the Reports courier column that prints a hidden figure as $0.00, and multilot NOTE 1 (a $0-cost lot disposal valued at catalog price). → *27 Oct: the Conflicts list is lane 6.0.988 (review).*
+
+**Imports, stock and money**
+
+- **Q26** [ready] Import approve costs about 2,170 statements against the Paid 1,000-per-invocation limit: HIGH, VERIFY the production path before relying on large imports (multilot r3 refute).
+
+- **Q27** [ready] A 150-row plain CSV Add becomes one batch of 301 statements, over the 300 chunk (pre-existing, CPU split makes it harmless today): fold into the import lane.
+
+- **Q28** [ready] Exchange replacement sale: loyalty accrual must follow the programme switch. SELECT-only ops audits: pre-6.0.131 replace-all deactivations, pre-6.0.134 grouped-return statuses, and the affected-customer count for the restored loyalty points (run in the postflight).
+
+- **Q29** [ready] Multilot: movements written in the deploy window above the watermark revert aggregate-only; the 0250 runbook must cover "migration applied but publish failed" and Worker-only rollback windows.
+
+- **Q30** [ready] Shift-cash leftovers: amend opened_at later, sales between close and reopen (resolved by the round 6 parent-close float), admin time edits that leave money outside a shift.
+
+#### Stock, catalog, contacts and suppliers
+
+**Historical release 2 lane scope (shipped inside release 2e; unresolved follow-ups and device acceptance remain open)**
+
+- **Q31** [ready] multilot-revert (6.0.113–116) OPEN — Revert of a multi-lot removal restores branch_stock but not lots (`stockRevert.ts:547`, CSV path since 6.0.56) plus ops query `branch-exceeds-lots.sql` [OPUS-AREA-REVIEW-R2-STOCK-RETURNS F1, CLAUDE-MULTILOT-REVERT]. import-returns-followups (6.0.131–136) OPEN — import skip keeps product, create-fold typed qty becomes stock-in, imported-sale returns must not subtract loyalty points (`contacts.ts:827`), bulk status ignores imported units, three import row codes English-only, misleading "Pricing changed" on stock conflict [same review F3–F7]. ui-polish-r2 (6.0.121–124) OPEN — undated-only Set starts on an empty lot, failed photo tile cramped and Save silently drops it, old-iOS picker can lock the form, storefront picker has no cancel [SONNET-AREA-REVIEW-R2-REPORTS-UI F3,F6–F8].
+
+**N5**
+
+- **Q32** [ready] F4#11 MISSING — a return restock raises the lot's `received_quantity` (`productBatches.ts:349`); REVERT-ATOMIC-AUDIT#19 PARTIAL — stock_revert audit written after the revert (`inventory.ts:3133`); after STAB/N1 [BC §3 N5].
+
+**N6**
+
+- **Q33** [ready] D4#372 / D4-historical-dates#230 OPEN — Worker default received date is the UTC day, business day is Cambodia UTC+7 (`productBatches.ts:190,295,628`, `batches.ts:500`); 38 other `toISOString().slice(0,10)` sites need triage [BC §3 N6].
+
+**N8**
+
+- **Q34** [needs owner] PRODUCT-DISMISS-REOPEN#115 MISSING — no undismiss/includeDismissed for product clusters (`products.ts:5816,5825`); SUPPLIER-LOT-IDENTITY#87 MISSING OWNER — same-day equal-cost receipts from different suppliers share one lot (BC-Q6); SUPPLIER-E3-E4-E5#82 UNCERTAIN FIFO drain mirror / predicate divergence / numeric ref collision.
+
+**Counted-stock family (HOLD, root chain only; BC-Q1)**
+
+- **Q35** [owner-decided] P1-STOCK-PREREQ#0 (durable dated-count receipts, count admission), P1-DAMAGED#1 (counted sellable tagged stock), inline damaged amount on the Set row (owner ruling 12 Oct), 31 COUNTED-* rows (OPTION-CONSUMERS, CONDITION-HISTORY, SCOPED-SET, SHARED-QUANTITY, TAG-UI, STANDALONE-REVERT, SALE-AMENDMENTS, RECEIVING-EXACT, TRANSFER-EXACT, INVENTORY-ADJUST-ADAPTER, SUPPLIER-RETURN-EXACT, BACKUP-RESTORE, CONVERSION-FRACTIONS ...), N10 merge-consumer seams (sale cancel single/group, return cancel/group Undo/Redo, stockRevert, transfer replay), customer1be COUNTED-MERGE-FOLD-EXACT (`1be0918a6`), replay `15fbdc8e0` (+ replay-conditions `6f96c7cf7` certified with exceptions), customer-return-backend `8070f00` (Opus BLOCK, fix plan: keep return_items.product_id = sold product, keeper only on stock-side rows) [BC §1.2, §3 N10, OPUS-REVIEW-CUSTOMER-RETURN-BACKEND, SONNET-REFUTE-REPLAY-CONDITIONS].
+
+**Stock UI/logic leftovers**
+
+- **Q36** [ready] REASON-CODE#83 PARTIAL (only `full_access_required` is coded, `inventory.ts:1182`); N6-NAV-RETRY#55 MISSING (session retry handle is component state); PIN-products-branch-move#298 and PIN-inventory-drain#299 MISSING (pin refetched rows only from authoritative stock); MERGE-COST-WARNING#157 PARTIAL (server sends `costOutliers`, dialog never renders it).
+
+- **Q37** [needs owner] S4-27#151 PARTIAL (undated lots get English-only batch word); S4-19b#147 PARTIAL (`MAX(batch_number)+1` on TEXT, `productBatches.ts:365`); S4-17b#146 UNCERTAIN (survey and undoable fold of cost-forked twins); P9-9#72 UNCERTAIN (tagged stock needs a signed-in live check); S4-SESSION-ID#154, S4-SESSION-PAYMENT#155, S4-SESSION-COST-PREFILL#156 UNCERTAIN OWNER (BC-Q16).
+
+- **Q38** [needs owner] STOCK-STATS-SCOPE#107 PARTIAL OWNER (BC-Q20); LABEL-MANAGE#14 UNCERTAIN OWNER (BC-Q19); LOT-NO-SUPPLIER-CONFLICT#15 PARTIAL (conflict type for lots with no supplier); PRODUCT-REMOVE-REVERSIBLE#17 PARTIAL (Remove refuses while a stock-in session is reversible, `productDelete.ts`); BATCH-historical-parity#351 PARTIAL; BATCH-view-readonly#324 UNCERTAIN OWNER and BATCH-branch-view#325 SUPERSEDED.
+
+- **Q39** [needs owner] BATCH-group-picker#310 CLOSED; BULK-discount-expiry#313 UNCERTAIN OWNER (BC-Q18); TRANSFER-example#311 OPEN OWNER; Z1-writer#233 OPEN (default two-branch writer lot attribution) and Z1-display-conflict#234 SUPERSEDED; STOCK-CHANGE-RIDEALONG#127 UNCERTAIN (stale residue, close); DETAIL-status-gap#295 OPEN OWNER; KERNEL-stock#364 OPEN (one on-hand/reserved/available/threshold helper across Dashboard, Inventory, Branches, POS, resolver).
+
+- **Q40** [ready] G1 filter/preview#374 OPEN.
+
+**Catalog and product detail**
+
+- **Q41** [ready] D3#166 / D3-detail-filters#213 PARTIAL (movement filters, full Date/Type/Batch/Qty/Running-balance/Reference table); D3-detail-search#214 OPEN (search by supplier/batch attributes); D5a#167 DONE and D5a-read#215 OPEN (supplier attribution across read surfaces); D2b#165 / D2-date-row#212 OPEN (Date row under search on Products and Inventory).
+
+- **Q42** [needs owner] D6 (archive L11303) OPEN (rename cascades with before→after preview); IDENTITY-rename-regroup#342 PARTIAL (rename does not regroup); IDENTITY-auto-merge-evidence#343 PARTIAL (auto-merge flag/filter and losing values); GROUP-image-owner#346 PARTIAL; PRODUCT-detail-density#287 PARTIAL; PRODUCT-edit-layout-confirm#288 OWNER.
+
+- **Q43** [ready] PRODUCT-MOBILE-DESCRIPTION#116 PARTIAL (hide inline descriptions on mobile); EXACT-DUP-CLICK-ACCEPTANCE#126 UNCERTAIN (not verified live); INVENTORY-EXCISION-LEFTOVERS#125 PARTIAL (unused catalog collectors, repoint `#product-` notification anchors); POS-price-condition-picker#347 PARTIAL (SP/VIP/condition tiers, never show cost in POS).
+
+- **Q44** [ready] K7-edit-jump#227 UNCERTAIN (edit-form section jumps); PICKER-GUARD#69 DONE; REASON-DIRTY#84 DONE.
+
+**Official names and duplicates**
+
+- **Q45** [needs owner] OFFICIAL-NAMES#22,#117 OWNER (sourced official-name Excel for the owner's review, no import without it; waits for the owner's current-stock confirmation; 6030/6031 "Abercrombie" copy); Product-duplicate-correction-remainder#406 DATA (remaining eligible groups with a fresh manifest and reversible receipts); Product-7091-inactive#405 SUPERSEDED.
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q46** [owner-decided] ADJUST-SIBLING-IDENTITY OPEN — post-commit audit/read uncertainty and concurrent new-barcode sibling identity (adjust candidate `a22d3b1e` rejected, archive L657); SEP1-3-LEGACY-DEDUCT HOLD — Sep 1–3 legacy-import sales stay un-deducted by owner ruling (held file `ops/scripts/migration/held/legacy_sep2_3_import_stock_deduction.sql`, 107 units, archive L1775).
+
+- **Q47** [needs owner] LEGACY-SHORT-LINES OWNER — two legacy invoices live but each one line short, held out of the paid flip (archive L2614); P3-DEFAULTS OWNER — Program 3 design defaults the owner may overrule (losses, compat cost keys admin-only, reason optional, shift-amend gating, archive L1917).
+
+- **Q48** [ready] the 8 Oct STOCK-ACTIVE pre-gate checklist (archive L155–L166: no active/inactive products, newest-first lots, active-branch display, image upload, nested-loading recovery, Free/Paid profiles, review repairs) shipped through the 8–9 Oct releases and is closed except the counted-damage conversion and the physical-device checks listed here.
+
+**Early-Sep ledger leftovers (archive L3001–L6543; most were closed by later releases, verify before any work)**
+
+- **Q49** [ready] CATALOG-INTEGRITY items 2–5 OPEN verify (merge reparenting of sales, supplier backfill of 18,996 lots across 2,667 products, `/detail-report` suppliers name-only, fuzzy name duplicate detection, each with undo, archive L3476–L3490); BATCHES-SET-SIGN OPEN verify (`batches.ts` set-sign write bug, task chip spawned, plus the uncommitted `Products.tsx` onAdd one-liner that hides the catalog Add-Product on Stock Changes, archive L4226–L4237).
+
+- **Q50** [ready] PDUP-REOPEN OPEN verify (= PRODUCT-DISMISS-REOPEN#115; Products duplicates tab reopen through includeDismissed + undismiss in `products.ts`, archive L3184); S4-32-COST-GUARD OPEN verify (cost mean only across similar costs: 2x guard over 353 merge-candidate groups, worst case 1.58x so the threshold fires on nothing today, take the highest above the threshold with a visible flag; no closure seen, archive L6190–L6215).
+
+- **Q51** [owner-decided] S4-29-MEASURED DATA (one same-name unbarcoded pair, 1,695 leading-zero barcode groups over 3,411 rows, placeholder product id 10185 "Ysl New Item" to delete by owner ruling 4 Sep; migration 0112 was written unrun, confirm it ran, archive L5375, L5660).
+
+- **Q52** [ready] SEP2-PROD-APPLY DATA (the 2 Sep production apply left four defects; twin products 3,881 and 15,004 rewritten receipt numbers were repaired later by 0109 and 0107; STILL OPEN: 27,278 lot quantities zeroed into 9,921 RECON lots, where 0108 only relabelled the codes and the zeroed quantities are not shown repaired, and the Delivery label that became a courier contact, with no closure seen; the forward fix `twin-merge.sql` was never applied and the pre-change Time Travel bookmark is never restored, archive L3028–L3035).
+
+- **Q53** [needs owner] PROD-CLAIMS-UNVERIFIED OWNER (supplier-attribution and naming-convention drift stay unverified until the owner names a concrete offending record; six other corruption claims were refuted by read-only SELECT, archive L3313).
+
+Evidence: BC §1.3, §2.8, §3, App. A; lane reports named above; archive grep by ID.
+
+#### Next owner scope — Inventory, image-only filters and permissions (18 October)
+
+- **Q54** [owner-decided] **OPEN — Main Inventory page:** promote the existing Branches > Products/Inventory surface into primary navigation, using compact Products-like rows on desktop and mobile. Group related details instead of many sparse columns. Keep the active branch visible even when there is only one. Resolve the existing Branches-specific activity gate and preserve old navigation/deep-link behavior.
+
+- **Q55** [owner-decided] **OPEN — Resumable count sessions:** save checks, counted quantities and issue reasons in resumable sessions without changing actual stock, financial records or history. Provide compact sections for all product checking rows, sessions and issues. A tick means checked/completed, no mark means unchecked, and there is one issue state with different reasons; this supersedes the earlier red/yellow severity proposal. Icons and accessible labels distinguish states without relying on color alone. Put compact horizontally scrollable filter rows immediately below search, including issue reasons and stock status, with a separate date range. Sale ranking is an optional filter/sort; the owner has not selected a default ranking measure. Keep current stock distinct from period sales metrics and rank on the server before pagination.
+
+- **Q56** [owner-decided] **OPEN — Image-only upload:** add a product received-date range and stock/filter menus alongside existing category/brand controls. The owner explicitly selected received date. Preserve restricted grants across listing, totals, filter choices and ranking so hidden data cannot be inferred. Reuse existing upload/preview/save paths.
+
+- **Q57** [owner-decided] **OPEN — Configurable permissions:** extend existing Full/Review/View/Hidden tiers and per-action controls rather than create a competing permission system. Custom users must be able to configure shown, hidden and partial information. Inventory hides cost from non-admins by default, with page-specific configurable permissions analogous to Products image-only. Trace the remaining partial fields and role defaults before changing them. Enforce redaction and actions on the server, including export, direct links, background requests and filter/count responses.
+
+- **Q58** [owner-decided] **Required acceptance:** EN/KM, dd/mm/yyyy, narrow/wide and long content; keyboard focus, touch, horizontal filter scrolling and no page overflow; iOS/Android/PWA fallbacks; account/branch/session changes and cache isolation; Free/Paid query limits; discriminating permission, ordering, date-boundary and pagination tests. Physical device checks remain explicitly unverified. The first-principles source map is private in Records; a full design council, session collaboration/conflict handling and ranking semantics remain pending. Resumable persistence and one issue state are owner decisions. Nothing here is implemented or deployed yet.
+
+#### Imports, exports and legacy migration
+
+**Lane**
+
+- **Q59** [ready] import-authority landed (finding J step 1, 6.0.73–75); J step 2 and donor ports are root-only (see Permissions). import-returns-followups in flight (above).
+
+**Register**
+
+- **Q60** [ready] P1-IMPORT-RETRY#2 PARTIAL (apply retries must keep applied-group identity; delayed CSV upload); F13#12 PARTIAL (re-importing an export adds stock; Fill-missing ignores quantity); N1b#183 / N1b-options#217 PARTIAL (calculation choices: discounts, notifications, duplicate policy); N1c#184 / N1c-intake#218 PARTIAL (one entry point, one or many files).
+
+- **Q61** [ready] P7-f#175 / P7-f-inventory-add#229 / H2#375 PARTIAL (inventory ADD import lacks supplier/payment_status/credit_due_date columns); Z1b#178 DONE, Z1-writer#233; S4-28#152 PARTIAL (wholesale tier through import/clone/export); WHOLESALE-PERIPHERALS#123 DONE; M6#173, M6-adjustments#208, M6-drawers#209, M6-suppliers#210 OPEN (930 historical stock adjustments, 755 cash sessions, supplier invoices; `stock_adjustments`/`drawer_sessions` ledgers deferred).
+
+- **Q62** [needs owner] LEGACY-BARCODE-AUDIT#105 PARTIAL (normaliser strips `Libre10ml` to `10`); CSV-general-replace-wizard#274, CSV-addsale-new-product#275, CSV-replace-columns#276, CSV-replace-match#277 PARTIAL, CSV-wipe-reimport#278 UNCERTAIN, CSV-layer-status#279 SUPERSEDED, CSV-cost-tolerance#280 OWNER, CSV-mode-timing-status#315 SUPERSEDED.
+
+- **Q63** [needs owner] DATED-frontdoor#272 DONE, DATED-rerun-status#273 SUPERSEDED; IMPORT-review-parity#256 PARTIAL OWNER (BC-Q26: Sales/Inventory have no in-modal Cancel); IMPORT-gallery-choice#314 PARTIAL (multi-image import or document single image); IMPORT-tracker-dwell#320 UNCERTAIN; UNIFIED-live-verify#321, SALES-roundtrip-live#352, QA-import-ripple#357, PERF-import-live#312 OPEN/UNCERTAIN live checks.
+
+- **Q64** [needs owner] D1b(a)#370 DONE; D6b#373 PARTIAL; Sales/returns-fold-import#385 MISSING (populate `search_normalized` in `salesImportCommit.ts:361`, `stockActionCommit.ts:787`; cheap, Sonnet); KERNEL-adjust-deltas#366 OPEN; COMMISSION-SERVICE#201 / RULE-commission#240 OWNER (rule never stated); IMPORT-old-flow-supersession#353 SUPERSEDED.
+
+- **Q65** [ready] XLSX/CSV mode tabs untranslated (`ProductImportModeTabs.tsx:10-13`, CSV-general#274); import row-code translations (R2 F5).
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q66** [ready] BARCODEKEY-BOUND OPEN (legacy-import barcode normaliser mis-keys SKU-style codes; re-run the applied Sep 1 and Sep 2 batches under both helpers and diff product_id per line; `legacy-preflight.mjs:77` still calls the old helper, archive L2618); MIG-0106-ALIAS HOLD (release-candidate `0106_barcode_aliases.sql` never applied; renumber and rebase if that line is ever merged, archive L2980).
+
+- **Q67** [ready] HO24-PARKED-MIGR HOLD (migrations 0185–0191 parked in `ops/scripts/migration/held/`; 0192–0207 are applied, verify which held ones remain, archive L493); D1b(b)#371 PARTIAL (consistent branch/supplier/date sibling reports); WHOLESALE-THRESHOLD#122 CLOSED; J3/N3a#376 DONE.
+
+- **Q68** [needs owner] **Early-Sep ledger leftovers (archive L3421, L6531)**: MIG-AUG31-DAY PARTIAL (the 31 Aug day report import was prepared and verified but never recorded as applied; the AR half is live through 0094 and 13,244 invoices) (commission fields: BC-Q22).
+
+**Import robustness lane (queued; OPUS-CORRECTNESS-HUNT-R2 H2/H4, 13 Oct)**
+
+- **Q69** [ready] IMPORT-VERDICT-DRIFT OPEN (an import chunk throws 500/failed when a row's verdict changes between Analyze and Approve: Remove newly through insufficient stock in release 2, Set already before; no production imports have been applied yet); IMPORT-UTC-LOT-DATE OPEN (counted and import lots are dated by the UTC date, so 00:00–06:59 KH lands on the previous day, also `productBatches.ts:190/295/686`; use `businessToday()`).
+
+Evidence: BC §3 N3, §2.4 B, App. A.
+
+#### Added 27 Oct from the lane log
+
+- **Q70** [ready] 6.0.991 P3 follow-ups: the scanner test is weak, a residual race outside sale create, wide expiry seeks.
+
+### Returns
+
+#### Returns, sales money, shifts and expenses
+
+**Findings still MISSING on production**
+
+- **Q71** [ready] (repro tests RED by design, kept out of release candidates): C imported returned quantity ignored in capacity (`returns.ts:733`; N1 returns-capacity landed 6.0.82–86 for release 2, check composition); D partial return on Not Paid leaves the Not Paid list, settlement refused, drawer pays out (`sales.ts:2420`); E replacement on a Not Paid sale booked as Cash (`returns.ts:101`; BC-Q5 rate rule).
+
+- **Q72** [owner-decided] F paid sale that grows stays Completed, $20 unsettleable (`saleLineAddition.ts:592`); G restore after same-line repricing (owner ruling 12 Oct: refuse with "record a new return"); M return id N collides with sale-keyed movements (first blocking id 16780, latent); capacity float-sum refusal (`returnCreateAction.ts:355`) [BC §1.3, §3 N1, N2 (needs BC-Q1, Q4, Q5), OPUS-AREA-REVIEW-R2-STOCK-RETURNS, FINAL-a3e831ad6cc0d4e8c]. → *27 Oct: G (refuse restore after repricing) is 6.0.989 (RC2b, deploying); F belongs to the sale-payments work (6.0.982).*
+
+**Returns register**
+
+- **Q73** [needs owner] F2#10 PARTIAL (Not Paid returns until RETURNS-MONEY 0204; held migration 0238 backfill: see Holds); RETURN-atomicity#248 / PART77-RETURNS-ATOMIC#185 PARTIAL (cross-step atomic create/edit, unpaged/N+1 sites); RETURN-replacement#330 PARTIAL (same-name replacement/settlement, unified chooser); RETURN-cancel-policy#296 PARTIAL OWNER (cancellation semantics for refund/stock/COGS).
+
+- **Q74** [ready] SALE-RETURN-ID#97 UNCERTAIN (equal sale/return ids, finding M); RETURN-SUBCENT#96 DONE; legacy v0 customer return create/edit does per-line N+1 capacity reads (Free-plan P1, OPUS-EFFICIENCY-REVIEW-R2 W2); two-line mixed CREATE over Free budget (CRB spin-off); edit/create `batch_id` asymmetry; EditReturnModal never sends `stock_condition` (7077327 finding 1), PATCH not actor-fenced (finding 8).
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q75** [needs owner] RETURNS-ENDPOINT OPEN — returns endpoint/UI `66399fef` isolated pending lifecycle integration; list/export 500/1000 loaded-row cap is a separate completeness issue (archive L1081); P1-RULINGS-PRECISION OWNER — non-blocking rulings on Precision v1: cached old PWA `409 money_precision_review_needed`, preview page-size key, zero-result pager, sub-cent return cancel, spurious `write_conflict` on return create (archive L1947).
+
+- **Q76** [ready] F-register tasks F69–F73, U16–U20 (Sep 8): F73 transfer receipt/audit retry gap, F71 Library mounted review needs sync-event consumption repair, U20 broader device layout coverage (archive L14800; the full F-register lives in the obligation index).
+
+#### Added 27 Oct from the lane log
+
+- **Q77** [ready] 6.0.994 E1 follow-up: return and receipt number probes retry on same-second collisions; give the exchange request statement headroom (RC2b sits exactly at the budget of 50).
+
+### Contacts
+
+#### Stock, catalog, contacts and suppliers
+
+**Contacts and suppliers**
+
+- **Q78** [needs owner] P10-14#66 OPEN (872 customers with blank gender: report and make fixable); GEN-MEMBERSHIP#57 OPEN (shared General customer's legacy membership value: clear and verify); CONTACT-CLEANUP#99 UNCERTAIN (membership-blocked customer cluster, supplier profile confirmation); Q4-data-review#378 OPEN OWNER (two duplicate-phone customer pairs: the owner merges them in the Duplicates tab).
+
+- **Q79** [needs owner] CUSTOMER-membership-prefix#427 OPEN OWNER (exact legacy prefix only if authorised); CONTACT-compare-review#334 PARTIAL, CONTACT-bulk-reviewed#336 PARTIAL (no pair-order implicit bulk merge, 3+ clusters explicit), CONTACT-identity-index#337 PARTIAL (normalised indexed identity keys), CONTACT-duplicate-km#285 OPEN (real Khmer for Resolve/Dismiss/search), CONTACT-merge-scope#283 DONE, CONTACT-merge-atomic#335 DONE, CONTACT-dismiss-sync#284 SUPERSEDED.
+
+- **Q80** [needs owner] F72-unknown-phone#409 UNCERTAIN OWNER (BC-Q14); Supplier-residual-invoice-ledger#384 PARTIAL (historical invoice monetary residual without double stock); SUPPLIER-AUTO-BACKFILL#120 PARTIAL DATA (18,996 blank-supplier lots, 7,340 source receipt lines carry a supplier); LOT-BACKFILL#68 DATA (19,914 untraced legacy lots); UNCOSTED10#77 DATA (10 genuinely uncosted removal rows).
+
+### Shift, receipts, Telegram
+
+#### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
+
+**Owner-decision lanes (14 Oct)**
+
+- **Q81** [owner-decided] Receipt TIN and licences: Khmer and English receipt, TIN and licence fields in settings printed on the receipt (accountant to confirm the invoice format).
+
+- **Q82** [owner-decided] Per-cashier shift report: open and close, per-cashier totals, all-cashier summary (design in the shift-cash report).
+
+- **Q83** [owner-decided] Telegram admin-only check: the full phone number may be shown only where the audience is verified admin-only; add the check and a test.
+
+#### Returns, sales money, shifts and expenses
+
+**Shifts and expenses**
+
+- **Q84** [needs owner] S4-10#145 DONE; SHIFT20-COUNT#58 DATA (shift 20 closing-count amendment); Historical-Sep4-shift-close#412 DATA OWNER; N46#420 DATA OWNER (expense note 993000 vs 99300 KHR before any write).
+
+- **Q85** [ready] N43 (shift open/close cash semantics) and N44 (field-specific compact input sizing) legacy-OPEN (archive L15949, L15966; shift lines now covered by shift-cash-everywhere 6.0.104–107 + 6.0.154–157 refuter fixes in flight: telegram-topics pin, Additional on the shift list card, per-shift drawer mutation guard, reopen/close actor named).
+
+- **Q86** [ready] fees/expenses K lane done, fees-k-frontend (6.0.137–140, in flight: deleteFee expected_updated_at + 409, ReviewQueue reject 512 cap + EN/KM for reason_too_long/invalid_reason/review_entity_changed/review_already_decided, 409 undo_history_stale refresh, Backups 503 guidance) OPEN [CLAUDE-FEES-K-FIX-FINAL, CLAUDE-FEES-K-FRONTEND]. K backlog: K5 pattern in label replace/classify, sale cancel fees, contact-merge repoint.
+
+- **Q87** [ready] review audit best-effort; six sites name the freshest-session device; `PATCH /action-history` unconditional flip; K8b needs a migration (pending_actions.requested_device_name/_tz, number 0249+).
+
+#### Telegram and notifications
+
+- **Q88** [ready] Pending-tag + Telegram-per-review lane (release 3 slice C, above); Khmer wording unification (Stock-in session, import row codes, Audit Log context block English labels "Before", "Created By", "Pending Action Id", "Requested By", km "sale" is bare លក់ where ការលក់ is more natural, 18 uses) OPEN [CLAUDE-RELEASE-2-GATE-FIXES, P-KM key map KM-STOCKIN-WORDING-KEYS].
+
+- **Q89** [needs owner] TG-TOPICS-OPS#37 / OPS-settings OPEN OWNER (guarded deployment-only write of the six Telegram topic ids supplied by the owner 27 Sep; production stores none; single-tenant per organization, never a migration); Telegram-live-shift-acceptance#399 OPEN (live shift-close behaviour); S4-6#143 PARTIAL (status message names the actual updater; amend message now names the actor in shift-cash-everywhere); TG-ASTRAL#88 PARTIAL (shared astral-character fixture for `cleanLine` and `saleItemNameLayout`); Notifications low/out alerts only on a sale crossing the threshold (donor NOTIF-V2 `ca36cfb3b`, `telegram.ts:1024` still a standing list) MISSING; Telegram carries profit/courier chat-wide by design (owner info); LOYALTY-notification manual adjustment#416 DONE; QUEUE-ERROR-CODE#91 PARTIAL (raw English `last_error`); Telegram report images (REPORT-CENTER#56). → *27 Oct: crossing-only alerts are lane 6.0.991 (RC2b, deploying).*
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q90** [needs owner] CP3B1-SETTOPIC OPEN (PENDING entry for the /settopic broadcast, U-broadcast, archive L184); BP-10 OWNER (Telegram settings permissions question left open after CP-3d, archive L188); amend message names the actor (done in shift-cash-everywhere), but who amended a sale/return status in older status messages: S4-6#143.
+
+- **Q91** [ready] **Early-Sep ledger leftovers (archive L5953)**: TG-REPORT-DATE-INPUT PARTIAL (the `/report` command refused dd-mm-yyyy input before the owner ruled the whole app day-first, so the refusal now inverts; parser state not stated).
+
+Evidence: BC §2.5, §2.6; CLAUDE-SHIFT-TELEGRAM-ADDITIONAL, CLAUDE-SHIFT-CASH-EVERYWHERE.
+
+### Permissions
+
+#### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
+
+**Owner-decision lanes (14 Oct)**
+
+- **Q92** [owner-decided] Admin reset code: an admin-issued one-time code replaces the authenticator-only reset.
+
+- **Q93** [owner-decided] Forced-change neutral copy: the forced password-change screen says "publicly known", which is wrong for a short seeded password; neutral EN/KM wording.
+
+- **Q94** [owner-decided] Review before/after records: a before/after record for every action and a record viewer (owner 14 Oct).
+
+**review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)**
+
+- **Q95** [ready] F1/F6: creating a request never broadcasts, so the pending tag appears only on the next visit; the ProductDuplicatesTab conflict apply does not refresh. F2: the second removal-alert site is unpinned. F3: `?fields` edge values (empty, array, case, repeated) are not answered 400. F4: more invisible characters to strip (U+2060, U+00AD, U+3164 and similar; keep ZWSP, ZWNJ, ZWJ and Khmer). F5: a retried create, edit or fee delete with the same client_request_id queues two pending rows and two alerts (`createPendingAction` is not idempotent). → *27 Oct: F3 strict `?fields` and F5 idempotent pending actions are lane 6.0.985 (RC2b, deploying).*
+
+- **Q96** [owner-decided] Also: a false "Products merged" alert on a removal-only conflict review (pre-existing); 30 alerts in 3 seconds have no rate limit; slice A still open (approve-performs-merge, details name, Khmer reader, bounded duplicate F8, 12-alert burst); create-fold must also require `merge_duplicates` (parity with merge-permission-fold, defaults granted per owner 14 Oct). → *27 Oct: approve-performs-merge (slice A) is lane 6.0.985 (RC2b, deploying).*
+
+**Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)**
+
+- **Q97** [ready] Drift-guard hardening: the retention writer scan can be fooled by a dynamic import, a new helper in `lib/audit.ts`, a reused allowlist expression, multi-row VALUES, `.js` files, and migrations are unscanned.
+
+- **Q98** [ready] `payment-methods/replace` (linked scope) rewrites the payment method on sales with a settings permission only and no password: add the step-up. → *27 Oct: the step-up shipped in 6.0.986 (live, RC1).*
+
+- **Q99** [ready] Stock Set undo/redo writes no audit row. Owner questions (all prunable today): promotions, `product/delete` with stock, loyalty `award_points`, whether review rejects matter after 21 days; also award_points and promotion replay receipts after 21 days, a record of the purge itself, and a purge cost that grows.
+
+- **Q100** [ready] `sale_refused` is missing from the audit vocabulary (Khmer label); the Server page shows an English refusal text; per-user rate limit on refused sales (refusal rows are already collapsed per account, reason and request id per day).
+
+- **Q101** [ready] Courier blind write: an amender with the courier-cost switch off can still write the courier cost through the API (write-side gate).
+
+- **Q102** [ready] NOTE C: `actorReadScope.ts` org field shape flip (interacts with the H7 epochs).
+
+- **Q103** [ready] Remaining non-aborting uploads: product, import and avatar uploads still use wrappers that do not abort.
+
+#### Accounts, sessions and drafts
+
+**receiving-f2 (6.0.108–110, 141–142 done; round 7 6.0.147–148 in flight)**
+
+- **Q104** [ready] login-duration change no longer forgets; storage-mode default unified to 'always'; draft prefix and every idempotency/pending record kept through resets with account binding; round 7: an unresolved checkout result survives a confirmed sign-out for the same account (cart still cleared) and the server origin joins retry-record keys.
+
+- **Q105** [ready] frozen sale/return attempts survive all resets bound by actor+org only [OPUS-REVIEW-RECEIVING-F2, SONNET-REFUTE-RECEIVING-F2, CLAUDE-RECEIVING-F1].
+
+**account-isolation-2 OPEN (queued after receiving-f1)**
+
+- **Q106** [ready] server switch does not reset the account (`AppContext.tsx:1903-1909`); import `apiFormPost` server-switch fence only (keep the same-server pin in `privateTransportScope.test.ts:84-90`); server component in actor-scoped pending keys (fee create, transfer run, shift, return/sale mutations, POS carts) with read-new-then-legacy, never delete.
+
+- **Q107** [ready] FeeForm/BranchForm/Branches/FeesPage recompute draft keys per render (partly in DU-B 6.0.34).
+
+**Register**
+
+- **Q108** [needs owner] P1-ACCOUNT-DRAFTS#7 DONE; Q15#28 / Profile-modal#394 PARTIAL OWNER (full profile page, photo, sign-in linking, OTP/2FA, annotated EN/KM tutorials); Q-DRAFTS2#35 MISSING DEFERRED (server-side cross-device drafts); F54-BOUNDARY#102 and F54-persistent-callback#410 PARTIAL (persistent queryCache/IDB callbacks and already-started results outside the shared HTTP fence).
+
+- **Q109** [owner-decided] F53/F55 (archive L16733, L16741: permission-refresh coalescing; pending offline work across hard runtime changes, moot after offline removal); Z6#180 / Z6-otp-live#238 OPEN (OTP enable/validation live end to end); MAIL-domain#258 OWNER-CONFIRMED14Oct (Resend verified; email/Google details match and no live test requested; owner confirmation is not an end-to-end certificate).
+
+- **Q110** [owner-decided] OAUTH-redirect#259 OWNER-CONFIRMED14Oct (matching details; no live Google test requested); W3 login batching + atomic lockout (`loginLockout.ts:96`, non-atomic read-modify-write) OPEN; customer self-service password reset (P9-6#81, #362, #379) MISSING (staff-issued temporary password is the only path; Telegram share + Resend email chosen 5 Oct; starts after portal-csrf merges; high conflict on `portal.ts`). → *27 Oct: the atomic lockout shipped in 6.0.986 (live, RC1).*
+
+- **Q111** [ready] SMS reset#379 SUPERSEDED.
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q112** [owner-decided] POSTUPLOAD-RECHECK OPEN (post-upload account/permission recheck; product save actor fence, archive L750); OFFLINE-DRAIN / U-DRAIN#13 OPEN (one-time automatic upload of queued sales/outbox rows, then remove the snapshot/mirror code, the POS checkout gate and copy; owner 26 Sep and 1 Oct; census 29 Sep: 7 uncommitted files, no commits; related F1 snapshot-loop removal in Efficiency).
+
+- **Q113** [ready] SETTINGS-wire-images-idea#349 UNCERTAIN (optional Settings entry point).
+
+**Completeness-pass additions (archive L16735–L16743)**
+
+- **Q114** [ready] FRESHNESS-FIXES OPEN verify (frontend cache freshness found on 8–9 Sep: an own-user update followed by an unrelated-user update inside the debounce loses the required bootstrap and a payloadless role refresh misses it, experiment `e24fc25e`, fix from `9654562d`; an invalidation during a pending read let the next read reuse stale in-flight work and an old response repopulate the shared cache, fix `538d65ee` in `http.ts`, and a late local fallback can replace a fresher server cache; these SHAs exist only on `archive/*` branches, not on origin/main or the release-2 base, so treat the fixes as not integrated; related F54-BOUNDARY#102 and F53/F55 above).
+
+Evidence: BC §1.4, §2.8; CLAUDE-RECEIVING-F1.
+
+#### Permissions, review queue, audit and undo
+
+**Review-queue completion plan (OPUS-PLAN-REVIEW-QUEUE-COMPLETION): historical B, C and D shipped in release2e; sliceA and the listed follow-ups remain OPEN**
+
+- **Q115** [ready] A approve-performs-merge (shared `runIdentityEditFold`, `confirm_merge_into` preview, reviewer merge/image/survivor-price/cost checks, approval inside the merge batch, undo restores identity, Free budget refusal); B mini pending-review tag + shared store (Products, Inventory, Fees, Branches, reasons); C Telegram alert per review + queue route (`reviewAlert.ts`, `requestDefer.ts`, reviewGate, reviewQueue, telegram.ts/telegramLang.ts, Settings). → *27 Oct: slice A is lane 6.0.985 (RC2b, deploying).*
+
+- **Q116** [needs owner] D permission catalog and all copy (permissions-catalog lane 6.0.143–146: D1 packs, D2 editor rows with on/off action rows, D3 defaults after owner, D4 parity test + hidden rows + sign-up toggle). Open owner calls: only changed fields move on a merge (Q1), Free refuses over-budget merge approval (Q3), queue scope beyond today (Q4), Employee defaults union on fresh installs (Q5), hide `security_settings`/`drive_credentials` (Q6), create-fold spelling needs edit permission (Q8), who sees tags (Q9), reject reason in Telegram up to 120 chars (Q10), Website Editor sign-up toggle off (Q11), merge stays off for Employee (Q12).
+
+**R2 security review conditions**
+
+- **Q117** [ready] (OPUS-AREA-REVIEW-R2-SECURITY, PASS-WITH-CONDITIONS): F3 inventory `unlockPricing` discount compare mirror (sub-cent); F4 role-editor descriptions/labels stale, branches add/delete absent from editor (always refused), `inventory:edit_reasons` default mismatch, no Website Editor sign-up toggle → permissions-audit lane; F5 late picker photo upload not owner-bound (attribution only).
+
+- **Q118** [needs owner] create-fold lets add-without-edit rewrite barcode spelling (BC-Q8). OPUS-CORRECTNESS-HUNT-R2 H1 SHOULD-FIX: new review refusal codes (`review_action_full_required`, `review_entity_changed`, `review_already_decided`, `invalid_reason`, `reason_too_long`) reach a Khmer reviewer in English (fees-k-frontend covers part).
+
+**Register**
+
+- **Q119** [needs owner] Q14#27 OPEN OWNER (branch-scoped order visibility + per-branch KPI in profile); VIS1#103 MISSING (cashier self / non-admin / all visibility; foundation `389244dc` not an ancestor); Q16#29 PARTIAL (undo broadcasts); Q17#30 / Review-UI-decision-notification#392 PARTIAL (before→after preview of the actual change in the real screen format, submitter notified; N4b apply-first redesign CANCELLED by the 13 Oct queue-first ruling).
+
+- **Q120** [ready] AUDIT-PER-RECORD#18 PARTIAL; AUDIT-FILTER-CAP#20 PARTIAL (cheap: cap values per filter, `auditLogQuery.ts:208-216`); K1#169, K1-create-delete#221, K1-scopes#222, K1-remaining#383 PARTIAL (server undo/redo appliers missing for contacts, files, lookups, users/roles, settings, fees, sale/return create); UNDO-status-conflict#322 DONE.
+
+- **Q121** [needs owner] K6#171 DONE; PERM-action-editor#244 PARTIAL (direct per-action admin selection, preset bundles; BC-Q12); Custom-permissions#391 PARTIAL (reject unsupported combinations, `users.ts:1014-1075`); SECURITY-SETTINGS#41 UNCERTAIN OWNER (keep or remove the unused key); REPAIR-permission-rule#247 UNCERTAIN OWNER (`POST /repair-integrity` backup-or-settings gate).
+
+- **Q122** [ready] PERM-library-fallback#270 UNCERTAIN (transitional "Full library OR settings"); PERM-import-contradiction#297 PARTIAL; REVIEW-source-sections#291 PARTIAL (source-page grouping, device/user/time identity in approval/audit/users); HISTORY-scope-example#271 UNCERTAIN; CONTACT-compare-review#334; N3 import-authority step 2 root-only (re-check inside the final-deactivate commit guard, donor per-row-group/rename guards, frontend Confirm/Retry that will 403) PARTIAL.
+
+- **Q123** [needs owner] Wide-Records-cascades#407 PARTIAL; permission deep-walk (archive L9374, L8614, L9385) legacy-OPEN; Organization-concept removal ORG-removal#306 OPEN OWNER (audit read sites before removing or hard-coding the default business); donors PERM-PROMO-DISC `86c3a2fb3`, PROD-PERM `c7d8529ee` PARTIAL.
+
+**Correctness hunt R2 follow-ups (OPUS-CORRECTNESS-HUNT-R2, 13 Oct 09:15Z; no blocker)**
+
+- **Q124** [ready] H3 OPEN (an approved review's exact discount differs from the direct-edit rounding: review-queue slice A); H7 OPEN (a same-user network blip causes a permission refresh and `resetActorReadSession`, which locks the Fee/Branch forms with a false "account changed" and drops typed text: fees-k-frontend 6.0.158–160 puts a shared `useFrozenDraftAuthority` on the write identity, also efficiency A6).
+
+- **Q125** [ready] H6 dead SQL tails in `getSalesGroupedTotals` and `getProductSalesRanking` go to money-surfaces (6.0.161).
+
+Evidence: OPUS-AREA-REVIEW-R2-SECURITY, OPUS-PLAN-REVIEW-QUEUE-COMPLETION, OPUS-CORRECTNESS-HUNT-R2, BC §1.2, §2.5.
+
+### Public site
+
+#### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
+
+**Owner-decision lanes (14 Oct)**
+
+- **Q126** [owner-decided] Returns policy page: 7 days, unopened, with receipt, same as the store.
+
+- **Q127** [owner-decided] Storefront minimum age 16.
+
+#### Public website, storefront and membership
+
+**Rulings not yet in code**
+
+- **Q128** [owner-decided] W-SITE#39 PARTIAL — `frontend/index.html:16` sets `maximum-scale=1, user-scalable=no` for every host (owner: zoom on public only); no footer/About independent-retailer line; thorough minimalist EN/KM overhaul; W-ADMIN#40 OPEN (admin landing in the same design language).
+
+- **Q129** [owner-decided] P9-3#78 PARTIAL (stale policy text "official distributors", "Business OS" wording in FAQ/privacy copy: `faqStarterText.ts:17,36`, `en.json:3571,3631,3659`, `km.json:3571`, `portalContentI18n.ts:59`; do not touch `legalContent.ts:118`), P9-4#79 assistant chat-box first MISSING DEFERRED, P9-5#80 featured/trending/bestseller on the front page PARTIAL DEFERRED (the Worker never sends ranks; BC-Q23b), P9-6#81 customer forgot-password MISSING.
+
+- **Q130** [needs owner] P10-20-PUBLIC#76 OPEN OWNER (rows per page change under the exception); PORTAL-EDITOR#85 DONE; PREVIEW-PROMOTIONS#86 MISSING (Website Editor preview builds `catalogTabProps` without `promotionRules`, `CatalogPage.tsx:3139`); PREVIEW-PAGESIZE#93 MISSING (shared localStorage key); PORTAL-OLD-SHOP-NAME#203 / A6-portal-data#242 OWNER (production portal businessName/title/intro/submissionInstructions only through owner-authorised editing).
+
+- **Q131** [needs owner] PORTAL-structured-details#286 PARTIAL; PORTAL-preferences-scope#308 PARTIAL (anonymous theme/language persistence, install/download presentation; BC-Q23a); PORTAL-sticky-pagesize-live#309, PORTAL-embedded-cache#360 UNCERTAIN (reproduce first); PORTAL-grouped-pagination#361 SUPERSEDED; PORTAL-guest-accounts#362 PARTIAL; PORTAL-small-targets#318 OWNER.
+
+- **Q132** [needs owner] SCAN-public-decision#302, SCAN-editor#303 OWNER (camera barcode search for shoppers; recommended-products scanner); K7-portal#226; DNS-old-domain#260 OWNER (old `leangcosmetics` domain redirects need DNS on Cloudflare); CONTENT-stories#265, Stories/posts/comments#389, Canva-like promotions editor#396, PROMO-editor-deferred#245, CANVA-PROMOTIONS#205 DEFERRED.
+
+- **Q133** [owner-decided] Part535 translations#380 DONE; Portal Contact us#395 CLOSED; sign-up toggle in Website Editor (R2 F4, plan slice D4) OPEN; portal membership lookup disabled by policy (keep).
+
+Evidence: BC §2.8 (W-SITE), §4 Q23; 27 Sep owner decisions above.
+
+### Platform & ops
+
+#### Consolidation lanes (last recorded state 19 Oct)
+
+- **Q134** [owner-decided] [~] **CONSOL-RECONCILE — full task ledger:** stable requirement/source/test/donor/release/acceptance mapping is underway. Inventory count sessions are in progress and image-only received-date filters remain queued; date/session/baseline/customer decisions are settled; their composed implementation and acceptance remain open. Physical devices/PWA, licence/compliance, broader correctness/performance and safe cleanup remain OPEN/HOLD. Preserve the entire historical queue below; old MISSING or checked rows need current evidence.
+
+- **Q135** [ready] [~] **CONSOL-J — executor authority and import recovery:**809–811 have bounded Astra GO. A six-case role/reassignment/policy/cancel matrix passes, with synthetic-policy and queue-entry limits recorded.812 adds a phase/status comparison inside the existing atomic lease claim: actual811 review bypass is now refused without changing product, review, audit, stock or cache; separate fresh approval succeeds. Twelve production-SQL controls and two deliberately wrong implementations distinguish phase admission from a stale status read. Generic product Free budgets remain a confirmed gap: actual inline start55/approve77 attempted statements exceed the configured50. Same-phase stale runs, ambiguous queued/failed intent, expired holders, staging/DLQ publication and full lost-ACK recovery remain OPEN. Final combined gate, Astra composition and production acceptance are pending.
+
+#### Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z)
+
+**Owner-decision lanes (14 Oct)**
+
+- **Q136** [owner-decided] sheetjs-0.20: 0.20.3 is approved and verified (tarball 2,409,319 bytes, vendored untracked in the sheet worktree). Parity found 30 of 30 .xlsx and 8 of 16 .xls identical; 8 legacy HTML-as-xls differ (numeric cells keep leading zeros, text cells gain spaces around separators, a few text cells become ISO dates) and the `t="d"` date reader reads one day early. Rework the reader, normalise the HTML-export whitespace, decide leading-zero handling (barcodes benefit), re-run parity; then commit PART B separately.
+
+- **Q137** [owner-decided] LICENSE file: "All rights reserved — Leang Cosmetics".
+
+- **Q138** [owner-decided] Offline queue removal slices S0, S5, S6 (tills drained; unblocked).
+
+**Efficiency (Free 50-statement paths) and hygiene**
+
+- **Q139** [ready] Free-plan paths over 50 statements: the conflict review loop alone, Dashboard startup at about 4.2k sales (view-more lists now 2–3 statements after the card); lanes E-TG, E-RET, E-ECHO, E-SNAP, E-PUT, E-STOCKIN, E-CLEAN stay queued behind slice A.
+
+- **Q140** [ready] Comments sweep: mechanical comment cleanup per package (517 to shorten, 50 to remove, the 4-decimal rule stated once), then the tokenizer strip; also one raiseIfSql builder (59 copies), casts through unknown, storage-key constants exported once, shared late-picker queue, BranchField, i18n duplicate-key check (516 duplicate keys per pack), productIdentity LIMIT 200 group cap, importEngine NaN delta, hard-coded Telegram 2000.
+
+- **Q141** [ready] fees-k leftovers N1, N4, N5, N6 and the ProductForm duplicate-warning state; storefront leftovers (pattern filter not exact, unused assistant* keys, stored FAQ text in production settings may still promise something).
+
+**Data and platform**
+
+- **Q142** [ready] K8b needs migration number 0249 or later (pending_actions requested_device_name/_tz; 0250 is now taken by the multilot watermark, so pick a free number against `d1_migrations` and every ref's files).
+
+- **Q143** [owner-decided] Privacy purge of history (scrub and force-push after the lanes merge; keep the private mirror), see Privacy below; repository private later (owner 14 Oct).
+
+#### UI, mobile and device acceptance
+
+**Owner daily-use UI (DU-A/B/C)**
+
+- **Q144** [ready] DU-A landed (picker cancel and late change, instant preview + Retry, keyboard/inert/44px Close, 6.0.24–29).
+
+- **Q145** [owner-decided] DU-B landed (newest-first lots, sole-branch chip, fences, 6.0.30–35, 6.0.90). **DU-C OPEN (queued after DU-A)**: `ProductsImageOnlyView:227` lot order, StockSessionLineEntry `isComposing` guard, inputMode/visual-viewport pins, ProductForm `<form>`/Enter, Modal keyboard opt-in + focus trap/restore (FastStockInModal Esc), image preview/save/reopen mounted test + Safari compression fallback test, EN/KM `new_batch`/`open_files`/`export_format_excel` [HAIKU-DAILY-USE-COVERAGE]. Remaining sole-branch chip sites per OWNER-BRANCH and Haiku map (ManageBatchesModal, VariantFormModal, NewSupplierReturnModal, POS CartItem, POS ProductDetailSheet) were widened into DU-B: verify composed.
+
+**Physical devices (DEVICE, owner action; NOT RUN)**
+
+- **Q146** [needs owner] P1-PHYSICAL#5, Physical-authenticated-acceptance#404 — iOS/Android camera and library photo (preview immediate, survives save/reopen), HEIC from library, native keyboard and Add/Remove/Set, installed-PWA restart bar, Android back, printing, installed-PWA lifecycle; checklist `Lanes/2026-10-12/OWNER-DEVICE-ACCEPTANCE-RECEIVING.md` (steps 1–12 for release 1). Owner has not tested the live photo fix on a phone.
+
+**Open owner-UI register**
+
+- **Q147** [ready] P1-OWNER-UI#6 PARTIAL umbrella; RESPONSIVE-PASS#71 / ADMIN-responsive-live#317 PARTIAL (full compact, mobile, public, portal pass); VISUAL14#104 PARTIAL (14-reference pagination/precision/security matrices); QA-initial-live#316, QA-page-pass#358, UI-label-live#300, MODAL-live#305, ROLE-live#307, SYNC-live#301 OPEN live verification after deploy.
+
+- **Q148** [ready] Q-MINIMIZE#16, F3-DRAFT-CHROME#168, F3-tabs#216 PARTIAL (only 14 flow kinds can park; about 30 dirty-state modals cannot; universal minimize for the other 24 draft modals, one modal per slice, last); S4-20#148 PARTIAL (Save at page end, minimize across forms); S4-21#149 PARTIAL (shared Discard/Back contract; QuickAddModal has no guard). → *27 Oct: the QuickAddModal guard shipped in 6.0.987 (live, RC1).*
+
+- **Q149** [needs owner] S4-22#150 PARTIAL (global Khmer line-height/clipping); S4R4-11#426 PARTIAL (sale-detail scan button); S4R4-7#424, S4R4-8/9#425 DONE; B1-STATS#164 / B1-stats-sweep#211 PARTIAL; N3a/N3#174, N3-palette#219 OWNER (palette confirmation), N3-section-sweep#220 PARTIAL (SectionCard rows page by page); Y16#177 / Y16-toolbar#232 PARTIAL (History/Manage join the chip row on six hubs).
+
+- **Q150** [needs owner] Z5#179 / Z5-currency#235 PARTIAL (currency-symbol contrast), Z5-receipt-settings#236 OWNER, Z5-live-check#237; Z7#181 / Z7-spacing#239 UNCERTAIN; SELECTION-columns#344 PARTIAL, SELECTION-header-conflict#345 SUPERSEDED; STATSTRIP-DORMANT-DATE#124 MISSING (close: precondition unmet); ADVISORY-ANCHOR#89 and LAYER-REASON-INLINE#186 UNCERTAIN (need a render).
+
+- **Q151** [needs owner] TOUCH-TARGETS#189 MISSING OWNER (BC-Q24: 44px on touch only?); PAGER-visual-check#293; PAGESIZE-KEYBOARD#95 SUPERSEDED; ZERO-PAGER#94 DONE; UI-theme-audit#269 UNCERTAIN; SETTINGS-visual#290 UNCERTAIN; Profile-modal-redesign#394 UNCERTAIN; Archived-visual-verification#386 OPEN; Thumbnail-simultaneous-detail#387 OPEN (verify with a real image).
+
+- **Q152** [needs owner] VIEWER-LOCALE-SURVIVORS#187 PARTIAL (day/numeric grouping in sync, banner, branch, backup, audit, export); K7-path-input#228 PARTIAL (backup path input width: owner must point at the input); Q18#31 UNCERTAIN OWNER (short display ids, BC-Q15); I18N-GOOGLE-LOGIN#161, I18N-ORPHAN-KEYS#160, I18N-unused-km#268, Unused-i18n-keys#393 (see Docs).
+
+- **Q153** [ready] NATIVE-DIALOG-SWEEP#191 / CONFIRM-SWEEP#121 PARTIAL (11 native alert/prompt sites remain: ProductForm x6, PrintSettings x2, Receipt, ReviewQueue, Settings; needs an input dialog; U-confirm); ASYNC-UNMOUNT-TIMERS#190 PARTIAL; PERMISSION-UI-HIDING#128 PARTIAL (Add/Edit controls for users without contacts add/edit: `CustomersTab`, Suppliers, Delivery tabs). → *27 Oct: PERMISSION-UI-HIDING#128 shipped in 6.0.987 (live, RC1).*
+
+- **Q154** [needs owner] STAT-FOLD-PERSISTENCE#129 UNCERTAIN; DEFAULTS-unnamed#292 OWNER; U1 backlog: rows per page (current defaults accepted, 1 Oct), N44 input sizing, cross-page consistency checklist (archive L8862), request batches of 18 and 20 Aug (archive L8297, L8156: re-triaged in the register).
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q155** [ready] SW-OPEN-RESIDUALS OPEN (service-worker stale-shell residuals: redirect dropping the query, un-aborted timed-out fetch, 200-HTML interstitial caching, archive L638); STOREFRONT-404 OPEN (one unidentified console 404 on the storefront after deploy, archive L1750).
+
+- **Q156** [needs owner] SW-LIVE-SMOKE, SMOKE-ENDSHIFT, PHYSICAL-PRINT, P4-IOS-LAG DEVICE (legacy browser upgrade warm-reload proof; signed-in POS End Shift smoke; physical receipt print with the driver-forms default of the four Print Settings modes; iOS PWA lag re-measure after wave 2); P4-KM-DUPKEY OWNER (Khmer for `contact_duplicate_will_use_existing` composed in-file, needs a native-speaker check).
+
+- **Q157** [ready] KHMER-WORKBOOK-4 HOLD (four whitespace-only Khmer workbook edits intentionally held: JSX supplies the separators); PW-EXPECTED-RED PARTIAL (Playwright findings not fixed: blocked-site-data login, bootstrap prefetch catch, iOS 16px inputs, account-handover POS filters, Vary: Accept, English last_error); COMPACT-PUBLIC-POLISH OPEN (broad compact/public/customer-portal visual polish).
+
+- **Q158** [needs owner] OWNER-ADDS-SEP7 PARTIAL (same-session duplicate feedback, sale-row eye removal, branch-vs-total stock alert parity, action minimization/permissions, gross/net clarity); F49-BROWSER-API OPEN (deprecated browser API console warning attribution); STAFF-DATE-TYPING OWNER (tell counter staff that typing 9032026 now means 9 March, day-first).
+
+- **Q159** [ready] DEBLOAT-I18N-927 OPEN (927 dead i18n keys about 160 KB queued behind FX-ui; unused is not dead, list for the owner); RETAINED-UI-REQUESTS#111 PARTIAL (delivery-contact rename parity, stock reason presets, 375px Products overflow); SCAN-sales-returns-live#304 OPEN (live check of the new Sales/Returns scan placement and camera flow).
+
+**Completeness-pass additions (archive L6544–L16757)**
+
+- **Q160** [ready] PARITY-SWEEP OPEN (every capability must exist on every surface that plausibly needs it; the named gap is POS quick-add creating plain contacts while the full contact forms support multi-option contacts; sweep POS quick-adds, manual add-stock vs import validation, receive-batch vs the §12 rules, edit forms vs import normalisers, and list every gap as its own item before fixing: Track F, archive L6861, L10483).
+
+- **Q161** [ready] QA-TRACK-E DEVICE (infra-dependent live checks: `wrangler tail` during a real transfer, reset, backup and import to watch D1 write contention and a Free-plan CPU trip, a real-device responsive pass, and a concurrent two-tab edit race on the same product or branch stock, archive L10481).
+
+- **Q162** [ready] AUG25-BATCH-LEFTOVERS UNCERTAIN verify (Aug 25–27 request batches, no closure found in the ledger: POS group-option display and picking for the "multiple pricings" request, related POS-price-condition-picker#347, archive L13672; import CPU efficiency, whole-CSV re-decode per window and sales re-partition per chunk, archive L13677; the message `Write blocked - server unavailable (operation: data:reset)` was reported and never investigated, archive L13504; `mode='all'` reset cleans R2 with a blanket prefix wipe instead of exact keys, related N7 dataset lifecycle, archive L13168).
+
+**Early-Sep UI leftovers (archive L3208, L5415, L6113)**
+
+- **Q163** [ready] PRODCARD-MOBILE-DESC OPEN (hide the inline mobile-card description, `ExpandableDescription` at `Products.tsx:3442`); S4-26-VISUAL DEVICE (reports hub density was verified only from emitted CSS, not visually, because rc worktree previews serve the main checkout); S4-33-AMEND-RECHECK OPEN (re-check that the S4-30 amendment ledger shows dates day-first).
+
+**Early-Sep defect lists (Part 549 / Part 539 / Part 77, archive L6435–L6492; verify each against current code)**
+
+- **Q164** [ready] layering HIGH — InfoHint `z-[1000]` renders under Modal `z-[1050]` (move to `z-[1055]`); InventoryReasonManagerModal (RenameCascadeModal was fixed in `352ed476`) `z-50` are buried; about 19 inline `fixed inset-0` overlays and the `Sidebar.tsx:498` backdrop remain.
+
+- **Q165** [ready] Date and locale sites — `App.tsx:1253`, `Branches.tsx:270`, `Backup.tsx:708`, `AuditLog.tsx:164/184`, `inventoryExport.ts:119`, `recordFilters.ts:59` (UTC midnight) and `.toLocaleString` digit grouping (tracked as VIEWER-LOCALE-SURVIVORS#187). the mouse-wheel number-input guard `e273e127` is already in the base (DONE); POS touch targets under 40px (#189).
+
+- **Q166** [ready] 10 unguarded fetch-then-setState sites and 6 uncleaned timers (#190); 65 native confirm/prompt/alert calls (#191); Part 539 LOW — POS needs a reload to see changed settings.
+
+- **Q167** [ready] storefront sign-up with a blank membership uses a native `window.confirm`. Part 77 MEDIUM (review-tier bypasses, offline-sale timestamps and Suppliers/Delivery sort were fixed) — still open: import-review parity, failed-job "Queued 0%" (offline-sale timestamps are moot after the offline removal; Suppliers/Delivery sort and pagination were fixed in `92648cef`).
+
+Evidence: HAIKU-DAILY-USE-COVERAGE, SONNET-AREA-REVIEW-R2-REPORTS-UI, BC §1.4, §2.4, §2.8, App. A.
+
+#### Efficiency, performance and Free/Paid
+
+**Release-2 efficiency review (OPUS-EFFICIENCY-REVIEW-R2, COMPLETE 13 Oct 09:05Z, no blocking bug)**
+
+- **Q168** [ready] W1 P2 `PUT /api/products/:id` reads the same row 7–8 times before one write (`products.ts` 2413–2507, `productWrites.ts:140`); W2 P1 on Free — legacy v0 customer return create/edit does per-line N+1 capacity reads duplicating a set-based check; W3 P1 on Free — Telegram overview and /report re-read the same sales snapshot up to five times per message.
+
+- **Q169** [ready] W4 P2 every report snapshot does two full read passes plus three restore checks (one D1 batch is already a consistent snapshot); W5 P3 duplicate reads in the identity-fold and approval paths; A1 `removeStockFromBatch` superseded in production code; A2 six hand-rolled 4-place rounders with two half-way rules; A3 the L4 goods-profit rule exists in three shapes.
+
+- **Q170** [ready] A4 "exactly one row changed" guard pasted 9 times; A5 second AsyncLocalStorage/WeakMap/global hook to carry the device.
+
+**C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)**
+
+- **Q171** [owner-decided] A0 metrics (per-request rows_read/rows_written/statements/ms in Server-Timing and Analytics Engine) PARTIAL; A1 hygiene (awaited broadcasts → waitUntil, awaited cache-version bumps, ETag/304) OPEN; A2-RETENTION#45 PARTIAL (`job_runs` table; retention must skip every FK/JSON-referenced `action_history` row, never expire `undo_snapshots`; owner ruling keeps expenses and reverts forever; `ephemeralRetention.ts:233`).
+
+- **Q172** [ready] A3-CATALOG#46 PARTIAL (one scan per page, parallel stock reads, cached filters); A4-DASHBOARD#47 PARTIAL (20 s startup cache keyed by permissions + versions); A5-SEARCH#48 UNCERTAIN (Khmer tokenizer probe, FTS only if confirmed); A6-THUMBNAILS#49 PARTIAL (wire w160/320/640 + srcset, orphan audit report-only); A7-R2-LIFECYCLE#50 UNCERTAIN (imports 7 d, quarantine 30 d, aborted multipart 1 d, backups in their own bucket).
+
+- **Q173** [owner-decided] A8-READ-MODELS#51 UNCERTAIN (only if 7 days of A0 numbers cross thresholds); F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) OPEN; F2 Durable Object auto-pong and pause polls while the tab is hidden, F3 stop pre-downloading every route on deploy OPEN; B1 backups keyset paging instead of OFFSET, full backup at 03:00 local, separate backups bucket (owner decision) OPEN.
+
+- **Q174** [needs owner] W1-W2-W3#53 PARTIAL (sale create 18–20 D1 trips → 3–4, report reader one-batch snapshot, login batching); PROD-Q1-Q9#52 DATA (read-only production counts via ops d1-export); MEASURE-TOKEN#54 OWNER (Account Analytics Read scope); V-location (every binding and external call checked for distance from Cambodia) PARTIAL; PD-1 precomputed search/catalog read model (archive L317) OPEN.
+
+- **Q175** [ready] U-receipt duplicate receipt numbers possible (no UNIQUE since 0107, probe outside the batch) OPEN; PD-1 audit lanes I1–I10 and adversarial audits A1–A3 of Codex work (archive L368–L380) historical, reports in `Records/Performance/2026-09-25`.
+
+**Release-3 efficiency lanes (OPUS-EFFICIENCY-REVIEW-R2 queue, disjoint file sets)**
+
+- **Q176** [ready] E-TG (W3: Telegram overview and /report read the sales snapshot once; after shift-cash lands; `telegram.ts`); E-RET (W2 set-based v0 return capacity + F2 returns PATCH refetch; `returns.ts`, `Returns.tsx`); E-ECHO (F1: every write re-read 2–4x, writeId on every channel; AppContext and page sync handlers); E-SNAP (W4: single-batch report snapshot, measure first; `salesAnalytics.ts`).
+
+- **Q177** [ready] E-PUT (W1/W5: product PUT row reads; after review-queue slice A); E-STOCKIN (W6: stock-in one line per request on Free); E-CLEAN (A1–A6: delete `removeStockFromBatch`, one `roundPlaces`, shared costViewProfit, shared one-row-changed guard, one device context, frozen-draft block); also I1 identity lookup unindexable (migration, owner-scheduled), I2 audit insert session sort, C1 expense delete never sends `expected_updated_at` (in fees-k-frontend).
+
+**Register**
+
+- **Q178** [ready] P1-SW-FALLBACK-LIMITS#4 PARTIAL (forever-pending storage operations, install/activation failures); PERF-CPU-WORKLOAD#65 DATA (real Free-account measurement, 500 MB check, daily read budget); PERF-7-SITES#188 PARTIAL (non-sargable report/stat/audit WHERE, audit indexes); PERF-inventory-summary#250 (`inventory.ts:759` unpaged `SELECT p.*`), PERF-customers#251, PERF-sales-date#252, PERF-returns-date#253 (`datetime(col)` windows) PARTIAL (measure p95 first).
+
+- **Q179** [ready] SEARCH-movement-diacritics#254 MISSING (33 scattered INSERT sites; practical loss nil); STATS-status-conflict#323; A4a-paid#207 OPEN (Paid `cpu_ms` 300000 and queue batch 5 re-basing; continuation unlock M4); K4#170, K4-live-staging#223, K4-sentry#224, K4-remaining#382 PARTIAL (live R2 NDJSON staging; Sentry beyond reportError).
+
+- **Q180** [ready] K7#172, K7-perf#225, K7-portal#226 PARTIAL; UMBRELLA#182 OPEN (media policy, storage/job hardening, final gate); STORAGE-baseline#327 OPEN; JOBS-finite-other#328; D1-contention-conditional#319 UNCERTAIN (only on a real recurring thrown error); SENTRY-X#73, SENTRY-6#74, SENTRY-1F#75 OPEN (D1 CPU limit 58 events; expression tree too large; product identity review).
+
+- **Q181** [needs owner] SENTRY-decision#262 OWNER; BLOAT-DEFERRED#119 PARTIAL (FTS optimize, portal screenshot GC, upload/orphan GC); PRELOAD-DEFERRAL#70 DONE; P1-FREE-REUSE#3 DONE; OWNER-PLANS (Free/Paid both profiles build; storefront budget unchanged); Free-plan budgets: restore 38 and add-items 41 statements near the 50 limit.
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q182** [needs owner] FREE-CAPACITY OPEN (actual CPU/query/storage/daily budgets for the Free plan; restore dependency discovery exceeds the Free query budget, archive L665); INC-FREE-READY OPEN (Free-plan readiness unfinished; Free and Paid stay separate profiles, never switched silently, archive L187); P1-RULINGS-FREE OWNER (non-blocking: free-account measurement deploy, live D1 size read vs the 500 MB cap, bulk re-import about 150k writes vs the 100k/day cap, last_error_code migration, archive L1933).
+
+- **Q183** [ready] U-SYNC PARTIAL (sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers: phase 1 done, refuter was running, shipping not seen, archive L305); C3V4-NEWITEMS OPEN (tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, version bumps into the D1 write batch before the money cache, W2 7-day shadow compare; `Records/Performance/2026-09-27/C3v4-council-synthesis.md`).
+
+- **Q184** [ready] P4-WAVE2 PARTIAL (inventory `/adjust` round trips, contacts create audit, stockSession pre-reads, returns N+1, batches audits, products FTS fallback, archive L1892); CP3B1-F3 OPEN (F3 rework held after R-F1F3 was not certified; stop pre-downloading every route on deploy).
+
+**Early-Sep ledger leftovers (archive L3475, L6435, L6444; verify)**
+
+- **Q185** [ready] D1-BLOAT deferred (FTS optimize, portal-screenshot GC, `uploads/` orphan GC, `inventory_movements` retention); 36 non-sargable `date(created_at)` sites and the movements-search REPLACE chain (Part 77), of which 7 hot ones are `returns.ts:492`, `sales.ts:1758/1774` and three audit-log retention sites (sargable lanes `67b8e3b9`, `3c36bfba`, `60df8ba0`, `bd2f0680` fixed contacts/compat and some sites; the `sales.ts` datetime wrap is deliberate, archive L16612).
+
+- **Q186** [ready] `audit_logs` has no indexes; unpaged reads and N+1 (also in Returns).
+
+**Completeness-pass additions (archive L14894)**
+
+- **Q187** [ready] F58-CHUNK-POLICY OPEN (isolated frontend chunk-policy candidate `57854fd6` cut measured asset loading and removed static import cycles; independent certification and integration were pending and it was excluded from the 8 Sep small release; the SHA exists only on `archive/*` branches).
+
+Evidence: OPUS-EFFICIENCY-REVIEW-R2, BC §2.8 (query cost), App. A.
+
+#### Privacy, security and secrets
+
+**Owner-requested audits (13 Oct)**
+
+- **Q188** [owner-decided] **Reports COMPLETE (13 Oct), follow-ups OPEN**: OPUS-SECURITY-AUDIT-WHOLE-APP covers11 checklist areas (7 MEDIUM findings); LICENSE-AUDIT inventories shipped/dev dependencies, assets and terms. Their original candidate was `dde1ba879`; the reports do not certify current code. The owner settled the project licence on14 Oct: proprietary, all rights reserved. The LICENSE file, package metadata, THIRD_PARTY_NOTICES and remaining remediation stay in Release3.
+
+- **Q189** [ready] COMPLIANCE-GAP-REVIEW is **COMPLETE (13 Oct)**: Cambodian commerce, consumer/data/cookie, invoice, cosmetics, accessibility and third-party gaps are mapped to code, owner information or professional review. This technical report is not legal advice. Its unresolved code/content and external actions remain in Release3 and Owner/external actions; completed research is not completed remediation. [QUEUED-BRIEFS-2026-10-13]
+
+**Public-repo customer data (owner Option 3, not urgent)**
+
+- **Q190** [owner-decided] Q21#34 MISSING — customer names/phones remain in tracked docs (old `progress.md`, four lines of `docs/history/session-log.md`) and in git history. Steps: (1) this rewrite removed them from `progress.md`; (2) scrub `docs/history/session-log.md` (use ids); (3) after the current lanes merge, purge history (force-push; breaks open branches; Haiku privacy scan ace55b9 of pushed branches reports).
+
+- **Q191** [owner-decided] (4) create a private GitHub copy pushed regularly; (5) customer data stays organised in local Records. Do not rewrite history before then.
+
+**Security register**
+
+- **Q192** [ready] ERROR-5XX-REDACTION#21 PARTIAL (44 route-level 5xx responses still return raw messages: `system.ts` x7, `compat.ts` x7, `sales.ts` x6, `users.ts:596`, `actionHistory.ts` x4; shared handler is sanitised); ADMIN-VARY#90 MISSING (`Vary: Accept` on the admin document rewrite); IMAGE-validate-entrypoints#331 PARTIAL (decode/pixel/bomb/orientation parity across upload, camera, ZIP, dataURL, avatar, promotion, portal).
+
+- **Q193** [needs owner] IMAGE-cap-atomic#333 PARTIAL (three-image cap race in `importJobs.ts:827,835`); ABUSE-bindings#338 PARTIAL (Workers Rate Limiting binding + Turnstile, BC-Q25); AI-quota-gateway#339 PARTIAL (daily quota, AI Gateway, validated tools); SECURITY-header-rollout#340 PARTIAL (CSP enforce vs report-only); METRICS-dashboard#341 PARTIAL.
+
+- **Q194** [needs owner] Unsafe-method-origin / return body admission#408 PARTIAL; PUBLIC-INTERNAL-ID#197 DONE; MEMBERSHIP-ORACLE#198 DONE; OWNER-SECURITY#36 OWNER (no stray `admin` user; 2FA on Cloudflare and GitHub; remove old-domain OAuth redirect URIs; delete the old zone later; confirm the test password is not a real one); Q20#33 UNCERTAIN (SEC-3 P3 items: recover from the original report).
+
+- **Q195** [needs owner] SECRET-rotate-confirm#261 OWNER (confirm the replaced Cloudinary secret); Malformed-secret-credential-name#400 OWNER (rotation and cleanup of the legacy malformed secret name); Deploy-build-state-evidence#419 PARTIAL (record build-time full SHA and dirty paths in the release record); R2-OLD-BUCKET#42 OWNER (keep only the latest; permanent delete is the owner's action).
+
+- **Q196** [ready] donor SEC-SALES `f69b0edfa` MISSING (cashier LIKE filter open to any viewer, future-skew-only client timestamp bound); Haiku privacy/secrets scan of seven pushed branches (HAIKU-PRIVACY-SCAN-BRANCHES, 13 Oct) found no real secret, token, phone, email or chat id in added lines; about 51 name-shaped test literals were not individually cleared (27 already on main).
+
+**Early-Sep ledger leftovers (archive L6492)**
+
+- **Q197** [owner-decided] the Part 539 portal findings (`aiProviderId` in `/config`, the membership-existence oracle on `POST /portal/submissions`) are DONE as PUBLIC-INTERNAL-ID#197 and MEMBERSHIP-ORACLE#198; the `portal_password_resets` table and RFID stub tables are dead schema (zombie cleanup, see Docs); the production portal settings carry the brand name in four user-editable fields (owner decided the brand 27 Sep).
+
+Evidence: BC §2.8, §4 Q11/Q12/Q25; OPUS-AREA-REVIEW-R2-SECURITY.
+
+#### Branch cleanup and repository hygiene
+
+**Branch cleanup checkpoint COMPLETE (13 Oct); new cleanup requires fresh proof**
+
+- **Q198** [ready] Historical BRANCH-CLEANUP-MANIFEST inventoried1096 remote refs/996 tips with merged, patch-equivalent, release-only and unique classes. The independently reviewed13 Oct run deleted416 branches after preserving all tips, a53-tip bundle and47 keep tags; its postflight retained main, releases and protected PR refs. Evidence: LANES.md13 Oct11:14Z and private branch backup logs. No new cleanup has run. Revalidate current tips, claims, open PR heads/bases and redundancy before any further expected-SHA deletion; preserve active, unmerged and uncertain work.
+
+- **Q199** [needs owner] PR9#44 OWNER (`codex/verified-resume-20260925` fully contained in urgent; close after RELEASE-1 with the owner's OK); P-public (archive L277) OPEN — `claude/p-public-20260925` (`97587c5b`, 19 commits) was never merged, the earlier [x] was wrong; reconcile lane queued ahead of storefront lanes; RC-UNMERGED-CANDIDATES#108 PARTIAL (merge-cost, customer/POS performance, indexed barcode, Reports, bulk actions); P1-PARKED#8 PARTIAL (freshly composed parked lanes: P-DON donor ports P-RET, SEC-SALES, SALE-CORNER-TAG `163d6c989`, DATE-UI `30c23c558`/DATE-W `39cf7331f`, DATA-AUDIT-B `63979fb4a`, REVERT-SET `ceb9af819`, NOTIF-V2, G38 members/telegram, G37-P2 HOLD, DEBLOAT `d08348422`, PROD-PERM; Codex 2 Oct stock family and PR9 DROP); P10-18#67 parked patch; U-branch-prep (retire Shop into Store; execution done by the cutover; never rerun); Q12#25 OWNER (private main + public sanitized mirror; new repo from `archive/docker-postgres-2026-07-26`, owner OK before creating any repo); downloads/worktrees: one checkout rule, push archive/<name> for anything unmerged, then remove.
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q200** [needs owner] RC-LINE OWNER (`rc/coordinated-2026-09-02` with 149 commits plus `rc/p2-*`, `rc/sec-*` are never deployable; the 4 Sep inventory calls them probably dead, confirm before deleting, archive L2824); HO24-BRANCH-DELETE OWNER (branch deletions per the 24 Sep manifest `docs/fleet/2026-09-24-branch-cleanup-manifest.md` run from the owner machine; superseded by the 13 Oct manifest).
+
+- **Q201** [ready] HO24-WEBSITE-POSTS HOLD (`rc/website-posts-api-20260924` needs its frontend; bulk settings save drops posts, archive L502).
+
+- **Q202** [needs owner] CP-3d held lanes of 30 Sep, status unverified because several landed in the 5–7 Oct releases (check the cleanup manifest before treating any as open): RETURNS-MONEY / RET-A (findings D/E/F still MISSING), IMPORT-U12, SALES-W1, IDX, PERM-WORKER, HEALTH-Q and AUTH-P1b (certified with exceptions), BULK-STATUS, CRON-OBS, PLAN-GUARD (token decision), READS-CUT (not certified), UI redesign lanes (ui-stock-1/2/3, ui-conflicts-1/2, ui-detail-1), SCAN1/SCAN2, A2+B1 (needs owner approval of the deletes), U-cost3 0200 repair.
+
+- **Q203** [ready] CP4-UBRANCH DONE (Shop to Store executed by the 5–6 Oct cutover).
+
+#### Docs, tooling and code hygiene
+
+- **Q204** [ready] progress.md rewrite — DONE by this commit (6.0.149); remaining documentation debt: `docs/history/session-log.md` customer-data lines (Privacy); LOG-PROTOCOL-BACKFILL#130 PARTIAL (board-only records / missing narrative 545/546/554/556); Q19#32 PARTIAL (tidy ledgers and folders); HYGIENE#24 PARTIAL (dead code, naming, no comments; final pass at the end on one release branch with the tokenizer strip); SONNET-NO-COMMENTS-SIMPLIFY-R2 (766 new comment lines in 78 files in release 2 to remove or shorten; defers to the `no-comments` skill) OPEN; TOOLING#38 OPEN (agent-friendly CDP/devtools verification skills, isolated parallel worktree instances, timeout-8 browser tests); I18N-ORPHAN-KEYS#160 MISSING (remove `special_price*` x4; `returns_count_label`, `still_need_decision` dormant → owner list), I18N-GOOGLE-LOGIN#161 (ask the Khmer reviewer), Unused-i18n-keys#393, I18N-unused-km#268; ZOMBIE-ROUTES-TABLES#194 UNCERTAIN (delete four dead GET routes in `compat.ts:1191,1200,1201,1205` after a route-order test; 28 uncalled routes, password-reset table, RFID stubs), ZOMBIE-OTHER#200 PARTIAL, CONTACT-LEGACY-404#192 DONE, BOOTSTRAP-PHANTOM-FIELDS#193 MISSING, ZOMBIE-DATED-OLD#199 SUPERSEDED, PROMO-wired-audit#266 PARTIAL (all ten routes live), Part535/dead-state#381 MISSING; P3-CDP-TIMEOUT OPEN (raw CDP send()/evaluate() without timeout in eight browser tests; unreachable `bulkImport*` wrappers); DEBLOAT-REMAINDER OPEN (114 exported symbols with no production caller, 40 unused-local diagnostics, BulkImportModal dead review-conflict UI x17; unused is not dead, so list for the owner); PICKER-GUARD-WIDEN OPEN (searchablePickersP6 watches only category|brand|supplier|unit: widen to product name and barcode bindings; row #69 itself is DONE); the U-1 per-lane checklist (refuter per lane, hygiene sweep per lane, discriminating tests registered in `test:utils`, docs updated when behaviour changes) is standing process for every lane; per-checkpoint exact-SHA gates replaced the old CERT sweep.
+
+**Early-Sep ledger leftovers (archive L4690, L5715, L6170, L6492; unused is not dead: list for the owner, never delete on sight)**
+
+- **Q205** [ready] zombie/orphan cleanup lane — the custom-tables cluster, DatedStockReconciliationModal chain, `lib/businessMetrics.ts`, `__lightbox_test_entry.tsx`, the `utils/index.ts` barrel, PublicCatalogPage dead membership machinery, duplicates (`users.ts` normalizePhoneLookup, three escapeHtml copies, `localDb.ts` dead CSV exports), about 28 uncalled routes plus 4 shadowed compat import-jobs routes (ZOMBIE-ROUTES#194), 2 never-sent AppBootstrapPayload fields, contact bulk-import transports that call a removed route.
+
+- **Q206** [ready] Orphaned language keys `special_price`, `special_price_hint`, `special_price_usd_full`, `special_price_khr_full`, `returns_count_label`, `still_need_decision` (no call site; deletion goes in one dedicated commit, S4-28). Session-log backfill: entries 545, 546, 554, 556 are missing and 553 is vacant; Part numbers are assigned at log time, not in commit messages (standing rule). Stale test `performanceLoadingUx.test.ts` (~line 1568, `salesGroupMode`) was RED at that head: one-line fix, probably already fixed.
+
+#### Backup, restore, Library and production data
+
+**Register**
+
+- **Q207** [ready] N7 / G49 dataset lifecycle MISSING (BC §3 N7: unbounded `listObjects` in `system.ts:615,1319`, reset text "product images" while images stay, `datasetOperationStore.ts` unused, no bounded cleanup for six growing tables, transfer-receipt retirement has no caller); FULL-LIFECYCLE#62 PARTIAL (durable reset/restore/export/transfer/journal continuation).
+
+- **Q208** [owner-decided] 0098-REPLAY#63 UNCERTAIN; RESTORE-UI-ASSETS#64 / BACKUP-restore-C#246 PARTIAL (typed-phrase danger confirm, use the server dry-run, `restorable` flag read nowhere, "validated" toast after a real restore, resumable restore; restore is Paid-only; maintenance write-blocking; design K10a = replace with the backup); DRIVE-connect#257 / A3#163,#367 OWNER-MANAGED14Oct (owner handles Drive; no agent setup task; backup/asset integrity checks remain separate).
+
+- **Q209** [ready] DRIVE-assets-restore#267, Drive-asset-mirror#390 PARTIAL (manifest + referenced assets, retry 401/403/429/5xx, checksums, round trip, cancel UI); BACKUP-finalize-sets#329 (newest 2 valid R2 sets); QA-reset-ripple#355, QA-restore-assets-ripple#356, QA-infra-pass#359, QA-transfer-ripple#354 OPEN live checks; MIGRATION-RECOVERY#43 (every data-changing migration writes a backup table first and ships tested recovery SQL: migrate → recover → byte-identical).
+
+- **Q210** [ready] K3 video#377 MISSING (container pipeline is paid-only: free fallback = store as is, BC-Q25d); IMAGE-provider#243 DONE; IMAGE-variants-audit#332 PARTIAL (bound thumb192/card640/detail1600, audit orphans); A2-live#206 / A2#162 OPEN (live verification checklist after deploy: reset, products, POS lots, iPhone install, import round trip, R2 two finalized sets, bare receipt id, Phnom Penh labels).
+
+- **Q211** [ready] POS-LIVE-RECEIPT-CHECK#109; four live data gaps measured 4 Sep (archive L15151) and `RECON` lot code S4-19 (DATE-STORED-ADJ#159 DONE: display day-first, stored code unchanged; rewrite of 6,031 month-first stored lots is a separate data job); "Sentry" and Resend/Drive/OAuth/DNS items are owner actions (below).
+
+**Legacy ledger leftovers (not in the register)**
+
+- **Q212** [ready] LIFECYCLE OPEN (dataset lifecycle: sales-reset route, atomic generation/journal, import fencing, backup/restore orchestration, R2 staging, principal recovery; migrations 0185–0191 parked, archive L807); LIFECYCLE-0188-HOLD (never apply 0188 remotely: its guards affect receipt deletion and backup/reset paths do not yet preserve permanent retirement evidence; wire the 0188 retirement trigger into the reset route first, archive L818, L640).
+
+- **Q213** [ready] RESTORE-TOCTOU OPEN (restore admission-read TOCTOU and restore effects after force-clear, archive L815); RESTORE-UI-CONFIRM-ASSETS (#64) and Free restore capacity; HIST-HEADER-ONLY-SALES / HIST-DUP-CONTACTS data items are listed under Returns and Contacts.
+
+#### Owner and external actions
+
+- **Q214** [needs owner] A2 live verification (owner, since 31 Aug): reset-data, a POS sale with lots and bare receipt ids, storefront install on iPhone, import round-trip, R2 keeps exactly two finalised sets (archive L4560, L6320); A3 connect Google Drive in Settings → Backup (archive L6326).
+
+- **Q215** [owner-decided] P07 / P05 owner statements of 8 Sep (archive L14844, L14896): the owner said the Telegram bot token was rotated, and repeated confirmation on14Oct; retain owner-confirmed status and do not re-rotate from an old pending entry; the owner says most images are first-party photography, so the image-rights review covers exceptions only; business, market and image-rights facts remain an owner-register item.
+
+- **Q216** [needs owner] Owner-only (not code): Drive is owner-managed; Resend verification/email/Google details are owner-confirmed14Oct, with no live email/Google test requested; move DNS if old-domain redirects are wanted; confirm the replaced Cloudinary secret; rotate the legacy malformed secret name; create a Sentry project or drop it; edit the four production portal rebrand fields; Account Analytics Read token scope; point at the too-wide backup path input; name the fixed dropdowns that should become user-defined (OPTIONS-user-defined#263); decide the `redeemValueKhrStep` (BC-Q13); stray `admin` user, 2FA on Cloudflare/GitHub; delete the old R2 bucket and old zone after verification; confirm the Shop→Store official-names Excel after the owner's stock reconciliation.
+
+**Owner rulings of 5–6 Oct not (fully) in code (BC §2.6, sampled at 0baa53f2)**
+
+- **Q217** [owner-decided] changed-fields-only saves PARTIAL (Settings main form done; receipt settings, roles and Website Editor unchecked); products have no created-date filter UNCERTAIN (use received date); every return must link to a sale PARTIAL (NewReturnModal requires one, the Worker still accepts none: `returns.ts:1519`); Not Paid return lowers the debt MISSING (finding D).
+
+- **Q218** [owner-decided] import slash dates read day-first unless the header says mm/dd/yyyy MISSING (`batchCode.ts:50`, donors DATE-UI `30c23c558` / DATE-W `39cf7331f`); low/out alerts only when a sale crosses the threshold MISSING (`telegram.ts:1024`); website phone sign-ups OFF MISSING until portal-csrf ships (6.0.44, default `portal.ts:531` still true). → *27 Oct: lane 6.0.991 (RC2b, deploying).*
+
+- **Q219** [owner-decided] sale corner tag (payment chip + return ribbon) MISSING (donor SALE-CORNER-TAG `163d6c989`); shop closing time forces open shifts closed UNCERTAIN (only per-shift `shift_close_time` found); category/brand import "Main - Sub" UNCERTAIN (import parsing unread); stock-in edit adjusts quantity without booking a loss UNCERTAIN.
+
+- **Q220** [owner-decided] role editor Sales "View", oversized fixed discount refusal, merge default logic, employee cost/price limits and product-edit Telegram alert switch are DONE on main.
+
+**Cheap safe list (BC §2.4, Sonnet, disjoint from lanes)**
+
+- **Q221** [ready] AUDIT-FILTER-CAP#20, TG-ASTRAL#88, PERMISSION-UI-HIDING#128, ZOMBIE-ROUTES#194, ADMIN-VARY#90, PIN-products-branch-move#298, S4-21 QuickAddModal guard#149, Sales/returns-fold-import#385, S4R4-11#426, docs-only #266/#70/#124; then the language-pack batch #160, #274, #157, #286/#78, #264/#388 after DU-A and receiving-f1 merge. → *27 Oct: #128 and the S4-21 guard shipped in 6.0.987 (live, RC1).*
+
+- **Q222** [ready] then #86, #93, #179, #83, #272 comment, #97 after their file owners.
+
+**Groups G40–G64 (5 Oct triage, 8 days stale, re-check before any lane)**
+
+- **Q223** [ready] G40 products list/columns 10, G42 form/Conflicts pager 5, G44 stats strip/range row 9, G45 POS/shift forms 5, G46 money messages 2, G56 route sweep gate 6, G57 iOS PWA/device checks 7 (P2); G41 detail floats 8, G43 inventory/branches 4, G47 selection actions 2, G48 short ids 1, G50 import polish 6, G51 role editor 2, G52 storefront polish 5, G53 app shell 4, G54 UI hints/i18n 8, G55 settings hub 5, G58 shared UI kit 3, G59 admin design pass 4, G60 deploy slimming 1, G61 field identity/autocomplete 2 (P3).
+
+- **Q224** [ready] G49 dataset lifecycle (N7); G62 security hardening, G63 toolchain/lint gate, G64 backup page copy/Drive folders; G01–G39 mostly live-verified. Index of the full requests/rules populations: obligation index (1,327 requests, 290 rules, 86 questions, 1,121 register rows).
+
+#### Added 27 Oct from the lane log
+
+- **Q225** [ready] Run the 6.0.995 `returns.created_at` shape census through the ops workflow once it is on main.
+
+- **Q226** [ready] Multi-client template must render the 6.0.984 crons (*/5, */15, 17 */3) (reconciler, multi-client line).
+
+- **Q227** [ready] `test-branch-review-state-pure` hangs at check 9 on the base too (pre-existing, seen 26 Oct).
 
 ### Register rows closed, superseded or covered elsewhere
 
@@ -665,49 +1074,9 @@ Production actions never happen from a planning, review or lane agent. Deploymen
 - **Never rerun the cutover.** The Shop → "Old Shop" (inactive) and Warehouse → "LC Store" consolidation is done; no cutover mode is to be rerun; no Undo for it.
 - **Deploy window rule**: at most2 deploys per Cambodia date:07:00 regardless of shift, and one after20:00 with fresh Ops `open_today=0`. Every release requires its exact-SHA full GitHub gate, independent Astra review, adversarial/threat review, secrets scan, `deploy.yml plan=paid` and independent postflight. Unattended schedules remain paused. Skip unready or unchanged candidates; old one-off exceptions do not authorize extra deployments. Never infer that main is deployed.
 - **Remote D1 only through the ops workflows** (read-only counts/ids queries, results kept in local Records); never wrangler or the D1 connector directly from an agent (13 Oct: one refuter ran a read-only SELECT outside the rule; future prompts forbid it). Local D1 harness only for destructive-operation work. Use full wrangler version UUIDs, never 8-hex tokens.
-- **Release 2e (`2bb192bcb`) is live.** The new bounded candidate requires its exact-SHA gate, independent review, secrets scan, fresh slot check (07:00 regardless of shift, or after20:00 with open_today=0), Paid workflow and postflight. The historical counted-stock conversion remains HOLD; only the exact six migration dependencies listed above belong to this release.
+- **RC1 `efaac4452` is live (26 Oct) and RC2b `a8dbbe1fc` is deploying (27 Oct).** Every new candidate still requires its exact-SHA gate, independent review, secrets scan, a fresh slot check, the Paid workflow and postflight; a release containing 6.0.984 rolls back only by redeploying the prior sha. The historical counted-stock conversion remains HOLD.
 - **Held branches and data**: DO NOT delete remote branches before the cleanup manifest is independently reviewed (expected-SHA atomic push); do not rewrite pushed history except the owner-approved privacy purge, scheduled after the lanes merge; no permanent deletion of data, buckets or zones without the owner; historical data repairs (sales 16671/16835/16917/16827, shift 20, nine unreversed deductions, expense note, membership prefix, duplicate customer pairs) only with exact evidence, a backup and owner approval.
 - **Counted-stock root-chain commits stay out of every release candidate**; repro tests that are RED by design (`test-al-money-c/d/e/f/g-native.cjs`, M case, `test-al-stock-i-native.cjs`) must not be in a gate-bound candidate until their fix lands.
 - **Protected work and active authority**: the owner resumed Codex supervision and the full goal on15Oct; this supersedes the12Oct work pause. Unattended schedules and snapshot loop remain paused. Frozen release candidates and original dirty trees are preserved; PR9 and uncertain branches require their recorded disposition before cleanup. Never deploy a dirty tree or edit the stale `Downloads/business-os-v1` checkout.
 
-## Done log (compact)
-
-One line per release or major lane, newest first. "Production" lines are recorded in the ledger as deployed; the current production head is `2bb192bcb` (release 2e). Every line's detail is in the private archive: `grep` the SHA.
-
-**14 Oct: release 2e `2bb192bcb` LIVE (production since 15:33Z, deploy 38575646057)**
-- 2d `04a5b24a8` (gate 38543525328 green 930/862; Opus release reviews GO WITH CONDITIONS) + login-refresh `3eb0fd9cd` + avatar `0f9f43b09`; gate 38556360473 green 931/865; review OPUS-RELEASE-REVIEW-2E; postflight PASS; owner device acceptance 14 Oct. The 2d lines below are now in production.
-
-**14 Oct: release 2d `04a5b24a8` (shipped inside release 2e)**
-- Compose: base `claude/release-2c-20261013` @ `30ea9623c` (contains release 1 `c9fd83121`). `57fbfe716` 16 lanes + app-session round 4 (conflicts only in tests and language packs); `7bfd3ab85` CRLF-neutral tests (6.0.377); `cb4fbb393` add-items and product-merge undo/redo bump the sales and products caches (6.0.387, SF-1 of the group A refute); `4b36e3461` admin host serves the locked viewport (6.0.388); `abf84fb40` multilot; `b81e0d780` sec-settings + backup test types the password + `sale_refused` KEPT (6.0.389); `3697c9632` shift-cash r5 + signed-in fake (6.0.396). Test-only compose fixes 6.0.369–370.
-- Lanes (head, versions): money-surfaces-r2 `34969303a` (6.0.322–327; courier-cost permission, cost-blind audit search, 20 s Dashboard ranking cache); sec-sale-time `e666af436` (6.0.328–332; server clock stamps every sale, refusals collapsed, redirects refused); sec-sessions `ba177569e` (6.0.339–342 plus 260–261, 287, 317–318; min password 10, no max age, short seeded admin forced to change); app-session-offline-ui `fbe97939b` (6.0.333–338, 349–351; one connection flag, step-up for session duration); shift-cash-everywhere `0c7a4508f` (6.0.362–368 plus 299–301; non-admin time edits refused, reopen at parent close); review-telegram `a08d983aa` (6.0.274–279, 290, 292); pending-tag `d1f01f0a7` (6.0.255–259, 309–310); permissions-catalog `a305cfcd1` (6.0.265–267); merge-permission-fold `268fcb739` (6.0.111–112, 178–179); receiving-f2 `6c5e59607`; storefront-compliance `90b250311` (6.0.303–308, 320); license-compliance `dcb5c2add` (6.0.270–273); fees-k-frontend `d74d32f03` (6.0.280–282, 302); ui-polish-r2 `90874d0f4`; import-returns-followups `389fdd960` (6.0.131–136, 218–219, 262–264, 319); sec-sheet-worker `0aea76a63` (6.0.311–313; dates from serial arithmetic, skew cache removed, SheetJS stays 0.18.5); multilot-revert `f4cb0427f` (6.0.343–348, 361, 384–386; migration 0250 watermark); sec-settings-reset `8b04098be` (6.0.352–356, 378–383; keep-forever retention, restore and repair step-up).
-- Evidence: CLAUDE-RELEASE-2D-COMPOSE, OPUS-REFUTE-2D-GROUP-A, OPUS-REFUTE-SEC-SETTINGS-R5, SONNET-REFUTE-SHIFT-CASH-R5, the per-lane refutes in `Records/Lanes/2026-10-13/` and `2026-10-14/`, and the LANES.md entries of 13 Oct 22:39Z to 14 Oct 06:36Z. Gate runs 38509144271 (red, fixed) and 38523140716 (pre-final).
-
-**13 Oct lanes (pushed, reviewed; not yet in production unless stated)**
-- `c9fd83121` Release 1 = receiving-f1 round 4 (6.0.102–103), LIVE since 13 Oct 14:05Z (production). Earlier rounds: `0baa53f2` held (refuter BLOCKER), `b106a5586` Opus BLOCK, `26439096a` PASS WITH NOTES.
-- `dde1ba879` Release 2 base (12 lanes on `b106a5586`, 6.0.93–94), first gate 38352516197 RED (7 test-harness/fixture reds); fixed by `c45f2b12d` release-2-fixes (6.0.125–130, test/harness only). `c7a8d9c13` receiving-f2 (6.0.108–110, 141–142). `4d8c2cc71` shift-cash-everywhere (6.0.104–107; refuter NOT CERTIFIED: a stale telegram-topics pin plus four should-fix items; fixed in 6.0.154–157 and rounds 4–5, see the 14 Oct group). `826cceef4` merge-permission-fold (6.0.111–112). Compose branches: `claude/release-2b-20261013` (release-2-fixes, receiving-f2 `c7a8d9c13`, merge-permission-fold `826cceef4`, shift-cash `4d8c2cc71`; CLAUDE-RELEASE-2B-COMPOSE), then `claude/release-2c-20261013` @ `30ea9623c` (adds the progress rewrite and main c9fd83121), then release-2d above. The first release 2 target (00:00Z 14 Oct) was not met; release 2d is the candidate.
-- Lanes in release 2: `b63e16e5d` fees-k-fix (6.0.61–66), `37a8168eb` reports-L (6.0.47–50), `0e3fba237` H-main (6.0.36–40), `de61407f6` finding-I (6.0.76–79), `1758fb73e` stock-ab-fix (6.0.55–57), `45f3226b5` returns-capacity (6.0.82–86), `3184e6554` import-authority step 1 (6.0.73–75), `580e55161` portal-csrf (6.0.44–46, 87–89), `5bc62669b` DU-B (6.0.30–35, 90), `f00953e93` DU-A (6.0.24–29), `1a96ab244` return-edit-guard (6.0.41–43, 80–81), `f88943abc` shift-telegram-additional (6.0.70–71).
-- Root chain, local only: `8070f00` customer-return-backend (6.0.16, Opus BLOCK), `6f96c7cf7` replay-conditions (6.0.51–54, certified with exceptions), `15fbdc8e0` merge replay, `847d1a0f5` and `7077327aa` counted-stock branches (pushed, not reviewed).
-
-**Production releases**
-- 13 Oct `c9fd83121` Release 1 (receiving-f1 round 4, 6.0.102–103), live since 14:05Z. Exact-SHA gate 38353277140 green; independent Opus release review PASS WITH NOTES; Sonnet refuter CERTIFIED WITH EXCEPTIONS; secrets scan clean; `bf7408b49` is its ancestor (28 commits). Content: Stock Session receiving repairs (stable account/server write identity, no stuck "saving", same-user refresh keeps the session, restore-race and sticky-forget fixes). Evidence: OPUS-RELEASE-REVIEW-26439096A, SONNET-REFUTE-26439096A, CLAUDE-RECEIVING-F1. Procedure: fresh deploy-trading-check with open_today=0, deploy.yml at the exact SHA with plan=paid and run_migrations=true, environment approval, postflight (runtime/version, migrations-applied, lots-exceed, health pack), fast-forward main, then the owner device checklist steps 1–12 (`Lanes/2026-10-12/OWNER-DEVICE-ACCEPTANCE-RECEIVING.md`).
-- 9 Oct `bf7408b49` Paid deploy 37934616520, 200 migrations through 0242: owner UI and conflict toolbars, account/loyalty/report-export and relative-price-recovery batch (the corrected `e192` composition after gate 37895352494; per archive L27–L91). Production until release 1; re-verified 13 Oct 07:20Z (runtime/version revision bf7408b49293, tier paid), and nothing was deployed between the 12 Oct takeover and release 1.
-- 9 Oct `440a706e0` morning deploy 37862538177 (stock reliability + service-worker storage fallback); `8b0e2c4cf` PWA restart protection; 8 Oct `1cb7b746e` mobile menu; 8 Oct `6d9ea0b5f` stock/image (deploy 37766560219).
-- 5–7 Oct releases `489311c2f` (release-20261005), `4ab47676e` (20261006), `422495ccc` (20261007), `fca69de83` (20261007-final): ancestors of main (what each carried: LANES entries of 5–7 Oct).
-- 1 Oct `14b86ed6a6ef` rc2-hotfix (Resolve/Merge depth guards, role editor, report keyset, barcode normalisation); `dc83ba8b9cf0` rc2 (privacy/terms, Scanbot removal, organised audit log, contacts, Revert, Keep/Merge, minimized chip, migration 0207).
-- 30 Sep `0d9a1a12` CP-3d (Codex stock repair `9f9018c4`, P-RECON, AB-F, P2, ED-0, K1+, PWA-2/3b, AUTH-P1-users, AB-W6, cleanup; Paid); `7da36a08f50b` INC-20260930 D1 outage recovery (D1 daily read quota exhausted; Paid upgrade); `bf2d8e00` CP-3c (TG-FIX, TG-SUMMARY, S1b, AUTH-P1).
-- 28–29 Sep `7c9dfb54` CP-3b-2b; `e716d68a` CP-3b-2a (A0 per-request D1 timing); `c3784a2e` CP-3b-1; `5bdf689b` CP-3a-2 (migrations 0201–0203, S-auth4); `39be7c38` CP-3a-1 (unique receipt numbers).
-- 26–27 Sep `c5b28762` CP-2 (migration 0195); `c35af63b` CP-1c; `c64eced5` CP-1 (urgent `1e925d8b`, migrations 0196/0197, run 36237752796); `0ecf871d` R2 moved to the APAC bucket; `3b8d37a9` Worker pinned to Singapore.
-- 21–24 Sep `7e7cc7dc` Claude handoff (migrations 0192–0194), `f064e844`, `35bddf53`, `27a9d156` (checkpoint 3), `ef0489c1`, `2fd4adf7`, `a7c03ee7`, `9895c5ec`, `fee0a315`, `f98754b3`, `c5b20a80`, `ee226065`, `80f379ff` (shift-close clock-skew fix), `85a3e752` (maintenance/admission), `ce945bb4` (legacy browser upgrade).
-- 20 Sep `590a62399d22` HTML shell hotfix, `5b81a2c344bd` verified checkpoint, `cbbebe5841f8` stock-in scope, `e85a45e8616f` admin date/report, `6a31689fb67c` online-only account safety (0184), `fdcee3fe685d` cost semantics.
-- 18 Sep `354f12d5` Program 11 checkpoint K (16 owner items, 0181/0182); `ae75fbad` 0183 supplier invoices settled; `de8c72fa9514` auth startup safety; `96cdcb6bbdfa` offline startup fix.
-- 16–18 Sep Program 10 checkpoints A–J: `a8a21c75`, `fc2c180c` (0173–0176), `2317a9ca` (0177), `c5af514a`, `06df3e75`, `467ecf9b`, `eca7aacd`, `036cfb87`, `7679d992` (0178–0180), `f2c25510`.
-- 15–16 Sep Programs 3–9: `2e016e08` (3), `38a3eb5e` (4, 0164), `6bd39bd9` (5, 0165–0167), `c596674e` (6, 0168/0169), `7d8e22d7` (6 follow-up), `20be849b` (7), `f2488996` (8/9, 0171/0172).
-- 14 Sep `4b20bd689a59` iOS PWA hardening, one-tap scanner, Playwright suite, Free/Paid split; `139fcbf8faa4` Precision v1 money contract (0158–0161).
-- 10–11 Sep `7e57b0ce` unified sales workflow + responsive UI; `648804c0` received-date provenance + POS saleability; `2afca7ece997` sales amendments (0149); `aa295f70` canonical operator vocabulary; `16ffa680aa52` General membership cleanup; `3f9a6b562042`, `f65829a1099b`, `23916844` shift-close and sale-outcome follow-ups; vocabulary releases `f0321c78`, `a6c29922`, `06b9346a`, `1d8c5813`, `98eea9d6aa1e`, `bf51f06fd4ad`.
-- 9 Sep `e408f31f` atomic sale creation, `38d27e03` urgent checkout hotfix, `46b49b6ebb18` currency snapshots, `26111791` report title picker, `be7bdaed` transfer retry-durability (0148), `4aba954f` sales-recovery records, `92ddfc6d` fourth-receipt recovery, `882136b7` merge performance, `1791eaf7` employee/return checkpoint, `4495bccf` F65 merge/remove (0138).
-- 7–8 Sep `6dbb8a8e` (U16–U19), `a5a4162f`, `73fd7dc1`, `4e576eaa` (F53/F54), `c2eb9d57` (explicit contact/POS duplicate decisions), `dfb8932e`, `4afe9825` (Telegram shift arrangement), `da5c8b02` (0135), `560bfbcb`, `02eecbe3833b`, `c475e637d197` (0133), `821efc94ce7a` (first functional release, 0128–0132).
-- 3–5 Sep `c999e909f4fe`, `a127e37aded0`, `3f675e840266` (0123–0127), `0ffc4bfcc4fd` (0120–0122), `9d13ca94ed4e` (Part 606), `c7ef7264` (4 Sep, from `rc/ee-integrate-2026-09-04`), `2c497564` (0108–0115), `e3678a39`, `a486d82e`, `57c0b61c` (0107); a stage-2 deploy from main (`a4f10152`) reverted 24 hotfix commits and was restored. Sep-4 reconcile branch `rc/s4-2026-09-04`: tips `c3145839` (nine lanes, certified), `2d701bb1` (thirteen), `244e231d` (fifteen), `cc2b7bff` and `1c8caaf6` (certified green, S4-30 merged as `0024ab19`); live Worker 3b25fe33 (3 Sep 14:27Z) ran `e3678a39` with migrations through 0107 (Part 583 incident: main then carried only through 0105).
-- 4 Sep S4 lanes on `rc/s4-2026-09-04`, deployed as `2c497564` (Worker a164d260, migrations 0108–0115 applied): S4-17 `c730e5be`, S4-27 `d144e133`, S4-24/25 `840161ee`, S4-26 `eae31420`, S4-24b `859c8e57`, S4-12 `19555765`, S4-2 `42913b42`, S4-18 `9c282599`, S4-29 `1ce506cf`, S4-8/9 `81914be8`, S4-28 `59906158`, S4-13..16 `6794a17f`, S4-32 `27622a63`, S4-33 `979338e9`, S4-30 `0024ab19`.
-- 31 Aug–3 Sep lanes: `9354f1ce` revenue kernel on the Net sales definition (with UTC+7 day bucketing `67b8e3b9`, `efcf21e3`, `11ffeff1`, `74bd4ae6`, `1c3fa481`), `3820a971` Google Drive OAuth fix, `1378e07a` cashier identity (0098/0099), `1655ea1e` contact-merge data movement, `65fcd70b` date/time UX, `c44a4520` product merge re-parents sales and movements, `98f8ee79` Telegram events for transfers and returns, `69ed7a1f` Products cannot-save root cause, view-tier permission slices `7fa62811`, `b30e5765`, `3035bc0e`, `7ff2eff0`, `46217e43` wholesale tier (0093), `b6f3ef7a` inventory excision, `af50009b` product-detail float, `06ceac74` POS banner self-heal.
-- 31 Aug–2 Sep `242c2b75` (Part 538, migrations 0083–0087, 01:32Z 31 Aug), then the same day `0414f46b` (receipt/locale, catalog endpoint removal), `08868840` (offline sale moment, sargable date perf), `0db93598` (stock leak sealed), `d558dcfb` (17:15 security batch H1/H2/M1 and C1 transfer FIFO), `34e0228f` (20:50 Stage-1 reds reconciled, 0094 AR ledger, 13,244 invoices); `57d8f1a2` (production ahead of HEAD: fees/delivery-contact lane, 0105).
-
+Finished releases, the compact done log and the 13–19 Oct status narrative are in `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998").
