@@ -233,6 +233,21 @@ check('the free config carries no Paid-only key at all', async () => {
 // Every check above reports "no drift". A comparison that can only ever say
 // that is indistinguishable from a broken one, so these feed it known
 // drift and assert it is seen.
+// Build settings that must be the same on both plans. They are top-level keys
+// (before the first [table]), which scopedPairs/keyedPairs already compare, but
+// "same on both" would also pass if both files lost them, and a lost minify
+// silently puts the 5.8 MB bundle back.
+check('both configs minify the bundle and upload source maps', async () => {
+  const topLevel = (text) => text.split(/^\[/m)[0]
+  for (const [name, text] of [['wrangler.toml', paidText], ['wrangler.free.toml', freeText]]) {
+    const head = topLevel(text).replace(/^\s*#.*$/gm, '')
+    assert.match(head, /^minify\s*=\s*true\s*$/m, name + ' must set minify = true')
+    assert.match(head, /^upload_source_maps\s*=\s*true\s*$/m, name + ' must set upload_source_maps = true (wrangler 4.116 uploads maps only when asked)')
+    assert.doesNotMatch(head, /keep_names\s*=\s*false/, name + ' must keep names so stacks and error.name checks read the same')
+  }
+  assert.doesNotMatch(topLevel(freeText).replace(/^\s*#.*$/gm, ''), /minify\s*=\s*false/)
+})
+
 check('POSITIVE CONTROL: an injected drift is detected', async () => {
   const tampered = paidText.replace('database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"', 'database_id = "0000"')
   assert.notEqual(tampered, paidText, 'the control must actually change something')

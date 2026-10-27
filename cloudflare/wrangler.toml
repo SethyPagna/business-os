@@ -2,6 +2,14 @@ name = "business-os"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
+# Minified bundle (27 Oct 2026): 5.8 MB -> 3.4 MB uploaded, 1.31 MB -> 0.97 MB gzip,
+# which shortens the parse a cold isolate pays on every deploy and every idle
+# restart (Free is 1 s startup, 10 ms CPU per request). keep_names stays at
+# wrangler's default (true), so stack frames and class names still read as
+# function names. Wrangler 4.116 uploads source maps only when asked, and
+# Workers Logs / the dashboard use them to show original line numbers.
+minify = true
+upload_source_maps = true
 account_id = "743e5b727d139e85ed11679097f6f99e"
 # Off by request (Aug 26 2026) once the custom domain was restored.
 #
