@@ -262,8 +262,12 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
     })
     if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
     else if (change.kind === 'unknown') codes.add(SHIFT_REVIEW.change)
-    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011
-      && change.kind !== 'actual') codes.add(SHIFT_REVIEW.tender)
+    // Over-tender with no change recorded is flagged, except a riel tender over by less than one 100-riel note: no
+    // note exists to hand that back (owner ruling 27 Oct 2026, the same rule that accepts a riel tender short by under
+    // 100 riel as fully paid -- lib/saleStatusResolution.ts shortfallCovered).
+    const overUsd = row.total_usd == null ? 0 : paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) - Number(row.total_usd)
+    const underOneRielNote = paidKhr > 0 && rate > 0 && overUsd * rate < 100
+    if (row.total_usd != null && overUsd > 0.011 && change.kind !== 'actual' && !underOneRielNote) codes.add(SHIFT_REVIEW.tender)
   }
   // The rename guard. Only meaningful once money has actually been tendered:
   // an empty shift with a misconfigured list is not evidence of a lost drawer.

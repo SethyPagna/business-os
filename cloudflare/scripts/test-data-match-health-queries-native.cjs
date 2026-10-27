@@ -378,7 +378,8 @@ async function main() {
       v1(1, 3.2345, 3.2345, -0.0045, 3.23, 13243), v1(2, 3.2346, 3.2346, -0.0046, 3.23, 13243), v1(3, 3.2345, 3.2345, -0.0045, 3.23, 13244),
       v1(4, 5, 5, 0, 5, 20500, { discount_usd: 1 }), v1(5, 5, 7, 0, 7, 28700, { is_delivery: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer' }),
       v1(6, 5, 5, 0, 5, 20500, { is_delivery: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'store' }),
-      v0(8, 9.99, { amount_paid_usd: 9, amount_paid_khr: 4000 }), v0(9, 9.99, { amount_paid_usd: 9, amount_paid_khr: 4050 }),
+      // 8: 100 riel short, past the riel rule (owner ruling 27 Oct 2026: under 100 riel short is paid); 9: 9 riel short, paid.
+      v0(8, 9.99, { amount_paid_usd: 9, amount_paid_khr: 3959 }), v0(9, 9.99, { amount_paid_usd: 9, amount_paid_khr: 4050 }),
       v0(10, 5, { sale_status: 'awaiting_payment' }), v0(11, 5, { sale_status: 'awaiting_payment', amount_paid_usd: 0 }),
       v0(12, 0), v0(13, 0, { legacy_receipt_number: '000013@2026-01-01' }), v0(14, -1), v0(15, 5, { exchange_rate: 0 }),
       v0(16, 10),
@@ -433,7 +434,7 @@ async function main() {
     })
   })
 
-  await check('health-sale-money applies lib/saleStatusResolution.ts paymentCoversSaleTotal to every tender at the half-cent edge', () => {
+  await check('health-sale-money applies lib/saleStatusResolution.ts paymentCoversSaleTotal to every riel tender at the 100-riel edge', () => {
     const { paymentCoversSaleTotal } = loadRealLib('saleStatusResolution.ts')
     const db = migratedDatabase()
     let seed = 20260929
@@ -441,8 +442,9 @@ async function main() {
     let covered = 0
     for (let id = 1; id <= 300; id += 1) {
       const totalCents = 100 + next(5000)
-      const shortRiel = next(120) - 20
-      const usdCents = totalCents - 1 - next(3)
+      // A riel tender is paid when short by under 100 riel (owner ruling, 27 Oct 2026): sweep 30 to 169 riel short.
+      const shortRiel = next(140) + 30
+      const usdCents = totalCents - 5 - next(3)
       const paidKhr = Math.round(((totalCents - usdCents) / 100) * 4100) - shortRiel
       const tender = { totalUsd: totalCents / 100, paidUsd: usdCents / 100, paidKhr, exchangeRate: 4100 }
       if (paymentCoversSaleTotal(tender)) covered += 1

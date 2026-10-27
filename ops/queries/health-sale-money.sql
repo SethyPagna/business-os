@@ -21,7 +21,8 @@
 --   v0_header_drift        legacy headers off their lines + components by more than a cent (INFO)
 --   completed_short        paid-reading sales short by more than half a cent at the sale's rate,
 --                          after the debt its active returns lowered (lib/returnRefundSplit.ts
---                          returnDebtLoweredSql; lib/saleStatusResolution.ts coverage rule)
+--                          returnDebtLoweredSql; lib/saleStatusResolution.ts coverage rule), except a
+--                          riel tender short by under 100 riel, which is paid (owner ruling 27 Oct 2026)
 --   not_paid_but_covered   Not Paid sales the TENDER alone already covers (a return that
 --                          lowered the debt to 0 leaves a legitimate Not Paid sale owing 0)
 --   system_sales_without_lines, negative_totals, bad_rate
@@ -78,9 +79,9 @@ SELECT
   (SELECT COUNT(*) FROM s WHERE mpv = 0 AND pay <> 'cancelled' AND n_lines > 0
      AND ABS(total - (lines_usd - disc - mdisc + tax + cust_fee)) > 0.01) AS v0_header_drift,
   (SELECT COUNT(*) FROM s WHERE pay = 'completed' AND imported = 0 AND rate > 0
-     AND total - lowered - paid_usd - paid_khr / rate > 0.005000001) AS completed_short,
+     AND total - lowered - paid_usd - paid_khr / rate > 0.005000001 AND NOT (paid_khr > 0 AND (total - lowered - paid_usd) * rate - paid_khr < 99.9999)) AS completed_short,
   (SELECT COUNT(*) FROM s WHERE pay = 'awaiting_payment' AND rate > 0
-     AND total - paid_usd - paid_khr / rate <= 0.005000001) AS not_paid_but_covered,
+     AND (total - paid_usd - paid_khr / rate <= 0.005000001 OR (paid_khr > 0 AND (total - paid_usd) * rate - paid_khr < 99.9999))) AS not_paid_but_covered,
   (SELECT COUNT(*) FROM s WHERE imported = 0 AND n_lines = 0 AND pay <> 'cancelled') AS system_sales_without_lines,
   (SELECT COUNT(*) FROM s WHERE total < 0 OR subtotal < 0) AS negative_totals,
   (SELECT COUNT(*) FROM s WHERE rate IS NULL OR rate <= 0) AS bad_rate,

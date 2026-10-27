@@ -224,14 +224,15 @@ for (const version of [1, 0]) {
 }
 // Exact payment settles.
 assert.equal(planSaleSettlement({ ...ownerSettle, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 39401 }] }).amountPaidKhr, 39401)
-// 50 units ($0.0050) short on $10 at 4,100 is 20.5 riel: 40,980 riel is 20
-// riel short (inside) and settles; 40,979 riel is 21 riel ($0.00512) short and
-// is refused.
+// A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026): on $10 at 4,100, 40,901 riel (99 short)
+// settles and 40,900 riel (100 short) is refused. A USD tender keeps the half-cent band: $9.995 settles, $9.99 does not.
 const tenAt4100 = { ...ownerSettle, totalUsd: 10 }
-assert.equal(planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40980 }] }).amountPaidKhr, 40980)
-assert.throws(() => planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40979 }] }),
+assert.equal(planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40901 }] }).amountPaidKhr, 40901)
+assert.throws(() => planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40900 }] }),
   (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
-console.log('PASS settlement accepts the owner tender and the band edge, refuses one step past it')
+assert.throws(() => planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_usd: 9.99 }] }),
+  (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
+console.log('PASS settlement accepts the owner tender and a riel tender 99 riel short, refuses 100 riel short and a USD cent short')
 
 const renamed = renameSalePaymentMethod(
   'Cash + Fcb',

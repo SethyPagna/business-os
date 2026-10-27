@@ -2,13 +2,15 @@
 -- (DATA-MATCH DM-08 drill-down, lane 6.0.943). completed_short counts sales that read PAID
 -- (lib/saleStatusResolution.ts saleStoredState: not Not Paid, not cancelled) and are not a historical
 -- import, whose tender falls more than half a cent short of what they owe at the sale's own rate, after
--- the debt their active returns lowered (lib/returnRefundSplit.ts returnDebtLoweredSql). The CTE rr, the columns
+-- the debt their active returns lowered (lib/returnRefundSplit.ts returnDebtLoweredSql), except a riel tender short by under
+-- 100 riel, which is paid (owner ruling 27 Oct 2026; lib/saleStatusResolution.ts shortfallCovered). The CTE rr, the columns
 -- of s the predicate reads and the WHERE of k are health-sale-money's own text; test-health-drilldown-rows-native.cjs
 -- pins each fragment against the health query's text and asserts this list has exactly the rows that column counts.
 -- Facts per sale, grouped by what each one confirms or refutes:
 --   money                 total_usd, lowered_usd, owed_usd, paid_usd, paid_khr, tender_usd (paid_usd +
 --                         paid_khr at the sale's rate), gap_usd (> 0.005 by construction), gap_khr
---   H1 half-cent edge     covered_by_worker_rule = 1: lib/saleStatusResolution.ts paymentCoversSaleTotalUnits
+--   H1 half-cent edge     covered_by_worker_rule = 1: lib/saleStatusResolution.ts paymentCoversSaleTotalUnits (half a cent, or
+--                         a riel tender short by under 100 riel, shortfallCovered)
 --                         (exact integer units, 4 dp) calls it paid, so the health float rule over-flags
 --   H2 return not netted  pre0260_refund_usd > 0 and gap_if_pre0260_netted <= 0.005: a return recorded
 --                         before 0260 (refund_currency NULL) lowered the debt while the sale read Not
@@ -52,7 +54,7 @@ s AS MATERIALIZED (
 ),
 k AS MATERIALIZED (
   SELECT id, total, rate, paid_usd, paid_khr, lowered FROM s
-  WHERE pay = 'completed' AND imported = 0 AND rate > 0 AND total - lowered - paid_usd - paid_khr / rate > 0.005000001
+  WHERE pay = 'completed' AND imported = 0 AND rate > 0 AND total - lowered - paid_usd - paid_khr / rate > 0.005000001 AND NOT (paid_khr > 0 AND (total - lowered - paid_usd) * rate - paid_khr < 99.9999)
 ),
 f AS MATERIALIZED (
   SELECT k.id, k.total, k.rate, k.paid_usd, k.paid_khr, k.lowered,
@@ -90,7 +92,9 @@ SELECT
   ROUND(f.total - f.lowered - f.paid_usd - f.paid_khr / f.rate, 6) AS gap_usd,
   ROUND((f.total - f.lowered - f.paid_usd - f.paid_khr / f.rate) * f.rate, 2) AS gap_khr,
   CASE WHEN (CAST(ROUND(f.total * 10000) AS INTEGER) - CAST(ROUND(f.lowered * 10000) AS INTEGER) - CAST(ROUND(f.paid_usd * 10000) AS INTEGER)) * CAST(ROUND(f.rate * 10000) AS INTEGER)
-    - CAST(ROUND(f.paid_khr * 10000) AS INTEGER) * 10000 <= 50 * CAST(ROUND(f.rate * 10000) AS INTEGER) THEN 1 ELSE 0 END AS covered_by_worker_rule,
+    - CAST(ROUND(f.paid_khr * 10000) AS INTEGER) * 10000 <= 50 * CAST(ROUND(f.rate * 10000) AS INTEGER)
+    OR (f.paid_khr > 0 AND (CAST(ROUND(f.total * 10000) AS INTEGER) - CAST(ROUND(f.lowered * 10000) AS INTEGER) - CAST(ROUND(f.paid_usd * 10000) AS INTEGER)) * CAST(ROUND(f.rate * 10000) AS INTEGER)
+      - CAST(ROUND(f.paid_khr * 10000) AS INTEGER) * 10000 < 1000000 * 10000) THEN 1 ELSE 0 END AS covered_by_worker_rule,
   COALESCE(rs.active_n, 0) AS returns_active, COALESCE(rs.cancelled_n, 0) AS returns_cancelled,
   COALESCE(rs.pre0260_usd, 0) AS pre0260_refund_usd,
   ROUND(f.total - f.lowered - f.paid_usd - f.paid_khr / f.rate - COALESCE(rs.pre0260_usd, 0), 6) AS gap_if_pre0260_netted,

@@ -75,7 +75,9 @@ check('the owner tender (39,400 riel for $9.61 at 4,100) owes nothing', () => {
 
 check('one unit past the band is owed, in cents', () => {
   assert.equal(owed(v1(9.9949, 0, 10), 10, 4100), 0.01, '$0.0051 short')
-  assert.equal(owed(v1(0, 40979, 10), 10, 4100), 0.01, '21 riel short at 4,100')
+  // A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026); 100 riel short is owed, in cents.
+  assert.equal(owed(v1(0, 40901, 10), 10, 4100), 0, '99 riel short at 4,100 is paid')
+  assert.equal(owed(v1(0, 40900, 10), 10, 4100), 0.02, '100 riel short at 4,100')
 })
 
 check('exact payment, overpayment and a real partial tender are unchanged', () => {

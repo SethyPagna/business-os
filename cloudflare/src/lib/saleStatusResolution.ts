@@ -66,6 +66,16 @@
 // so their sales still land. Refunds, change and overpayment are not coverage
 // questions and do not take the band.
 //
+// AND A RIEL TENDER SHORT BY LESS THAN ONE 100-RIEL NOTE IS PAID (owner ruling,
+// 27 Oct 2026: "a riel payment that leaves under 100 riel unpaid is accepted as
+// fully paid"). When the tender includes any riel and the shortfall, at the
+// sale's rate, is under 100 riel (99 riel is paid; 100 riel still owes), the
+// sale is covered: Completed, owing 0, no review flag. A USD-only tender keeps
+// the half-cent band. The same shortfallCovered answer is asked by every
+// coverage question above, the settlement, instalment and correction paths and
+// the POS included. Refund rounding (riel refunds round down to 100) is a
+// separate rule and does not use this.
+//
 // Neither half moves a sale by itself -- the resolver only picks the status a
 // sale is BORN with, and the guard only refuses -- so a pending
 // `sale.add_items` undo (which requires the sale to still be in the status it
@@ -179,6 +189,19 @@ export function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVer
  */
 export const PAID_STATUS_SHORTFALL_TOLERANCE_UNITS = 50n
 
+/** One 100-riel note in calculation units (four decimals): a riel tender short by LESS than this is paid (owner, 27 Oct 2026). */
+export const RIEL_REMAINDER_ACCEPTED_KHR_UNITS = 1_000_000n
+
+/**
+ * THE covered answer on a scaled shortfall (USD units x rate numerator minus KHR units x rate denominator, the
+ * shape scaledShortfall and the payment allocation both compute). Covered when short by at most half a cent, or
+ * when the tender includes riel (paidKhrUnits > 0) and the shortfall is under one 100-riel note at the sale's rate.
+ */
+export function shortfallCovered(scaled: bigint, ratio: { numerator: bigint; denominator: bigint }, paidKhrUnits: bigint): boolean {
+  if (scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * ratio.numerator) return true
+  return paidKhrUnits > 0n && scaled < RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator
+}
+
 type UnitsTender = SaleCoverageInput & { paidUsdUnits: bigint; paidKhrUnits: bigint }
 type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKhr: FinancialDecimalInput }
 
@@ -187,10 +210,10 @@ type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKh
  * (total - tender, in calculation units) multiplied by the rate numerator, so
  * no division and no rounding ever happens. Positive means short.
  */
-function scaledShortfall(input: UnitsTender): { scaled: bigint; numerator: bigint } {
+function scaledShortfall(input: UnitsTender): { scaled: bigint; numerator: bigint; denominator: bigint } {
   const { numerator, denominator } = rateRatio(input.exchangeRate, input.moneyPrecisionVersion)
   const totalUsdUnits = financialCalculationUnits(input.totalUsd)
-  return { scaled: (totalUsdUnits - input.paidUsdUnits) * numerator - input.paidKhrUnits * denominator, numerator }
+  return { scaled: (totalUsdUnits - input.paidUsdUnits) * numerator - input.paidKhrUnits * denominator, numerator, denominator }
 }
 
 function unitsTender(input: AmountTender): UnitsTender {
@@ -218,8 +241,8 @@ function unitsTender(input: AmountTender): UnitsTender {
  * is not evidence of a payment.
  */
 export function paymentCoversSaleTotalUnits(input: UnitsTender): boolean {
-  const { scaled, numerator } = scaledShortfall(input)
-  return scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
+  const { scaled, numerator, denominator } = scaledShortfall(input)
+  return shortfallCovered(scaled, { numerator, denominator }, input.paidKhrUnits)
 }
 
 /** Number-taking convenience over paymentCoversSaleTotalUnits. Same formula. */
@@ -238,8 +261,9 @@ export function paymentCoversSaleTotal(input: AmountTender): boolean {
  * decides what an unreadable sale owes.
  */
 export function saleOutstandingUsd(input: AmountTender): number {
-  const { scaled, numerator } = scaledShortfall(unitsTender(input))
-  if (scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator) return 0
+  const tender = unitsTender(input)
+  const { scaled, numerator, denominator } = scaledShortfall(tender)
+  if (shortfallCovered(scaled, { numerator, denominator }, tender.paidKhrUnits)) return 0
   return Number((2n * scaled + numerator) / (2n * numerator)) / 10_000
 }
 

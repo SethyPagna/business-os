@@ -108,17 +108,22 @@ function renderReceipt(saleOverrides: Record<string, unknown>): string {
 }
 
 // The printed text with every tag collapsed to one "|", so a row reads
-// "|Balance due:|$0.01|21៛|".
+// "|Balance due:|$0.03|121៛|".
 const printedText = (html: string): string => html.replace(/<[^>]+>/g, '|').replace(/\|+/g, '|')
 
-await runTest('a legacy sale 21 riel short prints a 21 riel balance, not the 41 riel of a rounded cent', () => {
-  // $10.00 at 4,100 paid with 40,979 riel owes $0.0051. The legacy column
+await runTest('a legacy sale 121 riel short prints a 121 riel balance, not the 123 riel of three rounded cents', () => {
+  // $10.00 at 4,100 paid with 40,879 riel owes $0.0295. The legacy column
   // prints that to the cent; the riel line is the owed amount converted once.
   const text = printedText(renderReceipt({
-    exchange_rate: 4100, is_delivery: 0, delivery_fee_usd: 0, total_usd: 10, amount_paid_usd: 0, amount_paid_khr: 40979,
+    exchange_rate: 4100, is_delivery: 0, delivery_fee_usd: 0, total_usd: 10, amount_paid_usd: 0, amount_paid_khr: 40879,
   }))
   const row = text.match(/\|Balance due:\|[^|]*\|[^|]*\|/)?.[0]
-  assert.equal(row, '|Balance due:|$0.01|21៛|')
+  assert.equal(row, '|Balance due:|$0.03|121៛|')
+  // A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026): no balance is printed.
+  const paid = printedText(renderReceipt({
+    exchange_rate: 4100, is_delivery: 0, delivery_fee_usd: 0, total_usd: 10, amount_paid_usd: 0, amount_paid_khr: 40901,
+  }))
+  assert.equal(paid.match(/\|Balance due:\|/), null, '99 riel short prints no balance due')
 })
 
 await runTest('a delivery sale booked at 4,000 prints every riel line at 4,000 while Settings says 4,200', () => {
