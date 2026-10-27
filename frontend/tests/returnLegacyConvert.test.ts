@@ -78,7 +78,7 @@ const listRoute = routes.slice(routes.indexOf("app.get('/', async"), routes.inde
 assert.match(listRoute, /list_origin_sale\.money_precision_version AS sale_money_precision_version/, 'the list row can show the lock')
 assert.match(listRoute, /LEFT JOIN sales list_origin_sale ON list_origin_sale\.id = r\.sale_id/)
 const history = read('../../cloudflare/src/routes/actionHistory.ts')
-assert.match(history, /applier\?\.name === RETURN_LEGACY_CONVERT_KIND(?: \|\| applier\?\.name === RETURN_EDIT_V1_KIND)?\) \{\n\s*if \(!canConvertLegacyReturns\(user\)\) return false/, 'History offers Undo/Redo only to whoever may convert')
+assert.match(history, /applier\?\.name === RETURN_LEGACY_CONVERT_KIND(?: \|\| applier\?\.name === RETURN_EDIT_KIND)?\) \{\n\s*if \(!canConvertLegacyReturns\(user\)\) return false/, 'History offers Undo/Redo only to whoever may convert')
 assert.match(history, /kind === RETURN_LEGACY_CONVERT_KIND \|\|/, 'a client cannot record a forged conversion history row')
 console.log('PASS the screen rule is the Worker rule')
 

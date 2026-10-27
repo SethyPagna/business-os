@@ -87,6 +87,7 @@ function loadUndoAppliers(db) {
   }
   stubs['./customerGenderRestoration'] = loadDependency(path.join(libDir, 'customerGenderRestoration.ts'))
   stubs['./returnLegacyConvert'] = { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') } } // 6.0.992; replay covered natively
+  stubs['./returnEditV1'] = { RETURN_EDIT_KIND: 'return.edit_v1', replayReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') } } // 6.0.997; replay covered natively
   // undoAppliers.ts now imports the exact sale money kernel; it depends only on
   // moneyPrecision, so the dependency loader resolves it against the real lib.
   stubs['./saleMoneyPrecision'] = loadDependency(path.join(libDir, 'saleMoneyPrecision.ts'))

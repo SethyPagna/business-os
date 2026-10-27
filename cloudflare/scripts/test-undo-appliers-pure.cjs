@@ -240,6 +240,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   // 6.0.992: the conversion replay is covered transactionally in test-return-legacy-convert-native.cjs.
   if (id === './returnLegacyConvert') return { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }
   }
+  if (id === './returnEditV1') return { RETURN_EDIT_KIND: 'return.edit_v1', replayReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') } }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayPermissionEffects, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers

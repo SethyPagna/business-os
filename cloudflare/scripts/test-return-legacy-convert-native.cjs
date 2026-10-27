@@ -332,8 +332,13 @@ async function main() {
     const convertedRow = await money(901)
     const editAfter = await send('PATCH', '/api/returns/901', { client_request_id: 'edit-after', expected_updated_at: convertedRow.updated_at, reason: 'Fix',
       items: [{ sale_item_id: 11, product_id: 1, quantity: 1, applied_price_usd: 10.01, applied_price_khr: 40040, stock_action: 'none', branch_id: 1 }] })
-    assert.equal(editAfter.body.code, 'customer_return_edit_v1_not_supported',
+    // 6.0.997: after conversion the return is edited like every current-format return -- a request without the previewed digest is
+    // refused as stale (never with the old-format lock), and the preview of a reason change succeeds.
+    assert.equal(editAfter.body.code, 'return_edit_preview_stale',
       `after conversion the return answers like every current-format return, not with the old-format lock: ${JSON.stringify(editAfter.body)}`)
+    const editPreview = await send('POST', '/api/returns/901/edit/preview', { expected_updated_at: convertedRow.updated_at, reason: 'Fix' })
+    assert.equal(editPreview.status, 200, JSON.stringify(editPreview.body))
+    assert.equal(editPreview.body.changed, true)
     const quoteAfter = await send('POST', '/api/returns/quote', { sale_id: 1, items: [{ sale_item_id: 11, quantity: 1 }] })
     assert.equal(quoteAfter.status, 200, `the sale takes new returns again: ${JSON.stringify(quoteAfter.body)}`)
     assert.equal(quoteAfter.body.total_refund_usd, 10.01, 'the last unit of line 1 is quoted at its exact share')

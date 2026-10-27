@@ -82,6 +82,7 @@ function loadHistoryRoute(db, undoAppliers) {
     '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: new Set(['sale.fields.bulk']), notifySaleBulkUpdate: notify },
     '../lib/saleCustomerAssignmentGuard': { isLoyaltyAssignmentError: () => false, LOYALTY_REASSIGNMENT_CODE: 'loyalty_reassignment' },
     '../lib/returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', notifyReturnBulkAction: notify },
+    '../lib/returnEditV1': { RETURN_EDIT_KIND: 'return.edit_v1', canEditCurrentReturns: () => false, replayReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') } },
     '../lib/returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', canConvertLegacyReturns: () => false, notifyLegacyReturnConversion: async () => {}, planLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, applyLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, ReturnLegacyConvertError: class ReturnLegacyConvertError extends Error {} },
     '../lib/saleSettlementAction': { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement', notifySaleSettlementAction: notify },
     '../lib/stockSession': { STOCK_SESSION_KIND: 'stock.session', canReplayStockSessionPayload: () => false, notifyStockSession: notify },

@@ -29,7 +29,7 @@ const { unstable_splitSqlQuery: split } = require('wrangler')
 const root = path.resolve(__dirname, '..')
 
 async function kernelBundle() {
-  const bundle = await build({ stdin: { contents: `export * from './src/lib/saleItemPricing'; export { executeRawStockTransaction } from './src/lib/stockTransaction'`, resolveDir: root, loader: 'ts' },
+  const bundle = await build({ stdin: { contents: `export * from './src/lib/saleItemPricing'; export { executeRawStockTransaction } from './src/lib/stockTransaction'; export { pairDamagedLinesToLots } from './src/lib/returnsStock'`, resolveDir: root, loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022' })
   const mod = { exports: {} }
   new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
@@ -234,6 +234,12 @@ async function main() {
     const headerHistory = Number(headerApply.body.history_id)
     assert.ok(headerHistory > 0, 'one undoable history entry')
     const afterHeader = await head()
+    // Owner 27 Oct: History says what happened in the reader's language and never "format"; the payload carries what the translated row needs.
+    const historyRow = await w.one('SELECT label,undo_label,redo_label,undo_payload FROM action_history WHERE id=?', headerHistory)
+    assert.deepEqual([historyRow.undo_label, historyRow.redo_label], ['Undo return edit', 'Redo return edit'])
+    assert.match(historyRow.label, /^Edit return RET-/)
+    assert.equal(JSON.parse(historyRow.undo_payload).return_number, (await w.one('SELECT return_number FROM returns WHERE id=?', returnId)).return_number)
+    assert.ok(![historyRow.label, historyRow.undo_label, historyRow.redo_label].some(text => /format|v[01]/i.test(text)))
     assert.deepEqual([afterHeader.reason, afterHeader.notes, afterHeader.return_type], ['Wrong size', 'Customer wanted a bigger box', 'refund'])
     assert.equal(await dump(w, returnId), moneyBase, 'money untouched by a header edit')
     assert.deepEqual([await lotStock(w, 500), await lotStock(w, 501), await lotStock(w, 502)], [11, 12, 7], 'stock untouched by a header edit')
@@ -354,17 +360,26 @@ async function main() {
     assert.equal(await stockState(w, returnId), usedBefore)
     await w.kernel.executeRawStockTransaction(w.db, [w.db.prepare('UPDATE damaged_stock_lots SET quantity_remaining=quantity WHERE return_id=?').bind(returnId)])
 
-    // ---- 7b. an undo is refused once a later return on the sale was written ----------------------------------------------------
-    const history0 = await w.one("SELECT id FROM action_history WHERE entity='return' AND entity_id=? AND status='undoable' ORDER BY id DESC LIMIT 1", String(returnId))
-    if (history0) {
-      const sibling = await createReturn(w, 1, 'edit-v1-create-2', [{ sale_item_id: 13, product_id: 3, quantity: 1, stock_action: 'restock' }])
-      assert.ok(sibling > 0)
-      const state0 = await stockState(w, returnId)
-      const blocked = await w.send('POST', `/api/action-history/${history0.id}/undo`, { require_applied: true, expected_generation: Number(JSON.parse((await w.one('SELECT undo_payload FROM action_history WHERE id=?', history0.id)).undo_payload).generation) })
-      assert.equal(blocked.status, 409, JSON.stringify(blocked.body))
-      assert.equal(blocked.body.code, 'undo_record_changed', 'a later write on the sale closes the undo')
-      assert.equal(await stockState(w, returnId), state0, 'the refused undo changed nothing')
+    // ---- 7b. an undo is refused once a later return on the sale was written ---------------------------------------------------
+    const editOnce = async (requestId, reason) => {
+      const request = await body({ reason })
+      const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request)
+      assert.equal(preview.status, 200, JSON.stringify(preview.body))
+      const applied = await w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: requestId, expected_digest: preview.body.digest })
+      assert.equal(applied.status, 200, JSON.stringify(applied.body))
+      return Number(applied.body.history_id)
     }
+    // Control: with nothing else written, a fresh edit undoes cleanly -- so the refusal below is caused by the sibling and nothing else.
+    const controlHistory = await editOnce('control-1', 'Control reason')
+    assert.equal((await w.send('POST', `/api/action-history/${controlHistory}/undo`, { require_applied: true, expected_generation: 0 })).status, 200, 'control: a clean edit undoes')
+    const siblingHistory = await editOnce('sibling-1', 'Reason before sibling')
+    const sibling = await createReturn(w, 1, 'edit-v1-create-2', [{ sale_item_id: 13, product_id: 3, quantity: 1, stock_action: 'restock' }])
+    assert.ok(sibling > 0)
+    const state0 = await stockState(w, returnId)
+    const blocked = await w.send('POST', `/api/action-history/${siblingHistory}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.body))
+    assert.equal(blocked.body.code, 'undo_record_changed', 'a later return on the sale closes the undo')
+    assert.equal(await stockState(w, returnId), state0, 'the refused undo changed nothing')
     console.log('PASS native return edit (current format): permissions, refusals with a way out, header edit, two-lot reversal in both ledgers, damaged/restock/none transitions, money byte-identical, undo/redo exact, idempotency')
   } finally {
     await w.mf.dispose()
@@ -421,4 +436,121 @@ async function budget() {
   }
 }
 
-main().then(budget).catch(error => { console.error(error); process.exitCode = 1 })
+// Lane 6.0.999's invariant (returnsStock.pairDamagedLinesToLots): for each (return, product) the damaged lines in ascending id and the
+// return's damaged lots in ascending id are the same sequence, each pair of equal quantity -- nothing else links a line to its lot.
+// Every edit below must leave it true, so each line is still paired with ITS OWN tag. Run with two damaged lines of ONE product that have
+// EQUAL quantities (nothing but the order tells them apart) and with different quantities.
+async function pairing() {
+  const w = await world('paid')
+  try {
+    await seedCatalog(w)
+    await seedSale(w, 2, [
+      { id: 21, key: 'a', product: 1, price: 10, quantity: 2, lots: [{ batch: 500, quantity: 2 }] },
+      { id: 22, key: 'b', product: 1, price: 10, quantity: 2, lots: [{ batch: 500, quantity: 2 }] },
+    ])
+    await seedSale(w, 3, [
+      { id: 31, key: 'a', product: 1, price: 10, quantity: 2, lots: [{ batch: 500, quantity: 2 }] },
+      { id: 32, key: 'b', product: 1, price: 10, quantity: 3, lots: [{ batch: 500, quantity: 3 }] },
+    ])
+    let counter = 0
+    const harness = async (saleId, q1, q2) => {
+      const returnId = await createReturn(w, saleId, `edit-v1-pair-${saleId}`, [
+        { sale_item_id: saleId * 10 + 1, product_id: 1, quantity: q1, stock_action: 'damaged', condition_tag: 'expired' },
+        { sale_item_id: saleId * 10 + 2, product_id: 1, quantity: q2, stock_action: 'damaged', condition_tag: 'broken' },
+      ])
+      const line = async (saleItem) => Number((await w.one('SELECT id FROM return_items WHERE return_id=? AND sale_item_id=?', returnId, saleItem)).id)
+      const l1 = await line(saleId * 10 + 1), l2 = await line(saleId * 10 + 2)
+      // The tag each damaged line is paired with, through the REAL helper, plus the invariant itself (counts and quantities).
+      const pairs = async () => {
+        const lines = await w.all("SELECT id,product_id,quantity,stock_action,return_to_stock FROM return_items WHERE return_id=? ORDER BY id", returnId)
+        const lots = await w.all('SELECT id,product_id,quantity,quantity_remaining,condition_tag FROM damaged_stock_lots WHERE return_id=? ORDER BY id', returnId)
+        const damaged = lines.filter(item => item.stock_action === 'damaged')
+        assert.equal(lots.length, damaged.length, 'one lot per damaged line')
+        const paired = w.kernel.pairDamagedLinesToLots(lines, lots)
+        return Object.fromEntries(lines.flatMap((item, index) => item.stock_action === 'damaged' ? [[item.id, paired[index]?.condition_tag ?? null]] : []))
+      }
+      const edit = async (items, extra = {}) => {
+        counter += 1
+        const request = { expected_updated_at: (await w.one('SELECT updated_at FROM returns WHERE id=?', returnId)).updated_at, ...extra, ...(items ? { items } : {}) }
+        const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request)
+        if (preview.status !== 200) return { preview }
+        const applied = await w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: `pair-${counter}`, expected_digest: preview.body.digest })
+        return { preview, applied }
+      }
+      const item = (id, saleItem, quantity, action, tag) => ({ id, sale_item_id: saleItem, product_id: 1, quantity, stock_action: action, ...(tag ? { condition_tag: tag } : {}) })
+      const undo = (applied, generation) => w.send('POST', `/api/action-history/${Number(applied.body.history_id)}/undo`, { require_applied: true, expected_generation: generation })
+      const redo = (applied, generation) => w.send('POST', `/api/action-history/${Number(applied.body.history_id)}/redo`, { require_applied: true, expected_generation: generation })
+      const lotRows = () => w.all('SELECT id,quantity,condition_tag FROM damaged_stock_lots WHERE return_id=? ORDER BY id', returnId)
+      return { returnId, saleItems: [saleId * 10 + 1, saleId * 10 + 2], q: [q1, q2], l1, l2, pairs, edit, item, undo, redo, lotRows, state: () => stockState(w, returnId) }
+    }
+
+    for (const [label, saleId, q1, q2] of [['equal quantities', 2, 2, 2], ['different quantities', 3, 2, 3]]) {
+      const h = await harness(saleId, q1, q2)
+      const [s1, s2] = h.saleItems
+      const two = (a1, t1, a2, t2) => [h.item(h.l1, s1, q1, a1, t1), h.item(h.l2, s2, q2, a2, t2)]
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired', [h.l2]: 'broken' }, `${label}: the create route pairs each damaged line with its own tag`)
+      const both = await h.state()
+      const ids = (await h.lotRows()).map(row => row.id)
+
+      // A. The SECOND line stops being damaged: the FIRST line's lot stays; undo restores the same rows and ids; redo re-applies exactly.
+      const a = await h.edit(two('damaged', undefined, 'restock'))
+      assert.equal(a.applied?.status, 200, `${label} A: ${JSON.stringify(a.applied?.body ?? a.preview.body)}`)
+      assert.deepEqual(await h.lotRows(), [{ id: ids[0], quantity: q1, condition_tag: 'expired' }], `${label} A: line 2 left; line 1 keeps ITS lot`)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired' })
+      const afterA = await h.state()
+      assert.equal((await h.undo(a.applied, 0)).status, 200)
+      assert.equal(await h.state(), both, `${label} A: undo is byte-identical, both lots back under their own ids`)
+      assert.equal((await h.redo(a.applied, 1)).status, 200)
+      assert.equal(await h.state(), afterA, `${label} A: redo is byte-identical to the edit`)
+      assert.equal((await h.undo(a.applied, 2)).status, 200)
+      assert.equal(await h.state(), both)
+
+      // B. The FIRST line stops being damaged: the SECOND line's lot stays.
+      const b = await h.edit(two('restock', undefined, 'damaged'))
+      assert.equal(b.applied?.status, 200, `${label} B: ${JSON.stringify(b.applied?.body ?? b.preview.body)}`)
+      assert.deepEqual(await h.lotRows(), [{ id: ids[1], quantity: q2, condition_tag: 'broken' }], `${label} B: line 1 left; line 2 keeps ITS lot`)
+      assert.deepEqual(await h.pairs(), { [h.l2]: 'broken' })
+
+      // C. The first line becomes damaged again while the second still holds: its new lot must come BEFORE the second line's lot, so the
+      //    second line's lot is re-created after it (same content, new id). Undo puts the original rows back.
+      const beforeC = await h.state()
+      const c = await h.edit(two('damaged', 'expired', 'damaged'))
+      assert.equal(c.applied?.status, 200, `${label} C: ${JSON.stringify(c.applied?.body ?? c.preview.body)}`)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired', [h.l2]: 'broken' }, `${label} C: each line still has its own tag`)
+      assert.deepEqual((await h.lotRows()).map(row => [row.quantity, row.condition_tag]), [[q1, 'expired'], [q2, 'broken']])
+      assert.ok((await h.lotRows()).every(row => row.id > ids[1]), `${label} C: both lots were written in line order, after every old id`)
+      assert.equal((await h.undo(c.applied, 0)).status, 200)
+      assert.equal(await h.state(), beforeC, `${label} C: undo restores the original lot row and id`)
+      assert.equal((await h.redo(c.applied, 1)).status, 200)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired', [h.l2]: 'broken' })
+
+      // D. A re-tag of the second line rewrites its lot in place; the first line's lot is untouched.
+      const lotsBeforeD = await h.lotRows()
+      const d = await h.edit(two('damaged', undefined, 'damaged', 'expired'))
+      assert.equal(d.applied?.status, 200, `${label} D: ${JSON.stringify(d.applied?.body ?? d.preview.body)}`)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired', [h.l2]: 'expired' })
+      assert.deepEqual((await h.lotRows()).map(row => row.id), lotsBeforeD.map(row => row.id), `${label} D: a re-tag keeps the lot ids`)
+      assert.equal((await h.undo(d.applied, 0)).status, 200)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'expired', [h.l2]: 'broken' })
+
+      // E. Both leave, then both come back with swapped tags: the new lots are written in line order.
+      const e0 = await h.edit(two('restock', undefined, 'restock'))
+      assert.equal(e0.applied?.status, 200, `${label} E0: ${JSON.stringify(e0.applied?.body ?? e0.preview.body)}`)
+      assert.equal((await h.lotRows()).length, 0)
+      const e = await h.edit(two('damaged', 'broken', 'damaged', 'expired'))
+      assert.equal(e.applied?.status, 200, `${label} E: ${JSON.stringify(e.applied?.body ?? e.preview.body)}`)
+      assert.deepEqual(await h.pairs(), { [h.l1]: 'broken', [h.l2]: 'expired' }, `${label} E: new lots follow line order`)
+
+      // F. A reason-only edit leaves every lot byte-identical.
+      const lotsBeforeF = await w.all('SELECT * FROM damaged_stock_lots WHERE return_id=? ORDER BY id', h.returnId)
+      const f = await h.edit(two('damaged', undefined, 'damaged'), { reason: `Reason only ${label}` })
+      assert.equal(f.applied?.status, 200, `${label} F: ${JSON.stringify(f.applied?.body ?? f.preview.body)}`)
+      assert.deepEqual(await w.all('SELECT * FROM damaged_stock_lots WHERE return_id=? ORDER BY id', h.returnId), lotsBeforeF)
+    }
+    console.log('PASS native return edit pairing: damaged lines (equal and different quantities, different tags) keep their own tags through remove, re-tag, re-create, undo and redo')
+  } finally {
+    await w.mf.dispose()
+  }
+}
+
+main().then(budget).then(pairing).catch(error => { console.error(error); process.exitCode = 1 })

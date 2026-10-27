@@ -266,6 +266,7 @@ const returnsRouteOverrides = {
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), applyReturnBulkActionOutcome: async () => ({ receipt: {}, wrote: false }), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
   '../lib/returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', canConvertLegacyReturns: () => false, notifyLegacyReturnConversion: async () => {}, planLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, applyLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, ReturnLegacyConvertError: class ReturnLegacyConvertError extends Error {} },
+  '../lib/returnEditV1': { RETURN_EDIT_KIND: 'return.edit_v1', canEditCurrentReturns: () => false, notifyReturnEdit: async () => {}, previewReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') }, applyReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') }, ReturnEditV1Error: class ReturnEditV1Error extends Error {} },
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,

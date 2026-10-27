@@ -339,6 +339,8 @@ const DYNAMIC_WRITERS = [
     pairs: [['return', 'return_fields_bulk'], ['return', 'action_undo'], ['return', 'action_redo']] },
   { file: 'lib/returnLegacyConvert.ts', entity: "'return'", action: '@action', cls: 'returns (6.0.992 money-format conversion and its undo/redo)', kept: true,
     pairs: [['return', 'return_money_convert'], ['return', 'action_undo'], ['return', 'action_redo']] },
+  { file: 'lib/returnEditV1.ts', entity: "'return'", action: '@action', cls: 'returns (6.0.997 manual edit of a current-format return and its undo/redo)', kept: true,
+    pairs: [['return', 'update'], ['return', 'action_undo'], ['return', 'action_redo']] },
   { file: 'lib/saleBulkStatus.ts', entity: "'sale'", action: '@action', cls: 'sales', kept: true,
     pairs: [['sale', 'sale_status_bulk'], ['sale', 'action_undo'], ['sale', 'action_redo']] },
   { file: 'lib/saleBulkUpdate.ts', entity: "'sale'", action: '@event', cls: 'sales', kept: true,

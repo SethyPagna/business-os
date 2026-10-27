@@ -146,9 +146,9 @@ function fixture({ sold = 3, sibling = null } = {}) {
     },
   } }
   const snapshot = () => JSON.stringify(effectTables.map(table => [table, sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
-  const call = async (body, { actor = 901, method = 'PATCH' } = {}) => {
+  const call = async (body, { actor = 901, method = 'PATCH', path: suffix = '' } = {}) => {
     const pending = []
-    const response = await app.request('/api/returns/901', { method,
+    const response = await app.request(`/api/returns/901${suffix}`, { method,
       headers: { 'content-type': 'application/json', cookie: `bos_session=cpb2-token-${actor}` },
       ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
     }, env, { waitUntil(promise) { pending.push(promise) }, passThroughOnException() {} })
@@ -275,7 +275,9 @@ async function controls() {
     assert.equal(f.snapshot(), before)
   })
   for (const [change, status, code] of [
-    ["UPDATE returns SET money_precision_version=1,calculated_refund_usd=5 WHERE id=901", 409, 'customer_return_edit_v1_not_supported'],
+    // 6.0.997: a current-format return is edited by lib/returnEditV1.ts. This body changes the quantity (2, stored 1): a money edit, refused with the
+    // way out and nothing written. The non-money edit of the same return follows below.
+    ["UPDATE returns SET money_precision_version=1,calculated_refund_usd=5 WHERE id=901", 409, 'return_edit_money_locked'],
     ["UPDATE sales SET money_precision_version=1,calculated_total_usd=0 WHERE id=901", 409, 'money_precision_review_needed'],
     ["UPDATE returns SET status='cancelled' WHERE id=901", 409, 'return_edit_cancelled'],
     ["UPDATE returns SET return_scope='supplier' WHERE id=901", 400, undefined],
@@ -286,6 +288,22 @@ async function controls() {
     assert.equal(result.status, status, JSON.stringify(result))
     if (code) assert.equal(result.body.code, code)
     assert.equal(f.snapshot(), before)
+  })
+  await withFixture({}, async f => {
+    // The same current-format return at its stored quantity: reason, notes and handling are editable (preview, then apply with its digest).
+    f.sql.exec('UPDATE returns SET money_precision_version=1,calculated_refund_usd=5 WHERE id=901')
+    const request = edit([line(1)], { reason: 'Corrected reason' })
+    const preview = await f.call(request, { method: 'POST', path: '/edit/preview' })
+    assert.equal(preview.status, 200, JSON.stringify(preview))
+    assert.equal(preview.body.changed, true)
+    assert.equal(preview.body.stock.length, 0, 'a reason/notes edit moves no stock')
+    const stock = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=901').get().quantity
+    const money = f.sql.prepare('SELECT total_refund_usd,total_refund_khr,calculated_refund_usd FROM returns WHERE id=901').get()
+    const saved = await f.call({ ...request, expected_digest: preview.body.digest })
+    assert.equal(saved.status, 200, JSON.stringify(saved))
+    assert.deepEqual(f.sql.prepare('SELECT reason,notes FROM returns WHERE id=901').get(), { reason: 'Corrected reason', notes: 'Edited' })
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=901').get().quantity, stock)
+    assert.deepEqual(f.sql.prepare('SELECT total_refund_usd,total_refund_khr,calculated_refund_usd FROM returns WHERE id=901').get(), money, 'money untouched')
   })
   await withFixture({}, async f => {
     const input = edit([line(2)])

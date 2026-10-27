@@ -271,6 +271,16 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/returnBulkAction': { applyReturnBulkAction: async () => ({}), applyReturnBulkActionOutcome: async () => ({ receipt: {}, wrote: false }), notifyReturnBulkAction: async () => {}, readReplacementOutstanding: async () => [], ReturnBulkError: class ReturnBulkError extends Error {} },
+  // 6.0.997: the current-format edit, REAL over the same kernels (its own behaviour is covered by test-return-edit-v1-native.cjs).
+  '../lib/returnEditV1': loadReal('lib/returnEditV1.ts', {
+    './db': { getDb: () => db }, './actorSnapshot': actorSnapshotKernel, './saleRecordEvents': saleRecordEventsKernel,
+    './returnLegacyConvert': { canConvertLegacyReturns: (user) => !!user && Number.isSafeInteger(Number(user.id)) && permissions.getActionTier(user, 'returns', 'edit') === 'full' },
+    './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'), './planTier': loadReal('lib/planTier.ts'), './returnCreateAction': returnCreateActionKernel,
+    './returnStockDeltas': loadReal('lib/returnStockDeltas.ts', { './actorSnapshot': actorSnapshotKernel }),
+    './branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRolesKernel, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
+    './returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts'), './stockCondition': loadReal('lib/stockCondition.ts') }),
+    './stockCondition': loadReal('lib/stockCondition.ts'), './returnBulkAction': { notifyReturnBulkAction: async () => {} },
+  }),
   '../lib/returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', canConvertLegacyReturns: () => false, notifyLegacyReturnConversion: async () => {}, planLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, applyLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, ReturnLegacyConvertError: class ReturnLegacyConvertError extends Error {} },
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
@@ -515,9 +525,21 @@ async function main() {
     const reused = await req('POST', '/', { ...postConflictBody, expected_quote: changedExpected })
     assert.strictEqual(reused.status, 409)
     assert.strictEqual(reused.json.code, 'idempotency_conflict')
-    const edit = await req('PATCH', `/${created.json.id}`, { reason: 'blocked v1 edit' })
-    assert.strictEqual(edit.status, 409)
-    assert.strictEqual(edit.json.code, 'customer_return_edit_v1_not_supported')
+    // 6.0.997: a current-format return is edited by lib/returnEditV1.ts. A money change is refused with the way out and writes nothing...
+    const moneyEdit = await req('PATCH', `/${created.json.id}`, { reason: 'blocked v1 edit', total_refund_usd: 1 })
+    assert.strictEqual(moneyEdit.status, 409)
+    assert.strictEqual(moneyEdit.json.code, 'return_edit_money_locked')
+    // ...while the reason and notes (same quantities, no money field) preview and save, and stock stays exactly where it was.
+    const stockBeforeEdit = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity
+    const heldMoney = rawDb.prepare('SELECT total_refund_usd,total_refund_khr FROM returns WHERE id=?').get([created.json.id])
+    const editUpdatedAt = rawDb.prepare('SELECT updated_at FROM returns WHERE id=?').get([created.json.id]).updated_at
+    const previewed = await reqExact('POST', `/${created.json.id}/edit/preview`, { reason: 'corrected v1 reason', expected_updated_at: editUpdatedAt })
+    assert.strictEqual(previewed.status, 200, JSON.stringify(previewed.json))
+    const edit = await req('PATCH', `/${created.json.id}`, { reason: 'corrected v1 reason', expected_digest: previewed.json.digest })
+    assert.strictEqual(edit.status, 200, JSON.stringify(edit.json))
+    assert.strictEqual(rawDb.prepare('SELECT reason FROM returns WHERE id=?').get([created.json.id]).reason, 'corrected v1 reason')
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batch.batchId]).quantity, stockBeforeEdit)
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT total_refund_usd,total_refund_khr FROM returns WHERE id=?').get([created.json.id]) }, { ...heldMoney })
   })
 
   await check('v1 create keeps fractional sale capacity exact after a prior partial return', async () => {

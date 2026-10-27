@@ -103,6 +103,8 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
     },
     // 6.0.992: the return money-format conversion applier; its replay is driven by test-return-legacy-convert-native.cjs.
     './returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') } },
+    // 6.0.997: the manual return edit applier; its replay is driven by test-return-edit-v1-native.cjs.
+    './returnEditV1': { RETURN_EDIT_KIND: 'return.edit_v1', replayReturnEdit: async () => { throw new Error('covered by test-return-edit-v1-native.cjs') } },
     ...extraStubs,
   }
   const loaded = new Map()

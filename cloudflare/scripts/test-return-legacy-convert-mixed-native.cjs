@@ -219,7 +219,10 @@ async function main() {
     const row930 = await one('SELECT updated_at FROM returns WHERE id=930')
     const edit930 = await send('PATCH', '/api/returns/930', { client_request_id: 'edit-930', expected_updated_at: row930.updated_at, reason: 'Fix',
       items: [{ sale_item_id: 12, product_id: 6, quantity: 1, stock_action: 'none', branch_id: 1 }] })
-    assert.equal(edit930.body.code, 'customer_return_edit_v1_not_supported', JSON.stringify(edit930.body))
+    // 6.0.997: like any current-format return -- without the previewed digest the edit is refused as stale; its preview succeeds.
+    assert.equal(edit930.body.code, 'return_edit_preview_stale', JSON.stringify(edit930.body))
+    const preview930 = await send('POST', '/api/returns/930/edit/preview', { expected_updated_at: row930.updated_at, reason: 'Fix' })
+    assert.equal(preview930.status, 200, JSON.stringify(preview930.body))
     // Cancelling the converted one and the sale's original v1 return both work.
     assert.equal((await bulk('cancel-930', 930, 'completed', 'cancelled')).status, 200)
     assert.equal((await bulk('cancel-v1', Number(v1.body.id), 'completed', 'cancelled')).status, 200)
