@@ -12,6 +12,7 @@ import { PRODUCT_SUPPLIER_REFUSAL } from '../lib/productSupplierGate'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import { RETURN_LEGACY_CONVERT_KIND, canConvertLegacyReturns, notifyLegacyReturnConversion } from '../lib/returnLegacyConvert'
+import { RETURN_EDIT_V1_KIND, notifyReturnEdit } from '../lib/returnEditV1'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
@@ -131,7 +132,7 @@ function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boole
       if (payload.snapshot_version !== 2 || !canReplayStockSessionPayload(user, payload)) return false
     } else if (applier?.name === CUSTOMER_GENDER_RESTORATION_KIND) {
       if (!canRestoreCustomerGender(user)) return false
-    } else if (applier?.name === RETURN_LEGACY_CONVERT_KIND) {
+    } else if (applier?.name === RETURN_LEGACY_CONVERT_KIND || applier?.name === RETURN_EDIT_V1_KIND) {
       if (!canConvertLegacyReturns(user)) return false
     } else if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
@@ -142,7 +143,7 @@ function isServerManagedPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const payload = value as Record<string, unknown>
   const kind = String(payload.applier || '')
-  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === RETURN_LEGACY_CONVERT_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
+  return kind === CUSTOMER_GENDER_RESTORATION_KIND || kind === RETURN_LEGACY_CONVERT_KIND || kind === RETURN_EDIT_V1_KIND || kind === TRANSFER_OPERATION_KIND || kind === STOCK_LOT_SET_KIND || kind === STOCK_IN_LINE_EDIT_KIND || SERVER_BULK_KINDS.has(kind) || kind === PRODUCT_MERGE_GROUP_ACTION_KIND || kind === PRODUCT_REMOVE_ACTION_KIND
     || (kind === 'product.merge' && payload.merge_version === 3)
     || (kind === SALE_ADD_ITEMS_ACTION_KIND && typeof payload.operation_id === 'string' && payload.operation_id.length > 0)
 }
@@ -521,7 +522,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const productRemoveReplay = parseJson(existing.undo_payload)?.applier === PRODUCT_REMOVE_ACTION_KIND
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
-    const legacyConvertReplay = parseJson(existing.undo_payload)?.applier === RETURN_LEGACY_CONVERT_KIND
+    const legacyConvertReplay = [RETURN_LEGACY_CONVERT_KIND, RETURN_EDIT_V1_KIND].includes(String(parseJson(existing.undo_payload)?.applier || ''))
     if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay && !legacyConvertReplay && !mergeCostReplay) {
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
@@ -629,6 +630,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         ? notifyCustomerGenderRestoration(c.env)
         : applier.name === RETURN_LEGACY_CONVERT_KIND
         ? notifyLegacyReturnConversion(c.env)
+        : applier.name === RETURN_EDIT_V1_KIND
+        ? notifyReturnEdit(c.env)
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_LOT_SET_KIND

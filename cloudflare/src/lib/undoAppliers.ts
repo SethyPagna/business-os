@@ -47,6 +47,7 @@ import { STOCK_SESSION_KIND, replayStockSession, type StockSessionQueryBudget } 
 import { actorSnapshot } from './actorSnapshot'
 import { CUSTOMER_GENDER_RESTORATION_KIND, replayCustomerGenderRestoration } from './customerGenderRestoration'
 import { RETURN_LEGACY_CONVERT_KIND, replayLegacyReturnConversion } from './returnLegacyConvert'
+import { RETURN_EDIT_V1_KIND, replayReturnEdit } from './returnEditV1'
 import {
   parseProductMergeClusterPlan,
   resolveProductMergeClusterPlanEconomics,
@@ -3510,6 +3511,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // 6.0.992 update of a locked return's money details: full Returns access with Edit, checked again inside the replay.
   [RETURN_LEGACY_CONVERT_KIND]: { permission: 'returns', action: 'edit', run: replayLegacyReturnConversion },
+  // 6.0.997 manual edit of a current-format return (reason, notes, handling, per-line stock handling): full Returns access, checked again inside the replay.
+  [RETURN_EDIT_V1_KIND]: { permission: 'returns', action: 'edit', run: replayReturnEdit },
   // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
   // recorded lot and branch delta of one generation and refuses 409 when the
   // lot or branch can no longer cover it.

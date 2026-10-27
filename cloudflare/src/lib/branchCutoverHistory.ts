@@ -40,6 +40,8 @@ export const CUTOVER_HISTORY_RULES: Readonly<Record<string, CutoverHistoryRule>>
   'customer.gender_restore': 'leave',
   // 6.0.992: rewrites return money-format columns only -- no stock, no branch.
   'return.legacy_convert': 'leave',
+  // 6.0.997: a manual return edit reverses and re-takes stock at the return's branch, so a replay after the consolidation could touch a retired branch.
+  'return.edit_v1': 'close',
   'sale.fields.bulk': 'leave',
   'sale.customer.bulk': 'leave',
   'sale.customer.v2.bulk': 'leave',

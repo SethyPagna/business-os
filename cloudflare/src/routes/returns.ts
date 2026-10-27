@@ -30,6 +30,7 @@ import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkActionOutcome, notifyReturnBulkAction, readReplacementOutstanding, ReturnBulkError } from '../lib/returnBulkAction'
 import { applyLegacyReturnConversion, canConvertLegacyReturns, notifyLegacyReturnConversion, planLegacyReturnConversion, ReturnLegacyConvertError } from '../lib/returnLegacyConvert'
+import { applyReturnEdit, notifyReturnEdit, previewReturnEdit, ReturnEditV1Error } from '../lib/returnEditV1'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -2890,6 +2891,30 @@ async function editBreaksReplacementFloor(db: ReturnType<typeof getDb>, input: {
   return (await firstDisallowedReplacementPrice(db, linesFor(input.after), input.exchangeRate))?.productId ?? null
 }
 
+// 6.0.997: the current-format edit. Preview is read-only and answers the digest the apply must carry.
+function returnEditFailure(c: Context, error: unknown) {
+  if (error instanceof ReturnEditV1Error) {
+    return c.json({ error: error.message, code: error.code, ...(error.params ? { params: error.params } : {}), ...(error.extra || {}) }, error.statusCode)
+  }
+  const refusal = branchEffectRefusal(error)
+  if (refusal) return c.json(refusal, 409)
+  const stockGuard = productStockGuardError(error)
+  if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+  throw error
+}
+function returnEditBudget(c: Context) {
+  const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+  return metrics ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 8 } : undefined
+}
+app.post('/:id/edit/preview', async (c) => {
+  const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  try {
+    const preview = await previewReturnEdit(c.env, c.get('user'), c.req.param('id'), body, branchRedirectTarget(c), returnEditBudget(c))
+    c.header('Cache-Control', 'no-store')
+    return c.json(preview)
+  } catch (error) { return returnEditFailure(c, error) }
+})
+
 // PATCH /api/returns/:id -- edit a customer return's items/reason/notes.
 // Reverses the previous restock (deduct what it added back), re-validates
 // against current sale quantities, replaces the return_items rows, and
@@ -2932,6 +2957,16 @@ app.patch('/:id', async (c) => {
   if (hasAcquisitionCostInput(body.items, user)) return c.json({ error: 'Cost-entry permission is required to submit return cost overrides.', code: 'product_cost_edit_required' }, 403)
   const returnId = Number(id)
   if (!Number.isSafeInteger(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
+  // 6.0.997: a current-format customer return is edited by lib/returnEditV1.ts (reason, notes, handling method and per-line stock
+  // handling; money is asserted unchanged). It never reaches the older re-pricing path below.
+  const formatRow = await db.prepare('SELECT money_precision_version AS v, return_scope AS scope FROM returns WHERE id=?').get<{ v: number | null; scope: string | null }>([returnId])
+  if (formatRow && Number(formatRow.v) === 1 && String(formatRow.scope || CUSTOMER_SCOPE) === CUSTOMER_SCOPE) {
+    try {
+      const result = await applyReturnEdit(c.env, user, returnId, body, branchRedirectTarget(c), returnEditBudget(c))
+      if (result.changed && !result.replayed) c.executionCtx.waitUntil(notifyReturnEdit(c.env))
+      return c.json(result)
+    } catch (error) { return returnEditFailure(c, error) }
+  }
   const requestId = normalizeClientRequestId(body.client_request_id)
   if (!requestId) {
     return c.json({
