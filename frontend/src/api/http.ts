@@ -826,18 +826,20 @@ async function tryServerReadWithRetry<T>(
   }
 }
 
+// One failed read is not an outage: Cloudflare answers a single over-limit request (1102) or a busy edge with a 503
+// while the app is up, and marking the server offline made recovery clear every cache and refresh every page, which
+// loaded the server further. A failure now asks the health probe, and only a failed probe marks the server offline.
+// A probe answered in the last HEALTH_PROBE_REUSE_MS is reused, so a burst of failures costs one /health call, and
+// reads that keep failing reach a fresh probe within that window.
+function suspectServerDown(): void {
+  if (_serverOnline) pingServerHealth().catch(() => {})
+}
+
 function noteReadFailure(channel: string, error: any, source: string, startedAt: number): boolean {
-  if (isTransientGatewayError(error?.status)) {
-    setServerHealth(false)
-    dispatchTransientGatewayOutage(channel, error, true)
-    logCall(channel, source || 'transient-gateway', Date.now() - startedAt, false)
-    return true
-  }
-  if (isConnectivityError(error)) {
-    setServerHealth(false)
-  }
-  logCall(channel, source || 'local-fallback', Date.now() - startedAt, false)
-  return false
+  const gateway = isTransientGatewayError(error?.status)
+  if (gateway || isConnectivityError(error)) suspectServerDown()
+  logCall(channel, source || (gateway ? 'transient-gateway' : 'local-fallback'), Date.now() - startedAt, false)
+  return gateway
 }
 
 function throwIfRequestAborted(signal?: AbortSignal): void {
@@ -1241,8 +1243,9 @@ function setServerHealth(online: boolean): void {
   }
   if (online && typeof window !== 'undefined') {
     dispatchTransientGatewayOutage('server:health', null, false)
-    // Server just came back ??clear all caches so fresh data is fetched
-    cacheClearAll()
+    // Server just came back. The channel events invalidate their caches (the rest expire in 20 s) and reach the
+    // pages as one bulk sync:flush that calls only the pages listening, staggered (api/syncRuntime.ts). Clearing every
+    // cache here made all mounted pages refetch at once.
     dispatchGlobalDataRefresh()
     window.dispatchEvent(new CustomEvent('sync:reconnected'))
   }
@@ -1312,6 +1315,9 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
     }
 
     setServerHealth(result.online)
+    if (!result.online && isTransientGatewayError(result.status)) {
+      dispatchTransientGatewayOutage('server:health', Object.assign(new Error('Server/tunnel is reconnecting. Read-only data will refresh automatically.'), { status: result.status }) as ApiRuntimeError, true)
+    }
     _lastHealthProbeResult = result
     _lastHealthProbeAt = Date.now()
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('server:probe', { detail: { online: result.online, cloudflareAccessRequired: result.cloudflareAccessRequired, runtimeMismatch: result.runtimeMismatch === true } }))
