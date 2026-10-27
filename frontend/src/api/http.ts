@@ -1631,14 +1631,7 @@ async function raceServerReadWithLocalFallback<T>(
 }
 
 // ?€?€?€ Smart dispatcher ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-/**
- * route() ??unified read/write dispatcher with:
- *   - Stale-while-revalidate: serve cached data immediately, refresh in background
- *   - Writes fail closed when the live server is unavailable
- *   - Cache tag invalidation: invalidate whole entity groups instantly
- *   - Active health awareness: skips server call if known offline
- */
-export function route<T = any>(
+function routeReading<T = any>(
   channel: string,
   serverFn: RouteFn<T>,
   localFn?: RouteFn<T> | null,
@@ -1863,6 +1856,30 @@ async function routeOnce<T = any>(
       return null
     })
   }
+  throw new Error('routeOnce is the read path; writes go through route()')
+}
+
+/**
+ * route() ??unified read/write dispatcher with:
+ *   - Stale-while-revalidate: serve cached data immediately, refresh in background
+ *   - Writes fail closed when the live server is unavailable
+ *   - Cache tag invalidation: invalidate whole entity groups instantly
+ *   - Active health awareness: skips server call if known offline
+ */
+export async function route<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
+  const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  // Reads: sign-in retry and the last answer while refreshing (routeReading); the rest of this function is the write path.
+  if (!isWrite) return routeReading(channel, serverFn, localFn, options)
+  const t0 = Date.now()
+  const syncServerUrl = getSyncServerUrl()
+  const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
+  const writeIdentity = typeof options === 'boolean' ? undefined : options.writeIdentity
+  throwIfRequestAborted(typeof options === 'boolean' ? undefined : options?.signal)
 
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (writeScope) assertActorSessionDispatchAllowed(writeScope)
