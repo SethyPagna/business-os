@@ -430,6 +430,26 @@ const PAYMENT_METHOD_SEARCH_SQL = normalizedHaystackSql(`(
   COALESCE(s.branch_name,'') || ' ' || COALESCE(${PAYMENT_METHOD_RENAMED_SUMMARY_SQL},'')
 )`)
 
+// A sale whose ONLY source-method row is an exchange refund credit (6.0.982 review): the rename leaves that row alone and
+// its summary stays what it is, so writing the sale would change nothing but bump its revision (and break a pending undo).
+// It is neither counted (preview, audit) nor written. A sale with a valid details array is judged by its rows alone.
+const PAYMENT_METHOD_CREDIT_ONLY_SQL = `(
+  ${VALID_PAYMENT_DETAILS_SQL} AND json_array_length(s.payment_details)>0
+  AND NOT EXISTS(
+    SELECT 1 FROM json_each(s.payment_details) detail
+    WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants))
+      AND json_extract(detail.value,'$.refund_credit') IS NOT 1
+  )
+  AND EXISTS(
+    SELECT 1 FROM json_each(s.payment_details) detail
+    WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants))
+      AND json_extract(detail.value,'$.refund_credit') = 1
+  )
+)`
+
+/** The sales a linked rename writes and the audit row counts: the candidates, less those whose only match is a refund credit. */
+const PAYMENT_METHOD_RENAME_WHERE = `(${PAYMENT_METHOD_CANDIDATE_WHERE} AND NOT ${PAYMENT_METHOD_CREDIT_ONLY_SQL})`
+
 const PAYMENT_METHOD_MALFORMED_RELEVANT_SQL = `(
   ${PAYMENT_METHOD_CANDIDATE_WHERE}
   AND s.payment_details IS NOT NULL AND trim(s.payment_details)!=''
@@ -563,9 +583,13 @@ async function loadPaymentMethodCandidates(
     for (const row of rows) {
       const malformed = malformedPaymentDetails(row.payment_details)
       const labels = String(row.payment_method ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+      // PAYMENT_METHOD_CREDIT_ONLY_SQL, restated for the preview: a sale whose only source-method row is a refund credit is not renamed.
+      let creditOnly = false
       if (!malformed && row.payment_details != null && String(row.payment_details).trim()) {
         const parsed = JSON.parse(String(row.payment_details)) as Array<Record<string, unknown>>
         for (const detail of parsed) labels.push(String(detail.method ?? '').trim())
+        const sourceRows = Array.isArray(parsed) ? parsed.filter((detail) => paymentMethodKey(String(detail.method ?? '').trim()) === source) : []
+        creditOnly = Array.isArray(parsed) && parsed.length > 0 && sourceRows.length > 0 && sourceRows.every((detail) => detail.refund_credit === true)
       }
       let sourceMatched = false
       for (const label of labels) {
@@ -600,7 +624,7 @@ async function loadPaymentMethodCandidates(
         }
         continue
       }
-      if (!sourceMatched) continue
+      if (!sourceMatched || creditOnly) continue
       summary.candidateCount += 1
       if (!renamed.changed) continue
       const currentSummary = paymentSummaryMatches(row.payment_method, source)
@@ -825,7 +849,7 @@ app.post('/payment-methods/replace', async (c) => {
     {
       sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name,device_tz,created_at)
             SELECT @userId,@userName,'replace','payment_method',@operationId,
-              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
+              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_RENAME_WHERE})` : '0'},
                 '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1)` : '0'}),
               'payment_method',@operationId,@old_value,@new_value,
               (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
@@ -846,7 +870,7 @@ app.post('/payment-methods/replace', async (c) => {
               payment_details=CASE WHEN ${VALID_PAYMENT_DETAILS_SQL} THEN ${PAYMENT_DETAILS_RENAME_SQL} ELSE s.payment_details END,
               search_normalized=${PAYMENT_METHOD_SEARCH_SQL},
               updated_at=@stamp
-            WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE}`,
+            WHERE ${PAYMENT_METHOD_RENAME_WHERE}`,
       params: { sourceVariants, identityVariants, target: to, stamp },
     })
   }

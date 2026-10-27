@@ -40,6 +40,13 @@
 //   reversal_current_method   the exchange-cancel reversal takes the method of the sale's current credit row (R1 must go red)
 //   relabel_moves_credit      bulk relabel rewrites the refund_credit row's method (R2/R3 must go red)
 //   rename_moves_credit       the linked Settings rename rewrites the refund_credit row's method (R4 must go red)
+//   preview_counts_credit     the rename preview counts a sale whose only source row is the credit (R5 must go red)
+//   audit_counts_credit       the rename's audit row counts that sale (R5 must go red)
+//   summary_renames_credit    the renamed summary takes the credit row's method to the target (R4 must go red)
+//   rename_touches_credit_only the rename writes that sale, bumping its revision (R5 must go red)
+//   riel_rule_dropped         a riel tender short by 99 riel owes (Q1 must go red)
+//   riel_note_rule_100        a riel tender short by exactly 100 riel is paid (Q1 must go red)
+//   riel_over_flagged         a riel over-tender under one note is flagged tender_incomplete (Q2 must go red)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -49,7 +56,7 @@ const H = require('./harness/al_money_native.cjs')
 const root = path.resolve(__dirname, '..')
 const MUTATIONS = {
   collect_at_creation: [{ name: 'collect_at_creation', file: 'src/lib/salePaymentWriters.ts',
-    from: 'receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,', to: 'receivedAt: anchor ? anchor.received_at : (input as any).saleCreatedAt ?? \'2026-08-20 03:00:00\',' }],
+    from: '    receivedAt: input.actor.receivedAt,\n    operationId: input.operationId,', to: '    receivedAt: anchor ? input.actor.receivedAt : \'2026-08-20 03:00:00\',\n    operationId: input.operationId,' }],
   undo_without_event: [{ name: 'undo_without_event', file: 'src/lib/saleSettlementAction.ts',
     from: '...replayEvents.map((event) => paymentEventInsertStatement(event)),', to: '' }],
   no_revision_guard: [{ name: 'no_revision_guard', file: 'src/routes/sales.ts',
@@ -81,15 +88,41 @@ const MUTATIONS = {
   rename_moves_credit: [{ name: 'rename_moves_credit', file: 'src/routes/settings.ts',
     from: "IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1\n      THEN json_set(detail.value,'$.method',@target)",
     to: "IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))\n      THEN json_set(detail.value,'$.method',@target)" }],
+  riel_rule_dropped: [{ name: 'riel_rule_dropped', file: 'src/lib/saleStatusResolution.ts',
+    from: 'return paidKhrUnits > 0n && scaled < RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator', to: 'return false' }],
+  riel_note_rule_100: [{ name: 'riel_note_rule_100', file: 'src/lib/saleStatusResolution.ts',
+    from: 'return paidKhrUnits > 0n && scaled < RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator', to: 'return paidKhrUnits > 0n && scaled <= RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator' }],
+  riel_over_flagged: [{ name: 'riel_over_flagged', file: 'src/lib/shiftReconciliation.ts',
+    from: 'const underOneRielNote = paidKhr > 0 && rate > 0 && overUsd * rate < 100', to: 'const underOneRielNote = false' }],
+  preview_counts_credit: [{ name: 'preview_counts_credit', file: 'src/routes/settings.ts', from: 'if (!sourceMatched || creditOnly) continue', to: 'if (!sourceMatched) continue' }],
+  audit_counts_credit: [{ name: 'audit_counts_credit', file: 'src/routes/settings.ts',
+    from: "json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_RENAME_WHERE})`",
+    to: "json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})`" }],
+  summary_renames_credit: [{ name: 'summary_renames_credit', file: 'src/routes/settings.ts',
+    from: "      SELECT CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1\n        THEN @target ELSE trim(COALESCE(json_extract(detail.value,'$.method'),'')) END AS method,\n        CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants)) AND json_extract(detail.value,'$.refund_credit') IS NOT 1",
+    to: "      SELECT CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))\n        THEN @target ELSE trim(COALESCE(json_extract(detail.value,'$.method'),'')) END AS method,\n        CASE WHEN trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@identityVariants))" }],
+  rename_touches_credit_only: [{ name: 'rename_touches_credit_only', file: 'src/routes/settings.ts',
+    from: '            WHERE ${PAYMENT_METHOD_RENAME_WHERE}`,', to: '            WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE}`,' }],
   overpay_accepted: [{ name: 'overpay_accepted', file: 'src/routes/sales.ts',
     from: "if (!statedChange && error.code === 'invalid_actual_change_total') {", to: "if (false) {" }],
 }
 const mutation = process.env.PAY_MUTATION || ''
 if (mutation && !MUTATIONS[mutation]) throw new Error(`unknown PAY_MUTATION ${mutation}`)
 
+// The shift reader runs in this process, so a mutant of a file it bundles is applied here as well as in the Worker.
 async function loadShiftReader() {
+  const patches = mutation ? MUTATIONS[mutation] : []
   const out = await build({ entryPoints: [path.join(root, 'src/lib/shiftReconciliation.ts')], bundle: true, write: false,
-    platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'silent' })
+    platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'silent',
+    plugins: [{ name: 'reader-mutants', setup(builder) {
+      builder.onLoad({ filter: /\.ts$/ }, (args) => {
+        const mine = patches.filter((patch) => args.path.replace(/\\/g, '/').endsWith(patch.file))
+        if (!mine.length) return undefined
+        let text = fs.readFileSync(args.path, 'utf8').replace(/\r\n/g, '\n')
+        for (const patch of mine) text = text.replace(patch.from, () => patch.to)
+        return { contents: text, loader: 'ts' }
+      })
+    } }] })
   const m = { exports: {} }
   new Function('require', 'module', 'exports', out.outputFiles[0].text)(require, m, m.exports)
   return m.exports
@@ -614,6 +647,7 @@ async function main() {
   }
   await staleReadRace(r)
   await creditMethodSurvives(r)
+  await rielRemainder(r)
   const failed = r.results.filter((result) => !result.ok)
   console.log(`${failed.length ? 'RED' : 'GREEN'} sale payment writers: ${r.results.length - failed.length}/${r.results.length} checks hold${mutation ? ` (PAY_MUTATION=${mutation}, expected RED)` : ''}`)
   if (failed.length) process.exitCode = 1
@@ -722,16 +756,103 @@ async function creditMethodSurvives(r) {
       assert.deepEqual([r3Mid, r3After], [r3Before, r3Before])
     })
 
-    // R4. The linked Settings rename Cash -> Cash USD renames the customer's rows, never the credit row.
+    // R4. The linked Settings rename Cash -> Cash USD renames the customer's rows, never the credit row. A sale whose ONLY
+    // Cash row is the credit (R5) is neither counted (preview, audit) nor written: writing it would bump its revision for nothing.
     const r4 = await exchange('pay-r4')
     const r4Pay = await instalment(r4.saleId, 'pay-r4-pay')
+    const r5 = await exchange('pay-r5')
+    const revisionOf = async (id) => Number((await h.one('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS r', id)).r)
+    const r5Before = { row: await h.one('SELECT payment_method,payment_details,updated_at FROM sales WHERE id=?', r5.saleId), revision: await revisionOf(r5.saleId) }
+    // What the rename should count: sales with a non-credit Cash row, or (no rows) a Cash summary token.
+    const expectedLinked = (await h.all("SELECT payment_method,payment_details FROM sales WHERE COALESCE(sale_status,'') <> 'cancelled' OR 1=1")).filter((sale) => {
+      let rows = []
+      try { rows = JSON.parse(sale.payment_details || '[]') } catch { return false }
+      if (Array.isArray(rows) && rows.length) return rows.some((row) => String(row.method || '').trim().toLowerCase() === 'cash' && row.refund_credit !== true)
+      return String(sale.payment_method || '').split('+').some((token) => token.trim().toLowerCase() === 'cash')
+    }).length
     const preview = await h.call('GET', '/api/settings/payment-methods/impact?from=Cash&to=Cash%20USD', undefined, 'rename preview')
-    const renamed = await h.call('POST', '/api/settings/payment-methods/replace', { from: 'Cash', to: 'Cash USD', scope: 'linked', expected_updated_at: preview.body.settings_updated_at }, 'linked rename Cash -> Cash USD')
+    // currentPassword: the deployed main asks for it on a linked rename (destructive step-up); this branch ignores it.
+    const renamed = await h.call('POST', '/api/settings/payment-methods/replace', { from: 'Cash', to: 'Cash USD', scope: 'linked', expected_updated_at: preview.body.settings_updated_at, currentPassword: 'al-money-fixture' }, 'linked rename Cash -> Cash USD')
     const r4Rows = await tender(r4.saleId)
-    r.check(`R4 a linked Settings rename leaves the credit row's method alone and renames the customer's row (pay ${r4Pay.status}, preview ${preview.status}, rename ${renamed.status} ${renamed.body.code || ''}; rows ${JSON.stringify(r4Rows)})`, () => {
+    const r4Summary = (await h.one('SELECT payment_method FROM sales WHERE id=?', r4.saleId)).payment_method
+    const r5After = { row: await h.one('SELECT payment_method,payment_details,updated_at FROM sales WHERE id=?', r5.saleId), revision: await revisionOf(r5.saleId) }
+    const auditRow = await h.one("SELECT details FROM audit_logs WHERE action='replace' AND entity='payment_method' ORDER BY id DESC LIMIT 1")
+    const audit = auditRow ? JSON.parse(auditRow.details) : {}
+    r.check(`R4 a linked Settings rename leaves the credit row's method alone, renames the customer's row and summarises both (pay ${r4Pay.status}, preview ${preview.status}, rename ${renamed.status} ${renamed.body.code || ''}; rows ${JSON.stringify(r4Rows)}; summary ${r4Summary})`, () => {
       assert.equal(r4Pay.status, 200)
       assert.equal(renamed.status, 200, JSON.stringify(renamed.body).slice(0, 200))
       assert.deepEqual(r4Rows.map((row) => [row.method, row.refund_credit === true]), [['Cash', true], ['Cash USD', false]])
+      assert.equal(r4Summary, 'Cash + Cash USD')
+    })
+    r.check(`R5 a sale whose only Cash row is the credit is not counted by the preview or the audit row, nor written (expected ${expectedLinked}; preview ${preview.body.live_snapshots && preview.body.live_snapshots.sales}; audit ${audit.linkedSales}; revision ${r5Before.revision} -> ${r5After.revision}; summary ${r5After.row.payment_method})`, () => {
+      assert.equal(preview.status, 200, JSON.stringify(preview.body).slice(0, 200))
+      assert.ok(expectedLinked > 0, 'fixture: there are customer Cash rows to rename')
+      assert.equal(preview.body.live_snapshots.sales, expectedLinked, 'the preview counts only sales the rename writes')
+      assert.equal(audit.linkedSales, expectedLinked, 'the audit row counts only sales the rename writes')
+      assert.deepEqual(r5After, r5Before, 'the credit-only sale is untouched: same row, same revision')
+    })
+  } finally {
+    await h.mf.dispose()
+  }
+}
+
+// Q. A riel payment that leaves under 100 riel unpaid is fully paid (owner ruling, 27 Oct 2026). A $10 sale at 4,000 is
+// 40,000 riel: 39,901 riel (99 short) is Completed on every path -- the POS create, a settle, an instalment, a correction --
+// and the shift raises no tender_incomplete; 39,900 riel (100 short) still owes. A riel instalment OVER by under one note,
+// with no change stated, raises no flag either. Its own worker, so the shift's review codes are these sales' alone.
+async function rielRemainder(r) {
+  const h = await H.startWorker({ patches: mutation ? MUTATIONS[mutation] : [] })
+  const shiftReader = await loadShiftReader()
+  const env = { DB: h.db }
+  const session = { scope_mode: 'shop_wide', user_id: 901, branch_id: 1, opened_at: '2000-01-01 00:00:00', closed_at: null, cancelled_at: null, opening_float_usd: 0, opening_float_khr: 0 }
+  const shift = () => shiftReader.shiftCashSales(env, session, Date.now() + 5000, { kinds: {}, configuredMethods: ['Cash', 'ABA'] })
+  const status = async (id) => (await h.one('SELECT sale_status FROM sales WHERE id=?', id)).sale_status
+  const riel = (khr) => [{ method: 'Cash', amount_usd: 0, amount_khr: khr }]
+  let n = 0
+  const notPaid = (key) => H.createSale(h, { key, status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], extra: { payment_currency: 'KHR' }, label: `${key}: Not Paid $10` })
+  const settle = (id, details, extra = {}) => h.call('PATCH', `/api/sales/${id}/status`, { sale_status: 'completed', client_request_id: `q-settle-${++n}`, expected_exchange_rate: 4000, payment_details: details, ...extra }, `settle ${id}`)
+  const pay = (id, details, extra = {}) => h.call('POST', `/api/sales/${id}/payments`, { client_request_id: `q-pay-${++n}`, expected_exchange_rate: 4000, payment_details: details, ...extra }, `pay ${id}`)
+  try {
+    await H.seedProduct(h, 401, 'PAY Balm', 2, 200)
+    // The POS create: a Not Paid request with 39,901 riel resolves to Completed; with 39,900 it stays Not Paid.
+    const pos99 = await H.createSale(h, { key: 'q-pos-99', status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], paymentDetails: riel(39901), extra: { payment_currency: 'KHR' }, label: 'POS $10 paid 39,901 riel' })
+    const pos100 = await H.createSale(h, { key: 'q-pos-100', status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], paymentDetails: riel(39900), extra: { payment_currency: 'KHR' }, label: 'POS $10 paid 39,900 riel' })
+    // Settle.
+    const s99 = await notPaid('q-settle-99'); const s100 = await notPaid('q-settle-100')
+    const settled99 = await settle(s99.body.id, riel(39901)); const settled100 = await settle(s100.body.id, riel(39900))
+    // Instalment.
+    const i99 = await notPaid('q-pay-99'); const i100 = await notPaid('q-pay-100')
+    const paid99 = await pay(i99.body.id, riel(39901)); const paid100 = await pay(i100.body.id, riel(39900))
+    // Correction: a completed $10 cash sale reopened and corrected to 39,901 riel.
+    const c = await H.createSale(h, { key: 'q-correct', lines: [{ productId: 401, quantity: 5 }], paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'POS $10 cash (really riel)' })
+    const reopened = await h.call('PATCH', `/api/sales/${c.body.id}/status`, { sale_status: 'awaiting_payment', client_request_id: 'q-reopen' }, 'reopen for correction')
+    const corrected99 = await settle(c.body.id, riel(39901), { replace_existing_payment: true })
+    // Over by under one note, no change stated.
+    const o = await notPaid('q-over')
+    const over = await pay(o.body.id, riel(40050))
+    const so = await notPaid('q-settle-over')
+    const settleOver = await settle(so.body.id, riel(40050))
+    const settleOverRow = await h.one('SELECT sale_status,change_usd,change_khr,change_is_actual FROM sales WHERE id=?', so.body.id)
+    const statuses = {
+      pos99: await status(pos99.body.id), pos100: await status(pos100.body.id),
+      settle99: [settled99.status, await status(s99.body.id)], settle100: [settled100.status, settled100.body.code, await status(s100.body.id)],
+      pay99: [paid99.status, await status(i99.body.id)], pay100: [paid100.status, await status(i100.body.id), paid100.body.owed_usd],
+      correct99: [reopened.status, corrected99.status, await status(c.body.id)], over: [over.status, over.body.code || '', await status(o.body.id)],
+      settleOver: [settleOver.status, settleOverRow],
+    }
+    const drawer = await shift()
+    r.check(`Q1 99 riel short is Completed on the POS create, a settle, an instalment and a correction; 100 riel short still owes (${JSON.stringify(statuses)})`, () => {
+      assert.deepEqual([statuses.pos99, statuses.pos100], ['completed', 'awaiting_payment'])
+      assert.deepEqual(statuses.settle99, [200, 'completed'])
+      assert.deepEqual(statuses.settle100, [400, 'insufficient_payment', 'awaiting_payment'])
+      assert.deepEqual(statuses.pay99, [200, 'completed'])
+      assert.deepEqual(statuses.pay100.slice(0, 2), [200, 'awaiting_payment'])
+      assert.ok(statuses.pay100[2] > 0, 'the 100-riel remainder is still owed')
+      assert.deepEqual(statuses.correct99, [200, 200, 'completed'])
+      assert.deepEqual(statuses.over, [200, '', 'completed'])
+    })
+    r.check(`Q2 the shift raises no tender_incomplete for them (codes ${JSON.stringify(drawer.reviewCodes)}; khr ${drawer.khr})`, () => {
+      assert.ok(!drawer.reviewCodes.includes('tender_incomplete'), JSON.stringify(drawer.reviewCodes))
     })
   } finally {
     await h.mf.dispose()
