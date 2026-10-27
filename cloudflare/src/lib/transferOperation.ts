@@ -11,7 +11,6 @@ import { transferIntentAuditStatement } from './transferOperationReceipt'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
-import { buildInClause, selectInChunks } from './sqlBinding'
 
 export const TRANSFER_OPERATION_KIND = 'stock.transfer'
 type Statement = { sql: string; params?: Record<string, unknown> }
@@ -91,11 +90,9 @@ export async function planTransferOperation(db: D1Compat, args: {
 
   // 1. Every product referenced by any line, source or destination.
   const productIds = [...new Set(args.lines.flatMap(line => [line.productId, line.destProductId]))]
-  const productRows = await selectInChunks(productIds, 0, chunk => {
-    const { sql, params: inParams } = buildInClause('id', chunk)
-    return db.prepare(`SELECT id,${productSnapshotSql} AS snapshot FROM products WHERE id IN (${sql}) AND is_active=1`)
-      .all<{ id: number; snapshot: string }>(inParams)
-  })
+  // json_each(@ids): one statement for any line count (Free: 50 calls per invocation).
+  const productRows = await db.prepare(`SELECT id,${productSnapshotSql} AS snapshot FROM products WHERE id IN (SELECT value FROM json_each(@ids)) AND is_active=1`)
+    .all<{ id: number; snapshot: string }>({ ids: JSON.stringify(productIds) })
   const productById = new Map(productRows.map(row => [Number(row.id), row]))
 
   // 2. FIFO lot availability for every (source product, from-branch) pair --
@@ -117,11 +114,10 @@ export async function planTransferOperation(db: D1Compat, args: {
 
   // 4. Every source lot (product_batches row) any line's takes reference.
   const takenBatchIds = [...new Set(linePlans.flatMap(plan => plan.takes.map(take => take.batchId)))]
-  const lotRows = await selectInChunks(takenBatchIds, 0, chunk => {
-    const { sql, params: inParams } = buildInClause('id', chunk)
-    return db.prepare(`SELECT id,${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id IN (${sql}) AND is_active=1`)
-      .all<{ id: number; snapshot: string; unit_cost_usd: number | null }>(inParams)
-  })
+  const lotRows = takenBatchIds.length
+    ? await db.prepare(`SELECT id,${lotSnapshotSql} AS snapshot,unit_cost_usd FROM product_batches WHERE id IN (SELECT value FROM json_each(@ids)) AND is_active=1`)
+      .all<{ id: number; snapshot: string; unit_cost_usd: number | null }>({ ids: JSON.stringify(takenBatchIds) })
+    : []
   const lotById = new Map(lotRows.map(row => [Number(row.id), row]))
 
   // 5. Destination-lot matches for cross-product lines, by lot code or (when
