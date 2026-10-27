@@ -9,7 +9,6 @@ import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat 
 import { getPlanLimits } from './planTier'
 import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding } from './sqlBinding'
-import { runD1BatchInChunks } from './importEngine'
 import { stockedProductIds, productStockGuardStatement, PRODUCT_HAS_STOCK_CODE } from './productStockGuard'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
@@ -74,14 +73,9 @@ export function buildAnonymousCustomerBulkDeleteGuard(ids: number[]): D1Statemen
 }
 
 async function loadAnonymousCustomerIds(db: D1Compat, ids: number[]): Promise<Set<number>> {
-  const found = new Set<number>()
-  for (const slice of chunkForBinding(ids)) {
-    const placeholders = slice.map(() => '?').join(',')
-    const rows = await db.prepare(`SELECT id FROM customers WHERE id IN (${placeholders}) AND ${customerIsAnonymousSql()}`)
-      .all<{ id: number }>(slice)
-    for (const row of rows) found.add(Number(row.id))
-  }
-  return found
+  const rows = await db.prepare(`SELECT id FROM customers WHERE id IN (SELECT value FROM json_each(@ids)) AND ${customerIsAnonymousSql()}`)
+    .all<{ id: number }>({ ids: JSON.stringify(ids) })
+  return new Set(rows.map((row) => Number(row.id)))
 }
 
 const NO_EXTRA_STATEMENTS = async () => []
@@ -270,20 +264,24 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   }
 
   const user = { id: job.created_by_id, name: job.created_by_name }
-  let cursor = job.processed_count
+  const cursor = job.processed_count
   const failedIds: number[] = JSON.parse(job.failed_ids_json || '[]')
 
-  while (cursor < allIds.length) {
-    // Checked once per outer chunk (not per statement) -- cheap, and
-    // frequent enough that Cancel in the UI takes effect within one
-    // chunk's worth of rows, not the whole remaining job.
-    const fresh = await db.prepare(`SELECT cancel_requested FROM bulk_delete_jobs WHERE id = @id`).get<{ cancel_requested: number }>({ id: jobId })
-    if (fresh?.cancel_requested) {
+  // ONE chunk per queue delivery, then the next chunk is re-enqueued, as the
+  // products path does. Looping every chunk in one invocation cost ~6 calls a
+  // chunk and failed past the Free plan's 50 calls at ~1,000 ids; now a
+  // delivery is a fixed ~5 calls whatever the job's size.
+  if (cursor < allIds.length) {
+    // The job row was read at the top of this delivery, so Cancel in the UI
+    // still takes effect within one chunk; the batch guard below closes the
+    // gap between that read and the write.
+    if (job.cancel_requested) {
       await db.prepare(`UPDATE bulk_delete_jobs SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
       return
     }
 
     const chunk = allIds.slice(cursor, cursor + bulkDeleteChunkSize)
+    const next = cursor + chunk.length
     let deleteChunk = chunk
     if (job.entity_type === 'customers') {
       const protectedIds = await loadAnonymousCustomerIds(db, chunk)
@@ -292,6 +290,13 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
         deleteChunk = chunk.filter((id) => !protectedIds.has(id))
       }
     }
+    const progress = (failed: number[], error: string | null): D1Statement => ({
+      sql: `UPDATE bulk_delete_jobs SET processed_count = @next, failed_count = @failedCount, failed_ids_json = @failedIds,
+          status = @status, finished_at = CASE WHEN @status = 'completed' THEN CURRENT_TIMESTAMP ELSE finished_at END,
+          last_error = COALESCE(@error, last_error), updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id AND processed_count = @cursor AND status = 'processing'`,
+      params: { id: jobId, cursor, next, failedCount: failed.length, failedIds: JSON.stringify(failed), status: next >= allIds.length ? 'completed' : 'processing', error },
+    })
     try {
       // One statement deletes the whole chunk, instead of one DELETE/UPDATE
       // per id -- this is the core of why this is fast at 10k+ scale.
@@ -299,50 +304,62 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       // decided by config.deleteMode -- see buildCoreDeleteStatement.
       const deleteStatements = buildCoreDeleteStatements(config, deleteChunk)
       const extraStatements = await config.buildExtraStatements(db, deleteChunk, job.reason, user, jobId)
-      if (job.entity_type === 'customers' && deleteChunk.length) {
+      // One audit_logs row per deleted id, written by one INSERT in the same
+      // atomic batch as the delete and the cursor -- device_name/device_tz
+      // are omitted here (audit() normally attaches them) since that per-row
+      // session lookup is exactly the N+1 cost this module exists to avoid;
+      // a bulk-delete audit entry is identifiable as a batch via the shared
+      // `reason` text and tight created_at clustering even without a device
+      // column.
+      const auditStatement: D1Statement = {
+        sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value)
+              SELECT @userId, @userName, 'delete', @entity, j.value, @details, @entity, j.value, NULL FROM json_each(@ids) j ORDER BY j.key`,
+        params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, ids: JSON.stringify(deleteChunk), details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
+      }
+      await db.batch([
+        // A redelivered or concurrent message for an already-advanced cursor,
+        // or a Cancel since the job read, aborts the whole chunk: no second
+        // delete, no duplicate audit rows.
+        {
+          sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM bulk_delete_jobs WHERE id=@id
+            AND processed_count=@cursor AND status='processing' AND cancel_requested=0)
+            THEN 1 ELSE json_extract('[]','$[bulk_delete_progress_changed]') END`,
+          params: { id: jobId, cursor },
+        },
         // The advisory read above lets unrelated profile ids continue when a
         // queued job contains a marker. This in-transaction assertion closes
         // the race where a profile is marked after that read but before the
-        // hard delete. Guard and deletes are six statements at most.
-        await db.batch([buildAnonymousCustomerBulkDeleteGuard(deleteChunk), ...deleteStatements, ...extraStatements])
-      } else {
-        await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
-      }
-
-      // One audit_logs row per deleted id, batched together with everything
-      // above rather than going through audit()'s per-call session lookup --
-      // device_name/device_tz are omitted here (audit() normally attaches
-      // them) since that per-row session lookup is exactly the N+1 cost
-      // this module exists to avoid; a bulk-delete audit entry is
-      // identifiable as a batch via the shared `reason` text and tight
-      // created_at clustering even without a device column.
-      const auditStatements: D1Statement[] = deleteChunk.map((id) => ({
-        sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value)
-              VALUES (@userId, @userName, 'delete', @entity, @entityId, @details, @entity, @entityId, NULL)`,
-        params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, entityId: id, details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
-      }))
-      await runD1BatchInChunks(db, auditStatements)
-
-      cursor += chunk.length
-      await db.prepare(`UPDATE bulk_delete_jobs
-        SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id`).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds) })
+        // hard delete.
+        ...(job.entity_type === 'customers' && deleteChunk.length ? [buildAnonymousCustomerBulkDeleteGuard(deleteChunk)] : []),
+        ...deleteStatements, ...extraStatements, auditStatement, progress(failedIds, null),
+      ])
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) throw error
-      // A whole chunk failing (after runD1BatchInChunks' own per-statement
-      // adaptive retry already gave up) is treated as those specific ids
-      // failing, not the whole job -- record them and move on to the next
-      // chunk rather than abandoning everything already-processed.
+      if (String(error).includes('bulk_delete_progress_changed')) {
+        const current = await getBulkDeleteJob(env, jobId)
+        if (current?.cancel_requested && current.status === 'processing') {
+          await db.prepare(`UPDATE bulk_delete_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP,
+            updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='processing' AND cancel_requested=1`).run({ id: jobId })
+        }
+        // Otherwise another delivery already committed this chunk.
+        return
+      }
+      // A whole chunk failing is treated as those specific ids failing, not
+      // the whole job -- record them and move on to the next chunk rather
+      // than abandoning everything already-processed.
       console.error('[bulk-delete] chunk failed', jobId, { cursor, chunkSize: chunk.length }, error)
       for (const id of deleteChunk) if (!failedIds.includes(id)) failedIds.push(id)
-      cursor += chunk.length
-      await db.prepare(`
-        UPDATE bulk_delete_jobs SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
-      `).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds), error: error instanceof Error ? error.message.slice(0, 2000) : String(error) })
+      const failure = progress(failedIds, error instanceof Error ? error.message.slice(0, 2000) : String(error))
+      await db.prepare(failure.sql).run(failure.params)
     }
+    if (next < allIds.length) {
+      await dispatchImportWork(env, { jobId, kind: 'bulk-delete' })
+      return
+    }
+  } else {
+    // A job whose last chunk committed under the old whole-job loop.
+    await db.prepare(`UPDATE bulk_delete_jobs SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
   }
-
-  await db.prepare(`UPDATE bulk_delete_jobs SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
 
   // One cache-bump and one broadcast for the whole job, not one per row --
   // the broadcast payload carries the full id list so connected clients
