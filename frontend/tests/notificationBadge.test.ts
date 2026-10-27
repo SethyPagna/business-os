@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const source = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
+const store = fs.readFileSync(new URL('../src/utils/notificationSummaryStore.ts', import.meta.url), 'utf8')
 
 // Badge count now honors the `notifications_realert_minutes` setting
 // (Settings.tsx's "Unresolved alert repeat interval") instead of the old
@@ -11,7 +12,7 @@ const source = fs.readFileSync(new URL('../src/components/shared/NotificationCen
 assert.doesNotMatch(source, /badgeSuppressed/)
 assert.doesNotMatch(source, /NOTIFICATION_SEEN_KEY/)
 assert.match(source, /const badgeCount = open \? 0 : badgeVisibleCount/)
-assert.match(source, /const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000/)
+assert.match(store, /const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000/)
 
 // Realert suppression: an alert counts toward the badge if never seen, or
 // last seen more than `realertMinutes` ago -- this is the actual fix for
@@ -31,11 +32,10 @@ assert.match(source, /if \(!open \|\| !allAlertItems\.length\) return/)
 // (seenSecurityIds/SEEN_SECURITY_IDS_KEY) and are deliberately excluded from
 // the realert-suppressed numeric badge set.
 assert.match(source, /filter\(\(section\) => section\.id !== 'security'\)/)
-assert.match(
-  source,
-  /import \{ getNotificationSummary as getNotificationSummaryRequest \} from '\.\.\/\.\.\/api\/notificationSummary\.ts'[\s\S]*withLoaderTimeout\(\s*\(\) => getNotificationSummaryRequest\(\) as Promise<Partial<NotificationSummary>>,\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
-)
-assert.match(source, /const visibleLoadRequestRef = useRef\(0\)[\s\S]*isTrackedRequestCurrent\(visibleLoadRequestRef, visibleRequestId\)/)
+assert.ok(store.includes("withLoaderTimeout(() => getNotificationSummary(), 'Notifications', NOTIFICATION_SUMMARY_TIMEOUT_MS)"))
+// The bell reads through the one shared store, not its own request and poll.
+assert.ok(source.includes('notificationSummaryStore.subscribe('))
+assert.doesNotMatch(source, /getNotificationSummary|scheduleRefresh|NOTIFICATION_SYNC_RELOAD_MIN_INTERVAL_MS/)
 assert.doesNotMatch(source, /getNotificationApi|window\.api|api\.getNotificationSummary/)
 
 console.log('PASS notification badge stays visible until the panel is opened')

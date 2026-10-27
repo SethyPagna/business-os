@@ -11,21 +11,13 @@ import Info from 'lucide-react/dist/esm/icons/info.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import {
-  beginTrackedRequest,
-  invalidateTrackedRequest,
-  isTrackedRequestCurrent,
-  withLoaderTimeout,
-} from '../../utils/loaders.ts'
-import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
+import { NOTIFICATION_OPEN_MAX_AGE_MS, notificationSummaryStore } from '../../utils/notificationSummaryStore.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
-import { FOREGROUND_RESUME_REASON } from '../../utils/permissionRefreshAccumulator.ts'
-import { planThrottledSyncReload } from '../../api/syncRuntime.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
@@ -124,14 +116,6 @@ type AppContextValue = {
   t: (key: string) => string
 }
 
-type SyncContextValue = {
-  syncChannel?: {
-    channel?: string
-    reason?: string | null
-    ts?: unknown
-  }
-}
-
 type NotificationCenterProps = {
   compact?: boolean
   openRequestId?: number
@@ -144,7 +128,6 @@ type NotificationSeverityIconProps = {
 }
 
 const useApp = useAppHook as () => AppContextValue
-const useSync = useSyncHook as () => SyncContextValue
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || '')
@@ -162,29 +145,10 @@ const DEFAULT_COLLAPSED: Record<string, boolean> = {
 
 const NOTIFICATION_FILTER_OPTIONS: ToneFilter[] = ['all', 'danger', 'warning', 'info', 'success']
 const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
-const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
-// How often loadSummary re-polls GET /api/notifications/summary while a tab
-// sits open and visible with nothing else prompting a refresh. This is a
-// backup poll, not the primary "something changed" signal -- most sections
-// (inventory/sales/returns/customers/contacts/catalog/settings/backup) are
-// already re-fetched near-instantly via the sync-channel broadcast effect
-// below (see the `syncChannel?.channel` effect), and a tab shown again after
-// a socket gap re-fetches through that same effect. This interval only covers the
-// remaining case: nothing pushed and the tab never lost focus. Previously a
-// bare `30000` (30s), which meant an idle-but-open tab hit the endpoint
-// roughly twice a minute for no reason. `buildExpirySection` (notifications.ts)
-// is the one section this interval can actually delay discovering -- it's
-// computed purely from today's date vs. each product's expiry_date, with no
-// DB write or broadcast to push on, so an expiry crossing a threshold is only
-// ever caught by this poll. That's judged an acceptable trade at 2h given
-// expiry itself is day-granularity, not minute-critical -- see progress.md
-// for the record of that call if a shorter/separate expiry schedule turns
-// out to be wanted after all.
-const NOTIFICATION_SUMMARY_IDLE_REFRESH_MS = 2 * 60 * 60 * 1000
-// Every sale on any device pushes sales/inventory; the bell's counts need not follow each one.
-// A push on the notifications channel (device approvals) is the bell's own news and reloads at once.
-const NOTIFICATION_SYNC_RELOAD_MIN_INTERVAL_MS = 30_000
-const NOTIFICATION_IMMEDIATE_SYNC_CHANNELS: ReadonlySet<string> = new Set(['notifications'])
+// The bell's summary is read by utils/notificationSummaryStore.ts, one shared poll for the app.
+// This slower poll only keeps the client-composed "Imports" section current; finished imports
+// also arrive as pushes (onImportJobPush below).
+const NOTIFICATION_IMPORT_JOBS_POLL_MS = 2 * 60 * 60 * 1000
 
 const TONE_CLASS: Record<Tone, string> = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -446,7 +410,6 @@ function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverity
 
 export default function NotificationCenter({ compact = false, openRequestId = 0, visibility = 'always' }: NotificationCenterProps) {
   const { navigateTo, notify, saveSettings, settings, t } = useApp()
-  const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t?.(key)
@@ -501,13 +464,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [realertTick, setRealertTick] = useState(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const requestRef = useRef(0)
-  const visibleLoadRequestRef = useRef(0)
   const aliveRef = useRef(true)
-  const refreshTimerRef = useRef<number | null>(null)
-  const refreshDueWhileHiddenRef = useRef(false)
-  const failureCountRef = useRef(0)
-  const lastSummaryLoadAtRef = useRef(0)
 
   useEffect(() => {
     const syncVisibility = () => setVisibilityActive(matchesVisibilityMode(visibility))
@@ -535,119 +492,63 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
   }
 
-  const scheduleRefresh = useCallback((delayMs: number) => {
-    if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
-    refreshTimerRef.current = window.setTimeout(() => {
-      refreshTimerRef.current = null
-      // A hidden tab skips this read (F2); the visibilitychange listener
-      // below reloads the summary, and reschedules, when the tab is shown.
-      if (!aliveRef.current) return
-      if (document.visibilityState === 'hidden') {
-        refreshDueWhileHiddenRef.current = true
-        return
-      }
-      void loadSummary(true)
-    }, delayMs)
-  }, [])
-
-  const loadSummary = useCallback(async (silent = false) => {
-    lastSummaryLoadAtRef.current = Date.now()
-    const requestId = beginTrackedRequest(requestRef)
-    const visibleRequestId = !silent && aliveRef.current ? beginTrackedRequest(visibleLoadRequestRef) : 0
-    if (visibleRequestId) setLoading(true)
-    try {
-      const result = await withLoaderTimeout(
-        () => getNotificationSummaryRequest() as Promise<Partial<NotificationSummary>>,
-        'Notifications',
-        NOTIFICATION_SUMMARY_TIMEOUT_MS,
-      )
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      failureCountRef.current = 0
-      const nextSections: NotificationSection[] = Array.isArray(result?.sections) ? result.sections : []
-      setSummary((current) => {
-        if (result?.unavailable && !nextSections.length && (current?.sections || []).length) {
-          return {
-            ...current,
-            unreadCount: Number(current?.unreadCount || 0),
-            preferences: result?.preferences || current?.preferences || {},
-            unavailable: true,
-            cooldownUntil: result?.cooldownUntil,
-          }
-        }
+  // A fresh summary from the shared store: swap it in, and keep the sections the person expanded complete.
+  const applySummary = useCallback((raw: unknown) => {
+    const result = raw as Partial<NotificationSummary> | null
+    const nextSections: NotificationSection[] = Array.isArray(result?.sections) ? result.sections : []
+    setSummary((current) => {
+      if (result?.unavailable && !nextSections.length && (current?.sections || []).length) {
         return {
-          unreadCount: Number(result?.unreadCount || 0),
-          sections: nextSections,
-          preferences: result?.preferences || {},
-          unavailable: !!result?.unavailable,
+          ...current,
+          unreadCount: Number(current?.unreadCount || 0),
+          preferences: result?.preferences || current?.preferences || {},
+          unavailable: true,
           cooldownUntil: result?.cooldownUntil,
         }
-      })
-      // A section the person expanded stays complete across refreshes; one that no longer needs a
-      // preview (it shrank under the cap) drops back to the summary's own, complete, items.
-      for (const sectionId of [...expandedSectionsRef.current]) {
-        const refreshed = nextSections.find((section) => section.id === sectionId)
-        if (!refreshed?.truncated) {
-          expandedSectionsRef.current.delete(sectionId)
-          setFullSectionItems((current) => {
-            if (!(sectionId in current)) return current
-            const next = { ...current }
-            delete next[sectionId]
-            return next
-          })
-          continue
-        }
-        void loadMoreItemsRef.current(sectionId, true)
       }
-      const unavailableDelay = Math.max(
-        5 * 60 * 1000,
-        Number(result?.cooldownUntil || 0) - Date.now(),
-      )
-      scheduleRefresh(result?.unavailable ? unavailableDelay : NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
-    } catch (error) {
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      failureCountRef.current += 1
-      scheduleRefresh(Math.min(90000, 15000 * failureCountRef.current))
-      if (!silent) {
-        console.error('[NotificationCenter] load failed:', getErrorMessage(error) || error)
+      return {
+        unreadCount: Number(result?.unreadCount || 0),
+        sections: nextSections,
+        preferences: result?.preferences || {},
+        unavailable: !!result?.unavailable,
+        cooldownUntil: result?.cooldownUntil,
       }
-    } finally {
-      if (visibleRequestId && aliveRef.current && isTrackedRequestCurrent(visibleLoadRequestRef, visibleRequestId)) {
-        setLoading(false)
+    })
+    // A section the person expanded stays complete across refreshes; one that no longer needs a
+    // preview (it shrank under the cap) drops back to the summary's own, complete, items.
+    for (const sectionId of [...expandedSectionsRef.current]) {
+      const refreshed = nextSections.find((section) => section.id === sectionId)
+      if (!refreshed?.truncated) {
+        expandedSectionsRef.current.delete(sectionId)
+        setFullSectionItems((current) => {
+          if (!(sectionId in current)) return current
+          const next = { ...current }
+          delete next[sectionId]
+          return next
+        })
+        continue
       }
+      void loadMoreItemsRef.current(sectionId, true)
     }
-  }, [scheduleRefresh])
+  }, [])
 
   useEffect(() => {
-    if (!visibilityActive) {
-      invalidateTrackedRequest(requestRef)
-      invalidateTrackedRequest(visibleLoadRequestRef)
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
-      return undefined
-    }
+    if (!visibilityActive) return undefined
     aliveRef.current = true
-    void loadSummary()
-    // Pushes keep the bell current while the tab is hidden, and a long
-    // absence with the socket down arrives as a foreground-resume-gap sync
-    // event (effect below). Showing the tab only catches up a skipped tick.
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && refreshDueWhileHiddenRef.current) {
-        refreshDueWhileHiddenRef.current = false
-        void loadSummary(true)
-      }
-    }
-    document.addEventListener('visibilitychange', onVisible)
+    const unsubscribe = notificationSummaryStore.subscribe((state) => {
+      if (!aliveRef.current) return
+      if (state.data) applySummary(state.data)
+      setLoading(state.loading && !state.data)
+    })
     return () => {
       aliveRef.current = false
-      document.removeEventListener('visibilitychange', onVisible)
-      invalidateTrackedRequest(requestRef)
-      invalidateTrackedRequest(visibleLoadRequestRef)
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
+      unsubscribe()
     }
-  }, [loadSummary, visibilityActive])
+  }, [applySummary, visibilityActive])
 
   // Independent poll for the client-composed "Imports" section (see the
   // importJobsSection state comment above) -- deliberately its own effect,
-  // not folded into loadSummary, since it hits a different endpoint
+  // not folded into the shared summary store, since it hits a different endpoint
   // (listImportJobs) and failing to fetch it should never block or retry-
   // storm the real notification summary above it.
   useEffect(() => {
@@ -688,7 +589,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       }
     }
     void loadImportJobs()
-    const stopPolling = startVisibleInterval(() => { void loadImportJobs() }, NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
+    const stopPolling = startVisibleInterval(() => { void loadImportJobs() }, NOTIFICATION_IMPORT_JOBS_POLL_MS)
     const stopPush = onImportJobPush(() => { void loadImportJobs() })
     return () => {
       cancelled = true
@@ -696,34 +597,6 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       stopPush()
     }
   }, [tr, visibilityActive])
-
-  useEffect(() => {
-    if (!visibilityActive) return
-    if (!syncChannel?.channel) return
-    if (syncChannel.reason === FOREGROUND_RESUME_REASON) return
-    // 'contacts' and 'backup' here used to be copy-pasted from
-    // PAGE_PERMISSIONS' page-id keys (AppContext.tsx), not real sync
-    // channel names -- nothing ever broadcasts a sync:update on either,
-    // so those two entries could never fire. The real channels for
-    // contacts-related notifications are the three per-tab ones
-    // (customers/suppliers/deliveryContacts); there's no backup-related
-    // broadcast channel to listen for. Also added 'notifications', the
-    // channel the backend actually broadcasts on for device-approval
-    // decisions (routes/devices.ts) -- previously missing even though
-    // it's the one channel semantically built for this exact component,
-    // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
-      const plan = planThrottledSyncReload(
-        syncChannel.channel,
-        Date.now() - lastSummaryLoadAtRef.current,
-        NOTIFICATION_SYNC_RELOAD_MIN_INTERVAL_MS,
-        NOTIFICATION_IMMEDIATE_SYNC_CHANNELS,
-      )
-      // The trailing reload replaces the idle timer; loadSummary re-arms it.
-      if (plan.runNow) void loadSummary(true)
-      else scheduleRefresh(plan.delayMs)
-    }
-  }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
@@ -854,13 +727,13 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     try {
       const result = await saveSettings({ [section.enabledKey]: nextValue ? 'true' : 'false' })
       if (!settingsSaveSucceeded(result)) return
-      void loadSummary(true)
+      void notificationSummaryStore.refresh({ force: true })
     } catch (error) {
       notify(getErrorMessage(error) || tr('notification_setting_update_failed', 'Failed to update notification setting', 'បរាជ័យក្នុងការកែប្រែការជូនដំណឹង'), 'error')
     } finally {
       if (aliveRef.current) setSavingKey('')
     }
-  }, [loadSummary, notify, saveSettings, savingKey, settings, tr])
+  }, [notify, saveSettings, savingKey, settings, tr])
 
   const activeAlertCount = Number(summary.unreadCount || 0)
 
@@ -917,7 +790,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   // Schedule exactly one timer for the soonest currently-suppressed alert's
   // realert moment, so the badge updates on its own without a poll -- not a
   // recurring interval (this project deliberately moved away from those for
-  // idle tabs, see NOTIFICATION_SUMMARY_IDLE_REFRESH_MS above).
+  // idle tabs, see utils/notificationSummaryStore.ts).
   useEffect(() => {
     if (open) return undefined
     const now = Date.now()
@@ -971,8 +844,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   useEffect(() => {
     if (!openRequestId || !visibilityActive) return
     setOpen(true)
-    void loadSummary(true)
-  }, [loadSummary, openRequestId, visibilityActive])
+    void notificationSummaryStore.refresh({ maxAgeMs: NOTIFICATION_OPEN_MAX_AGE_MS })
+  }, [openRequestId, visibilityActive])
 
   if (!visibilityActive) return null
 
@@ -983,7 +856,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         onClick={() => {
           setOpen((current) => !current)
           if (!open) {
-            void loadSummary(true)
+            void notificationSummaryStore.refresh({ maxAgeMs: NOTIFICATION_OPEN_MAX_AGE_MS })
           }
         }}
         className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-blue-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-blue-300"

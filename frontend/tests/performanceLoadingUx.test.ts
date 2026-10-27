@@ -1323,21 +1323,9 @@ assert.doesNotMatch(
   /catch\(\(\) => setUserOptions\(\[\]\)\)/,
   'action history should preserve current user options after transient user-option read failures',
 )
-assert.match(
-  notificationCenter,
-  /const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000/,
-  'notification center should use an explicit summary timeout',
-)
-assert.match(
-  notificationCenter,
-  /import \{ getNotificationSummary as getNotificationSummaryRequest \} from '\.\.\/\.\.\/api\/notificationSummary\.ts'[\s\S]*withLoaderTimeout\(\s*\(\) => getNotificationSummaryRequest\(\) as Promise<Partial<NotificationSummary>>,\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
-  'notification center should use the focused notification summary transport with a slow-read timeout',
-)
-assert.match(
-  notificationCenter,
-  /const visibleLoadRequestRef = useRef\(0\)[\s\S]*const visibleRequestId = !silent && aliveRef\.current \? beginTrackedRequest\(visibleLoadRequestRef\) : 0[\s\S]*isTrackedRequestCurrent\(visibleLoadRequestRef, visibleRequestId\)[\s\S]*invalidateTrackedRequest\(visibleLoadRequestRef\)/,
-  'notification center should keep visible loading state separate from silent background refresh request tracking',
-)
+const notificationStore = fs.readFileSync(new URL('../src/utils/notificationSummaryStore.ts', import.meta.url), 'utf8')
+assert.match(notificationStore, /const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000/, 'notification summary should use an explicit timeout')
+assert.ok(notificationStore.includes("withLoaderTimeout(() => getNotificationSummary(), 'Notifications', NOTIFICATION_SUMMARY_TIMEOUT_MS)"), 'notification summary should use the focused transport with a slow-read timeout')
 assert.doesNotMatch(
   notificationCenter,
   /getNotificationApi|window\.api|api\.getNotificationSummary/,
