@@ -6,6 +6,7 @@ import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
+import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import { createDataGapsPager, dataGapRefusalText, dataGapsPagerTotal, type DataGapsState } from '../../utils/productDataGapsPager.ts'
 import { ProductDataGapRowCard } from './ProductDataGapRowCard.tsx'
 import {
@@ -90,7 +91,8 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
     if (!pending) return
     setSaving(true)
     try {
-      const result = await setProductConflictMark(pending.row.id, pending.mark, true)
+      // A queued decision refreshes the waiting tags at once; the transport stays free of the review store (bundle budget).
+      const result = noteQueuedForReview(await setProductConflictMark(pending.row.id, pending.mark, true))
       setPending(null)
       // Queued: nothing changed yet, so the row stays listed (with its waiting tag) until an admin approves.
       notify(result?.pending

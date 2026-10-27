@@ -499,8 +499,9 @@ const moneyErrors = evaluate(named('cloudflare/src/lib/productWrites.ts', ['Prod
 const imageErrors = evaluate(named('cloudflare/src/lib/productImagePermission.ts', ['ProductImageAssetError']), {}, '{ProductImageAssetError}')
 // The handlers call the route file's own module-level helpers (the review-alert hook accessors and the coded-refusal
 // mapper); they are taken from the real source, so the hook-absent no-op path is the one exercised here.
-const reviewRouteHelpers = evaluate(named('cloudflare/src/routes/reviewQueue.ts', ['reviewAlertHook', 'announceReview', 'reviewNameBeforeChange', 'reviewCodedRefusal']), {},
-  '{ announceReview, reviewNameBeforeChange, reviewCodedRefusal }')
+// costMarkHiddenFrom (a Confirm $0 request is invisible to a reader without cost view) reads the real cost-access helper.
+const reviewRouteHelpers = evaluate(named('cloudflare/src/routes/reviewQueue.ts', ['reviewAlertHook', 'announceReview', 'reviewNameBeforeChange', 'reviewCodedRefusal', 'isCostMarkRequest', 'costMarkHiddenFrom']), { ...lib('acquisitionCostAccess') },
+  '{ announceReview, reviewNameBeforeChange, reviewCodedRefusal, costMarkHiddenFrom }')
 function reviewRoute(route, overrides = {}, reviewOverrides = {}) {
   return evaluate(`const handler=${selectRoute('cloudflare/src/routes/reviewQueue.ts', 'post', route)}`, {
     ...branchDeps, ...reviewRouteHelpers, ...lib('pendingActions'), ...lib('reviewApprovalPermission'), ...lib('productDiscountGate'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'), ...lib('productStockGuard'),

@@ -1,7 +1,6 @@
 import { readMergeCostQuotation, type MergeCostQuotation, type MergeCostPreviewPlan, type MergeCostReview } from '../utils/mergeCostPreview.ts'
 export type { MergeCostAuthority, MergeCostQuotation, MergeCostPreviewPlan, MergeCostReview } from '../utils/mergeCostPreview.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
-import { noteQueuedForReview } from '../utils/pendingReviewTargets.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { captureActorReadScope, assertActorReadScope, assertActorWriteIdentity } from './actorReadScope.ts'
@@ -477,15 +476,16 @@ export function getProductDataGapCounts(): Promise<ProductDataGapCounts> {
 
 // "Confirm $0" and "This product has no barcode" (set: false takes the decision back). The Worker audits each change and records
 // an undo entry; neither touches cost, stock or sales.
-// A Review-tier account's decision is queued for an admin instead (202 { pending: true, pendingActionId }): nothing is applied yet, and
-// the "waiting for review" tag on the product's row is refreshed at once. Asking again returns the same open request.
+// A Review-tier account's decision is queued for an admin instead (202 { pending: true, pendingActionId }): nothing is applied yet.
+// The caller refreshes the "waiting for review" tags (noteQueuedForReview); the transport must not import that store, which would pull
+// it into the shared API chunk's closure (tests/performanceBudgets.test.ts). Asking again returns the same open request.
 export function setProductConflictMark(productId: number, mark: ProductConflictMark, set: boolean): Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }> {
-  return (route(
+  return route(
     'products:conflictMark',
     () => apiFetch('POST', '/api/products/data-gaps/marks', { product_id: productId, mark, set }),
     null,
     true,
-  ) as Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }>).then(noteQueuedForReview)
+  ) as Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }>
 }
 
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {

@@ -224,9 +224,10 @@ await runTest('every new string exists in both packs and Khmer is not an English
 await runTest('Review tier: the transport chains the queued-for-review refresh, and a 202 { pending } is told apart from an applied decision', () => {
   const transport = read('api/productWriteTransport.ts')
   const fn = transport.slice(transport.indexOf('export function setProductConflictMark'), transport.indexOf('export function dismissProductDuplicateCluster'))
-  assert.match(fn, /\.then\(noteQueuedForReview\)/, 'the waiting tag refreshes at once after a queued decision')
   assert.match(fn, /pending\?: boolean; pendingActionId\?: number/)
+  assert.ok(!transport.includes('pendingReviewTargets'), 'the shared API chunk must not import the review store (catalog-products chunk budget)')
   const section = read('components/products/ProductDataGapsSection.tsx')
+  assert.match(section, /noteQueuedForReview\(await setProductConflictMark\(/, 'the waiting tag refreshes at once after a queued decision')
   assert.match(section, /result\?\.pending\s*\?\s*t\('reason_submitted_for_review'\)/, 'a queued decision says it was submitted, not that it was saved')
   assert.match(section, /getPermissionTier\?\.\('products'\) === 'review'/)
   assert.equal((section.match(/queuesForReview \? t\('conflict_sent_for_review_state'\)/g) || []).length, 2, 'both dialogs show "Pending approval" as the after-state for a Review-tier account')
