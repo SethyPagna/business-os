@@ -455,10 +455,16 @@ function getClientMetaHeaders(): Record<string, string> {
   return sharedGetClientMetaHeaders()
 }
 
+// The English text of the pack key server_error_page (km.json has the Khmer; restateServerErrorPage swaps it in).
+export const SERVER_ERROR_PAGE_MESSAGE = 'Server unavailable. Please try again.'
+
 function createApiError(status: number, parsed: LooseRecord | null, text: string): ApiRuntimeError {
-  const error = new Error(parsed?.error || text || `HTTP ${status}`) as ApiRuntimeError
+  // Every route of this app answers a failure as a JSON object, so a body that is not one came from a layer in front
+  // of it (an HTML 503 or 1102 page). Never show that markup to the operator.
+  const foreignBody = !(parsed && typeof parsed === 'object') && !!String(text || '').trim()
+  const error = new Error(foreignBody ? SERVER_ERROR_PAGE_MESSAGE : (parsed?.error || text || `HTTP ${status}`)) as ApiRuntimeError
   error.status = status
-  error.code = parsed?.code || null
+  error.code = foreignBody ? 'server_error_page' : (parsed?.code || null)
   if (parsed?.outcome === 'unknown' || parsed?.outcome === 'not_dispatched') error.outcome = parsed.outcome
   if (['refresh_before_create', 'refresh_before_edit', 'retry_same_request'].includes(parsed?.action)) error.action = parsed?.action
   // A refusal that states a wait (a sign-in lockout) keeps it, so the sign-in
@@ -1103,7 +1109,9 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
       if (apiError && typeof document !== 'undefined' && String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) {
-        await (await import('./branchRefusalLanguage.ts')).restateBranchRefusal(apiError)
+        const language = await import('./branchRefusalLanguage.ts')
+        await language.restateBranchRefusal(apiError)
+        await language.restateServerErrorPage(apiError)
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }

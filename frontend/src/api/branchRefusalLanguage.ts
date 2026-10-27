@@ -79,6 +79,14 @@ async function kmPackValue(key: string): Promise<string | null> {
   }
 }
 
+/** A failure answered by something in front of the app (an HTML 503 page, a 1102): api/http.ts gives it the English sentence and this the Khmer one. */
+export async function restateServerErrorPage<T extends Error & { code?: unknown }>(error: T): Promise<T> {
+  if (error?.code !== 'server_error_page') return error
+  const value = await kmPackValue('server_error_page')
+  if (value) error.message = value
+  return error
+}
+
 /** The operator went Back from the redirect float: "Nothing was changed. <branch> is disabled." in the UI language. */
 export async function restateRedirectDeclined<T extends Error>(error: T, branchName: string): Promise<T> {
   const value = await kmPackValue('branch_redirect_declined')
