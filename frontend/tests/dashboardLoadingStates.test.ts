@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { fmtClock24 } from '../src/utils/formatters.ts'
 
 // Source-shape guards for what the pure scheduler test cannot see: how the page uses it.
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -31,7 +32,14 @@ assert.ok(!dashboard.includes('Analytics unavailable for this range'), 'cards do
 assert.ok(dashboard.includes('isTransientLoadError(error) ? nextRetryDelayMs(retryCountRef.current) : null'), 'transient failures retry on the 2 s / 6 s schedule')
 assert.ok(dashboard.includes('const staleScopeRetry = isStaleReadScopeError(error) && !staleScopeRetriedRef.current'), 'stale_read_scope is retried once, silently')
 const packs = ['en', 'km'].map((code) => JSON.parse(fs.readFileSync(new URL(`../src/lang/${code}.json`, import.meta.url), 'utf8')))
-for (const key of ['dashboard_load_failed', 'dashboard_stale_notice']) {
+// Owner ruling: the stock block may be minutes old and says when it was computed, compact, 24 h, Cambodia time.
+assert.equal(fmtClock24('2026-10-27T07:05:00Z'), '14:05', 'the instant is shown in the business timezone, 24 h')
+assert.ok(dashboard.includes("const stockAsOf = summary?.stock_computed_at ? fmtClock24(summary.stock_computed_at) : ''"), 'nothing is shown until the Worker sends the computed time')
+assert.ok(dashboard.includes('{stockAsOf ? ('), 'the as-of line is hidden without the field')
+assert.ok(dashboard.includes("translateOr('stock_as_of', 'Stock as of {time}', 'ស្តុក ត្រឹម {time}').replace('{time}', stockAsOf)"), 'translated, with the time filled in')
+assert.ok(dashboard.includes('onClick={() => { void refreshStockNow() }}') && dashboard.includes('aria-label={refreshLabel} title={refreshLabel}'), 'an icon-only refresh with a translated tooltip')
+assert.ok(dashboard.includes('{ ...getCurrentDashboardRange(), refreshStock: 1 }'), 'the refresh asks the Worker to recompute the stock block')
+for (const key of ['dashboard_load_failed', 'dashboard_stale_notice', 'stock_as_of']) {
   for (const pack of packs) assert.ok(typeof pack[key] === 'string' && pack[key].length > 0, `${key} exists in both packs`)
   assert.notEqual(packs[0][key], packs[1][key], `${key} is translated`)
 }

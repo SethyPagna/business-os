@@ -1407,7 +1407,7 @@ for (const timeoutCall of dashboardTimeoutCalls) {
   let dispatched = 0
   let bounded = 0
   const env = {
-    query, getCurrentDashboardRange: () => query, label: 'Dashboard startup',
+    query, startupQuery: query, getCurrentDashboardRange: () => query, label: 'Dashboard startup',
     ...dashboardTimeoutValues,
     getDashboardApi: () => ({ [method]: (actual: unknown) => { dispatched++; assert.deepEqual(actual, query); return result } }),
     withLoaderTimeout: (loader: () => unknown, label: string, timeout: number) => {

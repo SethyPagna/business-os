@@ -9,7 +9,7 @@ import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { STATS_PRESETS } from '../shared/statsStripPresets.ts'
-import { fmtTime } from '../../utils/formatters'
+import { fmtClock24, fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -182,6 +182,9 @@ interface DashboardHourRow {
 }
 
 interface DashboardSummary {
+  // When the catalog-wide stock block was computed (ISO UTC). It may be minutes old by design;
+  // an older Worker does not send it, and then nothing about its age is shown.
+  stock_computed_at?: string
   today_count: number
   today_total: number
   today_total_khr: number
@@ -258,7 +261,7 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboardStartup: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboardStartup: (params: DashboardRangeQuery & { granularity: DashboardGranularity; refreshStock?: number }) => Promise<unknown>
   getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
   getDashboardInsightList: (params: DashboardRangeQuery & { insight: DashboardInsightKind; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
 }
@@ -922,7 +925,7 @@ export default function Dashboard() {
   // Set when a push arrived (or a read was cut off) while the page was hidden.
   const staleWhileHiddenRef = useRef(false)
   const refreshSchedulerRef = useRef<DashboardRefreshScheduler | null>(null)
-  const loadStartupRef = useRef<(options?: { silent?: boolean }) => Promise<unknown>>(async () => null)
+  const loadStartupRef = useRef<(options?: { silent?: boolean; refreshStock?: boolean }) => Promise<unknown>>(async () => null)
   const isActiveRef = useRef(isActive)
   isActiveRef.current = isActive
   const dashboardExportModulePromiseRef = useRef<Promise<DashboardExportModule> | null>(null)
@@ -976,7 +979,7 @@ export default function Dashboard() {
   // analytics. It used to be three loaders (first open, summary, analytics) racing the same
   // request, each with its own loading flag; one of them could be left set, and the page then
   // showed empty cards with no error.
-  const loadStartup = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+  const loadStartup = useCallback(async ({ silent = false, refreshStock = false }: { silent?: boolean; refreshStock?: boolean } = {}) => {
     const requestScope = dashboardScope
     const requestId = beginTrackedRequest(startupRequestRef)
     const isCurrent = () => requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(startupRequestRef, requestId)
@@ -991,9 +994,11 @@ export default function Dashboard() {
     startupInFlightRef.current = true
     if (silent && hasDataRef.current) setSilentRefresh(true)
     else setLoading(true)
+    // The Worker recomputes the stock block on request, at most once a minute.
+    const startupQuery = refreshStock ? { ...getCurrentDashboardRange(), refreshStock: 1 } : getCurrentDashboardRange()
     try {
       const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboardStartup(getCurrentDashboardRange()),
+        () => getDashboardApi().getDashboardStartup(startupQuery),
         'Dashboard startup',
         DASHBOARD_STARTUP_TIMEOUT_MS,
       )
@@ -1054,6 +1059,11 @@ export default function Dashboard() {
     }
   }, [dashboardScope, getCurrentDashboardRange, invalidateStockAlertPageRequests])
   loadStartupRef.current = loadStartup
+  // The stock block is cached for minutes: ask for a fresh one (the Worker allows it once a minute).
+  const refreshStockNow = useCallback(() => {
+    retryCountRef.current = 0
+    return loadStartup({ silent: true, refreshStock: true })
+  }, [loadStartup])
   // A read someone asked for (Retry, a push, coming back) starts the retry count again.
   const reloadStartup = useCallback(() => {
     retryCountRef.current = 0
@@ -1335,6 +1345,8 @@ export default function Dashboard() {
   const analyticsPending = !analyticsReady && waiting
   const analyticsUnavailable = !analyticsReady && !waiting
   const showLoadNotice = !waiting && Boolean(loadError)
+  // "HH:MM" in the business timezone; empty (hidden) until the Worker says when the stock block was computed.
+  const stockAsOf = summary?.stock_computed_at ? fmtClock24(summary.stock_computed_at) : ''
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
   const displayTotals = useMemo(
     () => normalizeDashboardGrossMetrics(analytics?.totals || {}),
@@ -2302,6 +2314,14 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Hours, low stock, and recent activity */}
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
+      {stockAsOf ? (
+        <div className="mb-1.5 flex items-center justify-end gap-1 text-[11px] text-gray-500 dark:text-gray-400" data-dashboard-stock-as-of="">
+          <span>{translateOr('stock_as_of', 'Stock as of {time}', 'ស្តុក ត្រឹម {time}').replace('{time}', stockAsOf)}</span>
+          <button type="button" onClick={() => { void refreshStockNow() }} disabled={silentRefresh || loading} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={refreshLabel} title={refreshLabel}>
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Best Hour */}
         <ExpiryAlertsCard summary={summary} pending={summaryPending} unavailable={summaryUnavailable} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => { setExpiryAlertsListOpen(true); void loadInsightList('expiring_products') }} />

@@ -46,7 +46,7 @@ assert.match(statsRangeRow, /data-date-presets/, 'dashboard presets should be ow
 // The dashboard's default window is TODAY -- the business day, exactly like
 // the list pages (user, 2026-09-03) -- and it governs the FLOW cards only.
 assert.doesNotMatch(dashboard, /offsetDate\(-6\)/, 'dashboard must not default to a rolling seven-day window')
-assert.ok(dashboard.includes('getDashboardApi().getDashboardStartup(getCurrentDashboardRange())'), 'the startup read must receive the canonical range, including exact UTC bounds')
+assert.ok(dashboard.includes('getDashboardApi().getDashboardStartup(startupQuery)'), 'the startup read must receive the canonical range, including exact UTC bounds')
 assert.match(transport, /appendQuery\('\/api\/dashboard', query\)/, 'dashboard summary transport must forward range parameters')
 assert.match(compat, /startDate: String\(query\.startDate \|\| today\)/, 'the dashboard API fallback range must be today as well')
 // G39 item 1 added a third parameter: the cache context the shared stock
