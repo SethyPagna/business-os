@@ -1266,6 +1266,56 @@ export const SALE_REPLAY_OPTIONAL_TABLES = ['sale_payment_events'] as const
 /** Not a backup table (an alert log); a restore that rolls inventory_movements back clears it. See migration 0272. */
 export const STOCK_CROSSING_ALERTS_TABLE = 'stock_crossing_alerts'
 
+/**
+ * Statements one restore transaction (permit + business statements + release) may hold. 300 is the size the import engine
+ * already submits to production D1 as one db.batch() (D1_IMPORT_BATCH_CHUNK_SIZE in importEngine.ts), and it stays far inside
+ * the 1,000 D1 calls one invocation may make on the Free plan. It was 100, which a full restore's deletion plan met exactly
+ * (one DELETE per BACKUP_TABLES entry, the products update, the stock_crossing_alerts clear, plus the two permit statements):
+ * the next table added to BACKUP_TABLES made every full restore refuse at run time.
+ */
+export const RESTORE_TRANSACTION_MAX_STATEMENTS = 300
+/** Business statements per restore transaction: the limit above less stockTransactionStatementCount's own overhead. */
+export const RESTORE_DELETE_STATEMENTS_PER_TRANSACTION = RESTORE_TRANSACTION_MAX_STATEMENTS - stockTransactionStatementCount(0)
+
+/** Cuts an ordered plan into consecutive runs of at most `perTransaction`; the runs concatenate back to the plan. */
+export function splitRestoreDeletePlan<T>(plan: readonly T[], perTransaction: number = RESTORE_DELETE_STATEMENTS_PER_TRANSACTION): T[][] {
+  if (!Number.isInteger(perTransaction) || perTransaction < 1) throw new Error('Restore transaction size must be a positive integer.')
+  const parts: T[][] = []
+  for (let start = 0; start < plan.length; start += perTransaction) parts.push(plan.slice(start, start + perTransaction))
+  return parts
+}
+
+/**
+ * Runs the restore's deletion plan and returns the statement count it submitted. A plan that fits one transaction (every
+ * table today) is all-or-nothing, exactly as before: a failure changes no rows. A longer plan -- more BACKUP_TABLES than one
+ * transaction holds -- runs as consecutive transactions IN THE SAME ORDER (children before parents, the products update after
+ * the ledgers it reads), so the foreign-key order is unchanged and the restore never refuses merely because the schema grew.
+ * Such a plan is not all-or-nothing, which the restore as a whole never was (the insert pass is many transactions, and
+ * maintenance.ts holds the fence): a chunk that fails after an earlier one committed throws an error that says so, the route
+ * records phase 'failed' and keeps maintenance on, and re-running the same backup (a full delete and reinsert) repairs it.
+ */
+export async function runRestoreDeletePlan(
+  db: D1Database,
+  plan: readonly D1PreparedStatement[],
+  authorize: () => Promise<Parameters<typeof executeRawRestoreStockTransaction>[2]>,
+  perTransaction: number = RESTORE_DELETE_STATEMENTS_PER_TRANSACTION,
+): Promise<number> {
+  const parts = splitRestoreDeletePlan(plan, perTransaction)
+  let submitted = 0
+  for (let index = 0; index < parts.length; index += 1) {
+    try {
+      await executeRawRestoreStockTransaction(db, parts[index], await authorize())
+    } catch (error) {
+      if (index === 0) throw error
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(`Restore deletion stopped in part ${index + 1} of ${parts.length}; parts 1-${index} were already committed, so the database is partly cleared. `
+        + `Maintenance stays on: re-run the restore from the same backup. (${reason})`, { cause: error })
+    }
+    submitted += stockTransactionStatementCount(parts[index].length)
+  }
+  return submitted
+}
+
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
   if ([...SALE_REPLAY_RESTORE_BUNDLE, ...SALE_REPLAY_OPTIONAL_TABLES].some((table) => requested.has(table))) {
@@ -1646,12 +1696,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
       deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     }
-    if (stockTransactionStatementCount(deletes.length) > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
     await onProgress?.({ phase: 'deleting' })
-    if (deletes.length) {
-      await executeRawRestoreStockTransaction(env.DB, deletes, await restoreStockAuthority(env, restoreToken || '', source))
-      statementCount += stockTransactionStatementCount(deletes.length)
-    }
+    statementCount += await runRestoreDeletePlan(env.DB, deletes, () => restoreStockAuthority(env, restoreToken || '', source))
 
     // Pass 2: stream rows and insert in bounded batches, per table.
     const CHUNK = 80

@@ -144,17 +144,24 @@ check('the unruled list only shrinks (base-era 19; none blocked on a trigger car
   assert.ok(Object.keys(UNRULED).length <= 19, 'do not park new tables in UNRULED -- decide')
 })
 
-// A full restore deletes every backed-up table (plus one products update) in ONE atomic stock transaction, which
-// lib/backup.ts refuses above 100 statements (stockTransactionStatementCount adds its own overhead). Past that, every
-// full restore refuses at run time, so the budget is checked here: chunk the restore plan before adding more tables.
-check('a full restore stays inside the 100-statement atomic limit', () => {
+// A full restore deletes every backed-up table, plus the products update and the stock_crossing_alerts clear, before it
+// inserts. lib/backup.ts submits that plan through runRestoreDeletePlan, which keeps it ONE transaction while it fits
+// RESTORE_TRANSACTION_MAX_STATEMENTS and chunks it in order past that, so a new table can no longer make every full restore
+// refuse. (RC3: the plan reached 101 against a hard 100 and refused; the old form of this check counted BACKUP_TABLES + 1 +
+// overhead, missed the crossing-log DELETE, read 100 and passed. test-backup-restore-delete-plan-pure counts what the restore
+// really submits.)
+check('a full restore deletion plan is counted whole and goes through the chunking helper', () => {
   const txSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'stockTransaction.ts'), 'utf8')
   const overhead = Number((txSource.match(/return businessStatements \+ (\d+)/) || [])[1])
   assert.ok(Number.isInteger(overhead), 'stockTransactionStatementCount overhead not found')
-  assert.ok(backupSource.includes('if (stockTransactionStatementCount(deletes.length) > 100) throw'), 'the restore guard moved; re-check this budget')
-  const statements = BACKUP_TABLES.length + 1 + overhead
-  assert.ok(statements <= 100, `a full restore needs ${statements} statements; chunk the restore plan before adding tables`)
-  console.log(`  restore statements ${statements}/100`)
+  const limit = Number((backupSource.match(/RESTORE_TRANSACTION_MAX_STATEMENTS = (\d+)/) || [])[1])
+  assert.ok(Number.isInteger(limit) && limit > overhead, 'RESTORE_TRANSACTION_MAX_STATEMENTS not found')
+  assert.ok(backupSource.includes('runRestoreDeletePlan(env.DB, deletes,'), 'the restore must submit its deletes through runRestoreDeletePlan')
+  assert.ok(!backupSource.includes('exceeds the atomic statement limit'), 'a long deletion plan is chunked, not refused')
+  assert.ok(backupSource.includes("deletes.push(env.DB.prepare(`DELETE FROM ${qid(STOCK_CROSSING_ALERTS_TABLE)}`))"), 'the crossing-log DELETE moved; re-count the plan below')
+  const business = BACKUP_TABLES.length + 1 + 1
+  const parts = Math.ceil(business / (limit - overhead))
+  console.log(`  full restore deletion plan: ${business} statements + ${overhead} overhead per transaction, ${parts} transaction(s) at ${limit}`)
 })
 
-console.log(`\n${passed} check(s) passed.`)
+
