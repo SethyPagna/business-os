@@ -7584,6 +7584,8 @@
   "conflict_refusal_barcode_present": "ផលិតផលនេះមានបាកូដ ដូច្នេះមិនអាចកត់ថាគ្មានបាកូដបានទេ។",
   "conflict_refusal_product_changed": "ផលិតផលនេះបានប្ដូរក្រោយពេលអ្នកបើក។ សូមផ្ទុកឡើងវិញ ហើយព្យាយាមម្ដងទៀត។",
   "conflict_refusal_product_not_found": "ផលិតផលនេះលែងមានហើយ។ សូមផ្ទុកបញ្ជីឡើងវិញ។",
+  "conflict_refusal_confirmed_value_changed": "ថ្លៃដើម ឬបាកូដបានប្តូរបន្ទាប់ពីសំណើ ដូច្នេះមិនបានអនុវត្តទេ។ សំណើនៅបើក៖ បដិសេធ ឬស្នើម្តងទៀត។",
+  "conflict_sent_for_review_state": "កំពុងរង់ចាំការអនុម័ត",
   "conflict_enter_barcode": "បញ្ចូលបាកូដ",
   "conflict_mark_no_barcode": "ផលិតផលនេះគ្មានបាកូដ",
   "conflict_issue_saved": "បានរក្សាទុក — ដកចេញពីទំនាស់ទិន្នន័យ",

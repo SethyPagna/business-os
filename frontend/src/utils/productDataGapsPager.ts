@@ -104,6 +104,7 @@ export const DATA_GAP_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   barcode_present: 'conflict_refusal_barcode_present',
   product_changed: 'conflict_refusal_product_changed',
   product_not_found: 'conflict_refusal_product_not_found',
+  confirmed_value_changed: 'conflict_refusal_confirmed_value_changed',
 }
 
 export function dataGapRefusalText(error: unknown, t: (key: string) => string | undefined, fallback: string): string {

@@ -190,7 +190,7 @@ await runTest('wiring: the tab mounts the section with its Refresh token, the se
 await runTest('a refused decision is restated from the language pack, in English and in Khmer, never the Worker English', () => {
   const workerEnglish = 'Worker English sentence'
   // Literal expectations: the table under test must not be its own oracle.
-  const EXPECTED_KEYS: Record<string, string> = { zero_not_unconfirmed: 'conflict_refusal_zero_not_unconfirmed', barcode_present: 'conflict_refusal_barcode_present', product_changed: 'conflict_refusal_product_changed', product_not_found: 'conflict_refusal_product_not_found' }
+  const EXPECTED_KEYS: Record<string, string> = { zero_not_unconfirmed: 'conflict_refusal_zero_not_unconfirmed', barcode_present: 'conflict_refusal_barcode_present', product_changed: 'conflict_refusal_product_changed', product_not_found: 'conflict_refusal_product_not_found', confirmed_value_changed: 'conflict_refusal_confirmed_value_changed' }
   assert.deepEqual({ ...DATA_GAP_REFUSAL_KEYS }, EXPECTED_KEYS)
   for (const code of Object.keys(EXPECTED_KEYS)) {
     const error = Object.assign(new Error(workerEnglish), { code, status: 409 })
@@ -211,13 +211,48 @@ await runTest('a refused decision is restated from the language pack, in English
 await runTest('every new string exists in both packs and Khmer is not an English placeholder', () => {
   const keys = ['product_data_gaps_none_unknown_cost', 'product_data_gaps_none_empty_barcode', 'product_data_gaps_none_placeholder_barcode', 'product_data_gaps_load_failed',
     'product_data_gaps_save_failed', 'conflict_type_unknown_cost', 'conflict_type_empty_barcode', 'conflict_type_placeholder_barcode', 'conflict_unknown_cost_catalog',
-    'conflict_refusal_zero_not_unconfirmed', 'conflict_refusal_barcode_present', 'conflict_refusal_product_changed', 'conflict_refusal_product_not_found', 'conflict_confirm_zero', 'conflict_confirm_zero_message', 'conflict_zero_confirmed_state', 'conflict_mark_no_barcode', 'conflict_mark_no_barcode_message', 'conflict_no_barcode_marked_state']
+    'conflict_refusal_zero_not_unconfirmed', 'conflict_refusal_barcode_present', 'conflict_refusal_product_changed', 'conflict_refusal_product_not_found', 'conflict_refusal_confirmed_value_changed', 'conflict_sent_for_review_state', 'reason_submitted_for_review', 'conflict_confirm_zero', 'conflict_confirm_zero_message', 'conflict_zero_confirmed_state', 'conflict_mark_no_barcode', 'conflict_mark_no_barcode_message', 'conflict_no_barcode_marked_state']
   for (const key of keys) {
     assert.ok(en[key], `${key} en`)
     assert.ok(km[key], `${key} km`)
     assert.notEqual(km[key], en[key], `${key} km is not English`)
     assert.match(km[key], /[ក-៿]/, `${key} km has Khmer`)
   }
+})
+
+// ---- Review tier (owner ruling, 27 Oct 2026): a Review-tier account's Confirm $0 / no-barcode is queued for an admin ----
+await runTest('Review tier: the transport chains the queued-for-review refresh, and a 202 { pending } is told apart from an applied decision', () => {
+  const transport = read('api/productWriteTransport.ts')
+  const fn = transport.slice(transport.indexOf('export function setProductConflictMark'), transport.indexOf('export function dismissProductDuplicateCluster'))
+  assert.match(fn, /\.then\(noteQueuedForReview\)/, 'the waiting tag refreshes at once after a queued decision')
+  assert.match(fn, /pending\?: boolean; pendingActionId\?: number/)
+  const section = read('components/products/ProductDataGapsSection.tsx')
+  assert.match(section, /result\?\.pending\s*\?\s*t\('reason_submitted_for_review'\)/, 'a queued decision says it was submitted, not that it was saved')
+  assert.match(section, /getPermissionTier\?\.\('products'\) === 'review'/)
+  assert.equal((section.match(/queuesForReview \? t\('conflict_sent_for_review_state'\)/g) || []).length, 2, 'both dialogs show "Pending approval" as the after-state for a Review-tier account')
+  assert.match(section, /onConfirmZero=\{canConfirmZero \?/, 'the $0 button needs products edit and the cost-entry permission, not the Full tier')
+  assert.match(section, /onMarkNoBarcode=\{canEditProduct \?/)
+  assert.ok(!/=== 'full'/.test(section), 'no Full-tier gate remains on the buttons')
+})
+
+await runTest('Review tier: the row card carries the waiting tag for its own product, and draws nothing extra when nothing waits', () => {
+  const card = read('components/products/ProductDataGapRowCard.tsx')
+  assert.match(card, /<PendingReviewTag section="products" entityType="product" ids=\{\[row\.id\]\}/)
+  const html = renderToStaticMarkup(React.createElement(ProductDataGapRowCard, { row: row(7, { barcode: null }), kind: 'empty_barcode', t: tr, onMarkNoBarcode: () => {} }))
+  assert.ok(!html.includes('role="img"'), 'nothing waiting: no tag')
+  assert.match(html, /data-product-data-gap-no-barcode/, 'a Review-tier account still gets the button')
+})
+
+await runTest('Review tier: an approval refused because the cost or barcode changed is worded from the pack, in English and Khmer', async () => {
+  const { reviewApprovalRefusalText } = await import('../src/api/branchRuleErrors.ts')
+  for (const [lang, pack] of [['en', en], ['km', km]] as const) {
+    const text = reviewApprovalRefusalText('confirmed_value_changed', 'products', (key) => pack[key])
+    assert.equal(text, pack.conflict_refusal_confirmed_value_changed, lang)
+    assert.ok(text && text.length > 20)
+  }
+  assert.match(km.conflict_refusal_confirmed_value_changed, /[ក-៿]/)
+  assert.ok(km.conflict_refusal_confirmed_value_changed.length < en.conflict_refusal_confirmed_value_changed.length, 'Khmer is the shorter line')
+  assert.equal(reviewApprovalRefusalText('something_else', 'products', (key) => en[key]), null)
 })
 
 if (failures) process.exit(1)

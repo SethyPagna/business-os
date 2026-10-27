@@ -386,6 +386,46 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer, wait
   await notify(env, waitUntil, 'products', { action: 'update', id })
 })
 
+// --- products / conflict_mark / product ----------------------------
+// A review-tier "Confirm $0 cost" / "no barcode" decision (routes/products.ts POST /data-gaps/marks, owner ruling 27 Oct 2026).
+// Approval writes the mark exactly as the Full tier does (lib/productDataGaps.ts setProductConflictMark: guard, mark, undo record,
+// audit row), as the REVIEWER, naming the requester in the audit details. A confirmation stands on the value it was made on, so the
+// write is refused (409, request stays open) unless the product still holds the cost / barcode the requester saw.
+function conflictMarkRefusal(code: string, message: string): Error {
+  return Object.assign(new Error(message), { name: 'ReviewCodedRefusal', code, status: 409 as const })
+}
+registerApplier('products', 'conflict_mark', 'product', async (env, row, reviewer, waitUntil) => {
+  // Imported where used, like lib/undoAppliers.ts does for the same module: the many harnesses that load this file by name never reach this applier.
+  const { parseProductConflictMarkInput, parseConfirmedValue, setProductConflictMark, ProductConflictMarkError } = await import('./productDataGaps')
+  const { canEditAcquisitionCosts, canViewAcquisitionCosts } = await import('./acquisitionCostAccess')
+  let payload: Record<string, unknown>
+  try { payload = JSON.parse(row.payload_json || '{}') as Record<string, unknown> } catch { payload = {} }
+  let input
+  try { input = parseProductConflictMarkInput(payload) } catch (error) {
+    throw conflictMarkRefusal('review_payload_unreadable', error instanceof Error ? error.message : 'This request cannot be read.')
+  }
+  if (row.entity_id != null && Number(row.entity_id) !== input.product_id) throw conflictMarkRefusal('review_payload_unreadable', 'This request names a different product than it was filed against.')
+  const requester = await loadPendingRequester(env, row.requested_by)
+  if (!requester || getActionTier(requester, 'products', 'edit') === 'none'
+    || (input.mark === 'zero_cost_confirmed' && !(canViewAcquisitionCosts(requester) && canEditAcquisitionCosts(requester)))) {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to make this decision.')
+  }
+  // A confirmation with no recorded value cannot be checked, so it is refused rather than applied blind.
+  const expected = input.set ? parseConfirmedValue(input.mark, payload.expected) : undefined
+  if (input.set && !expected) throw conflictMarkRefusal('review_payload_unreadable', 'This request has no recorded value to check, so it was not applied. Reject it and ask again.')
+  let result
+  try {
+    result = await setProductConflictMark(getDb(env), { id: reviewer.id, name: reviewer.name }, input,
+      { expected: expected ?? undefined, via: 'review', requestedBy: { id: row.requested_by, name: row.requested_by_name } })
+  } catch (error) {
+    if (error instanceof ProductConflictMarkError) throw conflictMarkRefusal(error.code, error.message)
+    throw error
+  }
+  if (!result.changed) return
+  await bumpVersion(env, 'products')
+  await notify(env, waitUntil, 'products', { action: 'update', id: input.product_id })
+})
+
 // --- products / delete / product -----------------------------------
 // Mirrors routes/products.ts's own DELETE /:id (soft delete, same as
 // every other product deactivation path in this app, including the

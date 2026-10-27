@@ -510,6 +510,7 @@ const REVIEW_REQUEST_PHRASES = {
   'New product': 'ផលិតផលថ្មី',                 // km.json new_products_count
   'Edit product': 'កែប្រែផលិតផល',              // km.json perm_act_products_edit
   'Remove product': 'លុបផលិតផល',               // km.json perm_act_products_delete (Delete product) and remove (លុប)
+  'Confirm conflict': 'បញ្ជាក់ទំនាស់ទិន្នន័យ',   // km.json confirm + conflicts
   'Delete expense': 'លុបចំណាយ',                // km.json perm_act_fees_delete
   'Edit stock reasons': 'កែប្រែមូលហេតុស្តុក',   // កែប្រែ (shift_action_edit) + មូលហេតុ (reason) + ស្តុក (stock)
   'Edit branch': 'កែប្រែសាខា',                 // km.json perm_act_branches_edit

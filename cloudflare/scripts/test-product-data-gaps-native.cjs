@@ -178,7 +178,7 @@ async function main() {
 
   await check('the Conflicts permission is enforced on every read and write with exact statuses', async () => {
     const reads = ['/data-gaps?kind=empty_barcode', '/data-gaps/counts']
-    for (const user of [role({ products: 'review' }), role({ products: true, 'products:merge_duplicates': false }), role({ pos: true })]) {
+    for (const user of [role({ products: true, 'products:merge_duplicates': false }), role({ pos: true })]) {
       for (const path of reads) {
         const res = await get(path, user)
         assert.equal(res.status, 403, `${user.role_permissions} ${path}`)
@@ -186,7 +186,8 @@ async function main() {
         assert.equal(res.json.counts, undefined)
       }
     }
-    for (const user of [role({ products: true }), noCostView, withCost, admin]) {
+    // The Review tier reads the lists too (owner, 27 Oct 2026): it can ask for a decision, an admin approves it.
+    for (const user of [role({ products: 'review' }), role({ products: true }), noCostView, withCost, admin]) {
       for (const path of reads) assert.equal((await get(path, user)).status, 200, path)
     }
   })
@@ -234,12 +235,12 @@ async function main() {
     assert.ok(!ids(await get('/data-gaps?kind=unknown_cost&limit=100')).includes(31))
   })
 
-  await check('Conflicts access gates the decisions too: merge_duplicates off, review tier and a missing cost view are refused with 403 and write nothing', async () => {
+  await check('Conflicts access gates the decisions too: merge_duplicates off and a missing cost view are refused with 403 and write nothing', async () => {
     const marksBefore = db.prepare('SELECT COUNT(*) n FROM product_conflict_marks').get().n
     const historyBefore = db.prepare('SELECT COUNT(*) n FROM action_history').get().n
     const employeeShape = role({ products: true, 'products:merge_duplicates': false, product_cost_view: true, product_cost_edit: true })
     const noCostView = role({ ...MERGE, product_cost_edit: true })
-    for (const [who, user] of [['merge off', employeeShape], ['review tier', role({ products: 'review', 'products:merge_duplicates': true, product_cost_view: true, product_cost_edit: true })]]) {
+    for (const [who, user] of [['merge off', employeeShape]]) {
       assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, user)).status, 403, `${who}: no barcode`)
       assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, user)).status, 403, `${who}: confirm $0`)
     }
@@ -252,7 +253,6 @@ async function main() {
 
   await check('refusals: a $0 confirmation needs the cost-entry permission, products edit at the full tier; the gap must still exist', async () => {
     assert.equal((await post({ product_id: 1, mark: 'zero_cost_confirmed', set: true }, role({ ...MERGE, product_cost_view: true }))).status, 403)
-    assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, role({ products: 'review', 'products:merge_duplicates': true }))).status, 403)
     assert.equal((await post({ product_id: 13, mark: 'no_barcode', set: true }, role({ pos: true }))).status, 403)
     const notZero = await post({ product_id: 6, mark: 'zero_cost_confirmed', set: true })
     assert.equal(notZero.status, 409)

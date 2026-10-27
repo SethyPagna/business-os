@@ -1,6 +1,7 @@
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
 import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
+import PendingReviewTag from '../shared/PendingReviewTag.tsx'
 import { ProductImg } from './shared/primitives.tsx'
 import type { ProductDataGapKind, ProductDataGapRow } from '../../api/productWriteTransport.ts'
 
@@ -14,9 +15,9 @@ export function ProductDataGapRowCard({ row, kind, t, onOpen, onConfirmZero, onM
   kind: ProductDataGapKind
   t: TranslateFn
   onOpen?: (productId: number) => void
-  /** Present only for a user who may confirm a $0 (products edit + the cost-entry permission). */
+  /** Present only for a user who may confirm a $0 (products edit + the cost-entry permission); a Review-tier account's tap is queued. */
   onConfirmZero?: (row: ProductDataGapRow) => void
-  /** Present only for a user who may edit products at the full tier. */
+  /** Present only for a user who may edit products (Full applies it; Review queues it). */
   onMarkNoBarcode?: (row: ProductDataGapRow) => void
 }) {
   const name = row.name || `#${row.id}`
@@ -35,7 +36,9 @@ export function ProductDataGapRowCard({ row, kind, t, onOpen, onConfirmZero, onM
   const noBarcodeLabel = t('conflict_mark_no_barcode') || 'This product has no barcode'
   const showBarcode = kind !== 'empty_barcode' && row.barcode && row.barcode.trim()
   return (
-    <div data-product-data-gap-row={row.id} className="flex w-full min-w-0 items-start gap-1 rounded-xl border border-amber-200 bg-amber-50 pr-1.5 dark:border-amber-900/40 dark:bg-amber-950/30">
+    <div data-product-data-gap-row={row.id} className="relative flex w-full min-w-0 items-start gap-1 rounded-xl border border-amber-200 bg-amber-50 pr-1.5 dark:border-amber-900/40 dark:bg-amber-950/30">
+      {/* A Review-tier decision waits for an admin: the same corner hourglass every queued product change shows. */}
+      <PendingReviewTag section="products" entityType="product" ids={[row.id]} className="left-px top-px" />
       <button
         type="button"
         onClick={() => onOpen?.(row.id)}

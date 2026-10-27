@@ -7584,6 +7584,8 @@
   "conflict_refusal_barcode_present": "This product has a barcode, so it cannot be marked as having none.",
   "conflict_refusal_product_changed": "This product changed after you opened it. Refresh and try again.",
   "conflict_refusal_product_not_found": "This product no longer exists. Refresh the list.",
+  "conflict_refusal_confirmed_value_changed": "The cost or barcode changed after this was requested, so nothing was applied. The request is still open: reject it, or ask for it again.",
+  "conflict_sent_for_review_state": "Pending approval",
   "conflict_enter_barcode": "Enter barcode",
   "conflict_mark_no_barcode": "This product has no barcode",
   "conflict_issue_saved": "Saved — removed from Conflicts",

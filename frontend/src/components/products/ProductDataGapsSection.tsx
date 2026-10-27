@@ -45,11 +45,13 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
   /** The tab's own Refresh bumps this; the section re-reads instead of carrying a second Refresh button. */
   refreshToken?: number
 }) {
-  const { user, can } = useApp() as { user: PermissionUser; can?: (permissionKey: string, actionKey: string) => boolean }
+  const { user, can, getPermissionTier } = useApp() as { user: PermissionUser; can?: (permissionKey: string, actionKey: string) => boolean; getPermissionTier?: (key: string) => string }
   const { syncChannel } = useSync() as { syncChannel?: { channel?: string; reason?: string; ts?: number } }
   const canSeeCost = canViewAcquisitionCosts(user)
   const canEditProduct = can ? can('products', 'edit') : false
   const canConfirmZero = canEditProduct && canEditAcquisitionCosts(user)
+  // A Review-tier account may ask for either decision; an admin approves it from the review queue (owner, 27 Oct 2026).
+  const queuesForReview = getPermissionTier?.('products') === 'review'
   const kinds = useMemo(() => KINDS.filter((item) => item.kind !== 'unknown_cost' || canSeeCost), [canSeeCost])
   // One pager per mount (created in the effect, so a StrictMode re-run gets a fresh, undisposed one).
   const pagerRef = useRef<ReturnType<typeof createDataGapsPager> | null>(null)
@@ -88,9 +90,12 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
     if (!pending) return
     setSaving(true)
     try {
-      await setProductConflictMark(pending.row.id, pending.mark, true)
+      const result = await setProductConflictMark(pending.row.id, pending.mark, true)
       setPending(null)
-      notify(t('conflict_issue_saved') || 'Saved — removed from Conflicts')
+      // Queued: nothing changed yet, so the row stays listed (with its waiting tag) until an admin approves.
+      notify(result?.pending
+        ? t('reason_submitted_for_review') || 'Submitted for review -- changes will appear once approved.'
+        : t('conflict_issue_saved') || 'Saved — removed from Conflicts')
       void pagerRef.current?.reload()
     } catch (error) {
       notify(dataGapRefusalText(error, t, 'Could not save this decision'), 'error')
@@ -177,11 +182,11 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
           items={zeroDialog
             ? [
               { label: t('before') || 'Before', value: t('cost_zero_unconfirmed') || '$0 not confirmed' },
-              { label: t('after') || 'After', value: t('conflict_zero_confirmed_state') || '$0 confirmed' },
+              { label: t('after') || 'After', value: queuesForReview ? t('conflict_sent_for_review_state') || 'Pending approval' : t('conflict_zero_confirmed_state') || '$0 confirmed' },
             ]
             : [
               { label: t('before') || 'Before', value: state.kind === 'placeholder_barcode' ? t('conflict_type_placeholder_barcode') || 'Barcode 0' : t('conflict_type_empty_barcode') || 'No barcode' },
-              { label: t('after') || 'After', value: t('conflict_no_barcode_marked_state') || 'Marked: no barcode' },
+              { label: t('after') || 'After', value: queuesForReview ? t('conflict_sent_for_review_state') || 'Pending approval' : t('conflict_no_barcode_marked_state') || 'Marked: no barcode' },
             ]}
           confirmLabel={t('confirm') || 'Confirm'}
           working={saving}

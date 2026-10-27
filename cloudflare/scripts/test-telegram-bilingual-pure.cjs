@@ -285,13 +285,15 @@ const REVIEW_PHRASE_PACK_KEYS = {
   'Edit branch': 'perm_act_branches_edit',
 }
 assert.deepEqual(Object.keys(lang.TELEGRAM_REVIEW_REQUEST_PHRASES).sort(),
-  [...Object.keys(REVIEW_PHRASE_PACK_KEYS), 'Edit stock reasons'].sort(), 'exactly six request phrases')
+  [...Object.keys(REVIEW_PHRASE_PACK_KEYS), 'Edit stock reasons', 'Confirm conflict'].sort(), 'exactly seven request phrases')
 for (const [english, key] of Object.entries(REVIEW_PHRASE_PACK_KEYS)) {
   assert.ok(kmPack[key], `${key} must exist in km.json`)
   assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES[english], kmPack[key], `request phrase "${english}" must say what km.json ${key} says`)
 }
 assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES['Edit stock reasons'], kmPack.shift_action_edit + kmPack.reasons + kmPack.stock,
   '"Edit stock reasons" is the pack\'s Edit + Reasons + Stock')
+assert.equal(lang.TELEGRAM_REVIEW_REQUEST_PHRASES['Confirm conflict'], kmPack.confirm + kmPack.conflicts,
+  '"Confirm conflict" is the pack\'s Confirm + Conflicts')
 assert.equal(lang.TELEGRAM_LABELS.requestedBy.km, kmPack.requested_by, 'the Requested by label is km.json requested_by')
 assert.ok(kmPack.reset_admin_request_send.includes(lang.TELEGRAM_LABELS.request.km), 'the Request label is the pack\'s own word for a request')
 assert.deepEqual(
@@ -299,7 +301,7 @@ assert.deepEqual(
   ['សំណើរង់ចាំការត្រួតពិនិត្យ', 'បានអនុម័តសំណើ', 'បានបដិសេធសំណើ', 'បានដាក់ស្នើឡើងវិញ'],
   'the four review headings carry their Khmer',
 )
-console.log('PASS review alert wording: six request phrases and two labels held to their pack keys, four headings with their Khmer')
+console.log('PASS review alert wording: seven request phrases and two labels held to their pack keys, four headings with their Khmer')
 
 // The check above transitively covers every Worker term that HAS a pack
 // counterpart. The terms that do not -- 'SRET', the command

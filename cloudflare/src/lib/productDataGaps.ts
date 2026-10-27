@@ -250,30 +250,110 @@ async function productState(db: Db, input: ProductConflictMarkInput): Promise<{ 
   return { active: Number(row?.active || 0), markable: Number(row?.markable || 0), marked: Number(row?.marked || 0) }
 }
 
-export async function setProductConflictMark(
-  db: Db,
-  actor: ConflictActor,
-  input: ProductConflictMarkInput,
-): Promise<{ product_id: number; mark: ProductConflictMark; set: boolean; changed: boolean; action_history_id: number }> {
+// The value a "confirmed correct" decision stands on: the catalog cost for a $0 confirmation, the barcode text for "no barcode".
+// A review-tier request records it when it is made; the approval refuses unless the product still holds exactly that value (owner, 27 Oct 2026).
+export type ConfirmedValue = { cost_price_usd: number | null; cost_price_khr: number | null } | { barcode: string | null }
+
+export async function readConfirmedValue(db: Db, input: Pick<ProductConflictMarkInput, 'product_id' | 'mark'>): Promise<ConfirmedValue | null> {
+  const row = await db.prepare('SELECT cost_price_usd, cost_price_khr, barcode FROM products WHERE id = @pid AND is_active = 1')
+    .get<{ cost_price_usd: number | null; cost_price_khr: number | null; barcode: string | null }>({ pid: input.product_id })
+  if (!row) return null
+  return input.mark === 'zero_cost_confirmed'
+    ? { cost_price_usd: row.cost_price_usd ?? null, cost_price_khr: row.cost_price_khr ?? null }
+    : { barcode: row.barcode ?? null }
+}
+
+/** Reads a stored ConfirmedValue back for the given mark; null when it is missing or the wrong shape. */
+export function parseConfirmedValue(mark: ProductConflictMark, raw: unknown): ConfirmedValue | null {
+  const record = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+  if (!record) return null
+  const num = (value: unknown): number | null | undefined => (value === null ? null : typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+  if (mark === 'zero_cost_confirmed') {
+    const usd = num(record.cost_price_usd)
+    const khr = num(record.cost_price_khr)
+    return usd === undefined || khr === undefined ? null : { cost_price_usd: usd, cost_price_khr: khr }
+  }
+  return record.barcode === null || typeof record.barcode === 'string' ? { barcode: record.barcode as string | null } : null
+}
+
+const confirmedSql = (mark: ProductConflictMark): string => (mark === 'zero_cost_confirmed'
+  ? 'EXISTS (SELECT 1 FROM products p WHERE p.id = @pid AND p.cost_price_usd IS @exp_usd AND p.cost_price_khr IS @exp_khr)'
+  : 'EXISTS (SELECT 1 FROM products p WHERE p.id = @pid AND p.barcode IS @exp_barcode)')
+
+const confirmedParams = (expected: ConfirmedValue): Record<string, unknown> => ('barcode' in expected
+  ? { exp_barcode: expected.barcode }
+  : { exp_usd: expected.cost_price_usd, exp_khr: expected.cost_price_khr })
+
+const valueChanged = (mark: ProductConflictMark): ProductConflictMarkError => (mark === 'zero_cost_confirmed'
+  ? new ProductConflictMarkError(409, 'confirmed_value_changed', 'The cost changed after this was requested, so the $0 confirmation was not applied. Reject the request and check the product again.')
+  : new ProductConflictMarkError(409, 'confirmed_value_changed', 'The barcode changed after this was requested, so the "no barcode" mark was not applied. Reject the request and check the product again.'))
+
+/**
+ * The checks every mark change starts with. Returns 'noop' when the product is already in the asked state, throws the refusal
+ * otherwise. A review-tier request runs it before queueing so a request that could never apply is not queued.
+ */
+export async function preflightProductConflictMark(db: Db, input: ProductConflictMarkInput): Promise<'noop' | 'ok'> {
   const state = await productState(db, input)
   if (!state.active) throw new ProductConflictMarkError(404, 'product_not_found', 'Product not found')
-  if (Boolean(state.marked) === input.set) return { product_id: input.product_id, mark: input.mark, set: input.set, changed: false, action_history_id: 0 }
+  if (Boolean(state.marked) === input.set) return 'noop'
   if (input.set && !state.markable) {
     throw input.mark === 'zero_cost_confirmed'
       ? new ProductConflictMarkError(409, 'zero_not_unconfirmed', 'This cost is no longer an unconfirmed $0. Refresh and check it.')
       : new ProductConflictMarkError(409, 'barcode_present', 'This product has a barcode, so it cannot be marked as having none.')
   }
+  return 'ok'
+}
+
+/** The open request of this account for the same product, mark and direction, so a repeated tap or retry reuses it (null when none). */
+export async function findOpenConflictMarkRequest(db: Db, requestedBy: number | null, input: ProductConflictMarkInput): Promise<number | null> {
+  const rows = await db.prepare(`SELECT id, payload_json FROM pending_actions
+    WHERE status = 'open' AND section = 'products' AND action_type = 'conflict_mark' AND entity_type = 'product'
+      AND entity_id = @pid AND requested_by IS @uid ORDER BY id`).all<{ id: number; payload_json: string }>({ pid: input.product_id, uid: requestedBy })
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
+      if (payload.mark === input.mark && payload.set === input.set) return Number(row.id)
+    } catch { /* an unreadable request is never a match */ }
+  }
+  return null
+}
+
+export type ProductConflictMarkOptions = {
+  /** Set only: the value the decision stands on; the write is refused unless the product still holds it. */
+  expected?: ConfirmedValue
+  /** Where the change came from, for the audit row. */
+  via?: 'conflicts' | 'review'
+  /** The review-tier account that asked, named on the audit row when a reviewer applies the change. */
+  requestedBy?: ConflictActor
+}
+
+export async function setProductConflictMark(
+  db: Db,
+  actor: ConflictActor,
+  input: ProductConflictMarkInput,
+  options: ProductConflictMarkOptions = {},
+): Promise<{ product_id: number; mark: ProductConflictMark; set: boolean; changed: boolean; action_history_id: number }> {
+  if (await preflightProductConflictMark(db, input) === 'noop') {
+    return { product_id: input.product_id, mark: input.mark, set: input.set, changed: false, action_history_id: 0 }
+  }
+  const expected = input.set ? options.expected : undefined
+  if (expected) {
+    const now = await readConfirmedValue(db, input)
+    if (JSON.stringify(now) !== JSON.stringify(expected)) throw valueChanged(input.mark)
+  }
   const [label, undoLabel, redoLabel] = MARK_TEXT[input.mark][input.set ? 'set' : 'unset']
   const payload = JSON.stringify({ applier: PRODUCT_CONFLICT_APPLIER, product_id: input.product_id, mark: input.mark, set: input.set })
   const statements: Statement[] = [
-    { sql: guardSql(`${input.set ? `NOT ${markedSql(input.mark)} AND ${markableSql(input.mark)}` : markedSql(input.mark)}`), params: { pid: input.product_id } },
+    { sql: guardSql(`${input.set ? `NOT ${markedSql(input.mark)} AND ${markableSql(input.mark)}${expected ? ` AND ${confirmedSql(input.mark)}` : ''}` : markedSql(input.mark)}`),
+      params: { pid: input.product_id, ...(expected ? confirmedParams(expected) : {}) } },
     input.set
       ? { sql: 'INSERT INTO product_conflict_marks (product_id, mark, marked_by_id, marked_by_name) VALUES (@pid, @mark, @uid, @uname)', params: { pid: input.product_id, mark: input.mark, uid: actor.id, uname: actor.name } }
       : { sql: 'DELETE FROM product_conflict_marks WHERE product_id = @pid AND mark = @mark', params: { pid: input.product_id, mark: input.mark } },
     { sql: `INSERT INTO action_history (scope, entity, entity_id, label, undo_label, redo_label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
       VALUES ('products', 'product', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable', @payload, @payload, @uid, @uname)`,
     params: { entityId: String(input.product_id), label, undoLabel, redoLabel, payload, uid: actor.id, uname: actor.name } },
-    buildAuditStatement(actor.id, actor.name, input.set ? 'conflict_mark' : 'conflict_unmark', 'product', String(input.product_id), { via: 'conflicts', mark: input.mark }),
+    buildAuditStatement(actor.id, actor.name, input.set ? 'conflict_mark' : 'conflict_unmark', 'product', String(input.product_id),
+      { via: options.via ?? 'conflicts', mark: input.mark, ...(options.requestedBy ? { requested_by_id: options.requestedBy.id, requested_by_name: options.requestedBy.name } : {}) }),
     ordinaryBusinessMaintenanceGuard,
   ]
   let results
@@ -284,6 +364,7 @@ export async function setProductConflictMark(
     if (isChangedError(error)) {
       const now = await productState(db, input)
       if (Boolean(now.marked) === input.set) return { product_id: input.product_id, mark: input.mark, set: input.set, changed: false, action_history_id: 0 }
+      if (expected && JSON.stringify(await readConfirmedValue(db, input)) !== JSON.stringify(expected)) throw valueChanged(input.mark)
       throw new ProductConflictMarkError(409, 'product_changed', 'This product changed after you opened it. Refresh and try again.')
     }
     throw error
