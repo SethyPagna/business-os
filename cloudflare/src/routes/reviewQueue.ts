@@ -1,6 +1,6 @@
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono } from 'hono'
-import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, canViewAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { productCreateErrorResponse, hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
 import { branchRedirectTarget } from '../lib/branchRedirectWrite'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -93,6 +93,14 @@ function reviewCodedRefusal(err: unknown): { body: Record<string, unknown>; stat
   return { body: { ...extra, success: false, error: err.message, code }, status }
 }
 
+// A "Confirm $0 cost" request is cost data: a reader without product_cost_view neither lists, counts, opens, approves nor rejects it.
+// Same test as pendingActions.ts NOT_COST_MARK_SQL, for one row; an unreadable payload counts as one.
+function isCostMarkRequest(row: PendingActionRow): boolean {
+  if (row.section !== 'products' || row.action_type !== 'conflict_mark' || row.entity_type !== 'product') return false
+  try { return (JSON.parse(row.payload_json || '{}') as { mark?: unknown }).mark === 'zero_cost_confirmed' } catch { return true }
+}
+const costMarkHiddenFrom = (user: SessionUser, row: PendingActionRow): boolean => !canViewAcquisitionCosts(user) && isCostMarkRequest(row)
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
@@ -122,7 +130,7 @@ app.get('/mine', async (c) => {
   // exactly the rows they most need to see.
   const fields = c.req.query('fields')
   if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
-  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id) }
+  const options: ListPendingActionsOptions = { status, requestedBy: Number(user.id), excludeCostMarks: !canViewAcquisitionCosts(user) }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
@@ -234,7 +242,7 @@ app.get('/', async (c) => {
   const section = c.req.query('section') || null
   const fields = c.req.query('fields')
   if (fields && fields !== 'targets') return c.json({ success: false, code: 'invalid_fields', error: "fields must be 'targets' or left out." }, 400)
-  const options: ListPendingActionsOptions = { status, section }
+  const options: ListPendingActionsOptions = { status, section, excludeCostMarks: !canViewAcquisitionCosts(c.get('user')) }
   const rows = fields === 'targets' ? await listPendingActionTargets(c.env, options) : await listPendingActions(c.env, options)
   return c.json({ success: true, data: rows })
 })
@@ -243,7 +251,7 @@ app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400)
   const row = await getPendingAction(c.env, id)
-  if (!row) return c.json({ error: 'Not found' }, 404)
+  if (!row || costMarkHiddenFrom(c.get('user'), row)) return c.json({ error: 'Not found' }, 404)
   return c.json({ success: true, data: row })
 })
 
@@ -255,7 +263,7 @@ app.post('/:id/approve', async (c) => {
   if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)
 
   const row = await getPendingAction(c.env, id)
-  if (!row) return c.json({ error: 'Not found' }, 404)
+  if (!row || costMarkHiddenFrom(user, row)) return c.json({ error: 'Not found' }, 404)
   // N12: the queue exists so a second person checks a write. Nobody approves
   // their own request, whatever their grants (a reviewer who also holds a
   // Review Required tier elsewhere could otherwise queue and approve the same
@@ -393,6 +401,8 @@ app.post('/:id/reject', async (c) => {
   if (reason !== null && reason.length > REVIEW_REASON_MAX_LENGTH) {
     return c.json({ error: `Reason is too long (max ${REVIEW_REASON_MAX_LENGTH} characters)`, code: 'reason_too_long' }, 400)
   }
+  const existingRow = await getPendingAction(c.env, id)
+  if (existingRow && costMarkHiddenFrom(user, existingRow)) return c.json({ error: 'Not found' }, 404)
   const ok = await markPendingActionRejected(c.env, id, {
     reviewedBy: user.id,
     reviewedByName: actorSnapshot(user),

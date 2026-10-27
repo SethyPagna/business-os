@@ -186,6 +186,61 @@ async function main() {
     assert.deepEqual(audit, { via: 'conflicts', mark: 'zero_cost_confirmed' })
   })
 
+  // ---- the queue must not tell a reader without product_cost_view that a product costs $0 ----
+  const queueApp = h.load('routes/reviewQueue.ts').default
+  const queueGet = async (path, user) => {
+    h.setUser(user)
+    const res = await queueApp.request(`http://local${path}`, { method: 'GET' }, env, { waitUntil: () => {}, passThroughOnException: () => {} })
+    return { status: res.status, text: await res.text() }
+  }
+  const noCostReader = role({ review: true, products: true, ...MERGE })
+  const costReader = role({ review: true, products: true, ...MERGE, ...COST })
+  const costWords = /\$\s?0|zero_cost|cost_price|"cost|0\.00/i
+
+  await check('summary is neutral: no money in the stored text of a Confirm $0 request', async () => {
+    const summaries = db.prepare("SELECT summary FROM pending_actions WHERE action_type = 'conflict_mark'").all().map(row => row.summary)
+    assert.ok(summaries.length >= 4)
+    for (const summary of summaries) assert.match(summary, /^Confirm conflict for product #\d+$/)
+  })
+
+  await check('a reader without cost view sees no cost and no Confirm $0 request anywhere in /api/review (list, targets, detail, mine)', async () => {
+    const zeroIds = db.prepare("SELECT id FROM pending_actions WHERE action_type = 'conflict_mark' AND json_extract(payload_json, '$.mark') = 'zero_cost_confirmed'").all().map(row => row.id)
+    const barcodeIds = db.prepare("SELECT id FROM pending_actions WHERE action_type = 'conflict_mark' AND json_extract(payload_json, '$.mark') = 'no_barcode'").all().map(row => row.id)
+    assert.ok(zeroIds.length >= 2 && barcodeIds.length >= 2, 'fixture: both kinds are queued')
+    for (const path of ['/?status=all', '/?status=all&fields=targets', '/?status=open&section=products']) {
+      const res = await queueGet(path, noCostReader)
+      assert.equal(res.status, 200, path)
+      const ids = JSON.parse(res.text).data.map(row => row.id)
+      for (const id of zeroIds) assert.ok(!ids.includes(id), `${path}: the $0 request #${id} is hidden`)
+      for (const id of barcodeIds) assert.ok(ids.includes(id), `${path}: the barcode request #${id} is still listed`)
+      assert.ok(!costWords.test(res.text), `${path}: nothing in the payload mentions a cost: ${res.text.match(costWords)}`)
+    }
+    for (const id of zeroIds) assert.equal((await queueGet(`/${id}`, noCostReader)).status, 404, 'the detail view is hidden')
+    assert.equal((await queueGet(`/${barcodeIds[0]}`, noCostReader)).status, 200)
+    // The requester's own list: the same rule once their cost grants are gone.
+    setRequesterGrants({ products: 'review', ...MERGE })
+    const mine = await queueGet('/mine?status=all', role({ products: 'review', ...MERGE }))
+    assert.equal(mine.status, 200)
+    for (const id of zeroIds) assert.ok(!JSON.parse(mine.text).data.some(row => row.id === id))
+    assert.ok(!costWords.test(mine.text), 'mine: no cost')
+    setRequesterGrants({ products: 'review', ...MERGE, ...COST })
+    // Positive control: a reader WITH cost view sees the request, so the filter is what hid it.
+    const seen = await queueGet('/?status=all', costReader)
+    const seenIds = JSON.parse(seen.text).data.map(row => row.id)
+    for (const id of zeroIds) assert.ok(seenIds.includes(id), 'control: cost reader sees the $0 request')
+    assert.equal((await queueGet(`/${zeroIds[0]}`, costReader)).status, 200)
+  })
+
+  await check('a reader without cost view cannot reject or approve a Confirm $0 request, and the request stays open', async () => {
+    const zero = db.prepare("SELECT id FROM pending_actions WHERE status = 'open' AND json_extract(payload_json, '$.mark') = 'zero_cost_confirmed' ORDER BY id").get()
+    h.setUser(role({ review: true, products: true, ...MERGE }))
+    for (const action of ['reject', 'approve']) {
+      const res = await queueApp.request(`http://local/${zero.id}/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'x' }) }, env, { waitUntil: () => {}, passThroughOnException: () => {} })
+      assert.equal(res.status, 404, action)
+    }
+    assert.equal(db.prepare('SELECT status FROM pending_actions WHERE id = ?').get(zero.id).status, 'open')
+  })
+
   if (failed) { console.error(`${failed} check(s) FAILED`); process.exit(1) }
   console.log('all checks passed')
 }

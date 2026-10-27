@@ -6307,7 +6307,8 @@ app.post('/data-gaps/marks', async (c) => {
         entityType: 'product',
         entityId: input.product_id,
         payload: { product_id: input.product_id, mark: input.mark, set: input.set, ...(expected ? { expected } : {}) },
-        summary: `${input.set ? 'Confirm' : 'Remove confirmation of'} ${input.mark === 'zero_cost_confirmed' ? '$0 cost' : 'no barcode'} for product #${input.product_id}`,
+        // No money in the text: a summary is shown to every reader of the queue, and "$0 cost" would tell one without cost access.
+        summary: `${input.set ? 'Confirm conflict' : 'Remove conflict confirmation'} for product #${input.product_id}`,
       })
       // Never fall through to a direct write for a review-tier account: a queue that did not take the request is an error, not a free pass.
       if (pendingId == null) throw new Error('A review-tier Conflicts decision was not queued.')

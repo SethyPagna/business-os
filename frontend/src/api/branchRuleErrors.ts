@@ -273,7 +273,7 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
   if (code === 'review_entity_changed') return reviewStaleDecisionText('entity_changed', t)
   // A queued Conflicts decision ("Confirm $0" / "no barcode") stands on the cost or barcode the requester saw; it changed, nothing was applied.
   if (code === 'confirmed_value_changed') {
-    return t('conflict_refusal_confirmed_value_changed') || 'The cost or barcode changed after this was requested, so nothing was applied. The request is still open: reject it, or ask for it again.'
+    return t('conflict_refusal_confirmed_value_changed') || 'Cost or barcode changed; nothing applied. Reject or re-request.'
   }
   if (code === 'review_already_decided') return reviewStaleDecisionText('already_decided', t)
   if (code === 'reason_too_long') {
