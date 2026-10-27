@@ -1,0 +1,119 @@
+// Lane 6.0.1002 (perf-transport): identical concurrent GETs share one network call (sign-in fired
+// /api/auth/bootstrap three times), and an invalidation keeps a shared read only when it claims no data change.
+// Runs the real api/http.ts against a counting fetch.
+import assert from 'node:assert/strict'
+import {
+  __resetApiHealthForTests,
+  __resetApiWriteDedupeForTests,
+  apiFetch,
+  cacheClearAll,
+  cacheInvalidate,
+  cacheInvalidateWithDerived,
+  currentReadEpoch,
+  route,
+  setSyncServerUrl,
+  setSyncToken,
+} from '../src/api/http.ts'
+
+let failed = 0
+async function runTest(name: string, fn: () => void | Promise<void>): Promise<void> {
+  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
+}
+
+type Deferred = { promise: Promise<Response>; resolve: (payload?: unknown) => void }
+function deferredResponse(): Deferred {
+  let resolve!: (payload?: unknown) => void
+  const promise = new Promise<Response>((done) => {
+    resolve = (payload: unknown = { ok: true }) => done(new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  })
+  return { promise, resolve }
+}
+
+async function withFetch(run: (calls: string[], pending: Deferred[]) => Promise<void>): Promise<void> {
+  __resetApiWriteDedupeForTests(); __resetApiHealthForTests(); cacheClearAll()
+  setSyncServerUrl('https://sync.example.test'); setSyncToken('')
+  const original = globalThis.fetch
+  const calls: string[] = []
+  const pending: Deferred[] = []
+  globalThis.fetch = ((url: string) => {
+    calls.push(String(url))
+    const next = deferredResponse()
+    pending.push(next)
+    return next.promise
+  }) as typeof fetch
+  try { await run(calls, pending) } finally {
+    globalThis.fetch = original
+    __resetApiWriteDedupeForTests(); __resetApiHealthForTests(); cacheClearAll(); setSyncServerUrl('')
+  }
+}
+
+await runTest('three concurrent bootstrap reads make one request and each caller gets its own copy', () => withFetch(async (calls, pending) => {
+  const reads = [1, 2, 3].map(() => apiFetch('GET', '/api/auth/bootstrap', undefined, 8000))
+  assert.equal(calls.length, 1, 'one network call')
+  pending[0].resolve({ user: { id: 7 }, settings: { a: 1 } })
+  const [first, second, third] = await Promise.all(reads)
+  assert.deepEqual(second, first)
+  assert.deepEqual(third, first)
+  assert.notEqual(second, first, 'joiners get a copy, not the first caller\'s object')
+  ;(first as { user: { id: number } }).user.id = 99
+  assert.equal((second as { user: { id: number } }).user.id, 7, 'mutating one answer leaves the others alone')
+}))
+
+await runTest('a GET after the first settled is a new request (no result cache)', () => withFetch(async (calls, pending) => {
+  const first = apiFetch('GET', '/api/branches', undefined, 8000)
+  pending[0].resolve({ n: 1 })
+  await first
+  const second = apiFetch('GET', '/api/branches', undefined, 8000)
+  assert.equal(calls.length, 2)
+  pending[1].resolve({ n: 2 })
+  assert.deepEqual(await second, { n: 2 })
+}))
+
+await runTest('different paths and a read with an abort signal are never merged', () => withFetch(async (calls, pending) => {
+  const a = apiFetch('GET', '/api/branches', undefined, 8000)
+  const b = apiFetch('GET', '/api/branches?x=1', undefined, 8000)
+  const signalled = apiFetch('GET', '/api/branches', undefined, 8000, { signal: new AbortController().signal })
+  assert.equal(calls.length, 3)
+  pending.forEach((entry) => entry.resolve({}))
+  await Promise.all([a, b, signalled])
+}))
+
+await runTest('a data-change invalidation while a GET is in flight: the next identical GET starts fresh', () => withFetch(async (calls, pending) => {
+  const before = apiFetch('GET', '/api/dashboard/startup', undefined, 8000)
+  const epoch = currentReadEpoch()
+  cacheInvalidateWithDerived('sales')
+  assert.ok(currentReadEpoch() > epoch)
+  const after = apiFetch('GET', '/api/dashboard/startup', undefined, 8000)
+  assert.equal(calls.length, 2, 'a request begun before the sale may predate it, so it is not shared past the invalidation')
+  const during = apiFetch('GET', '/api/dashboard/startup', undefined, 8000)
+  assert.equal(calls.length, 2, 'but callers after the invalidation share the fresh one')
+  pending.forEach((entry) => entry.resolve({}))
+  await Promise.all([before, after, during])
+}))
+
+await runTest('a precaution invalidation (socket opened) keeps a lookup read in flight shared; a data change does not', () => withFetch(async (calls, pending) => {
+  const epoch = currentReadEpoch()
+  let serverFnRuns = 0
+  const read = (channel: string, path: string) => route(channel, () => { serverFnRuns++; return apiFetch('GET', path, undefined, 8000) })
+  const first = read('branches:get', '/api/branches')
+  cacheInvalidate('branches:get', { precaution: true })
+  assert.equal(currentReadEpoch(), epoch, 'a precaution is not a data change')
+  const second = read('branches:get', '/api/branches')
+  assert.equal(serverFnRuns, 1, 'the second caller joined the read already in flight (route level)')
+  assert.equal(calls.length, 1)
+  pending[0].resolve([{ id: 1 }])
+  assert.deepEqual(await first, [{ id: 1 }])
+  assert.deepEqual(await second, [{ id: 1 }])
+
+  serverFnRuns = 0
+  const third = read('branches:get2', '/api/branches?v=2')
+  cacheInvalidate('branches:get2')
+  const fourth = read('branches:get2', '/api/branches?v=2')
+  assert.equal(serverFnRuns, 2, 'a data change retires the read in flight (route level)')
+  assert.equal(calls.length, 3)
+  pending[1].resolve([]); pending[2].resolve([])
+  await Promise.all([third, fourth])
+}))
+
+if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
+console.log('transportReadDedupe: all passed')

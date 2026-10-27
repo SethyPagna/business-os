@@ -42,6 +42,8 @@ type CacheEntry = { data: any; ts: number; scope: ActorReadScope }
 type CacheState = { data: any; stale: boolean }
 type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
+// `epoch` is _readEpoch when the read started; see apiFetchOnce's read dedupe.
+type InflightRead = InflightWrite & { epoch: number }
 // RouteFn optionally receives the AbortSignal for the search group it was
 // dispatched under (see `searchGroup` on RouteOptions below and
 // `beginSearchGroup`/`endSearchGroup`). Existing zero-arg closures
@@ -184,6 +186,11 @@ const _successfulServerReads = new WeakSet<Promise<any>>()
 // Only pending work owns tokens; completed query keys leave no generation map.
 const _readCacheTokens = new Set<ReadCacheToken>()
 const _writeInflight = new Map<string, InflightWrite>()
+// Identical concurrent GETs share one network call (apiFetchOnce). A GET that started before a data-change
+// invalidation may predate the change, so it is joined only while _readEpoch (bumped by every such
+// invalidation) is the value it started under.
+const _readInflight = new Map<string, InflightRead>()
+let _readEpoch = 0
 const _apiMismatchCooldown = new Map<string, { error: ApiRuntimeError; until: number }>()
 const CACHE_TTL   = 20_000   // 20 seconds
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
@@ -354,10 +361,28 @@ function cacheReadResult(token: ReadCacheToken, data: any): boolean {
   return true
 }
 
-export function cacheInvalidate(prefix: string): void {
+/** The value apiFetch's read dedupe and getAppBootstrap's single flight compare: unchanged means no data-change invalidation since a read began. */
+export function currentReadEpoch(): number {
+  return _readEpoch
+}
+
+/**
+ * Drops the cached entries under `prefix` and fences every read in flight from refilling the cache.
+ * By default the invalidation says data changed, so a request already in flight may predate the change
+ * and is no longer shared: the next caller starts a fresh one (and callers after that share it).
+ * `precaution: true` is for an invalidation that does not claim a change (a socket opening, which may
+ * have missed a push while closed): the cache is dropped, but the read in flight stays shareable.
+ */
+export function cacheInvalidate(prefix: string, options: { precaution?: boolean } = {}): void {
   invalidateActorReadChannel(prefix)
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
-  Object.keys(_inflight).forEach(k => { if (k.startsWith(prefix)) clearInflight(k) })
+  for (const k of Object.keys(_inflight)) {
+    if (!k.startsWith(prefix)) continue
+    // invalidateActorReadChannel above moved the scope the read began under; a precaution re-stamps it so the read stays shareable.
+    if (options.precaution) _inflightScopes.set(_inflight[k], captureActorReadScope(k))
+    else clearInflight(k)
+  }
+  if (!options.precaution) _readEpoch++
   for (const token of _readCacheTokens) {
     if (token.channel.startsWith(prefix)) {
       token.valid = false
@@ -868,6 +893,7 @@ function methodAllowsRequestBody(method: unknown): boolean {
 
 export function __resetApiWriteDedupeForTests(): void {
   _writeInflight.clear()
+  _readInflight.clear()
 }
 
 export function __resetApiHealthForTests(): void {
@@ -955,6 +981,20 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
     }
     if (existing) {
       _writeInflight.delete(dedupeKey)
+    }
+  }
+
+  // An identical GET already on the wire is joined, not repeated (sign-in fired /api/auth/bootstrap three times).
+  // Not for recovery probes (each is its own proof), nor a caller with an abort signal (its abort would cancel the others).
+  const readDedupeKey = normalizedMethod === 'GET' && readScope && !recoveryRead && !options.signal
+    ? `${path} ${readScope.authority} ${readScope.revision} ${timeoutMs}` : ''
+  if (readDedupeKey) {
+    const existing = _readInflight.get(readDedupeKey)
+    if (existing && existing.epoch === _readEpoch && Date.now() - existing.startedAt <= Math.max(timeoutMs, INFLIGHT_REUSE_WINDOW_MS)) {
+      const shared = await existing.promise
+      assertActorReadScope(readScope!, false, recoveryRead)
+      // Each caller owns its copy, so one screen sorting or trimming its answer cannot change another's.
+      return markActorReadResult(typeof structuredClone === 'function' ? structuredClone(shared) : shared, readScope!)
     }
   }
 
@@ -1113,6 +1153,13 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       if (current?.promise === requestPromise) {
         _writeInflight.delete(dedupeKey)
       }
+    }).catch(() => {})
+  }
+
+  if (readDedupeKey) {
+    _readInflight.set(readDedupeKey, { promise: requestPromise, startedAt: Date.now(), epoch: _readEpoch })
+    requestPromise.finally(() => {
+      if (_readInflight.get(readDedupeKey)?.promise === requestPromise) _readInflight.delete(readDedupeKey)
     }).catch(() => {})
   }
 
@@ -1352,7 +1399,8 @@ export function ensureHealthLifecycleListeners(): void {
     const changed = connected !== _syncSocketOpen
     _syncSocketOpen = connected
     if (changed && connected) {
-      for (const key of Object.keys(SOCKET_BACKED_LOOKUP_TTL_MS)) cacheInvalidate(key)
+      // A precaution (the socket may have missed a push while closed), not a data change: reads already in flight stay shared.
+      for (const key of Object.keys(SOCKET_BACKED_LOOKUP_TTL_MS)) cacheInvalidate(key, { precaution: true })
     }
     // The socket is the fastest signal we have. It dropping (server outage,
     // redeploy, dead network that 'offline' never reported) or coming back
