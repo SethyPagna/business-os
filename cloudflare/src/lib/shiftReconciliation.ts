@@ -82,15 +82,55 @@ import type { Env } from '../index'
 // that cash share of its riel figure from the riel drawer. A row from before
 // 0260 (currency NULL, nothing lowered) reads as it always did: dollar cash.
 // lib/returnRefundSplit.ts refundCashOut is the JS reading.
-function refundCashUsdSql(alias: string): string {
-  return `(COALESCE(${alias}.total_refund_usd, 0) - COALESCE(${alias}.owed_reduction_usd, 0))`
+//
+// `prefix` names the column set: '' reads the return row itself, 'before_' / 'after_' read the two sides of a
+// return_refund_corrections row (migration 0275), so a correction is valued by THIS function on both sides.
+function refundCashUsdSql(alias: string, prefix = ''): string {
+  return `(COALESCE(${alias}.${prefix}total_refund_usd, 0) - COALESCE(${alias}.${prefix}owed_reduction_usd, 0))`
 }
-export function refundDrawerUsdSql(alias: string): string {
-  return `(CASE WHEN ${alias}.refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
+export function refundDrawerUsdSql(alias: string, prefix = ''): string {
+  return `(CASE WHEN ${alias}.${prefix}refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias, prefix)} END)`
 }
-export function refundDrawerKhrSql(alias: string): string {
-  return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
-    THEN ROUND(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd) ELSE 0 END)`
+export function refundDrawerKhrSql(alias: string, prefix = ''): string {
+  return `(CASE WHEN ${alias}.${prefix}refund_currency = 'KHR' AND COALESCE(${alias}.${prefix}total_refund_usd, 0) > 0
+    THEN ROUND(COALESCE(${alias}.${prefix}total_refund_khr, 0) * ${refundCashUsdSql(alias, prefix)} / ${alias}.${prefix}total_refund_usd) ELSE 0 END)`
+}
+
+/**
+ * The signed money adjustments of return_refund_corrections (migration 0275) as a derived table, one row per
+ * adjustment, so a shift, a report and a digest all read the SAME rows. The return row holds the AFTER values of every
+ * correction, so a correction is two rows:
+ *   * minus its difference (after - before) at the return's own created_at: the period the return was made in still
+ *     reports what that return originally paid, however many corrections came later;
+ *   * plus the same difference at counts_at: the period the change is counted in ('today' = when it was made,
+ *     'original_day' = the return's own day, which cancels the first row).
+ * Summed over all periods the refund therefore equals the current row (the telescoping invariant), and a closed shift
+ * never moves because of a correction counted elsewhere. A cancel is a correction to zero cash and a restore the
+ * reverse, so the same arithmetic holds for them. The cashier of the counted row is the one who made the change
+ * ('today') or the return's own cashier ('original_day'). A cancelled return is NOT filtered here: its original
+ * period reads 0 from the return row and is topped up by the difference.
+ * Columns: correction_id, return_id, created_at, branch_id, cashier_id, refund_usd, refund_khr, owed_usd, cash_usd, cash_khr.
+ * `created_at` is the instant the adjustment lands on (the column the shift and report windows already filter).
+ */
+export function refundCorrectionsSql(): string {
+  const side = (counted: boolean) => {
+    const sign = counted ? '' : '-'
+    const columns = [
+      'c.id AS correction_id',
+      counted ? 'c.counts_at AS created_at' : 'r.created_at AS created_at',
+      'COALESCE(c.branch_id, r.branch_id) AS branch_id',
+      counted ? "CASE WHEN c.mode = 'original_day' THEN r.cashier_id ELSE c.actor_id END AS cashier_id" : 'r.cashier_id AS cashier_id',
+      'c.return_id AS return_id',
+      `${sign}(c.after_total_refund_usd - c.before_total_refund_usd) AS refund_usd`,
+      `${sign}(c.after_total_refund_khr - c.before_total_refund_khr) AS refund_khr`,
+      `${sign}(c.after_owed_reduction_usd - c.before_owed_reduction_usd) AS owed_usd`,
+      `${sign}(${refundDrawerUsdSql('c', 'after_')} - ${refundDrawerUsdSql('c', 'before_')}) AS cash_usd`,
+      `${sign}(${refundDrawerKhrSql('c', 'after_')} - ${refundDrawerKhrSql('c', 'before_')}) AS cash_khr`,
+    ]
+    return `SELECT ${columns.join(', ')} FROM return_refund_corrections c JOIN returns r ON r.id = c.return_id
+      WHERE COALESCE(r.return_scope, 'customer') = 'customer'`
+  }
+  return `(${side(true)} UNION ALL ${side(false)})`
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100
@@ -541,11 +581,25 @@ export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, 
   if (shift.branch_id) { clauses.push('returns.branch_id = @branchId'); params.branchId = shift.branch_id }
   clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'")
   clauses.push("COALESCE(returns.return_scope, 'customer') = 'customer'")
+  // The corrections of return refunds (0275), valued by the same drawer functions: the return rows above hold the
+  // CURRENT refund, so the shift that made the return gives back each later difference and the shift that counts it
+  // takes it. One statement, so the base and its adjustment cannot be read at two different moments.
+  const adjustments = refundCorrectionWindow(shift, nowMs)
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${refundDrawerUsdSql('returns')}), 0) AS usd,
-      COALESCE(SUM(${refundDrawerKhrSql('returns')}), 0) AS khr
+      COALESCE(SUM(${refundDrawerKhrSql('returns')}), 0) AS khr,
+      (SELECT COALESCE(SUM(x.cash_usd), 0) FROM ${refundCorrectionsSql()} x WHERE ${adjustments.clauses.join(' AND ')}) AS adjust_usd,
+      (SELECT COALESCE(SUM(x.cash_khr), 0) FROM ${refundCorrectionsSql()} x WHERE ${adjustments.clauses.join(' AND ')}) AS adjust_khr
       FROM returns WHERE ${clauses.join(' AND ')}`)
-    .get<{ usd: number; khr: number }>(params)
-  return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
+    .get<{ usd: number; khr: number; adjust_usd: number; adjust_khr: number }>({ ...params, ...adjustments.params })
+  return { usd: round2(Number(row?.usd || 0) + Number(row?.adjust_usd || 0)), khr: roundKhr(Number(row?.khr || 0) + Number(row?.adjust_khr || 0)) }
+}
+
+/** The shift window over refundCorrectionsSql() rows, as SQL on alias `x`: the window, the cashier, the branch. */
+export function refundCorrectionWindow(shift: ShiftReconciliationSession, nowMs: number): { clauses: string[]; params: Record<string, unknown> } {
+  const { clauses, params } = shiftWindowWhere('x', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { clauses.push('x.branch_id = @branchId'); params.branchId = shift.branch_id }
+  if (!clauses.length) clauses.push('1 = 1')
+  return { clauses, params }
 }
 
 /**
@@ -1253,6 +1307,8 @@ export async function loadShiftCloseDrift(
 //     edits still move it; the stored drawer keeps expense totals only, so a
 //     label edit is deliberately not a change), and its refunds: count, ids
 //     and the drawer cash they took, per currency;
+//   * the refund corrections (0275) landing in the window, on either side: count, ids and the drawer cash they
+//     add or take, per currency -- a correction counted in another shift is not in this window, so it cannot move it;
 //   * the payment-method settings that decide which tender is cash.
 // The shift row's own opening/additional/counted values are guarded by the
 // close's revision already.
@@ -1270,6 +1326,7 @@ export function shiftCloseInputsDigestSql(shift: ShiftReconciliationSession, now
   refunds.clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'", "COALESCE(returns.return_scope, 'customer') = 'customer'")
   const salesWhere = sales.clauses.join(' AND ')
   const events = paymentEventWindow(shift, nowMs)
+  const corrections = refundCorrectionWindow(shift, nowMs)
   const expr = `json_array(
     (SELECT json_array(COUNT(*), TOTAL(sales.id), TOTAL(COALESCE(close_rev.revision, 0))) FROM sales
       LEFT JOIN sale_write_revisions close_rev ON close_rev.sale_id = sales.id WHERE ${salesWhere}),
@@ -1283,8 +1340,10 @@ export function shiftCloseInputsDigestSql(shift: ShiftReconciliationSession, now
       WHERE key IN ('pos_payment_methods', '${PAYMENT_METHOD_KINDS_SETTING}') ORDER BY key)),
     (SELECT json_array(COUNT(*), TOTAL(e.id), TOTAL(COALESCE(event_rev.revision, 0))) FROM sale_payment_events e CROSS JOIN sales ON sales.id = e.sale_id
       LEFT JOIN sale_write_revisions event_rev ON event_rev.sale_id = sales.id
-      WHERE ${['sales.payments_version = 1', ...events.clauses].join(' AND ')}))`
-  return { expr, params: { ...sales.params, ...fees.params, ...refunds.params, ...events.params } }
+      WHERE ${['sales.payments_version = 1', ...events.clauses].join(' AND ')}),
+    (SELECT json_array(COUNT(*), TOTAL(x.correction_id), TOTAL(x.cash_usd), TOTAL(x.cash_khr)) FROM ${refundCorrectionsSql()} x
+      WHERE ${corrections.clauses.join(' AND ')}))`
+  return { expr, params: { ...sales.params, ...fees.params, ...refunds.params, ...events.params, ...corrections.params } }
 }
 
 /** The digest's value now -- read BEFORE the figures, so anything that moves after is caught at commit. */

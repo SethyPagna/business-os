@@ -36,6 +36,7 @@ CREATE TABLE shift_sessions(id INTEGER PRIMARY KEY, business_date TEXT, branch_i
  scope_mode TEXT NOT NULL DEFAULT 'per_account', opened_at TEXT, closed_at TEXT, cancelled_at TEXT, closing_counted_khr REAL,
  opening_float_khr REAL NOT NULL DEFAULT 0,
  opening_float_khr_registered INTEGER NOT NULL DEFAULT 0 CHECK (opening_float_khr_registered IN (0, 1)));
+CREATE TABLE return_refund_corrections(id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE, return_id INTEGER NOT NULL, sale_id INTEGER, branch_id INTEGER, kind TEXT NOT NULL DEFAULT 'edit', mode TEXT NOT NULL, counts_at TEXT NOT NULL, before_total_refund_usd REAL NOT NULL DEFAULT 0, before_total_refund_khr REAL NOT NULL DEFAULT 0, before_owed_reduction_usd REAL NOT NULL DEFAULT 0, before_refund_currency TEXT, after_total_refund_usd REAL NOT NULL DEFAULT 0, after_total_refund_khr REAL NOT NULL DEFAULT 0, after_owed_reduction_usd REAL NOT NULL DEFAULT 0, after_refund_currency TEXT, reverses_id INTEGER, actor_id INTEGER, actor_name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
  total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, exchange_rate REAL);

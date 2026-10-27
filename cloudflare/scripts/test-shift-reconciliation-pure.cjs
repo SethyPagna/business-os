@@ -60,6 +60,7 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
  change_usd REAL, change_khr REAL, change_is_actual INTEGER, change_exchange_rate REAL,
  total_usd REAL DEFAULT 0, exchange_rate REAL DEFAULT 4100,
  delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL, payments_version INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE return_refund_corrections(id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE, return_id INTEGER NOT NULL, sale_id INTEGER, branch_id INTEGER, kind TEXT NOT NULL DEFAULT 'edit', mode TEXT NOT NULL, counts_at TEXT NOT NULL, before_total_refund_usd REAL NOT NULL DEFAULT 0, before_total_refund_khr REAL NOT NULL DEFAULT 0, before_owed_reduction_usd REAL NOT NULL DEFAULT 0, before_refund_currency TEXT, after_total_refund_usd REAL NOT NULL DEFAULT 0, after_total_refund_khr REAL NOT NULL DEFAULT 0, after_owed_reduction_usd REAL NOT NULL DEFAULT 0, after_refund_currency TEXT, reverses_id INTEGER, actor_id INTEGER, actor_name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, direction TEXT NOT NULL, origin TEXT NOT NULL,
  payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
  change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,

@@ -13,7 +13,8 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
  total_usd REAL, delivery_fee_usd REAL DEFAULT 0, delivery_fee_paid_by TEXT DEFAULT 'customer', delivery_actual_cost_usd REAL,
  is_delivery INTEGER DEFAULT 0, delivery_contact_id INTEGER, delivery_contact_name TEXT, source_return_id INTEGER, amount_paid_usd REAL);
 CREATE TABLE sale_items(id INTEGER PRIMARY KEY, sale_id INTEGER, cost_price_usd REAL, quantity REAL);
-CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, return_number TEXT,
+CREATE TABLE return_refund_corrections(id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE, return_id INTEGER NOT NULL, sale_id INTEGER, branch_id INTEGER, kind TEXT NOT NULL DEFAULT 'edit', mode TEXT NOT NULL, counts_at TEXT NOT NULL, before_total_refund_usd REAL NOT NULL DEFAULT 0, before_total_refund_khr REAL NOT NULL DEFAULT 0, before_owed_reduction_usd REAL NOT NULL DEFAULT 0, before_refund_currency TEXT, after_total_refund_usd REAL NOT NULL DEFAULT 0, after_total_refund_khr REAL NOT NULL DEFAULT 0, after_owed_reduction_usd REAL NOT NULL DEFAULT 0, after_refund_currency TEXT, reverses_id INTEGER, actor_id INTEGER, actor_name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, cashier_id INTEGER, return_number TEXT,
  receipt_number TEXT, customer_id INTEGER, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
  status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
 CREATE TABLE return_items(id INTEGER PRIMARY KEY, return_id INTEGER, cost_price_usd REAL, quantity REAL, stock_action TEXT, return_to_stock INTEGER);

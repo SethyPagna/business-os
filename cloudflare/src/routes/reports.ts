@@ -34,6 +34,7 @@ import { parseReportExport, readRecordExport, recordExportTotals, reportExportSt
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { costViewProfit } from '../lib/reportProfitView'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
+import { applyRefundCorrections, mergeReasonAdjustments, refundCorrectionByReasonSql, refundCorrectionTotalsSql } from '../lib/refundCorrectionReport'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -488,17 +489,24 @@ app.get('/overview', async (c) => {
     const cur = reportRecordRange('returns', 'returns', f)
     const shape = (r: Record<string, unknown> | null | undefined) => ({ count: num(r?.count), refund_usd: num(r?.refund_usd), refund_khr: num(r?.refund_khr),
       owed_reduction_usd: num(r?.owed_reduction_usd), cash_refund_usd: num(r?.cash_refund_usd), cash_refund_khr: num(r?.cash_refund_khr) })
-    const [totals, byReason, previous] = await Promise.all([
+    // Refund corrections (0275): the rows above hold the CURRENT refund, so a correction made later moves its difference out
+    // of the period the return was made in and into the period it counts in -- the same arithmetic as the shift drawer.
+    const adjCur = reportRecordRange('returns', 'x', f)
+    const adjPrev = prev ? reportRecordRange('returns', 'x', prev) : null
+    const [totals, byReason, previous, adjTotals, adjByReason, adjPrevious] = await Promise.all([
       db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${cur.sql}`).get<Record<string, unknown>>(cur.params),
       db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '') AS reason, ${money} FROM returns WHERE ${base} AND ${cur.sql} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '') ORDER BY refund_usd DESC, refund_khr DESC, count DESC LIMIT 50`).all<Record<string, unknown>>(cur.params),
       prev
         ? (() => { const p = reportRecordRange('returns', 'returns', prev); return db.prepare(`SELECT ${money} FROM returns WHERE ${base} AND ${p.sql}`).get<Record<string, unknown>>(p.params) })()
         : Promise.resolve(null),
+      db.prepare(refundCorrectionTotalsSql(adjCur.sql)).get<Record<string, unknown>>(adjCur.params),
+      db.prepare(refundCorrectionByReasonSql(adjCur.sql)).all<Record<string, unknown>>(adjCur.params),
+      adjPrev ? db.prepare(refundCorrectionTotalsSql(adjPrev.sql)).get<Record<string, unknown>>(adjPrev.params) : Promise.resolve(null),
     ])
     out.returns = {
-      totals: shape(totals),
-      previous: previous ? shape(previous) : null,
-      by_reason: (byReason || []).map((r) => ({ reason: String(r.reason || ''), ...shape(r) })),
+      totals: shape(applyRefundCorrections(totals, adjTotals)),
+      previous: previous ? shape(applyRefundCorrections(previous, adjPrevious)) : null,
+      by_reason: mergeReasonAdjustments(byReason || [], adjByReason || []).map((r) => ({ reason: String(r.reason || ''), ...shape(r) })),
     }
   }
 

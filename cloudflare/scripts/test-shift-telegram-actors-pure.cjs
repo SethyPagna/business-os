@@ -91,6 +91,7 @@ function database() {
       customer_id INTEGER, delivery_contact_id INTEGER, delivery_contact_name TEXT
     );
 ALTER TABLE sales ADD COLUMN payments_version INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE return_refund_corrections(id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE, return_id INTEGER NOT NULL, sale_id INTEGER, branch_id INTEGER, kind TEXT NOT NULL DEFAULT 'edit', mode TEXT NOT NULL, counts_at TEXT NOT NULL, before_total_refund_usd REAL NOT NULL DEFAULT 0, before_total_refund_khr REAL NOT NULL DEFAULT 0, before_owed_reduction_usd REAL NOT NULL DEFAULT 0, before_refund_currency TEXT, after_total_refund_usd REAL NOT NULL DEFAULT 0, after_total_refund_khr REAL NOT NULL DEFAULT 0, after_owed_reduction_usd REAL NOT NULL DEFAULT 0, after_refund_currency TEXT, reverses_id INTEGER, actor_id INTEGER, actor_name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, direction TEXT NOT NULL, origin TEXT NOT NULL,
  payment_method TEXT NOT NULL, payment_details TEXT NOT NULL, amount_paid_usd REAL NOT NULL DEFAULT 0, amount_paid_khr REAL NOT NULL DEFAULT 0,
  change_usd REAL NOT NULL DEFAULT 0, change_khr REAL NOT NULL DEFAULT 0, change_is_actual INTEGER NOT NULL DEFAULT 0, change_exchange_rate REAL,
