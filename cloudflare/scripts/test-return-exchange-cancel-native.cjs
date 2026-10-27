@@ -28,6 +28,8 @@ const MUTANTS = {
   'credit-not-reversed': [{ file: FILE, from: 'member.credit = { saleId: info.sale_id, usd: credit, before, after }', to: 'void 0' }],
   'takeback-not-resplit': [{ file: FILE, from: 'if (takeBacks.length) {', to: 'if (false) {' }],
   'undo-leaves-credit': [{ file: FILE, from: 'const to = direction > 0 ? credit.after : credit.before', to: 'const to = credit.after' }],
+  // 6.0.982: the reversal's Not Paid decision back on a private half-cent band instead of the shared coverage rule.
+  'credit-half-cent-only': [{ file: FILE, from: "before.sale_status === 'completed' && !covered ?", to: "before.sale_status === 'completed' && Math.abs(sale.total_usd - paidUsd - sale.amount_paid_khr / 4000) > 0.005 ?" }],
   'restore-allowed': [{ file: FILE, from: 'if (Array.isArray(rows) && creditRowIndex(rows) >= 0) continue', to: 'continue' }],
   'foreign-return-linkable': [
     { file: FILE, from: '|| Number(row.sale_id) !== linkedTo.sale_id', to: '' },
@@ -499,6 +501,38 @@ async function main() {
         assert.equal(partialRedone.status, 200, JSON.stringify(partialRedone.body))
         assert.deepEqual([glossRedone.owed_reduction_usd, glossRedone.status], [6.48, 'completed'])
         assert.deepEqual(saleRedone, partialSale)
+      })
+    }
+
+    // ---- 13b. the reversal reads coverage through the one shared rule (6.0.982, owner 27 Oct 2026) -----------------------------------------------------------
+    // "A riel tender short by under 100 riel is fully paid; 100 riel short still owes." A tiny credit reversed off a sale the customer paid in riel leaves a
+    // shortfall the coverage rule calls paid: the sale stays Completed. One 100-riel note short is a real debt: Not Paid.
+    {
+      await H.seedProduct(h, 9761, 'XC Pin', 0.02, 50, 0.01)
+      await H.seedProduct(h, 9762, 'XC Clip', 0.03, 50, 0.01)
+      await H.seedProduct(h, 9763, 'XC Mirror', 10, 50, 4)
+      const columns = id => h.one('SELECT payment_details,amount_paid_usd,amount_paid_khr,sale_status FROM sales WHERE id=?', id)
+      const rielExchange = async (productId, price, khr) => {
+        const sale = await makeSale([{ productId, quantity: 1, price }])
+        return exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: 9763, quantity: 1 }],
+          { payment: { details: [{ method: 'Cash', amount_usd: 0, amount_khr: khr }], change_currency: 'USD' } })
+      }
+      // $0.02 credit, $9.98 = 39,920 riel paid: cancelling leaves $10 against 39,920 riel, 80 riel short.
+      const under = await rielExchange(9761, 0.02, 39920)
+      const underKept = await cancelNow(under.ret.id, 'xc-riel-under', { return_ids: [] })
+      const underSale = await columns(under.s2.id)
+      r.check(`riel rule: 80 riel short after the credit leaves reads paid, the sale stays Completed -- ${JSON.stringify(underSale)}`, () => {
+        assert.equal(underKept.status, 200, JSON.stringify(underKept.body))
+        assert.deepEqual(JSON.parse(underSale.payment_details), [{ method: 'Cash', amount_usd: 0, amount_khr: 39920 }])
+        assert.deepEqual([underSale.amount_paid_usd, underSale.amount_paid_khr, underSale.sale_status], [0, 39920, 'completed'])
+      })
+      // $0.03 credit, $9.97 = 39,880 riel paid: 120 riel short -- more than one 100-riel note, a debt.
+      const over = await rielExchange(9762, 0.03, 39880)
+      const overKept = await cancelNow(over.ret.id, 'xc-riel-over', { return_ids: [] })
+      const overSale = await columns(over.s2.id)
+      r.check(`riel rule: 120 riel short is owed, the sale reads Not Paid -- ${JSON.stringify(overSale)}`, () => {
+        assert.equal(overKept.status, 200, JSON.stringify(overKept.body))
+        assert.deepEqual([overSale.amount_paid_usd, overSale.amount_paid_khr, overSale.sale_status], [0, 39880, 'awaiting_payment'])
       })
     }
 

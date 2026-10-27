@@ -21,7 +21,7 @@ import {
   carriesRetiredReturnLabel, planReturnMoney, readSalesReturnMoney, saleReturnMoney, saleReturnMoneySql, type SaleReturnMoney, RETURN_REOPENS_PAID_SALE_DEBT, RETURN_REOPENS_PAID_SALE_DEBT_ERROR, ReturnMoneyError,
   saleReturnRecordWord, saleReturnStateSql, saleReturnTagStatement,
 } from './returnRefundSplit'
-import { saleStoredState, type SaleReturnState } from './saleStatusResolution'
+import { paymentCoversSaleTotal, saleStoredState, type SaleReturnState } from './saleStatusResolution'
 import {
   BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, BranchEffectResolver, BranchRetiredNoSuccessorError,
   branchEffectGuardPredicate, foldedLotSurvivors, readBranchDirectory,
@@ -1009,7 +1009,6 @@ async function planReplacementChoices(db: D1Compat, request: BulkRequest, return
 // tenders and the reports all read the sale as stored), and a take-back return of the sale splits its refund again, debt first, against the sale as
 // it now stands -- so the customer ends up having paid for exactly what they keep. Nothing is deleted: the exact columns on both sides ride in the
 // snapshot, which is what undo and redo replay, and the Records line of the sale shows its payment state moving.
-const CREDIT_TOLERANCE = 0.005
 const money4 = (value: number): number => Math.round(value * 10000) / 10000
 
 type TenderRow = { method?: unknown; amount_usd?: unknown; amount_khr?: unknown; refund_credit?: unknown }
@@ -1047,12 +1046,16 @@ async function planCreditReversals(request: BulkRequest, members: Member[], repl
       amount_paid_khr: sale.amount_paid_khr, sale_status: normalize(sale.sale_status, 'completed'),
     }
     const paidUsd = Math.max(0, money4(sale.amount_paid_usd - credit))
-    const rate = sale.exchange_rate > 0 ? sale.exchange_rate : 0
-    const owed = money4(sale.total_usd - paidUsd - (sale.amount_paid_khr && rate ? sale.amount_paid_khr / rate : 0))
+    // Whether what is left still pays the sale is the one coverage answer (half a cent; a riel tender short by under 100 riel, owner 27 Oct 2026), never
+    // a private band here. Money that cannot be read is not evidence of a payment: it reads not covered.
+    let covered = false
+    try {
+      covered = paymentCoversSaleTotal({ totalUsd: sale.total_usd, paidUsd, paidKhr: sale.amount_paid_khr, exchangeRate: sale.exchange_rate, moneyPrecisionVersion: 1 })
+    } catch { covered = false }
     const methods = [...new Set(rest.map((row) => String(row.method ?? '')).filter(Boolean))]
     const after: SaleCreditState = {
       payment_method: methods.join(' + ') || null, payment_details: JSON.stringify(rest), amount_paid_usd: paidUsd, amount_paid_khr: sale.amount_paid_khr,
-      sale_status: before.sale_status === 'completed' && owed > CREDIT_TOLERANCE ? 'awaiting_payment' : before.sale_status,
+      sale_status: before.sale_status === 'completed' && !covered ? 'awaiting_payment' : before.sale_status,
     }
     member.credit = { saleId: info.sale_id, usd: credit, before, after }
     // A take-back of the replacement was refunded as if the credit had been paid in cash: split it again, debt first, against the sale as it stands now.
