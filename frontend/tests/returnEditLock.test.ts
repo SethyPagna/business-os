@@ -31,11 +31,13 @@ console.log('PASS the Worker detail carries the sale version and the edit route 
 const modal = read('../src/components/returns/EditReturnModal.tsx')
 assert.match(modal, /const editLock = returnEditLock\(ret\)/)
 assert.match(modal, /if \(returnEditLock\(ret\)\) return\n/, 'submit refuses to send a locked edit (run for both locks in returnMoneyV1Flow.test.ts)')
-assert.match(modal, /if \(editLock\) return createPortal\(/, 'the locked panel replaces the form from first paint')
+// 6.0.997: a current-format return opens its own screen from first paint; the old "cannot be edited" panel and its sentence are
+// retired (tests/returnEditCurrent.test.ts pins the new screen).
+assert.match(modal, /if \(editLock === 'exact_return'\) \{\s*const access = currentReturnEditAccess\(ret, user as never\)/, 'the current-format screen replaces the form from first paint')
+assert.ok(!/if \(editLock\) return createPortal\(/.test(modal), 'no dead-end panel is left behind')
 // 6.0.992 ships with this lane: every legacy_return_on_exact_sale lock opens the Update money details panel first
 // (tests/returnLegacyConvert.test.ts), so this panel only ever shows the exact-return lock.
 assert.match(modal, /if \(editLock === 'legacy_return_on_exact_sale'\) return <ReturnLegacyLockPanel /)
-assert.match(modal, /data-return-edit-lock=\{editLock\}>\{T\('return_v1_edit_unavailable'/)
 assert.ok(!/Number\(ret\.money_precision_version\) === 1/.test(modal), 'no second, narrower lock check left behind')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>

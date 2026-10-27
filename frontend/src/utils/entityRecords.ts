@@ -220,7 +220,7 @@ export function auditRowsToRecords(rows: AuditRecordRow[] | null | undefined): R
  */
 export function withCreatedRecord(records: RecordItem[], createdAt: string | null | undefined, entityKey: string): RecordItem[] {
   const stamp = String(createdAt || '').trim()
-  if (!stamp || records.some((record) => String(record.kind || '').toLowerCase() === 'create')) return records
+  if (!stamp || records.some((record) => ['create', 'return_created'].includes(String(record.kind || '').toLowerCase()))) return records
   const created: RecordItem = {
     id: `created:${entityKey}`,
     at: stamp,
@@ -354,6 +354,8 @@ export const RETURN_RECORD_KIND_KEYS: Record<string, [string, string]> = {
 export const RETURN_RECORDS_ADAPTER: RecordsAdapter = {
   normalizeKind: (raw) => {
     const kind = String(raw ?? '').toLowerCase().trim()
+    // withCreatedRecord's synthetic first line (a return recorded before its create row was audited) reads as "Return recorded".
+    if (kind === 'create') return 'return_created'
     return RETURN_RECORD_KIND_KEYS[kind] ? kind : 'return_changed'
   },
   kindLabel: (kind, ctx) => {
@@ -390,7 +392,17 @@ export function recordForViewer(record: RecordItem, canViewCosts: boolean): Reco
   return changes.length === record.changes.length ? record : { ...record, changes }
 }
 
+// 6.0.997: a manual return edit writes one field per line, "stock_handling.<product>" / "damaged_tag.<product>", so the Records row names
+// the product and says what moved in the reader's language (the product name is data and is shown as recorded).
+const RETURN_LINE_FIELD_PREFIXES: Record<string, [string, string]> = {
+  'stock_handling.': ['stock_action_label', 'Stock handling'],
+  'damaged_tag.': ['stock_tag_label', 'Tag'],
+}
+
 export function entityFieldLabel(field: string, label: LabelFn): string {
+  for (const [prefix, entry] of Object.entries(RETURN_LINE_FIELD_PREFIXES)) {
+    if (field.startsWith(prefix)) return `${label(entry[0], entry[1])} - ${field.slice(prefix.length)}`
+  }
   const topic = TELEGRAM_TOPIC_FIELD_LABEL_KEYS[field]
   if (topic) return `${label('telegram_topics_title', 'Forum topics')} - ${label(topic[0], topic[1])}`
   const entry = ENTITY_FIELD_LABEL_KEYS[field]
@@ -407,6 +419,12 @@ function renderEntityValue(value: RecordValue, ctx: RecordRenderContext, field =
   // the configured symbol), not as a bare number: "4.5" for a price is how a
   // reader loses a zero. Only a plain number is formatted; anything else
   // (a text a route wrote into the column) is shown exactly as recorded.
+  if (field.startsWith('stock_handling.') && ['restock', 'damaged', 'none'].includes(String(raw))) {
+    return ctx.label(`stock_action_${String(raw)}`, { restock: 'Restock', damaged: 'Damaged', none: 'No restock' }[String(raw) as 'restock'])
+  }
+  if (field === 'return_type' && ['restock', 'writeoff', 'refund'].includes(String(raw))) {
+    return ctx.label(`return_type_${String(raw)}`, { restock: 'Restock', writeoff: 'Write Off', refund: 'Refund Only' }[String(raw) as 'restock'])
+  }
   const column = field.split('.').pop() || ''
   if ((column.endsWith('_usd') || column.endsWith('_khr')) && raw !== '' && Number.isFinite(Number(raw))) {
     return column.endsWith('_khr') ? ctx.fmtKHR(Number(raw)) : ctx.fmtUSD(Number(raw))

@@ -1848,6 +1848,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             recordKey={`return:${recordsRet.id}`}
             load={() => fetchReturnRecords(recordsRet.id as number | string)}
             adapter={RETURN_RECORDS_ADAPTER}
+            // The return's own date stays a separate first line, apart from the dates of its edits (owner, 27 Oct 2026).
+            createdAt={recordsRet.created_at}
             canViewCosts={canViewAcquisitionCosts(user)}
             onClose={() => setRecordsRet(null)}
             t={t}

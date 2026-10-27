@@ -24,6 +24,8 @@ import {
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { ReturnLegacyLockPanel } from './ReturnLegacyConvert.tsx'
+import ReturnEditCurrent, { ReturnEditAsk } from './ReturnEditCurrent.tsx'
+import { currentReturnEditAccess } from './helpers/returnEditCurrent.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
@@ -72,6 +74,8 @@ interface ExistingReturn {
   /** The linked sale's money version (GET /api/returns/:id). */
   sale_money_precision_version?: number | string | null
   total_refund_usd?: number | string | null
+  status?: string | null
+  return_scope?: string | null
   return_number?: string | null
   reason?: string | null
   return_type?: ReturnType | null
@@ -344,16 +348,14 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     if (!submitting) closeGuard.requestClose()
   }
 
-  if (editLock) return createPortal(
-    <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
-      <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
-        <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
-        <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
-        <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
-        <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
-      </div>
-    </div>, document.body,
-  )
+  // 6.0.997: a current-format return opens its own form (reason, notes, handling method, per-line stock handling); someone without
+  // full Returns access, or a cancelled return, gets the reason and the way out. Never a dead end, and never the re-pricing form below.
+  if (editLock === 'exact_return') {
+    const access = currentReturnEditAccess(ret, user as never)
+    return access === 'form'
+      ? <ReturnEditCurrent ret={ret} onClose={onClose} onSuccess={onSuccess} onReloadLatest={onReloadLatest} fmtUSD={fmtUSD} notify={notify} />
+      : <ReturnEditAsk ret={ret} why={access === 'cancelled' ? 'cancelled' : 'ask_manager'} onClose={onClose} fmtUSD={fmtUSD} />
+  }
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>

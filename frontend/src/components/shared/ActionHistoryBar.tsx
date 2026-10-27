@@ -49,6 +49,7 @@ function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
     .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
   if (p?.applier === 'sale.fields.bulk' || p?.applier === 'sale.customer.bulk') return item.label || ''
   if (p?.applier === 'return.legacy_convert') return legacyConvertHistoryLabel(item, T)
+  if (p?.applier === 'return.edit_v1') return p.return_number != null && p.return_number !== '' ? T('return_edit_history_one', 'Edit return {number}').replace('{number}', String(p.return_number)) : item.label || ''
   if (p?.applier === 'return.fields.bulk') {
     const noun = T('returns', 'returns')
     const field = T(String(p.field || p.action || ''), String(p.field || p.action || '').replaceAll('_', ' '))
@@ -72,6 +73,10 @@ function legacyConvertHistoryLabel(item: HistoryItem, T: Translate): string {
 function serverDoneLabel(item: HistoryItem, direction: 'undo' | 'redo', T: Translate): string {
   if (item.undo_payload?.applier === 'return.legacy_convert') {
     return direction === 'redo' ? T('return_convert_history_redo', 'Redo update of money details') : T('return_convert_history_undo', 'Undo update of money details')
+  }
+  // 6.0.997: a manual return edit (reason, notes, handling, stock handling) -- the stored English never says "format".
+  if (item.undo_payload?.applier === 'return.edit_v1') {
+    return direction === 'redo' ? T('return_edit_history_redo', 'Redo return edit') : T('return_edit_history_undo', 'Undo return edit')
   }
   return (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
 }
