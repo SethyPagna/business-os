@@ -32,10 +32,12 @@ const modal = read('../src/components/returns/EditReturnModal.tsx')
 assert.match(modal, /const editLock = returnEditLock\(ret\)/)
 assert.match(modal, /if \(returnEditLock\(ret\)\) return\n/, 'submit refuses to send a locked edit (run for both locks in returnMoneyV1Flow.test.ts)')
 assert.match(modal, /if \(editLock\) return createPortal\(/, 'the locked panel replaces the form from first paint')
-assert.match(modal, /editLock === 'exact_return'\s*\? T\('return_v1_edit_unavailable'[\s\S]*?: T\('return_legacy_edit_unavailable'/)
+// 6.0.992 ships with this lane: every legacy_return_on_exact_sale lock opens the Update money details panel first
+// (tests/returnLegacyConvert.test.ts), so this panel only ever shows the exact-return lock.
+assert.match(modal, /if \(editLock === 'legacy_return_on_exact_sale'\) return <ReturnLegacyLockPanel /)
+assert.match(modal, /data-return-edit-lock=\{editLock\}>\{T\('return_v1_edit_unavailable'/)
 assert.ok(!/Number\(ret\.money_precision_version\) === 1/.test(modal), 'no second, narrower lock check left behind')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
-assert.ok(en.return_legacy_edit_unavailable && /older money format/i.test(en.return_legacy_edit_unavailable))
-assert.ok(km.return_legacy_edit_unavailable && /[ក-៿]/.test(km.return_legacy_edit_unavailable) && km.return_legacy_edit_unavailable !== en.return_legacy_edit_unavailable)
+assert.ok(!('return_legacy_edit_unavailable' in en) && !('return_legacy_edit_unavailable' in km), 'the unreachable legacy sentence is retired in both packs')
 console.log('PASS the Edit Return form shows the reason in both languages instead of the form')

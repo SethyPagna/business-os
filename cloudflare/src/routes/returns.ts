@@ -1082,7 +1082,7 @@ app.post('/bulk', async (c) => {
   }
 })
 
-// 6.0.992: "Convert to current format" -- the admin way out of an old-format return locked on a current-format sale
+// 6.0.992: "Update money details" -- the way out of an old-format return locked on a current-format sale, for full Returns access
 // (lib/returnLegacyConvert.ts). Preview is read-only; the apply takes the preview's digest so it writes exactly what
 // the admin reviewed, and records one undoable history entry.
 function legacyConvertFailure(c: Context, error: unknown) {
@@ -1095,7 +1095,7 @@ app.post('/legacy-convert/preview', async (c) => {
   const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   try {
     if (!canConvertLegacyReturns(c.get('user'))) {
-      return c.json({ error: 'Only an admin with Returns Edit can convert a return to the current format.', code: 'return_convert_forbidden' }, 403)
+      return c.json({ error: "Full access to Returns (with Edit) is required to update a return's money details.", code: 'return_convert_forbidden' }, 403)
     }
     const plan = await planLegacyReturnConversion(c.env, body.return_ids)
     c.header('Cache-Control', 'no-store')

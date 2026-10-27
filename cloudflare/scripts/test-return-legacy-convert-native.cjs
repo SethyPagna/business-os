@@ -6,7 +6,8 @@
 // Locks, in order:
 //   1. the lock is real before conversion: PATCH refuses (money_precision_review_needed), a new v1 quote on the sale is
 //      refused;
-//   2. a non-admin (Returns Full + Edit) is refused preview and apply, writing nothing;
+//   2. owner ruling 27 Oct: full Returns access (admins AND managers) may update; Review tier, Edit switched off and no
+//      Returns access are refused preview and apply, writing nothing (the manager performs the real apply in step 5);
 //   3. a legacy row whose stored refund is the gross price on a discounted sale is REFUSED, with the reason, nothing written;
 //   4. the preview names every old-format return on the sale (active, a product-only line, a cancelled one) with before/after;
 //   5. a stale digest is refused; apply converts, preserving total_refund_usd, total_refund_khr, owed_reduction_usd,
@@ -72,6 +73,10 @@ async function migrate(db) {
 const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', role_code: 'admin', permissions: '{}' }
 // Returns Full with Edit on, every other key off: everything except the admin role.
 const MANAGER = { id: 8, username: 'manager', name: 'Fixture Manager', role_code: 'manager', permissions: JSON.stringify({ returns: true }) }
+// Refused: Review Required on Returns; Returns Full with Edit switched off; no Returns access (a view-only seat elsewhere).
+const REVIEWER = { id: 9, username: 'reviewer', name: 'Fixture Reviewer', role_code: 'manager', permissions: JSON.stringify({ returns: 'review' }) }
+const EDIT_OFF = { id: 10, username: 'editoff', name: 'Fixture Edit Off', role_code: 'manager', permissions: JSON.stringify({ returns: true, 'returns:edit': false }) }
+const VIEWER = { id: 11, username: 'viewer', name: 'Fixture Viewer', role_code: 'staff', permissions: JSON.stringify({ sales: 'view', returns: 'view' }) }
 
 async function main() {
   const [kernel, bundle] = await Promise.all([kernelBundle(), workerBundle()])
@@ -197,14 +202,19 @@ async function main() {
     assert.equal(baseReceivable, 7.5, 'the Not Paid fixture owes 15.00 less the 7.50 the old return lowered')
     assert.deepEqual({ usd: Number(baseShift.usd), khr: Number(baseShift.khr) }, { usd: 50.05, khr: 20000 }, 'three dollar refunds (sale A twice, sale B) and one riel refund left the drawers; sale C lowered a debt')
 
-    // 2. Permission: Returns Full + Edit is not enough.
-    for (const [url, body] of [['/api/returns/legacy-convert/preview', { return_ids: [901] }],
-      ['/api/returns/legacy-convert', { return_ids: [901], client_request_id: 'manager-try', expected_digest: 'x' }]]) {
-      const refused = await send('POST', url, body, MANAGER)
-      assert.equal(refused.status, 403, `${url} ${JSON.stringify(refused.body)}`)
-      assert.equal(refused.body.code, 'return_convert_forbidden')
+    // 2. Permission: full Returns access (admin or manager) only.
+    for (const [label, user, code] of [['review tier', REVIEWER, 'return_convert_forbidden'], ['Edit switched off', EDIT_OFF, 'return_convert_forbidden'],
+      ['no Returns access (view elsewhere)', VIEWER, null]]) {
+      for (const [url, body] of [['/api/returns/legacy-convert/preview', { return_ids: [901] }],
+        ['/api/returns/legacy-convert', { return_ids: [901], client_request_id: `try-${user.id}`, expected_digest: 'x' }]]) {
+        const refused = await send('POST', url, body, user)
+        assert.equal(refused.status, 403, `${label} ${url} ${JSON.stringify(refused.body)}`)
+        if (code) assert.equal(refused.body.code, code, label)
+      }
     }
-    assert.equal(await exactBytes(), baseBytes, 'a refused non-admin writes nothing')
+    const managerPreview = await send('POST', '/api/returns/legacy-convert/preview', { return_ids: [901] }, MANAGER)
+    assert.equal(managerPreview.status, 200, `a manager with full Returns may preview: ${JSON.stringify(managerPreview.body)}`)
+    assert.equal(await exactBytes(), baseBytes, 'refusals and the preview write nothing')
     assert.equal(await counts(), baseCounts)
 
     // 3. A conversion that would change money is refused, with the figures, writing nothing.
@@ -237,7 +247,8 @@ async function main() {
     assert.equal(stale.status, 409, JSON.stringify(stale.body))
     assert.equal(stale.body.code, 'return_convert_preview_stale')
     assert.equal(await exactBytes(), baseBytes)
-    const applied = await send('POST', '/api/returns/legacy-convert', { return_ids: [901, 905], client_request_id: 'convert-1', expected_digest: preview.body.digest })
+    // The manager (full Returns, not admin) performs the real apply.
+    const applied = await send('POST', '/api/returns/legacy-convert', { return_ids: [901, 905], client_request_id: 'convert-1', expected_digest: preview.body.digest }, MANAGER)
     assert.equal(applied.status, 200, JSON.stringify(applied.body))
     assert.deepEqual(applied.body.converted, [901, 902, 903, 905])
     assert.equal(applied.body.replayed, false)
@@ -262,7 +273,7 @@ async function main() {
     const convertedBytes = await exactBytes()
 
     // 6. Idempotency: the same request replays its receipt; a new request finds nothing left to convert.
-    const replay = await send('POST', '/api/returns/legacy-convert', { return_ids: [901, 905], client_request_id: 'convert-1', expected_digest: preview.body.digest })
+    const replay = await send('POST', '/api/returns/legacy-convert', { return_ids: [901, 905], client_request_id: 'convert-1', expected_digest: preview.body.digest }, MANAGER)
     assert.equal(replay.status, 200, JSON.stringify(replay.body))
     assert.equal(replay.body.replayed, true)
     assert.equal(Number(replay.body.history_id), historyId)
@@ -276,8 +287,10 @@ async function main() {
     const historyCount = Number((await one('SELECT COUNT(*) n FROM action_history')).n)
 
     // 7. Undo restores the exact old bytes (version, columns, empty link, no snapshot); redo re-applies.
-    const managerUndo = await send('POST', `/api/action-history/${historyId}/undo`, { require_applied: true, expected_generation: 0 }, MANAGER)
-    assert.notEqual(managerUndo.status, 200, 'a non-admin cannot replay it either')
+    for (const user of [REVIEWER, EDIT_OFF]) {
+      const refusedUndo = await send('POST', `/api/action-history/${historyId}/undo`, { require_applied: true, expected_generation: 0 }, user)
+      assert.notEqual(refusedUndo.status, 200, `${user.username} cannot replay it either`)
+    }
     const undo = await send('POST', `/api/action-history/${historyId}/undo`, { require_applied: true, expected_generation: 0 })
     assert.equal(undo.status, 200, JSON.stringify(undo.body))
     const undone = JSON.parse(await exactBytes())
@@ -328,7 +341,7 @@ async function main() {
     assert.equal(blockedUndo.body.code, 'undo_record_changed', 'a later write on the sale closes the undo instead of restoring a shape it relied on')
     assert.equal(Number((await money(901)).money_precision_version), 1, 'the refused undo changed nothing')
 
-    console.log('PASS native return legacy convert: locked before, admin-only, refuses a money change with its figures, converts the whole old-format set of a sale preserving refund, riel, debt, shift drawers and stock, replays idempotently, undoes/redoes exactly, unlocks the sale, and closes undo after a later write')
+    console.log('PASS native return legacy convert: locked before, full Returns access only (admin or manager), refuses a money change with its figures, converts the whole old-format set of a sale preserving refund, riel, debt, shift drawers and stock, replays idempotently, undoes/redoes exactly, unlocks the sale, and closes undo after a later write')
   } finally {
     await mf.dispose()
   }

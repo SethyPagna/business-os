@@ -24,7 +24,6 @@ import {
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { ReturnLegacyLockPanel } from './ReturnLegacyConvert.tsx'
-import { isLegacyReturnOnExactSale } from './helpers/returnLegacyConvert.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
@@ -108,7 +107,7 @@ interface EditReturnModalProps {
   onClose: () => void
   onSuccess?: (result?: unknown) => void | Promise<void>
   onReloadLatest?: () => void
-  /** 6.0.992: an admin converted this locked old-format return (ReturnLegacyLockPanel). */
+  /** 6.0.992: someone with full Returns access updated this locked return's money details (ReturnLegacyLockPanel). */
   onLegacyConverted?: () => void
   fmtUSD: MoneyFormatter
   notify: NotifyFn
@@ -334,9 +333,11 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     ret.id ?? null,
   )
   const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
-  // 6.0.992: an old-format return on a current-format sale is refused by the Worker's edit route; show why and, for an
-  // admin, Convert -- never the form. After every hook, before any other panel.
-  if (isLegacyReturnOnExactSale(ret)) return <ReturnLegacyLockPanel ret={ret} onClose={onClose} fmtUSD={fmtUSD} notify={notify} onConverted={onLegacyConverted} />
+  // 6.0.992: an old-format return on a current-format sale is refused by the Worker's edit route; show why and, for full
+  // Returns access, Update money details -- never the form. After every hook, before any other panel. Every
+  // legacy_return_on_exact_sale lock lands here (a non-customer row gets the reason without the action), so the panel
+  // below only ever shows the exact-return lock.
+  if (editLock === 'legacy_return_on_exact_sale') return <ReturnLegacyLockPanel ret={ret} onClose={onClose} fmtUSD={fmtUSD} notify={notify} onConverted={onLegacyConverted} />
 
   // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
@@ -347,9 +348,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
       <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
         <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
-        <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{editLock === 'exact_return'
-          ? T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')
-          : T('return_legacy_edit_unavailable', 'This return uses an older money format than its sale, so it cannot be edited here. Its saved refund stays unchanged. An admin can review and convert it.')}</p>
+        <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
         <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
         <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
       </div>

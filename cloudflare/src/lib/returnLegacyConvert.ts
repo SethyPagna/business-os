@@ -1,10 +1,12 @@
-// 6.0.992 -- "Convert to current format": the admin way out of a locked old-format return.
+// 6.0.992 -- "Update money details" (internally: convert to the current money format): the way out of a locked old-format
+// return for anyone with full Returns access (owner ruling 27 Oct 2026: admins AND managers).
 //
 // A return stored in the older money format (returns.money_precision_version = 0: no exact refund columns, no per-line
 // refund snapshot) that sits on a sale stored in the current format (sales.money_precision_version = 1) is locked three
 // ways: PUT /api/returns/:id refuses to re-price it (money_precision_review_needed), every NEW return on that sale fails
 // its v1 quote (customer_return_legacy_refund_review_needed: the old row has no snapshot), and a cancel/restore on that
-// sale fails the exact-entitlement cohort check. Owner, 26 Oct 2026: no refusal may be a dead end; admins get clear options.
+// sale fails the exact-entitlement cohort check. Owner, 26 Oct 2026: no refusal may be a dead end; 27 Oct: anyone with full
+// Returns access may do it, and the screen calls it updating the return's money details (never "format").
 //
 // Converting writes the v1 shape the current app would have written for the SAME return -- and only when that shape keeps
 // every amount the shop already recorded. The v1 quote (lib/customerReturnEntitlement.ts) is run for the return's own
@@ -33,7 +35,7 @@
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
-import { getActionTier, isAdminControlUser } from './permissions'
+import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4, roundMoney2, subtractMoney4 } from './moneyPrecision'
 import { customerReturnQuotePlanFromRows, readCustomerReturnQuoteRows } from './customerReturnQuotePlan'
@@ -59,15 +61,15 @@ function fail(message: string, status: 400 | 403 | 404 | 409 | 503 = 409, code?:
   throw new ReturnLegacyConvertError(message, status, code, params)
 }
 
-/** Admin plus Returns Edit at Full. A money-format restatement of recorded refunds is an administrative correction, not a
- * routine edit (owner: "admin should have clear options"); Returns Edit is the action it unlocks. For an admin the action
- * tier is always full, so the second clause only matters if the admin rule ever narrows. Mirrored by
+/** Full access to Returns with Edit not switched off -- the same tier check as the other full-tier return actions
+ * (saved reasons, routes/returns.ts). Owner ruling 27 Oct 2026: admins AND managers may update a locked return; Review
+ * and View tiers, or Edit switched off, are refused. Admins always resolve to full. Mirrored by
  * frontend/src/components/returns/helpers/returnLegacyConvert.ts canConvertLegacyReturns. */
 export function canConvertLegacyReturns(user: SessionUser | null | undefined): boolean {
-  return !!user && Number.isSafeInteger(Number(user.id)) && isAdminControlUser(user) && getActionTier(user, 'returns', 'edit') === 'full'
+  return !!user && Number.isSafeInteger(Number(user.id)) && getActionTier(user, 'returns', 'edit') === 'full'
 }
 function authorize(user: SessionUser | null | undefined): SessionUser {
-  if (!canConvertLegacyReturns(user)) fail('Only an admin with Returns Edit can convert a return to the current format.', 403, 'return_convert_forbidden')
+  if (!canConvertLegacyReturns(user)) fail("Full access to Returns (with Edit) is required to update a return's money details.", 403, 'return_convert_forbidden')
   return user!
 }
 
@@ -427,8 +429,8 @@ export async function applyLegacyReturnConversion(env: Env, userInput: SessionUs
   const lookup = `SELECT id FROM undo_snapshots WHERE kind=@kind AND json_extract(payload_json,'$.operation_id')=@operation`
   const params = { kind: RETURN_LEGACY_CONVERT_KIND, operation: operationId, user: user.id, name: actorSnapshot(user) }
   const label = plan.members.length === 1
-    ? `Convert return ${plan.members[0].return_number || plan.members[0].id} to the current money format`
-    : `Convert ${plan.members.length} returns to the current money format`
+    ? `Update money details of return ${plan.members[0].return_number || plan.members[0].id}`
+    : `Update money details of ${plan.members.length} returns`
   const statements: Statement[] = [
     guard(`NOT EXISTS(${lookup})`, params),
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@sales) j WHERE COALESCE((SELECT revision FROM sale_write_revisions

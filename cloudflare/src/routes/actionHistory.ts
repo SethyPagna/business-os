@@ -544,7 +544,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
     if (genderReplay && !canRestoreCustomerGender(user)) return c.json({ success: false, error: 'Administrator Contacts edit permission is required.' }, 403)
-    if (legacyConvertReplay && !canConvertLegacyReturns(user)) return c.json({ success: false, error: 'Only an admin with Returns Edit can convert a return to the current format.', code: 'return_convert_forbidden' }, 403)
+    if (legacyConvertReplay && !canConvertLegacyReturns(user)) return c.json({ success: false, error: "Full access to Returns (with Edit) is required to update a return's money details.", code: 'return_convert_forbidden' }, 403)
     if (applier && (applier.name === TRANSFER_OPERATION_KIND
       ? !canReplayTransferPayload(user, payload)
       : applier.name === STOCK_SESSION_KIND

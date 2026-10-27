@@ -99,7 +99,7 @@ interface ReturnsListSurfaceProps {
   selectionModeActive: boolean
   getReturnLongPressState: (rowId: number) => LongPressState
   setDetailRet: (ret: ReturnRecord) => void
-  /** 6.0.992: admins convert a locked old-format return from its row (ReturnLegacyLockTag); absent = reason only. */
+  /** 6.0.992: full Returns access updates a locked return's money details from its row (ReturnLegacyLockTag); absent = reason only. */
   onConvertLegacy?: (id: number) => void
   showReturnActionGroups: boolean
   SUPPLIER_SCOPE: string

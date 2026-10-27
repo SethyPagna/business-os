@@ -1,13 +1,16 @@
-// 6.0.992: "Convert to current format" for an old-format return locked on a current-format sale.
+// 6.0.992: "Update money details" (the Worker converts it to the current money format) for an old-format return locked on
+// a current-format sale. The screen never says "format" (owner, 27 Oct 2026).
 //
 // The Worker (cloudflare/src/lib/returnLegacyConvert.ts) is the authority: POST /api/returns/legacy-convert/preview
 // shows what would be written and why a return cannot be converted; POST /api/returns/legacy-convert writes exactly the
 // previewed digest and records one undoable history entry (both called from ReturnLegacyConvert.tsx). This file is pure:
 // it decides only what the screen offers, so tests/returnLegacyConvert.test.ts runs it under node:
 //   - the lock is shown to everyone who sees the return (a v0 return on a v1 sale, the Worker's PATCH refusal);
-//   - Convert is offered only to an admin (canConvertLegacyReturns mirrors the Worker: admin + Returns Edit at Full,
-//     and an admin always holds Returns Edit at Full); everyone else reads "an admin can review and convert it".
-import { isAdminControlUser, type PermissionUser } from '../../../utils/permissions.ts'
+//   - Update is offered to anyone with full Returns access and Edit not switched off -- admins AND managers (owner ruling
+//     27 Oct 2026; canConvertLegacyReturns mirrors the Worker's getActionTier(user, 'returns', 'edit') === 'full');
+//     everyone else reads "ask a manager or admin to update it".
+import { getEffectivePermissionMap, getPermissionTierFromMap, isAdminControlUser, type PermissionUser } from '../../../utils/permissions.ts'
+import { isActionOverriddenOff } from '../../../utils/permissionActions.ts'
 
 export type LegacyConvertRow = {
   id: number
@@ -38,7 +41,10 @@ export function isLegacyReturnOnExactSale(ret: LockSource): boolean {
 }
 
 export function canConvertLegacyReturns(user: PermissionUser): boolean {
-  return isAdminControlUser(user)
+  if (!user) return false
+  if (isAdminControlUser(user)) return true
+  const merged = getEffectivePermissionMap(user)
+  return getPermissionTierFromMap(merged, 'returns', false) === 'full' && !isActionOverriddenOff(merged, 'returns', 'edit')
 }
 
 /** What the screen offers for one return: nothing (not locked), the reason only, or the reason plus Convert. */
@@ -61,15 +67,15 @@ export function legacyConvertReasonText(code: string | null, rawParams: Record<s
     : rawParams
   switch (code) {
     case 'return_convert_amount_changed':
-      return fill(T('return_convert_amount_changed', 'The saved refund ({before}) is not what this sale allows today ({after}), so converting would change money. To correct it, cancel this return and record it again.'), params)
+      return fill(T('return_convert_amount_changed', 'The saved refund ({before}) is not what this sale allows today ({after}), so updating would change money. To correct it, cancel this return and record it again.'), params)
     case 'return_convert_line_changed':
-      return fill(T('return_convert_line_changed', 'A line refund ({before}) differs from what the sale allows ({after}), so converting would change money. To correct it, cancel this return and record it again.'), params)
+      return fill(T('return_convert_line_changed', 'A line refund ({before}) differs from what the sale allows ({after}), so updating would change money. To correct it, cancel this return and record it again.'), params)
     case 'return_convert_riel_changed':
       return fill(T('return_convert_riel_changed', 'The riel refund ({before}) would change. Cancel this return and record it again to correct it.'), params)
     case 'return_convert_report_changed':
-      return fill(T('return_convert_report_changed', 'Converting would change this sale in the sales report (revenue {before} to {after}). To correct it, cancel this return and record it again.'), params)
+      return fill(T('return_convert_report_changed', 'Updating would change this sale in the sales report (revenue {before} to {after}). To correct it, cancel this return and record it again.'), params)
     case 'return_convert_sale_amended':
-      return T('return_convert_sale_amended', 'The sale was changed after this return was recorded, so it cannot be converted. Record a new return instead.')
+      return T('return_convert_sale_amended', 'The sale was changed after this return was recorded, so it cannot be updated. Record a new return instead.')
     case 'return_convert_line_unlinked':
     case 'return_convert_line_split':
     case 'return_convert_no_lines':
@@ -77,9 +83,9 @@ export function legacyConvertReasonText(code: string | null, rawParams: Record<s
     case 'return_convert_not_locked':
       return T('return_convert_not_locked', 'This return is not locked. It can be edited as it is.')
     case 'return_convert_supplier':
-      return T('return_convert_supplier', 'Supplier returns are not converted.')
+      return T('return_convert_supplier', 'Supplier returns are not updated this way.')
     default:
-      return T('return_convert_quote_refused', 'This sale cannot price this return today, so it cannot be converted. Cancel this return and record it again.')
+      return T('return_convert_quote_refused', 'This sale cannot price this return today, so it cannot be updated. Cancel this return and record it again.')
   }
 }
 
@@ -87,12 +93,12 @@ export function legacyConvertReasonText(code: string | null, rawParams: Record<s
  * Khmer session never shows the Worker's English. */
 export function legacyConvertFailureText(code: string, T: Translate): string {
   switch (code) {
-    case 'return_convert_forbidden': return T('return_convert_admin_only', 'An admin can review and convert it.')
+    case 'return_convert_forbidden': return T('return_convert_admin_only', 'Ask a manager or admin to update it.')
     case 'return_convert_preview_stale':
-    case 'return_convert_changed': return T('return_convert_stale', 'These returns changed. Nothing was converted. Try again.')
+    case 'return_convert_changed': return T('return_convert_stale', 'These returns changed. Nothing was updated. Try again.')
     case 'return_convert_not_found': return T('return_convert_not_found', 'This return no longer exists. Refresh the list.')
-    case 'maintenance_active': return T('return_convert_paused', 'Saving is paused for maintenance. Nothing was converted.')
+    case 'maintenance_active': return T('return_convert_paused', 'Saving is paused for maintenance. Nothing was updated.')
     case 'return_convert_uncertain': return T('return_convert_uncertain', 'The result is not confirmed. Check the return before trying again.')
-    default: return T('return_convert_failed', 'Nothing was converted. Try again.')
+    default: return T('return_convert_failed', 'Nothing was updated. Try again.')
   }
 }

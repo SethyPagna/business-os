@@ -614,7 +614,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     return wrappedPromise
   }, [clearLoadWatchdog, debouncedSearch, returnsDateRange, scope, tr])
 
-  // 6.0.992: Convert to current format -- one flow for the list row, the bulk bar and the Edit Return lock panel.
+  // 6.0.992: Update money details (full Returns access) -- one flow for the list row, the bulk bar and the Edit Return lock panel.
   const canConvertLegacy = canConvertLegacyReturns(user)
   const afterLegacyConvert = () => { void loadReturns(true); actionHistory.refreshServerItems() }
   const legacyConvert = useLegacyReturnConvert({ notify, onConverted: afterLegacyConvert })
@@ -1640,7 +1640,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           {canConvertLegacy && selectedReturns.some(isLegacyReturnOnExactSale) ? (
             <button type="button" className={toolbarIconButtonClassName} disabled={legacyConvert.busy || selectedReturns.length > RETURN_BULK_LIMIT}
               onClick={() => { void legacyConvert.startConvert(selectedReturns.filter(isLegacyReturnOnExactSale).map((row) => Number(row.id))) }}
-              aria-label={tr('return_convert_title', 'Convert to current format')} title={tr('return_convert_title', 'Convert to current format')}>
+              aria-label={tr('return_convert_title', 'Update money details')} title={tr('return_convert_title', 'Update money details')}>
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
             </button>
           ) : null}

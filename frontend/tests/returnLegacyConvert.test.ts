@@ -1,6 +1,6 @@
-// 6.0.992: who is offered "Convert to current format" for a locked old-format return, and that every surface shows the
-// lock. The Worker is the enforcement (cloudflare/scripts/test-return-legacy-convert-native.cjs drives the 403 for a
-// Returns Full + Edit manager); this pins the screen to the same rule so it never offers a button the Worker refuses,
+// 6.0.992: who is offered "Update money details" for a locked old-format return, and that every surface shows the
+// lock. The Worker is the enforcement (cloudflare/scripts/test-return-legacy-convert-native.cjs drives 200 for a Returns
+// Full manager and 403 for Review / View / Edit-off); this pins the screen to the same rule so it never offers a button the Worker refuses,
 // and never hides the reason from someone who cannot convert.
 //
 // Run: node tests/returnLegacyConvert.test.ts
@@ -26,19 +26,26 @@ const admin = { role_code: 'admin', permissions: '{}' }
 const allGrant = { role_code: 'owner', permissions: JSON.stringify({ all: true }) }
 const manager = { role_code: 'manager', permissions: JSON.stringify({ returns: true, 'returns:edit': true }) }
 const cashier = { role_code: 'cashier', permissions: JSON.stringify({ returns: true, 'returns:edit': false }) }
+const reviewer = { role_code: 'manager', permissions: JSON.stringify({ returns: 'review' }) }
+const viewer = { role_code: 'staff', permissions: JSON.stringify({ returns: 'view' }) }
+const roleManager = { role_code: 'manager', role_permissions: JSON.stringify({ returns: true }), permissions: '{}' }
 assert.equal(canConvertLegacyReturns(admin), true)
 assert.equal(canConvertLegacyReturns(allGrant), true, 'the effective all grant is an admin, as on the Worker')
-assert.equal(canConvertLegacyReturns(manager), false, 'Returns Full + Edit is not enough: the Worker answers 403')
-assert.equal(canConvertLegacyReturns(cashier), false)
+assert.equal(canConvertLegacyReturns(manager), true, 'owner 27 Oct: a manager with full Returns access may update it')
+assert.equal(canConvertLegacyReturns(roleManager), true, 'full Returns from the role counts the same')
+assert.equal(canConvertLegacyReturns(cashier), false, 'full Returns with Edit switched off is refused')
+assert.equal(canConvertLegacyReturns(reviewer), false, 'Review tier is refused')
+assert.equal(canConvertLegacyReturns(viewer), false, 'View is refused')
 assert.equal(canConvertLegacyReturns(null), false)
 assert.equal(canConvertLegacyReturns({ username: 'admin', role_code: 'cashier', permissions: '{}' }), false, 'a name is not a credential')
 
-assert.equal(legacyConvertAccess(locked, admin), 'convert', 'admin: reason + Convert')
-assert.equal(legacyConvertAccess(locked, manager), 'reason_only', 'manager: reason + "an admin can review and convert it"')
+assert.equal(legacyConvertAccess(locked, admin), 'convert', 'admin: reason + Update')
+assert.equal(legacyConvertAccess(locked, manager), 'convert', 'manager with full Returns: reason + Update')
+assert.equal(legacyConvertAccess(locked, reviewer), 'reason_only', 'review tier: reason + "ask a manager or admin"')
 assert.equal(legacyConvertAccess(locked, cashier), 'reason_only')
 assert.equal(legacyConvertAccess(locked, null), 'reason_only', 'the reason is never hidden')
 assert.equal(legacyConvertAccess({ money_precision_version: 1, sale_money_precision_version: 1 }, admin), null, 'nothing shown when not locked')
-console.log('PASS legacy convert access: the lock shows for everyone, Convert only for an admin')
+console.log('PASS legacy convert access: the lock shows for everyone, Update for full Returns access (admins and managers)')
 
 // --- reason sentences -------------------------------------------------------------------------------------------------
 const T = (key: string, fallback: string) => ({ return_convert_amount_changed: 'KM {before} -> {after}' } as Record<string, string>)[key] ?? fallback
@@ -54,7 +61,7 @@ for (const code of ['return_convert_forbidden', 'return_convert_preview_stale', 
   'maintenance_active', 'return_convert_uncertain', 'return_convert_invalid', 'client_request_id_required', '']) legacyConvertFailureText(code, spy)
 assert.deepEqual([...new Set(seen)].sort(), ['return_convert_admin_only', 'return_convert_failed', 'return_convert_not_found', 'return_convert_paused',
   'return_convert_stale', 'return_convert_uncertain'], 'each failure maps to its own sentence, never the raw message')
-assert.match(legacyConvertReasonText('something_new', null, (_k, f) => f), /cannot be converted/, 'an unknown code still reads as a reason with a way through')
+assert.match(legacyConvertReasonText('something_new', null, (_k, f) => f), /cannot be updated/, 'an unknown code still reads as a reason with a way through')
 for (const code of ['return_convert_amount_changed', 'return_convert_line_changed', 'return_convert_riel_changed', 'return_convert_line_unlinked', 'return_convert_quote_refused', 'return_convert_report_changed']) {
   assert.match(legacyConvertReasonText(code, {}, (_k, f) => f), /cancel this return and record it again|Cancel this return and record it again/i,
     `${code} names the way through, never a dead end`)
@@ -63,10 +70,10 @@ console.log('PASS every refusal names its figures and the way through')
 
 // --- parity with the Worker ---------------------------------------------------------------------------------------------
 const lib = read('../../cloudflare/src/lib/returnLegacyConvert.ts')
-assert.match(lib, /export function canConvertLegacyReturns\(user[^)]*\): boolean \{\n\s*return !!user && Number\.isSafeInteger\(Number\(user\.id\)\) && isAdminControlUser\(user\) && getActionTier\(user, 'returns', 'edit'\) === 'full'/)
+assert.match(lib, /export function canConvertLegacyReturns\(user[^)]*\): boolean \{\n\s*return !!user && Number\.isSafeInteger\(Number\(user\.id\)\) && getActionTier\(user, 'returns', 'edit'\) === 'full'\n/, 'owner 27 Oct: full Returns access, not admin-only')
 const routes = read('../../cloudflare/src/routes/returns.ts')
 const previewRoute = routes.slice(routes.indexOf("app.post('/legacy-convert/preview'"), routes.indexOf("app.post('/legacy-convert', async"))
-assert.match(previewRoute, /if \(!canConvertLegacyReturns\(c\.get\('user'\)\)\)/, 'the preview is admin-only too, not just the write')
+assert.match(previewRoute, /if \(!canConvertLegacyReturns\(c\.get\('user'\)\)\)/, 'the preview is gated too, not just the write')
 const listRoute = routes.slice(routes.indexOf("app.get('/', async"), routes.indexOf("app.get('/damaged-lots'"))
 assert.match(listRoute, /list_origin_sale\.money_precision_version AS sale_money_precision_version/, 'the list row can show the lock')
 assert.match(listRoute, /LEFT JOIN sales list_origin_sale ON list_origin_sale\.id = r\.sale_id/)
@@ -77,17 +84,19 @@ console.log('PASS the screen rule is the Worker rule')
 
 // --- wiring ---------------------------------------------------------------------------------------------------------------
 const modal = read('../src/components/returns/EditReturnModal.tsx')
-assert.match(modal, /if \(isLegacyReturnOnExactSale\(ret\)\) return <ReturnLegacyLockPanel ret=\{ret\}/, 'Edit Return shows the lock panel, never the form')
-assert.ok(modal.indexOf('if (isLegacyReturnOnExactSale(ret))') > modal.indexOf('const closeGuard = useCloseGuard('), 'after every hook')
+assert.match(modal, /if \(editLock === 'legacy_return_on_exact_sale'\) return <ReturnLegacyLockPanel ret=\{ret\}/, 'Edit Return shows the lock panel, never the form, for every legacy lock')
+assert.ok(modal.indexOf("if (editLock === 'legacy_return_on_exact_sale')") > modal.indexOf('const closeGuard = useCloseGuard('), 'after every hook')
+assert.ok(modal.indexOf("if (editLock === 'legacy_return_on_exact_sale')") < modal.indexOf('if (editLock) return createPortal('), 'before the exact-return lock')
+assert.ok(!modal.includes('return_legacy_edit_unavailable'), "990's legacy lock sentence is retired: the panel above answers every legacy lock")
 const surface = read('../src/components/returns/ReturnsListSurface.tsx')
 assert.equal((surface.match(/<ReturnLegacyLockTag ret=\{ret\} onConvert=\{onConvertLegacy\} \/>/g) || []).length, 2, 'desktop and mobile rows both show the lock')
 const page = read('../src/components/returns/Returns.tsx')
-assert.match(page, /onConvertLegacy=\{canConvertLegacy \? /, 'the row gets Convert only for an admin')
+assert.match(page, /onConvertLegacy=\{canConvertLegacy \? /, 'the row gets Update only for full Returns access')
 assert.match(page, /canConvertLegacy && selectedReturns\.some\(isLegacyReturnOnExactSale\)/, 'the bulk bar offers Convert for a selection that holds a locked return')
 const panel = read('../src/components/returns/ReturnLegacyConvert.tsx')
 assert.match(panel, /useConfirmDialog/, 'the shared compact confirm dialog, never native confirm()')
 assert.ok(!/window\.confirm\(|\bconfirm\(/.test(panel.replace(/askToConfirm\(/g, '')), 'no native confirm')
-assert.match(panel, /access === 'convert' \?[\s\S]*?<RefreshCcw[\s\S]*?T\('return_convert_action', 'Convert'\)[\s\S]*?: \([\s\S]*?T\('return_convert_admin_only'/, 'main action: icon + one word; others read the admin hint')
+assert.match(panel, /access === 'convert' \?[\s\S]*?<RefreshCcw[\s\S]*?T\('return_convert_action', 'Update'\)[\s\S]*?: \([\s\S]*?T\('return_convert_admin_only'/, 'main action: icon + one word; others read the admin hint')
 
 assert.ok(!/notify\(String\(/.test(panel), 'no raw Worker message reaches the toast')
 const tag = panel.slice(panel.indexOf('export function ReturnLegacyLockTag'))
@@ -101,7 +110,12 @@ for (const key of keys) {
   assert.ok(en[key], `en.json has ${key}`)
   assert.ok(km[key] && /[ក-៿]/.test(km[key]) && km[key] !== en[key], `km.json has Khmer for ${key}`)
 }
-assert.equal(en.return_convert_partial_note, "Returns that can't be converted stay as they are.")
+assert.equal(en.return_convert_partial_note, "Returns that can't be updated stay as they are.")
 assert.ok(!('return_convert_sale_blocked' in en) && !('return_convert_sale_blocked' in km), 'the retired all-or-nothing sentence is gone from both packs')
-assert.equal(en.return_convert_admin_only, 'An admin can review and convert it.', 'matches the refusal copy: "an admin can review and convert it"')
+assert.equal(en.return_convert_admin_only, 'Ask a manager or admin to update it.')
+for (const key of [...keys, 'money_precision_review_needed']) {
+  assert.doesNotMatch(en[key], /format|\bv[01]\b/i, `${key}: owner 27 Oct -- the screen says money details, never "format"`)
+  assert.doesNotMatch(km[key], /ទម្រង់|បម្លែង/, `${key}: Khmer says update, not convert or format`)
+}
+assert.ok(!('return_legacy_edit_unavailable' in en) && !('return_legacy_edit_unavailable' in km), 'the unreachable 990 sentence is retired from both packs')
 console.log('PASS the lock reaches the Edit form, both list rows and the bulk bar, in both languages')

@@ -190,13 +190,14 @@ await runTest('money_precision_review_needed: six Worker sites, one accurate cla
   assert.equal((returns.match(/c\.json\(\{ \.\.\.MONEY_PRECISION_REVIEW_NEEDED \}, 409\)/g) || []).length, 3, 'create (twice) and edit refuse with the constant')
   assert.match(returns, /if \(Number\(linkedSale\?\.money_precision_version\) === 1\) \{\s*return c\.json\(\{ \.\.\.MONEY_PRECISION_REVIEW_NEEDED \}, 409\)/, 'the edit site is decided by the stored sale, not the request')
   // The text is bundled into the app and the current app always sends v1, so whoever reads it is on the current app:
-  // the sentence must say what happened (older money format, nothing saved) and what to do, never "restart / out of date".
+  // the sentence must say what happened (older money rules, nothing saved) and what to do, never "restart / out of date".
   assert.match(read(FRONTEND, 'src', 'api', 'returnsTransport.ts'), /money_precision_version: 1, expected_quote: expected/)
   assert.equal((read(FRONTEND, 'src', 'components', 'sales', 'SaleDetailModal.tsx').match(/money_precision_version: 1,/g) || []).length, 2, 'amendment and added lines send v1')
   for (const text of [EN.money_precision_review_needed]) assert.doesNotMatch(text, /out of date|restart|reload|update the app|older app|old app/i)
   assert.match(EN.money_precision_review_needed, /nothing was saved/i)
-  assert.match(EN.money_precision_review_needed, /older money format/i)
-  assert.match(EN.money_precision_review_needed, /an admin can review and convert it/i, 'stays true once admins can convert (lane 6.0.992)')
+  assert.match(EN.money_precision_review_needed, /older money rules/i)
+  assert.match(EN.money_precision_review_needed, /a manager or admin can update its money details/i, 'owner 27 Oct: full Returns access updates it (lane 6.0.992)')
+  assert.doesNotMatch(EN.money_precision_review_needed, /format/i, 'owner 27 Oct: never "format"')
   // POST /sales refuses a sale that does not exist yet, so the sentence names no sale.
   assert.doesNotMatch(EN.money_precision_review_needed, /this sale/i)
   assert.doesNotMatch(KM.money_precision_review_needed, /ចាប់ផ្តើមឡើងវិញ|ផ្ទុកកម្មវិធីឡើងវិញ/, 'Khmer does not say restart or reload either')

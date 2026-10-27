@@ -1,9 +1,9 @@
-// 6.0.992: the screens and API calls for "Convert to current format" (helpers/returnLegacyConvert.ts holds the pure rules).
+// 6.0.992: the screens and API calls for "Update money details" (helpers/returnLegacyConvert.ts holds the pure rules).
 //   useLegacyReturnConvert -- preview -> shared compact confirm dialog (before/after per return) -> apply. One hook, used
 //                             by the Edit Return lock panel, the list row and the bulk bar, so all three say the same.
-//   ReturnLegacyLockPanel  -- replaces the Edit Return form for a locked return: the reason, then Convert (admin) or
-//                             "an admin can review and convert it" (everyone else).
-//   ReturnLegacyLockTag    -- the list row's lock icon with the reason; for an admin, the Convert button (same RefreshCcw
+//   ReturnLegacyLockPanel  -- replaces the Edit Return form for a locked return: the reason, then Update (full Returns
+//                             access: admins and managers) or "ask a manager or admin to update it" (everyone else).
+//   ReturnLegacyLockTag    -- the list row's lock icon with the reason; with full Returns access, the Update button (same RefreshCcw
 //                             icon as the panel and the bulk bar).
 import { useCallback, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
@@ -41,7 +41,7 @@ export async function previewLegacyConvert(returnIds: number[]): Promise<LegacyC
 }
 
 // Online only, like the bulk return action: the write is guarded against the sale's live revision, so a replay from an
-// offline queue could never be the change the admin reviewed.
+// offline queue could never be the change the reviewer saw.
 export async function applyLegacyConvert(returnIds: number[], digest: string, requestId: string): Promise<LegacyConvertResult> {
   if (navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server before converting returns.')
   return apiFetch('POST', '/api/returns/legacy-convert', { return_ids: returnIds, expected_digest: digest, client_request_id: requestId }) as Promise<LegacyConvertResult>
@@ -76,7 +76,7 @@ export function useLegacyReturnConvert({ notify, onConverted }: { notify: Notify
       if (!convertible.length) {
         const reason = refused.length
           ? legacyConvertReasonText(refused[0].code, refused[0].params, T, { usd, khr })
-          : T('return_convert_nothing', 'Already in the current format. Nothing to convert.')
+          : T('return_convert_nothing', 'Money details are already up to date. Nothing to update.')
         notify(reason, refused.length ? 'error' : 'info')
         return refused.length ? reason : null
       }
@@ -88,7 +88,7 @@ export function useLegacyReturnConvert({ notify, onConverted }: { notify: Notify
         return `${usd(row.total_refund_usd)}${riel}${row.lines.length ? ` (${lines})` : ''}`
       }
       const confirmed = await askToConfirm({
-        title: T('return_convert_title', 'Convert to current format'),
+        title: T('return_convert_title', 'Update money details'),
         message: T('return_convert_message', 'Refunds, cash, debt, stock and report totals stay the same. Undo is in History.'),
         items: [
           ...convertible.map((row) => ({ label: row.return_number || `#${row.id}`, value: describe(row) })),
@@ -98,14 +98,14 @@ export function useLegacyReturnConvert({ notify, onConverted }: { notify: Notify
         note: [
           convertible.some((row) => row.after && row.after.total_refund_khr !== row.before.total_refund_khr)
             ? T('return_convert_riel_note', 'The riel figure of a dollar refund is restated at the sale rate, as shown. No riel cash changes.') : '',
-          refused.length ? T('return_convert_partial_note', "Returns that can't be converted stay as they are.") : '',
+          refused.length ? T('return_convert_partial_note', "Returns that can't be updated stay as they are.") : '',
         ].filter(Boolean).join(' ') || undefined,
-        confirmLabel: T('return_convert_action', 'Convert'),
+        confirmLabel: T('return_convert_action', 'Update'),
       })
       if (!confirmed) return null
       const requestId = `return-convert-${businessDateTimeId()}-${Math.random().toString(36).slice(2, 10)}`
       const result = await applyLegacyConvert(ids, preview.digest, requestId)
-      notify(T('return_convert_done', 'Converted. Undo is in History.'), 'success')
+      notify(T('return_convert_done', 'Updated. Undo is in History.'), 'success')
       onConverted?.(result.converted)
       return null
     } catch (error) {
@@ -137,17 +137,17 @@ export function ReturnLegacyLockPanel({ ret, onClose, fmtUSD, notify, onConverte
       <div data-return-legacy-lock={access || ''}>
         <p className="mb-3 flex items-start gap-2 text-sm leading-relaxed" role="status">
           <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
-          <span>{T('return_legacy_lock_reason', 'This return was saved in an older money format than its sale, so it cannot be edited as it is.')}</span>
+          <span>{T('return_legacy_lock_reason', 'This return was recorded under older money rules. Update its money details to edit it.')}</span>
         </p>
         <div className="mb-3 flex justify-between text-sm"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(Number(ret.total_refund_usd) || 0)}</span></div>
         {refusal ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200" role="alert">{refusal}</p> : null}
         {access === 'convert' ? (
           <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5" disabled={busy}
-            onClick={() => { void startConvert([Number(ret.id)]).then(setRefusal) }} title={T('return_convert_title', 'Convert to current format')}>
-            <RefreshCcw className="h-4 w-4" aria-hidden="true" />{T('return_convert_action', 'Convert')}
+            onClick={() => { void startConvert([Number(ret.id)]).then(setRefusal) }} title={T('return_convert_title', 'Update money details')}>
+            <RefreshCcw className="h-4 w-4" aria-hidden="true" />{T('return_convert_action', 'Update')}
           </button>
         ) : (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{T('return_convert_admin_only', 'An admin can review and convert it.')}</p>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{T('return_convert_admin_only', 'Ask a manager or admin to update it.')}</p>
         )}
       </div>
       {confirmDialog}
@@ -155,15 +155,15 @@ export function ReturnLegacyLockPanel({ ret, onClose, fmtUSD, notify, onConverte
   )
 }
 
-/** The list row's lock: a reason tooltip for everyone; for an admin, an icon-only Convert button. */
+/** The list row's lock: a reason tooltip for everyone; with full Returns access, an icon-only Update button. */
 export function ReturnLegacyLockTag({ ret, onConvert }: { ret: LegacyLockReturn; onConvert?: (id: number) => void }) {
   const { user } = useApp()
   const T = useTranslate()
   const access = legacyConvertAccess(ret, user as never)
   if (!access) return null
-  const reason = T('return_legacy_lock_reason', 'This return was saved in an older money format than its sale, so it cannot be edited as it is.')
+  const reason = T('return_legacy_lock_reason', 'This return was recorded under older money rules. Update its money details to edit it.')
   if (access === 'convert' && onConvert) {
-    const label = `${reason} ${T('return_convert_title', 'Convert to current format')}`
+    const label = `${reason} ${T('return_convert_title', 'Update money details')}`
     return (
       <button type="button" data-return-legacy-lock="convert" aria-label={label} title={label}
         className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
@@ -172,7 +172,7 @@ export function ReturnLegacyLockTag({ ret, onConvert }: { ret: LegacyLockReturn;
       </button>
     )
   }
-  const label = `${reason} ${T('return_convert_admin_only', 'An admin can review and convert it.')}`
+  const label = `${reason} ${T('return_convert_admin_only', 'Ask a manager or admin to update it.')}`
   return (
     <span data-return-legacy-lock="reason_only" role="img" aria-label={label} title={label}
       className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
