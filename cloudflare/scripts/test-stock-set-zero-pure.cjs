@@ -111,7 +111,7 @@ const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')

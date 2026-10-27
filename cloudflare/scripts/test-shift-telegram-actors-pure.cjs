@@ -151,7 +151,7 @@ async function main() {
   const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
   const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
-  const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': dbModule, './removalLosses': loadReal('lib/removalLosses.ts'),
     './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })

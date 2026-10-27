@@ -374,7 +374,7 @@ console.log(`PASS coverage: all ${new Set(scanned.map(([, name]) => name)).size}
 
 // lib/telegram.ts reads the sales kernel for the shift report (S4-7).
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => { throw new Error('no DB in this test') } }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => { throw new Error('no DB in this test') } }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
 // asserted below are the ones it composes -- while the settings READ answers
@@ -763,7 +763,7 @@ const stubDb = {
     }
   },
 }
-const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },

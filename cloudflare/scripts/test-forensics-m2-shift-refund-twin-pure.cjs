@@ -97,7 +97,7 @@ const refundMoneyPrecision = load('lib/refundMoneyPrecision.ts', { './moneyPreci
 const customerReturnEntitlement = load('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': load('lib/financialPrecision.ts'), './saleTotals': saleTotals })
-const salesAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './schemaProbe': load('lib/schemaProbe.ts'), './businessDateWindow': businessDateWindow,
+const salesAnalytics = load('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './schemaProbe': load('lib/schemaProbe.ts'), './businessDateWindow': businessDateWindow,
   './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision })
 const recon = load('lib/shiftReconciliation.ts', {
   './db': { getDb: () => db }, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,

@@ -67,6 +67,8 @@ const kernelDependencies = [
   // salesAnalytics.ts's reportTableColumns now delegates to this shared,
   // per-isolate-memoized PRAGMA table_info() probe (schemaProbe.ts).
   'schemaProbe.ts',
+  // 6.0.982: what a Not Paid sale still owes asks the shared coverage answer.
+  'saleStatusResolution.ts', 'financialPrecision.ts',
 ]
 for (const file of kernelDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))

@@ -61,7 +61,9 @@ const businessDateWindow = compile('businessDateWindow.ts')
 const reportMoneyPrecision = compile('reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const refundMoneyPrecision = compile('refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = compile('customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
+const saleStatusResolution = compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision })
 const analytics = compile('salesAnalytics.ts', {
+  './saleStatusResolution': saleStatusResolution,
   './db': {},
   '../index': {},
   './businessDateWindow': businessDateWindow,

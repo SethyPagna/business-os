@@ -138,6 +138,9 @@ const customerReturnEntitlement = load('lib/customerReturnEntitlement.ts', { './
 const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = load('lib/financialPrecision.ts')
+// salesAnalytics asks the one coverage answer for what a Not Paid sale still owes (6.0.982, riel rule).
+const saleStatusResolution = load('lib/saleStatusResolution.ts', { './financialPrecision': financialPrecision })
+analyticsPrecision['./saleStatusResolution'] = saleStatusResolution
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const realAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './schemaProbe': load('lib/schemaProbe.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const analytics = {

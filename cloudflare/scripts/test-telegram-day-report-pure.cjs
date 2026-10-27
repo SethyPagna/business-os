@@ -150,7 +150,7 @@ const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const analytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': dbShim, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const analytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': dbShim, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Merged Sep 6 2026: telegram.ts now reads the owner's low-stock setting
 // through lib/lowStockSettings.ts and shares the drawer arithmetic through
 // lib/shiftReconciliation.ts (lowstock and shifts lanes). Both are the REAL

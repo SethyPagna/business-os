@@ -204,6 +204,13 @@ async function main() {
     { total: 15.3333, paid: 1.11114, khr: 333, rate: 4000, returns: [[3.33335, null, null], [1, 0.5, 'KHR']] },
     { total: 5, paid: 0, khr: 0, rate: 0, returns: [[2, 2, 'USD']] },        // no riel: an unreadable rate does not matter
     { total: 5, paid: 7, khr: 0, rate: 4100, returns: [] },                   // overpaid: owes nothing
+    // A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026); 100 riel short still owes.
+    { total: 10, paid: 0, khr: 39950, rate: 4000, returns: [], expected: 0 },          // 50 riel short
+    { total: 10, paid: 0, khr: 39901, rate: 4000, returns: [], expected: 0 },          // 99 riel short
+    { total: 10, paid: 0, khr: 39900, rate: 4000, returns: [], expected: 0.025 },      // 100 riel short
+    { total: 10, paid: 5, khr: 19900, rate: 4000, v1: true, returns: [], expected: 0.025 }, // mixed, 100 riel short
+    { total: 10, paid: 5, khr: 19901, rate: 4000, v1: true, returns: [], expected: 0 },     // mixed, 99 riel short
+    { total: 10, paid: 9.97, khr: 0, rate: 4000, returns: [], expected: 0.03 },        // USD only keeps the half-cent band
   ]
   for (const [index, c] of cases.entries()) {
     const w = makeKernelWorld()
@@ -219,6 +226,7 @@ async function main() {
       exchange_rate: rielPaid || c.rate > 0 ? c.rate : 1, money_precision_version: c.v1 ? 1 : 0, calculated_total_usd: c.v1 ? c.total : null,
       refund_usd: resolution.sumRefundsUsd(lowered) })
     check(`still owed matches the sale screen's formula, case ${index + 1} (${formula})`, () => assert.equal(kernelOwed, formula))
+    if (c.expected !== undefined) check(`still owed is ${c.expected}, case ${index + 1} (${c.khr} riel + $${c.paid} on $${c.total})`, () => assert.equal(kernelOwed, c.expected))
   }
 
   console.log(`\n${passed} passed`)

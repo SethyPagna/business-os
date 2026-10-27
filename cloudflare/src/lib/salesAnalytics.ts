@@ -161,6 +161,7 @@ import {
 } from './customerReturnEntitlement'
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
+import { paymentCoversSaleTotal } from './saleStatusResolution'
 import {
   EMPTY_REMOVAL_LOSS,
   REMOVAL_LOSS_FROM,
@@ -1346,7 +1347,9 @@ function reportV1RefundReversal(
 // saleStatusResolution.ts recordedSaleOutstandingUsd over the debt its returns lowered
 // (returnRefundSplit.ts planReturnMoney). Every amount is quantized half-up to four places
 // as that formula does; a legacy rate is quantized too, a V1 rate stays exact; a shortfall
-// of at most half a cent is paid. Held to that formula by test-revenue-not-paid-split-pure.cjs.
+// of at most half a cent is paid, and so is a riel tender short by under 100 riel (owner ruling,
+// 27 Oct 2026), asked of the one coverage answer (saleStatusResolution paymentCoversSaleTotal ->
+// shortfallCovered), never restated here. Held to that formula by test-revenue-not-paid-split-pure.cjs.
 // Money that cannot be read refuses the report, like every other unreadable amount here.
 const reportQ4 = (value: unknown): ReportExactDecimal =>
   ReportExactDecimal.recorded(ReportExactDecimal.recorded(value == null || value === '' ? 0 : value as string | number).toText(4))
@@ -1356,14 +1359,26 @@ function reportStillOwed(sale: ReportScalarRow, returned: ReportScalarRow[]): Re
     ReportExactDecimal.zero())
   const paidKhr = reportQ4(sale.amount_paid_khr)
   let shortfall = reportQ4(sale.total_usd).subtract(lowered).subtract(reportQ4(sale.amount_paid_usd))
-  if (paidKhr.compare(ReportExactDecimal.zero()) !== 0) {
-    const v1 = Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null
+  const rielPaid = paidKhr.compare(ReportExactDecimal.zero()) !== 0
+  const v1 = Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null
+  if (rielPaid) {
     const rate = sale.exchange_rate == null || sale.exchange_rate === '' ? null
       : v1 ? ReportExactDecimal.recorded(sale.exchange_rate as string | number) : reportQ4(sale.exchange_rate)
     if (!rate || !rate.isPositive()) throw new ReportMoneyPrecisionError('unsupported_row')
     shortfall = shortfall.subtract(paidKhr.divide(rate))
   }
-  return shortfall.compare(ReportExactDecimal.recorded('0.005')) <= 0 ? ReportExactDecimal.zero() : ReportExactDecimal.recorded(shortfall.toText(4))
+  if (shortfall.compare(ReportExactDecimal.recorded('0.005')) <= 0) return ReportExactDecimal.zero()
+  if (rielPaid) {
+    let covered: boolean
+    try {
+      covered = paymentCoversSaleTotal({
+        totalUsd: reportQ4(sale.total_usd).subtract(lowered).toText(4), paidUsd: reportQ4(sale.amount_paid_usd).toText(4),
+        paidKhr: paidKhr.toText(4), exchangeRate: sale.exchange_rate as string | number, moneyPrecisionVersion: v1 ? 1 : 0,
+      })
+    } catch { throw new ReportMoneyPrecisionError('unsupported_row') }
+    if (covered) return ReportExactDecimal.zero()
+  }
+  return ReportExactDecimal.recorded(shortfall.toText(4))
 }
 
 // Every view of one snapshot (totals, period series, each grouping, the product split) walks the same per-sale

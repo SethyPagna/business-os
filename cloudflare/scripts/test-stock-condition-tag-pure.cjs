@@ -149,7 +149,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 // loads with no overrides of its own.
 const removalLosses = loadReal('lib/removalLosses.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
   './db': { getDb: () => db },
   './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,

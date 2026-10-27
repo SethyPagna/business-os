@@ -355,7 +355,7 @@ async function main() {
   const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-  const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+  const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {
