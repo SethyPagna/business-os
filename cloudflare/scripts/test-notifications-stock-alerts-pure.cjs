@@ -147,7 +147,7 @@ async function main() {
     assert.equal(item.kind, 'inventory_low_stock')
     assert.equal(item.meta, 'Low stock (9)')
     assert.equal(item.metaKey, 'notification_inventory_low_stock')
-    assert.deepEqual(item.metaParams, { quantity: 9 })
+    assert.deepEqual(item.metaParams, { quantity: 9, branchId: 1, branch: 'LC Store' })
     assert.equal(item.pageId, 'inventory')
     assert.equal(item.anchor, `product-${a}`)
     assert.equal(inventory.summary, '1 low stock')
@@ -207,6 +207,31 @@ async function main() {
     }
     walk(SRC)
     assert.deepEqual(callers.sort(), ['lib/returnExchangeCreate.ts', 'routes/returns.ts', 'routes/sales.ts'])
+  })
+
+  await check('two branches crossing on the same product read differently (only while there is more than one active branch)', async () => {
+    const insertAlert = (key, branchId, saleId) => seedStockFixture(raw.db, () => raw.db.prepare(`INSERT INTO stock_crossing_alerts (alert_key, product_id, branch_id, tier, sale_id, quantity_before, quantity_after, created_at)
+      VALUES (?, ?, ?, 'low', ?, 12, 7, ?)`).run(key, a, branchId, saleId, new Date().toISOString()))
+    seedStockFixture(raw.db, () => raw.db.prepare("INSERT OR IGNORE INTO branches (id, name, is_default, is_active) VALUES (2, 'Old Shop', 0, 1)").run())
+    insertAlert('branch-2', 2, 201)
+    const labels = section(await summary()).items.filter((item) => item.anchor === `product-${a}`).map((item) => item.label)
+    assert.ok(labels.includes('Serum A · LC Store') && labels.includes('Serum A · Old Shop'), labels.join(' | '))
+    assert.equal(new Set(labels).size, labels.length)
+    seedStockFixture(raw.db, () => raw.db.prepare('UPDATE branches SET is_active = 0 WHERE id = 2').run())
+    assert.ok(section(await summary()).items.every((item) => !item.label.includes(' · ')), 'one active branch: the plain product name')
+    seedStockFixture(raw.db, () => raw.db.prepare('DELETE FROM stock_crossing_alerts WHERE alert_key = ?').run('branch-2'))
+  })
+
+  await check('a crossing for a product that is no longer active is left out, and no label is English-only', async () => {
+    const gone = product('Retired D', 0)
+    seedStockFixture(raw.db, () => raw.db.prepare(`INSERT INTO stock_crossing_alerts (alert_key, product_id, branch_id, tier, sale_id, quantity_before, quantity_after, created_at)
+      VALUES ('gone-1', ?, 1, 'out', 301, 3, 0, ?)`).run(gone, new Date().toISOString()))
+    assert.ok(section(await summary()).items.some((item) => item.label === 'Retired D'), 'control: listed while active')
+    seedStockFixture(raw.db, () => raw.db.prepare('UPDATE products SET is_active = 0 WHERE id = ?').run(gone))
+    const after = section(await summary())
+    assert.ok(!after.items.some((item) => item.label === 'Retired D' || item.anchor === `product-${gone}`))
+    assert.ok(after.items.every((item) => !/Product #/.test(item.label)))
+    seedStockFixture(raw.db, () => raw.db.prepare("DELETE FROM stock_crossing_alerts WHERE alert_key = 'gone-1'").run())
   })
 
   await check('a restock and a second crossing is a new item with its own id', async () => {

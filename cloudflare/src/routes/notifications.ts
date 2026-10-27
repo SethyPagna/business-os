@@ -129,8 +129,8 @@ type NotificationSection = {
   summaryParams?: Record<string, unknown>
   items: NotificationItem[]
   // Set only when `items` is a preview: the section's true size and a flag the
-  // panel uses to offer "show all" (GET /summary/items?section=<id>). `count`
-  // is always the true size, so the bell badge and headline are unaffected.
+  // panel uses to offer "show all". No section is a preview now (the endpoint behind it, GET /summary/items,
+  // is gone); the panel's tail logic stays dormant. `count` is always the true size.
   itemsTotal?: number
   truncated?: boolean
   // Settings key this section's on/off switch reads and writes (see
@@ -191,7 +191,7 @@ export const NOTIFICATION_SECTION_CACHE_TTL_SECONDS = 45
 // The bell's stock alerts are the crossings sales recorded (stock_crossing_alerts, migration 0272; owner ruling
 // 6 Oct 2026: low / out-of-stock alerts only when a SALE pushes a product across the threshold, no standing list;
 // a manual Remove / Set and a transfer are silent because they never record a crossing). The newest few from the
-// last day, through idx_stock_crossing_alerts_recent (created_at DESC, id DESC): about 150 rows however large the
+// last day for products that are still active, through idx_stock_crossing_alerts_recent (created_at DESC, id DESC): about 150 rows however large the
 // catalog is, so nothing is cached. Whether one was seen is the panel's per-item-id state (NotificationCenter.tsx),
 // as for every other section, so an item keeps a stable id.
 export const STOCK_ALERT_WINDOW_HOURS = 24
@@ -280,11 +280,15 @@ function sectionCacheFor(c: NotificationContext): SectionCache {
   }
 }
 
-type StockAlertRow = { id: number; tier: string; product_id: number; quantity_after: number; name: string | null }
+type StockAlertRow = { id: number; tier: string; product_id: number; branch_id: number; quantity_after: number; name: string | null; branch_name: string | null; branch_count: number }
 
+// CROSS JOIN pins the order: the alerts index first, then each product by key (left to itself the planner starts from the active products).
 export const STOCK_ALERTS_SQL = `
-  SELECT a.id, a.tier, a.product_id, a.quantity_after, p.name
-  FROM stock_crossing_alerts a LEFT JOIN products p ON p.id = a.product_id
+  SELECT a.id, a.tier, a.product_id, a.branch_id, a.quantity_after, p.name, b.name AS branch_name,
+    (SELECT COUNT(*) FROM branches WHERE is_active = 1) AS branch_count
+  FROM stock_crossing_alerts a
+  CROSS JOIN products p ON p.id = a.product_id AND p.is_active = 1
+  LEFT JOIN branches b ON b.id = a.branch_id
   WHERE a.created_at >= @since
   ORDER BY a.created_at DESC, a.id DESC
   LIMIT @limit`
@@ -303,10 +307,11 @@ async function buildStockAlertsSection(db: SectionDb): Promise<NotificationSecti
     return {
       id: `crossing-${row.id}`,
       tone: isOut ? 'danger' as const : 'warning' as const,
-      label: row.name || `Product #${row.product_id}`,
+      // With more than one branch, two branches crossing on the same product must read differently.
+      label: Number(row.branch_count) > 1 && row.branch_name ? `${row.name || `#${row.product_id}`} · ${row.branch_name}` : (row.name || `#${row.product_id}`),
       meta: isOut ? 'Out of stock' : `Low stock (${quantity})`,
       metaKey: isOut ? 'notification_inventory_out_of_stock' : 'notification_inventory_low_stock',
-      metaParams: { quantity },
+      metaParams: { quantity, branchId: row.branch_id, branch: row.branch_name },
       kind: isOut ? 'inventory_out_of_stock' : 'inventory_low_stock',
       pageId: 'inventory',
       anchor: `product-${row.product_id}`,

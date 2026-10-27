@@ -102,6 +102,25 @@ async function main() {
       await world.run('UPDATE users SET is_active = 1 WHERE id = ?', cashier.id)
     })
 
+    await check('a forced password change is a 403 with no rows on the very next request, and ends when the password is changed', async (t) => {
+      const forced = await world.account('mw-forced', { roleCode: 'mw_cashier', passwordHash: world.adminPasswordHash })
+      t.eq('before', (await branches('mw-forced')).status, 200)
+      await world.run('UPDATE users SET must_change_password = 1 WHERE id = ?', forced.id)
+      const a = await branches('mw-forced')
+      const b = await summary('mw-forced')
+      t.eq('branches status', a.status, 403)
+      t.eq('summary status', b.status, 403)
+      t.eq('branches code', a.json?.code, 'password_change_required')
+      t.ok('branches response carries no rows', noRows(a), a.text)
+      t.ok('summary response carries no rows', noRows(b), b.text)
+      const changed = await world.api('POST', `/api/users/${forced.id}/change-password`,
+        { currentPassword: adminPassword, newPassword: `Mw-${randomBytes(9).toString('base64url')}-7q` }, { as: 'mw-forced' })
+      t.eq('change status', changed.status, 200)
+      const after = await branches('mw-forced')
+      t.eq('after the change', after.status, 200)
+      t.ok('and the rows are back', Array.isArray(after.json) && after.json.length > 0)
+    })
+
     await check('no cookie and an unknown token get 401 and no rows', async (t) => {
       for (const route of ['/api/branches', '/api/notifications/summary']) {
         const bare = await world.mf.dispatchFetch(`http://localhost${route}`)
