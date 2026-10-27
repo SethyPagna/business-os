@@ -17,6 +17,7 @@ import {
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
+import { resetActorReadSession } from '../src/api/actorReadScope.ts'
 
 let failed = 0
 function readableStorage(): Storage {
@@ -127,6 +128,71 @@ await runTest('a precaution invalidation (socket opened) keeps a lookup read in 
   assert.equal(calls.length, 3)
   pending[1].resolve([]); pending[2].resolve([])
   await Promise.all([third, fourth])
+}))
+
+// Sign-in resets the read scope while the first screen reads are on the wire; they used to die with stale_read_scope.
+// One storage for the whole file: the read-session marker lives in it, and a fresh one reads as another tab having changed the session.
+const pageStorage = readableStorage()
+async function withSignedInPage(userId: number, run: (storage: Storage) => Promise<void>): Promise<void> {
+  const originalWindow = (globalThis as { window?: unknown }).window
+  const storage = pageStorage
+  storage.setItem('businessos_user', JSON.stringify({ id: userId }))
+  ;(globalThis as { window?: unknown }).window = { location: { origin: 'https://admin.example.test' }, localStorage: storage, sessionStorage: readableStorage() }
+  __resetApiHealthForTests(); cacheClearAll(); setSyncServerUrl('https://admin.example.test')
+  try { await run(storage) } finally {
+    ;(globalThis as { window?: unknown }).window = originalWindow
+    cacheClearAll(); setSyncServerUrl('')
+  }
+}
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
+const gate = () => { let open!: () => void; const promise = new Promise<void>((resolve) => { open = resolve }); return { promise, open } }
+
+await runTest('a read caught by the sign-in scope reset is re-issued once under the settled scope', () => withSignedInPage(1, async () => {
+  let runs = 0
+  const g = gate()
+  const read = route('dashboard:startup:x', async () => { runs++; if (runs === 1) await g.promise; return { run: runs } })
+  await settle()
+  resetActorReadSession()
+  g.open()
+  assert.deepEqual(await read, { run: 2 })
+  assert.equal(runs, 2)
+}))
+
+await runTest('the re-issue happens once: a second stale read surfaces the error', () => withSignedInPage(1, async () => {
+  let runs = 0
+  const g1 = gate(); const g2 = gate()
+  const read = route('dashboard:startup:y', async () => { runs++; await (runs === 1 ? g1 : g2).promise; return runs })
+  const failure = assert.rejects(read, (e: any) => e.code === 'stale_read_scope')
+  await settle()
+  resetActorReadSession(); g1.open()
+  await settle()
+  resetActorReadSession(); g2.open()
+  await failure
+  assert.equal(runs, 2)
+}))
+
+await runTest('a sign-in by another account is not papered over: the stale read is refused, not re-issued', () => withSignedInPage(1, async (storage) => {
+  let runs = 0
+  const g = gate()
+  const read = route('dashboard:startup:z', async () => { runs++; await g.promise; return runs })
+  const failure = assert.rejects(read, (e: any) => e.code === 'stale_read_scope')
+  await settle()
+  storage.setItem('businessos_user', JSON.stringify({ id: 2 }))
+  resetActorReadSession()
+  g.open()
+  await failure
+  assert.equal(runs, 1)
+}))
+
+await runTest('a write caught by the reset is never re-issued', () => withSignedInPage(1, async () => {
+  let runs = 0
+  const g = gate()
+  const write = route('sales:create', async () => { runs++; await g.promise; return runs }, null, true)
+  await settle()
+  resetActorReadSession()
+  g.open()
+  await write.catch(() => {})
+  assert.equal(runs, 1)
 }))
 
 // getAppBootstrap imports extension-less modules, so it is bundled with its own copy of http.ts (its module

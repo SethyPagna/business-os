@@ -1614,6 +1614,26 @@ export async function route<T = any>(
   localFn?: RouteFn<T> | null,
   options: boolean | RouteOptions = false,
 ): Promise<T | null> {
+  const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  const owner = isWrite ? null : captureActorWriteIdentity()
+  try {
+    return await routeOnce(channel, serverFn, localFn, options)
+  } catch (error: any) {
+    // Sign-in resets the read scope and the bootstrap may then rewrite the stored grants, so a read begun in that
+    // window dies with stale_read_scope although the account is the same. Re-issue it once under the settled scope.
+    // Never for a write, another account, a locked session or a caller that has gone away.
+    const callerSignal = typeof options === 'boolean' ? undefined : options?.signal
+    if (error?.code !== 'stale_read_scope' || !owner || !isActorWriteIdentityCurrent(owner) || callerSignal?.aborted) throw error
+    return routeOnce(channel, serverFn, localFn, options)
+  }
+}
+
+async function routeOnce<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
   const t0 = Date.now()
   const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
