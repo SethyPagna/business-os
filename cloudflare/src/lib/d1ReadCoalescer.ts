@@ -88,10 +88,25 @@ class CoalescingD1 {
   }
 }
 
-/** A real D1 binding (as opposed to the hand-made stand-ins some tests pass in). */
+/**
+ * A real D1 binding, as opposed to the hand-made compat objects some tests pass in (their statements have get(), a real
+ * statement has bind() and first() and no get()). Preparing a statement does no I/O.
+ */
+const BINDINGS = new WeakMap<object, boolean>()
 function isD1Binding(db: unknown): db is D1Database {
-  const candidate = db as Partial<Record<'prepare' | 'batch' | 'exec', unknown>> | null | undefined
-  return !!candidate && typeof candidate.prepare === 'function' && typeof candidate.batch === 'function' && typeof candidate.exec === 'function'
+  if (!db || typeof db !== 'object') return false
+  const known = BINDINGS.get(db)
+  if (known !== undefined) return known
+  let verdict = false
+  try {
+    const candidate = db as Partial<Record<'prepare' | 'batch' | 'exec', unknown>>
+    if (typeof candidate.prepare === 'function' && typeof candidate.batch === 'function' && typeof candidate.exec === 'function') {
+      const statement = (db as D1Database).prepare('SELECT 1') as unknown as Record<string, unknown>
+      verdict = typeof statement.bind === 'function' && typeof statement.first === 'function' && typeof statement.get !== 'function'
+    }
+  } catch { verdict = false }
+  BINDINGS.set(db, verdict)
+  return verdict
 }
 
 /** `env` with its DB binding coalescing reads. Idempotent; anything that is not a D1 binding is returned untouched. */

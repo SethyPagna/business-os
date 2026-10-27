@@ -102,6 +102,8 @@ async function suite(coalescer, label) {
     record('idempotent: wrapping a wrapped env changes nothing', coalesceD1Reads(env) === env && env.KEEP === 'x' && env.DB !== world.d1)
     const handMade = { DB: { prepare() { return { get() {}, all() {}, run() {} } }, batch() {} } }
     record('a hand-made compat object (no exec) is returned untouched', coalesceD1Reads(handMade) === handMade)
+    const hybrid = { DB: { prepare() { return { bind() { return this }, get() {}, all() {}, run() {} } }, batch() {}, exec() {} } }
+    record('a harness object with exec/batch whose statements have get() (D1Compat-like) is returned untouched', coalesceD1Reads(hybrid) === hybrid)
     const direct = await env.DB.batch([env.DB.prepare(row(1)).bind(), world.d1.prepare(row(2))])
     record('a caller\'s own db.batch is forwarded as it is (mixed wrapped and real statements)', direct.length === 2 && direct[0].results[0].name === 'one' && direct[1].results[0].name === 'two' && kinds(world) === 'batch')
   }
@@ -120,6 +122,7 @@ async function main() {
     ['stops batching after any failed batch', (text) => text.replace('.every(Boolean)) this.batching = false', '.length) this.batching = false')],
     ['no chunking', (text) => text.replace('const MAX_BATCH = 50', 'const MAX_BATCH = 100000')],
     ['writes are held back with the reads', (text) => text.replace('run(): Promise<D1Result> { return this.real(this.owner.d1).run() }', 'run(): Promise<D1Result> { return this.owner.read(this) }')],
+    ['takes any object with prepare/batch/exec for a D1 binding', (text) => text.replace("verdict = typeof statement.bind === 'function' && typeof statement.first === 'function' && typeof statement.get !== 'function'", 'verdict = true')],
     ['no batching at all (every read its own group)', (text) => text.replace('const MAX_BATCH = 50', 'const MAX_BATCH = 1')],
   ]
   for (const [name, mutate] of MUTANTS) {
