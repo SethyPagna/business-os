@@ -313,7 +313,10 @@ function normalizeReferenceName(value: unknown): string {
   return paymentMethodKey(value)
 }
 
-const PAYMENT_METHOD_SCAN_PAGE_SIZE = 200
+// One call per page of sales (three short columns per row, ~100 bytes). 200 a
+// page took 80 calls for 15.8k sales, past the Free plan's 50 per invocation;
+// 5,000 takes 4, and stays under 15 until ~70k sales.
+const PAYMENT_METHOD_SCAN_PAGE_SIZE = 5000
 const PAYMENT_METHOD_VARIANT_LIMIT = 1000
 
 type PaymentMethodSettingSnapshot = {
@@ -324,14 +327,8 @@ type PaymentMethodSettingSnapshot = {
 
 type PaymentMethodSaleRow = {
   id: number
-  receipt_number: string | null
-  cashier_name: string | null
-  customer_name: string | null
-  customer_phone: string | null
-  branch_name: string | null
   payment_method: string | null
   payment_details: string | null
-  write_revision: number
 }
 
 type PaymentMethodImpactSummary = {
@@ -551,12 +548,11 @@ async function loadPaymentMethodCandidates(
   }
   let afterId = 0
   for (;;) {
+    // Only the columns the classification below reads.
     const rows = await db.prepare(`
-      SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name,
-             s.payment_method,s.payment_details,COALESCE(v.revision,0) AS write_revision
-      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
-      WHERE s.id>@afterId
-      ORDER BY s.id LIMIT @pageSize
+      SELECT id,payment_method,payment_details FROM sales
+      WHERE id>@afterId
+      ORDER BY id LIMIT @pageSize
     `).all<PaymentMethodSaleRow>({ afterId, pageSize: PAYMENT_METHOD_SCAN_PAGE_SIZE })
     if (!rows.length) break
     for (const row of rows) {
