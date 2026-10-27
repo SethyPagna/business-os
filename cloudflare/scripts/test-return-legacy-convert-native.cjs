@@ -254,6 +254,11 @@ async function main() {
     assert.equal(applied.body.replayed, false)
     const historyId = Number(applied.body.history_id)
     assert.ok(historyId > 0, 'one undoable history entry')
+    // Owner 27 Oct: what History shows says "money details", never "format"; the payload carries what the translated row needs.
+    const historyRow = await one('SELECT label,undo_label,redo_label,undo_payload FROM action_history WHERE id=?', historyId)
+    assert.deepEqual([historyRow.label, historyRow.undo_label, historyRow.redo_label],
+      ['Update money details of 4 returns', 'Undo update of money details', 'Redo update of money details'])
+    assert.deepEqual([JSON.parse(historyRow.undo_payload).count, JSON.parse(historyRow.undo_payload).return_number], [4, null])
     for (const id of [901, 902, 903, 905]) {
       const row = await money(id)
       assert.equal(Number(row.money_precision_version), 1, `return ${id} is in the current format`)
