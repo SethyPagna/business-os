@@ -2504,9 +2504,16 @@ app.patch('/:id/status', async (c) => {
   // Pre-flight availability for anything the plan TAKES (plain read; the
   // CHECK(quantity >= 0) constraints below remain the real race guard,
   // same validate-then-batch shape as POST / -- see lib/db.ts's batch()).
+  // One read for every (product, branch) the plan takes, not one per line:
+  // un-cancelling a 36+ line sale used to exceed the Free plan's 50 calls.
+  const deductionStock = plan.deductions.length
+    ? await db.prepare(`SELECT bs.product_id, bs.branch_id, bs.quantity FROM json_each(?) j
+        JOIN branch_stock bs ON bs.product_id = json_extract(j.value, '$[0]') AND bs.branch_id = json_extract(j.value, '$[1]')`)
+      .all<{ product_id: number; branch_id: number; quantity: number }>([JSON.stringify(plan.deductions.map((entry) => [entry.product_id, entry.branch_id]))])
+    : []
+  const stockByPair = new Map(deductionStock.map((row) => [`${row.product_id}:${row.branch_id}`, row.quantity]))
   for (const deduction of plan.deductions) {
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([deduction.product_id, deduction.branch_id])
-    const available = stockRow?.quantity || 0
+    const available = stockByPair.get(`${deduction.product_id}:${deduction.branch_id}`) || 0
     if (deduction.quantity > available) {
       const name = items.find((item) => item.product_id === deduction.product_id)?.product_name || `product #${deduction.product_id}`
       return c.json({ error: `Insufficient stock for ${name}: requested ${deduction.quantity}, available ${available}` }, 409)
