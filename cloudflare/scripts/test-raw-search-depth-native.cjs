@@ -18,12 +18,31 @@ const legacyBody = `export function foldDiacriticsSql(expr: string): string {
   return out
 }`
 const legacy = load(source.replace(/export function foldDiacriticsSql\(expr: string\): string \{[\s\S]*?\n\}/, legacyBody))
-const settingsSource = fs.readFileSync(path.join(__dirname, '../src/routes/settings.ts'), 'utf8')
-const settingsSqlSource = settingsSource.slice(settingsSource.indexOf('const VALID_PAYMENT_DETAILS_SQL ='), settingsSource.indexOf('const PAYMENT_METHOD_MALFORMED_RELEVANT_SQL ='))
+// The payment-method search SQL comes from the REAL routes/settings.ts, bundled whole, with only its searchMatch import pointed at the
+// implementation under test (current or legacy). Evaluating a slice of the file broke whenever a constant moved into or out of the slice
+// (6.0.982); the whole module has no such boundary.
+const settingsPath = path.join(__dirname, '../src/routes/settings.ts')
+const settingsSource = fs.readFileSync(settingsPath, 'utf8')
+const SEARCH_IMPORT = "import { normalizedHaystackSql } from '../lib/searchMatch'"
+assert.equal(settingsSource.split(SEARCH_IMPORT).length, 2, 'settings.ts imports normalizedHaystackSql from searchMatch exactly once')
+const settingsBundle = require('esbuild').buildSync({
+  stdin: { contents: `${settingsSource.replace(SEARCH_IMPORT, 'const { normalizedHaystackSql } = (globalThis as any).__rawSearchDepthSearch')}\nexport { PAYMENT_METHOD_SEARCH_SQL }\n`,
+    resolveDir: path.dirname(settingsPath), sourcefile: settingsPath, loader: 'ts' },
+  bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'silent',
+}).outputFiles[0].text
+const paymentSqlBySearch = new Map()
 function paymentSql(search) {
-  const out = ts.transpileModule(settingsSqlSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  return new Function('normalizedHaystackSql', out + '\nreturn PAYMENT_METHOD_SEARCH_SQL;')(search.normalizedHaystackSql)
+  if (!paymentSqlBySearch.has(search)) {
+    globalThis.__rawSearchDepthSearch = { normalizedHaystackSql: search.normalizedHaystackSql }
+    const mod = { exports: {} }
+    try { new Function('require', 'module', 'exports', settingsBundle)(require, mod, mod.exports) } finally { delete globalThis.__rawSearchDepthSearch }
+    assert.equal(typeof mod.exports.PAYMENT_METHOD_SEARCH_SQL, 'string', 'settings.ts declares PAYMENT_METHOD_SEARCH_SQL')
+    paymentSqlBySearch.set(search, mod.exports.PAYMENT_METHOD_SEARCH_SQL)
+  }
+  return paymentSqlBySearch.get(search)
 }
+// Control: each implementation really reached the bundled module, so the comparisons below are not of one SQL text with itself.
+assert.notEqual(paymentSql(legacy), paymentSql(current), 'the legacy and current searchMatch produce different payment-method SQL')
 const fixtures = [null, '', 'Crème+Brûlée & ÆTHER/ØRESUND_Łódź.Þing-Đà', 'ÁÀÂÄÃÅÉÈÊËÍÌÎÏÓÒÔÖÕØÚÙÛÜÝŸÑÇŞŢÆŒßŁĐÞ', 'កម្ពុជា+សេរ៉ូម', "Quote' @value ?99 -- /* */\nTab\t MixedCASE", '100ml', '110C', 'E.l.f.']
 let expected, references, expectedPayment, scopeReferences
 const paymentParams = { identityVariants: '["ABA"]', target: 'Crème & Card' }
