@@ -26,7 +26,7 @@ function load(filename) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: filename,
   }).outputText
   new Function('require', 'module', 'exports', output)(name => {
-    if (name === '../lib/auth') return { requireAuth: async (c, next) => {
+    if (name === '../lib/auth') return { prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => {
       if (!user) return c.json({ error: 'Unauthenticated' }, 401)
       c.set('user', user)
       return next()

@@ -70,6 +70,7 @@ import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
 import { PendingActionIdempotencyError } from './lib/pendingActions'
+import { d1DailyLimitBody } from './lib/d1DailyLimit'
 
 export type Env = {
   DB: D1Database
@@ -233,6 +234,14 @@ installReviewAlerts()
 app.onError((error, c) => {
   const transactionRefusal = stockTransactionRefusal(error)
   if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
+  // The account's D1 daily cap (Free plan) is not a bug: one stable 503 with the reset time, no raw message, no Sentry noise.
+  const dailyLimit = d1DailyLimitBody(error)
+  if (dailyLimit) {
+    console.warn('[worker] D1 daily limit reached', dailyLimit.limit, c.req.method, c.req.path)
+    return c.json({ ...dailyLimit, error: 'The daily database limit was reached. It resets at 00:00 UTC.' }, 503, {
+      'Retry-After': String(Math.max(1, Math.ceil((Date.parse(dailyLimit.resetsAt) - Date.now()) / 1000))),
+    })
+  }
   const stockRefusal = productStockGuardError(error)
   if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
   if (error instanceof PendingActionIdempotencyError) return c.json({ success: false, error: error.message, code: error.code }, 409)
