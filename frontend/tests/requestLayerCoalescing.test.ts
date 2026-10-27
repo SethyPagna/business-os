@@ -154,59 +154,15 @@ await test('remote vs local is told apart by websocket.ts payload key, and no lo
 })
 
 // ---------------------------------------------------------------------------------------------
-// Finding 5 (bell): NotificationCenter's real sync effect, extracted and run against a fake clock.
+// Finding 5 (bell): the bell no longer reacts to sales pushes at all. One shared store reads the summary at most once a
+// minute while visible and at once only for a 'notifications' push; its behaviour is executed in notificationSummaryStore.test.ts.
 const bellSource = read('../src/components/shared/NotificationCenter.tsx')
-const bellTree = ts.createSourceFile('NotificationCenter.tsx', bellSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-function bellSyncEffect(): string {
-  let found = ''
-  const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && node.expression.getText(bellTree) === 'useEffect' && node.arguments[0]?.getText(bellTree).includes('syncChannel.reason === FOREGROUND_RESUME_REASON')) found = node.arguments[0].getText(bellTree)
-    ts.forEachChild(node, visit)
-  }
-  visit(bellTree); assert.ok(found, 'bell sync effect'); return found
-}
-function bellConstants(): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const statement of bellTree.statements) {
-    if (!ts.isVariableStatement(statement)) continue
-    for (const declaration of statement.declarationList.declarations) {
-      const name = declaration.name.getText(bellTree)
-      if (/^NOTIFICATION_(SYNC|IMMEDIATE)/.test(name) && declaration.initializer) {
-        out[name] = new Function(`return (${ts.transpileModule(declaration.initializer.getText(bellTree), {}).outputText.trim().replace(/;$/, '')})`)()
-      }
-    }
-  }
-  return out
-}
-await test('bell: a burst of sales pushes reloads the summary once per 30 s; notifications reload at once', async () => {
-  const clock = fakeClock()
-  let loads = 0
-  let refreshTimer: number | null = null
-  const lastSummaryLoadAtRef = { current: 0 }
-  const loadSummary = async () => { loads++; lastSummaryLoadAtRef.current = clock.now() }
-  const env: Record<string, unknown> = {
-    ...bellConstants(),
-    planThrottledSyncReload: syncRuntime.planThrottledSyncReload,
-    FOREGROUND_RESUME_REASON, visibilityActive: true, lastSummaryLoadAtRef, loadSummary,
-    // scheduleRefresh's contract: one pending timer, replaced by each call, then loadSummary.
-    scheduleRefresh: (delayMs: number) => {
-      if (refreshTimer != null) clock.clearTimeout(refreshTimer)
-      refreshTimer = clock.setTimeout(() => { refreshTimer = null; return loadSummary() }, delayMs)
-    },
-    Date: { now: clock.now },
-    syncChannel: null as unknown,
-  }
-  const code = ts.transpileModule(`return (${bellSyncEffect()})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  const effect = new Function('env', `with(env){${code}}`)(env) as () => void
-  const push = (channel: string) => { env.syncChannel = { channel, ts: clock.now(), reason: null }; effect() }
-  await loadSummary() // the bell's own first load at t=0
-  for (let i = 0; i < 5; i++) { await clock.advance(1_000); push('sales') }
-  assert.equal(loads, 1, 'no reload inside the 30 s window')
-  await clock.advance(30_000)
-  assert.equal(loads, 2, 'one trailing reload carries the whole burst')
-  push('notifications')
-  assert.equal(loads, 3, 'a notifications push reloads at once')
-  assert.match(bellSource, /const loadSummary = useCallback\(async \(silent = false\) => \{\n\s+lastSummaryLoadAtRef\.current = Date\.now\(\)/)
+const bellStoreSource = read('../src/utils/notificationSummaryStore.ts')
+await test('bell: sales pushes do not reload the summary; the shared store polls once per 60 s and reads a notifications push at once', () => {
+  assert.ok(!/\bsyncChannel\b|\buseSync\b/.test(bellSource), 'the bell does not watch the lossy single-slot channel')
+  assert.ok(bellStoreSource.includes("subscribeSyncSignals(['notifications'],"), 'only a notifications push is listened to')
+  assert.ok(!/'sales'|'inventory'/.test(bellStoreSource.slice(bellStoreSource.indexOf('export const notificationSummaryStore'))), 'no sale or stock push reads the summary')
+  assert.ok(bellStoreSource.includes('NOTIFICATION_POLL_INTERVAL_MS = 60_000'), 'one read per minute while visible')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -226,51 +182,23 @@ new Function('require', 'module', 'exports', ts.transpileModule(read('../src/api
       return { half: 'summary' }
     },
   }, transportModule, transportModule.exports)
-const dashboardSource = read('../src/components/dashboard/Dashboard.tsx')
-const dashboardTree = ts.createSourceFile('Dashboard.tsx', dashboardSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-function dashboardDeclaration(name: string): string {
-  let found = ''
-  const visit = (node: ts.Node) => {
-    if (ts.isVariableDeclaration(node) && node.name.getText(dashboardTree) === name) found = node.initializer!.getText(dashboardTree)
-    if (ts.isFunctionDeclaration(node) && node.name?.text === name) found = node.getText(dashboardTree)
-    ts.forEachChild(node, visit)
-  }
-  visit(dashboardTree); return found
-}
-await test('Dashboard re-activation / sync refresh: summary + analytics = 1 read (was 2), each half lands in its own state', async () => {
+await test('Dashboard refresh: the one startup read is shared while in flight and re-read after a sale', async () => {
   httpModule.setSyncServerUrl('https://sync.example.test')
   httpModule.cacheClearAll()
   dashboardFetches.length = 0
-  const writes: Record<string, unknown> = {}
-  const env: Record<string, unknown> = {
-    useCallback: (fn: unknown) => fn, console,
-    dashboardScope: 's', dashboardScopeRef: { current: 's' },
-    summaryRequestRef: { current: 0 }, analyticsRequestRef: { current: 0 }, analyticsLoadingRef: { current: false },
-    beginTrackedRequest, isTrackedRequestCurrent, invalidateStockAlertPageRequests() {},
-    getCurrentDashboardRange: () => ({ startDate: '2026-10-20', endDate: '2026-10-20', granularity: 'day' }),
-    getDashboardApi: () => transportModule.exports,
-    withLoaderTimeout: (fn: () => unknown) => fn(),
-    DASHBOARD_SUMMARY_TIMEOUT_MS: 1, DASHBOARD_ANALYTICS_TIMEOUT_MS: 1,
-    isDashboardSummaryPayload: () => true, isDashboardAnalyticsPayload: () => true,
-    normalizeDashboardSummaryPayload: (value: unknown) => value, normalizeDashboardAnalyticsPayload: (value: unknown) => value,
-    isInvalidSessionError: () => false, getErrorMessage: (error: Error) => error.message,
-    setSummary: (value: { data: unknown }) => { writes.summary = value.data }, setAnalytics: (value: { data: unknown }) => { writes.analytics = value.data },
-    setSummaryError() {}, setAnalyticsError() {}, setLoading() {}, setAnalyticsLoading() {},
-  }
-  const helper = dashboardDeclaration('startupHalf')
-  if (helper) env.startupHalf = new Function(`${ts.transpileModule(helper, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return startupHalf`)()
-  const loader = (name: string) => {
-    const code = ts.transpileModule(`return (${dashboardDeclaration(name)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-    return new Function('env', `with(env){${code}}`)(env) as (options?: unknown) => Promise<unknown>
-  }
-  // Exactly what the sync-refresh effect and the Retry button run.
-  await Promise.allSettled([loader('loadSummary')({ label: 'Dashboard summary refresh' }), loader('loadAnalytics')({ silent: true })])
+  const range = { startDate: '2026-10-20', endDate: '2026-10-20', granularity: 'day' }
+  const startup = transportModule.exports.getDashboardStartup
+  // A sync refresh and the Retry button asking in the same moment make one request, and both get both halves.
+  const [first, second] = await Promise.all([startup(range), startup(range)])
   assert.deepEqual(dashboardFetches, ['/api/dashboard/startup'])
-  assert.deepEqual(writes, { summary: { half: 'summary' }, analytics: { half: 'analytics' } })
+  assert.deepEqual(first, { summary: { half: 'summary' }, analytics: { half: 'analytics' } })
+  assert.deepEqual(second, first)
   // A sale invalidates the derived dashboard read; the next refresh is again one read.
   httpModule.cacheInvalidateWithDerived('sales')
-  await Promise.allSettled([loader('loadSummary')({ label: 'Dashboard summary refresh' }), loader('loadAnalytics')({ silent: true })])
+  await startup(range)
   assert.equal(dashboardFetches.length, 2)
+  const dashboardSource = read('../src/components/dashboard/Dashboard.tsx')
+  assert.equal((dashboardSource.match(/getDashboardStartup\(/g) || []).length, 1, 'the page has one call site for the startup read')
   httpModule.cacheClearAll()
   httpModule.setSyncServerUrl('')
 })
