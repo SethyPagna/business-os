@@ -2804,6 +2804,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         range={stripRange}
         onRangeChange={setStripRange}
         showTime
+        singleRow
         onOpenChange={setStripOpen}
         iconOnly
         compactRange

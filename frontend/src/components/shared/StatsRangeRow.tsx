@@ -7,7 +7,7 @@ type TranslateFn = (key: string) => string | undefined
 /** One stable control row; presets remain reachable while Stats is folded. */
 export default function StatsRangeRow({
   range, onRangeChange, t, leading, actions, showTime = false, continuous = false,
-  showPresets = true, compactRange = false, layout = 'wrap', disabled = false, className = '',
+  showPresets = true, compactRange = false, layout = 'wrap', singleRow = false, disabled = false, className = '',
 }: {
   range: DateTimeRange
   onRangeChange: (range: DateTimeRange, source?: DateTimeRangeSource) => void
@@ -19,6 +19,8 @@ export default function StatsRangeRow({
   showPresets?: boolean
   compactRange?: boolean
   layout?: 'wrap' | 'scroll'
+  /** Chip, dates and actions share ONE row at every width (phones included): the dates take what is left and truncate, the actions stay compact icons. */
+  singleRow?: boolean
   /** Dates and presets stay visible but inert; `leading` and `actions` keep working. */
   disabled?: boolean
   className?: string
@@ -45,20 +47,20 @@ export default function StatsRangeRow({
   return (
     <div className={`min-w-0 ${className}`}>
       {/* Existing action-heavy callers wrap so dates retain a readable minimum width. */}
-      <div className={scrolling ? 'stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1' : 'flex min-w-0 flex-wrap items-center gap-1'} data-stats-range-controls>
+      <div className={scrolling ? 'stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1' : `flex min-w-0 items-center gap-1 ${singleRow ? 'flex-nowrap' : 'flex-wrap'}`} data-stats-range-controls>
         {leading}
         <DateTimeRangePicker
           value={range} onChange={onRangeChange} t={t} showTime={showTime} continuous={continuous} disabled={disabled}
           showCalendarIcon={false}
           compactTriggerLabels={compactRange}
           showQuickRanges={!showPresets}
-          className={scrolling ? 'w-56 min-w-[14rem] shrink-0' : 'min-w-[10.5rem] flex-1'}
+          className={scrolling ? 'w-56 min-w-[14rem] shrink-0' : singleRow ? 'min-w-[8rem] flex-1 basis-0' : 'min-w-[10.5rem] flex-1'}
           triggerClassName={compactRange
             ? 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
             : 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3'}
         />
         {scrolling ? presets : null}
-        {actions ? <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">{actions}</div> : null}
+        {actions ? <div className={`ml-auto flex shrink-0 items-center justify-end gap-1 ${singleRow ? 'flex-nowrap' : 'flex-wrap'}`}>{actions}</div> : null}
       </div>
       {!scrolling ? presets : null}
     </div>

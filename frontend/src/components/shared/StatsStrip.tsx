@@ -83,6 +83,7 @@ export default function StatsStrip({
   iconOnly = false,
   compactRange = false,
   layout = 'wrap',
+  singleRow = false,
   rangeDisabled = false,
   summary,
   className = '',
@@ -110,6 +111,8 @@ export default function StatsStrip({
   compactRange?: boolean
   /** 'scroll' keeps chip, dates, presets and actions on one horizontally scrolling row. */
   layout?: 'wrap' | 'scroll'
+  /** Stats chip, dates and actions on one row at every width (see StatsRangeRow). */
+  singleRow?: boolean
   /** Dates and presets inert; the Stats chip and the actions stay live. */
   rangeDisabled?: boolean
   /** A one-line headline (e.g. "42 sales · $1,204") shown next to the Stats
@@ -163,7 +166,7 @@ export default function StatsStrip({
         <StatsRangeRow range={range} onRangeChange={onRangeChange} t={t}
           leading={statsTrigger} actions={toolbarActions}
           showTime={showTime} continuous={continuous} showPresets={showPresets} compactRange={compactRange}
-          layout={layout} disabled={rangeDisabled} />
+          layout={layout} singleRow={singleRow} disabled={rangeDisabled} />
       ) : (
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {statsTrigger}

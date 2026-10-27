@@ -2008,6 +2008,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           onRangeChange={handleDashboardRangeChange}
           showTime
           continuous
+          singleRow
           loading={summaryPending || analyticsPending}
           rangeActions={hasPermission('dashboard_export') ? (
             <button
