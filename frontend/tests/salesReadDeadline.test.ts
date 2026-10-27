@@ -161,7 +161,9 @@ await runTest('the Sales route policy lets a timed-out read consume one attempt'
   resetReadState()
   const originalFetch = globalThis.fetch
   let calls = 0
-  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    // A failed read also asks the shared /health probe (lane 6.0.1002); the probe is not a retry of the read.
+    if (String(input).endsWith('/health')) return Promise.resolve(new Response('{"status":"ok"}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     calls += 1
     return new Promise<Response>((_resolve, reject) => {
       const rejectAbort = () => reject(new DOMException('Aborted', 'AbortError'))
