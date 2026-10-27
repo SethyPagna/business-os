@@ -2,6 +2,7 @@ import { getNotificationSummary } from '../api/notificationSummary.ts'
 import { withLoaderTimeout } from './loaders.ts'
 import { runWhenVisible, startVisibleInterval, type VisibilityHost } from './visibilityPolling.ts'
 import { subscribeSyncSignals } from './syncSignals.ts'
+import { FOREGROUND_RESUME_REASON } from './permissionRefreshAccumulator.ts'
 
 // ONE shared read of GET /api/notifications/summary for the whole app (it costs about
 // 56k D1 rows). The bell used to read it per component, on every sale push of every tab.
@@ -136,6 +137,7 @@ export const notificationSummaryStore = createNotificationSummaryStore({
   fetchSummary: () => withLoaderTimeout(() => getNotificationSummary(), 'Notifications', NOTIFICATION_SUMMARY_TIMEOUT_MS),
   share: browserShare(),
   onNotificationsPush: (listener) => subscribeSyncSignals((signal) => {
-    if (signal.type === 'update' && signal.channel === 'notifications') listener()
+    // A no-gap resume burst names every channel; the visibility catch-up already covers it.
+    if (signal.type === 'update' && signal.channel === 'notifications' && signal.reason !== FOREGROUND_RESUME_REASON) listener()
   }),
 })
