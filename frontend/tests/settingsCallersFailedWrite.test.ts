@@ -25,7 +25,7 @@ await test('callers that ignored a failed write now read the answer: Receipt, Pr
   assert.match(read('../src/components/receipt-settings/PrintSettings.tsx'), /settingsSaveSucceeded\(result\)\) notify\?\./)
   const loyalty = read('../src/components/loyalty-points/LoyaltyPointsPage.tsx')
   assert.ok(loyalty.indexOf('settingsSaveSucceeded(result)') > 0 && loyalty.indexOf('settingsSaveSucceeded(result)') < loyalty.indexOf("notify(copy('saved'"))
-  assert.match(read('../src/components/shared/NotificationCenter.tsx'), /if \(!settingsSaveSucceeded\(result\)\) return\n\s+void loadSummary\(true\)/)
+  assert.match(read('../src/components/shared/NotificationCenter.tsx'), /if \(!settingsSaveSucceeded\(result\)\) return\n\s+void notificationSummaryStore\.refresh\(\{ force: true \}\)/)
   assert.match(read('../src/components/users/UserProfileModal.tsx'), /if \(!settingsSaveSucceeded\(result\)\) return\n\s+actionHistory\.pushAction/)
 })
 
