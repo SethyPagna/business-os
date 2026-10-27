@@ -2,6 +2,9 @@
 // /api/auth/bootstrap three times), and an invalidation keeps a shared read only when it claims no data change.
 // Runs the real api/http.ts against a counting fetch.
 import assert from 'node:assert/strict'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { buildSync } from 'esbuild'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -16,6 +19,17 @@ import {
 } from '../src/api/http.ts'
 
 let failed = 0
+function readableStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => values.clear(),
+    key: (index: number) => [...values.keys()][index] ?? null,
+    getItem: (key: string) => values.get(String(key)) ?? null,
+    setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+    removeItem: (key: string) => { values.delete(String(key)) },
+  }
+}
 async function runTest(name: string, fn: () => void | Promise<void>): Promise<void> {
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
@@ -113,6 +127,63 @@ await runTest('a precaution invalidation (socket opened) keeps a lookup read in 
   assert.equal(calls.length, 3)
   pending[1].resolve([]); pending[2].resolve([])
   await Promise.all([third, fourth])
+}))
+
+// getAppBootstrap imports extension-less modules, so it is bundled with its own copy of http.ts (its module
+// state, fetch and window are the test's); that copy is returned as `http` so the test can invalidate through it.
+const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const bundled = buildSync({
+  stdin: { contents: "export * from './src/api/appBootstrapTransport.ts'; export * as http from './src/api/http.ts'", resolveDir: FRONTEND, loader: 'ts' },
+  bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
+}).outputFiles[0].text
+const bundleModule = { exports: {} as Record<string, any> }
+new Function('module', 'exports', 'require', bundled)(bundleModule, bundleModule.exports, (name: string) => { throw new Error(`unexpected require ${name}`) })
+const { getAppBootstrap, http: bundledHttp } = bundleModule.exports as { getAppBootstrap: () => Promise<any>; http: typeof import('../src/api/http.ts') }
+
+async function withBundledPage(early: Promise<unknown> | null, run: (calls: string[], pending: Deferred[]) => Promise<void>): Promise<void> {
+  const originalFetch = globalThis.fetch
+  const originalWindow = (globalThis as { window?: unknown }).window
+  const calls: string[] = []
+  const pending: Deferred[] = []
+  ;(globalThis as { window?: unknown }).window = { location: { origin: 'https://admin.example.test', hostname: 'admin.example.test' }, localStorage: readableStorage(), sessionStorage: readableStorage(), __businessOsAuthBootstrapPromise: early }
+  bundledHttp.setSyncServerUrl('https://admin.example.test')
+  bundledHttp.cacheClearAll()
+  globalThis.fetch = ((url: string) => { calls.push(String(url)); const next = deferredResponse(); pending.push(next); return next.promise }) as typeof fetch
+  try { await run(calls, pending) } finally {
+    globalThis.fetch = originalFetch
+    ;(globalThis as { window?: unknown }).window = originalWindow
+    bundledHttp.setSyncServerUrl(''); bundledHttp.cacheClearAll()
+  }
+}
+
+await runTest('sign-in asks for the bootstrap three times at once: one request, one answer for all', () => withBundledPage(null, async (calls, pending) => {
+  const asks = [getAppBootstrap(), getAppBootstrap(), getAppBootstrap()]
+  await Promise.resolve()
+  assert.equal(calls.length, 1)
+  pending[0].resolve({ user: { id: 3 }, settings: {} })
+  const answers = await Promise.all(asks)
+  assert.deepEqual(answers.map((a) => a.user.id), [3, 3, 3])
+  const next = getAppBootstrap()
+  await Promise.resolve()
+  assert.equal(calls.length, 2, 'a later ask is a new read, not a stored answer')
+  pending[1].resolve({ user: { id: 3 } }); await next
+}))
+
+await runTest('the early bootstrap copy of the page serves every overlapping ask (taken only once) with no request at all', () => withBundledPage(Promise.resolve({ user: { id: 5 }, settings: {} }), async (calls) => {
+  const answers = await Promise.all([getAppBootstrap(), getAppBootstrap()])
+  assert.deepEqual(answers.map((a) => a.user.id), [5, 5])
+  assert.equal(calls.length, 0)
+}))
+
+await runTest('an ask after a users/roles push is not served by the read begun before it', () => withBundledPage(null, async (calls, pending) => {
+  const before = getAppBootstrap()
+  await Promise.resolve()
+  bundledHttp.cacheInvalidateWithDerived('users')
+  const after = getAppBootstrap()
+  await Promise.resolve()
+  assert.equal(calls.length, 2, 'a permission change must not be answered by a read that predates it')
+  pending.forEach((entry) => entry.resolve({ user: { id: 1 } }))
+  await Promise.all([before, after])
 }))
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
