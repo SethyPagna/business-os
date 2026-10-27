@@ -35,6 +35,8 @@ export const RESTRICTED_HISTORICAL_BRANCH_REFERENCES = [
   ['sale_payment_events', 'branch_id'],
   // 0272: the branch a low or out-of-stock crossing happened at, an event-time fact in an alert log, never reparented.
   ['stock_crossing_alerts', 'branch_id'],
+  // 0275: the branch a refund correction was made at, an event-time fact on an append-only ledger (UPDATE aborts), never reparented.
+  ['return_refund_corrections', 'branch_id'],
 ] as const
 /** JSON payload families (design §1.2 c). action_history is streamed and classified; the other three are fenced by count:max. */
 export const CUTOVER_JSON_FAMILIES = ['action_history', 'undo_snapshots', 'pending_actions', 'stock_session_operations'] as const

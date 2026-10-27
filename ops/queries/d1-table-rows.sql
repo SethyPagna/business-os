@@ -183,5 +183,6 @@ SELECT
     'permission_extras_0270_state', (SELECT COUNT(*) FROM permission_extras_0270_state),
     'permission_extras_0270_fix', (SELECT COUNT(*) FROM permission_extras_0270_fix),
     'sale_payment_events', (SELECT COUNT(*) FROM sale_payment_events),
-    'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts)
+    'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts),
+    'return_refund_corrections', (SELECT COUNT(*) FROM return_refund_corrections)
   ) AS rows_10;
