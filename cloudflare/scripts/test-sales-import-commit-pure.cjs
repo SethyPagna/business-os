@@ -27,6 +27,7 @@ function compileSubject() {
     if (request === './db') return {}
     if (request === './loyaltyEligibility') return compileLib('loyaltyEligibility',localRequire)
     if (request === './saleStatusResolution') return compileLib('saleStatusResolution', localRequire)
+    if (request === './paymentMethodRegistry') return compileLib('paymentMethodRegistry', localRequire)
     if (request === './financialPrecision') return compileLib('financialPrecision', localRequire)
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)

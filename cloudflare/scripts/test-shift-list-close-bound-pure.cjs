@@ -115,6 +115,7 @@ function harness(sqlite, routeSource = source) {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },

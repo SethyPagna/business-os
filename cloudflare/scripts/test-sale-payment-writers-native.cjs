@@ -807,7 +807,9 @@ async function rielRemainder(r) {
   const session = { scope_mode: 'shop_wide', user_id: 901, branch_id: 1, opened_at: '2000-01-01 00:00:00', closed_at: null, cancelled_at: null, opening_float_usd: 0, opening_float_khr: 0 }
   const shift = () => shiftReader.shiftCashSales(env, session, Date.now() + 5000, { kinds: {}, configuredMethods: ['Cash', 'ABA'] })
   const status = async (id) => (await h.one('SELECT sale_status FROM sales WHERE id=?', id)).sale_status
-  const riel = (khr) => [{ method: 'Cash', amount_usd: 0, amount_khr: khr }]
+  // Paid by ABA: 39,901 and 40,050 riel are not whole 100-riel notes, which cash can no longer hold (owner, 27 Oct 2026).
+  // The coverage band and the over-tender flag read the tender whatever its method, so the checks below are unchanged.
+  const riel = (khr) => [{ method: 'ABA', amount_usd: 0, amount_khr: khr }]
   let n = 0
   const notPaid = (key) => H.createSale(h, { key, status: 'awaiting_payment', lines: [{ productId: 401, quantity: 5 }], extra: { payment_currency: 'KHR' }, label: `${key}: Not Paid $10` })
   const settle = (id, details, extra = {}) => h.call('PATCH', `/api/sales/${id}/status`, { sale_status: 'completed', client_request_id: `q-settle-${++n}`, expected_exchange_rate: 4000, payment_details: details, ...extra }, `settle ${id}`)

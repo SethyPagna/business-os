@@ -140,14 +140,14 @@ async function run() {
   const savedLines = f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=@id').all({id:waitingId})
   const settled = await h.app.request(`/${waitingId}/status`,{method:'PATCH',headers:{'content-type':'application/json'},
     body:JSON.stringify({client_request_id:'settle-precise',sale_status:'completed',expected_exchange_rate:4000,
-      payment_details:[{method:'Cash',amount_usd:1,amount_khr:920}]})},{DB:f.route},h.executionCtx)
+      payment_details:[{method:'Cash',amount_usd:1,amount_khr:1000}]})},{DB:f.route},h.executionCtx)
   const settledBody = await settled.json()
   assert.equal(settled.status,200,JSON.stringify(settledBody))
   const settledHeader = f.raw.prepare('SELECT * FROM sales WHERE id=@id').get({id:waitingId})
   for(const key of ['exchange_rate','subtotal_usd','subtotal_khr','total_usd','total_khr','money_precision_version','calculated_total_usd','rounding_adjustment_usd'])
     assert.equal(settledHeader[key],savedHeader[key],key)
   assert.deepEqual(f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=@id').all({id:waitingId}),savedLines)
-  assert.equal(settledHeader.amount_paid_usd,1);assert.equal(settledHeader.amount_paid_khr,920)
+  assert.equal(settledHeader.amount_paid_usd,1);assert.equal(settledHeader.amount_paid_khr,1000)
   console.log('PASS actual mixed USD/KHR payment uses saved rate and preserves complete v1 basket')
   const records = h.load('lib/saleRecords.ts').buildSaleRecords({sale:savedHeader})
   const creation = records.find(row=>row.kind==='sale_created')
@@ -227,18 +227,19 @@ async function run() {
     assert.equal(result.changeUsd,0);assert.equal(result.changeKhr,20)
   }
   const preciseChangeDb = h.fixture()
+  // The writers below take riel as cash, so the tender and the stated change are whole 100-riel notes (owner, 27 Oct 2026).
   const changeBody = {...h.request('native-change'),money_precision_version:1,exchange_rate:4020,
-    amount_paid_usd:1,amount_paid_khr:20,
+    amount_paid_usd:1,amount_paid_khr:2000,
     items:[intent('native-line',1,1,0,4020)]}
   const preciseChange = await h.postSale(preciseChangeDb.route,changeBody)
   assert.equal(preciseChange.status,200,JSON.stringify(preciseChange.body))
-  assert.equal(preciseChange.body.sale.change_usd,0);assert.equal(preciseChange.body.sale.change_khr,20)
+  assert.equal(preciseChange.body.sale.change_usd,0.5);assert.equal(preciseChange.body.sale.change_khr,2000)
   const settlement = h.load('lib/paymentSettlement.ts').planSaleSettlement({moneyPrecisionVersion:1,
-    configuredMethodsRaw:'["Cash"]',paymentDetailsRaw:[{method:'Cash',amount_usd:1,amount_khr:20}],
+    configuredMethodsRaw:'["Cash","ABA"]',paymentDetailsRaw:[{method:'ABA',amount_usd:1,amount_khr:20}],
     existingPaidUsd:0,existingPaidKhr:0,totalUsd:1,exchangeRate:4020})
   assert.equal(settlement.changeUsd,0);assert.equal(settlement.changeKhr,20)
   const actualChange = await h.postSale(preciseChangeDb.route,{...changeBody,client_request_id:'recorded-native-change',
-    change_is_actual:true,change_usd:0,change_khr:20})
+    change_is_actual:true,change_usd:0,change_khr:2000})
   assert.equal(actualChange.status,200,JSON.stringify(actualChange.body))
   const actualAdd = await h.app.request(`/${actualChange.body.id}/items`,{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({money_precision_version:1,client_request_id:'actual-change-add',expected_exchange_rate:4020,
@@ -246,8 +247,8 @@ async function run() {
   const actualAdded = await actualAdd.json()
   assert.equal(actualAdd.status,200,JSON.stringify(actualAdded))
   assert.equal(actualAdded.sale.change_is_actual,1)
-  assert.equal(actualAdded.sale.change_usd,0);assert.equal(actualAdded.sale.change_khr,20)
+  assert.equal(actualAdded.sale.change_usd,0);assert.equal(actualAdded.sale.change_khr,2000)
   assert.equal(actualAdded.sale.change_exchange_rate,actualChange.body.sale.change_exchange_rate)
-  console.log('PASS exact native change USD1+KHR20 at4020 yields USD0/KHR20; legacy and recorded actual change preserved')
+  console.log('PASS exact native change USD1+KHR20 at4020 yields USD0/KHR20 (USD1+KHR2000 through the writers); legacy and recorded actual change preserved')
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

@@ -515,7 +515,8 @@ async function main() {
       const rielExchange = async (productId, price, khr) => {
         const sale = await makeSale([{ productId, quantity: 1, price }])
         return exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: 9763, quantity: 1 }],
-          { payment: { details: [{ method: 'Cash', amount_usd: 0, amount_khr: khr }], change_currency: 'USD' } })
+          // Paid by ABA: these riel amounts are not whole 100-riel notes, which cash can no longer hold (owner, 27 Oct 2026).
+          { payment: { details: [{ method: 'ABA', amount_usd: 0, amount_khr: khr }], change_currency: 'USD' } })
       }
       // $0.02 credit, $9.98 = 39,920 riel paid: cancelling leaves $10 against 39,920 riel, 80 riel short.
       const under = await rielExchange(9761, 0.02, 39920)
@@ -523,7 +524,7 @@ async function main() {
       const underSale = await columns(under.s2.id)
       r.check(`riel rule: 80 riel short after the credit leaves reads paid, the sale stays Completed -- ${JSON.stringify(underSale)}`, () => {
         assert.equal(underKept.status, 200, JSON.stringify(underKept.body))
-        assert.deepEqual(JSON.parse(underSale.payment_details), [{ method: 'Cash', amount_usd: 0, amount_khr: 39920 }])
+        assert.deepEqual(JSON.parse(underSale.payment_details), [{ method: 'ABA', amount_usd: 0, amount_khr: 39920 }])
         assert.deepEqual([underSale.amount_paid_usd, underSale.amount_paid_khr, underSale.sale_status], [0, 39920, 'completed'])
       })
       // $0.03 credit, $9.97 = 39,880 riel paid: 120 riel short -- more than one 100-riel note, a debt.
