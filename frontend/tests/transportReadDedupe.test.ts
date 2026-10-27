@@ -93,6 +93,13 @@ await runTest('different paths and a read with an abort signal are never merged'
   await Promise.all([a, b, signalled])
 }))
 
+await runTest('the account-proof probe /api/sync/owner is never shared: each ask is its own request', () => withFetch(async (calls, pending) => {
+  const reads = [apiFetch('GET', '/api/sync/owner', undefined, 8000), apiFetch('GET', '/api/sync/owner', undefined, 8000), apiFetch('GET', '/api/sync/owner?x=1', undefined, 8000)]
+  assert.equal(calls.length, 3, 'a probe taken after a dispatch must not be answered by one that began before it')
+  pending.forEach((entry) => entry.resolve({ owner: { actor_id: 1 } }))
+  await Promise.all(reads)
+}))
+
 await runTest('a data-change invalidation while a GET is in flight: the next identical GET starts fresh', () => withFetch(async (calls, pending) => {
   const before = apiFetch('GET', '/api/dashboard/startup', undefined, 8000)
   const epoch = currentReadEpoch()
