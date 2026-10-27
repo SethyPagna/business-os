@@ -54,7 +54,15 @@ const db = {
       run: async (params) => { const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
     }
   },
-  batch: (items) => raw.batch(items),
+  // The summary's sections are read in one db.batch: each statement still counts, under its own category.
+  batch: async (items) => {
+    const results = await raw.batch(items)
+    items.forEach((item, index) => {
+      const rows = results[index].results ?? []
+      ledger.push({ category: category(item.sql), rows: rows.length, bytes: Buffer.byteLength(JSON.stringify(rows)), sql: item.sql })
+    })
+    return results
+  },
   exec: (sql) => raw.exec(sql),
 }
 const statements = (name) => ledger.filter((entry) => entry.category === name).length
@@ -65,7 +73,7 @@ let currentUser = null
 const overrides = {
   '../lib/db': { getDb: () => db },
   './db': { getDb: () => db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', currentUser); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', currentUser); return next() }, prefetchWithSession: () => {}, takePrefetched: () => undefined },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
 }
 const modules = new Map()

@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { getDb } from './db'
+import { getDb, type BindParams } from './db'
 import type { Env } from '../index'
 
 // K8a: the device an audit row names is the device the REQUEST arrived on.
@@ -377,6 +377,26 @@ export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env
 // a later call in the same request retries; revokeSession() drops it too.
 const sessionLookupMemo = new WeakMap<object, { token: string; lookup: Promise<SessionUser | null> }>()
 
+// Reads a route needs first, sent in the SAME db.batch as the session lookup (one round trip, one
+// transaction, so a revoked session or a changed permission is read at the same instant as the data it
+// guards). The session is still looked up on every request -- nothing about it is cached -- and the rows
+// are handed out only once requireAuth has accepted the session: a request that is refused (no cookie, a
+// revoked or expired session, a forced password change) never sees them. Register before requireAuth runs
+// (a route-level `app.use` ahead of it); a lookup that already ran (the staff body admission) or a request
+// with no cookie simply leaves takePrefetched empty, and the handler reads for itself.
+type SessionPrefetch = { statements: Array<{ sql: string; params?: BindParams }>; rows: unknown[][] | null }
+const sessionPrefetches = new WeakMap<object, SessionPrefetch>()
+
+export function prefetchWithSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, statements: SessionPrefetch['statements']): void {
+  if (!sessionLookupMemo.has(c)) sessionPrefetches.set(c, { statements, rows: null })
+}
+
+/** Rows of the `index`th prefetched statement, or undefined when the handler has to read them itself. */
+export function takePrefetched<T = Record<string, unknown>, E extends { Bindings: Env; Variables: { user: SessionUser } } = { Bindings: Env; Variables: { user: SessionUser } }>(c: Context<E>, index: number): T[] | undefined {
+  if (!c.get('user')) return undefined
+  return sessionPrefetches.get(c)?.rows?.[index] as T[] | undefined
+}
+
 // True when the request carries a session cookie at all. Not authentication:
 // only a cheap pre-filter so a route can skip speculative work for callers
 // that cannot possibly have a session (see routes/auth.ts's /bootstrap).
@@ -423,22 +443,32 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
     LIMIT 1
   `
   const lookupParams = { token_hash: tokenHash, now: nowIso }
+  const prefetch = sessionPrefetches.get(c)
+  const read = async (mustChangeColumn: string): Promise<SessionLookupRow | undefined> => {
+    if (!prefetch) return db.prepare(lookupSql(mustChangeColumn)).get<SessionLookupRow>(lookupParams)
+    const [session, ...extra] = await db.batch([{ sql: lookupSql(mustChangeColumn), params: lookupParams }, ...prefetch.statements])
+    prefetch.rows = extra.map((result) => (result?.results ?? []) as unknown[])
+    return (session?.results?.[0] ?? undefined) as SessionLookupRow | undefined
+  }
   let row: SessionLookupRow | undefined
   if (mustChangeColumnMissing) {
-    row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+    row = await read('')
   } else {
     try {
-      row = await db.prepare(lookupSql(' u.must_change_password,')).get<SessionLookupRow>(lookupParams)
+      row = await read(' u.must_change_password,')
     } catch (error) {
       // Worker deployed before migration 0202: every request would 500 on
       // the missing column. Remember it for this isolate and read without it.
-      if (!/no such column/i.test(String((error as Error)?.message || error))) throw error
+      if (!/no such column.*must_change_password/i.test(String((error as Error)?.message || error))) throw error
       mustChangeColumnMissing = true
-      row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+      row = await read('')
     }
   }
 
-  if (!row) return null
+  if (!row) {
+    if (prefetch) prefetch.rows = null
+    return null
+  }
 
   const {
     session_created_at: createdAt,

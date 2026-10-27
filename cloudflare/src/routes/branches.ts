@@ -27,7 +27,7 @@ import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
-import { requireAuth, type SessionUser } from '../lib/auth'
+import { requireAuth, prefetchWithSession, takePrefetched, type SessionUser } from '../lib/auth'
 import { getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -119,6 +119,12 @@ async function readStockIntegrityIssues(db: D1Compat): Promise<StockIntegrityIss
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+// GET /api/branches reads the list in the session lookup's own D1 batch: one round trip, not two.
+const BRANCH_LIST_SQL = 'SELECT * FROM branches ORDER BY is_default DESC, name'
+app.use('*', async (c, next) => {
+  if (c.req.method === 'GET' && /^\/api\/branches\/?$/.test(c.req.path)) prefetchWithSession(c, [{ sql: BRANCH_LIST_SQL }])
+  return next()
+})
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
 
@@ -134,7 +140,7 @@ type BranchInput = {
 
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const branches = await db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all<BranchIdentitySnapshot>()
+  const branches = takePrefetched<BranchIdentitySnapshot>(c, 0) ?? await db.prepare(BRANCH_LIST_SQL).all<BranchIdentitySnapshot>()
   return c.json(await Promise.all(branches.map(async branch => ({ ...branch, edit_etag: await branchEditEtag(branch) }))))
 })
 

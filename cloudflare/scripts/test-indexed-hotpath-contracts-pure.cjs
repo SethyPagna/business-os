@@ -47,12 +47,15 @@ assert.doesNotMatch(
   'notification status equality must not wrap the indexed sale_status column',
 )
 // Not Paid reads the payment state a return keeps (lib/salesStatus.ts notPaidSaleSql): two plain equality terms.
-assert.match(notifications, /WHERE \$\{notPaidSaleSql\('sales'\)\}/)
+// The bell queues write each OR term of those predicates as its own ordered seek; scripts/test-notifications-sales-queues-pure.cjs pins the
+// equivalence and the plan.
+assert.match(notifications, /"sale_status = 'awaiting_payment'"/)
+assert.match(notifications, /"sale_status IN \('partial_return', 'returned'\) AND status_before_return = 'awaiting_payment'"/)
 assert.match(read('cloudflare', 'src', 'lib', 'salesStatus.ts'),
   /\(\$\{alias\}\.sale_status = 'awaiting_payment' OR \(\$\{alias\}\.sale_status IN \('partial_return', 'returned'\) AND \$\{alias\}\.status_before_return = 'awaiting_payment'\)\)/)
 // The delivery queue reads the delivery tag (lib/salesStatus.ts deliveryPendingSaleSql, owner 20 Oct 2026); its tag term is a
 // plain equality on the column the partial index idx_sales_delivery_pending_created (0263) covers.
-assert.match(notifications, /WHERE \$\{deliveryPendingSaleSql\('sales'\)\}/)
+assert.match(notifications, /"delivery_pending = 1 AND COALESCE\(sale_status, ''\) <> 'cancelled'"/)
 assert.match(read('cloudflare', 'src', 'lib', 'salesStatus.ts'),
   /\(\$\{alias\}\.delivery_pending = 1 AND COALESCE\(\$\{alias\}\.sale_status, ''\) <> 'cancelled'\)/)
 

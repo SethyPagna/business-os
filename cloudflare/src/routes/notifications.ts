@@ -1,15 +1,15 @@
 import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
-import { getDb } from '../lib/db'
+import { getDb, type BindParams } from '../lib/db'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
 import { requestMetricsOf } from '../lib/requestMetrics'
-import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
-import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { requireAuth, type SessionUser } from '../lib/auth'
+import { loadLowStockConfig, lowStockThresholdSql, resolveLowStockConfig, LOW_STOCK_SETTING_KEYS, type LowStockConfig } from '../lib/lowStockSettings'
+import { cachedJsonResponse, getVersionsWithFallback } from '../lib/cache'
+import { requireAuth, prefetchWithSession, takePrefetched, type SessionUser } from '../lib/auth'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
@@ -23,6 +23,11 @@ import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } fr
 // look stale or just permanently "off" regardless of real inventory/sales
 // state.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+// GET /summary reads the preferences (and the three low-stock keys) in the session lookup's own D1 batch.
+app.use('/summary', async (c, next) => {
+  if (c.req.method === 'GET') prefetchWithSession(c, [preferencesStatement()])
+  return next()
+})
 app.use('*', requireAuth)
 
 // D1 (SQLite) caps bound parameters per statement at 100 -- same limit
@@ -58,6 +63,8 @@ const NOTIFICATION_SETTING_KEYS = [
   // Presence-only read: loadPreferences reduces this to a boolean and the
   // token value never leaves that function.
   'drive_sync_refresh_token',
+  // The low-stock rule (lib/lowStockSettings.ts), so the summary needs no second settings read for it.
+  ...LOW_STOCK_SETTING_KEYS,
 ]
 const SUMMARY_SEPARATOR = ' - '
 
@@ -137,13 +144,17 @@ type NotificationSection = {
   enabledKey?: string
 }
 
-async function loadPreferences(env: Env) {
-  const db = getDb(env)
+function preferencesStatement() {
   const placeholders = NOTIFICATION_SETTING_KEYS.map(() => '?').join(',')
-  const rows = await db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`)
+  return { sql: `SELECT key, value FROM settings WHERE key IN (${placeholders})`, params: NOTIFICATION_SETTING_KEYS }
+}
+
+async function loadPreferences(env: Env, prefetched?: Array<{ key: string; value: string }>) {
+  const rows = prefetched ?? await getDb(env).prepare(preferencesStatement().sql)
     .all<{ key: string; value: string }>(NOTIFICATION_SETTING_KEYS)
   const map = rowsToSettingMap(rows)
   return {
+    lowStockConfig: resolveLowStockConfig(map),
     inventoryEnabled: normalizeBoolean(map.notifications_inventory_enabled, true),
     salesEnabled: normalizeBoolean(map.notifications_sales_enabled, true),
     loyaltyEnabled: normalizeBoolean(map.notifications_loyalty_enabled, true),
@@ -187,18 +198,75 @@ export const INVENTORY_PREVIEW_ITEMS = 50
 // What the full list was capped at before the preview existed.
 export const INVENTORY_FULL_ITEMS = 5000
 
+// What a section builder reads through: the live database, or the batch below.
+type SectionDb = { prepare(sql: string): { all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> } }
+
+// The statements of every section that has to read, sent as ONE db.batch (one round trip, one snapshot). A
+// builder queues its statements in its first synchronous step; flush() runs once every section has either
+// queued or needs none (a cache hit), after seal() says no more are coming.
+function sectionBatch(env: Env) {
+  const database = getDb(env)
+  const queued: Array<{ sql: string; params?: BindParams; resolve(rows: never[]): void; reject(error: unknown): void }> = []
+  let joined = 0
+  let ready = 0
+  let sealed = false
+  let flushed = false
+  const flush = async () => {
+    flushed = true
+    const statements = queued.splice(0)
+    if (!statements.length) return
+    try {
+      const results = await database.batch(statements.map(({ sql, params }) => ({ sql, params })))
+      statements.forEach((statement, index) => statement.resolve((results[index]?.results ?? []) as never[]))
+    } catch (error) {
+      for (const statement of statements) statement.reject(error)
+    }
+  }
+  const maybeFlush = () => { if (sealed && ready === joined) void flush() }
+  // A statement asked for after the flush (a builder that reads twice in turn) just goes to D1 by itself.
+  const db: SectionDb = {
+    prepare: (sql) => ({
+      all: <T>(params?: BindParams) => flushed
+        ? database.prepare(sql).all<T>(params)
+        : new Promise<T[]>((resolve, reject) => { queued.push({ sql, params, resolve: resolve as (rows: never[]) => void, reject }) }),
+    }),
+  }
+  return {
+    db,
+    /** A section that will read through db. The returned function says its statements are queued (or not needed); call it once. */
+    join() {
+      joined += 1
+      let done = false
+      return () => { if (done) return; done = true; ready += 1; maybeFlush() }
+    },
+    seal() { sealed = true; maybeFlush() },
+  }
+}
+
 type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
 
 type SectionCache = <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>) => Promise<T>
 
 // One per request: each data version is read once however many sections key on it
-// (products, settings and the rest are shared by two or three of them).
+// (products, settings and the rest are shared by two or three of them), and the namespaces asked for in
+// the same synchronous turn go to getVersionsWithFallback together: one D1 statement for every one KV
+// lacks, not one each.
 function sectionCacheFor(c: NotificationContext): SectionCache {
   const versionReads = new Map<string, Promise<string>>()
+  const waiting: Array<{ namespace: string; resolve(token: string): void; reject(error: unknown): void }> = []
   const versionOf = (namespace: string) => {
     let read = versionReads.get(namespace)
     if (!read) {
-      read = getVersionWithFallback(c.env, namespace)
+      read = new Promise<string>((resolve, reject) => {
+        if (!waiting.length) {
+          queueMicrotask(() => {
+            const turn = waiting.splice(0)
+            getVersionsWithFallback(c.env, turn.map((entry) => entry.namespace))
+              .then((tokens) => turn.forEach((entry, index) => entry.resolve(tokens[index])), (error) => turn.forEach((entry) => entry.reject(error)))
+          })
+        }
+        waiting.push({ namespace, resolve, reject })
+      })
       versionReads.set(namespace, read)
     }
     return read
@@ -221,8 +289,7 @@ function lowStockCacheInput(config: LowStockConfig): string {
 // exact size). The totals ride on the same single pass as window aggregates, so
 // asking for 50 rows reads the catalog once, exactly as asking for 5,000 did --
 // it just stops shipping 4,950 rows nobody scrolled to.
-async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildInventorySection(db: SectionDb, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
   const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')
   // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
   // low-quantity alert off. With the alert off the low fragment is -1, and
@@ -290,8 +357,7 @@ async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit
   }
 }
 
-async function buildExpirySection(env: Env, days: number): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildExpirySection(db: SectionDb, days: number): Promise<NotificationSection | null> {
   // The two inner selects narrow the catalog to the window with migration 0228's partial index
   // (is_active, date(expiry_date)) -- the Dashboard's own expiry statements do the same -- instead of
   // walking every visible product on every refresh. date() can only round a time of day up to its day,
@@ -364,8 +430,7 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
 // reverting every receipt on the lot: the row keeps 'credit' for a possible
 // un-revert, but with nothing received and no money there is nothing owed
 // (lib/productBatches.ts planUnreceiveBatchStock; untracked NULL lots stay).
-async function buildSupplierCreditSection(env: Env, days: number): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildSupplierCreditSection(db: SectionDb, days: number): Promise<NotificationSection | null> {
   const rows = await db.prepare(`
     SELECT pb.id, pb.credit_due_date, pb.supplier_name, pb.lot_code, pb.unit_cost_usd,
       p.name AS product_name,
@@ -432,8 +497,7 @@ export const AWAITING_DELIVERY_SQL = salesQueue([
   "sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_delivery'",
 ], ' UNION ')
 
-async function buildSalesSection(env: Env): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildSalesSection(db: SectionDb): Promise<NotificationSection | null> {
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
     db.prepare(AWAITING_PAYMENT_SQL).all<{ id: number; receipt_number: string; total_usd: number }>(),
     db.prepare(AWAITING_DELIVERY_SQL).all<{ id: number; receipt_number: string; total_usd: number }>(),
@@ -595,8 +659,7 @@ function importPermissionForType(type: string): string {
 // enough that it doesn't turn into a permanent nag for an import someone
 // already looked at via the Dashboard's own warnings card) and to the
 // user's permitted import types.
-async function buildImportsSection(env: Env, user: SessionUser): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildImportsSection(db: SectionDb, user: SessionUser): Promise<NotificationSection | null> {
   const rows = await db.prepare(`
     SELECT id, type, status, warning_count, created_at, finished_at
     FROM import_jobs
@@ -627,8 +690,7 @@ async function buildImportsSection(env: Env, user: SessionUser): Promise<Notific
   }
 }
 
-async function buildPortalSection(env: Env): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildPortalSection(db: SectionDb): Promise<NotificationSection | null> {
   const rows = await db.prepare(`
     SELECT id, customer_name, membership_number, platform
     FROM customer_share_submissions
@@ -693,8 +755,7 @@ function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boole
   }
 }
 
-async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection | null> {
-  const db = getDb(env)
+async function buildDeviceApprovalSection(db: SectionDb): Promise<NotificationSection | null> {
   // Pending-device rows are no longer produced by anything: the login gate
   // that used to create them (requiresDeviceApproval in lib/deviceTrust.ts)
   // is permanently off, so `status = 'pending'` rows left in this table are
@@ -771,24 +832,38 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
 app.get('/summary', async (c) => {
   const user = c.get('user')
   // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
-  const { loyaltyPointsEnabled, ...preferences } = await loadPreferences(c.env)
+  const { loyaltyPointsEnabled, lowStockConfig, ...preferences } = await loadPreferences(c.env, takePrefetched(c, 0))
   const sections: NotificationSection[] = []
   const cachedSection = sectionCacheFor(c)
+  const batch = sectionBatch(c.env)
 
+  // Every section that reads D1 reads through the one batch: a section joins it, queues its statements, then
+  // says so (a cache hit queues nothing and says so when it resolves).
   const tasks: Array<Promise<NotificationSection | null>> = []
+  const direct = (build: (db: SectionDb) => Promise<NotificationSection | null>) => {
+    const queued = batch.join()
+    const section = build(batch.db)
+    queued()
+    return section
+  }
+  const cached = (name: string, namespaces: string[], inputs: string, build: (db: SectionDb) => Promise<NotificationSection | null>) => {
+    const queued = batch.join()
+    const section = cachedSection(name, namespaces, inputs, () => { const produced = build(batch.db); queued(); return produced })
+    section.then(queued, queued)
+    return section
+  }
   let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
   if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
-    const lowStockConfig = await loadLowStockConfig(c.env)
-    tasks.push(cachedSection('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-      () => buildInventorySection(c.env, lowStockConfig, INVENTORY_PREVIEW_ITEMS)))
+    tasks.push(cached('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
+      (db) => buildInventorySection(db, lowStockConfig, INVENTORY_PREVIEW_ITEMS)))
   }
   if (preferences.expiryEnabled && hasPermission(user, 'products')) {
-    tasks.push(cachedSection('expiry', ['products', 'settings'], String(preferences.expiryDays),
-      () => buildExpirySection(c.env, preferences.expiryDays)))
+    tasks.push(cached('expiry', ['products', 'settings'], String(preferences.expiryDays),
+      (db) => buildExpirySection(db, preferences.expiryDays)))
   }
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
   // a view-only user sees it, a full user whose sales:view was switched off does not.
-  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
+  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(direct(buildSalesSection))
   // Loyalty off: no cache-version read and no ledger or settings read at all.
   if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
     loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
@@ -802,16 +877,16 @@ app.get('/summary', async (c) => {
   // meaning submissions could sit unreviewed indefinitely with no other
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
-  if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
+  if (hasPermission(user, 'customer_portal')) tasks.push(direct(buildPortalSection))
+  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(direct((db) => buildImportsSection(db, user)))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
   // who can act on it — admin-control users only (was: anyone with
   // inventory access; the user asked for "reminder for admin" and for the
   // supplier section to be hidden from employees).
-  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cachedSection('supplier_credit', ['products', 'stock', 'settings'], String(preferences.supplierCreditDays),
-    () => buildSupplierCreditSection(c.env, preferences.supplierCreditDays)))
+  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cached('supplier_credit', ['products', 'stock', 'settings'], String(preferences.supplierCreditDays),
+    (db) => buildSupplierCreditSection(db, preferences.supplierCreditDays)))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
   // deliberately unused — that record was STALE: requiresDeviceApproval is
@@ -821,7 +896,8 @@ app.get('/summary', async (c) => {
   // admin approves it. Without this section, nothing surfaced those pending
   // devices and people were silently locked out. Admin-control users only —
   // they are the ones who can act on it.
-  if (isAdminControlUser(user)) tasks.push(buildDeviceApprovalSection(c.env))
+  if (isAdminControlUser(user)) tasks.push(direct(buildDeviceApprovalSection))
+  batch.seal()
 
   let results: Array<NotificationSection | null>
   try {
@@ -861,7 +937,7 @@ app.get('/summary/items', async (c) => {
   if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
   const lowStockConfig = await loadLowStockConfig(c.env)
   const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-    () => buildInventorySection(c.env, lowStockConfig, INVENTORY_FULL_ITEMS))
+    () => buildInventorySection(getDb(c.env), lowStockConfig, INVENTORY_FULL_ITEMS))
   return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [] })
 })
 
