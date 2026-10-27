@@ -3140,7 +3140,7 @@
   "notification_expiry_title": "Product expiry",
   "notification_inventory": "Inventory",
   "notification_inventory_alerts": "Inventory alerts",
-  "notification_inventory_alerts_desc": "Low stock and out of stock warnings",
+  "notification_inventory_alerts_desc": "When a sale pushes a product into low or out of stock",
   "notification_loyalty_alerts": "Loyalty alerts",
   "notification_loyalty_alerts_desc": "Customers who reached your points target",
   "notification_loyalty_threshold": "Loyalty points threshold",

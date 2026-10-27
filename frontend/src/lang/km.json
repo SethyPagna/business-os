@@ -3140,7 +3140,7 @@
   "notification_expiry_title": "ផុតកំណត់ផលិតផល",
   "notification_inventory": "ស្តុកទំនិញ",
   "notification_inventory_alerts": "ការជូនដំណឹងស្តុក",
-  "notification_inventory_alerts_desc": "ការព្រមានស្តុកទាប និងអស់ស្តុក",
+  "notification_inventory_alerts_desc": "ពេលការលក់ធ្វើឱ្យទំនិញស្តុកទាប ឬអស់ស្តុក",
   "notification_loyalty_alerts": "ការជូនដំណឹងពិន្ទុ",
   "notification_loyalty_alerts_desc": "អតិថិជនដែលឈានដល់គោលដៅពិន្ទុ",
   "notification_loyalty_threshold": "កម្រិតពិន្ទុសមាជិកភាព",
