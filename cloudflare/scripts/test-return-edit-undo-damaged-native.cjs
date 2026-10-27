@@ -142,15 +142,15 @@ async function main() {
       sale_item_id: saleItemId, product_id: 1, quantity, stock_action: action, return_to_stock: action === 'restock', branch_id: 1,
       ...(action === 'damaged' ? { condition_tag: tag, damaged_disposition: 'keep' } : {}),
     })
-    const create = async items => {
-      const response = await send('POST', '/api/returns', { client_request_id: requestId('create'), sale_id: 1, reason: 'Changed mind', items })
+    const create = async (items, notes) => {
+      const response = await send('POST', '/api/returns', { client_request_id: requestId('create'), sale_id: 1, reason: 'Changed mind', items, ...(notes === undefined ? {} : { notes }) })
       assert.equal(response.status, 200, JSON.stringify(response.body))
       return response.body.id
     }
     // The ordinary edit form: it sends every line with stock_action (and the tag for a damaged one).
-    const editLines = async (id, items) => {
+    const editLines = async (id, items, fields = {}) => {
       const current = await get(id)
-      const response = await send('PATCH', `/api/returns/${id}`, { client_request_id: requestId('edit'), expected_updated_at: current.updated_at, reason: current.reason, items })
+      const response = await send('PATCH', `/api/returns/${id}`, { client_request_id: requestId('edit'), expected_updated_at: current.updated_at, reason: current.reason, items, ...fields })
       assert.equal(response.status, 200, JSON.stringify(response.body))
     }
     // Undo / Redo: the real client builder over a snapshot, as restoreReturnSnapshot sends it.
@@ -158,7 +158,7 @@ async function main() {
       const current = await get(id)
       const payload = returnHistoryPayloadFromSnapshot(structuredClone(snapshot))
       assert.ok(payload, `${label}: the client built a replay body`)
-      const sent = { ...payload, notes: label, expected_updated_at: current.updated_at, client_request_id: key || requestId(label) }
+      const sent = { ...payload, expected_updated_at: current.updated_at, client_request_id: key || requestId(label) }
       return { ...(await send('PATCH', `/api/returns/${id}`, sent)), sent }
     }
 
@@ -199,19 +199,24 @@ async function main() {
     // ======================= A. edit damaged(expired) -> restock, Undo, Redo, double-apply, same id =============
     await scenario('A. Undo of an edit restores the damaged line with its tag, Redo undoes it again, nothing stacks', async () => {
       const base = await ledger()
-      const id = await create([line(2, 'damaged', 'expired')])
+      const id = await create([line(2, 'damaged', 'expired')], 'abc')
+      const notesNow = async () => (await get(id)).notes
+      assert.equal(await notesNow(), 'abc', 'A1 notes as created')
       await expectState('A1 created damaged', id, base, { restockDelta: 0, lots: [kept(2, 'expired')], lines: [rowOf(2, 'damaged')] })
       const before = await get(id)
-      await editLines(id, [line(2, 'restock')])
+      await editLines(id, [line(2, 'restock')], { notes: 'xyz' })
+      assert.equal(await notesNow(), 'xyz', 'A2 notes edited')
       await expectState('A2 edited to restock', id, base, { restockDelta: 2, lots: [], lines: [rowOf(2, 'restock')] })
       const after = await get(id)
 
       const undo = await replay(id, before, 'Undo return edit')
       assert.equal(undo.status, 200, JSON.stringify(undo.body))
+      assert.equal(await notesNow(), 'abc', 'A3 Undo restores the notes as they were (never a history label)')
       await expectState('A3 after Undo', id, base, { restockDelta: 0, lots: [kept(2, 'expired')], lines: [rowOf(2, 'damaged')] })
 
       const redo = await replay(id, after, 'Redo return edit')
       assert.equal(redo.status, 200, JSON.stringify(redo.body))
+      assert.equal(await notesNow(), 'xyz', 'A4 Redo restores the edited notes')
       await expectState('A4 after Redo', id, base, { restockDelta: 2, lots: [], lines: [rowOf(2, 'restock')] })
 
       // D (double apply): the same Undo again with a NEW request id replaces the state, it does not stack it.
