@@ -75,11 +75,14 @@ type AllocRow = { id: number; return_item_id: number; sale_item_id: number | nul
 type LotRow = { id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; return_id: number
   quantity: number; quantity_remaining: number; reason: string | null; created_by_user_id: number | null; created_by_user_name: string | null
   created_at: string | null; updated_at: string | null; condition_tag: string | null; source: string | null; unit_cost_usd: number | null }
-type LineState = { id: number; a: ReturnStockAction; r: 0 | 1; b: number | null; allocs: AllocRow[] }
+// ra / rr: the line's stock_action and return_to_stock exactly as stored (NULL, odd case), kept on the BEFORE side only so the state guard
+// compares what the row really holds and an undo writes it back byte for byte. An older snapshot without them falls back to a / r.
+type LineState = { id: number; a: ReturnStockAction; r: 0 | 1; b: number | null; allocs: AllocRow[]; ra?: string | null; rr?: number | null }
+const storedLine = (state: LineState) => ({ a: 'ra' in state ? state.ra : state.a, r: 'rr' in state ? state.rr : state.r, b: state.b })
 type Change = { id: number; name: string | null; before: LineState; after: LineState }
 type Header = { reason: string | null; notes: string | null; return_type: string | null }
 type LotMove = { product_id: number; product_name: string | null; branch_id: number; batch_id: number | null; quantity: number; usd: number | null; khr: number | null }
-type Retag = { id: number; name: string | null; before: string | null; after: string | null }
+type Retag = { id: number; line?: number; name: string | null; before: string | null; after: string | null }
 type PlainGuard = { product: number; branch: number; q: number }
 
 /** Everything an apply, an undo and a redo need; stored in undo_snapshots.payload_json. */
@@ -140,7 +143,7 @@ function parseIntent(body: Row): Intent {
     intent.notes = notes || null
   }
   if (body.return_type !== undefined) {
-    if (typeof body.return_type !== 'string' || !RETURN_TYPES.includes(body.return_type)) fail('Choose a handling method.', 400, 'return_edit_invalid')
+    if (typeof body.return_type !== 'string' || !body.return_type.trim() || body.return_type.length > 40) fail('Choose a handling method.', 400, 'return_edit_invalid')
     intent.returnType = body.return_type
   }
   for (const field of MONEY_KEYS) if (body[field] !== undefined) intent.money.push({ field, value: body[field] })
@@ -213,7 +216,8 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
   const ret = await read(db.prepare(`SELECT r.id,r.return_number,r.sale_id,r.status,r.return_scope,r.money_precision_version,r.branch_id,r.branch_name,r.reason,r.notes,
       r.return_type,r.updated_at,r.created_at,r.total_refund_usd,r.total_refund_khr,r.refund_currency,r.owed_reduction_usd,
       COALESCE(v.revision,0) AS revision,${moneyFp('r.id')} AS money_fp,s.sale_status,
-      (SELECT COALESCE(MAX(id),0) FROM damaged_stock_lots) AS max_lot_id,(SELECT COALESCE(MAX(id),0) FROM return_item_batch_allocations) AS max_alloc_id
+      MAX((SELECT COALESCE(MAX(id),0) FROM damaged_stock_lots),COALESCE((SELECT seq FROM sqlite_sequence WHERE name='damaged_stock_lots'),0)) AS max_lot_id,
+      MAX((SELECT COALESCE(MAX(id),0) FROM return_item_batch_allocations),COALESCE((SELECT seq FROM sqlite_sequence WHERE name='return_item_batch_allocations'),0)) AS max_alloc_id
     FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id LEFT JOIN sales s ON s.id=r.sale_id WHERE r.id=@id`).get<Row>({ id: returnId }))
   if (!ret) fail('This return no longer exists. Refresh the list.', 404, 'return_edit_not_found')
   if (String(ret.return_scope || 'customer') !== 'customer') fail('Supplier returns are edited from the supplier return screen.', 400, 'return_edit_supplier')
@@ -237,6 +241,8 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
 
   // ---- header ----
   const headerBefore: Header = { reason: nullableText(ret.reason), notes: nullableText(ret.notes), return_type: nullableText(ret.return_type) }
+  // A handling method other than the three on offer is accepted only as the value already stored (a screen sends it back unchanged).
+  if (intent.returnType !== undefined && intent.returnType !== headerBefore.return_type && !RETURN_TYPES.includes(intent.returnType)) fail('Choose a handling method.', 400, 'return_edit_invalid')
   const headerAfter: Header = { reason: intent.reason ?? headerBefore.reason, notes: intent.notes !== undefined ? intent.notes : headerBefore.notes,
     return_type: intent.returnType ?? headerBefore.return_type }
 
@@ -272,6 +278,8 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
   const resolver = new BranchEffectResolver(directory, redirectTarget)
   const branchName = (id: number): string | null => (directory.find(row => Number(row.id) === id)?.name as string | undefined) ?? null
   const stamp = new Date().toISOString()
+  // Both tables are AUTOINCREMENT: an id once used is never handed out again, so the next id is read from the sequence too (MAX(id) alone
+  // drops back after the newest rows are deleted and would give another return's old lot id to a new row, breaking undo and sale links).
   let nextLot = num(ret.max_lot_id), nextAlloc = num(ret.max_alloc_id)
   const needSaleLines = targets.some(entry => entry.target !== entry.current && entry.target !== 'none' && entry.target !== entry.current)
   const saleLines = new Map<number, { batch_id: number | null; allocs: Array<{ batch_id: number; outstanding: number }> }>()
@@ -289,6 +297,7 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
   }
 
   const changes: Change[] = []
+  const foldMaps = new Map<number, Map<number, number>>()
   const stock: StockDelta[] = []
   const removedLots: LotRow[] = []
   const addedLots: LotRow[] = []
@@ -329,6 +338,28 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
     costUsd: item.cost_price_usd == null ? null : num(item.cost_price_usd), costKhr: item.cost_price_khr == null ? null : num(item.cost_price_khr), movementType: '',
   })
 
+  // A retired branch's lots may have been folded into a survivor lot at the landing branch (the cutover merges lots received the same
+  // day). Units a restock put in an old lot now sit in the survivor, so BOTH directions address the survivor. One read per landing branch.
+  {
+    const wanted = new Map<number, Set<number>>()
+    for (const entry of targets) {
+      if (entry.current === entry.target) continue
+      const recorded = num(entry.item.branch_id || ret.branch_id)
+      if (!recorded || !num(entry.item.product_id) || num(entry.item.quantity) <= 0) continue
+      const landing = landingFor(recorded)
+      if (!landing.redirected) continue
+      const ids = wanted.get(landing.branch) ?? new Set<number>()
+      for (const alloc of entry.item.allocs) ids.add(alloc.batch_id)
+      if (entry.item.batch_id != null) ids.add(num(entry.item.batch_id))
+      const saleLine = saleLines.get(num(entry.item.sale_item_id))
+      if (saleLine) { for (const alloc of saleLine.allocs) ids.add(alloc.batch_id); if (saleLine.batch_id != null) ids.add(saleLine.batch_id) }
+      wanted.set(landing.branch, ids)
+    }
+    for (const [branch, ids] of wanted) foldMaps.set(branch, await read(foldedLotSurvivors(db, branch, [...ids])))
+  }
+  const surviving = (landing: { branch: number; redirected: boolean }, batchId: number | null): number | null =>
+    batchId == null ? null : (landing.redirected ? foldMaps.get(landing.branch)?.get(batchId) : undefined) ?? batchId
+
   for (const entry of targets) {
     const { item, line, current, target } = entry
     const quantity = num(item.quantity)
@@ -342,8 +373,9 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
       fail('This line has no product or branch, so its stock handling cannot change here.', 409, 'return_edit_provenance')
     }
     const landing = landingFor(recordedBranch)
-    const before: LineState = { id: item.id, a: current, r: num(item.return_to_stock) === 1 ? 1 : 0, b: item.batch_id == null ? null : num(item.batch_id), allocs: item.allocs }
-    const after: LineState = { ...before, allocs: before.allocs }
+    const before: LineState = { id: item.id, a: current, r: num(item.return_to_stock) === 1 ? 1 : 0, b: item.batch_id == null ? null : num(item.batch_id), allocs: item.allocs,
+      ra: item.stock_action == null ? null : String(item.stock_action), rr: item.return_to_stock == null ? null : num(item.return_to_stock) }
+    const after: LineState = { id: item.id, a: current, r: before.r, b: before.b, allocs: before.allocs }
 
     if (current === 'damaged' && target === 'damaged') {
       // Only the tag moves. The held row stays; its units are not touched.
@@ -351,7 +383,7 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
       if (!lot) fail(`The damaged-stock record of ${name || 'this line'} cannot be matched to the line, so its tag cannot change here. You can still change the reason and notes.`, 409, 'return_edit_damaged_unmatched', { product: name })
       if ((lot.condition_tag ?? DEFAULT_STOCK_CONDITION_TAG) !== wantTag) {
         if (retag.some(entry2 => entry2.after !== (wantTag ?? DEFAULT_STOCK_CONDITION_TAG))) fail('Choose one tag for the damaged lines you change together.', 400, 'return_edit_damaged_mixed_tags')
-        retag.push({ id: lot.id, name, before: lot.condition_tag, after: wantTag ?? DEFAULT_STOCK_CONDITION_TAG })
+        retag.push({ id: lot.id, line: item.id, name, before: lot.condition_tag, after: wantTag ?? DEFAULT_STOCK_CONDITION_TAG })
       }
       continue
     }
@@ -362,11 +394,11 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
       if (allocated > quantity + 1e-9) fail('This return has incomplete stock records for a line. Count the stock with Set instead.', 409, 'return_edit_provenance', { product: name })
       for (const alloc of item.allocs) {
         if (alloc.branch_id != null && alloc.branch_id !== recordedBranch) fail('This return has a lot record for a different branch. Count the stock with Set instead.', 409, 'return_edit_provenance', { product: name })
-        stock.push(delta(item, landing, alloc.batch_id, -alloc.quantity))
+        stock.push(delta(item, landing, surviving(landing, alloc.batch_id), -alloc.quantity))
       }
       const remainder = roundQ(quantity - allocated)
       if (remainder > 1e-9) {
-        if (!item.allocs.length && item.batch_id != null) stock.push(delta(item, landing, num(item.batch_id), -remainder))
+        if (!item.allocs.length && item.batch_id != null) stock.push(delta(item, landing, surviving(landing, num(item.batch_id)), -remainder))
         else stock.push(delta(item, landing, null, -remainder))
       }
       after.allocs = []; after.r = 0; after.b = null
@@ -390,9 +422,11 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
       if (!saleItemId || plan.plainQuantity > 1e-9 || plan.requiresLotPick || !plan.splits.length) {
         fail(`No received date is recorded for ${name || 'this product'}, so its units can't be put back from here. Add them with Add stock, or choose "no stock change".`, 409, 'return_edit_lot_unavailable', { product: name })
       }
-      const folded = landing.redirected ? await read(foldedLotSurvivors(db, landing.branch, plan.splits.map(split => split.batchId))) : new Map<number, number>()
       const merged = new Map<number, number>()
-      for (const split of plan.splits) merged.set(folded.get(split.batchId) ?? split.batchId, roundQ((merged.get(split.batchId) ?? 0) + split.quantity))
+      for (const split of plan.splits) {
+        const survivor = surviving(landing, split.batchId)!
+        merged.set(survivor, roundQ((merged.get(survivor) ?? 0) + split.quantity))
+      }
       after.allocs = [...merged].map(([batchId, q]) => {
         stock.push(delta(item, landing, batchId, q))
         nextAlloc += 1
@@ -514,7 +548,7 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
       ...changes.map(change => ({ id: change.id, product_name: change.name, quantity: num(detail(change.id)?.quantity), before: change.before.a, after: change.after.a,
         tag_before: change.before.a === 'damaged' ? removedByLine.get(change.id)?.condition_tag ?? DEFAULT_STOCK_CONDITION_TAG : null,
         tag_after: change.after.a === 'damaged' ? (addedByLine.get(change.id)?.condition_tag ?? null) : null })),
-      ...retag.map(entry => ({ id: -entry.id, product_name: entry.name, quantity: num(lots.find(lot => lot.id === entry.id)?.quantity), before: 'damaged' as ReturnStockAction, after: 'damaged' as ReturnStockAction,
+      ...retag.map(entry => ({ id: -(entry.line ?? entry.id), product_name: entry.name, quantity: num(lots.find(lot => lot.id === entry.id)?.quantity), before: 'damaged' as ReturnStockAction, after: 'damaged' as ReturnStockAction,
         tag_before: entry.before, tag_after: entry.after })),
     ],
     stock: [
@@ -541,7 +575,7 @@ const fieldsOf = (s: Snapshot, side: Side): Row => ({ ...s.header[side] })
 function statePredicate(s: Snapshot, side: Side): { sql: string; params: Row } {
   const present = side === 'before' ? s.lots.removed : s.lots.added
   const absent = side === 'before' ? s.lots.added : s.lots.removed
-  const lines = s.changes.map(change => ({ id: change.id, a: change[side].a, r: change[side].r, b: change[side].b }))
+  const lines = s.changes.map(change => ({ id: change.id, ...storedLine(change[side]) }))
   const allocs = s.changes.flatMap(change => change[side].allocs)
   const itemIds = s.changes.map(change => change.id)
   const tags = s.lots.retag.map(entry => ({ id: entry.id, tag: side === 'before' ? entry.before : entry.after }))
@@ -628,7 +662,7 @@ function editStatements(s: Snapshot, dir: 1 | -1, user: SessionUser, stamp: stri
 
   // The lines and the lots they put back.
   if (s.changes.length) {
-    const lines = s.changes.map(change => ({ id: change.id, a: change[to].a, r: change[to].r, b: change[to].b }))
+    const lines = s.changes.map(change => ({ id: change.id, ...storedLine(change[to]) }))
     const pick = (path: string) => `(SELECT json_extract(j.value,'$.${path}') FROM json_each(@lines) j WHERE json_extract(j.value,'$.id')=return_items.id)`
     out.push({ sql: `UPDATE return_items SET stock_action=${pick('a')},return_to_stock=${pick('r')},batch_id=${pick('b')} WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
       params: { lines: JSON.stringify(lines) } })
@@ -681,7 +715,7 @@ function editStatements(s: Snapshot, dir: 1 | -1, user: SessionUser, stamp: stri
     oldFields[key] = change[from].a; newFields[key] = change[to].a
   }
   for (const entry of s.lots.retag) {
-    const key = `damaged_tag.${nameOf(-entry.id, entry.name)}`
+    const key = `damaged_tag.${nameOf(entry.line ?? -entry.id, entry.name)}`
     oldFields[key] = (dir > 0 ? entry.before : entry.after) ?? DEFAULT_STOCK_CONDITION_TAG; newFields[key] = (dir > 0 ? entry.after : entry.before) ?? DEFAULT_STOCK_CONDITION_TAG
   }
   out.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value)
@@ -753,9 +787,14 @@ export async function applyReturnEdit(env: Env, userInput: SessionUser | null | 
   const statements = editStatements(plan.snapshot, 1, user, stamp, { apply: true, operationId, requestDigest: plan.requestDigest, expectedRevision: revision, action: 'update', stored })
   try { await execute(db, plan.snapshot, statements) } catch (error) {
     const committed = await findOperation(db, operationId)
-    if (committed) return receipt(readStored(committed), committed, true, await currentUpdatedAt())
+    if (committed) {
+      // Someone saved under this request id first. Only the very same edit is a replay; a different one lost the race and is refused.
+      const winner = readStored(committed)
+      if (winner.return_id !== returnId || winner.request_digest !== plan.requestDigest) fail('That request id was already used for a different edit.', 409, 'idempotency_conflict')
+      return receipt(winner, committed, true, await currentUpdatedAt())
+    }
     if (/ordinary_business_maintenance/i.test(String(error))) fail('Saving is paused for maintenance. Nothing was saved.', 503, 'maintenance_active')
-    if (/guard_value|CHECK constraint failed|money_precision_invalid_returns/i.test(String(error))) fail('This return or its stock changed while saving. Nothing was saved. Review it again.', 409, 'return_edit_changed')
+    if (/guard_value|CHECK constraint failed|UNIQUE constraint failed|money_precision_invalid_returns/i.test(String(error))) fail('This return or its stock changed while saving. Nothing was saved. Review it again.', 409, 'return_edit_changed')
     throw error
   }
   const committed = await findOperation(db, operationId)
@@ -780,6 +819,13 @@ export async function replayReturnEdit(payload: Record<string, unknown>, ctx: Un
   if (stored.generation === expectedGeneration + 1 && stored.last_direction === ctx.direction && stored.last_expected_generation === expectedGeneration) return complete(stored.generation)
   const fromStatus = ctx.direction === 'undo' ? 'applied' : 'reversed'
   if (stored.generation !== expectedGeneration || snapshot.status !== fromStatus) fail('This edit changed. Refresh the history.', 409, 'undo_history_stale')
+  const movesStock = stored.stock.length > 0 || stored.lots.removed.length > 0 || stored.lots.added.length > 0 || stored.lots.retag.length > 0
+  if (movesStock) {
+    const sale = await db.prepare('SELECT s.sale_status FROM returns r LEFT JOIN sales s ON s.id=r.sale_id WHERE r.id=@id').get<Row>({ id: stored.return_id })
+    if (String(sale?.sale_status || '').toLowerCase() === 'cancelled') {
+      fail('The sale was cancelled. Un-cancel the sale in Sales to change this return\'s stock handling, or change only the reason and notes.', 409, 'return_edit_sale_cancelled')
+    }
+  }
   const next: Stored = { ...stored, generation: expectedGeneration + 1, last_direction: ctx.direction, last_expected_generation: expectedGeneration }
   const dir: 1 | -1 = ctx.direction === 'undo' ? -1 : 1
   const statements = editStatements(stored, dir, user, new Date().toISOString(), { apply: false, operationId: stored.operation_id, requestDigest: stored.request_digest,
@@ -798,7 +844,7 @@ export async function replayReturnEdit(payload: Record<string, unknown>, ctx: Un
       if (observed.generation === next.generation && observed.last_direction === ctx.direction && observed.last_expected_generation === expectedGeneration) return complete(observed.generation)
     }
     if (/ordinary_business_maintenance/i.test(String(error))) fail('Saving is paused for maintenance. Nothing was changed.', 503, 'maintenance_active')
-    if (/guard_value|CHECK constraint failed|money_precision_invalid_returns/i.test(String(error))) {
+    if (/guard_value|CHECK constraint failed|UNIQUE constraint failed|money_precision_invalid_returns/i.test(String(error))) {
       fail('A return on this sale, or its stock, changed after this edit, so it cannot be replayed. Nothing was changed.', 409, 'undo_record_changed')
     }
     throw error
