@@ -46,6 +46,7 @@ const REQUEST_PHRASES = new Map<string, ReviewRequestPhrase>([
   ['products:create:product', 'New product'],
   ['products:update:product', 'Edit product'],
   ['products:delete:product', 'Remove product'],
+  ['products:conflict_mark:product', 'Confirm conflict'],
   ['fees:delete:fee', 'Delete expense'],
   ['inventory:update:inventory_reason', 'Edit stock reasons'],
   ['branches:update:branch', 'Edit branch'],
@@ -100,6 +101,7 @@ function payloadName(row: ReviewAlertRow): string | null {
 const NAME_READS = new Map<string, string>([
   ['products:update:product', 'SELECT name FROM products WHERE id = @id'],
   ['products:delete:product', 'SELECT name FROM products WHERE id = @id'],
+  ['products:conflict_mark:product', 'SELECT name FROM products WHERE id = @id'],
   ['fees:delete:fee', `SELECT COALESCE(NULLIF(trim(label), ''), fee_type) AS name FROM fees WHERE id = @id`],
   ['branches:update:branch', 'SELECT name FROM branches WHERE id = @id'],
 ])

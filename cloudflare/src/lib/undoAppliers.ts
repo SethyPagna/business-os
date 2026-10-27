@@ -540,6 +540,12 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     A child variant pointing at the discarded row would be left rooted on a
 //     deactivated parent (familyPagination.ts joins `parent.id = p.parent_id`),
 //     so the fold moves the children onto the keeper and records their ids.
+//   product_conflict_marks -- Conflicts decisions (migration 0273: "Confirm $0 cost", "no barcode"). Each is
+//     bound to the VALUE it confirmed on that row (a $0 cost, an empty barcode), and a merge changes the
+//     survivor's cost and barcode. Folding the loser's mark onto the survivor could therefore hide a real new
+//     conflict on it, so marks do not move: the loser is deactivated (the Conflicts lists skip inactive rows, so
+//     its marks are inert) and undo reactivates it with its decisions intact. The survivor's own marks stay as
+//     they were. Pinned in scripts/test-merge-identity-fk-pure.cjs ("conflict marks stay with the row").
 //   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
@@ -4007,6 +4013,26 @@ const APPLIERS: Record<string, UndoApplierDef> = {
     permission: 'products',
     action: 'delete',
     run: replayProductRemove,
+  },
+  // Conflicts decisions (lib/productDataGaps.ts): "Confirm $0" and "no barcode" are rows in product_conflict_marks. The payload is the
+  // mark itself ({ product_id, mark, set }); undo/redo is the compensating write. Gated like the forward route: products edit at the
+  // full tier plus Conflicts access (alsoAction), and a $0 confirmation also needs the cost-entry permission (checked in the replay).
+  'product.conflict_mark': {
+    permission: 'products',
+    action: 'edit',
+    // Conflicts access (merge_duplicates) must not be switched off, as for the forward route. The three History gates refuse a role with it
+    // off; the full tier of products edit is the applier's own tier.
+    alsoAction: 'merge_duplicates',
+    run: async (payload, ctx) => {
+      if (!ctx.user) throw new UndoConflictError('The signed-in user is required to replay this action.')
+      const { replayProductConflictMark } = await import('./productDataGaps')
+      const { canEditAcquisitionCosts } = await import('./acquisitionCostAccess')
+      const { actorId } = await import('./actorSnapshot')
+      const productId = await replayProductConflictMark(getDb(ctx.env), { id: actorId(ctx.user), name: actorSnapshot(ctx.user) }, canEditAcquisitionCosts(ctx.user), ctx.direction, payload)
+      const { bumpVersion } = await import('./cache')
+      await bumpVersion(ctx.env, 'products')
+      await broadcast(ctx.env, 'products', { action: 'update', id: productId })
+    },
   },
   // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
   // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).

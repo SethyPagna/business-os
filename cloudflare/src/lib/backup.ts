@@ -148,6 +148,7 @@ export const BACKUP_TABLES = [
   'contact_duplicate_dismissals',
   'products',
   'product_duplicate_dismissals',
+  'product_conflict_marks',
   'product_batches',
   'branch_stock',
   'branch_batch_stock',

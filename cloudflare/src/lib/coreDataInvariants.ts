@@ -706,6 +706,8 @@ export const FACTORY_RESET_TABLES = [
   // Clear children first so no request receipt survives a factory reset.
   'product_conflict_merge_run_cases',
   'product_conflict_merge_runs',
+  // Conflicts decisions (0273) name products by id; a reset must not leave marks for ids a new product could reuse.
+  'product_conflict_marks',
   // Durable monetary-mutation members reference their receipts, whose history
   // parent is cleared below. Guards are transient but must not survive reset.
   'sale_mutation_members',
@@ -818,6 +820,8 @@ export const PRODUCTS_RESET_TABLES = [
   // reference runs and products, so reset them child-first.
   'product_conflict_merge_run_cases',
   'product_conflict_merge_runs',
+  // Conflicts decisions (0273) name products by id; a reset must not leave marks for ids a new product could reuse.
+  'product_conflict_marks',
   'stock_session_members',
   'stock_session_operations',
   'stock_session_guards',

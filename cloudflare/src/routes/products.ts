@@ -33,6 +33,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
+import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -6257,6 +6258,91 @@ app.get('/possible-duplicates', async (c) => {
   const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
     await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
   return c.json({ success: true, clusters })
+})
+
+// Conflicts' other sections: products with an unknown cost (catalog, received dates, held damaged lots, unproven old $0), no barcode and
+// placeholder "0" barcodes (lib/productDataGaps.ts holds the rules). Same gate as the sweep above, which is what shows the tab; the
+// unknown-cost list and count are cost data, so they also need product_cost_view (a role without it gets the barcode counts only).
+// The counts are cached on the products+stock version; a page reads index entries after the cursor.
+function denyDataGaps(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
+  const user = c.get('user')
+  // Review tier reads the lists too: it can ask for a decision (owner, 27 Oct 2026), and the admin approves it. View tier reads and
+  // gets no decision button (the write route below refuses it). Only 'none' is refused here.
+  if (getActionTier(user, 'products', 'merge_duplicates') === 'none') {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  return null
+}
+
+app.get('/data-gaps/counts', async (c) => {
+  const denied = denyDataGaps(c)
+  if (denied) return denied
+  const counts = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true))
+  if (canViewAcquisitionCosts(c.get('user'))) return c.json({ success: true, counts })
+  const { unknown_cost: _hidden, ...visible } = counts
+  return c.json({ success: true, counts: visible })
+})
+
+app.get('/data-gaps', async (c) => {
+  const denied = denyDataGaps(c)
+  if (denied) return denied
+  const kind = parseProductDataGapKind(c.req.query('kind'))
+  if (!kind) return c.json({ success: false, error: 'kind (unknown_cost|empty_barcode|placeholder_barcode) is required' }, 400)
+  if (kind === 'unknown_cost' && !canViewAcquisitionCosts(c.get('user'))) {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  const page = await listProductDataGaps(getDb(c.env), kind, { after: c.req.query('after'), limit: c.req.query('limit') })
+  return c.json({ success: true, ...page })
+})
+
+// "Confirm $0" and "This product has no barcode" (and taking either back). A mark changes no cost, stock, lot or sale; each change is one
+// batch with its audit row and its undo record. Setting a mark is a products edit (full tier, a review-tier user is refused rather than
+// queued: a mark is a decision, not a field edit); a $0 confirmation also needs the cost-entry permission.
+app.post('/data-gaps/marks', async (c) => {
+  const user = c.get('user')
+  // A decision hides a product from Conflicts for everyone, so it needs the same access the Conflicts reads need (merge_duplicates),
+  // plus products edit; a $0 confirmation is cost data, so it also needs cost view and the cost-entry permission. At the Full tier it
+  // applies at once; at the Review tier it goes to the review queue for an admin to approve (owner ruling, 27 Oct 2026), never applied
+  // directly and never refused.
+  const noConflictsAccess = denyDataGaps(c)
+  if (noConflictsAccess) return noConflictsAccess
+  try {
+    const input = parseProductConflictMarkInput(await c.req.json().catch(() => null))
+    const editTier = getActionTier(user, 'products', 'edit')
+    if ((editTier !== 'full' && editTier !== 'review')
+      || (input.mark === 'zero_cost_confirmed' && !(canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)))) {
+      return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+    }
+    const db = getDb(c.env)
+    if (editTier === 'review') {
+      // Refuse what could never apply before queueing it, then queue once: a repeat of the same request returns the open one.
+      if (await preflightProductConflictMark(db, input) === 'noop') return c.json({ success: true, product_id: input.product_id, mark: input.mark, set: input.set, changed: false })
+      const existing = await findOpenConflictMarkRequest(db, actorId(user), input)
+      if (existing != null) return c.json({ success: true, pending: true, pendingActionId: existing, reused: true }, 202)
+      const expected = input.set ? await readConfirmedValue(db, input) : null
+      const pendingId = await maybeQueueForReview(c.env, user, 'products', {
+        actionType: 'conflict_mark',
+        entityType: 'product',
+        entityId: input.product_id,
+        payload: { product_id: input.product_id, mark: input.mark, set: input.set, ...(expected ? { expected } : {}) },
+        // No money in the text: a summary is shown to every reader of the queue, and "$0 cost" would tell one without cost access.
+        summary: `${input.set ? 'Confirm conflict' : 'Remove conflict confirmation'} for product #${input.product_id}`,
+      })
+      // Never fall through to a direct write for a review-tier account: a queue that did not take the request is an error, not a free pass.
+      if (pendingId == null) throw new Error('A review-tier Conflicts decision was not queued.')
+      return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+    }
+    const result = await setProductConflictMark(db, { id: actorId(user), name: actorSnapshot(user) }, input)
+    if (result.changed) {
+      await bumpVersion(c.env, 'products') // awaited: the Conflicts list re-reads right after this response
+      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: input.product_id }))
+    }
+    return c.json({ success: true, ...result })
+  } catch (error) {
+    if (error instanceof ProductConflictMarkError) return c.json({ success: false, error: error.message, code: error.code }, error.statusCode)
+    throw error
+  }
 })
 
 app.post('/possible-duplicates/dismiss', async (c) => {

@@ -181,12 +181,22 @@ export interface ListPendingActionsOptions {
    * the request; it reads it off the session.
    */
   requestedBy?: number | null
+  /**
+   * Leave out the Conflicts "Confirm $0 cost" requests (PENDING_COST_MARK_SQL). Set for a reader without product_cost_view: the
+   * request itself says a product costs $0, so it is hidden from that reader's lists, counts and badges (owner rule: cost stays private).
+   */
+  excludeCostMarks?: boolean
 }
 
 /** What the pending-review tag needs to point at a record: no payload, expected state, summary or reason. */
 export type PendingActionTarget = Pick<PendingActionRow,
   'id' | 'section' | 'action_type' | 'entity_type' | 'entity_id' | 'status' | 'requested_by' | 'requested_by_name' | 'created_at'>
 const TARGET_COLUMNS = 'id, section, action_type, entity_type, entity_id, status, requested_by, requested_by_name, created_at'
+
+// The Conflicts "Confirm $0 cost" requests (their payload names the mark, and the mark alone says the product costs $0);
+// routes/reviewQueue.ts isCostMarkRequest is the same test for one row.
+const NOT_COST_MARK_SQL = `NOT (section = 'products' AND action_type = 'conflict_mark' AND entity_type = 'product'
+  AND (NOT json_valid(payload_json) OR json_extract(payload_json, '$.mark') IS 'zero_cost_confirmed'))`
 
 export function listPendingActions(env: Env, options: ListPendingActionsOptions = {}): Promise<PendingActionRow[]> {
   return selectPendingActions<PendingActionRow>(env, options, '*')
@@ -213,6 +223,7 @@ async function selectPendingActions<Row>(env: Env, options: ListPendingActionsOp
     clauses.push('requested_by = @requestedBy')
     params.requestedBy = options.requestedBy
   }
+  if (options.excludeCostMarks) clauses.push(NOT_COST_MARK_SQL)
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = await db.prepare(`
     SELECT ${columns} FROM pending_actions ${where} ORDER BY created_at DESC, id DESC

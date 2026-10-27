@@ -159,6 +159,8 @@ const ROWS = [
   ['product', 'update', KEPT],
   ['product', 'delete', PURGED],
   ['product', 'cost_override', KEPT],
+  ['product', 'conflict_mark', PURGED],
+  ['product', 'conflict_unmark', PURGED],
   ['product', 'lookup_replace', PURGED],
   ['product', 'supplier_backfill', PURGED],
   ['product', 'wire_images', PURGED],

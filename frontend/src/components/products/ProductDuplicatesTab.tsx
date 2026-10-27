@@ -16,6 +16,7 @@ import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import { createRowSearch } from '../../utils/rowSearch.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { ProductImg } from './shared/primitives.tsx'
+import ProductDataGapsSection from './ProductDataGapsSection.tsx'
 import {
   getPossiblySameProducts,
   dismissProductDuplicateCluster,
@@ -302,6 +303,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   // Owner, 5 Oct 2026: the merge rule picks the highest price; choosing another needs Edit product at FULL tier + the price action.
   const canOverridePrices = canOverrideMergePrice(user)
   const [loading, setLoading] = useState(false)
+  const [gapsRefreshToken, setGapsRefreshToken] = useState(0)
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
   // The scanner gun fills the filter the camera and the keyboard fill (setSearch).
@@ -784,7 +786,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   return (
     <div className="space-y-2">
       <SectionTitleAction page="products" section="duplicates">
-        <button type="button" onClick={() => void load()} disabled={loading} title={refreshLabel} aria-label={refreshLabel} className={`${toolbarIconButtonClassName} disabled:opacity-50`}>
+        <button type="button" onClick={() => { setGapsRefreshToken((token) => token + 1); void load() }} disabled={loading} title={refreshLabel} aria-label={refreshLabel} className={`${toolbarIconButtonClassName} disabled:opacity-50`}>
           <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </SectionTitleAction>
@@ -920,6 +922,9 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
           </div>
         </>
       )}
+
+      {/* Unknown-cost and no-barcode products: edits, not merges (lib/productDataGaps.ts on the Worker). */}
+      <ProductDataGapsSection t={t} notify={notify} onPreviewProduct={onPreviewProduct} refreshToken={gapsRefreshToken} />
 
       {resolving && resolveAdapter ? (
         <ResolveModal
