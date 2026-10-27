@@ -43,7 +43,9 @@ const draft = initialDraft(ret())
 assert.deepEqual(draft.lines.map((line) => line.action), ['restock', 'damaged'])
 assert.equal(draftChanged(ret(), draft), false, 'nothing touched: nothing to save')
 const body = buildCurrentEditBody(ret(), draft) as { items: Array<Record<string, unknown>> } & Record<string, unknown>
-assert.deepEqual(Object.keys(body).sort(), ['expected_updated_at', 'items', 'notes', 'reason', 'return_type'])
+assert.deepEqual(Object.keys(body).sort(), ['expected_updated_at', 'items', 'notes', 'reason'], 'the handling method rides only when it was changed')
+assert.equal((buildCurrentEditBody(ret(), { ...draft, returnType: 'refund' }) as Record<string, unknown>).return_type, 'refund')
+assert.ok(!('return_type' in (buildCurrentEditBody({ ...ret(), return_type: 'exchange' }, initialDraft({ ...ret(), return_type: 'exchange' })) as Record<string, unknown>)), 'a stored method this screen does not offer is not sent back')
 for (const key of ['total_refund_usd', 'total_refund_khr', 'refund_currency', 'branch_id', 'applied_price_usd', 'cost_price_usd']) {
   assert.ok(!(key in body) && body.items.every((item) => !(key in item)), `the body never carries ${key}`)
 }

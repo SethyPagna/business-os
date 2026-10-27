@@ -72,7 +72,8 @@ export function buildCurrentEditBody(ret: CurrentReturn, draft: EditDraft): Reco
     expected_updated_at: ret.updated_at ?? '',
     reason: draft.reason.trim(),
     notes: draft.notes.trim() || null,
-    return_type: draft.returnType,
+    // The handling method rides only when the person changed it: a return stored with a method this screen does not offer is saved as it is.
+    ...(draft.returnType !== String(ret.return_type || 'restock') ? { return_type: draft.returnType } : {}),
     items: items.map((item, index) => {
       const line = draft.lines[index]
       return {
@@ -126,6 +127,7 @@ export function reviewRows(preview: EditPreview, T: Translate): Array<{ label: s
 
 const SENTENCES: Record<string, string> = {
   return_edit_forbidden: 'Ask a manager or admin to edit this return.',
+  return_edit_offline: 'Connect to the server before editing a return. Nothing was saved.',
   return_edit_money_locked: "Quantities, lines, the refund and its currency can't be changed on this return yet. You can change the reason, notes and stock handling now. To correct an amount, cancel this return and record a new one.",
   return_edit_preview_stale: 'This return changed. Nothing was saved. Review it again.',
   return_edit_changed: 'This return or its stock changed while saving. Nothing was saved. Review it again.',

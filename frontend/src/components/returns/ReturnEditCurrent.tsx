@@ -55,7 +55,7 @@ export async function previewCurrentEdit(returnId: number | string, body: Record
 }
 // Online only: the write is guarded against the return's live revision, so a replay from an offline queue could never be what was reviewed.
 export async function saveCurrentEdit(returnId: number | string, body: Record<string, unknown>, digest: string, requestId: string): Promise<{ success: boolean; changed: boolean; history_id: number | null }> {
-  if (navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server before editing a return.')
+  if (navigator.onLine === false && !(await confirmServerReachable())) throw Object.assign(new Error('Connect to the server before editing a return.'), { code: 'return_edit_offline' })
   return apiFetch('PATCH', `/api/returns/${encodeURIComponent(String(returnId))}`, { ...body, expected_digest: digest, client_request_id: requestId })
 }
 
@@ -110,7 +110,7 @@ export default function ReturnEditCurrent({ ret, onClose, onSuccess, onReloadLat
       if (!preview.changed) { notify(T('return_edit_nothing', 'Nothing to change.'), 'info'); return }
       const confirmed = await askToConfirm({
         title: T('return_edit_review_title', 'Save changes'),
-        message: T('return_edit_review_message', 'Refund, debt and cash stay the same. Undo is in History.'),
+        message: T('return_edit_review_message', 'Money paid or refunded stays the same. Stock and cost figures may change. Undo is in History.'),
         items: reviewRows(preview, T),
         confirmLabel: T('save', 'Save'),
       })
