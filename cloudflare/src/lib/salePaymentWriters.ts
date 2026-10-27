@@ -145,13 +145,13 @@ export function saleTenderEvent(sale: Record<string, unknown> & { id: number }, 
 export type CorrectionAnchor = { event: PaymentEventInsert; tender: PaymentEventInsert | null } | null
 
 /**
- * What a payment correction (replace_existing_payment on a reopened sale) is dated at. A correction fixes a
- * mis-keyed RECORD, it is not new money, so it is dated at the LATEST live payment and lands in that payment's
- * drawer: one correction out of the whole current tender and one correction in of the new tender. Earlier
- * payments and the shifts they landed in are left as they are; the shift of the latest payment takes the
- * difference, which is the one place the mistake can have been keyed when a deposit was right and the final
- * settle was not. `tender` is the sale's current tender as an event (its own columns, nothing re-summed; null
- * when nothing is recorded). Returns null when no payment is live: the correction is then a plain collect.
+ * Whether a payment correction (replace_existing_payment on a reopened sale) has a recorded payment to correct, and
+ * what it takes out. Owner ruling, 27 Oct 2026: a later payment correction counts on the day it is made, in the shift
+ * that made it, never back-dated to the corrected payment. So the pair (one correction out of the whole current
+ * tender, one correction in of the new tender) is dated NOW by the acting cashier in the collecting branch
+ * (settlementApplyEvents); the latest live payment is used only for its drawer effect. `tender` is the sale's current
+ * tender as an event (its own columns, nothing re-summed; null when nothing is recorded). Returns null when no payment
+ * is live: the correction is then a plain collect.
  */
 export function correctionAnchor(events: readonly PaymentEventInsert[], tender: PaymentEventInsert | null): CorrectionAnchor {
   const ins = livePaymentEvents(events).filter((event) => event.direction === 'in')
@@ -242,8 +242,9 @@ export type PaymentActor = { receivedAt: string; branchId: number | null; cashie
  *   - money taken now: one `collect` in, received now, in the collecting branch, by the acting cashier, for
  *     exactly the rows the request added (planSaleSettlement.addedDetails). No added row, no event.
  *   - a payment correction (correctionAnchor): `correction` out of the whole current tender (a copy of the sale's
- *     own columns) and `correction` in of the new tender, both dated at the latest live payment, in its branch,
- *     cashier and drawer. With no live payment it is a plain collect.
+ *     own columns) and `correction` in of the new tender, both dated NOW, by the acting cashier, in the collecting
+ *     branch (owner ruling 27 Oct 2026: a correction counts on the day it is made, never back-dated). The drawer
+ *     effect is the latest live payment's. With no live payment it is a plain collect.
  */
 export function settlementApplyEvents(input: {
   operationId: string
@@ -259,8 +260,8 @@ export function settlementApplyEvents(input: {
   if (anchor && input.correction?.tender) {
     events.push(mirrorEvent(input.correction.tender, {
       eventId: settlementEventId(input.operationId, 0, 'out'), direction: 'out', origin: 'correction', operationId: input.operationId,
-      reversesEventId: null, receivedAt: anchor.received_at, branchId: anchor.branch_id, cashierId: anchor.cashier_id,
-      cashierName: anchor.cashier_name, drawerEffect: anchor.drawer_effect,
+      reversesEventId: null, receivedAt: input.actor.receivedAt, branchId: input.actor.branchId, cashierId: input.actor.cashierId,
+      cashierName: input.actor.cashierName, drawerEffect: anchor.drawer_effect,
     }))
   }
   if (!input.added.length) return events
@@ -271,13 +272,13 @@ export function settlementApplyEvents(input: {
     origin: anchor ? 'correction' : 'collect',
     tender: input.added,
     exchangeRate: input.exchangeRate,
-    receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,
+    receivedAt: input.actor.receivedAt,
     operationId: input.operationId,
     change: input.change,
     drawerEffect: anchor ? anchor.drawer_effect : 1,
-    branchId: anchor ? anchor.branch_id : input.actor.branchId,
-    cashierId: anchor ? anchor.cashier_id : input.actor.cashierId,
-    cashierName: anchor ? anchor.cashier_name : input.actor.cashierName,
+    branchId: input.actor.branchId,
+    cashierId: input.actor.cashierId,
+    cashierName: input.actor.cashierName,
   }))
   return events
 }
@@ -295,9 +296,9 @@ export class LaterPaymentDependsError extends Error {
  * the operation's CURRENT generation wrote, each with its opposite, copying the money so the ledger nets out.
  *   collect:    undo (generation g -> g+1) answers the `in` with an `undo` out; redo answers that out with a `redo` in.
  *   correction: every answer is a `correction` event of the opposite direction (the pair is in and out both ways).
- * A collect is reversed now, by the acting cashier, in the collecting branch (the money leaves the drawer that is
- * open now). A correction stays a correction of the record: it is dated at, and lands in the drawer of, the event
- * it answers. Refused (LaterPaymentDependsError) when any event of the sale was written after this operation's
+ * Every answer is dated now, by the acting cashier, in the collecting branch (the money leaves or comes back to the
+ * drawer that is open now; owner ruling 27 Oct 2026: a correction, and so its undo, counts on the day it is made),
+ * with the drawer effect of the event it answers. Refused (LaterPaymentDependsError) when any event of the sale was written after this operation's
  * last one by another operation: undoing an older payment under a newer one would leave the newer one paying for
  * money that is gone.
  */
@@ -320,9 +321,7 @@ export function settlementReplayEvents(input: {
     const direction: PaymentEventDirection = source.direction === 'in' ? 'out' : 'in'
     // A collect operation only ever has an `in` at generation 0, so its undo is an out and its redo an in.
     const origin: Exclude<PaymentEventOrigin, 'opening'> = correctionOperation ? 'correction' : input.direction === 'undo' ? 'undo' : 'redo'
-    const dated = correctionOperation
-      ? { receivedAt: source.received_at, branchId: source.branch_id, cashierId: source.cashier_id, cashierName: source.cashier_name, drawerEffect: source.drawer_effect }
-      : { ...input.actor, drawerEffect: source.drawer_effect }
+    const dated = { ...input.actor, drawerEffect: source.drawer_effect }
     return mirrorEvent(source, {
       eventId: settlementEventId(input.operationId, input.generation + 1, direction), direction, origin, operationId: input.operationId,
       reversesEventId: source.event_id, ...dated,

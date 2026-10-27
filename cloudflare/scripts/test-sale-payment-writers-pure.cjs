@@ -43,12 +43,12 @@ check('a later payment of another operation refuses the undo (red: undo under a 
   assert.equal(W.settlementReplayEvents({ operationId: 'op', direction: 'undo', generation: 0, saleEvents: earlier, actor }).length, 1)
 })
 
-check('a correction operation replays at the corrected payment\'s date and drawer, never now (red: dated now)', () => {
+check('a correction operation replays NOW, by the acting cashier, with the drawer of the event it answers (owner 27 Oct; red: back-dated)', () => {
   const saleEvents = [event({ id: 1, event_id: 'op:0:out', direction: 'out', origin: 'correction', reverses_event_id: 'checkout:7' }),
     event({ id: 2, event_id: 'op:0:in', origin: 'correction', payment_method: 'ABA' })]
   const undo = W.settlementReplayEvents({ operationId: 'op', direction: 'undo', generation: 0, saleEvents, actor })
   assert.deepEqual(undo.map((e) => [e.event_id, e.direction, e.origin, e.received_at, e.cashier_id]),
-    [['op:1:in', 'in', 'correction', '2026-10-20 03:00:00', 5], ['op:1:out', 'out', 'correction', '2026-10-20 03:00:00', 5]])
+    [['op:1:in', 'in', 'correction', '2026-10-26 04:05:06', 9], ['op:1:out', 'out', 'correction', '2026-10-26 04:05:06', 9]])
 })
 
 check('live events drop a reversed event and a reversed reversal (red: counting the undo pair as live)', () => {
@@ -56,7 +56,7 @@ check('live events drop a reversed event and a reversed reversal (red: counting 
   assert.deepEqual(W.livePaymentEvents(rows).map((e) => e.event_id), ['c'])
 })
 
-check('a correction is dated at the LATEST live payment and replaces the whole tender (red: the first payment, or a refusal)', () => {
+check('a correction replaces the whole tender, dated NOW by the acting cashier in the collecting branch (owner 27 Oct; red: back-dated to a payment)', () => {
   assert.equal(W.correctionAnchor([], null), null)
   const tender = event({ event_id: 'opening:7', amount_paid_usd: 10 })
   const deposit = event({ id: 1, event_id: 'checkout:7', received_at: '2026-10-01 01:00:00' })
@@ -65,8 +65,9 @@ check('a correction is dated at the LATEST live payment and replaces the whole t
   assert.equal(anchor.event.event_id, 'op:0:in')
   const [out, inn] = W.settlementApplyEvents({ operationId: 'fix', saleId: 7, exchangeRate: 4000, added: [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }],
     change: { usd: 0, khr: 0, isActual: false, exchangeRate: null }, actor, correction: anchor })
-  assert.deepEqual([out.direction, out.origin, out.amount_paid_usd, out.received_at, out.reverses_event_id], ['out', 'correction', 10, '2026-10-05 01:00:00', null])
-  assert.deepEqual([inn.direction, inn.origin, inn.payment_method, inn.received_at, inn.cashier_id], ['in', 'correction', 'ABA', '2026-10-05 01:00:00', 5])
+  assert.deepEqual([out.direction, out.origin, out.amount_paid_usd, out.received_at, out.reverses_event_id], ['out', 'correction', 10, '2026-10-26 04:05:06', null])
+  assert.deepEqual([inn.direction, inn.origin, inn.payment_method, inn.received_at, inn.cashier_id], ['in', 'correction', 'ABA', '2026-10-26 04:05:06', 9])
+  assert.deepEqual([out.branch_id, inn.branch_id, out.drawer_effect, inn.drawer_effect], [2, 2, 1, 1])
   // An undone payment is not live: the correction falls back to the one before it.
   const undone = [deposit, settle, event({ id: 3, event_id: 'op:1:out', direction: 'out', origin: 'undo', reverses_event_id: 'op:0:in' })]
   assert.equal(W.correctionAnchor(undone, tender).event.event_id, 'checkout:7')

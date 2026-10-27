@@ -18,7 +18,9 @@
 //   G. payment_events_mismatch of ops/queries/health-sale-money.sql stays 0, with a positive control.
 //   H. an account without sales:status Full is refused on both writers.
 //   I. a settle and an instalment racing on one sale never both land on the same revision.
-//   J. a payment correction writes its pair at the corrected payment's own time; undo answers both.
+//   J. a payment correction writes its pair NOW (owner ruling 27 Oct 2026: it counts on the day it is made, in the
+//      shift that made it, never back-dated); undo answers both, also now.
+//   L. the same, discriminating: a deposit on 20 Aug and a settle on 10 Sep stay put; the current shift takes the correction.
 //   K. a v0 sale whose created_at cannot be read still settles (stays version 0, no events).
 //
 // Mutation controls (each must turn this file red; run with PAY_MUTATION=<name>):
@@ -26,8 +28,9 @@
 //   undo_without_event   the undo restores the columns and writes no reversal event
 //   overpay_accepted     the instalment skips the "more than is owed" refusal
 //   no_revision_guard    the instalment batch does not pin the revision it read (I2 must go red)
-//   correction_first_payment  a correction is dated at the FIRST live payment (L1 must go red)
-//   correction_dated_now      a correction is dated now (L1 must go red)
+//   correction_backdated      a correction is dated at the latest live payment, the pre-ruling rule (L1/L2 must go red)
+//   (the undo of a correction dated at the events it answers is caught by test-sale-payment-writers-pure: here the pair is
+//    itself dated now, so its answers land now either way and L3 only asserts it)
 //   credit_without_event      an exchange cancel moves the credit in the columns only (X must go red)
 //   credit_flag_dropped       a settle drops the refund_credit marker of a repeated row (X must go red)
 //   credit_dropped_on_correction  a payment correction replaces the credit row with plain cash (X4/X5 must go red)
@@ -51,12 +54,11 @@ const MUTATIONS = {
     from: '...replayEvents.map((event) => paymentEventInsertStatement(event)),', to: '' }],
   no_revision_guard: [{ name: 'no_revision_guard', file: 'src/routes/sales.ts',
     from: '    saleRevisionGuard(id, Number(sale.write_revision)),\n    ...openingStatements,', to: '    ...openingStatements,' }],
-  correction_first_payment: [{ name: 'correction_first_payment', file: 'src/lib/salePaymentWriters.ts',
-    from: 'const latest = ins[ins.length - 1]', to: 'const latest = ins[0]' }],
-  correction_dated_now: [{ name: 'correction_dated_now', file: 'src/lib/salePaymentWriters.ts',
-    from: 'receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,', to: 'receivedAt: input.actor.receivedAt,' },
-  { name: 'correction_out_dated_now', file: 'src/lib/salePaymentWriters.ts',
-    from: 'reversesEventId: null, receivedAt: anchor.received_at,', to: 'reversesEventId: null, receivedAt: input.actor.receivedAt,' }],
+  correction_backdated: [{ name: 'correction_backdated_out', file: 'src/lib/salePaymentWriters.ts',
+    from: "reversesEventId: null, receivedAt: input.actor.receivedAt, branchId: input.actor.branchId, cashierId: input.actor.cashierId,\n      cashierName: input.actor.cashierName, drawerEffect: anchor.drawer_effect,",
+    to: "reversesEventId: null, receivedAt: anchor.received_at, branchId: anchor.branch_id, cashierId: anchor.cashier_id,\n      cashierName: anchor.cashier_name, drawerEffect: anchor.drawer_effect," },
+  { name: 'correction_backdated_in', file: 'src/lib/salePaymentWriters.ts',
+    from: "    receivedAt: input.actor.receivedAt,\n    operationId: input.operationId,\n    change: input.change,", to: "    receivedAt: anchor ? anchor.received_at : input.actor.receivedAt,\n    operationId: input.operationId,\n    change: input.change," }],
   credit_without_event: [{ name: 'credit_without_event', file: 'src/lib/returnBulkAction.ts',
     from: 'return [creditPaymentEventStatement(members, direction), {', to: 'return [{' }],
   credit_flag_dropped: [{ name: 'credit_flag_dropped', file: 'src/lib/paymentSettlement.ts',
@@ -294,26 +296,30 @@ async function main() {
     const mistyped = await H.createSale(h, { key: 'pay-j-mistyped', lines: [{ productId: 405, quantity: 5 }], paymentDetails: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }], label: 'checkout $10 cash (really ABA)' })
     const mistypedId = Number(mistyped.body.id)
     const checkoutEvent = (await events(mistypedId))[0]
+    const correctionStartedAt = canonical(Date.now() - 1000)
     const reopen = await h.call('PATCH', `/api/sales/${mistypedId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-j-reopen' }, 'reopen for payment correction')
     const corrected = await settle(mistypedId, [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the tender to ABA')
     const correctionEvents = await events(mistypedId)
-    r.check(`J1 the correction pair is dated at the corrected checkout and nets to the new tender (reopen ${reopen.status}, correct ${corrected.status}; ${JSON.stringify(correctionEvents.map((e) => [e.direction, e.origin, e.payment_method, e.received_at]))})`, () => {
+    r.check(`J1 the correction pair is dated now, by the acting cashier, and nets to the new tender (reopen ${reopen.status}, correct ${corrected.status}; ${JSON.stringify(correctionEvents.map((e) => [e.direction, e.origin, e.payment_method, e.received_at]))})`, () => {
       assert.equal(reopen.status, 200, JSON.stringify(reopen.body).slice(0, 200))
       assert.equal(corrected.status, 200, JSON.stringify(corrected.body).slice(0, 200))
-      assert.deepEqual(correctionEvents.slice(1).map((e) => [e.direction, e.origin, e.payment_method, e.received_at, e.reverses_event_id]),
-        [['out', 'correction', 'Cash', checkoutEvent.received_at, null], ['in', 'correction', 'ABA', checkoutEvent.received_at, null]])
+      assert.deepEqual(correctionEvents.slice(1).map((e) => [e.direction, e.origin, e.payment_method, e.reverses_event_id]),
+        [['out', 'correction', 'Cash', null], ['in', 'correction', 'ABA', null]])
+      for (const event of correctionEvents.slice(1)) assert.ok(event.received_at >= correctionStartedAt && event.received_at >= checkoutEvent.received_at, event.received_at)
+      assert.deepEqual(net(correctionEvents), { usd: 10, khr: 0 })
     })
     const correctionUndo = await H.historyStep(h, Number(corrected.body.actionHistoryId), 'undo', 0, 'undo the correction')
     const correctionUndone = await events(mistypedId)
     const mistypedAfterUndo = await sale(mistypedId)
-    r.check(`J2 undoing the correction answers both events at the same date (got ${correctionUndo.status})`, () => {
+    r.check(`J2 undoing the correction answers both events, also dated now (got ${correctionUndo.status})`, () => {
       assert.equal(correctionUndo.status, 200, JSON.stringify(correctionUndo.body).slice(0, 200))
-      assert.deepEqual(correctionUndone.slice(3).map((e) => [e.direction, e.origin, e.received_at]).sort(), [['in', 'correction', checkoutEvent.received_at], ['out', 'correction', checkoutEvent.received_at]])
+      assert.deepEqual(correctionUndone.slice(3).map((e) => [e.direction, e.origin]).sort(), [['in', 'correction'], ['out', 'correction']])
+      for (const event of correctionUndone.slice(3)) assert.ok(event.received_at >= correctionStartedAt, event.received_at)
       assert.equal(mistypedAfterUndo.payment_method, 'Cash')
       assert.deepEqual(net(correctionUndone), { usd: 10, khr: 0 })
     })
 
-    // A deposit at checkout, then the settle keyed wrong: the correction lands at the settle, the deposit stays put.
+    // A deposit at checkout, then the settle keyed wrong: the correction replaces the whole tender, dated now.
     const twoPayments = await H.createSale(h, { key: 'pay-j-two', status: 'awaiting_payment', lines: [{ productId: 405, quantity: 5 }],
       paymentDetails: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], label: 'checkout Not Paid $10 with a $2 deposit' })
     const twoId = Number(twoPayments.body.id)
@@ -322,18 +328,19 @@ async function main() {
     const twoReopen = await h.call('PATCH', `/api/sales/${twoId}/status`, { sale_status: 'awaiting_payment', client_request_id: 'pay-j-two-reopen' }, 'reopen the two-payment sale')
     const twoCorrect = await settle(twoId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'ABA', amount_usd: 8, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the $8 to ABA')
     const twoAfter = await events(twoId)
-    r.check(`J3 with a deposit and a settle the correction is dated at the settle and replaces the whole tender (${twoSettle.status}/${twoReopen.status}/${twoCorrect.status}; ${JSON.stringify(twoAfter.map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]))})`, () => {
+    r.check(`J3 with a deposit and a settle the correction replaces the whole tender, dated now (${twoSettle.status}/${twoReopen.status}/${twoCorrect.status}; ${JSON.stringify(twoAfter.map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]))})`, () => {
       assert.equal(twoCorrect.status, 200, JSON.stringify(twoCorrect.body).slice(0, 200))
       const collect = twoBefore[1]
       assert.equal(collect.origin, 'collect')
-      assert.deepEqual(twoAfter.slice(2).map((e) => [e.direction, e.origin, e.amount_paid_usd, e.received_at]),
-        [['out', 'correction', 10, collect.received_at], ['in', 'correction', 10, collect.received_at]])
+      assert.deepEqual(twoAfter.slice(2).map((e) => [e.direction, e.origin, e.amount_paid_usd]), [['out', 'correction', 10], ['in', 'correction', 10]])
+      for (const event of twoAfter.slice(2)) assert.ok(event.received_at >= collect.received_at, event.received_at)
       assert.deepEqual(net(twoAfter), { usd: 10, khr: 0 })
     })
 
-    // ---- L. correction dating, discriminating (release review P2-2) -----------------------------------------
+    // ---- L. correction dating, discriminating (owner ruling 27 Oct 2026) ------------------------------------
     // A v0 deposit on 20 Aug (opening event), a settle whose event is moved to 10 Sep (restore mode: the only way an
-    // append-only row can be re-dated in a fixture), then a correction. It must land at 10 Sep, the latest live payment.
+    // append-only row can be re-dated in a fixture), then a correction. It counts on the day it is made: the 20 Aug and
+    // 10 Sep shifts keep what they took, the current shift takes the correction (cash -8, ABA +8). Its undo is dated now too.
     const dated = await H.importSale(h, 3, 'awaiting_payment', [{ productId: 403, name: 'PAY Mask', quantity: 5, price: 2 }], { paidUsd: 2, createdAt: '2026-08-20T03:00:00.000Z' })
     const datedId = Number(dated.sale.id)
     const datedSettle = await settle(datedId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'Cash', amount_usd: 8, amount_khr: 0 }], {}, 'settle the dated sale $8 cash')
@@ -356,15 +363,24 @@ async function main() {
     const datedCorrect = await settle(datedId, [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }, { method: 'ABA', amount_usd: 8, amount_khr: 0 }], { replace_existing_payment: true }, 'correct the $8 to ABA')
     const datedEvents = await events(datedId)
     const [augAfter, sepAfter, nowAfter] = [await augShift(), await sepShift(), await shiftCash(canonical(Date.now() - 3600 * 1000), null)]
-    r.check(`L1 the correction lands at the latest live payment (10 Sep), not the deposit (20 Aug) or now (settle ${datedSettle.status}, reopen ${datedReopen.status}, correct ${datedCorrect.status}; ${JSON.stringify(datedEvents.map((e) => [e.direction, e.origin, e.received_at]))})`, () => {
+    r.check(`L1 the correction is dated now, not at the settle (10 Sep) or the deposit (20 Aug) (settle ${datedSettle.status}, reopen ${datedReopen.status}, correct ${datedCorrect.status}; ${JSON.stringify(datedEvents.map((e) => [e.direction, e.origin, e.received_at]))})`, () => {
       assert.equal(datedCorrect.status, 200, JSON.stringify(datedCorrect.body).slice(0, 200))
-      assert.deepEqual(datedEvents.filter((e) => e.origin === 'correction').map((e) => [e.direction, e.received_at, e.amount_paid_usd]),
-        [['out', '2026-09-10 05:00:00', 10], ['in', '2026-09-10 05:00:00', 10]])
+      const pair = datedEvents.filter((e) => e.origin === 'correction')
+      assert.deepEqual(pair.map((e) => [e.direction, e.amount_paid_usd]), [['out', 10], ['in', 10]])
+      for (const event of pair) assert.ok(event.received_at >= canonical(Date.now() - 600 * 1000), `dated now, got ${event.received_at}`)
     })
-    r.check(`L2 only the 10 Sep shift moves: cash 8 -> 0, ABA +8; 20 Aug and now unchanged (aug ${JSON.stringify(augBefore)} -> ${JSON.stringify(augAfter)}; sep ${JSON.stringify(sepBefore)} -> ${JSON.stringify(sepAfter)})`, () => {
+    r.check(`L2 only the current shift moves: cash -8, ABA +8; 20 Aug and 10 Sep unchanged (aug ${JSON.stringify(augBefore)} -> ${JSON.stringify(augAfter)}; sep ${JSON.stringify(sepBefore)} -> ${JSON.stringify(sepAfter)}; now ${JSON.stringify(nowBefore)} -> ${JSON.stringify(nowAfter)})`, () => {
       assert.deepEqual(augAfter, augBefore)
-      assert.deepEqual([sepBefore.usd, sepBefore.digital.usd, sepAfter.usd, sepAfter.digital.usd], [8, 0, 0, 8])
-      assert.deepEqual([nowAfter.usd, nowAfter.digital.usd], [nowBefore.usd, nowBefore.digital.usd])
+      assert.deepEqual(sepAfter, sepBefore)
+      assert.deepEqual([sepBefore.usd, sepBefore.digital.usd], [8, 0], 'fixture: the 10 Sep shift took the $8 settle in cash')
+      assert.deepEqual([Number((nowAfter.usd - nowBefore.usd).toFixed(2)), Number((nowAfter.digital.usd - nowBefore.digital.usd).toFixed(2))], [-8, 8])
+    })
+    const datedUndo = await H.historyStep(h, Number(datedCorrect.body.actionHistoryId), 'undo', 0, 'undo the dated correction')
+    const [sepUndone, nowUndone] = [await sepShift(), await shiftCash(canonical(Date.now() - 3600 * 1000), null)]
+    r.check(`L3 undoing that correction is dated now as well: 10 Sep unchanged, the current shift back to before (undo ${datedUndo.status}; sep ${JSON.stringify(sepUndone)}; now ${JSON.stringify(nowUndone)})`, () => {
+      assert.equal(datedUndo.status, 200, JSON.stringify(datedUndo.body).slice(0, 200))
+      assert.deepEqual(sepUndone, sepBefore)
+      assert.deepEqual([nowUndone.usd, nowUndone.digital.usd], [nowBefore.usd, nowBefore.digital.usd])
     })
 
     // ---- X. exchange refund credit through instalment, settle, cancel and its undo (release review P2-1) --------
