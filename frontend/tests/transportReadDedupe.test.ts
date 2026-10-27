@@ -202,16 +202,53 @@ await runTest('a write caught by the reset is never re-issued', () => withSigned
   assert.equal(runs, 1)
 }))
 
+await runTest('a GET under account B never joins the GET account A has in flight', () => withSignedInPage(1, async (storage) => {
+  const original = globalThis.fetch
+  const calls: string[] = []
+  const pending: Deferred[] = []
+  globalThis.fetch = ((url: string) => { calls.push(String(url)); const next = deferredResponse(); pending.push(next); return next.promise }) as typeof fetch
+  try {
+    const asA = apiFetch('GET', '/api/orders/mine', undefined, 8000)
+    const refusedA = assert.rejects(asA, (e: any) => e.code === 'stale_read_scope')
+    storage.setItem('businessos_user', JSON.stringify({ id: 2 }))
+    resetActorReadSession()
+    const asB = apiFetch('GET', '/api/orders/mine', undefined, 8000)
+    assert.equal(calls.length, 2, 'B asked for its own request')
+    pending[0].resolve({ who: 'A' }); pending[1].resolve({ who: 'B' })
+    assert.deepEqual(await asB, { who: 'B' })
+    await refusedA
+  } finally {
+    globalThis.fetch = original
+    storage.setItem('businessos_user', JSON.stringify({ id: 1 })); resetActorReadSession()
+  }
+}))
+
+await runTest('a precaution invalidation does not keep a read begun under another account', () => withSignedInPage(1, async (storage) => {
+  let serverFnRuns = 0
+  const gateA = gate()
+  const asA = route('branches:acct', async () => { serverFnRuns++; await gateA.promise; return 'A' })
+  const refusedA = assert.rejects(asA, (e: any) => e.code === 'stale_read_scope')
+  await settle()
+  storage.setItem('businessos_user', JSON.stringify({ id: 2 }))
+  resetActorReadSession()
+  cacheInvalidate('branches:acct', { precaution: true })
+  const asB = route('branches:acct', async () => { serverFnRuns++; return 'B' })
+  assert.equal(await Promise.race([asB, settle().then(() => 'waiting on the first account read')]), 'B')
+  assert.equal(serverFnRuns, 2, 'B ran its own read instead of joining the first account read')
+  gateA.open(); await refusedA
+  storage.setItem('businessos_user', JSON.stringify({ id: 1 })); resetActorReadSession()
+}))
+
 // getAppBootstrap imports extension-less modules, so it is bundled with its own copy of http.ts (its module
 // state, fetch and window are the test's); that copy is returned as `http` so the test can invalidate through it.
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const bundled = buildSync({
-  stdin: { contents: "export * from './src/api/appBootstrapTransport.ts'; export * as http from './src/api/http.ts'", resolveDir: FRONTEND, loader: 'ts' },
+  stdin: { contents: "export * from './src/api/appBootstrapTransport.ts'; export * as http from './src/api/http.ts'; export * as scope from './src/api/actorReadScope.ts'", resolveDir: FRONTEND, loader: 'ts' },
   bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent',
 }).outputFiles[0].text
 const bundleModule = { exports: {} as Record<string, any> }
 new Function('module', 'exports', 'require', bundled)(bundleModule, bundleModule.exports, (name: string) => { throw new Error(`unexpected require ${name}`) })
-const { getAppBootstrap, http: bundledHttp } = bundleModule.exports as { getAppBootstrap: () => Promise<any>; http: typeof import('../src/api/http.ts') }
+const { getAppBootstrap, http: bundledHttp, scope: bundledScope } = bundleModule.exports as { getAppBootstrap: () => Promise<any>; http: typeof import('../src/api/http.ts'); scope: typeof import('../src/api/actorReadScope.ts') }
 
 async function withBundledPage(early: Promise<unknown> | null, run: (calls: string[], pending: Deferred[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch
@@ -257,6 +294,22 @@ await runTest('an ask after a users/roles push is not served by the read begun b
   assert.equal(calls.length, 2, 'a permission change must not be answered by a read that predates it')
   pending.forEach((entry) => entry.resolve({ user: { id: 1 } }))
   await Promise.all([before, after])
+}))
+
+await runTest('getAppBootstrap across an account switch: B gets its own read and the first answer never reaches B', () => withBundledPage(null, async (calls, pending) => {
+  const stored = (window as unknown as { localStorage: Storage }).localStorage
+  stored.setItem('businessos_user', JSON.stringify({ id: 1 }))
+  const asA = getAppBootstrap()
+  const refusedA = assert.rejects(asA, (e: any) => e.code === 'stale_read_scope')
+  await Promise.resolve()
+  stored.setItem('businessos_user', JSON.stringify({ id: 2 }))
+  bundledScope.resetActorReadSession()
+  const asB = getAppBootstrap()
+  await Promise.resolve()
+  assert.equal(calls.length, 2, 'the single flight is keyed by account')
+  pending[0].resolve({ user: { id: 1 } }); pending[1].resolve({ user: { id: 2 } })
+  assert.equal((await asB).user.id, 2)
+  await refusedA
 }))
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
