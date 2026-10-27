@@ -32,7 +32,7 @@ import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback }
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
 // every sale writer rather than done in the POS component.
-import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '../lib/paymentMethodRegistry'
+import { isCashPaymentMethod, mergePaymentMethods, parseConfiguredMethods, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
@@ -154,7 +154,7 @@ import {
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES, RETURN_STATUSES, SALE_RETURN_EVIDENCE_SQL, SALE_STATE_SET_SQL, requestedSaleState, sameSaleState, saleStateParams, saleStatusFilterSql, saleStatusWord } from '../lib/salesStatus'
 import { returnDebtLoweredSql } from '../lib/returnRefundSplit'
-import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, saleReadsNotPaid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type RecordedSaleMoney } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, rielCashRowRefused, saleReadsNotPaid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -748,7 +748,7 @@ app.post('/', async (c) => {
       .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk)))
     : null
   const rateSettingRowsRead = readStarted(db.prepare(
-    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','${PAYMENT_METHOD_KINDS_SETTING}')`,
   ).all<{ key: string; value: string }>())
   const customerRead = body.customer_id
     ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_id]))
@@ -1221,6 +1221,10 @@ app.post('/', async (c) => {
     }
     throw error
   }
+  // Riel change is handed back in notes: whole hundreds (owner, 27 Oct 2026). Only a stated change is asked.
+  if (nativeChange.changeIsActual === 1 && !rielCashAmountValid(nativeChange.changeKhr)) {
+    return c.json({ error: RIEL_CHANGE_REFUSAL, code: RIEL_CASH_NOT_HUNDREDS }, 400)
+  }
   const paymentDetails = Array.isArray(body.payment_details)
     ? body.payment_details
       .slice(0, 12)
@@ -1240,6 +1244,11 @@ app.post('/', async (c) => {
     : saleStatus === 'awaiting_payment' && amountPaidUsd <= 0 && amountPaidKhr <= 0
       ? []
       : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: amountPaidUsd, amount_khr: amountPaidKhr }]
+  // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026; lib/saleStatusResolution.ts).
+  const rielCashRow = rielCashRowRefused(effectivePaymentDetails, (method) => isCashPaymentMethod(method, parsePaymentMethodKinds(rateSettings[PAYMENT_METHOD_KINDS_SETTING])))
+  if (rielCashRow >= 0) {
+    return c.json({ error: 'Riel paid in cash must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS, row: rielCashRow }, 400)
+  }
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
   // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
   // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
@@ -2458,6 +2467,8 @@ app.patch('/:id/status', async (c) => {
     cancelFeeUsd = round2(Math.max(0, Number(body.cancel_fee_usd) || 0))
     cancelFeeKhr = Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0))
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
+    // The lost fee is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026).
+    if (!rielCashAmountValid(cancelFeeKhr)) return c.json({ error: 'Riel paid in cash must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS }, 400)
   }
 
   const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id, returned_quantity FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null }>([id])
@@ -2648,7 +2659,7 @@ app.patch('/:id/status', async (c) => {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
     }
     const settingRows = await db.prepare(`
-      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods')
+      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')
     `).all<{ key: string; value: string }>()
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
     const recordedMoney=hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0])
@@ -2681,6 +2692,7 @@ app.patch('/:id/status', async (c) => {
       settlementPlan = planSaleSettlement({
         moneyPrecisionVersion: recordedMoney ? 1 : 0,
         configuredMethodsRaw: settingMap.pos_payment_methods,
+        methodKindsRaw: settingMap[PAYMENT_METHOD_KINDS_SETTING],
         paymentDetailsRaw: body.payment_details,
         existingPaidUsd: paymentCorrection ? (keptCredit ? keptCredit.creditUsd : 0) : sale.amount_paid_usd,
         existingPaidKhr: paymentCorrection ? (keptCredit ? keptCredit.creditKhr : 0) : sale.amount_paid_khr,
@@ -3124,6 +3136,9 @@ app.patch('/:id/status', async (c) => {
   return c.json(statusPayload)
 })
 
+/** Riel change is handed back in notes: whole hundreds (owner, 27 Oct 2026). POST / and POST /:id/payments refuse the rest. */
+const RIEL_CHANGE_REFUSAL = 'Riel change must be whole 100 riel notes.'
+
 // POST /api/sales/:id/payments -- an instalment on a Not Paid sale (owner, 24 Oct 2026: staff may take several
 // payments until the sale is covered; slice S4 of DESIGN-SALE-ADDITIONS-PAYMENTS).
 //
@@ -3203,7 +3218,7 @@ app.post('/:id/payments', async (c) => {
     db.prepare(`SELECT ${returnDebtLoweredSql('returns')} AS debt_lowered_usd FROM returns WHERE sale_id = ?
       AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'`)
       .all<{ debt_lowered_usd: number | string | null }>([id]),
-    db.prepare(`SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods')`).all<{ key: string; value: string }>(),
+    db.prepare(`SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')`).all<{ key: string; value: string }>(),
     readBranchDirectory(db),
   ])
   const debtLoweredUsd = sumRefundsUsd(debtRows.map((row) => row.debt_lowered_usd ?? 0))
@@ -3236,6 +3251,7 @@ app.post('/:id/payments', async (c) => {
     plan = planSaleSettlement({
       moneyPrecisionVersion: hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0]) ? 1 : 0,
       configuredMethodsRaw: settingMap.pos_payment_methods,
+      methodKindsRaw: settingMap[PAYMENT_METHOD_KINDS_SETTING],
       paymentDetailsRaw: [...existingSubmission, ...body.payment_details],
       existingPaidUsd: sale.amount_paid_usd ?? 0,
       existingPaidKhr: sale.amount_paid_khr ?? 0,
@@ -3279,6 +3295,9 @@ app.post('/:id/payments', async (c) => {
       return c.json({ error: error.message, code: error.code, owed_usd: owedBefore.owedUsd }, error.statusCode)
     }
     throw error
+  }
+  if (statedChange && !rielCashAmountValid(nativeChange.changeKhr)) {
+    return c.json({ error: RIEL_CHANGE_REFUSAL, code: RIEL_CASH_NOT_HUNDREDS, owed_usd: owedBefore.owedUsd }, 400)
   }
   const changeGiven = statedChange && (nativeChange.changeUsd > 0 || nativeChange.changeKhr > 0)
 

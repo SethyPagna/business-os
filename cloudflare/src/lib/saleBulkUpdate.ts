@@ -4,7 +4,8 @@ import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import { getActionTier } from './permissions'
-import { parseConfiguredMethodsStrict, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
+import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
@@ -384,8 +385,13 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
   }
 
   let expectedPaymentMethodsRaw: string | null = null
+  // A relabel that makes non-cash riel cash must find whole 100-riel notes (owner, 27 Oct 2026); cash -> cash keeps what is stored.
+  let relabelMakesCash: ((sourceMethod: unknown) => boolean) | null = null
   if (request.action.kind === 'payment_method') {
-    const setting = await db.prepare("SELECT value FROM settings WHERE key='pos_payment_methods'").get<{ value: string }>()
+    const settingRows = await db.prepare(`SELECT key,value FROM settings WHERE key IN ('pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')`).all<{ key: string; value: string }>()
+    const setting = settingRows.find((row) => row.key === 'pos_payment_methods')
+    const kinds = parsePaymentMethodKinds(settingRows.find((row) => row.key === PAYMENT_METHOD_KINDS_SETTING)?.value)
+    if (isCashPaymentMethod(request.action.target, kinds)) relabelMakesCash = (sourceMethod) => !isCashPaymentMethod(sourceMethod, kinds)
     const configured = parseConfiguredMethodsStrict(setting?.value)
     if (!setting || !configured.ok) fail('Configured payment methods are unreadable. Repair them in Settings before changing sales.', 409)
     const targetKey = paymentMethodKey(request.action.target)
@@ -422,6 +428,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
       // An exchange refund credit row is never relabelled (6.0.982): the exchange cancel reverses it by its own recorded method, and a relabel
       // would move the credit into another drawer kind (cash read as digital).
       matches = details.some((detail) => normalized(detail.method) === source && detail.refund_credit !== true) || (!details.length && topLevelMatched)
+      const relabelled = details.length ? details.filter((detail) => normalized(detail.method) === source && detail.refund_credit !== true) : [{ amount_khr: sale.amount_paid_khr }]
+      if (matches && relabelMakesCash?.(request.action.source) && relabelled.some((detail) => !rielCashAmountValid(detail.amount_khr))) {
+        throw new SaleBulkError(`Sale ${expected.id} has riel that is not whole 100 riel notes, so it cannot be relabelled as cash.`, 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [expected.id] })
+      }
     } else if (request.action.kind === 'delivery_contact') {
       matches = (sale.delivery_contact_id == null ? null : Number(sale.delivery_contact_id)) === request.action.source_id && Number(sale.is_delivery || 0) === 1
     } else {

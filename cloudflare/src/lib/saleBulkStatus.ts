@@ -15,7 +15,7 @@ import { BranchEffectResolver, branchEffectGuardPredicate, branchEffectRefusal, 
 import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
-import { returnSaleAwaitsPayment, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type SaleStoredState } from './saleStatusResolution';
+import { returnSaleAwaitsPayment, RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type SaleStoredState } from './saleStatusResolution';
 import { returnDebtLoweredSql } from './returnRefundSplit';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
@@ -180,6 +180,9 @@ function parseRequest(raw: Row): BulkStatusRequest {
             for (const key of ['fee_usd', 'fee_khr'])
                 if (item.cancel[key] !== undefined && (!Number.isFinite(Number(item.cancel[key])) || Number(item.cancel[key]) < 0))
                     throw new SaleBulkError('Invalid per-sale cancellation fee.', 400);
+            // A lost fee is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026).
+            if (!rielCashAmountValid(Math.round(Number(item.cancel.fee_khr) || 0)))
+                throw new SaleBulkError('Riel paid in cash must be whole 100 riel notes.', 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [item.id] });
         }
         ids.add(item.id);
     }

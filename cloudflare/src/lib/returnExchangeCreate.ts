@@ -15,6 +15,7 @@ import { customerReturnAuthorityPredicate, customerReturnQuotePlanFromRows, publ
 import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { multiplyMoney4 } from './moneyPrecision'
 import { isCashPaymentMethod, paymentMethodKey, parseConfiguredMethods, parsePaymentMethodKinds } from './paymentMethodRegistry'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashRowRefused } from './saleStatusResolution'
 import { productStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE } from './productStockGuard'
 import { businessDateTimeId } from './receiptNumber'
 import { fillOmittedReturnCosts } from './returnCostAccess'
@@ -240,6 +241,9 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
       return reply(400, { error: "Choose one of the shop's payment methods.", code: 'return_exchange_payment_method' })
     }
   }
+  // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026; lib/saleStatusResolution.ts).
+  const rielCashRow = rielCashRowRefused(intent.exchange_payment.details, (method) => isCashPaymentMethod(method, kinds))
+  if (rielCashRow >= 0) return reply(400, { error: 'Riel paid in cash must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS, row: rielCashRow })
   let settlement: ReturnType<typeof settleExchange>
   try {
     settlement = settleExchange({

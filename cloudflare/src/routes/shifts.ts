@@ -13,6 +13,7 @@ import {
   type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
 import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect, type BranchEffect } from '../lib/branchRedirectWrite'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -255,6 +256,8 @@ function additionalMoney(value: unknown): { ok: true; value: number } | { ok: fa
   const parsed = countedMoney(value)
   return parsed.ok ? { ok: true, value: parsed.value ?? 0 } : parsed
 }
+/** Counted riel is drawer cash: whole 100-riel notes (owner, 27 Oct 2026; lib/saleStatusResolution.ts). */
+const RIEL_COUNT_REFUSAL = { error: 'Riel cash counts must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS }
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
@@ -1220,6 +1223,7 @@ app.post('/open', async (c) => {
   const floatUsdParsed = countedMoney(body.opening_float_usd); const floatKhrParsed = countedMoney(body.opening_float_khr)
   if (!floatUsdParsed.ok || !floatKhrParsed.ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
+  if (!rielCashAmountValid(floatKhr)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const existing = await readCurrent(db, policy, user.id, branchId)
   if (existing && !existing.cancelled_at) return c.json({ ...currentResponse(user, existing, policy, false), already_registered: true }, 200)
   if (existing?.cancelled_at) {
@@ -1411,6 +1415,7 @@ app.post('/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const nowIso = new Date().toISOString()
   const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(nowIso), Date.parse(nowIso))
   if (timing.refusal) return c.json(timing.refusal, 409)
@@ -1455,6 +1460,7 @@ app.post('/:id/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
@@ -1634,6 +1640,9 @@ app.patch('/:id', async (c) => {
   const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
   const additionalUsd = additionalUsdParsed.value; const additionalKhr = additionalKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
+  // Only a riel count this amend changes is asked; a count stored before the rule is kept as it is.
+  if ([[openingKhr, before.opening_float_khr], [additionalKhr, before.additional_cash_khr ?? 0], [closingKhr, before.closing_counted_khr]]
+    .some(([next, stored]) => !sameCountValue(next, stored, 0.5) && !rielCashAmountValid(next))) return c.json(RIEL_COUNT_REFUSAL, 400)
   if (before.has_reopened_child && closedAt
     && (!sameCountValue(closingUsd, before.closing_counted_usd, 0.005) || !sameCountValue(closingKhr, before.closing_counted_khr, 0.5))) {
     return c.json(SHIFT_COUNT_LOCKED_BY_REOPEN, 409)

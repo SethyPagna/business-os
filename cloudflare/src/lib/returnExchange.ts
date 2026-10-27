@@ -1,6 +1,6 @@
 import { nativeChangeAmounts, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { NativeSaleChangeValidationError, planNativeSaleChange, type NativeSaleChangePlan } from './nativeSaleChange'
-import { paymentCoversSaleTotal } from './saleStatusResolution'
+import { paymentCoversSaleTotal, rielCashFloor } from './saleStatusResolution'
 import {
   capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, serializeSaleItemPricing,
   type CapturedPricingPool, type ExactLinePricing, type ReceiptAllocationContext,
@@ -186,8 +186,6 @@ export type ExchangeSettlement = {
   saleStatus: 'completed' | 'awaiting_payment'
 }
 
-function floor100(value: number): number { return Math.floor(value / 100 + 1e-9) * 100 }
-
 /**
  * Settles S2: the refund's cash share is the first tender row, the customer's rows follow, and whatever the tender exceeds the
  * total by is the sale's ACTUAL change in the chosen currency. Dollar change is the overpayment to the cent; riel change is the
@@ -229,7 +227,7 @@ export function settleExchange(input: {
   })
   if (!surplus.hasOverpayment) return { paymentDetails, paymentMethod, amountPaidUsd, amountPaidKhr, change: none, saleStatus: 'completed' }
   const candidates = input.payment.change_currency === 'KHR'
-    ? [{ usd: 0, khr: floor100(surplus.changeKhr) }, { usd: 0, khr: Math.max(0, floor100(surplus.changeKhr) - 100) }]
+    ? [{ usd: 0, khr: rielCashFloor(surplus.changeKhr) }, { usd: 0, khr: Math.max(0, rielCashFloor(surplus.changeKhr) - 100) }]
     : [{ usd: surplus.changeUsd, khr: 0 }, { usd: Math.max(0, Math.round(surplus.changeUsd * 100 - 1) / 100), khr: 0 }]
   let failure: unknown = null
   for (const candidate of candidates) {

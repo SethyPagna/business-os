@@ -3,7 +3,8 @@ import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from './productStockGuard'
 import type { D1Compat } from './db'
 import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
-import { saleStoredState } from './saleStatusResolution'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, saleStoredState } from './saleStatusResolution'
+import { isCashPaymentMethod } from './paymentMethodRegistry'
 import { branchCanSell } from './branchRoles'
 import { actorSnapshot, type ActorLike } from './actorSnapshot'
 import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branchRoleGuards'
@@ -164,6 +165,12 @@ export async function applyHistoricalSaleImport(
     // stay rejected) -- naming a billing plan in the operator-facing error
     // went stale the day the plan changed (A4).
     throw new Error(`Sale on row ${rowNumber} exceeds the ${MAX_HISTORICAL_SALE_LINES}-line safety limit; split it into smaller receipts.`)
+  }
+  // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026). The sheet has one method column and one riel
+  // column, so the riel is cash when every method it names is cash (a mixed 'Cash + ABA' cannot say which part is cash).
+  const importMethods = String(d.payment_method || 'Cash').split('+').map((method) => method.trim()).filter(Boolean)
+  if (!rielCashAmountValid(d.amount_paid_khr) && importMethods.length && importMethods.every((method) => isCashPaymentMethod(method))) {
+    throw Object.assign(new Error(`Sale on row ${rowNumber}: riel paid in cash must be whole 100 riel notes.`), { code: RIEL_CASH_NOT_HUNDREDS })
   }
 
   const groupKey = `row:${rowNumber}`
