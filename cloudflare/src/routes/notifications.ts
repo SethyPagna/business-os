@@ -2,7 +2,6 @@ import { loyaltyPointsEnabled } from '../lib/loyaltyEligibility'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
-import { deliveryPendingSaleSql, notPaidSaleSql } from '../lib/salesStatus'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockGuard'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
@@ -415,19 +414,29 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
   }
 }
 
+// The two queues, newest first, 50 each: salesStatus.ts's notPaidSaleSql / deliveryPendingSaleSql with
+// each OR term written as its own ordered index seek. The OR form let SQLite walk idx_sales_created_pg
+// and test every sale; with ANALYZE statistics (production has them) it does, so a shop with few unpaid
+// sales read the whole table (15.8k rows) for each queue. Order is created_at then id, both descending:
+// the walk the old form took. scripts/test-notifications-sales-queues-pure.cjs pins both forms together.
+const salesQueueSeek = (where: string) => `SELECT * FROM (SELECT id, receipt_number, total_usd, created_at FROM sales WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT 50)`
+const salesQueue = (terms: string[], join: string) => `SELECT id, receipt_number, total_usd FROM (${terms.map(salesQueueSeek).join(join)}) ORDER BY created_at DESC, id DESC LIMIT 50`
+export const AWAITING_PAYMENT_SQL = salesQueue([
+  "sale_status = 'awaiting_payment'",
+  "sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_payment'",
+], ' UNION ALL ')
+// UNION, not UNION ALL: a sale can be both delivery_pending and awaiting_delivery.
+export const AWAITING_DELIVERY_SQL = salesQueue([
+  "delivery_pending = 1 AND COALESCE(sale_status, '') <> 'cancelled'",
+  "sale_status = 'awaiting_delivery'",
+  "sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_delivery'",
+], ' UNION ')
+
 async function buildSalesSection(env: Env): Promise<NotificationSection | null> {
   const db = getDb(env)
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
-    db.prepare(`
-      SELECT id, receipt_number, total_usd FROM sales
-      WHERE ${notPaidSaleSql('sales')}
-      ORDER BY created_at DESC LIMIT 50
-    `).all<{ id: number; receipt_number: string; total_usd: number }>(),
-    db.prepare(`
-      SELECT id, receipt_number, total_usd FROM sales
-      WHERE ${deliveryPendingSaleSql('sales')}
-      ORDER BY created_at DESC LIMIT 50
-    `).all<{ id: number; receipt_number: string; total_usd: number }>(),
+    db.prepare(AWAITING_PAYMENT_SQL).all<{ id: number; receipt_number: string; total_usd: number }>(),
+    db.prepare(AWAITING_DELIVERY_SQL).all<{ id: number; receipt_number: string; total_usd: number }>(),
   ])
   if (!awaitingPayment.length && !awaitingDelivery.length) return null
 
