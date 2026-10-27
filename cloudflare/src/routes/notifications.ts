@@ -198,6 +198,69 @@ export const INVENTORY_PREVIEW_ITEMS = 50
 // What the full list was capped at before the preview existed.
 export const INVENTORY_FULL_ITEMS = 5000
 
+// The bell's low/out-of-stock section is a figure that may be up to 5 minutes old (owner ruling, 27 Oct: the
+// dashboard stock overview is the same kind of figure), shown with the time it was computed. It is keyed by
+// organization, the low-stock rule and TIME, never by the stock version: counting every flagged product costs
+// O(catalog) rows, and a sale used to invalidate it on every poll. Sales/delivery queues, expiry and the rest stay live.
+// Three tiers, cheapest first: this isolate's memo; the Cache API entry every isolate of the colo shares (no
+// daily write cap, unlike KV's 1,000 on Free); a recompute. One recompute at a time: concurrent callers in an
+// isolate share one in-flight promise, and a short-lived lock entry makes other isolates serve the (older) entry
+// instead of recomputing alongside. Without a Cache API (tests, workers.dev) the memo alone applies.
+export const INVENTORY_SECTION_MAX_AGE_MS = 5 * 60 * 1000
+const INVENTORY_ENTRY_TTL_SECONDS = 10 * 60
+const INVENTORY_LOCK_TTL_SECONDS = 20
+type TimedInventory = { computedAt: string; section: NotificationSection | null }
+const inventoryMemo = new Map<string, TimedInventory>()
+const inventoryFlights = new Map<string, Promise<TimedInventory>>()
+let inventoryNow = () => Date.now()
+/** Test seams: forget the isolate memo (a fresh isolate) and move the clock. */
+export function resetInventoryBellCache(now?: () => number): void {
+  inventoryMemo.clear()
+  inventoryFlights.clear()
+  inventoryNow = now || (() => Date.now())
+}
+const isFresh = (entry: TimedInventory) => inventoryNow() - Date.parse(entry.computedAt) < INVENTORY_SECTION_MAX_AGE_MS
+
+async function timedInventory(c: NotificationContext, key: string, produce: () => Promise<NotificationSection | null>): Promise<TimedInventory> {
+  const remembered = inventoryMemo.get(key)
+  if (remembered && isFresh(remembered)) return remembered
+  const running = inventoryFlights.get(key)
+  if (running) return running
+  const flight = (async (): Promise<TimedInventory> => {
+    const cache = typeof caches === 'undefined' ? null : caches.default
+    const origin = new URL(c.req.url).origin
+    const entryRequest = new Request(`${origin}/api/notifications/_inventory/entry?k=${encodeURIComponent(key)}`)
+    const lockRequest = new Request(`${origin}/api/notifications/_inventory/lock?k=${encodeURIComponent(key)}`)
+    let older: TimedInventory | null = null
+    if (cache) {
+      const hit = await cache.match(entryRequest)
+      if (hit) {
+        const entry = await hit.json<TimedInventory>()
+        if (isFresh(entry)) return entry
+        older = entry
+      }
+      // Someone else is recomputing: answer with the older figure rather than read the catalog twice.
+      if (older) {
+        const lock = await cache.match(lockRequest)
+        // The lock carries its own start time, so it lapses on schedule whatever the cache does with max-age.
+        if (lock && inventoryNow() - Number(await lock.text()) < INVENTORY_LOCK_TTL_SECONDS * 1000) return older
+      }
+      c.executionCtx.waitUntil(cache.put(lockRequest, new Response(String(inventoryNow()), { headers: { 'cache-control': `public, max-age=${INVENTORY_LOCK_TTL_SECONDS}` } })))
+    }
+    const entry: TimedInventory = { section: await produce(), computedAt: new Date(inventoryNow()).toISOString() }
+    if (cache) {
+      c.executionCtx.waitUntil(cache.put(entryRequest, new Response(JSON.stringify(entry), {
+        headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INVENTORY_ENTRY_TTL_SECONDS}` },
+      })))
+    }
+    return entry
+  })()
+  inventoryFlights.set(key, flight)
+  const settle = () => { if (inventoryFlights.get(key) === flight) inventoryFlights.delete(key) }
+  flight.then((entry) => { if (isFresh(entry)) inventoryMemo.set(key, entry); settle() }, settle)
+  return flight
+}
+
 // What a section builder reads through: the live database, or the batch below.
 type SectionDb = { prepare(sql: string): { all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> } }
 
@@ -853,9 +916,14 @@ app.get('/summary', async (c) => {
     return section
   }
   let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
+  let inventoryTask: Promise<TimedInventory> | undefined
   if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
-    tasks.push(cached('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-      (db) => buildInventorySection(db, lowStockConfig, INVENTORY_PREVIEW_ITEMS)))
+    const queued = batch.join()
+    const timed = timedInventory(c, `${user.organization_id ?? 0}:${lowStockCacheInput(lowStockConfig)}`,
+      () => { const produced = buildInventorySection(batch.db, lowStockConfig, INVENTORY_PREVIEW_ITEMS); queued(); return produced })
+    timed.then(queued, queued)
+    inventoryTask = timed
+    tasks.push(timed.then((entry) => entry.section))
   }
   if (preferences.expiryEnabled && hasPermission(user, 'products')) {
     tasks.push(cached('expiry', ['products', 'settings'], String(preferences.expiryDays),
@@ -921,6 +989,8 @@ app.get('/summary', async (c) => {
     unreadCount,
     unread: unreadCount,
     generatedAt: new Date().toISOString(),
+    // When the inventory section's counts were computed (up to INVENTORY_SECTION_MAX_AGE_MS ago); absent without the section.
+    ...(inventoryTask ? { inventory_computed_at: (await inventoryTask).computedAt } : {}),
     preferences,
     sections,
   })
