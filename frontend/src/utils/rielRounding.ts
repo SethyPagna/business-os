@@ -12,9 +12,10 @@
 //   - Amount to collect, non-cash payment on a delivery -> round UP to 100៛
 //   - Change handed back to the customer (any sale)     -> round DOWN to 100៛
 
-import { RIEL_CASH_STEP_KHR, rielCashFloor } from './saleStatusResolution.ts'
+import { rielCashFloor } from './saleStatusResolution.ts'
 
-export const RIEL_STEP = RIEL_CASH_STEP_KHR
+// Explicit on purpose: cloudflare/scripts/test-native-sale-change-pure.cjs reads it beside NATIVE_CHANGE_KHR_STEP.
+export const RIEL_STEP = 100
 
 /** Down to whole 100៛ notes: the shared rielCashFloor (utils/saleStatusResolution.ts). */
 export function roundRielDown(khr: number): number {
