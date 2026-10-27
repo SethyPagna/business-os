@@ -77,8 +77,8 @@ async function world(planTier) {
     compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
   const db = await mf.getD1Database('DB')
   await migrate(db)
-  const send = async (method, url, body, user = ADMIN) => {
-    const response = await mf.dispatchFetch(`http://local${url}`, { method, headers: { 'content-type': 'application/json', 'x-test-user': JSON.stringify(user) },
+  const send = async (method, url, body, user = ADMIN, headers = {}) => {
+    const response = await mf.dispatchFetch(`http://local${url}`, { method, headers: { 'content-type': 'application/json', 'x-test-user': JSON.stringify(user), ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
     const text = await response.text()
     let parsed
@@ -91,7 +91,7 @@ async function world(planTier) {
 }
 
 // A current-format sale exactly as checkout writes it, drawn from the named lots.
-async function seedSale(w, saleId, lines) {
+async function seedSale(w, saleId, lines, branch = 1, branchName = 'Shop') {
   const { kernel, db } = w
   const pool = { version: 1, pool_key: `edit-pool-${saleId}`, evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [], lines: lines.map(line => ({ line_key: line.key, source: 'selling',
     product: { id: line.product, selling_price_usd: line.price, selling_price_khr: line.price * 4000, wholesale_price_usd: null, discount_enabled: false, discount_amount_usd: 0, discount_amount_khr: 0, discount_percent: 0 },
@@ -105,24 +105,24 @@ async function seedSale(w, saleId, lines) {
   await db.batch([
     db.prepare(`INSERT INTO sales(id,receipt_number,branch_id,branch_name,exchange_rate,subtotal_usd,discount_usd,membership_discount_usd,tax_usd,
       calculated_total_usd,rounding_adjustment_usd,total_usd,money_precision_version,sale_status,amount_paid_usd,amount_paid_khr)
-      VALUES(?,?,1,'Shop',4000,?,0,0,0,?,?,?,1,'completed',?,0)`).bind(saleId, `EDIT-${saleId}`, Number(amounts.reduce((s, v) => s + v, 0).toFixed(4)), entitlement, Number((total - entitlement).toFixed(4)), total, total),
+      VALUES(?,?,?,?,4000,?,0,0,0,?,?,?,1,'completed',?,0)`).bind(saleId, `EDIT-${saleId}`, branch, branchName, Number(amounts.reduce((s, v) => s + v, 0).toFixed(4)), entitlement, Number((total - entitlement).toFixed(4)), total, total),
     ...pricing.map((row, index) => db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,batch_id,cost_price_usd,cost_price_khr,
       total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,applied_price_khr,product_discount_usd,product_discount_khr,product_discount_type,product_discount_label,
       manual_discount_usd,manual_discount_khr,manual_discount_type,manual_discount_value,price_mode,pricing_snapshot_json)
-      VALUES(?,?,?,?,?,1,?,7,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(lines[index].id, saleId, lines[index].product, `Product ${lines[index].product}`, lines[index].quantity,
+      VALUES(?,?,?,?,?,?,?,7,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(lines[index].id, saleId, lines[index].product, `Product ${lines[index].product}`, lines[index].quantity, branch,
       lines[index].lots.length === 1 ? lines[index].lots[0].batch : null,
       row.total_usd, row.total_khr, row.base_price_usd, row.base_price_khr, row.applied_price_usd, row.applied_price_khr, row.product_discount_usd, row.product_discount_khr,
       row.product_discount_type, row.product_discount_label, row.manual_discount_usd, row.manual_discount_khr, row.manual_discount_type, row.manual_discount_value, row.price_mode, row.pricing_snapshot_json)),
-    ...lines.flatMap(line => line.lots.map(lot => db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(?,?,1,?,0)').bind(line.id, lot.batch, lot.quantity))),
+    ...lines.flatMap(line => line.lots.map(lot => db.prepare('INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(?,?,?,?,0)').bind(line.id, lot.batch, branch, lot.quantity))),
   ])
 }
 
-async function createReturn(w, saleId, requestId, items) {
+async function createReturn(w, saleId, requestId, items, branch = 1) {
   const quote = await w.send('POST', '/api/returns/quote', { sale_id: saleId, items: items.map(({ sale_item_id, quantity }) => ({ sale_item_id, quantity })) })
   assert.equal(quote.status, 200, JSON.stringify(quote.body))
   const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = quote.body
   const created = await w.send('POST', '/api/returns', { client_request_id: requestId, money_precision_version: 1, sale_id: saleId, reason: 'Customer changed mind', expected_quote: expected,
-    items: items.map(item => ({ branch_id: 1, ...item })) })
+    items: items.map(item => ({ branch_id: branch, ...item })) })
   assert.equal(created.status, 200, JSON.stringify(created.body))
   return Number(created.body.id)
 }
@@ -567,4 +567,166 @@ async function pairing() {
   }
 }
 
-main().then(budget).then(pairing).catch(error => { console.error(error); process.exitCode = 1 })
+// Round 2, P2-1. damaged_stock_lots and return_item_batch_allocations are AUTOINCREMENT: an id once used is never handed out again.
+// An edit that deletes the newest lots must not let the next edit (on another return) take their ids, or the first edit's undo
+// finds a stranger's row under its id and is refused with a false 409 (and sale_items.damaged_lot_id could point at another return).
+async function idReuse() {
+  const w = await world('paid')
+  try {
+    await seedCatalog(w)
+    await seedSale(w, 2, [{ id: 21, key: 'a', product: 1, price: 10, quantity: 2, lots: [{ batch: 500, quantity: 2 }] }, { id: 22, key: 'b', product: 1, price: 10, quantity: 1, lots: [{ batch: 500, quantity: 1 }] }])
+    await seedSale(w, 3, [{ id: 31, key: 'a', product: 2, price: 5, quantity: 1, lots: [{ batch: 502, quantity: 1 }] }])
+    const r1 = await createReturn(w, 2, 'idr-1', [{ sale_item_id: 21, product_id: 1, quantity: 2, stock_action: 'damaged', condition_tag: 'expired' }, { sale_item_id: 22, product_id: 1, quantity: 1, stock_action: 'damaged', condition_tag: 'broken' }])
+    const r2 = await createReturn(w, 3, 'idr-2', [{ sale_item_id: 31, product_id: 2, quantity: 1, stock_action: 'none' }])
+    const lineOf = async (returnId, saleItem) => Number((await w.one('SELECT id FROM return_items WHERE return_id=? AND sale_item_id=?', returnId, saleItem)).id)
+    const [a, b, c] = [await lineOf(r1, 21), await lineOf(r1, 22), await lineOf(r2, 31)]
+    const lotsBefore = await w.all('SELECT * FROM damaged_stock_lots WHERE return_id=? ORDER BY id', r1)
+    assert.equal(lotsBefore.length, 2)
+    const edit = async (returnId, items, id) => {
+      const request = { expected_updated_at: (await w.one('SELECT updated_at FROM returns WHERE id=?', returnId)).updated_at, items }
+      const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request)
+      assert.equal(preview.status, 200, JSON.stringify(preview.body))
+      return w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: id, expected_digest: preview.body.digest })
+    }
+    const e1 = await edit(r1, [{ id: a, sale_item_id: 21, product_id: 1, quantity: 2, stock_action: 'restock' }, { id: b, sale_item_id: 22, product_id: 1, quantity: 1, stock_action: 'restock' }], 'idr-e1')
+    assert.equal(e1.status, 200, JSON.stringify(e1.body))
+    assert.equal((await w.all('SELECT id FROM damaged_stock_lots WHERE return_id=?', r1)).length, 0, 'E1 closed both lots (the newest lot ids are gone)')
+    const e2 = await edit(r2, [{ id: c, sale_item_id: 31, product_id: 2, quantity: 1, stock_action: 'damaged', condition_tag: 'broken' }], 'idr-e2')
+    assert.equal(e2.status, 200, JSON.stringify(e2.body))
+    const used = lotsBefore.map(row => row.id)
+    const fresh = await w.one('SELECT id FROM damaged_stock_lots WHERE return_id=?', r2)
+    assert.ok(!used.includes(fresh.id) && fresh.id > Math.max(...used), `the new lot (${fresh.id}) takes an id nobody used before (${used})`)
+    const allocUsed = (await w.all('SELECT MAX(id) AS m FROM return_item_batch_allocations'))[0].m
+    const undo = await w.send('POST', `/api/action-history/${Number(e1.body.history_id)}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(undo.status, 200, `undo of E1 after an unrelated edit: ${JSON.stringify(undo.body)}`)
+    assert.deepEqual(await w.all('SELECT * FROM damaged_stock_lots WHERE return_id=? ORDER BY id', r1), lotsBefore, 'undo brings back the very same lot rows under their own ids')
+    assert.ok(allocUsed >= 0)
+    console.log('PASS native return edit ids: an id once used is never reused, so an unrelated edit cannot break an earlier undo')
+  } finally {
+    await w.mf.dispose()
+  }
+}
+
+// Round 2, P2-2. A return restocked at a branch that was later retired: the cutover moved its stock to the successor and folded
+// lot 501 into lot 500 (same day). Taking the restock back must draw from the SURVIVOR, and putting it back must put ALL units there
+// (a map keyed by the old id and written under the survivor id kept only the last split). The sale drew 501 first, so the restock plan
+// meets lot 500 BEFORE the folded lot 501 -- the order in which the old keying lost units.
+async function redirect() {
+  const w = await world('paid')
+  try {
+    const { kernel, db } = w
+    await kernel.executeRawStockTransaction(db, [
+      db.prepare("INSERT INTO branches(id,name,role,canonical_key,is_active,is_default) VALUES(1,'LC Store','shop','warehouse',1,1),(2,'Old Shop','shop','shop',1,0)"),
+      db.prepare(`INSERT INTO products(id,name,is_active,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr) VALUES(1,'Widget',1,20,10,40000,7,28000)`),
+      db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,20)'),
+      db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES
+        (500,1,'lot-500','LOT-500','2026-08-01',1,1),(501,1,'lot-501','LOT-501','2026-08-01',1,2)`),
+      db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,2,10),(501,2,10)'),
+    ])
+    await seedSale(w, 5, [{ id: 51, key: 'a', product: 1, price: 10, quantity: 3, lots: [{ batch: 501, quantity: 2 }, { batch: 500, quantity: 1 }] }], 2, 'Old Shop')
+    const returnId = await createReturn(w, 5, 'redir-1', [{ sale_item_id: 51, product_id: 1, quantity: 3, stock_action: 'restock' }], 2)
+    const line = Number((await w.one('SELECT id FROM return_items WHERE return_id=?', returnId)).id)
+    // The cutover: everything at Old Shop moves to LC Store, lot 501 folded into 500, Old Shop retired with LC Store as successor.
+    await kernel.executeRawStockTransaction(db, [
+      db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,23)'),
+      db.prepare('UPDATE branch_stock SET quantity=0 WHERE branch_id=2'),
+      db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,23),(501,1,0)'),
+      db.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE branch_id=2'),
+    ])
+    await db.prepare('UPDATE branches SET is_active=0,successor_branch_id=1 WHERE id=2').run()
+    await db.prepare("INSERT INTO audit_logs(user_name,action,entity,entity_id,details) VALUES('op','branch_cutover_lot_fold','product_batch','500',?)")
+      .bind(JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 500, foldedBatchIds: [501], branchId: 1 })).run()
+    const at = async (batch) => Number((await w.one('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1', batch)).quantity)
+    const branchAt = async () => Number((await w.one('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1')).quantity)
+    const total = async () => Number((await w.one('SELECT stock_quantity FROM products WHERE id=1')).stock_quantity)
+    const go = async (action, id) => {
+      const request = { expected_updated_at: (await w.one('SELECT updated_at FROM returns WHERE id=?', returnId)).updated_at, items: [{ id: line, sale_item_id: 51, product_id: 1, quantity: 3, stock_action: action }] }
+      const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request, ADMIN, { 'x-branch-redirect': '1' })
+      if (preview.status !== 200) return { preview }
+      return { preview, applied: await w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: id, expected_digest: preview.body.digest }, ADMIN, { 'x-branch-redirect': '1' }) }
+    }
+    // Take the restock back: all three units leave the survivor lot (501 holds nothing at LC Store any more).
+    const back = await go('none', 'redir-e1')
+    assert.equal(back.applied?.status, 200, JSON.stringify(back.applied?.body ?? back.preview.body))
+    assert.deepEqual([await at(500), await at(501), await branchAt(), await total()], [20, 0, 20, 20], 'take-back drew from the survivor lot')
+    const stateTaken = await stockState(w, returnId)
+    // Put it back: the two sale lots both fold into 500, so ALL three units arrive there and the allocations add up to the line.
+    const again = await go('restock', 'redir-e2')
+    assert.equal(again.applied?.status, 200, JSON.stringify(again.applied?.body ?? again.preview.body))
+    assert.deepEqual([await at(500), await at(501), await branchAt(), await total()], [23, 0, 23, 23], 'restock put all units into the survivor lot')
+    assert.equal(Number((await w.one('SELECT SUM(quantity) AS q FROM return_item_batch_allocations WHERE return_item_id=?', line)).q), 3, 'the recorded allocations add up to the line quantity')
+    // Undo of the restock returns to the taken-back state exactly.
+    const undo = await w.send('POST', `/api/action-history/${Number(again.applied.body.history_id)}/undo`, { require_applied: true, expected_generation: 0 }, ADMIN, { 'x-branch-redirect': '1' })
+    assert.equal(undo.status, 200, JSON.stringify(undo.body))
+    assert.equal(await stockState(w, returnId), stateTaken, 'undo restores the taken-back state byte for byte')
+    console.log('PASS native return edit redirect: a restock at a retired branch is taken back from, and put back into, the survivor lot with every unit')
+  } finally {
+    await w.mf.dispose()
+  }
+}
+
+// Round 2, P3-2 / P3-3 / P3-4: odd stored values do not block a change of that line, undo/redo refuse on a cancelled sale like a save does,
+// and two different edits racing under one request id cannot both be told they succeeded.
+async function edges() {
+  const w = await world('paid')
+  try {
+    await seedCatalog(w)
+    await seedSale(w, 2, [{ id: 21, key: 'a', product: 1, price: 10, quantity: 2, lots: [{ batch: 500, quantity: 2 }] }])
+    const returnId = await createReturn(w, 2, 'edge-1', [{ sale_item_id: 21, product_id: 1, quantity: 2, stock_action: 'restock' }])
+    const line = Number((await w.one('SELECT id FROM return_items WHERE return_id=?', returnId)).id)
+    const base = async (items, extra = {}) => ({ expected_updated_at: (await w.one('SELECT updated_at FROM returns WHERE id=?', returnId)).updated_at, ...extra, ...(items ? { items } : {}) })
+    const item = (action, tag) => ({ id: line, sale_item_id: 21, product_id: 1, quantity: 2, stock_action: action, ...(tag ? { condition_tag: tag } : {}) })
+    const save = async (request, id) => {
+      const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request)
+      if (preview.status !== 200) return { preview }
+      return { preview, applied: await w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: id, expected_digest: preview.body.digest }) }
+    }
+
+    // P3-2: a stored handling method outside the three on offer does not block a notes-only edit; it is kept as stored.
+    await w.kernel.executeRawStockTransaction(w.db, [w.db.prepare("UPDATE returns SET return_type='exchange' WHERE id=?").bind(returnId)])
+    const notesOnly = await save(await base(undefined, { notes: 'only notes', return_type: 'exchange' }), 'edge-notes')
+    assert.equal(notesOnly.applied?.status, 200, `a notes-only edit of a return with an unusual handling method: ${JSON.stringify(notesOnly.applied?.body ?? notesOnly.preview.body)}`)
+    assert.equal((await w.one('SELECT return_type FROM returns WHERE id=?', returnId)).return_type, 'exchange', 'the unusual method is kept as stored')
+
+    // P3-2: a line whose stock_action / return_to_stock are stored unusually (mixed case, NULL) can still be changed, and undo writes them back exactly.
+    const toNone = await save(await base([item('none')]), 'edge-none')
+    assert.equal(toNone.applied?.status, 200, JSON.stringify(toNone.applied?.body ?? toNone.preview.body))
+    await w.kernel.executeRawStockTransaction(w.db, [w.db.prepare("UPDATE return_items SET stock_action='None',return_to_stock=NULL WHERE id=?").bind(line)])
+    const odd = await save(await base([item('restock')]), 'edge-odd')
+    assert.equal(odd.applied?.status, 200, `changing a line stored as stock_action 'None' / return_to_stock NULL: ${JSON.stringify(odd.applied?.body ?? odd.preview.body)}`)
+    const afterOdd = await stockState(w, returnId)
+
+    // P3-3: a cancelled sale closes undo (and redo) of a stock-moving edit, as it closes a save.
+    await w.db.prepare("UPDATE sales SET sale_status='cancelled' WHERE id=2").run()
+    const refused = await w.send('POST', `/api/action-history/${Number(odd.applied.body.history_id)}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'return_edit_sale_cancelled')
+    assert.equal(await stockState(w, returnId), afterOdd, 'the refused undo wrote nothing')
+    await w.db.prepare("UPDATE sales SET sale_status='completed' WHERE id=2").run()
+    const undone = await w.send('POST', `/api/action-history/${Number(odd.applied.body.history_id)}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(undone.status, 200, JSON.stringify(undone.body))
+    const raw = await w.one('SELECT stock_action,return_to_stock FROM return_items WHERE id=?', line)
+    assert.deepEqual([raw.stock_action, raw.return_to_stock], ['None', null], 'undo wrote the stored values back exactly')
+
+    // P3-4: the same request id with a DIFFERENT edit is never reported as a success -- one after the other, and raced.
+    const first = await save(await base(undefined, { reason: 'First reason' }), 'edge-same')
+    assert.equal(first.applied?.status, 200)
+    const other = await w.send('PATCH', `/api/returns/${returnId}`, { ...(await base(undefined, { reason: 'Another reason' })), client_request_id: 'edge-same', expected_digest: 'x' })
+    assert.equal(other.status, 409, JSON.stringify(other.body))
+    assert.equal(other.body.code, 'idempotency_conflict')
+    const request1 = await base(undefined, { reason: 'Racer one' }), request2 = { ...request1, reason: 'Racer two' }
+    const [p1, p2] = [await w.send('POST', `/api/returns/${returnId}/edit/preview`, request1), await w.send('POST', `/api/returns/${returnId}/edit/preview`, request2)]
+    const raced = await Promise.all([
+      w.send('PATCH', `/api/returns/${returnId}`, { ...request1, client_request_id: 'edge-race', expected_digest: p1.body.digest }),
+      w.send('PATCH', `/api/returns/${returnId}`, { ...request2, client_request_id: 'edge-race', expected_digest: p2.body.digest }),
+    ])
+    assert.deepEqual(raced.map(r => r.status).sort(), [200, 409], `one racer wins, the other is refused: ${JSON.stringify(raced.map(r => r.body))}`)
+    const loser = raced.find(r => r.status === 409)
+    assert.ok(['idempotency_conflict', 'return_edit_preview_stale', 'return_edit_changed'].includes(loser.body.code), JSON.stringify(loser.body))
+    console.log('PASS native return edit edges: unusual stored values, cancelled sale on undo, a different edit under a used request id')
+  } finally {
+    await w.mf.dispose()
+  }
+}
+
+main().then(budget).then(pairing).then(idReuse).then(redirect).then(edges).catch(error => { console.error(error); process.exitCode = 1 })
