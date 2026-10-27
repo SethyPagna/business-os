@@ -717,13 +717,20 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
       return status !== 'cancelled'
     }))
     const projected = cohort(true)
+    // 6.0.992: a transition that brings nothing back only REMOVES returns from the cohort. What it leaves is judged by its exact (v1)
+    // members alone: an old-format member has no entitlement snapshot to validate, so counting it refused every cancel on a sale that
+    // holds both formats -- including the cancel the app offers as the way to correct an old-format return. A restore still validates
+    // every projected member, so bringing a return back next to an old-format row is refused exactly as before.
+    const reactivatesHere = headers.some(row => override.has(Number(row.id)) && override.get(Number(row.id)) !== 'cancelled'
+      && normalize(row.status, 'completed') === 'cancelled')
+    const judged = reactivatesHere ? projected : projected.filter(row => Number(row.money_precision_version) === 1)
     try {
       // A transition may remove an aggregate-invalid historical cohort, but a
       // selected v1 member itself must always have intact immutable authority.
       for (const row of materialize(headers.filter(row => override.has(Number(row.id))
         && Number(row.money_precision_version) === 1))) validateCustomerReturnRestorationMemberV1(row)
-      if (projected.length) {
-        validateCustomerReturnRestorationCohortV1(projected)
+      if (judged.length) {
+        validateCustomerReturnRestorationCohortV1(judged)
       }
     } catch {
       fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
@@ -733,7 +740,12 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     const linesById = new Map(lines.map(line => [Number(line.sale_item_id), line]))
     const returned = new Map<number, number[]>()
     for (const item of parsed.items.filter(item => activeIds.has(Number(item.return_id)))) {
-      const id = Number(item.sale_item_id)
+      let id = Number(item.sale_item_id)
+      // An old-format line may name only its product (6.0.992): on a cancel it counts against the one sale line that sells that product.
+      if (item.sale_item_id == null && !reactivatesHere) {
+        const matches = saleLines.filter(row => Number(row.sale_id) === saleId && row.product_id != null && Number(row.product_id) === Number(item.product_id))
+        if (matches.length === 1) id = Number(matches[0].sale_item_id)
+      }
       if (!Number.isSafeInteger(id) || id <= 0) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
       const line = linesById.get(id)
       if (!line || line.product_id !== item.product_id) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)

@@ -36,6 +36,7 @@ const ROWS = [
   ['return_create', 'create', KEPT],
   ['return', 'update', KEPT],
   ['return', 'return_fields_bulk', KEPT],
+  ['return', 'return_money_convert', KEPT],
   ['supplier_return', 'create', KEPT],
   ['return_reason', 'replace', KEPT],
   // ---- stock changes: adjustments, stock-in, transfers, sessions, holds, disposals
@@ -336,6 +337,8 @@ const DYNAMIC_WRITERS = [
   { file: 'lib/transferOperation.ts', entity: "'stock_transfer'", action: '@action', cls: 'undo/redo of a stock transfer', kept: true, pairs: [['stock_transfer', 'action_undo'], ['stock_transfer', 'action_redo']] },
   { file: 'lib/returnBulkAction.ts', entity: "'return'", action: '@action', cls: 'returns', kept: true,
     pairs: [['return', 'return_fields_bulk'], ['return', 'action_undo'], ['return', 'action_redo']] },
+  { file: 'lib/returnLegacyConvert.ts', entity: "'return'", action: '@action', cls: 'returns (6.0.992 money-format conversion and its undo/redo)', kept: true,
+    pairs: [['return', 'return_money_convert'], ['return', 'action_undo'], ['return', 'action_redo']] },
   { file: 'lib/saleBulkStatus.ts', entity: "'sale'", action: '@action', cls: 'sales', kept: true,
     pairs: [['sale', 'sale_status_bulk'], ['sale', 'action_undo'], ['sale', 'action_redo']] },
   { file: 'lib/saleBulkUpdate.ts', entity: "'sale'", action: '@event', cls: 'sales', kept: true,

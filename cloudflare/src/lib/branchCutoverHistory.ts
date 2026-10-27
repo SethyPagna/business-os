@@ -38,6 +38,8 @@ export type CutoverHistoryDecision = 'leave' | 'close'
 // that is not listed here refuses the cutover instead of being left open.
 export const CUTOVER_HISTORY_RULES: Readonly<Record<string, CutoverHistoryRule>> = Object.freeze({
   'customer.gender_restore': 'leave',
+  // 6.0.992: rewrites return money-format columns only -- no stock, no branch.
+  'return.legacy_convert': 'leave',
   'sale.fields.bulk': 'leave',
   'sale.customer.bulk': 'leave',
   'sale.customer.v2.bulk': 'leave',

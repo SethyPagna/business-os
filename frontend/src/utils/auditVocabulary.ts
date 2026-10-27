@@ -62,6 +62,8 @@ export const AUDIT_ACTION_LABELS: Record<string, [string, string]> = {
   action_redo: ['redo', 'Redo'],
   // A protected action (restore, reset, retention change, forced maintenance clear) that the admin or password check refused.
   step_up_refused: ['step_up_refused', 'Protected action refused'],
+  // 6.0.992: a locked return's money details were updated (never "format" on screen, owner 27 Oct 2026).
+  return_money_convert: ['return_convert_title', 'Update money details'],
 }
 
 /**

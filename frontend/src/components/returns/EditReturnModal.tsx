@@ -11,6 +11,7 @@ import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { returnEditLock } from './helpers/returnEditLock.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import {
@@ -22,6 +23,7 @@ import {
 } from '../../utils/directMutationRequest.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import { ReturnLegacyLockPanel } from './ReturnLegacyConvert.tsx'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
@@ -67,6 +69,8 @@ interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
 interface ExistingReturn {
   id: number | string
   money_precision_version?: number | string | null
+  /** The linked sale's money version (GET /api/returns/:id). */
+  sale_money_precision_version?: number | string | null
   total_refund_usd?: number | string | null
   return_number?: string | null
   reason?: string | null
@@ -103,6 +107,8 @@ interface EditReturnModalProps {
   onClose: () => void
   onSuccess?: (result?: unknown) => void | Promise<void>
   onReloadLatest?: () => void
+  /** 6.0.992: someone with full Returns access updated this locked return's money details (ReturnLegacyLockPanel). */
+  onLegacyConverted?: () => void
   fmtUSD: MoneyFormatter
   notify: NotifyFn
 }
@@ -152,8 +158,9 @@ function isWriteConflict(error: unknown): boolean {
   return !!candidate?.conflict || candidate?.code === 'write_conflict'
 }
 
-export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, fmtUSD, notify }: EditReturnModalProps) {
+export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, onLegacyConverted, fmtUSD, notify }: EditReturnModalProps) {
   const { user, t } = useApp()
+  const editLock = returnEditLock(ret)
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -239,7 +246,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
   const handleSubmit = async (): Promise<void> => {
     // Temporary create-only checkpoint: never reprice a v1 return through the
     // legacy edit request. Its original pending requests remain untouched.
-    if (Number(ret.money_precision_version) === 1) return
+    // A v0 return on a v1 sale is refused by the Worker as well (returnEditLock).
+    if (returnEditLock(ret)) return
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
     // A stored retry is resent unchanged so the Worker can replay its receipt.
     if (!activePendingRequest && keepsNoLine) { notify(emptyEditText, 'error'); return }
@@ -325,17 +333,22 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     ret.id ?? null,
   )
   const closeGuard = useCloseGuard({ dirty: editDirty.dirty }, onClose)
+  // 6.0.992: an old-format return on a current-format sale is refused by the Worker's edit route; show why and, for full
+  // Returns access, Update money details -- never the form. After every hook, before any other panel. Every
+  // legacy_return_on_exact_sale lock lands here (a non-customer row gets the reason without the action), so the panel
+  // below only ever shows the exact-return lock.
+  if (editLock === 'legacy_return_on_exact_sale') return <ReturnLegacyLockPanel ret={ret} onClose={onClose} fmtUSD={fmtUSD} notify={notify} onConverted={onLegacyConverted} />
 
   // The backdrop, the ✕ and Cancel all land here.
   const closeIfIdle = () => {
     if (!submitting) closeGuard.requestClose()
   }
 
-  if (Number(ret.money_precision_version) === 1) return createPortal(
+  if (editLock) return createPortal(
     <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
       <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
         <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
-        <p className="my-4 text-sm" role="status">{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
+        <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
         <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
         <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
       </div>
