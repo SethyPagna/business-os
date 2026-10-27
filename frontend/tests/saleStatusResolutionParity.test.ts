@@ -709,6 +709,24 @@ await runTest('both copies read a stored sale in the two-status model identicall
   for (const fixture of retired) assert.notEqual(String(fixture.row.sale_status), fixture.expected.saleStatus, `"${fixture.name}" does not discriminate`)
 })
 
+// Riel cash comes in whole hundreds (owner, 27 Oct 2026, lane 6.0.1006). Both copies answer the same; the rows are
+// chosen so the plausible wrong rules differ: a 'whole riel' check accepts 39,950, a 'round to 100' check accepts
+// 39,950 as 40,000, and a rule that ignored the method refuses ABA.
+await runTest('both copies apply the riel cash rule identically, and correctly', async () => {
+  const worker = await loadWorkerCopy()
+  const amounts: Array<[unknown, boolean]> = [[0, true], [100, true], [39900, true], ['39900.0000', true], [39950, false], [50, false], [1, false],
+    [39900.5, false], ['39950', false], [null, true], ['', true], ['abc', true]]
+  for (const copy of [uiCopy, worker]) {
+    for (const [khr, valid] of amounts) assert.equal(copy.rielCashAmountValid(khr), valid, `rielCashAmountValid(${JSON.stringify(khr)})`)
+    const isCash = (method: unknown) => String(method).toLowerCase() === 'cash'
+    assert.equal(copy.rielCashRowRefused([{ method: 'ABA', amount_khr: 39950 }, { method: 'Cash', amount_khr: 39900 }], isCash), -1, 'ABA may hold any riel')
+    assert.equal(copy.rielCashRowRefused([{ method: 'ABA', amount_khr: 39950 }, { method: 'Cash', amount_khr: 39950 }], isCash), 1, 'the cash row is named')
+    for (const [raw, floored] of [[9717, 9700], [3990, 3900], [100, 100], [99, 0], [-5, 0], [Number.NaN, 0], [399.99999999999994, 400]])
+      assert.equal(copy.rielCashFloor(raw as number), floored, `rielCashFloor(${raw})`)
+    assert.equal(copy.RIEL_CASH_NOT_HUNDREDS, 'riel_cash_not_hundreds')
+  }
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

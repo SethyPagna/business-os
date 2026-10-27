@@ -202,6 +202,46 @@ export function shortfallCovered(scaled: bigint, ratio: { numerator: bigint; den
   return paidKhrUnits > 0n && scaled < RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator
 }
 
+/**
+ * RIEL CASH COMES IN WHOLE HUNDREDS (owner ruling, 27 Oct 2026: "there's no such thing as double digit riel so if
+ * we input that it is invalid for cash. other payment method is fine. make sure it is consistent."). No riel coin
+ * exists below the 100-riel note, so a CASH amount in riel is 0 or a whole multiple of 100: a tender row paid by a
+ * cash method, change handed back, a cash refund, a shift's float and counted cash, an expense paid from the
+ * drawer. A non-cash method (bank, QR, card) paid in riel may hold any whole riel.
+ *
+ * Every writer refuses a NEW or CHANGED cash riel amount that is not whole hundreds with RIEL_CASH_NOT_HUNDREDS
+ * and writes nothing. Amounts stored before the ruling are read, reported, kept through edits of other fields and
+ * restored by undo as they are. A riel figure the app computes for cash (a riel refund, riel change) rounds DOWN
+ * to whole hundreds (rielCashFloor): the till keeps up to 99 riel (owner, 21 Oct 2026).
+ *
+ * The coverage band above is unchanged. A cash tender can no longer be short by a 1-riel token, but a non-cash
+ * riel tender still can, and it still counts as paid when short by under 100 riel.
+ */
+export const RIEL_CASH_STEP_KHR = 100
+
+/** The one refusal code every writer and the frontend use for a cash riel amount that is not whole hundreds. */
+export const RIEL_CASH_NOT_HUNDREDS = 'riel_cash_not_hundreds'
+
+/**
+ * May this riel amount be cash? 0 and whole multiples of 100 only. A blank or a value that is not a number is not
+ * this rule's question (true): the amount's own validator refuses it with its own code.
+ */
+export function rielCashAmountValid(khr: unknown): boolean {
+  if (khr == null || (typeof khr === 'string' && khr.trim() === '')) return true
+  const value = Number(khr)
+  return !Number.isFinite(value) || value % RIEL_CASH_STEP_KHR === 0
+}
+
+/** The index of the first tender row paid by a cash method whose riel is not whole hundreds, or -1. */
+export function rielCashRowRefused(rows: readonly { method?: unknown; amount_khr?: unknown }[], isCash: (method: unknown) => boolean): number {
+  return rows.findIndex((row) => !rielCashAmountValid(row.amount_khr) && isCash(row.method))
+}
+
+/** A cash riel figure the app computes, rounded DOWN to whole hundreds; 0 for nothing. */
+export function rielCashFloor(khr: number): number {
+  return Number.isFinite(khr) && khr > 0 ? Math.floor(khr / RIEL_CASH_STEP_KHR + 1e-9) * RIEL_CASH_STEP_KHR : 0
+}
+
 type UnitsTender = SaleCoverageInput & { paidUsdUnits: bigint; paidKhrUnits: bigint }
 type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKhr: FinancialDecimalInput }
 
