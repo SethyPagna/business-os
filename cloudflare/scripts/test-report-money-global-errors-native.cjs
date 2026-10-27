@@ -42,7 +42,7 @@ Module._load = function(request, parent, isMain) {
   }
   if (request === './routes/sync') return { createSyncRoute: emptyRoute }
   if (request === '../lib/auth') return {
-    requireAuth: async (c, next) => {
+    prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => {
       c.set('user', { id: 1, role: 'admin', permissions: { all: true } })
       return next()
     },

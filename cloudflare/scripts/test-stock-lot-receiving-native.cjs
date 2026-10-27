@@ -18,7 +18,7 @@ function load(relative) {
   const module = { exports: {} }
   cache.set(relative, module)
   new Function('require', 'module', 'exports', compiled)(request => {
-    if (request === '../lib/auth' || request === './auth') return { requireAuth: async (c, next) => { c.set('user', actor); await next() } }
+    if (request === '../lib/auth' || request === './auth') return { prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => { c.set('user', actor); await next() } }
     if (request === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
     if (request === './cache' || request === '../lib/cache') return { bumpVersion: async () => {}, getVersion: async () => 0, cacheKey: (...args) => args.join(':'), cachedJson: async (c, key, ttl, fn) => c.json(await fn()) }
     if (request === './telegram' || request === '../lib/telegram') return { sendTelegramEvent: async () => {}, formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [] }

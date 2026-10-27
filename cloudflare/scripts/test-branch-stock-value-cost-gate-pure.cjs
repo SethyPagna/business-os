@@ -24,7 +24,7 @@ function load(filename) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: filename,
   }).outputText
   new Function('require', 'module', 'exports', output)(name => {
-    if (name === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
+    if (name === '../lib/auth') return { prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name === '../lib/db' || name === './db') return { ...load(path.join(root, 'lib/db.ts')), getDb: () => db }
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), `${name}.ts`))
     return require(name)

@@ -69,7 +69,7 @@ const backupCalls = []
 function backups(user = { id: 7, username: 'owner', grants: ['backup', 'backup_restore'] }) {
   const backup = new Proxy({}, { get: (_, key) => key === 'CLOUDFLARE_BACKUP_KEEP' ? 2 : async () => { backupCalls.push(key); return [] } })
   return load(read('src/routes/backups.ts'), {
-    hono: { Hono }, '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); return next() } },
+    hono: { Hono }, '../lib/auth': { prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => { c.set('user', user); return next() } },
     '../lib/audit': { audit: async () => backupCalls.push('audit') },
     '../lib/permissions': { hasPermission: (actor, key) => actor.grants.includes(key) },
     '../lib/acquisitionCostAccess': { canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true },

@@ -111,7 +111,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === '../lib/familyStockStats') return { getFamilyStockStats: noop }
   if (id === '../lib/lowStockSettings') return { loadLowStockConfig: noop, lowStockThresholdSql: noop }
   if (id === '../lib/auth') return {
-    requireAuth: async (c, next) => {
+    prefetchWithSession: () => {}, takePrefetched: () => undefined, requireAuth: async (c, next) => {
       if (!currentUser) return c.json({ error: 'Unauthorized' }, 401)
       c.set('user', currentUser)
       return next()
