@@ -267,6 +267,28 @@ async function main() {
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     console.log('PASS sale_payment_events restores from a document that carries it and is cleared by one that predates it')
 
+    // 0275 return_refund_corrections is the same kind of optional replay member: money history that a restore replaces with
+    // the document's copy, and that a pre-0275 document clears (its differences describe return rows the restore rolls back).
+    const correction = (operation) => f.sql.prepare(`INSERT INTO return_refund_corrections(operation_id,return_id,branch_id,mode,counts_at,before_total_refund_usd,after_total_refund_usd)
+      VALUES(?,1,1,'today','2026-10-26 01:00:00',4,3)`).run(operation)
+    const correctionIds = () => f.sql.prepare('SELECT operation_id FROM return_refund_corrections ORDER BY id').all().map(row => row.operation_id)
+    correction('kept-before-backup')
+    const withCorrections = await backup.createCloudflareBackup(f.env, 'manual')
+    assert.ok(JSON.parse(f.env.ASSETS._store.get(withCorrections.key).body).tables.return_refund_corrections, 'a backup of a post-0275 database carries the correction ledger')
+    correction('written-after-backup')
+    await restoreOwned(f.env, withCorrections.key)
+    assert.deepEqual(correctionIds(), ['kept-before-backup'], 'a document with the ledger replaces it')
+    const pre0275 = structuredClone(JSON.parse(f.env.ASSETS._store.get(withCorrections.key).body))
+    delete pre0275.tables.return_refund_corrections
+    pre0275.summary.tableCount = Object.keys(pre0275.tables).length
+    pre0275.summary.rowCount = Object.values(pre0275.tables).reduce((n, t) => n + t.rows.length, 0)
+    const pre0275Key = 'backups/cloudflare/pre-0275-no-corrections.json'
+    await f.env.ASSETS.put(pre0275Key, JSON.stringify(pre0275), { customMetadata: { format: document.format } })
+    assert.equal((await backup.validateCloudflareBackup(f.env, pre0275Key)).restorable, true, 'a pre-0275 backup is still restorable')
+    await restoreOwned(f.env, pre0275Key)
+    assert.deepEqual(correctionIds(), [], 'a pre-0275 document clears the live correction ledger')
+    console.log('PASS return_refund_corrections restores from a document that carries it and is cleared by one that predates it')
+
     // 0272 stock_crossing_alerts is a log, not a backup table, but its claim keys embed movement and sale ids that a restore
     // rolls back: a restore that rolls inventory_movements back clears it, so an old key cannot swallow the next crossing.
     f.sql.prepare("INSERT INTO stock_crossing_alerts(alert_key,product_id,branch_id,tier,sale_id,quantity_before,quantity_after,created_at) VALUES ('stock-crossing:low:1:1:7',1,1,'low',1,12,9,'2026-10-25T01:00:00.000Z')").run()

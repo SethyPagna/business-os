@@ -224,6 +224,8 @@ export const BACKUP_TABLES = [
   'sale_bulk_operations',
   'sale_bulk_members',
   'return_write_revisions',
+  // 0275 refund correction ledger: append-only like sale_payment_events, no FK, a child of the return ids restored above.
+  'return_refund_corrections',
   'return_bulk_operations',
   'return_bulk_members',
   // Immutable Sales Records rows reference sales and the durable operation
@@ -1261,9 +1263,14 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
 // one does not refuse, it CLEARS the live table, because its rows describe the sales the restore is rolling
 // back. sale_payment_events (0271): after a Sales restore its rows would otherwise sit against sales whose
 // payments_version has gone back to 0, and the next money write's opening:<sale_id> event would collide.
-export const SALE_REPLAY_OPTIONAL_TABLES = ['sale_payment_events'] as const
+// return_refund_corrections (0275) is the same: its before/after rows describe return rows a restore rolls back, so a
+// document that predates it must clear it, or the shift drawer would subtract differences from refunds that were never changed.
+export const SALE_REPLAY_OPTIONAL_TABLES = ['sale_payment_events', 'return_refund_corrections'] as const
 /** Not a backup table (an alert log); a restore that rolls inventory_movements back clears it. See migration 0272. */
 export const STOCK_CROSSING_ALERTS_TABLE = 'stock_crossing_alerts'
+
+/** Business statements one restore transaction may hold: the 100-statement atomic limit less stockTransactionStatementCount's overhead. */
+export const RESTORE_DELETE_STATEMENTS_PER_TRANSACTION = 98
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
@@ -1645,11 +1652,17 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
       deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     }
-    if (stockTransactionStatementCount(deletes.length) > 100) throw new Error('Restore deletion plan exceeds the atomic statement limit. No database rows have been changed.')
     await onProgress?.({ phase: 'deleting' })
-    if (deletes.length) {
-      await executeRawRestoreStockTransaction(env.DB, deletes, await restoreStockAuthority(env, restoreToken || '', source))
-      statementCount += stockTransactionStatementCount(deletes.length)
+    // One atomic stock transaction holds at most 100 statements (its own overhead included). A plan that fits runs as ONE
+    // transaction, exactly as it always did. A plan beyond it -- every backed-up table adds a DELETE, and a full restore reached
+    // the limit with migration 0275 -- runs as consecutive transactions IN THE SAME ORDER (children before parents, the
+    // products update after the ledgers it reads), so the foreign-key order is unchanged. The insert pass below is already a
+    // series of separate transactions, so a restore never was all-or-nothing past this point; a failed chunk is a failed
+    // restore like a failed insert chunk, re-run from the same backup.
+    for (let start = 0; start < deletes.length; start += RESTORE_DELETE_STATEMENTS_PER_TRANSACTION) {
+      const part = deletes.slice(start, start + RESTORE_DELETE_STATEMENTS_PER_TRANSACTION)
+      await executeRawRestoreStockTransaction(env.DB, part, await restoreStockAuthority(env, restoreToken || '', source))
+      statementCount += stockTransactionStatementCount(part.length)
     }
 
     // Pass 2: stream rows and insert in bounded batches, per table.

@@ -144,17 +144,22 @@ check('the unruled list only shrinks (base-era 19; none blocked on a trigger car
   assert.ok(Object.keys(UNRULED).length <= 19, 'do not park new tables in UNRULED -- decide')
 })
 
-// A full restore deletes every backed-up table (plus one products update) in ONE atomic stock transaction, which
-// lib/backup.ts refuses above 100 statements (stockTransactionStatementCount adds its own overhead). Past that, every
-// full restore refuses at run time, so the budget is checked here: chunk the restore plan before adding more tables.
-check('a full restore stays inside the 100-statement atomic limit', () => {
+// A full restore deletes every backed-up table (plus one products update, the stock_crossing_alerts log and any optional
+// member the document lacks) before it inserts. One atomic stock transaction holds at most 100 statements, so lib/backup.ts
+// runs the plan as consecutive transactions of RESTORE_DELETE_STATEMENTS_PER_TRANSACTION, in the same order, when it does
+// not fit. Before migration 0275 the plan fitted exactly and a new table made every full restore REFUSE at run time
+// (test-backup-legacy-restore-pure and test-backup-restore-roundtrip-ledgers-native went red). This pins the chunking.
+check('a full restore deletion plan is chunked inside the 100-statement atomic limit, in order', () => {
   const txSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'stockTransaction.ts'), 'utf8')
   const overhead = Number((txSource.match(/return businessStatements \+ (\d+)/) || [])[1])
   assert.ok(Number.isInteger(overhead), 'stockTransactionStatementCount overhead not found')
-  assert.ok(backupSource.includes('if (stockTransactionStatementCount(deletes.length) > 100) throw'), 'the restore guard moved; re-check this budget')
-  const statements = BACKUP_TABLES.length + 1 + overhead
-  assert.ok(statements <= 100, `a full restore needs ${statements} statements; chunk the restore plan before adding tables`)
-  console.log(`  restore statements ${statements}/100`)
+  const chunk = Number((backupSource.match(/RESTORE_DELETE_STATEMENTS_PER_TRANSACTION = (\d+)/) || [])[1])
+  assert.ok(Number.isInteger(chunk) && chunk + overhead <= 100, `a delete chunk of ${chunk} plus ${overhead} overhead must fit the 100-statement limit`)
+  assert.equal(chunk + overhead, 100, 'the chunk uses the whole transaction, so a plan that fits stays ONE transaction')
+  assert.ok(!backupSource.includes('exceeds the atomic statement limit'), 'the restore must chunk its deletes, not refuse a full restore')
+  assert.ok(backupSource.includes('deletes.slice(start, start + RESTORE_DELETE_STATEMENTS_PER_TRANSACTION)'), 'the plan is sliced in order')
+  const planned = BACKUP_TABLES.length + 1 + 1
+  console.log(`  full restore deletion plan: ${planned} statements in ${Math.ceil(planned / chunk)} transaction(s)`)
 })
 
 console.log(`\n${passed} check(s) passed.`)

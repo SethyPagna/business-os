@@ -143,6 +143,7 @@ const CHILD_SCOPED = {
   'ai_response_logs.provider_config_id': 'ai_provider_configs',
   'sale_amendments.reverses_amendment_id': 'sale_amendments',
   'sale_amendments.undo_action_id': 'action_history',
+  'return_refund_corrections.reverses_id': 'return_refund_corrections',
   'sales.cancel_fee_id': 'fees',
   'product_merge_map_0165.keeper_id': 'products',
   'customer_merge_map_0166.keeper_id': 'customers',
