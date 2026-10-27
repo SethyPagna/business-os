@@ -53,7 +53,7 @@ function readStoredUser(): unknown {
   }
 }
 
-function readErrorField(error: unknown, field: 'message' | 'status'): unknown {
+function readErrorField(error: unknown, field: 'message' | 'status' | 'code'): unknown {
   if (!error || typeof error !== 'object') return undefined
   return (error as Record<string, unknown>)[field]
 }
@@ -168,6 +168,8 @@ async function readAppBootstrapOnce(): Promise<unknown> {
         authError: typeof message === 'string' && message ? message : 'Please sign in again to continue.',
       }
     }
+    // The daily database limit is not a lost connection: the shell stays up under its own banner (api/http.ts).
+    if (readErrorField(error, 'code') === 'd1_daily_limit') throw error
     const status = readErrorField(error, 'status')
     if (isNetErr(error) || isTransientGatewayError(status)) {
       const localBootstrap = buildLocalBootstrap()

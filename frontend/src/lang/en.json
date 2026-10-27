@@ -2799,6 +2799,7 @@
   "request_rate_limited": "Too many requests. Please wait a moment and try again.",
   "request_not_found": "Not found.",
   "request_failed_page": "The request failed. Please try again.",
+  "d1_daily_limit_banner": "Daily database limit reached — the app is read-only until 07:00. Sales can't be saved.",
   "auth_error_credentials_required": "Enter your username and password.",
   "auth_error_invalid_credentials": "Invalid username or password.",
   "auth_error_login_rate_limited_network": "Too many sign-in attempts from this network. Please try again later.",
