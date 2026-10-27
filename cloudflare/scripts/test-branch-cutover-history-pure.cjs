@@ -125,7 +125,7 @@ async function main() {
       for (const m of fs.readFileSync(path.join(root, 'src/lib', file), 'utf8').matchAll(/export const ([A-Z_]+_KIND) = '([^']+)'/g)) constants[m[1]] = m[2]
     }
     const kinds = [...block.matchAll(/^  (?:'([^']+)'|\[([A-Z_]+)\]): /gm)].map(m => m[1] || constants[m[2]])
-    assert.equal(kinds.length, 20); assert.ok(kinds.every(Boolean))
+    assert.equal(kinds.length, 21); assert.ok(kinds.every(Boolean))
     assert.deepEqual([...kinds].sort(), Object.keys(history.CUTOVER_HISTORY_RULES).sort())
   })
 
