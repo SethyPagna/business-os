@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict'
 import {
   createSyncFlushCollector,
+  dispatchSyncUpdates,
+  FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,
   SYNC_FLUSH_EVENT,
   subscribeSyncFlush,
   type SyncFlushDetail,
@@ -172,6 +174,23 @@ await test('the raw sync:flush event carries the unfiltered set', () => {
   assert.equal(rawFlushes.length, 1)
   assert.deepEqual(rawFlushes[0].channels, ['sales', 'customers'])
   stop()
+})
+
+await test('a real resume (22 channels from web-api.ts) is one bulk flush: each open page reloads once, 400 ms apart', () => {
+  const calls: Array<[string, number]> = []
+  const start = clock.now()
+  const stops = [
+    subscribeSyncFlush(['sales', 'products', 'returns', 'inventory', 'dashboard', 'settings'], () => calls.push(['dashboard', clock.now() - start])),
+    subscribeSyncFlush(['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings'], () => calls.push(['sales', clock.now() - start])),
+    subscribeSyncFlush(['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'], () => calls.push(['bell', clock.now() - start])),
+  ]
+  const before = rawFlushes.length
+  dispatchSyncUpdates(FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS, 'foreground-resume', { trigger: 'visibility-resume' })
+  clock.advance(3_000)
+  assert.equal(rawFlushes.length - before, 1, 'one flush for 22 events')
+  assert.equal(rawFlushes[rawFlushes.length - 1].bulk, true)
+  assert.deepEqual(calls, [['dashboard', 250], ['sales', 650], ['bell', 1_050]], '22 channels used to publish 6, 8 and 9 times to these pages')
+  stops.forEach((stop) => stop())
 })
 
 Date.now = realDateNow
