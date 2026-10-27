@@ -129,6 +129,23 @@ async function main() {
       t.eq('the hold is off', await maintenanceHeld(), false)
     })
 
+    // A restore the Worker refuses BEFORE it deletes anything changed nothing, so it must not leave the app write-blocked. (RC3: a
+    // refused full restore left the maintenance hold on, and every later write in the same run failed behind it.) The same
+    // route, with the hold taken: a document that omits an FK-dependent table is refused after maintenance begins.
+    await check('a restore refused before it deletes anything releases the maintenance hold and changes nothing', async (t) => {
+      const bucket = await world.mf.getR2Bucket('ASSETS')
+      const document = JSON.parse(await (await bucket.get(`backups/cloudflare/${backupName}`)).text())
+      delete document.tables.user_notes
+      document.summary.tableCount = Object.keys(document.tables).length
+      document.summary.rowCount = Object.values(document.tables).reduce((n, table) => n + table.rows.length, 0)
+      const incompleteName = 'refused-missing-user-notes.json'
+      await bucket.put(`backups/cloudflare/${incompleteName}`, JSON.stringify(document))
+      const response = await world.api('POST', '/api/backups', { type: 'import-folder', sourceDir: incompleteName, currentPassword: adminPassword })
+      t.ok('the restore was refused for the missing dependency', response.status >= 400 && /missing.*dependenc/i.test(response.text), response.text)
+      t.eq('the later sale survives', await receipts(), ['RESTORE-AFTER', 'RESTORE-BEFORE'])
+      t.eq('maintenance was released', await maintenanceHeld(), false)
+    })
+
     await check('the built-in admin with the right password restores: the later sale goes, the earlier one stays', async (t) => {
       const response = await restore('admin', { currentPassword: adminPassword })
       t.eq('status', response.status, 200)
