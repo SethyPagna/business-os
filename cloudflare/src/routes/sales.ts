@@ -54,7 +54,6 @@ import {
   saleMutationGuard,
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
-  type SaleSettlementState,
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { deriveSalePaymentState, PaymentEventError } from '../lib/salePayments'
