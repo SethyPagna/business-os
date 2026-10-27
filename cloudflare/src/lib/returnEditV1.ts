@@ -428,9 +428,11 @@ export async function planReturnEdit(env: Env, userInput: SessionUser | null | u
         merged.set(survivor, roundQ((merged.get(survivor) ?? 0) + split.quantity))
       }
       after.allocs = [...merged].map(([batchId, q]) => {
+        // The allocation belongs to the LINE's own branch (what every later reader compares it with: the next edit and the cancel); the lot
+        // is the survivor, and a survivor id maps to itself when read through the fold again.
         stock.push(delta(item, landing, batchId, q))
         nextAlloc += 1
-        return { id: nextAlloc, return_item_id: item.id, sale_item_id: saleItemId, batch_id: batchId, branch_id: landing.branch, quantity: q, lot_code: null, expiry_date: null, reversed_at: null, created_at: stamp }
+        return { id: nextAlloc, return_item_id: item.id, sale_item_id: saleItemId, batch_id: batchId, branch_id: recordedBranch, quantity: q, lot_code: null, expiry_date: null, reversed_at: null, created_at: stamp }
       })
       after.r = 1
       after.b = after.allocs.length === 1 && sameQ(after.allocs[0].quantity, quantity) ? after.allocs[0].batch_id : null
@@ -612,6 +614,9 @@ function editStatements(s: Snapshot, dir: 1 | -1, user: SessionUser, stamp: stri
   const startParts = [
     "NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')",
     start.sql,
+    // A cancelled sale has taken its units back already: no edit, undo or redo may move this return's stock then (checked again here, in the batch).
+    ...(s.stock.length || s.lots.removed.length || s.lots.added.length || s.lots.retag.length
+      ? ["NOT EXISTS(SELECT 1 FROM returns cr JOIN sales cs ON cs.id=cr.sale_id WHERE cr.id=@rid AND lower(COALESCE(cs.sale_status,''))='cancelled')"] : []),
     `NOT EXISTS(SELECT 1 FROM json_each(@plain) x WHERE COALESCE((SELECT quantity FROM branch_stock WHERE product_id=json_extract(x.value,'$.product') AND branch_id=json_extract(x.value,'$.branch')),0)
       - COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=json_extract(x.value,'$.product') AND bbs.branch_id=json_extract(x.value,'$.branch')),0) < -json_extract(x.value,'$.q'))`,
   ]

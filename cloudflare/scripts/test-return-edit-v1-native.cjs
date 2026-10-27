@@ -642,7 +642,7 @@ async function redirect() {
     const go = async (action, id) => {
       const request = { expected_updated_at: (await w.one('SELECT updated_at FROM returns WHERE id=?', returnId)).updated_at, items: [{ id: line, sale_item_id: 51, product_id: 1, quantity: 3, stock_action: action }] }
       const preview = await w.send('POST', `/api/returns/${returnId}/edit/preview`, request, ADMIN, { 'x-branch-redirect': '1' })
-      if (preview.status !== 200) return { preview }
+      assert.equal(preview.status, 200, `${id} preview: ${JSON.stringify(preview.body)}`)
       return { preview, applied: await w.send('PATCH', `/api/returns/${returnId}`, { ...request, client_request_id: id, expected_digest: preview.body.digest }, ADMIN, { 'x-branch-redirect': '1' }) }
     }
     // Take the restock back: all three units leave the survivor lot (501 holds nothing at LC Store any more).
@@ -655,10 +655,39 @@ async function redirect() {
     assert.equal(again.applied?.status, 200, JSON.stringify(again.applied?.body ?? again.preview.body))
     assert.deepEqual([await at(500), await at(501), await branchAt(), await total()], [23, 0, 23, 23], 'restock put all units into the survivor lot')
     assert.equal(Number((await w.one('SELECT SUM(quantity) AS q FROM return_item_batch_allocations WHERE return_item_id=?', line)).q), 3, 'the recorded allocations add up to the line quantity')
-    // Undo of the restock returns to the taken-back state exactly.
+    // Undo of the restock returns to the taken-back state exactly, and redo to the restocked one.
+    const stateAgain = await stockState(w, returnId)
     const undo = await w.send('POST', `/api/action-history/${Number(again.applied.body.history_id)}/undo`, { require_applied: true, expected_generation: 0 }, ADMIN, { 'x-branch-redirect': '1' })
     assert.equal(undo.status, 200, JSON.stringify(undo.body))
     assert.equal(await stockState(w, returnId), stateTaken, 'undo restores the taken-back state byte for byte')
+    const redo = await w.send('POST', `/api/action-history/${Number(again.applied.body.history_id)}/redo`, { require_applied: true, expected_generation: 1 }, ADMIN, { 'x-branch-redirect': '1' })
+    assert.equal(redo.status, 200, JSON.stringify(redo.body))
+    assert.equal(await stockState(w, returnId), stateAgain, 'redo restores the restocked state byte for byte')
+    // The restock this edit made is recorded under the LINE's branch (the retired one), so a FRESH take-back by another edit works ...
+    const allocBranch = await w.all('SELECT branch_id,batch_id,quantity FROM return_item_batch_allocations WHERE return_item_id=?', line)
+    assert.deepEqual(allocBranch.map(row => [row.branch_id, row.batch_id, row.quantity]), [[2, 500, 3]], 'allocation keeps the line own branch and the survivor lot')
+    const again2 = await go('none', 'redir-e3')
+    assert.equal(again2.applied?.status, 200, JSON.stringify(again2.applied?.body))
+    assert.deepEqual([await at(500), await at(501), await branchAt(), await total()], [20, 0, 20, 20], 'a second take-back drew the survivor lot')
+    const again3 = await go('restock', 'redir-e4')
+    assert.equal(again3.applied?.status, 200, JSON.stringify(again3.applied?.body))
+    assert.deepEqual([await at(500), await branchAt(), await total()], [23, 23, 23])
+    // ... and so does cancelling the return (and restoring it).
+    const bulk = async (key, source, target) => {
+      const row = await w.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', returnId)
+      return w.send('POST', '/api/returns/bulk', { client_request_id: key, field: 'status', source, target,
+        items: [{ id: returnId, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null }] }, ADMIN, { 'x-branch-redirect': '1' })
+    }
+    const cancel = await bulk('redir-cancel', 'completed', 'cancelled')
+    assert.equal(cancel.status, 200, JSON.stringify(cancel.body))
+    assert.deepEqual([await at(500), await at(501), await branchAt(), await total()], [20, 0, 20, 20], 'cancelling took the three units back from the survivor lot')
+    const restore = await bulk('redir-restore', 'cancelled', 'completed')
+    assert.equal(restore.status, 200, JSON.stringify(restore.body))
+    assert.deepEqual([await at(500), await branchAt(), await total()], [23, 23, 23], 'restoring put them back')
+    const back2 = await go('none', 'redir-e5')
+    assert.equal(back2.applied?.status, 200, JSON.stringify(back2.applied?.body))
+    const again4 = await go('restock', 'redir-e6')
+    assert.equal(again4.applied?.status, 200, JSON.stringify(again4.applied?.body))
     console.log('PASS native return edit redirect: a restock at a retired branch is taken back from, and put back into, the survivor lot with every unit')
   } finally {
     await w.mf.dispose()
