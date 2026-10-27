@@ -30,7 +30,7 @@ function actualRoute(events: unknown[], invalidations: string[], scopeCurrent: (
   const assertScope=extract(actorSource,'assertActorReadScope',{isActorReadScopeCurrent:scopeCurrent})
   return extract(httpSource,'route',{
     assertActorReadScope:assertScope,assertActorSessionDispatchAllowed:assertScope,isActorReadScopeCurrent:scopeCurrent,
-    getSyncServerUrl:()=> {beforeRoute();return serverUrl},getReadServerBaseUrl:()=> 'https://fixture.invalid',hasStoredAuthSession:()=>true,getSameOriginApiBaseUrl:()=>'',throwIfRequestAborted:()=>{},_serverOnline:true,
+    getSyncServerUrl:()=> {beforeRoute();return serverUrl},getReadServerBaseUrl:()=> 'https://fixture.invalid',hasStoredAuthSession:()=>true,getSameOriginApiBaseUrl:()=>'',throwIfRequestAborted:()=>{},_serverOnline:true,refuseWriteUnderD1Limit:async()=>{},
     createWriteBlockedError:extract(httpSource,'createWriteBlockedError',{}),dispatchWriteBlocked:(channel:string,message:string,detail:any)=>events.push({type:'sync:write-blocked',channel,message,detail}),
     cacheInvalidateWithDerived:(key:string)=>invalidations.push(key),setServerHealth:()=>{},logCall:()=>{},createSyncErrorId:()=> 'fixture-event',
     isConnectivityError:extract(httpSource,'isConnectivityError',{isInvalidSessionError,isTransientGatewayError,isNetErr:extract(httpSource,'isNetErr',{})}),isInvalidSessionError,

@@ -29,7 +29,7 @@ const isTransientGatewayError = load(http, 'isTransientGatewayError', { TRANSIEN
 const isInvalidSessionError = load(http, 'isInvalidSessionError')
 const realRoute = load(http, 'route', {
   getSyncServerUrl: () => 'https://fixture.invalid', getReadServerBaseUrl: () => 'https://fixture.invalid',
-  hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '', throwIfRequestAborted: () => {}, _serverOnline: true,
+  hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '', throwIfRequestAborted: () => {}, _serverOnline: true, refuseWriteUnderD1Limit: async () => {},
   cacheInvalidateWithDerived: () => {}, setServerHealth: () => {}, logCall: () => {}, createSyncErrorId: () => 'fixture-event',
   isConnectivityError: load(http, 'isConnectivityError', { isInvalidSessionError, isTransientGatewayError, isNetErr: load(http, 'isNetErr') }),
   isInvalidSessionError, isWriteConflictError: load(http, 'isWriteConflictError'),

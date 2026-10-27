@@ -477,6 +477,63 @@ function foreignBodyError(status: number): { key: string; message: string } {
   return status >= 500 ? FOREIGN_BODY_ERRORS.unavailable : FOREIGN_BODY_ERRORS.failed
 }
 
+// The Free plan caps D1 at a daily number of rows read and written. Past it every query fails until 00:00 UTC (07:00 in
+// Cambodia), and the Worker answers 503 with this code. It is not an outage (the server answers and /health is fine), so
+// it never feeds the offline probe or the refresh events; it raises one banner (components/server/D1LimitBanner.tsx),
+// blocks saving with the same sentence, and lifts at the first API request that succeeds. While it holds, one cheap read
+// a minute (visible tab only) checks whether the day has turned over.
+export const D1_DAILY_LIMIT_CODE = 'd1_daily_limit'
+export const D1_DAILY_LIMIT_EVENT = 'server:d1-limit'
+export const D1_DAILY_LIMIT_KEY = 'd1_daily_limit_banner'
+export const D1_DAILY_LIMIT_MESSAGE = "Daily database limit reached — the app is read-only until 07:00. Sales can't be saved."
+const D1_LIMIT_RECHECK_MS = 60_000
+let _d1LimitActive = false
+let _d1LimitRecheck: ReturnType<typeof setTimeout> | null = null
+
+export function isD1DailyLimitActive(): boolean {
+  return _d1LimitActive
+}
+
+// The Worker's refusal becomes the banner sentence, and is not a gateway failure (the server answered).
+function noteD1DailyLimit(error: ApiRuntimeError): void {
+  error.transientGateway = false
+  error.message = D1_DAILY_LIMIT_MESSAGE
+  error.messageKey = D1_DAILY_LIMIT_KEY
+  setD1DailyLimit(true)
+}
+
+function setD1DailyLimit(active: boolean): void {
+  if (active === _d1LimitActive) return
+  _d1LimitActive = active
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(D1_DAILY_LIMIT_EVENT, { detail: { active } }))
+  if (active) scheduleD1LimitRecheck()
+  else if (_d1LimitRecheck) { clearTimeout(_d1LimitRecheck); _d1LimitRecheck = null }
+}
+
+function scheduleD1LimitRecheck(): void {
+  if (_d1LimitRecheck) return
+  _d1LimitRecheck = setTimeout(() => {
+    _d1LimitRecheck = null
+    if (!_d1LimitActive) return
+    const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
+    const probe = visible ? apiFetch('GET', '/api/branches', undefined, 8000).catch(() => {}) : Promise.resolve()
+    void probe.then(() => { if (_d1LimitActive) scheduleD1LimitRecheck() })
+  }, D1_LIMIT_RECHECK_MS)
+}
+
+// Nothing is sent: the database refuses every query until the day turns over.
+async function refuseWriteUnderD1Limit(channel: string): Promise<void> {
+  if (!_d1LimitActive) return
+  logCall(channel, 'd1-limit-write-blocked', 0, false)
+  const error = new Error(D1_DAILY_LIMIT_MESSAGE) as ApiRuntimeError
+  error.status = 503
+  error.code = D1_DAILY_LIMIT_CODE
+  error.messageKey = D1_DAILY_LIMIT_KEY
+  error.outcome = 'not_dispatched'
+  await restateInKhmer(error)
+  throw error
+}
+
 async function restateInKhmer(error: ApiRuntimeError): Promise<void> {
   if (typeof document === 'undefined' || !String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) return
   const language = await import('./branchRefusalLanguage.ts')
@@ -874,6 +931,10 @@ function suspectServerDown(): void {
 }
 
 function noteReadFailure(channel: string, error: any, source: string, startedAt: number): boolean {
+  if (error?.code === D1_DAILY_LIMIT_CODE) {
+    logCall(channel, source || 'd1-daily-limit', Date.now() - startedAt, false)
+    return false
+  }
   const gateway = isTransientGatewayError(error?.status)
   if (gateway || isConnectivityError(error)) suspectServerDown()
   logCall(channel, source || (gateway ? 'transient-gateway' : 'local-fallback'), Date.now() - startedAt, false)
@@ -942,6 +1003,9 @@ export function __resetApiHealthForTests(): void {
   _healthTimer = null
   _healthInitialTimer = null
   _healthProbeInFlight = null
+  _d1LimitActive = false
+  if (_d1LimitRecheck) clearTimeout(_d1LimitRecheck)
+  _d1LimitRecheck = null
   _lastHealthProbeResult = null
   _lastHealthProbeAt = 0
   _serverOnline = true
@@ -1143,9 +1207,12 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
         dispatchPasswordChangeRequired(path, requestSequence)
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
+      if (apiError.code === D1_DAILY_LIMIT_CODE) noteD1DailyLimit(apiError)
       if (apiError) await restateInKhmer(apiError)
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
+    // Any API answer proves D1 is serving again.
+    if (_d1LimitActive && path.startsWith('/api/')) setD1DailyLimit(false)
     const result = await res.json()
     if (establishesActor) {
       cookieUser = result?.user && typeof result.user === 'object' ? result.user : undefined
@@ -1850,6 +1917,7 @@ export async function route<T = any>(
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (writeScope) assertActorSessionDispatchAllowed(writeScope)
   if (writeIdentity) assertActorWriteIdentity(writeIdentity)
+  await refuseWriteUnderD1Limit(channel)
   if (!syncServerUrl) {
     const message = 'Server is not connected. Changes are invalid until a live server is configured.'
     logCall(channel, 'local-write-skipped', 0, false)

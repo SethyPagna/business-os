@@ -16,6 +16,7 @@ import { getScrollTarget, getScrollToPosition } from './components/shared/global
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
+import D1LimitBanner from './components/server/D1LimitBanner.tsx'
 import { useBranchRedirectQueue } from './components/shared/useBranchRedirectQueue.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
@@ -1987,6 +1988,7 @@ export default function App() {
             ref={mainRef}
             className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${inlineMobileNavigation ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(3.55rem+env(safe-area-inset-bottom))]'} pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
           >
+            <D1LimitBanner />
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">
             </div>
