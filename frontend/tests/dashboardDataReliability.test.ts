@@ -19,12 +19,12 @@ assert.match(dashboard, /function isDashboardAnalyticsPayload/, 'dashboard shoul
 assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.revenue_usd\)\)/, 'analytics validation must reject an empty totals object that would render as fake zero revenue')
 assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.tx_count\)\)/, 'analytics validation must use the tx_count field returned by the analytics API')
 assert.doesNotMatch(dashboard, /totals\?\.transaction_count/, 'analytics validation must not require the nonexistent transaction_count field')
-assert.match(dashboard, /if \(!isDashboardAnalyticsPayload\(data\)\)[\s\S]{0,220}normalizeDashboardAnalyticsPayload\(data\)/, 'dashboard must validate the raw response before filling defaults')
+assert.ok(dashboard.includes('if (!isDashboardAnalyticsPayload(payload.analytics))'), 'dashboard must validate the raw response before filling defaults')
+assert.ok(dashboard.indexOf('isDashboardAnalyticsPayload(payload.analytics)') < dashboard.indexOf('normalizeDashboardAnalyticsPayload(payload.analytics)'), 'validation precedes normalization')
 assert.doesNotMatch(dashboard, /setSummary\(\{\}\)/, 'dashboard should preserve the previous summary when refresh fails')
-assert.match(dashboard, /const \[summaryError, setSummaryError\]/, 'dashboard should track summary load errors separately')
-assert.match(dashboard, /const \[analyticsError, setAnalyticsError\]/, 'dashboard should track analytics load errors separately')
-assert.match(dashboard, /Showing saved dashboard totals/, 'dashboard should explain when it is showing saved/stale totals')
-assert.match(dashboard, /Analytics unavailable/, 'dashboard should distinguish analytics failures from genuine no-data states')
+assert.match(dashboard, /const [loadError, setLoadError]/, 'dashboard should track the load error once, for the one startup read')
+assert.match(dashboard, /dashboard_stale_notice/, 'dashboard should explain when it is showing saved/stale totals')
+assert.match(dashboard, /dashboard_load_failed/, 'dashboard should distinguish a failed load from a genuine no-data state, once, with Retry')
 assert.doesNotMatch(dashboard, /PortalMenu/, 'dashboard detail rows should open directly without an extra menu step')
 assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'low_stock' \}\)/, 'dashboard low-stock rows should open direct item details')
 assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'out_of_stock' \}\)/, 'dashboard out-of-stock rows should open direct item details')
@@ -46,8 +46,7 @@ assert.match(statsRangeRow, /data-date-presets/, 'dashboard presets should be ow
 // The dashboard's default window is TODAY -- the business day, exactly like
 // the list pages (user, 2026-09-03) -- and it governs the FLOW cards only.
 assert.doesNotMatch(dashboard, /offsetDate\(-6\)/, 'dashboard must not default to a rolling seven-day window')
-assert.match(dashboard, /getDashboardStartup\(query\),\s*label,/, 'summary refresh must receive the canonical range, including exact UTC bounds')
-assert.match(dashboard, /getDashboardStartup\(query\),\s*'Dashboard analytics',/, 'analytics refresh must receive the same canonical range')
+assert.ok(dashboard.includes('getDashboardApi().getDashboardStartup(getCurrentDashboardRange())'), 'the startup read must receive the canonical range, including exact UTC bounds')
 assert.match(transport, /appendQuery\('\/api\/dashboard', query\)/, 'dashboard summary transport must forward range parameters')
 assert.match(compat, /startDate: String\(query\.startDate \|\| today\)/, 'the dashboard API fallback range must be today as well')
 // G39 item 1 added a third parameter: the cache context the shared stock

@@ -23,8 +23,8 @@ assert.equal(finishDashboardStockAlertRequest(requestRef, newPageRequest, inFlig
 assert.equal(inFlightRef.current, false, 'the current request releases its own slot')
 
 const dashboard = readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
-assert.match(dashboard, /loadSummary[\s\S]{0,500}invalidateStockAlertPageRequests\(\)[\s\S]{0,160}beginTrackedRequest\(summaryRequestRef\)/,
-  'summary/filter refresh invalidates page requests before issuing the new summary')
+assert.ok(dashboard.indexOf('invalidateStockAlertPageRequests()', dashboard.indexOf('const loadStartup = useCallback')) < dashboard.indexOf('getDashboardStartup(getCurrentDashboardRange())'),
+  'a startup read invalidates page requests before issuing the new summary')
 assert.match(dashboard, /useEffect\(\(\) => \{\s*invalidateStockAlertPageRequests\(\)[\s\S]{0,900}setLowStockRows\(initialLowRows\)/,
   'summary page 1 invalidates old append requests before rows and cursors reset')
 assert.match(dashboard, /finishDashboardStockAlertRequest\(requestRef, requestId, inFlightRef\)/,

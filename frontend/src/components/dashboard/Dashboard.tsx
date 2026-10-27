@@ -2,7 +2,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig } from '../../AppContext.tsx'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useMemo } from 'react'
@@ -27,6 +27,9 @@ import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import { FOREGROUND_RESUME_GAP_REASON } from '../../utils/permissionRefreshAccumulator.ts'
+import { subscribeSyncSignals } from '../../utils/syncSignals.ts'
+import { createDashboardRefreshScheduler, isStaleReadScopeError, isTransientLoadError, nextRetryDelayMs, type DashboardRefreshScheduler } from './dashboardRefresh.ts'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
@@ -75,14 +78,6 @@ interface AppContextValue {
   navigateTo: NavigateFn
   user?: AppUser | null
   hasPermission: (key: string) => boolean
-}
-
-interface SyncContextValue {
-  syncChannel?: {
-    channel?: string
-    reason?: string | null
-    ts?: string | number
-  } | null
 }
 
 interface DashboardProduct {
@@ -271,16 +266,7 @@ interface DashboardApi {
 type DashboardExportModule = typeof import('./dashboardExport.ts')
 
 const useApp = useAppHook as () => AppContextValue
-const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
-
-// Summary and analytics are both halves of GET /api/dashboard/startup, which the Worker builds
-// from the same dashboardSummary/dashboardAnalytics calls /api/dashboard and /api/analytics answer
-// with. Loaders started together (re-activation, a sync refresh, Retry) share that one read through
-// route()'s in-flight de-duplication of the same range key.
-function startupHalf(data: unknown, half: 'summary' | 'analytics'): unknown {
-  return data && typeof data === 'object' ? (data as Record<string, unknown>)[half] : undefined
-}
 
 function getDashboardApi(): DashboardApi {
   return { getDashboardStartup, getDashboardStockAlerts, getDashboardInsightList }
@@ -293,8 +279,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
-const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
 const DASHBOARD_STARTUP_TIMEOUT_MS = 30000
+// Coming back to the page re-reads only when something may have changed meanwhile: a push
+// arrived while it was hidden, or the figures are older than this.
+const DASHBOARD_REACTIVATION_STALE_MS = 5 * 60 * 1000
 const DASHBOARD_STOCK_ALERT_PAGE_SIZE = 10
 const DASHBOARD_STOCK_ALERT_SCROLL_THRESHOLD_PX = 64
 const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
@@ -351,6 +339,18 @@ const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 // a max + scroll so a very long list can't blow the row past a sane height)
 // and flex-1 so it fills whatever height the stretched card ends up with.
 const CARD_LIST_BODY = 'flex-1 min-h-[8rem] max-h-[16rem] overflow-y-auto'
+
+// A card whose figures have not arrived yet shows the skeleton, never "No data"
+// or 0. After the retries are spent it shows a quiet blank block: the page
+// carries the single notice with the Retry button, so the cards do not each
+// repeat it.
+function CardSkeleton({ className = 'h-28' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700 ${className}`} aria-hidden="true" />
+}
+
+function CardUnavailable({ className = 'h-28' }: { className?: string }) {
+  return <div className={`rounded-xl bg-gray-50 dark:bg-gray-800/40 ${className}`} aria-hidden="true" />
+}
 
 // A card's list body is capped at CARD_LIST_BODY's max-height and scrolls in
 // place, but scrolling inside a small tile is awkward on a phone -- so once a
@@ -538,11 +538,10 @@ function formatDashboardHourLabel(hourValue: unknown): string {
   return `${String(hour).padStart(2, '0')}:00`
 }
 
-function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
+function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, translateOr, fmtUSD, onOpen }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
-  analyticsError: string
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
   onOpen: (payment: DashboardPaymentRow) => void
@@ -556,7 +555,7 @@ function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, 
     <div className="card flex flex-col p-3 sm:p-4">
       <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
       {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? (
-        <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+        <CardUnavailable className="h-28" />
       ) : !payments.length ? (
         <p className="flex flex-1 items-center justify-center py-8 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
       ) : (
@@ -601,8 +600,10 @@ function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, 
   )
 }
 
-function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus, onOpenSale, onViewMore }: {
+function RecentSalesCard({ summary, pending, unavailable, t, translateOr, fmtUSD, fmtKHR, formatStatus, onOpenSale, onViewMore }: {
   summary: DashboardSummary | null
+  pending: boolean
+  unavailable: boolean
   t: TranslateFn
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
@@ -616,7 +617,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
     <div className="card flex flex-col">
       <div className="border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
-        {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
+        {pending ? <div className="p-3"><CardSkeleton /></div> : unavailable ? <div className="p-3"><CardUnavailable /></div> : !sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="detail-scroll-text text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
             <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleTone(sale)}`}>{formatStatus(sale)}</div></div>
@@ -628,11 +629,10 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
   )
 }
 
-function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen, onViewMore }: {
+function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, t, translateOr, fmtUSD, onOpen, onViewMore }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
-  analyticsError: string
   t: TranslateFn
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
@@ -644,7 +644,7 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   const maxRevenue = Math.max(...all.map((branch) => branch.revenue_usd || 0), 0.01)
   return <div className="card flex flex-col p-3 sm:p-4">
     <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
-    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : (
+    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <CardUnavailable className="h-28" /> : (
       <>
         <div className={`space-y-1 ${CARD_LIST_BODY}`}>
           {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
@@ -658,8 +658,10 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   </div>
 }
 
-function ExpiryAlertsCard({ summary, translateOr, onOpen, onViewMore }: {
+function ExpiryAlertsCard({ summary, pending, unavailable, translateOr, onOpen, onViewMore }: {
   summary: DashboardSummary | null
+  pending: boolean
+  unavailable: boolean
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   onOpen: (item: DashboardProduct) => void
   onViewMore: () => void
@@ -667,7 +669,7 @@ function ExpiryAlertsCard({ summary, translateOr, onOpen, onViewMore }: {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
     <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{Number(summary?.expiring_count || 0) > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{summary?.expiring_count}</span> : null}</div>
-    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
+    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{pending ? <div className="p-3"><CardSkeleton /></div> : unavailable ? <div className="p-3"><CardUnavailable /></div> : !items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
     <DashboardViewMoreFooter show={items.length > 5} translateOr={translateOr} onClick={onViewMore} />
   </div>
 }
@@ -689,11 +691,10 @@ function computeDashboardBusyHours(analytics: DashboardAnalytics | null): Dashbo
   return Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
 }
 
-function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour, onViewMore }: {
+function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, t, translateOr, fmtUSD, onOpenHour, onViewMore }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
-  analyticsError: string
   t: TranslateFn
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
@@ -716,7 +717,7 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
   const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
   return <div className="card flex flex-col p-3 sm:p-4">
     <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
-    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
+    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <CardUnavailable className="h-28" /> : <>
       <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
       <div className={`space-y-1 ${CARD_LIST_BODY}`}>{!busyHours.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : busyHours.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
       <DashboardViewMoreFooter show={busyHours.length > 5} translateOr={translateOr} onClick={onViewMore} />
@@ -799,7 +800,6 @@ export default function Dashboard() {
   // Settings > Stock Alerts -- the number the low-stock card's rows were
   // judged by, shown in the drill panel and carried into the export.
   const lowStockConfig = useLowStockConfig()
-  const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -836,10 +836,10 @@ export default function Dashboard() {
   const [summarySnapshot, setSummary] = useState<{ scope: string; data: DashboardSummary } | null>(null)
   const [analyticsSnapshot, setAnalytics] = useState<{ scope: string; data: DashboardAnalytics } | null>(null)
   const [loading, setLoading]     = useState(true)
-  const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
-  const [summaryError, setSummaryError] = useState('')
-  const [analyticsError, setAnalyticsError] = useState('')
+  // One read, one failure: shown once, after the automatic retries are spent.
+  const [loadError, setLoadError] = useState('')
+  const [retrying, setRetrying] = useState(false)
   // The shared preset rail and custom picker both write these dates. A new
   // user starts on TODAY; a saved all-time range deliberately restores as two
   // empty endpoints. The range governs the flow cards only; stock and alert
@@ -905,19 +905,26 @@ export default function Dashboard() {
   // where every group renders together). Defaults to the overview group so a
   // phone opens on the chart + recent sales rather than an empty pane.
   const [mobileSection, setMobileSection] = useState<DashboardMobileSection>('overview')
-  const summaryRequestRef = useRef(0)
-  const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
-  const refreshRequestRef = useRef(0)
   const lowStockRequestRef = useRef(0)
   const outOfStockRequestRef = useRef(0)
   const lowStockLoadInFlightRef = useRef(false)
   const outOfStockLoadInFlightRef = useRef(false)
   const lowStockListRef = useRef<HTMLDivElement | null>(null)
   const outOfStockListRef = useRef<HTMLDivElement | null>(null)
-  const analyticsLoadingRef = useRef(true)
-  const startupLoadingRef = useRef(false)
-  const startupAttemptedRef = useRef(false)
+  // True once this scope has figures on screen: later reads then refresh them quietly.
+  const hasDataRef = useRef(false)
+  const startupInFlightRef = useRef(false)
+  const retryTimerRef = useRef<number | null>(null)
+  const retryCountRef = useRef(0)
+  const staleScopeRetriedRef = useRef(false)
+  const lastLoadedAtRef = useRef(0)
+  // Set when a push arrived (or a read was cut off) while the page was hidden.
+  const staleWhileHiddenRef = useRef(false)
+  const refreshSchedulerRef = useRef<DashboardRefreshScheduler | null>(null)
+  const loadStartupRef = useRef<(options?: { silent?: boolean }) => Promise<unknown>>(async () => null)
+  const isActiveRef = useRef(isActive)
+  isActiveRef.current = isActive
   const dashboardExportModulePromiseRef = useRef<Promise<DashboardExportModule> | null>(null)
 
   const invalidateStockAlertPageRequests = useCallback(() => {
@@ -934,11 +941,6 @@ export default function Dashboard() {
       dashboardExportModulePromiseRef.current = import('./dashboardExport.ts')
     }
     return dashboardExportModulePromiseRef.current
-  }, [])
-
-  const setAnalyticsLoading = useCallback((value: boolean) => {
-    analyticsLoadingRef.current = value
-    setALoading(value)
   }, [])
 
   const openInventoryOverview = useCallback((stockState: InventoryStockFocus = 'all') => {
@@ -970,21 +972,32 @@ export default function Dashboard() {
     if (prefs) setFilterSelection({ storageKey: dashboardFilterStorageKey, prefs })
   }, [dashboardFilterStorageKey])
 
-  const loadDashboardStartup = useCallback(async () => {
+  // ONE read serves the whole page: GET /api/dashboard/startup carries the summary and the
+  // analytics. It used to be three loaders (first open, summary, analytics) racing the same
+  // request, each with its own loading flag; one of them could be left set, and the page then
+  // showed empty cards with no error.
+  const loadStartup = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestScope = dashboardScope
     const requestId = beginTrackedRequest(startupRequestRef)
-    startupLoadingRef.current = true
-    startupAttemptedRef.current = true
-    setLoading(true)
-    setAnalyticsLoading(true)
-    const query = getCurrentDashboardRange()
+    const isCurrent = () => requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(startupRequestRef, requestId)
+    if (retryTimerRef.current != null) {
+      window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    refreshSchedulerRef.current?.noteLoad()
+    // The summary is page 1 of both stock-alert lists: a late page requested before this
+    // read must not append to it.
+    invalidateStockAlertPageRequests()
+    startupInFlightRef.current = true
+    if (silent && hasDataRef.current) setSilentRefresh(true)
+    else setLoading(true)
     try {
       const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboardStartup(query),
+        () => getDashboardApi().getDashboardStartup(getCurrentDashboardRange()),
         'Dashboard startup',
         DASHBOARD_STARTUP_TIMEOUT_MS,
       )
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(startupRequestRef, requestId)) return null
+      if (!isCurrent()) return null
       const payload = data && typeof data === 'object' ? data as { summary?: unknown; analytics?: unknown } : {}
       if (!isDashboardSummaryPayload(payload.summary)) {
         throw new Error('Dashboard startup returned incomplete summary data.')
@@ -995,73 +1008,58 @@ export default function Dashboard() {
       const normalizedSummary = normalizeDashboardSummaryPayload(payload.summary)
       const normalizedAnalytics = normalizeDashboardAnalyticsPayload(payload.analytics)
       if (!normalizedSummary || !normalizedAnalytics) throw new Error('Dashboard startup returned invalid data.')
+      hasDataRef.current = true
+      staleWhileHiddenRef.current = false
+      lastLoadedAtRef.current = Date.now()
+      retryCountRef.current = 0
+      staleScopeRetriedRef.current = false
       setSummary({ scope: requestScope, data: normalizedSummary })
       setAnalytics({ scope: requestScope, data: normalizedAnalytics })
-      setSummaryError('')
-      setAnalyticsError('')
+      setLoadError('')
+      setRetrying(false)
       return data
     } catch (error) {
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(startupRequestRef, requestId)) return null
-      const message = isInvalidSessionError(error)
-        ? 'Please sign in again to continue.'
-        : getErrorMessage(error, 'Dashboard startup failed to load.')
-      if (!isInvalidSessionError(error)) {
-        console.error('[Dashboard] startup failed:', message)
-      }
-      setSummaryError(message)
-      setAnalyticsError(message)
-      return null
-    } finally {
-      if (requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(startupRequestRef, requestId)) {
-        startupLoadingRef.current = false
-        setLoading(false)
-        setAnalyticsLoading(false)
-      }
-    }
-  }, [dashboardScope, getCurrentDashboardRange, setAnalyticsLoading])
-
-  const loadSummary = useCallback(async ({
-    label = 'Dashboard summary',
-    markLoading = false,
-  }: { label?: string; markLoading?: boolean } = {}) => {
-    // The summary is page 1 for both family-alert lists. Invalidate an old
-    // page request before fetching a new filter/refresh summary so its late
-    // response cannot append rows or advance the new cursor.
-    invalidateStockAlertPageRequests()
-    const requestId = beginTrackedRequest(summaryRequestRef)
-    const requestScope = dashboardScope
-    if (markLoading) setLoading(true)
-    try {
-      const query = getCurrentDashboardRange()
-      const data = startupHalf(await withLoaderTimeout(
-        () => getDashboardApi().getDashboardStartup(query),
-        label,
-        DASHBOARD_SUMMARY_TIMEOUT_MS,
-      ), 'summary')
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
-      if (!isDashboardSummaryPayload(data)) {
-        throw new Error('Dashboard summary returned incomplete data.')
-      }
-      const normalized = normalizeDashboardSummaryPayload(data)
-      if (!normalized) throw new Error('Dashboard summary returned invalid data.')
-      setSummary({ scope: requestScope, data: normalized })
-      setSummaryError('')
-      return data
-    } catch (error) {
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
+      if (!isCurrent()) return null
       if (isInvalidSessionError(error)) {
-        setSummaryError('Please sign in again to continue.')
+        setRetrying(false)
+        setLoadError('Please sign in again to continue.')
         return null
       }
-      console.error('[Dashboard] summary failed:', getErrorMessage(error, 'Dashboard summary failed to load.'))
-      setSummaryError(getErrorMessage(error, 'Dashboard summary failed to load.'))
+      // A read rejected because sign-in just reset the read scope: send it again once, with no
+      // notice at all. Anything else that can pass by itself (a timeout, a dropped connection, a
+      // 5xx, a 409 while tills are ringing) is tried again at 2 s and 6 s before telling anyone.
+      const staleScopeRetry = isStaleReadScopeError(error) && !staleScopeRetriedRef.current
+      if (staleScopeRetry) staleScopeRetriedRef.current = true
+      const retryDelay = staleScopeRetry ? 0 : isTransientLoadError(error) ? nextRetryDelayMs(retryCountRef.current) : null
+      if (retryDelay != null) {
+        if (!staleScopeRetry) retryCountRef.current += 1
+        setRetrying(true)
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null
+          void loadStartupRef.current({ silent: true })
+        }, retryDelay)
+        return null
+      }
+      const message = getErrorMessage(error, 'Dashboard startup failed to load.')
+      console.error('[Dashboard] startup failed:', message)
+      setRetrying(false)
+      setLoadError(message)
       return null
     } finally {
-      if (markLoading && requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
+      if (isCurrent()) {
+        startupInFlightRef.current = false
         setLoading(false)
+        setSilentRefresh(false)
       }
     }
   }, [dashboardScope, getCurrentDashboardRange, invalidateStockAlertPageRequests])
+  loadStartupRef.current = loadStartup
+  // A read someone asked for (Retry, a push, coming back) starts the retry count again.
+  const reloadStartup = useCallback(() => {
+    retryCountRef.current = 0
+    staleScopeRetriedRef.current = false
+    return loadStartup({ silent: true })
+  }, [loadStartup])
 
   const loadStockAlertPage = useCallback(async (state: DashboardStockAlertState, page: number) => {
     const requestRef = state === 'low' ? lowStockRequestRef : outOfStockRequestRef
@@ -1134,55 +1132,20 @@ export default function Dashboard() {
     }
   }, [dashboardScope, getCurrentDashboardRange])
 
-  const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    const requestId = beginTrackedRequest(analyticsRequestRef)
-    const requestScope = dashboardScope
-    const shouldClearLoading = !silent || analyticsLoadingRef.current
-    if (!silent) setAnalyticsLoading(true)
-    const query = getCurrentDashboardRange()
-    try {
-      const data = startupHalf(await withLoaderTimeout(
-        () => getDashboardApi().getDashboardStartup(query),
-        'Dashboard analytics',
-        DASHBOARD_ANALYTICS_TIMEOUT_MS,
-      ), 'analytics')
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
-      if (!isDashboardAnalyticsPayload(data)) {
-        throw new Error('Dashboard analytics returned incomplete data.')
-      }
-      const normalized = normalizeDashboardAnalyticsPayload(data)
-      if (!normalized) throw new Error('Dashboard analytics returned invalid data.')
-      setAnalytics({ scope: requestScope, data: normalized })
-      setAnalyticsError('')
-      return data
-    } catch (error) {
-      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
-      if (isInvalidSessionError(error)) {
-        setAnalyticsError('Please sign in again to continue.')
-        return null
-      }
-      console.error('[Dashboard] analytics failed:', getErrorMessage(error, 'Dashboard analytics failed to load.'))
-      setAnalyticsError(getErrorMessage(error, 'Dashboard analytics failed to load.'))
-      return null
-    } finally {
-      if (shouldClearLoading && requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(analyticsRequestRef, requestId)) {
-        setAnalyticsLoading(false)
-      }
-    }
-  }, [dashboardScope, getCurrentDashboardRange, setAnalyticsLoading])
-
   // Runs before loader effects: an old startup must not suppress the new
   // interval's requests, nor may its finally block release the new loading UI.
   useEffect(() => {
     loadingScopeRef.current = dashboardScope
     invalidateTrackedRequest(startupRequestRef)
-    invalidateTrackedRequest(summaryRequestRef)
-    invalidateTrackedRequest(analyticsRequestRef)
-    invalidateTrackedRequest(refreshRequestRef)
+    if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = null
+    retryCountRef.current = 0
+    staleScopeRetriedRef.current = false
+    hasDataRef.current = false
+    startupInFlightRef.current = false
     Object.keys(insightRequestRef.current).forEach((kind) => { insightRequestRef.current[kind]++ })
-    startupLoadingRef.current = false
-    setSummaryError('')
-    setAnalyticsError('')
+    setRetrying(false)
+    setLoadError('')
     setSilentRefresh(false)
     setKpiDetail(null)
     setCustomerDetail(null)
@@ -1206,27 +1169,23 @@ export default function Dashboard() {
     }
   }, [filterPrefs, dashboardFilterStorageKey])
 
+  // Leaving the page cancels its read and retries; coming back reads again only if something
+  // may have changed meanwhile. The loading flag is left alone while hidden, so the first frame
+  // after returning is the skeleton, never "unavailable".
   useEffect(() => {
     if (!isActive) {
+      if (startupInFlightRef.current || retryTimerRef.current != null) staleWhileHiddenRef.current = true
       invalidateTrackedRequest(startupRequestRef)
-      invalidateTrackedRequest(summaryRequestRef)
-      invalidateTrackedRequest(refreshRequestRef)
-      startupLoadingRef.current = false
-      setLoading(false)
+      if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+      startupInFlightRef.current = false
       setSilentRefresh(false)
       return
     }
-
-    if (summary == null && analytics == null && !startupAttemptedRef.current) {
-      void loadDashboardStartup()
-      return
-    }
-    if (startupLoadingRef.current) return
-
-    void loadSummary({
-      markLoading: summary == null,
-    })
-  }, [isActive, loadSummary]) // eslint-disable-line
+    const upToDate = hasDataRef.current && !staleWhileHiddenRef.current
+      && Date.now() - lastLoadedAtRef.current < DASHBOARD_REACTIVATION_STALE_MS
+    if (!upToDate) void reloadStartup()
+  }, [isActive, reloadStartup])
 
   useEffect(() => {
     invalidateStockAlertPageRequests()
@@ -1260,52 +1219,33 @@ export default function Dashboard() {
     if (outOfStockListRef.current) outOfStockListRef.current.scrollTop = 0
   }, [invalidateStockAlertPageRequests, isActive, summary?.low_stock, summary?.low_stock_count, summary?.low_stock_preview_truncated, summary?.out_of_stock, summary?.out_of_stock_count, summary?.out_of_stock_preview_truncated])
 
+  // Pushes, a tab resume and a reconnect arrive as raw window events (utils/syncSignals.ts), not
+  // through the app context's one-channel slot, which a 22-channel resume burst leaves holding only its
+  // last channel. The scheduler turns any burst into one read, at most one per 5 s.
   useEffect(() => {
-    if (!isActive) {
-      invalidateTrackedRequest(analyticsRequestRef)
-      setAnalyticsLoading(false)
-      return
-    }
-
-    if (startupLoadingRef.current) return
-    if (summary == null && analytics == null && !startupAttemptedRef.current) return
-
-    void loadAnalytics({
-      silent: summary != null,
+    const scheduler = createDashboardRefreshScheduler(() => {
+      if (!isActiveRef.current) {
+        staleWhileHiddenRef.current = true
+        return
+      }
+      void loadStartupRef.current({ silent: true })
     })
-  }, [isActive, loadAnalytics, setAnalyticsLoading])
-
-  useEffect(() => {
-    if (!isActive || !syncChannel?.channel) return
-    const ch = syncChannel.channel
-    // 'dashboard' itself is one of the channels a completed background
-    // import broadcasts (see importJobRefresh.ts's
-    // getImportCompletionRefreshChannels) -- it was missing from this list,
-    // so on the (common) case where 'dashboard' happened to be the last of
-    // several same-tick channel events to settle, the Dashboard would end
-    // up NOT refreshing even though earlier channels in the same batch
-    // (products/inventory/sales) usually did trigger a refresh moments
-    // before. Listing it explicitly closes that gap instead of relying on
-    // a sibling channel happening to still be "in flight".
-    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard' || ch === 'settings') {
-      const refreshId = beginTrackedRequest(refreshRequestRef)
-      setSilentRefresh(true)
-      Promise.allSettled([
-        loadSummary({ label: 'Dashboard summary refresh' }),
-        loadAnalytics({ silent: true }),
-      ]).finally(() => {
-        if (isTrackedRequestCurrent(refreshRequestRef, refreshId)) {
-          setSilentRefresh(false)
-        }
-      })
+    refreshSchedulerRef.current = scheduler
+    const stop = subscribeSyncSignals((signal) => {
+      // A user-visible Retry or a push starts the retry count over.
+      if (signal.type === 'update' && isActiveRef.current) retryCountRef.current = 0
+      scheduler.signal(signal)
+    })
+    return () => {
+      stop()
+      scheduler.dispose()
+      refreshSchedulerRef.current = null
     }
-  }, [isActive, loadAnalytics, loadSummary, syncChannel?.channel, syncChannel?.ts])
+  }, [])
 
   useEffect(() => () => {
-    invalidateTrackedRequest(summaryRequestRef)
-    invalidateTrackedRequest(analyticsRequestRef)
-    invalidateTrackedRequest(refreshRequestRef)
     invalidateTrackedRequest(startupRequestRef)
+    if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
     Object.keys(insightRequestRef.current).forEach((kind) => { insightRequestRef.current[kind]++ })
     invalidateStockAlertPageRequests()
   }, [invalidateStockAlertPageRequests])
@@ -1370,24 +1310,31 @@ export default function Dashboard() {
   // (G39 item 7), so the only other catch-up is a resume after a socket gap,
   // when a push may have been missed.
   useEffect(() => {
-    if (!isActive || syncChannel?.channel !== 'dashboard' || syncChannel.reason !== FOREGROUND_RESUME_GAP_REASON) return
+    if (!isActive) return
     let cancelled = false
-    listImportJobs({ limit: IMPORT_JOBS_SHARED_LIMIT })
-      .then((result) => {
-        if (cancelled) return
-        setRecentImportFiles(mapRecentImportJobs(result))
-      })
-      .catch(() => { /* non-critical widget -- silently leave it as-is on failure */ })
-    return () => { cancelled = true }
-  }, [isActive, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts])
+    const stop = subscribeSyncSignals((signal) => {
+      if (signal.type !== 'update' || signal.channel !== 'dashboard' || signal.reason !== FOREGROUND_RESUME_GAP_REASON) return
+      listImportJobs({ limit: IMPORT_JOBS_SHARED_LIMIT })
+        .then((result) => {
+          if (cancelled) return
+          setRecentImportFiles(mapRecentImportJobs(result))
+        })
+        .catch(() => { /* non-critical widget -- silently leave it as-is on failure */ })
+    })
+    return () => {
+      cancelled = true
+      stop()
+    }
+  }, [isActive])
 
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
-  const summaryUnavailable = !rangePending && !loading && !summaryReady
-  const analyticsPending = !analyticsReady && (rangePending || aLoading)
-  const analyticsUnavailable = !rangePending && !analyticsReady && !aLoading
-  const staleSummaryNotice = summaryReady && summaryError
-  const staleAnalyticsNotice = analyticsReady && analyticsError
+  const waiting = rangePending || loading || retrying
+  const summaryPending = !summaryReady && waiting
+  const summaryUnavailable = !summaryReady && !waiting
+  const analyticsPending = !analyticsReady && waiting
+  const analyticsUnavailable = !analyticsReady && !waiting
+  const showLoadNotice = !waiting && Boolean(loadError)
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
   const displayTotals = useMemo(
     () => normalizeDashboardGrossMetrics(analytics?.totals || {}),
@@ -2013,31 +1960,6 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     translateOr,
   ])
 
-  if (summaryUnavailable) {
-    return (
-      <div className="page-scroll p-3 sm:p-5">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
-          <div className="font-semibold">Dashboard summary unavailable</div>
-          <div className="mt-1 text-xs text-amber-800/90 dark:text-amber-200/80">
-            {summaryError || 'The dashboard summary did not finish loading. Retry to fetch fresh totals and activity.'}
-          </div>
-          <button
-            type="button"
-            className="btn-secondary mt-3 px-3 py-1.5 text-xs"
-            onClick={() => {
-              void Promise.allSettled([
-                loadSummary({ label: 'Dashboard summary retry', markLoading: true }),
-                loadAnalytics(),
-              ])
-            }}
-          >
-            {refreshLabel}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
@@ -2050,18 +1972,27 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         </div>
       ) : null}
 
-      {(staleSummaryNotice || staleAnalyticsNotice) ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
-          <div className="font-semibold">
-            {staleSummaryNotice && staleAnalyticsNotice
-              ? 'Showing saved dashboard totals and analytics while refresh finishes.'
-              : staleSummaryNotice
-                ? 'Showing saved dashboard totals while the latest summary refresh failed.'
-                : 'Showing saved dashboard analytics while the latest analytics refresh failed.'}
+      {/* The single notice for a failed read, shown after the automatic retries are spent. It
+          replaces the old hide-the-whole-page error and the per-card messages. */}
+      {showLoadNotice ? (
+        <div role="alert" className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">
+              {summaryReady && analyticsReady
+                ? translateOr('dashboard_stale_notice', 'Showing the last loaded figures; the latest refresh failed.', 'កំពុងបង្ហាញតួលេខចុងក្រោយ ការផ្ទុកថ្មីបរាជ័យ។')
+                : translateOr('dashboard_load_failed', 'The dashboard could not be loaded.', 'មិនអាចផ្ទុកផ្ទាំងគ្រប់គ្រងបានទេ។')}
+            </div>
+            <div className="mt-0.5 break-words text-[11px] text-amber-800/90 dark:text-amber-200/80">{loadError}</div>
           </div>
-          <div className="mt-0.5 text-[11px] text-amber-800/90 dark:text-amber-200/80">
-            {summaryError || analyticsError}
-          </div>
+          <button
+            type="button"
+            className="btn-secondary inline-flex shrink-0 items-center gap-1 px-3 py-1.5 text-xs"
+            onClick={() => { void reloadStartup() }}
+            title={translateOr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            {translateOr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+          </button>
         </div>
       ) : null}
 
@@ -2077,12 +2008,12 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           onRangeChange={handleDashboardRangeChange}
           showTime
           continuous
-          loading={analyticsPending}
+          loading={summaryPending || analyticsPending}
           rangeActions={hasPermission('dashboard_export') ? (
             <button
               type="button"
               onClick={() => setExportChoicesOpen(true)}
-              disabled={!summary || !analytics || loading || aLoading}
+              disabled={!summary || !analytics || loading}
               className={toolbarIconButtonClassName}
               aria-label={exportLabel}
               title={exportLabel}
@@ -2093,26 +2024,19 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           cards={periodKpis.map((kpi): StatCardDef => ({
             key: kpi.id,
             label: String(kpi.label),
-            value: kpi.value,
-            sub: kpi.sub,
-            trend: kpi.trend,
+            // Without figures a card says so, instead of showing the zeros the empty state computes.
+            value: summaryReady && analyticsReady ? kpi.value : '\u2014',
+            sub: summaryReady && analyticsReady ? kpi.sub : undefined,
+            trend: summaryReady && analyticsReady ? kpi.trend : undefined,
             hint: (kpi as { info?: string }).info,
             tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
               : /red|rose/.test(String(kpi.color || '')) ? 'crit'
                 : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
                   : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
                     : undefined,
-            details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
+            details: summaryReady && analyticsReady ? (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })) : [],
           }))}
         />
-        {analyticsUnavailable ? (
-          <div className="mt-2 rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
-            <div className="font-semibold">Analytics unavailable</div>
-            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
-            </div>
-          </div>
-        ) : null}
       </div>
 
       {/* Small-screen section switcher -- splits the long card stack into
@@ -2165,7 +2089,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               (e.g. Recent Sales with a long list) stretched the row. */}
           <div className="flex flex-1 flex-col">
           {analyticsPending ? <div className="h-52 flex-1 min-h-[13rem] animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
-          : analyticsUnavailable ? <div className="flex flex-1 min-h-[13rem] flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          : analyticsUnavailable ? <CardUnavailable className="min-h-[13rem] flex-1 rounded-2xl" />
           : chartRenderData.length === 0 ? <div className="flex flex-1 min-h-[13rem] items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
           : chartMode === 'revenue' ? (
             <>
@@ -2212,6 +2136,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
 
         <RecentSalesCard
           summary={summary}
+          pending={summaryPending}
+          unavailable={summaryUnavailable}
           t={t}
           translateOr={translateOr}
           fmtUSD={fmtUSD}
@@ -2239,7 +2165,6 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           analytics={analytics}
           analyticsPending={analyticsPending}
           analyticsUnavailable={analyticsUnavailable}
-          analyticsError={analyticsError}
           t={t}
           translateOr={translateOr}
           fmtUSD={fmtSplitUsd}
@@ -2279,7 +2204,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             </div>
           </div>
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
-            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+            <CardUnavailable className="h-28" />
           ) : (
             <>
               <div className={`space-y-1.5 ${CARD_LIST_BODY}`}>
@@ -2329,7 +2254,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                 <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">{t('net_of_returns')}</span>
               </div>
               {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
-                <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+                <CardUnavailable className="h-28" />
               ) : (
                 <>
                   {customers.length === 0
@@ -2378,7 +2303,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
         {/* Best Hour */}
-        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => { setExpiryAlertsListOpen(true); void loadInsightList('expiring_products') }} />
+        <ExpiryAlertsCard summary={summary} pending={summaryPending} unavailable={summaryUnavailable} translateOr={translateOr} onOpen={openExpiryDetail} onViewMore={() => { setExpiryAlertsListOpen(true); void loadInsightList('expiring_products') }} />
 
         {/* Low Stock */}
         <div className="card flex flex-col">
@@ -2399,7 +2324,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               }
             }}
           >
-            {!lowStockRows.length
+            {summaryPending ? <div className="p-3"><CardSkeleton /></div> : summaryUnavailable ? <div className="p-3"><CardUnavailable /></div> : !lowStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
               : lowStockRows.map(p => (
                 <button
@@ -2444,7 +2369,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               }
             }}
           >
-            {!outOfStockRows.length
+            {summaryPending ? <div className="p-3"><CardSkeleton /></div> : summaryUnavailable ? <div className="p-3"><CardUnavailable /></div> : !outOfStockRows.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
               : outOfStockRows.map(p => (
                 <button
@@ -2476,7 +2401,6 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             analytics={analytics}
             analyticsPending={analyticsPending}
             analyticsUnavailable={analyticsUnavailable}
-            analyticsError={analyticsError}
             t={t}
             translateOr={translateOr}
             fmtUSD={fmtSplitUsd}
@@ -2546,7 +2470,6 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           analytics={analytics}
           analyticsPending={analyticsPending}
           analyticsUnavailable={analyticsUnavailable}
-          analyticsError={analyticsError}
           translateOr={translateOr}
           fmtUSD={fmtSplitUsd}
           onOpen={openPaymentDetail}

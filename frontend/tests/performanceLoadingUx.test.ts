@@ -1336,11 +1336,7 @@ assert.match(
   /const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000/,
   'dashboard summary should use an explicit timeout constant',
 )
-assert.match(
-  dashboard,
-  /const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000/,
-  'dashboard analytics should use an explicit timeout constant',
-)
+assert.match(dashboard, /const DASHBOARD_STARTUP_TIMEOUT_MS = 30000/, 'dashboard startup read should use an explicit timeout constant')
 assert.match(
   dashboard,
   /import \{ getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
@@ -1394,7 +1390,7 @@ function readDashboardTimeouts(node: ts.Node) {
   ts.forEachChild(node, readDashboardTimeouts)
 }
 readDashboardTimeouts(dashboardAst)
-// Startup, summary and analytics all read GET /api/dashboard/startup (summary/analytics take one half).
+// One combined read serves summary and analytics (GET /api/dashboard/startup).
 const method = 'getDashboardStartup'
 const dashboardTimeoutCalls: ts.CallExpression[] = []
 function visitDashboardTimeout(node: ts.Node) {
@@ -1403,14 +1399,14 @@ function visitDashboardTimeout(node: ts.Node) {
   ts.forEachChild(node, visitDashboardTimeout)
 }
 visitDashboardTimeout(dashboardAst)
-assert.equal(dashboardTimeoutCalls.length, 3, `every ${method} read must remain wrapped in withLoaderTimeout`)
+assert.equal(dashboardTimeoutCalls.length, 1, `every ${method} read must remain wrapped in withLoaderTimeout`)
 for (const timeoutCall of dashboardTimeoutCalls) {
   const query = { startDate: '2026-09-19', endDate: '2026-09-20', createdFrom: '2026-09-19 15:00:00', createdTo: '2026-09-19 19:01:00', granularity: 'day' }
   const result = Promise.resolve({ method })
   let dispatched = 0
   let bounded = 0
   const env = {
-    query, label: 'Dashboard summary',
+    query, getCurrentDashboardRange: () => query, label: 'Dashboard startup',
     ...dashboardTimeoutValues,
     getDashboardApi: () => ({ [method]: (actual: unknown) => { dispatched++; assert.deepEqual(actual, query); return result } }),
     withLoaderTimeout: (loader: () => unknown, label: string, timeout: number) => {
@@ -1422,21 +1418,9 @@ for (const timeoutCall of dashboardTimeoutCalls) {
   assert.equal(dispatched, 1, `${method} dispatches the canonical timed range once`)
   assert.equal(bounded, 1, `${method} dispatch stays inside its timeout wrapper`)
 }
-assert.match(
-  dashboard,
-  /const DASHBOARD_STARTUP_TIMEOUT_MS = 30000/,
-  'dashboard combined startup read should use an explicit timeout',
-)
-assert.match(
-  dashboard,
-  /summary == null && analytics == null && !startupAttemptedRef\.current[\s\S]*loadDashboardStartup\(\)/,
-  'dashboard should route the first empty load through the combined startup loader',
-)
-assert.match(
-  dashboard,
-  /\}, \[isActive, loadSummary\]\) \/\/ eslint-disable-line/,
-  'dashboard summary effect should not depend on range-bound startup or analytics loaders',
-)
+assert.match(dashboard, /const DASHBOARD_STARTUP_TIMEOUT_MS = 30000/, 'dashboard combined startup read should use an explicit timeout')
+assert.ok(dashboard.includes('const upToDate = hasDataRef.current && !staleWhileHiddenRef.current'), 'coming back to the page re-reads only when figures may have changed')
+assert.ok(dashboard.includes('}, [isActive, reloadStartup])'), 'the activation effect depends on the single range-bound loader')
 assert.doesNotMatch(
   dashboard,
   /catch \(error\) \{[\s\S]{0,360}set(?:Summary|Analytics)\(EMPTY_/,

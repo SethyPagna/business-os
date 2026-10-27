@@ -1829,6 +1829,8 @@
   "dashboard_formula_revenue": "Net revenue = gross sales − discounts − refunds",
   "dashboard_formula_stock_value": "Stock value = quantity on hand x unit cost",
   "dashboard_formula_store_discounts": "Store discounts are the cashier-entered sale discounts and product promotions.",
+  "dashboard_load_failed": "The dashboard could not be loaded.",
+  "dashboard_stale_notice": "Showing the last loaded figures; the latest refresh failed.",
   "data_reset": "Reset Data",
   "data_reset_confirm": "Are you sure you want to delete all data?",
   "data_rows_detected": "data rows detected",
