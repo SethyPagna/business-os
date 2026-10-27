@@ -74,6 +74,7 @@ async function scenario({ retired, mutate }) {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/db': { getDb: () => d1(sqlite) },
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),

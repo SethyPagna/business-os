@@ -270,6 +270,7 @@ const feesRoute = loadReal('routes/fees.ts', {
   // module loaded above, not a stub, so the order under test is the real one.
   '../lib/batchCode': batchCode,
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/telegram': { sendTelegramEvent: async () => false },
   // Real and pure: the expense DELETE now admits a stated version (expected_updated_at) through the same
   // helpers as the edit, so a partial stub here would only test the stub.

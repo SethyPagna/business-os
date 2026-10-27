@@ -134,6 +134,7 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
   '../lib/branchRoles': loadReal('lib/branchRoles.ts'),
   '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': loadReal('lib/branchRoles.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts') }),
@@ -220,10 +221,16 @@ async function main() {
     assert.equal(result.status, 200)
     assert.equal(result.body.fee.amount_usd, 1.2345)
     assert.equal(result.body.fee.amount_khr, 20.49)
+    // A changed riel is drawer cash: whole 100-riel notes (owner, 27 Oct 2026). 20.5 rounds to 21 riel and is refused,
+    // with nothing written; 2,099.5 rounds to 2,100 and is kept.
     result = await update({ fee_money_version: 1, amount_khr: '20.5', expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 400)
+    assert.equal(result.body.code, 'riel_cash_not_hundreds')
+    assert.equal(sqlite.prepare('SELECT amount_khr FROM fees WHERE id = 1').get().amount_khr, 20.49)
+    result = await update({ fee_money_version: 1, amount_khr: '2099.5', expectedUpdatedAt: row().updated_at })
     assert.equal(result.status, 200)
     assert.equal(result.body.fee.amount_usd, 1.2345)
-    assert.equal(result.body.fee.amount_khr, 21)
+    assert.equal(result.body.fee.amount_khr, 2100)
   })
   await check('CUTOVER-LD: an edit keeps the label the fee was recorded under after the rename; a branch change re-stamps it', async () => {
     // The consolidation's end state: branch 2 retired as "Old Shop" (role shop, successor LC Store), LC Store the selling branch.

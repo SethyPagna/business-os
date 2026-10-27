@@ -597,8 +597,6 @@ app.post('/', async (c) => {
   } catch {
     return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
   }
-  // An expense is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026).
-  if (!rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
   const requestedSaleId = optionalPositiveId(body.sale_id)
   const requestedBranchId = optionalPositiveId(body.branch_id)
@@ -643,6 +641,9 @@ app.post('/', async (c) => {
     }
     return c.json(feeOperationReceiptResponse(priorReceipt))
   }
+  // An expense is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026). Asked after the receipt
+  // lookup, so a request committed before the rule still replays its receipt.
+  if (!rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
 
   let saleId: number | null
   let branchId: number

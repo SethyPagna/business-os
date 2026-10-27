@@ -146,6 +146,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => activeD1 },
   '../lib/auth': {
@@ -318,6 +319,7 @@ async function main() {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(empty) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },

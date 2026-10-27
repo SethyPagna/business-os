@@ -119,7 +119,7 @@ assert.equal(helper.planHistoricalSaleLine({...historical,manual_discount_type:n
  f.raw.prepare("UPDATE sales SET sale_status='awaiting_payment',amount_paid_usd=0,amount_paid_khr=0,payment_details='[]' WHERE id=?").run([id])
  f.raw.prepare("INSERT INTO settings(key,value) VALUES('exchange_rate','5000') ON CONFLICT(key) DO UPDATE SET value='5000'").run()
  const beforePayment=f.raw.prepare('SELECT * FROM sales WHERE id=?').get([id]),beforePaymentLines=f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=?').all([id])
- const settled=await h.app.request(`/${id}/status`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({client_request_id:'historical-pay',sale_status:'completed',expected_exchange_rate:4000,payment_details:[{method:'Cash',amount_usd:20,amount_khr:920}]})},{DB:f.route},h.executionCtx)
+ const settled=await h.app.request(`/${id}/status`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({client_request_id:'historical-pay',sale_status:'completed',expected_exchange_rate:4000,payment_details:[{method:'Cash',amount_usd:20,amount_khr:1000}]})},{DB:f.route},h.executionCtx)
  assert.equal(settled.status,200,JSON.stringify(await settled.json()))
  const paid=f.raw.prepare('SELECT * FROM sales WHERE id=?').get([id])
  for(const key of ['money_precision_version','calculated_total_usd','rounding_adjustment_usd','subtotal_usd','subtotal_khr','discount_usd','discount_khr','total_usd','total_khr','exchange_rate'])assert.equal(paid[key],beforePayment[key],key)

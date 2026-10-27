@@ -1223,9 +1223,10 @@ app.post('/open', async (c) => {
   const floatUsdParsed = countedMoney(body.opening_float_usd); const floatKhrParsed = countedMoney(body.opening_float_khr)
   if (!floatUsdParsed.ok || !floatKhrParsed.ok) return c.json({ error: 'Opening cash counts must be finite, non-negative numbers or blank.' }, 400)
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
-  if (!rielCashAmountValid(floatKhr)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const existing = await readCurrent(db, policy, user.id, branchId)
   if (existing && !existing.cancelled_at) return c.json({ ...currentResponse(user, existing, policy, false), already_registered: true }, 200)
+  // Asked only of a float that is about to be written: a retried open answers already_registered as before.
+  if (!rielCashAmountValid(floatKhr)) return c.json(RIEL_COUNT_REFUSAL, 400)
   if (existing?.cancelled_at) {
     const inheritedReason = `Replacement after cancellation: ${existing.cancel_reason || 'Cancelled by administrator'}`.slice(0, 500)
     const replacement = await writeContinuation(db, user, existing, { reason: inheritedReason, floatUsd, floatKhr,
@@ -1415,13 +1416,14 @@ app.post('/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
-  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const nowIso = new Date().toISOString()
   const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(nowIso), Date.parse(nowIso))
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  // Asked last, of counts about to be written: a retried or refused close answers as it did before the rule.
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1460,7 +1462,6 @@ app.post('/:id/close', async (c) => {
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
-  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
@@ -1475,6 +1476,7 @@ app.post('/:id/close', async (c) => {
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }

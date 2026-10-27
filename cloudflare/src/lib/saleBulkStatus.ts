@@ -180,9 +180,6 @@ function parseRequest(raw: Row): BulkStatusRequest {
             for (const key of ['fee_usd', 'fee_khr'])
                 if (item.cancel[key] !== undefined && (!Number.isFinite(Number(item.cancel[key])) || Number(item.cancel[key]) < 0))
                     throw new SaleBulkError('Invalid per-sale cancellation fee.', 400);
-            // A lost fee is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026).
-            if (!rielCashAmountValid(Math.round(Number(item.cancel.fee_khr) || 0)))
-                throw new SaleBulkError('Riel paid in cash must be whole 100 riel notes.', 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [item.id] });
         }
         ids.add(item.id);
     }
@@ -362,6 +359,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
             fail('Request id was already used with different data.');
         return JSON.parse(String(previous.receipt_json));
     }
+    // A lost fee is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026). Asked after the receipt
+    // lookup, so a group committed before the rule still replays its receipt.
+    const rielFee = request.items.find(item => item.cancel && !rielCashAmountValid(Math.round(Number(item.cancel.fee_khr) || 0)));
+    if (rielFee)
+        throw new SaleBulkError('Riel paid in cash must be whole 100 riel notes.', 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [rielFee.id] });
     const ids = request.items.map(i => i.id);
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before

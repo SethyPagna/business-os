@@ -137,6 +137,7 @@ const route = loadReal('routes/shifts.ts', {
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },

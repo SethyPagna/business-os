@@ -168,6 +168,17 @@ async function main() {
     const g2 = await cancelled(39900)
     r.check('G1 cancel: a 39,950 riel lost fee is refused', () => refused(g1))
     r.check('G2 cancel: a 39,900 riel lost fee is accepted', () => ok(g2))
+    const groupCancel = async (khr) => {
+      const res = await sale([{ method: 'Cash', amount_usd: 10, amount_khr: 0 }]); ok(res)
+      const row = await h.one('SELECT id, sale_status, updated_at FROM sales WHERE id=?', res.body.id)
+      const out = await h.call('POST', '/api/sales/bulk-status', { client_request_id: key('group-cancel'), target_status: 'cancelled',
+        items: [{ id: row.id, expected_status: row.sale_status, expected_updated_at: row.updated_at, cancel: { reason: 'mistake', fee_khr: khr } }] }, `group cancel lost fee ${khr}`)
+      return { out, status: (await h.one('SELECT sale_status FROM sales WHERE id=?', row.id)).sale_status }
+    }
+    const g3 = await groupCancel(39950)
+    const g4 = await groupCancel(39900)
+    r.check('G3 group cancel: a 39,950 riel lost fee is refused and the sale is not cancelled', () => { refused(g3.out); assert.notEqual(g3.status, 'cancelled') })
+    r.check('G4 group cancel: a 39,900 riel lost fee is accepted', () => { ok(g4.out); assert.equal(g4.status, 'cancelled') })
 
     // ---- H. group relabel of the payment method (POST /api/sales/bulk-update) -----------------------------------------
     const relabel = async (khr) => {

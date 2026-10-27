@@ -143,6 +143,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
@@ -200,7 +201,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.deepEqual(overviews, [rootShift.id], 'T10: only the winning concurrent close schedules the Reports overview; an open schedules none')
   const parentBeforeReopen = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(rootShift.id)
 
-  const ordinarySameDay = await call('POST', '/open', { branch_id: 1, opening_float_usd: 99, opening_float_khr: 99 })
+  const ordinarySameDay = await call('POST', '/open', { branch_id: 1, opening_float_usd: 99, opening_float_khr: 9900 })
   assert.equal(ordinarySameDay.status, 200)
   assert.equal((await ordinarySameDay.json()).already_registered, true, 'ordinary same-day open returns the closed root and does not create a row')
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM shift_sessions WHERE parent_shift_id IS NULL').get().n, 1)

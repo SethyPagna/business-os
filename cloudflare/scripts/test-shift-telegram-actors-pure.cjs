@@ -202,6 +202,7 @@ async function main() {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
