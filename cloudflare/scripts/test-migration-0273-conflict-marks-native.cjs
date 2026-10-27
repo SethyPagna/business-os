@@ -84,7 +84,10 @@ check('the marks table refuses an unknown mark and a second mark of the same kin
   const db = seeded()
   db.exec(sql)
   db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'no_barcode')").run()
-  db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'zero_cost_confirmed')").run()
+  db.prepare("INSERT INTO product_conflict_marks(product_id, mark, confirmed_cost_usd) VALUES (1, 'zero_cost_confirmed', 0)").run()
+  assert.throws(() => db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (2, 'zero_cost_confirmed')").run(), /CHECK/, 'a $0 confirmation must carry the cost it confirmed')
+  assert.deepEqual(db.prepare("SELECT name FROM pragma_table_info('product_conflict_marks') WHERE name LIKE 'confirmed_%' ORDER BY name").all().map((c) => c.name),
+    ['confirmed_barcode', 'confirmed_cost_khr', 'confirmed_cost_usd'], 'the mark holds the value it confirmed')
   assert.throws(() => db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'no_barcode')").run(), /UNIQUE|PRIMARY/)
   assert.throws(() => db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (2, 'dismissed')").run(), /CHECK/)
   db.close()

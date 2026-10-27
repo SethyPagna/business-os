@@ -60,7 +60,13 @@ export function parseProductConflictMark(value: unknown): ProductConflictMark | 
 const EMPTY_BARCODE_SQL = `p.is_active = 1 AND (p.barcode IS NULL OR trim(p.barcode, ${BLANK_CHARS_SQL}) = '')`
 const PLACEHOLDER_BARCODE_SQL = `p.is_active = 1 AND p.barcode IS NOT NULL AND trim(p.barcode, ${BLANK_CHARS_SQL}) <> '' AND trim(p.barcode, ${BLANK_CHARS_SQL}) NOT GLOB '*[^0]*'`
 const NOT_GROUP_PARENT = 'NOT (COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)'
-const HAS_MARK = (mark: ProductConflictMark, alias: string): string => `EXISTS (SELECT 1 FROM product_conflict_marks m WHERE m.product_id = ${alias}.id AND m.mark = '${mark}')`
+// A mark counts only while the product still holds the value it confirmed (IS, so NULL matches NULL): a changed cost or barcode lists the
+// product again, and putting the old value back makes the mark count again. Migration 0273 stores the value on the mark row.
+const BOUND = (mark: ProductConflictMark, m: string, p: string): string => (mark === 'zero_cost_confirmed'
+  ? `${m}.confirmed_cost_usd IS ${p}.cost_price_usd AND ${m}.confirmed_cost_khr IS ${p}.cost_price_khr`
+  : `${m}.confirmed_barcode IS ${p}.barcode`)
+const HAS_MARK = (mark: ProductConflictMark, alias: string): string =>
+  `EXISTS (SELECT 1 FROM product_conflict_marks m WHERE m.product_id = ${alias}.id AND m.mark = '${mark}' AND ${BOUND(mark, 'm', alias)})`
 const NOT_MARKED_NO_BARCODE = `NOT ${HAS_MARK('no_barcode', 'p')}`
 const WATERMARK = `CAST((SELECT value FROM system_flags WHERE key = 'cost_zero_watermark') AS INTEGER)`
 
@@ -229,7 +235,19 @@ const markableSql = (mark: ProductConflictMark): string => (mark === 'zero_cost_
   ? `EXISTS (SELECT 1 FROM products p WHERE p.id = @pid AND ${unprovenZero('p')})`
   : `EXISTS (SELECT 1 FROM products p WHERE p.id = @pid AND ((${EMPTY_BARCODE_SQL}) OR (${PLACEHOLDER_BARCODE_SQL})))`)
 
-const markedSql = (mark: ProductConflictMark): string => `EXISTS (SELECT 1 FROM product_conflict_marks WHERE product_id = @pid AND mark = '${mark}')`
+/** The mark is in force: its row exists AND the product still holds the value it confirmed. */
+const markedSql = (mark: ProductConflictMark): string =>
+  `EXISTS (SELECT 1 FROM product_conflict_marks m JOIN products bp ON bp.id = m.product_id WHERE m.product_id = @pid AND m.mark = '${mark}' AND ${BOUND(mark, 'm', 'bp')})`
+/** The row exists, in force or not (taking a mark back deletes a stale row too). */
+const presentSql = (mark: ProductConflictMark): string => `EXISTS (SELECT 1 FROM product_conflict_marks WHERE product_id = @pid AND mark = '${mark}')`
+/** Writing a mark stores the value it confirms, read in the same statement that writes it. REPLACE swaps a stale row for the current one. */
+const writeMarkSql = (mark: ProductConflictMark): string => (mark === 'zero_cost_confirmed'
+  ? `INSERT OR REPLACE INTO product_conflict_marks (product_id, mark, confirmed_cost_usd, confirmed_cost_khr, marked_by_id, marked_by_name)
+      SELECT id, '${mark}', cost_price_usd, cost_price_khr, @uid, @uname FROM products WHERE id = @pid`
+  : `INSERT OR REPLACE INTO product_conflict_marks (product_id, mark, confirmed_barcode, marked_by_id, marked_by_name)
+      SELECT id, '${mark}', barcode, @uid, @uname FROM products WHERE id = @pid`)
+/** Already in the asked state: a set that is in force, or a take-back with no row. */
+const isNoop = (state: { marked: number; present: number }, set: boolean): boolean => (set ? Boolean(state.marked) : !state.present)
 
 const MARK_TEXT: Record<ProductConflictMark, { set: [string, string, string]; unset: [string, string, string] }> = {
   zero_cost_confirmed: {
@@ -242,12 +260,13 @@ const MARK_TEXT: Record<ProductConflictMark, { set: [string, string, string]; un
   },
 }
 
-async function productState(db: Db, input: ProductConflictMarkInput): Promise<{ active: number; markable: number; marked: number }> {
+async function productState(db: Db, input: ProductConflictMarkInput): Promise<{ active: number; markable: number; marked: number; present: number }> {
   const row = await db.prepare(`SELECT
     (SELECT COUNT(*) FROM products WHERE id = @pid AND is_active = 1) AS active,
     (SELECT ${markableSql(input.mark)}) AS markable,
-    (SELECT ${markedSql(input.mark)}) AS marked`).get<{ active: number; markable: number; marked: number }>({ pid: input.product_id })
-  return { active: Number(row?.active || 0), markable: Number(row?.markable || 0), marked: Number(row?.marked || 0) }
+    (SELECT ${markedSql(input.mark)}) AS marked,
+    (SELECT ${presentSql(input.mark)}) AS present`).get<{ active: number; markable: number; marked: number; present: number }>({ pid: input.product_id })
+  return { active: Number(row?.active || 0), markable: Number(row?.markable || 0), marked: Number(row?.marked || 0), present: Number(row?.present || 0) }
 }
 
 // The value a "confirmed correct" decision stands on: the catalog cost for a $0 confirmation, the barcode text for "no barcode".
@@ -295,7 +314,7 @@ const valueChanged = (mark: ProductConflictMark): ProductConflictMarkError => (m
 export async function preflightProductConflictMark(db: Db, input: ProductConflictMarkInput): Promise<'noop' | 'ok'> {
   const state = await productState(db, input)
   if (!state.active) throw new ProductConflictMarkError(404, 'product_not_found', 'Product not found')
-  if (Boolean(state.marked) === input.set) return 'noop'
+  if (isNoop(state, input.set)) return 'noop'
   if (input.set && !state.markable) {
     throw input.mark === 'zero_cost_confirmed'
       ? new ProductConflictMarkError(409, 'zero_not_unconfirmed', 'This cost is no longer an unconfirmed $0. Refresh and check it.')
@@ -344,10 +363,10 @@ export async function setProductConflictMark(
   const [label, undoLabel, redoLabel] = MARK_TEXT[input.mark][input.set ? 'set' : 'unset']
   const payload = JSON.stringify({ applier: PRODUCT_CONFLICT_APPLIER, product_id: input.product_id, mark: input.mark, set: input.set })
   const statements: Statement[] = [
-    { sql: guardSql(`${input.set ? `NOT ${markedSql(input.mark)} AND ${markableSql(input.mark)}${expected ? ` AND ${confirmedSql(input.mark)}` : ''}` : markedSql(input.mark)}`),
+    { sql: guardSql(`${input.set ? `NOT ${markedSql(input.mark)} AND ${markableSql(input.mark)}${expected ? ` AND ${confirmedSql(input.mark)}` : ''}` : presentSql(input.mark)}`),
       params: { pid: input.product_id, ...(expected ? confirmedParams(expected) : {}) } },
     input.set
-      ? { sql: 'INSERT INTO product_conflict_marks (product_id, mark, marked_by_id, marked_by_name) VALUES (@pid, @mark, @uid, @uname)', params: { pid: input.product_id, mark: input.mark, uid: actor.id, uname: actor.name } }
+      ? { sql: writeMarkSql(input.mark), params: { pid: input.product_id, uid: actor.id, uname: actor.name } }
       : { sql: 'DELETE FROM product_conflict_marks WHERE product_id = @pid AND mark = @mark', params: { pid: input.product_id, mark: input.mark } },
     { sql: `INSERT INTO action_history (scope, entity, entity_id, label, undo_label, redo_label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
       VALUES ('products', 'product', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable', @payload, @payload, @uid, @uname)`,
@@ -363,7 +382,7 @@ export async function setProductConflictMark(
     // The guard fired: someone changed the product between the check and the write. Say which refusal now applies.
     if (isChangedError(error)) {
       const now = await productState(db, input)
-      if (Boolean(now.marked) === input.set) return { product_id: input.product_id, mark: input.mark, set: input.set, changed: false, action_history_id: 0 }
+      if (isNoop(now, input.set)) return { product_id: input.product_id, mark: input.mark, set: input.set, changed: false, action_history_id: 0 }
       if (expected && JSON.stringify(await readConfirmedValue(db, input)) !== JSON.stringify(expected)) throw valueChanged(input.mark)
       throw new ProductConflictMarkError(409, 'product_changed', 'This product changed after you opened it. Refresh and try again.')
     }
@@ -406,15 +425,15 @@ export async function replayProductConflictMark(
   const target = direction === 'undo' ? !payload.set : payload.set
   const input: ProductConflictMarkInput = { product_id: productId, mark, set: target }
   const state = await productState(db, input)
-  if (Boolean(state.marked) === target) throw new ProductConflictReplayError('This mark is already in that state; there is nothing to change.', 'undo_already_done')
+  if (isNoop(state, target)) throw new ProductConflictReplayError('This mark is already in that state; there is nothing to change.', 'undo_already_done')
   const changed = (): ProductConflictReplayError => new ProductConflictReplayError(
     `The product changed after this action, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'}. Nothing was changed.`, 'undo_record_changed')
   if (target && !state.markable) throw changed()
   try {
     await db.batch([
-      { sql: guardSql(target ? `NOT ${markedSql(mark)} AND ${markableSql(mark)}` : markedSql(mark)), params: { pid: productId } },
+      { sql: guardSql(target ? `NOT ${markedSql(mark)} AND ${markableSql(mark)}` : presentSql(mark)), params: { pid: productId } },
       target
-        ? { sql: 'INSERT INTO product_conflict_marks (product_id, mark, marked_by_id, marked_by_name) VALUES (@pid, @mark, @uid, @uname)', params: { pid: productId, mark, uid: actor.id, uname: actor.name } }
+        ? { sql: writeMarkSql(mark), params: { pid: productId, uid: actor.id, uname: actor.name } }
         : { sql: 'DELETE FROM product_conflict_marks WHERE product_id = @pid AND mark = @mark', params: { pid: productId, mark } },
       buildAuditStatement(actor.id, actor.name, target ? 'conflict_mark' : 'conflict_unmark', 'product', String(productId), { via: 'undo_applier', direction, mark }),
       ordinaryBusinessMaintenanceGuard,

@@ -8,6 +8,10 @@
 --   1. product_conflict_marks: one row per (product, mark). mark 'zero_cost_confirmed' proves a $0 catalog cost is real; mark 'no_barcode'
 --      removes the product from both barcode lists. Deleting the row reverses either. The route writes an audit row and an undo record
 --      with every change. No cost, stock, lot or sale column is touched by a mark.
+--      A mark is BOUND to the value it confirmed: confirmed_cost_usd / confirmed_cost_khr (the catalog cost, NULL = unknown) for a $0
+--      confirmation and confirmed_barcode (the text, NULL = none) for "no barcode". The Conflicts queries count a mark only while the
+--      product still holds exactly that value (IS comparison, so NULL matches NULL), so a changed value lists the product again with no
+--      change to any writer, and putting the old value back (an undo, or retyping it) makes the mark count again.
 --   2. system_flags 'cost_zero_watermark': the highest products.id when this migration is applied, as text. A $0 catalog cost on a product
 --      at or below it was written when the Worker could not store "unknown", so it is unproven until confirmed; a product created after
 --      it can only hold a $0 a person typed. Nothing old is rewritten.
@@ -44,7 +48,11 @@ CREATE TABLE product_conflict_marks (
   marked_by_id INTEGER,
   marked_by_name TEXT,
   marked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (product_id, mark)
+  confirmed_cost_usd REAL,
+  confirmed_cost_khr REAL,
+  confirmed_barcode TEXT,
+  PRIMARY KEY (product_id, mark),
+  CHECK (mark <> 'zero_cost_confirmed' OR confirmed_cost_usd IS NOT NULL)
 );
 
 CREATE INDEX idx_products_unknown_cost ON products(is_active, id) WHERE cost_price_usd IS NULL AND is_active = 1;
@@ -66,5 +74,6 @@ SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE name IN ('product_con
     'idx_product_batches_unknown_cost','idx_damaged_lots_unknown_cost','idx_products_zero_cost','idx_products_empty_barcode',
     'idx_products_placeholder_barcode')) = 7
   AND (SELECT COUNT(*) FROM product_conflict_marks) = 0
+  AND (SELECT COUNT(*) FROM pragma_table_info('product_conflict_marks') WHERE name IN ('confirmed_cost_usd','confirmed_cost_khr','confirmed_barcode')) = 3
   AND (SELECT value FROM system_flags WHERE key = 'cost_zero_watermark') = CAST((SELECT COALESCE(MAX(id), 0) FROM products) AS TEXT)
 THEN 1 ELSE json_extract('[]','$[conflict_marks_0273_post]') END;

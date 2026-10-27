@@ -427,7 +427,7 @@ async function main() {
     const live = seed()
     const { mod: liveMod, adapter: liveAdapter, undoAppliers } = loadProductsRoute(live)
     seedStockFixture(live.db, () => {
-      live.db.prepare("INSERT INTO product_conflict_marks(product_id, mark) VALUES (?, 'zero_cost_confirmed'), (?, 'no_barcode'), (?, 'no_barcode')").run(DUP, DUP, KEEPER)
+      live.db.prepare("INSERT INTO product_conflict_marks(product_id, mark, confirmed_cost_usd, confirmed_barcode) VALUES (?, 'zero_cost_confirmed', 6.45, NULL), (?, 'no_barcode', NULL, '03614274226546'), (?, 'no_barcode', NULL, '3614274226546')").run(DUP, DUP, KEEPER)
     })
     const marks = () => live.db.prepare("SELECT product_id || ':' || mark AS k FROM product_conflict_marks ORDER BY 1").all().map((r) => r.k)
     const before = marks()

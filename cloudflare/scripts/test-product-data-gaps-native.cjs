@@ -70,8 +70,9 @@ seedStockFixture(db, () => {
   held.run(9, 2, 2)
   held.run(10, 2, 0)
   db.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,source) VALUES(4,0,'edit')").run()
-  db.prepare("INSERT INTO product_conflict_marks(product_id,mark) VALUES(3,'zero_cost_confirmed')").run()
-  db.prepare("INSERT INTO product_conflict_marks(product_id,mark) VALUES(24,'no_barcode')").run()
+  // A mark is bound to the value it confirmed, so each fixture mark is written the way the route writes it: from the row's current value.
+  db.prepare("INSERT INTO product_conflict_marks(product_id,mark,confirmed_cost_usd,confirmed_cost_khr) SELECT id,'zero_cost_confirmed',cost_price_usd,cost_price_khr FROM products WHERE id=3").run()
+  db.prepare("INSERT INTO product_conflict_marks(product_id,mark,confirmed_barcode) SELECT id,'no_barcode',barcode FROM products WHERE id=24").run()
   // The lot triggers derive catalog costs; restore the fixture's intended catalog costs.
   const set = db.prepare('UPDATE products SET cost_price_usd = ? WHERE id = ?')
   set.run(0, 5); set.run(2, 7); set.run(2, 8); set.run(0, 31)
@@ -320,6 +321,74 @@ async function main() {
     const unplussed = pageSql('unknown_cost').replace('WHERE +p.is_active = 1', 'WHERE p.is_active = 1')
     assert.notEqual(unplussed, pageSql('unknown_cost'))
     assert.ok(plan(unplussed).includes('idx_products_active_grouped_pg'), 'control: the plain term walks the active-product index')
+  })
+
+  // ---- a mark holds only for the value it confirmed (owner, 27 Oct 2026) ----
+  // Every write below is a raw UPDATE, which is exactly what any writer's undo does: the lists must follow the VALUE, not the writer.
+  const write = (sql, ...args) => seedStockFixture(db, () => db.prepare(sql).run(...args))
+  const unknownIds = async () => ids(await get('/data-gaps?kind=unknown_cost&limit=100'))
+  const barcodeIds = async (kind) => ids(await get(`/data-gaps?kind=${kind}&limit=100`))
+
+  await check('a confirmed $0 stops holding when the cost changes, and holds again when the identical cost is back (undo or retype)', async () => {
+    // Product 3 holds a confirmed $0 (fixture: bound to usd 0 and its khr).
+    assert.ok(!(await unknownIds()).includes(3), 'control: the confirmation hides it')
+    const before = db.prepare('SELECT cost_price_usd usd, cost_price_khr khr FROM products WHERE id = 3').get()
+    write('UPDATE products SET cost_price_khr = 4000 WHERE id = 3')
+    assert.ok((await unknownIds()).includes(3), 'the khr cost changed: the confirmation no longer applies, listed again')
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = 3').get().n, 1, 'the stale row is kept, not deleted')
+    write('UPDATE products SET cost_price_khr = ? WHERE id = 3', before.khr)
+    assert.ok(!(await unknownIds()).includes(3), 'the identical old cost is back (what an undo does): hidden again')
+    write('UPDATE products SET cost_price_usd = 3 WHERE id = 3')
+    assert.ok(!(await unknownIds()).includes(3), 'a real cost needs no confirmation')
+    write('UPDATE products SET cost_price_usd = NULL WHERE id = 3')
+    assert.ok((await unknownIds()).includes(3), 'NULL cost is unknown and flagged whatever was confirmed before')
+    write('UPDATE products SET cost_price_usd = ? WHERE id = 3', before.usd)
+    assert.ok(!(await unknownIds()).includes(3), 'back to the confirmed $0: hidden again')
+  })
+
+  await check('confirming again at the new value replaces the stale mark, and the old value no longer hides it', async () => {
+    write('UPDATE products SET cost_price_khr = 4000 WHERE id = 3')
+    assert.ok((await unknownIds()).includes(3))
+    const again = await post({ product_id: 3, mark: 'zero_cost_confirmed', set: true })
+    assert.equal(again.status, 200, JSON.stringify(again.json))
+    assert.equal(again.json.changed, true, 'a stale mark is not "already confirmed"')
+    assert.deepEqual({ ...db.prepare("SELECT confirmed_cost_usd usd, confirmed_cost_khr khr FROM product_conflict_marks WHERE product_id = 3 AND mark = 'zero_cost_confirmed'").get() }, { usd: 0, khr: 4000 })
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = 3").get().n, 1, 'one row per product and mark')
+    assert.ok(!(await unknownIds()).includes(3))
+    write('UPDATE products SET cost_price_khr = NULL WHERE id = 3')
+    assert.ok((await unknownIds()).includes(3), 'the new confirmation is bound to khr 4000, not to the old value')
+    write('UPDATE products SET cost_price_khr = 4000 WHERE id = 3')
+    assert.ok(!(await unknownIds()).includes(3))
+  })
+
+  await check('a no-barcode mark stops holding when a barcode is added and the barcode is later re-emptied to a different blank', async () => {
+    // Product 24: barcode NULL, marked "no barcode".
+    assert.ok(!(await barcodeIds('empty_barcode')).includes(24), 'control: the mark hides it')
+    write("UPDATE products SET barcode = '885000000999' WHERE id = 24")
+    assert.ok(!(await barcodeIds('empty_barcode')).includes(24), 'it has a barcode')
+    write("UPDATE products SET barcode = '' WHERE id = 24")
+    assert.ok((await barcodeIds('empty_barcode')).includes(24), 're-emptied to a blank string, which is not the NULL the mark confirmed: listed again')
+    write("UPDATE products SET barcode = '0' WHERE id = 24")
+    assert.ok((await barcodeIds('placeholder_barcode')).includes(24), 'the old placeholder is listed too')
+    write('UPDATE products SET barcode = NULL WHERE id = 24')
+    assert.ok(!(await barcodeIds('empty_barcode')).includes(24), 'the identical value (NULL) is back: the confirmed fact is true again, hidden')
+  })
+
+  await check('marking no-barcode again after the barcode changed binds the new value, and Take back works on a stale row', async () => {
+    write("UPDATE products SET barcode = '' WHERE id = 24")
+    assert.ok((await barcodeIds('empty_barcode')).includes(24))
+    assert.equal((await post({ product_id: 24, mark: 'no_barcode', set: true })).json.changed, true)
+    assert.ok(!(await barcodeIds('empty_barcode')).includes(24))
+    write('UPDATE products SET barcode = NULL WHERE id = 24')
+    assert.ok((await barcodeIds('empty_barcode')).includes(24), 'bound to the blank string now, not to NULL')
+    const taken = await post({ product_id: 24, mark: 'no_barcode', set: false })
+    assert.equal(taken.json.changed, true, 'taking back a stale row removes it')
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = 24").get().n, 0)
+    const none = await post({ product_id: 24, mark: 'no_barcode', set: false })
+    assert.equal(none.json.changed, false)
+    // Counts follow the same rule.
+    const counts = (await get('/data-gaps/counts')).json.counts
+    assert.equal(counts.empty_barcode, (await barcodeIds('empty_barcode')).length)
   })
 
   if (failed) throw new Error(failed + ' data-gap checks failed')
