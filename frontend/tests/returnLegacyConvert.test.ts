@@ -6,6 +6,7 @@
 // Run: node tests/returnLegacyConvert.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS, auditActionLabel } from '../src/utils/auditVocabulary.ts'
 import { canConvertLegacyReturns, isLegacyReturnOnExactSale, legacyConvertAccess, legacyConvertFailureText, legacyConvertReasonText } from '../src/components/returns/helpers/returnLegacyConvert.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
@@ -143,5 +144,10 @@ for (const key of ['return_convert_history_one', 'return_convert_history_many', 
   assert.ok(km[key] && /[ក-៿]/.test(km[key]) && !/ទម្រង់|បម្លែង/.test(km[key]), `km.json ${key}`)
 }
 assert.match(lib, /'count',@count,'return_number',@returnNumber/, 'the payload carries what the translated row needs')
-assert.match(read('../src/utils/auditVocabulary.ts'), /return_money_convert: \['return_convert_title', 'Update money details'\]/, 'Records name the action in the pack')
+// It is an ACTION (audit_logs.action), never an entity: the Worker's section map (test-audit-log-sections-pure.cjs) needs
+// every labelled entity to have a section, and the row's entity stays 'return'.
+const packT = (key: string, fallback: string) => en[key] ?? fallback
+assert.equal(auditActionLabel('return_money_convert', packT), 'Update money details', 'Records name the action in the pack')
+assert.ok(!('return_money_convert' in AUDIT_ENTITY_LABELS), 'return_money_convert is an action label, not an entity label')
+assert.equal(AUDIT_ACTION_LABELS.return_money_convert?.[0], 'return_convert_title')
 console.log('PASS History rows, done toasts, Records and Worker refusals say "money details", never "format"')
