@@ -119,3 +119,29 @@ for (const key of [...keys, 'money_precision_review_needed']) {
 }
 assert.ok(!('return_legacy_edit_unavailable' in en) && !('return_legacy_edit_unavailable' in km), 'the unreachable 990 sentence is retired from both packs')
 console.log('PASS the lock reaches the Edit form, both list rows and the bulk bar, in both languages')
+
+// --- History and Records say "money details" too (owner 27 Oct) ---------------------------------------------------------
+// Every string the Worker stores or sends for this feature can reach a screen: the History row (label / undo_label /
+// redo_label, shown as the done toast), and a replay refusal's message. None may say "format".
+const NO_FORMAT = /format|\bv[01]\b/i
+const labelsBlock = lib.slice(lib.indexOf('export const RETURN_LEGACY_CONVERT_HISTORY_LABELS'), lib.indexOf('} as const', lib.indexOf('export const RETURN_LEGACY_CONVERT_HISTORY_LABELS')))
+const labels = [...labelsBlock.matchAll(/^\s*(one|many|undo|redo): '([^']+)'/gm)].map((match) => [match[1], match[2]])
+assert.deepEqual(labels.map(([name]) => name), ['one', 'many', 'undo', 'redo'], 'the four stored History labels')
+for (const [name, text] of labels) assert.doesNotMatch(text, NO_FORMAT, `History label ${name}: "${text}"`)
+const historyInsert = lib.slice(lib.indexOf('INSERT INTO action_history('), lib.indexOf('FROM undo_snapshots WHERE id=', lib.indexOf('INSERT INTO action_history(')))
+assert.match(historyInsert, /@label,@undoLabel,@redoLabel,/, 'the stored labels come from the checked constants, never an inline literal')
+for (const literal of historyInsert.match(/'[^']*'/g) || []) assert.doesNotMatch(literal, NO_FORMAT, `no inline History text: ${literal}`)
+const failures = [...lib.matchAll(/fail\((['"])((?:(?!\1).)+)\1/g)].map((match) => match[2])
+assert.ok(failures.length >= 15, `the refusal messages were found (${failures.length})`)
+for (const message of failures) assert.doesNotMatch(message, NO_FORMAT, `Worker refusal text: ${message}`)
+const bar = read('../src/components/shared/ActionHistoryBar.tsx')
+assert.match(bar, /if \(p\?\.applier === 'return\.legacy_convert'\) return legacyConvertHistoryLabel\(item, T\)/, 'the History row is translated for this applier')
+assert.match(bar, /const doneLabel = serverDoneLabel\(item, direction, T\)/, 'the Undo/Redo done text is translated for this applier')
+for (const key of ['return_convert_history_one', 'return_convert_history_many', 'return_convert_history_undo', 'return_convert_history_redo']) {
+  assert.ok(bar.includes(`T('${key}'`), `ActionHistoryBar uses ${key}`)
+  assert.ok(en[key] && !NO_FORMAT.test(en[key]), `en.json ${key}`)
+  assert.ok(km[key] && /[ក-៿]/.test(km[key]) && !/ទម្រង់|បម្លែង/.test(km[key]), `km.json ${key}`)
+}
+assert.match(lib, /'count',@count,'return_number',@returnNumber/, 'the payload carries what the translated row needs')
+assert.match(read('../src/utils/auditVocabulary.ts'), /return_money_convert: \['return_convert_title', 'Update money details'\]/, 'Records name the action in the pack')
+console.log('PASS History rows, done toasts, Records and Worker refusals say "money details", never "format"')

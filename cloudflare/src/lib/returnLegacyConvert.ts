@@ -47,6 +47,14 @@ import { bumpVersion } from './cache'
 import type { UndoApplierContext, UndoApplierOutcome } from './undoAppliers'
 
 export const RETURN_LEGACY_CONVERT_KIND = 'return.legacy_convert'
+/** Stored History text (the English fallback; the History bar shows the return_convert_history_* pack keys for this applier,
+ * from the payload's count / return_number). Owner, 27 Oct 2026: the screen says "money details", never "format". */
+export const RETURN_LEGACY_CONVERT_HISTORY_LABELS = {
+  one: 'Update money details of return {number}',
+  many: 'Update money details of {count} returns',
+  undo: 'Undo update of money details',
+  redo: 'Redo update of money details',
+} as const
 export const RETURN_LEGACY_CONVERT_LIMIT = 50
 /** Four-place line detail may move by less than half a cent; the cent payout may not move at all. */
 export const RETURN_LEGACY_CONVERT_LINE_TOLERANCE_USD = 0.005
@@ -391,7 +399,7 @@ type SnapshotRow = { id: number; status: string; payload_json: string; created_b
 async function findOperation(db: D1Compat, operationId: string): Promise<SnapshotRow | undefined> {
   const rows = await db.prepare(`SELECT id,status,payload_json,created_by_id FROM undo_snapshots
     WHERE kind=@kind AND json_extract(payload_json,'$.operation_id')=@operation LIMIT 2`).all<SnapshotRow>({ kind: RETURN_LEGACY_CONVERT_KIND, operation: operationId })
-  if (rows.length > 1) fail('This conversion was recorded twice. Ask an administrator to review it.', 409, 'return_convert_duplicate')
+  if (rows.length > 1) fail('This update was recorded twice. Ask an administrator to review it.', 409, 'return_convert_duplicate')
   return rows[0]
 }
 function readStored(row: SnapshotRow): Stored {
@@ -399,7 +407,7 @@ function readStored(row: SnapshotRow): Stored {
     const stored = JSON.parse(row.payload_json) as Stored
     if (stored.version !== 1 || !Array.isArray(stored.members) || !Number.isSafeInteger(stored.generation)) throw new Error('shape')
     return stored
-  } catch { return fail('The conversion record cannot be read.', 409, 'return_convert_unreadable') }
+  } catch { return fail('The update record cannot be read.', 409, 'return_convert_unreadable') }
 }
 function receipt(stored: Stored, row: SnapshotRow, replayed: boolean) {
   return { success: true, replayed, operation_id: stored.operation_id, history_id: stored.history_id ?? null,
@@ -410,16 +418,16 @@ export async function applyLegacyReturnConversion(env: Env, userInput: SessionUs
   const user = authorize(userInput)
   const db = getDb(env)
   const requestId = String(body.client_request_id ?? '').trim().slice(0, 120)
-  if (!requestId) fail('Preview the conversion again before confirming it.', 400, 'client_request_id_required')
+  if (!requestId) fail('Preview the update again before confirming it.', 400, 'client_request_id_required')
   const operationId = `${user.id}:${requestId}`
   const existing = await findOperation(db, operationId)
   if (existing) {
-    if (Number(existing.created_by_id) !== Number(user.id)) fail('Conversion not found.', 404, 'return_convert_not_found')
+    if (Number(existing.created_by_id) !== Number(user.id)) fail('Update not found.', 404, 'return_convert_not_found')
     return { ...receipt(readStored(existing), existing, true), rows: [] as ConvertPreviewRow[] }
   }
   const plan = await planLegacyReturnConversion(env, body.return_ids)
   if (typeof body.expected_digest !== 'string' || body.expected_digest !== plan.digest) {
-    fail('These returns changed since the preview. Nothing was converted. Open the preview again.', 409, 'return_convert_preview_stale')
+    fail('These returns changed since the preview. Nothing was updated. Open the preview again.', 409, 'return_convert_preview_stale')
   }
   // Idempotent: nothing left to convert (every selected return already is) is a success that writes nothing.
   if (!plan.members.length) return { success: true, replayed: false, operation_id: null, history_id: null, status: 'applied' as const, converted: [] as number[], rows: plan.rows }
@@ -429,8 +437,8 @@ export async function applyLegacyReturnConversion(env: Env, userInput: SessionUs
   const lookup = `SELECT id FROM undo_snapshots WHERE kind=@kind AND json_extract(payload_json,'$.operation_id')=@operation`
   const params = { kind: RETURN_LEGACY_CONVERT_KIND, operation: operationId, user: user.id, name: actorSnapshot(user) }
   const label = plan.members.length === 1
-    ? `Update money details of return ${plan.members[0].return_number || plan.members[0].id}`
-    : `Update money details of ${plan.members.length} returns`
+    ? RETURN_LEGACY_CONVERT_HISTORY_LABELS.one.replace('{number}', String(plan.members[0].return_number || plan.members[0].id))
+    : RETURN_LEGACY_CONVERT_HISTORY_LABELS.many.replace('{count}', String(plan.members.length))
   const statements: Statement[] = [
     guard(`NOT EXISTS(${lookup})`, params),
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@sales) j WHERE COALESCE((SELECT revision FROM sale_write_revisions
@@ -440,9 +448,12 @@ export async function applyLegacyReturnConversion(env: Env, userInput: SessionUs
       params: { ...params, payload: JSON.stringify(stored) } },
     ...writeStatements(plan.members, 'after', stamp),
     { sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
-      SELECT 'returns','return',@entityId,@label,'Undo return format conversion','Redo return format conversion',1,'undoable',
-        json_object('applier',@kind,'operation_id',@operation,'snapshot_id',id,'generation',0),json_object('applier',@kind,'operation_id',@operation,'snapshot_id',id,'generation',0),@user,@name
-      FROM undo_snapshots WHERE id=(${lookup})`, params: { ...params, label, entityId: String(plan.members[0].id) } },
+      SELECT 'returns','return',@entityId,@label,@undoLabel,@redoLabel,1,'undoable',
+        json_object('applier',@kind,'operation_id',@operation,'snapshot_id',id,'generation',0,'count',@count,'return_number',@returnNumber),
+        json_object('applier',@kind,'operation_id',@operation,'snapshot_id',id,'generation',0,'count',@count,'return_number',@returnNumber),@user,@name
+      FROM undo_snapshots WHERE id=(${lookup})`, params: { ...params, label, entityId: String(plan.members[0].id), undoLabel: RETURN_LEGACY_CONVERT_HISTORY_LABELS.undo,
+        redoLabel: RETURN_LEGACY_CONVERT_HISTORY_LABELS.redo, count: plan.members.length,
+        returnNumber: plan.members.length === 1 ? String(plan.members[0].return_number || plan.members[0].id) : null } },
     { sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.history_id',
         (SELECT id FROM action_history WHERE json_extract(undo_payload,'$.applier')=@kind AND json_extract(undo_payload,'$.operation_id')=@operation),
         '$.fingerprint',${FINGERPRINT_SQL}) WHERE id=(${lookup})`, params: { ...params, saleIds } },
@@ -453,14 +464,14 @@ export async function applyLegacyReturnConversion(env: Env, userInput: SessionUs
   try { await db.batch(statements) } catch (error) {
     const committed = await findOperation(db, operationId)
     if (committed) return { ...receipt(readStored(committed), committed, true), rows: plan.rows }
-    if (/ordinary_business_maintenance/i.test(String(error))) fail('Saving is paused for maintenance. Nothing was converted.', 503, 'maintenance_active')
+    if (/ordinary_business_maintenance/i.test(String(error))) fail('Saving is paused for maintenance. Nothing was updated.', 503, 'maintenance_active')
     if (GUARD_FAILURE.test(String(error)) || /money_precision_invalid_returns/.test(String(error))) {
-      fail('A return on this sale changed while converting. Nothing was converted. Open the preview again.', 409, 'return_convert_changed')
+      fail('A return on this sale changed while updating. Nothing was updated. Open the preview again.', 409, 'return_convert_changed')
     }
     throw error
   }
   const committed = await findOperation(db, operationId)
-  if (!committed) fail('The conversion result is uncertain. Check the return before trying again.', 503, 'return_convert_uncertain')
+  if (!committed) fail('The update result is uncertain. Check the return before trying again.', 503, 'return_convert_uncertain')
   return { ...receipt(readStored(committed), committed, false), rows: plan.rows }
 }
 
@@ -469,15 +480,15 @@ export async function replayLegacyReturnConversion(payload: Record<string, unkno
   const user = authorize(ctx.user)
   const db = getDb(ctx.env)
   const snapshot = await findOperation(db, String(payload.operation_id || ''))
-  if (!snapshot || snapshot.id !== Number(payload.snapshot_id)) fail('Conversion record not found.', 404, 'return_convert_not_found')
+  if (!snapshot || snapshot.id !== Number(payload.snapshot_id)) fail('Update record not found.', 404, 'return_convert_not_found')
   const stored = readStored(snapshot)
-  if (stored.history_id !== ctx.historyId) fail('This history entry does not own the conversion.', 409, 'undo_history_unusable')
+  if (stored.history_id !== ctx.historyId) fail('This history entry does not own the update.', 409, 'undo_history_unusable')
   const expectedGeneration = Number(ctx.generation)
   if (typeof ctx.generation !== 'number' || !Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0) fail('An expected generation is required.', 400, 'return_convert_invalid')
   const complete = (generation: number): UndoApplierOutcome => ({ complete: true, continuation_required: false, processed_children: stored.members.length, pending_children: 0, generation })
   if (stored.generation === expectedGeneration + 1 && stored.last_direction === ctx.direction && stored.last_expected_generation === expectedGeneration) return complete(stored.generation)
   const fromStatus = ctx.direction === 'undo' ? 'applied' : 'reversed'
-  if (stored.generation !== expectedGeneration || snapshot.status !== fromStatus) fail('This conversion changed. Refresh the history.', 409, 'undo_history_stale')
+  if (stored.generation !== expectedGeneration || snapshot.status !== fromStatus) fail('This update changed. Refresh the history.', 409, 'undo_history_stale')
   const from: Side = ctx.direction === 'undo' ? 'after' : 'before'
   const to: Side = ctx.direction === 'undo' ? 'before' : 'after'
   const next: Stored = { ...stored, generation: expectedGeneration + 1, last_direction: ctx.direction, last_expected_generation: expectedGeneration }
@@ -508,7 +519,7 @@ export async function replayLegacyReturnConversion(payload: Record<string, unkno
     }
     if (/ordinary_business_maintenance/i.test(String(error))) fail('Saving is paused for maintenance. Nothing was changed.', 503, 'maintenance_active')
     if (GUARD_FAILURE.test(String(error)) || /money_precision_invalid_returns/.test(String(error))) {
-      fail('A return on this sale changed after the conversion, so it cannot be replayed. Nothing was changed.', 409, 'undo_record_changed')
+      fail('A return on this sale changed after the update, so it cannot be replayed. Nothing was changed.', 409, 'undo_record_changed')
     }
     throw error
   }

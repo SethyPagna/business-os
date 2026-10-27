@@ -109,6 +109,8 @@ export const AUDIT_ENTITY_LABELS: Record<string, [string, string]> = {
   file: ['files', 'Library'],
   audit_log: ['audit_log', 'Audit Log'],
   system: ['system', 'System'],
+  // 6.0.992: a locked return's money details were updated (never "format" on screen, owner 27 Oct 2026).
+  return_money_convert: ['return_convert_title', 'Update money details'],
 }
 
 /** What an action is called, in the reader's language. */
