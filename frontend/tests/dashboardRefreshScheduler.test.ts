@@ -20,6 +20,7 @@ const { subscribeSyncSignals } = await import('../src/utils/syncSignals.ts')
 const { dispatchSyncUpdates, FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS } = await import('../src/api/syncRuntime.ts')
 const {
   createDashboardRefreshScheduler,
+  DASHBOARD_REFRESH_CHANNELS,
   isStaleReadScopeError,
   isTransientLoadError,
   nextRetryDelayMs,
@@ -68,7 +69,7 @@ function setup() {
   const clock = createClock()
   let runs = 0
   const scheduler = createDashboardRefreshScheduler(() => { runs += 1 }, clock.host)
-  const stop = subscribeSyncSignals((signal) => scheduler.signal(signal))
+  const stop = subscribeSyncSignals(DASHBOARD_REFRESH_CHANNELS, (signal) => scheduler.signal(signal))
   return { clock, scheduler, stop, runs: () => runs }
 }
 

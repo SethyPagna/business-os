@@ -77,7 +77,7 @@ function harness() {
     startupRequestRef: { current: 0 },
     insightRequestRef: { current: {} }, startupInFlightRef: { current: false }, retryTimerRef: { current: null }, retryCountRef: { current: 0 },
     hasDataRef: { current: false }, staleWhileHiddenRef: { current: false }, lastLoadedAtRef: { current: 0 }, refreshSchedulerRef: { current: null }, loadStartupRef: { current: async () => null },
-    window: { setTimeout: () => 1, clearTimeout: () => {} }, isTransientLoadError: () => false, isStaleReadScopeError: (e: any) => e?.code === 'stale_read_scope', staleScopeRetriedRef: { current: false }, nextRetryDelayMs: () => null,
+    window: { setTimeout: () => 1, clearTimeout: () => {} }, isTransientLoadError: () => false, isStaleReadScopeError: (e: any) => e?.code === 'stale_read_scope', transportReissuesStaleReadScope: false, staleScopeRetriedRef: { current: false }, nextRetryDelayMs: () => null,
     setRetrying: (value: any) => writes.push({ kind: 'retrying', value }), setLoadError: (value: any) => writes.push({ kind: 'loadError', value }), setSilentRefresh: (value: any) => writes.push({ kind: 'silent', value }),
     useCallback: (fn: any) => fn, beginTrackedRequest, isTrackedRequestCurrent, invalidateTrackedRequest,
     getCurrentDashboardRange: () => ({ ...query, granularity: 'day' }),
@@ -129,6 +129,17 @@ for (const name of ['loadStartup', 'loadInsightList']) {
   await h.loader('loadStartup')()
   assert.equal(timers.length, 1, 'exactly once: a second stale_read_scope is not retried again')
   assert.equal(h.writes.some((w: any) => w.kind === 'loadError' && w.value), true, 'then the one notice with Retry applies')
+}
+// When the transport already re-sends a stale_read_scope read, the screen does not send it again on top.
+{
+  const h = harness()
+  h.env.transportReissuesStaleReadScope = true
+  const timers: Array<{ ms: number }> = []
+  h.env.window.setTimeout = (_fn: () => void, ms: number) => { timers.push({ ms }); return 1 }
+  h.setResponse(Promise.reject(Object.assign(new Error('stale'), { name: 'AbortError', code: 'stale_read_scope' })))
+  await h.loader('loadStartup')()
+  assert.deepEqual(timers, [], 'no screen-level retry on top of the one in the transport')
+  assert.equal(h.writes.some((w: any) => w.kind === 'loadError' && w.value), true, 'a read the transport could not save reaches the person')
 }
 const switching = harness(); const startup = deferred(); switching.setResponse(startup.promise)
 switching.env.loadingScopeRef = { current: 'actor-A:range-A' }

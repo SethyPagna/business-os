@@ -30,7 +30,7 @@ assert.ok(dashboard.includes('showLoadNotice ? ('), 'the notice shows only after
 assert.ok(/onClick=\{\(\) => \{ void reloadStartup\(\) \}\}/.test(dashboard), 'the notice has a Retry action')
 assert.ok(!dashboard.includes('Analytics unavailable for this range'), 'cards do not each repeat the failure')
 assert.ok(dashboard.includes('isTransientLoadError(error) ? nextRetryDelayMs(retryCountRef.current) : null'), 'transient failures retry on the 2 s / 6 s schedule')
-assert.ok(dashboard.includes('const staleScopeRetry = isStaleReadScopeError(error) && !staleScopeRetriedRef.current'), 'stale_read_scope is retried once, silently')
+assert.ok(dashboard.includes('const staleScopeRetry = !transportReissuesStaleReadScope && isStaleReadScopeError(error) && !staleScopeRetriedRef.current'), 'stale_read_scope is retried once, silently, unless the transport already re-sends it')
 const packs = ['en', 'km'].map((code) => JSON.parse(fs.readFileSync(new URL(`../src/lang/${code}.json`, import.meta.url), 'utf8')))
 // Owner ruling: the stock block may be minutes old and says when it was computed, compact, 24 h, Cambodia time.
 assert.equal(fmtClock24('2026-10-27T07:05:00Z'), '14:05', 'the instant is shown in the business timezone, 24 h')

@@ -2,11 +2,12 @@ import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import type { ComponentProps } from 'react'
 import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { useSettledSearch } from './salesSearchSettle.ts'
-import { createSalesPageCache, pagesToPrefetch, planSalesLoad, salesLoadKey } from './salesLoadFlow.ts'
+import { createSalesPageCache, pagesToPrefetch, planSalesLoad, SALES_REFRESH_CHANNELS, salesLoadKey } from './salesLoadFlow.ts'
+import { subscribeSyncBurst } from '../../utils/syncSignals.ts'
 import CalendarRange from 'lucide-react/dist/esm/icons/calendar-range.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
-import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
@@ -235,13 +236,6 @@ interface AppContextValue {
   clearSyncError?: () => void
 }
 
-interface SyncContextValue {
-  syncChannel?: {
-    channel?: string | null
-    ts?: string | number | null
-  } | null
-}
-
 interface SaleItemAddition {
   product_id: number
   quantity: number
@@ -285,7 +279,6 @@ type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history'
 type SalesListSurfaceProps = ComponentProps<typeof SalesListSurface>
 
 const useApp = useAppHook as () => AppContextValue
-const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getSalesApi(): SalesApi {
@@ -415,7 +408,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `returns:add` grant behind the Returns page's Add Return button and the
   // same one routes/returns.ts enforces on POST /api/returns.
   const canAddReturn = can('returns', 'add')
-  const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
   const salesRef = useRef<SaleRecord[]>([])
@@ -1084,19 +1076,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return undefined
   }, [isActive, loading])
 
+  // Sales rows/reports expose current linked customer, courier, cashier and product metadata in
+  // addition to immutable receipt snapshots. Those reference routes broadcast their own channels, so
+  // refresh on the full dependency set instead of waiting for the next sale mutation.
+  // Every channel of a burst reaches this page (the AppContext slot kept only the last of a tab
+  // resume's 22), as ONE refresh. Activating the page reads on its own (effect above), so a burst
+  // that arrives while it is hidden needs no catch-up.
   useEffect(() => {
-    if (!isActive || !syncChannel?.channel) return
-    // Sales rows/reports expose current linked customer, courier, cashier and
-    // product metadata in addition to immutable receipt snapshots. Those
-    // reference routes broadcast their own channels, so refresh on the full
-    // dependency set instead of waiting for the next sale mutation.
-    if (['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings'].includes(syncChannel.channel)) {
-      if (syncChannel.channel === 'users') setUserOptionsLoaded(false)
+    if (!isActive) return undefined
+    return subscribeSyncBurst(SALES_REFRESH_CHANNELS, ({ channels }) => {
+      if (channels.includes('users')) setUserOptionsLoaded(false)
       loadSales(true)
       void loadSalesStats() // Z3a: keep the summary aggregate in lockstep with the rows
       void loadStatsStrip() // the range strip counts the same events
-    }
-  }, [isActive, loadSales, loadSalesStats, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+    })
+  }, [isActive, loadSales, loadSalesStats, loadStatsStrip])
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false

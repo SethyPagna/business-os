@@ -27,8 +27,8 @@ import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
 import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import { FOREGROUND_RESUME_GAP_REASON } from '../../utils/permissionRefreshAccumulator.ts'
-import { subscribeSyncSignals } from '../../utils/syncSignals.ts'
-import { createDashboardRefreshScheduler, isStaleReadScopeError, isTransientLoadError, nextRetryDelayMs, type DashboardRefreshScheduler } from './dashboardRefresh.ts'
+import { subscribeSyncSignals, transportReissuesStaleReadScope } from '../../utils/syncSignals.ts'
+import { createDashboardRefreshScheduler, DASHBOARD_REFRESH_CHANNELS, isStaleReadScopeError, isTransientLoadError, nextRetryDelayMs, type DashboardRefreshScheduler } from './dashboardRefresh.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
@@ -1033,7 +1033,8 @@ export default function Dashboard() {
       // A read rejected because sign-in just reset the read scope: send it again once, with no
       // notice at all. Anything else that can pass by itself (a timeout, a dropped connection, a
       // 5xx, a 409 while tills are ringing) is tried again at 2 s and 6 s before telling anyone.
-      const staleScopeRetry = isStaleReadScopeError(error) && !staleScopeRetriedRef.current
+      // route() re-issues such a read itself when the transport has that (a second send here would be a third).
+      const staleScopeRetry = !transportReissuesStaleReadScope && isStaleReadScopeError(error) && !staleScopeRetriedRef.current
       if (staleScopeRetry) staleScopeRetriedRef.current = true
       const retryDelay = staleScopeRetry ? 0 : isTransientLoadError(error) ? nextRetryDelayMs(retryCountRef.current) : null
       if (retryDelay != null) {
@@ -1241,7 +1242,7 @@ export default function Dashboard() {
       void loadStartupRef.current({ silent: true })
     })
     refreshSchedulerRef.current = scheduler
-    const stop = subscribeSyncSignals((signal) => {
+    const stop = subscribeSyncSignals(DASHBOARD_REFRESH_CHANNELS, (signal) => {
       // A user-visible Retry or a push starts the retry count over.
       if (signal.type === 'update' && isActiveRef.current) retryCountRef.current = 0
       scheduler.signal(signal)
@@ -1322,7 +1323,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!isActive) return
     let cancelled = false
-    const stop = subscribeSyncSignals((signal) => {
+    const stop = subscribeSyncSignals(['dashboard'], (signal) => {
       if (signal.type !== 'update' || signal.channel !== 'dashboard' || signal.reason !== FOREGROUND_RESUME_GAP_REASON) return
       listImportJobs({ limit: IMPORT_JOBS_SHARED_LIMIT })
         .then((result) => {

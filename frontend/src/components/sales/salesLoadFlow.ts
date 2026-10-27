@@ -1,5 +1,8 @@
 // Decisions the Sales list makes about its reads, kept out of the 3000-line page so they can be tested.
 
+// Channels whose change alters a row, a figure or a name the Sales page shows.
+export const SALES_REFRESH_CHANNELS: readonly string[] = ['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings']
+
 export type SalesLoadPlan = 'start' | 'coalesce' | 'preempt'
 
 /**

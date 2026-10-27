@@ -136,7 +136,7 @@ function browserShare(): ShareChannel | null {
 export const notificationSummaryStore = createNotificationSummaryStore({
   fetchSummary: () => withLoaderTimeout(() => getNotificationSummary(), 'Notifications', NOTIFICATION_SUMMARY_TIMEOUT_MS),
   share: browserShare(),
-  onNotificationsPush: (listener) => subscribeSyncSignals((signal) => {
+  onNotificationsPush: (listener) => subscribeSyncSignals(['notifications'], (signal) => {
     // A no-gap resume burst names every channel; the visibility catch-up already covers it.
     if (signal.type === 'update' && signal.channel === 'notifications' && signal.reason !== FOREGROUND_RESUME_REASON) listener()
   }),
