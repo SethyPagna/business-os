@@ -57,11 +57,14 @@ interface EditableReturnItem {
   // legacy boolean) by normalizeStockAction.
   stock_action?: ReturnStockAction
   branch_id?: number | string | null
-  // P4-3: return_items has no persisted condition_tag/damaged_disposition
-  // column (only damaged_stock_lots/inventory_movements do), so there is
-  // nothing to seed here on open -- these always start at the defaults
-  // (DEFAULT_STOCK_CONDITION_TAG / 'keep') and only matter for a NEW
-  // 'damaged' choice made in this edit.
+  // P4-3: return_items has no condition_tag/damaged_disposition column (only
+  // damaged_stock_lots does). Since 6.0.999 GET /api/returns/:id attaches them
+  // to each damaged line (the tag of its lot, and 'keep' while the lot is
+  // whole), and this form spreads each stored line into its state, so an
+  // existing damaged line opens -- and is saved -- with the tag it was stored
+  // with. The defaults (DEFAULT_STOCK_CONDITION_TAG / 'keep') apply only to a
+  // NEW 'damaged' choice made in this edit, or to a line the Worker could not
+  // pair with a lot.
   condition_tag?: string
   damaged_disposition?: DamagedDisposition
 }

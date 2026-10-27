@@ -25,6 +25,7 @@ import {
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
+  attachStoredDamagedChoices, firstLineWithoutStockAction,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
@@ -1137,7 +1138,9 @@ app.get('/:id', async (c) => {
     WHERE r.id = ?
   `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
-  const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
+  // 6.0.999: each damaged line carries the tag it was stored with (it lives on the damaged lot, not on the line), so an
+  // edit form or an Undo/Redo built from this read sends the condition back instead of resetting it to the default.
+  const items = await attachStoredDamagedChoices(db, id, await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{ product_id: number | null; quantity: number; stock_action: string | null; return_to_stock: number | null }>([id]))
   const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
   // A one-step exchange's replacement units still with the customer (6.0.958): what the cancel screen asks about before a return that opened
   // a replacement sale is cancelled. Null for a return with no replacement sale, a cancelled one, or one whose replacement is all back.
@@ -3066,7 +3069,21 @@ app.patch('/:id', async (c) => {
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
-  let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
+  // 6.0.999: Undo/Redo replay a snapshot through this route. A line that names no stock_action is read as the legacy
+  // return_to_stock boolean (restock), which silently turned stored damaged and no-restock lines into sellable stock
+  // (and made an old Undo of damaged -> restock a silent no-op). Every current client names the action, so a line without
+  // one is refused outright; nothing has been written yet.
+  if (Array.isArray(body.items)) {
+    const guessed = firstLineWithoutStockAction(body.items)
+    if (guessed >= 0) {
+      return c.json({
+        error: 'This change came from an older version of the app and does not say how the stock of one line was handled. Refresh the app and try again. Nothing was changed.',
+        code: 'return_stock_action_required', action: 'refresh_required', line: guessed + 1,
+      }, 400)
+    }
+  }
+  // Omitting `items` keeps the lines as stored, and a damaged line keeps the tag its lot was stored with.
+  let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : await attachStoredDamagedChoices(db, id, existingItems)
   if (Array.isArray(body.items)) {
     const sourceRows = existing.sale_id
       ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])

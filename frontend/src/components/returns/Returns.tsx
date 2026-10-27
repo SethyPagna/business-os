@@ -81,6 +81,7 @@ import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from
 import { parseOutstanding, takeBackReplacement, takeBackRequestId, validateTakeBack, type ReplacementLine, type ReplacementOutstanding, type TakeBackDeps } from './helpers/returnReplacementCancel.ts'
 import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { returnHistoryPayloadFromSnapshot, type ReturnHistoryPayload } from './helpers/returnHistoryPayload.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 import { RETURN_RECORDS_ADAPTER } from '../../utils/entityRecords.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
@@ -172,25 +173,6 @@ const RETURN_SORT_FIELD_DEFS = [
   { id: 'processed_by', kind: 'text' as const, get: (ret: ReturnRow) => ret?.cashier_name },
   { id: 'type', kind: 'text' as const, get: (ret: ReturnRow) => ret?.return_type },
 ]
-
-interface ReturnHistoryPayload extends Record<string, unknown> {
-  reason: string
-  return_type: string
-  notes: string
-  total_refund_usd: number | string
-  total_refund_khr: number | string
-  branch_id: number | string | null
-  items: Array<{
-    sale_item_id: number | string | null
-    product_id: number | string | null
-    product_name: string | null
-    quantity: number | string
-    applied_price_usd: number | string
-    applied_price_khr: number | string
-    return_to_stock: boolean
-    branch_id: number | string | null
-  }>
-}
 
 async function prepareReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<PreparedReturnUpdateRequest> {
   const { prepareReturnUpdateRequest } = await loadReturnsWriteTransport()
@@ -956,25 +938,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     if (!hasLoadedReturnLines(snapshot)) {
       throw new Error(tr('return_history_lines_unavailable', 'The lines of this return were not loaded when this change was recorded, so it cannot be undone or redone here. Nothing was changed.'))
     }
-    return {
-      reason: snapshot.reason || '',
-      return_type: snapshot.return_type || 'restock',
-      notes: snapshot.notes || '',
-      total_refund_usd: snapshot.total_refund_usd || 0,
-      total_refund_khr: snapshot.total_refund_khr || 0,
-      branch_id: snapshot.branch_id || null,
-      items: snapshot.items.map((item) => ({
-        sale_item_id: item.sale_item_id || null,
-        product_id: item.product_id || null,
-        product_name: item.product_name || null,
-        quantity: item.quantity || 0,
-        applied_price_usd: item.applied_price_usd || 0,
-        applied_price_khr: item.applied_price_khr || 0,
-        // Undo/replay must not convert a permission-redacted snapshot to zero.
-        return_to_stock: item.return_to_stock !== false,
-        branch_id: item.branch_id || snapshot.branch_id || null,
-      })),
+    // Each line replays with the stock handling it was stored with (restock / damaged with its tag / none). A line
+    // that does not say, or a damaged line without its tag, is refused: a replay never guesses a restock.
+    const payload = returnHistoryPayloadFromSnapshot({ ...snapshot, items: snapshot.items })
+    if (!payload) {
+      throw new Error(tr('return_history_damaged_unavailable', 'This change cannot be undone or redone here: the stock handling of some lines cannot be confirmed from the record. Nothing was changed.'))
     }
+    return payload
   }, [tr])
 
   const fetchReturnSnapshot = useCallback(async (returnId: number | string | null | undefined, fallback: ReturnRow | null = null): Promise<ReturnRow | null> => {

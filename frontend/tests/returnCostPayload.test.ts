@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import { returnHistoryPayloadFromSnapshot } from '../src/components/returns/helpers/returnHistoryPayload.ts'
 
 // Compile and execute each real customer-return map callback. Hidden costs
 // must not be converted into zero-valued acquisition-cost overrides.
 for (const file of ['NewReturnModal', 'EditReturnModal', 'Returns']) {
   const source = readFileSync(new URL(`../src/components/returns/${file}.tsx`, import.meta.url), 'utf8')
+  // 6.0.999: Undo/Redo lines are built by helpers/returnHistoryPayload.ts (executed directly below), so Returns.tsx
+  // holds no map callback of its own. A mapping re-inlined into Returns.tsx is still found and held to the same rule.
+  const delegatesHistory = file === 'Returns' && source.includes("from './helpers/returnHistoryPayload.ts'")
   const ast = ts.createSourceFile(`${file}.tsx`, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const callbacks: ts.ArrowFunction[] = []
   function visit(node: ts.Node): void {
@@ -17,7 +21,7 @@ for (const file of ['NewReturnModal', 'EditReturnModal', 'Returns']) {
     ts.forEachChild(node, visit)
   }
   visit(ast)
-  assert.ok(callbacks.length, `${file} return builder found`)
+  assert.ok(callbacks.length || delegatesHistory, `${file} return builder found`)
   for (const callback of callbacks) {
     const code = ts.transpileModule(`const build = ${callback.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
     const build = new Function('toNumber', 'foundSale', 'ret', 'snapshot', 'DEFAULT_STOCK_CONDITION_TAG', `${code}; return build`)(Number, { branch_id: 1 }, { branch_id: 1 }, { branch_id: 1 }, 'damaged')
@@ -28,6 +32,23 @@ for (const file of ['NewReturnModal', 'EditReturnModal', 'Returns']) {
       assert.equal(Object.hasOwn(result, 'cost_price_usd'), false)
       assert.equal(Object.hasOwn(result, 'cost_price_khr'), false)
     }
+  }
+}
+// The Undo/Redo lines themselves: whatever cost the snapshot holds (hidden: undefined, a real zero, a real figure), a
+// replayed line carries none -- the Worker keeps the recorded return cost when a line omits it -- and the stock handling is named.
+for (const cost of [undefined, 0, 123.4567, '9.5']) {
+  const body = returnHistoryPayloadFromSnapshot({
+    branch_id: 1,
+    items: [
+      { sale_item_id: 9, product_id: 7, quantity: 2, applied_price_usd: 30, applied_price_khr: 120000, return_to_stock: 1, stock_action: 'restock', cost_price_usd: cost, cost_price_khr: cost } as never,
+      { sale_item_id: 10, product_id: 8, quantity: 1, applied_price_usd: 30, applied_price_khr: 120000, return_to_stock: 0, stock_action: 'damaged', condition_tag: 'expired', damaged_disposition: 'keep', cost_price_usd: cost, cost_price_khr: cost } as never,
+    ],
+  })
+  assert.ok(body, `history body built for cost ${String(cost)}`)
+  for (const line of body.items) {
+    assert.equal(Object.hasOwn(line, 'cost_price_usd'), false)
+    assert.equal(Object.hasOwn(line, 'cost_price_khr'), false)
+    assert.ok(['restock', 'damaged', 'none'].includes(line.stock_action), 'every replayed line names its stock handling')
   }
 }
 console.log('PASS customer-return create/edit/history omit browser acquisition-cost snapshots')
