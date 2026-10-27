@@ -108,62 +108,58 @@ function namesStockAction(line: { stock_action?: unknown }): boolean {
   return explicit === 'none' || explicit === 'restock' || explicit === 'damaged'
 }
 
-function isPresent(value: unknown): boolean {
-  return value != null && String(value).trim() !== ''
-}
-
 /**
- * The index of the first posted line whose stock handling the server would have to GUESS, or -1.
+ * The index of the first posted line that names no valid stock_action, or -1.
  *
- * A line that names no valid stock_action is read as the legacy return_to_stock boolean (see normalizeStockAction).
- * That is only harmless where the guess equals what the return already holds for that product / sale line. It is
- * refused where it would change it -- a stored damaged line read as restock puts the units on the shelf and drops the
- * lot; a stored no-restock line read as restock does the same -- and whenever the line carries damaged data
- * (condition_tag / damaged_disposition) without the action that gives it meaning. A line with nothing stored to
- * contradict (a new line, or a return of other products) keeps the legacy default, so older clients mid-deploy and
- * every existing test payload behave as before.
+ * Every current client names the action on every line (create, edit, Undo, Redo). A line without one comes from an old
+ * build, and an old build cannot say damaged: it sent a stored damaged line and a stored no-restock line as
+ * return_to_stock: true (the integer 0 read through `!== false`), i.e. restock. The server would have to GUESS, and no
+ * condition on the stored return makes the guess safe:
+ *   - the stored return holds a damaged / no-restock line or lot -> the guess turns it into sellable stock;
+ *   - the body's lines differ from the stored ones (an old Undo after a line was removed) -> the guess restocks the
+ *     re-added line (one damaged unit became sellable);
+ *   - neither (an old Undo of damaged -> restock) -> the body equals the stored state, so the Undo is accepted, does
+ *     nothing, and the history reports it as undone.
+ * The last case is why the rule is unconditional: that body is byte-identical to a harmless one. The refusal asks the till
+ * to refresh; nothing has been written when it is sent. Damaged data (condition_tag / damaged_disposition) without an
+ * action is the same refusal.
  */
-export function firstLineWithGuessedStockAction(
-  lines: ReadonlyArray<{ stock_action?: unknown; return_to_stock?: unknown; product_id?: unknown; sale_item_id?: unknown; condition_tag?: unknown; damaged_disposition?: unknown }>,
-  stored: ReadonlyArray<{ stock_action?: unknown; return_to_stock?: unknown; product_id?: unknown; sale_item_id?: unknown }>,
-): number {
-  for (const [index, line] of lines.entries()) {
-    if (namesStockAction(line)) continue
-    if (isPresent(line.condition_tag) || isPresent(line.damaged_disposition)) return index
-    const guessed = normalizeStockAction(line)
-    const productId = Number(line.product_id) || 0
-    const saleItemId = Number(line.sale_item_id) || 0
-    const named = productId > 0 || saleItemId > 0
-    const contradicted = stored.some((row) => {
-      if (named && !((productId > 0 && Number(row.product_id) === productId) || (saleItemId > 0 && Number(row.sale_item_id) === saleItemId))) return false
-      const held = storedStockAction(row)
-      return held !== null && held !== guessed
-    })
-    if (contradicted) return index
-  }
-  return -1
+export function firstLineWithoutStockAction(lines: ReadonlyArray<{ stock_action?: unknown }>): number {
+  return lines.findIndex((line) => !namesStockAction(line))
 }
 
 /** The condition a stored damaged line was recorded with, as GET /:id shows it and an edit or replay sends it back. */
 export type StoredDamagedChoice = { condition_tag: StockConditionTag; damaged_disposition?: 'keep' }
 
+type PairableLine = { product_id?: unknown; quantity?: unknown; stock_action?: unknown; return_to_stock?: unknown }
+type PairableLot = { id: number; product_id: number | null; quantity: number; quantity_remaining: number; condition_tag: string | null }
+
 /**
- * For each stored return line, in order, the tag of the damaged lot it opened, or null (not a damaged line, or no lot
- * that provably belongs to it).
+ * THE one place a stored damaged return line is paired with the damaged lot it opened. Every reader that needs "which lot
+ * (tag, remaining units) belongs to this line" must call this and nothing else; GET /:id, the PATCH items-omitted path and
+ * any edit/replay of lane 997's current-format returns go through it.
  *
- * return_items has no condition_tag column; the tag lives on damaged_stock_lots, keyed by return_id. The create and the
- * edit write one lot per damaged line in the same loop order as the lines, so the Nth damaged line of a product is the
- * Nth lot of that product. The match is by product, not branch (the branch consolidation can move a lot to the
- * successor branch), and a pair whose quantities differ is not matched: no tag is better than another line's tag.
+ * There is no stored link to read. damaged_stock_lots carries no return_item_id / sale_item_id: its batch_id is the sale's
+ * LOT, which several lines can share, and its product / branch / quantity can repeat across lines. (Checked against
+ * migrations 0074 and 0162, the only two that define its columns.) So the pairing is a rule, and the rule is an
+ * INVARIANT EVERY WRITER MUST KEEP:
  *
- * damaged_disposition 'keep' is reported only for a lot still whole (quantity_remaining = quantity). A lot that was
- * drawn or destroyed has no disposition a replay may reuse, so none is reported -- a replay never destroys stock.
+ *   for each (return, product), the damaged return_items rows in ascending id order and the return's damaged_stock_lots
+ *   rows in ascending id order are the same sequence -- the Kth damaged line of a product owns the Kth lot of that product
+ *   -- and a pair has equal quantity.
+ *
+ * POST / and PATCH /:id keep it by writing line and lot in one loop, in line order, after deleting the old lots. A writer
+ * that edits a line in place and APPENDS a lot (changing damaged <-> restock, adding or removing a damaged line, changing
+ * its quantity) breaks it: the new lot sorts after lots that belong to later lines, and tags swap silently. Such a writer
+ * must instead delete and re-create the return's lots in line order, or add a real link column (a migration) and change
+ * this one function to read it. The quantity check below only turns the worst failures into "no tag" instead of
+ * another line's tag; it cannot detect two equal-quantity lines swapped.
+ *
+ * Returns, per line, the paired lot or null (not a damaged line, no lot left for it, or a quantity mismatch). The match is
+ * by product, not branch: the branch consolidation can move a lot to the successor branch.
  */
-export function storedDamagedChoices(
-  lines: ReadonlyArray<{ product_id?: unknown; quantity?: unknown; stock_action?: unknown; return_to_stock?: unknown }>,
-  lots: ReadonlyArray<{ id: number; product_id: number | null; quantity: number; quantity_remaining: number; condition_tag: string | null }>,
-): Array<StoredDamagedChoice | null> {
-  const queues = new Map<number, Array<(typeof lots)[number]>>()
+export function pairDamagedLinesToLots<L extends PairableLot>(lines: ReadonlyArray<PairableLine>, lots: ReadonlyArray<L>): Array<L | null> {
+  const queues = new Map<number, L[]>()
   for (const lot of [...lots].sort((a, b) => Number(a.id) - Number(b.id))) {
     const key = Number(lot.product_id) || 0
     queues.set(key, [...(queues.get(key) || []), lot])
@@ -172,6 +168,19 @@ export function storedDamagedChoices(
     if (storedStockAction(line) !== 'damaged') return null
     const lot = queues.get(Number(line.product_id) || 0)?.shift()
     if (!lot || Math.abs(Number(lot.quantity) - Number(line.quantity)) > 1e-9) return null
+    return lot
+  })
+}
+
+/**
+ * For each stored return line, in order, the tag of the damaged lot it opened (via pairDamagedLinesToLots), or null.
+ *
+ * damaged_disposition 'keep' is reported only for a lot still whole (quantity_remaining = quantity). A lot that was
+ * drawn or destroyed has no disposition a replay may reuse, so none is reported -- a replay never destroys stock.
+ */
+export function storedDamagedChoices(lines: ReadonlyArray<PairableLine>, lots: ReadonlyArray<PairableLot>): Array<StoredDamagedChoice | null> {
+  return pairDamagedLinesToLots(lines, lots).map((lot) => {
+    if (!lot) return null
     const parsed = parseStockConditionTag(lot.condition_tag)
     if (!parsed.ok || !parsed.tag) return null
     return Number(lot.quantity_remaining) >= Number(lot.quantity)

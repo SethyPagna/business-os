@@ -705,7 +705,7 @@ async function successorChecks() {
     const { response } = await runWith(returnsRoute.default, returnBody(), 'after', 3)
     assert.strictEqual(response.status, 200)
     const edited = await req('PATCH', `/${response.json.id}`, {
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }],
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, applied_price_usd: 10 }],
       reason: 'Edited down',
     })
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
@@ -884,7 +884,7 @@ async function preConsolidationReturn(appToUse) {
 const editBody = (id, extra = {}) => ({
   client_request_id: 'edit-1',
   expected_updated_at: rawDb.prepare('SELECT updated_at FROM returns WHERE id = ?').get([id]).updated_at,
-  items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }],
+  items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, applied_price_usd: 10 }],
   reason: 'Edited down',
   ...extra,
 })

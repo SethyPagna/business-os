@@ -27,8 +27,8 @@
 //   return_edit_replacement_floor              403  PATCH /api/returns/:id that would leave the return's recorded replacement under its allowed price (fewer units
 //                                         returned, or a dearer line covering it) by a caller who may not set prices; the extra unit is a separate return (6.0.958)
 //   return_bulk_over_plan_budget     400  POST /api/returns/bulk and its undo/redo: a selection too large for one Free-plan invocation (6.0.958)
-//   return_stock_action_required     400  PATCH /api/returns/:id: a line names no stock_action where the legacy restock default would change what the
-//                                         return holds (a stored damaged or no-restock line). Reached by an Undo/Redo body an older build stored or sent (6.0.999)
+//   return_stock_action_required     400  PATCH /api/returns/:id: a line names no valid stock_action. Reached by an Undo/Redo or edit body an
+//                                         older build stored or sent; the legacy restock default is never trusted (6.0.999)
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',

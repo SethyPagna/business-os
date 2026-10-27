@@ -730,7 +730,7 @@ async function main() {
     // Edit down from 3 to 1 -- should reverse 3 out of the batch, then
     // restock 1 back into the same batch (net: 5 + 1 = 6).
     const edited = await req('PATCH', `/${returnId}`, {
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }],
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, applied_price_usd: 10 }],
       reason: 'Edited down',
     })
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
@@ -780,7 +780,7 @@ async function main() {
     // split), then re-apply the same -- both lots land back at 10 with NO
     // phantom stock. The pre-fix code pulled all 5 out of one lot here.
     const edited = await req('PATCH', `/${created.json.id}`, {
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 5, return_to_stock: true, applied_price_usd: 10 }],
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 5, stock_action: 'restock', return_to_stock: true, applied_price_usd: 10 }],
       reason: 'Re-saved',
     })
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
@@ -807,8 +807,8 @@ async function main() {
         .run({ saleItemId, batchId, quantity }))
     }
     const items = [
-      { sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 3, return_to_stock: true },
-      { sale_item_id: 2, product_id: 2, product_name: 'Different Serum', quantity: 3, return_to_stock: true },
+      { sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 3, stock_action: 'restock', return_to_stock: true },
+      { sale_item_id: 2, product_id: 2, product_name: 'Different Serum', quantity: 3, stock_action: 'restock', return_to_stock: true },
     ]
     const created = await req('POST', '/', { sale_id: 1, reason: 'Two split lines', items })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
@@ -839,7 +839,7 @@ async function main() {
     const frozen = {
       client_request_id: 'return-edit-frozen-status', expected_updated_at: before.updated_at,
       reason: 'Partial return',
-      items: [{ sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 2, return_to_stock: true }],
+      items: [{ sale_item_id: 1, product_id: 1, product_name: 'Widget', quantity: 2, stock_action: 'restock', return_to_stock: true }],
     }
     const edited = await req('PATCH', `/${created.json.id}`, frozen)
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
@@ -897,7 +897,7 @@ async function main() {
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
     const edited = await req('PATCH', `/${created.json.id}`, {
       client_request_id: 'return-edit-no-parent', reason: 'Manual edited',
-      items: [{ product_id: 1, product_name: 'Widget', quantity: 1, return_to_stock: true }],
+      items: [{ product_id: 1, product_name: 'Widget', quantity: 1, stock_action: 'restock', return_to_stock: true }],
     })
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-no-parent'").get().n, 1)
@@ -910,7 +910,7 @@ async function main() {
     assert.strictEqual(returnWord(1), 'partial_return')
     const linkedEdit = await req('PATCH', `/${linked.json.id}`, {
       client_request_id: 'return-edit-status-unchanged', reason: 'Still one of three',
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }],
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true }],
     })
     assert.strictEqual(linkedEdit.status, 200, JSON.stringify(linkedEdit.json))
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-status-unchanged'").get().n, 1)
@@ -924,7 +924,7 @@ async function main() {
     const stamp = rawDb.prepare('SELECT updated_at FROM returns WHERE id=@id').get({ id: first.json.id }).updated_at
     const frozen = {
       client_request_id: 'return-edit-shared-request', expected_updated_at: stamp, reason: 'Winner',
-      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1 }],
+      items: [{ product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, branch_id: 1 }],
     }
     let interposed
     beforeBatchHook = async () => { interposed = await req('PATCH', `/${first.json.id}`, frozen) }
@@ -954,7 +954,7 @@ async function main() {
     corruptNextReturnReceipt = true
     const receiptFailure = await req('PATCH', `/${manual.json.id}`, {
       client_request_id: 'return-edit-bad-receipt', expected_updated_at: manualBefore.updated_at,
-      reason: 'Must roll back', items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1 }],
+      reason: 'Must roll back', items: [{ product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, branch_id: 1 }],
     })
     assert.strictEqual(receiptFailure.status, 500)
     assert.strictEqual(rawDb.prepare('SELECT reason FROM returns WHERE id=@id').get({ id: manual.json.id }).reason, manualBefore.reason)
@@ -969,7 +969,7 @@ async function main() {
     corruptNextSaleRecordEvent = true
     const eventFailure = await req('PATCH', `/${linked.json.id}`, {
       client_request_id: 'return-edit-bad-event', expected_updated_at: linkedStamp,
-      reason: 'Partial', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true }],
+      reason: 'Partial', items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true }],
     })
     assert.strictEqual(eventFailure.status, 500)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM return_items WHERE return_id=@id').get({ id: linked.json.id }).quantity, 2)
@@ -1638,7 +1638,7 @@ async function main() {
     // Naming the lot lets it through, and the units land in THAT lot.
     const named = await req('PATCH', `/${refused.json.id}`, {
       sale_id: 1,
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, stock_action: 'restock', return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
       reason: 'Legacy line, lot named',
     })
     assert.strictEqual(named.status, 200, JSON.stringify(named.json))
@@ -1844,7 +1844,7 @@ async function main() {
     // 400'd -- corrupting stock on a mere validation refusal. Refusing
     // untouched is the invariant, whatever the reason for the refusal.
     const edited = await req('PATCH', `/${created.json.id}`, {
-      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: 999999 }],
+      items: [{ product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: 999999 }],
       reason: 'Shrinking the returned side',
     })
     assert.strictEqual(edited.status, 409, JSON.stringify(edited.json))
@@ -1856,7 +1856,7 @@ async function main() {
 
     // Naming the lot lets the same edit through, and it lands in THAT lot.
     const accepted = await req('PATCH', `/${created.json.id}`, {
-      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
+      items: [{ product_id: 1, quantity: 1, stock_action: 'restock', return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
       reason: 'Shrinking the returned side',
     })
     assert.strictEqual(accepted.status, 200, JSON.stringify(accepted.json))

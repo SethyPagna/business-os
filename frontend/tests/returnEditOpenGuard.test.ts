@@ -225,7 +225,7 @@ await runTest('a snapshot with its lines is still replayed whole', async () => {
 
 // 6.0.999. The snapshot is what GET /api/returns/:id returns: the database row, where return_to_stock is the integer 0 or 1
 // (so `!== false` read a damaged and a no-restock line as a restock) and a damaged line carries the tag of its lot.
-const DAMAGED_UNAVAILABLE = 'The damaged-stock details of this return were not available when this change was recorded, so it cannot be undone or redone here. Nothing was changed.'
+const DAMAGED_UNAVAILABLE = 'This change cannot be undone or redone here: the stock handling of some lines cannot be confirmed from the record. Nothing was changed.'
 const storedMix = [
   { id: 1, sale_item_id: 11, product_id: 5, product_name: 'Serum', quantity: 1, applied_price_usd: 5, applied_price_khr: 20500, return_to_stock: 1, stock_action: 'restock', branch_id: 1 },
   { id: 2, sale_item_id: 12, product_id: 6, product_name: 'Toner', quantity: 2, applied_price_usd: 5, applied_price_khr: 20500, return_to_stock: 0, stock_action: 'damaged', condition_tag: 'expired', damaged_disposition: 'keep', branch_id: 1 },

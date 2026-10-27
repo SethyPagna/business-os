@@ -942,7 +942,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     // that does not say, or a damaged line without its tag, is refused: a replay never guesses a restock.
     const payload = returnHistoryPayloadFromSnapshot({ ...snapshot, items: snapshot.items })
     if (!payload) {
-      throw new Error(tr('return_history_damaged_unavailable', 'The damaged-stock details of this return were not available when this change was recorded, so it cannot be undone or redone here. Nothing was changed.'))
+      throw new Error(tr('return_history_damaged_unavailable', 'This change cannot be undone or redone here: the stock handling of some lines cannot be confirmed from the record. Nothing was changed.'))
     }
     return payload
   }, [tr])

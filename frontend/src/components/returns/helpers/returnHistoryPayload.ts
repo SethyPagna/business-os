@@ -11,7 +11,7 @@
 //     (cloudflare/src/lib/returnsStock.ts storedDamagedChoices);
 //   - a line that does not say, or a damaged line without its tag, makes the whole body null: nothing is sent, and
 //     the caller tells the operator why. A replay never fills a gap with a default.
-// The Worker enforces the same rule from its side (firstLineWithGuessedStockAction); the two stay in step through
+// The Worker enforces the same rule from its side (firstLineWithoutStockAction); the two stay in step through
 // cloudflare/scripts/test-return-history-stock-action-pure.cjs, which runs both on one table.
 import type { ReturnStockAction } from './returnOptions.ts'
 

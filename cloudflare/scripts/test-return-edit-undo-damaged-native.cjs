@@ -178,6 +178,8 @@ async function main() {
       return { restocked: (by.return || 0) + (by.return_reversal || 0), damaged: (by.damage_in || 0) + (by.damage_reversal || 0) }
     }
     const movementCount = async () => Number((await db.prepare('SELECT COUNT(*) n FROM inventory_movements').first()).n)
+    // Everything a refused body must leave alone, in one string.
+    const fingerprint = async id => JSON.stringify({ ledger: await ledger(), lots: await lotsOf(id), lines: await linesOf(id), movements: await movementCount(), updated: (await get(id)).updated_at })
 
     // One assertion for "this is exactly the state": both ledgers move by `restockDelta`, lots are as listed, the line
     // rows are as listed, and the movement ledger nets to the same units (nothing stacked, nothing lost).
@@ -289,8 +291,38 @@ async function main() {
       assert.deepEqual(after.items.map(item => [item.quantity, item.condition_tag ?? null]), [[1, null], [2, 'opened']], 'the restock line carries no tag; the damaged one keeps its own')
     })
 
+    // ======================= D2. equal quantities, different tags ==================================================
+    // Scenario D's lines differ in size (1 and 2), so a matcher that pairs by quantity passes it. Here both lines are 1: only the
+    // ORDER rule (the Kth damaged line of a product owns the Kth lot) can tell them apart. Both orders of tags are run, so a
+    // matcher that sorts by tag, or hands every line the first lot, fails one of them.
+    await scenario('D2. two damaged lines of EQUAL size keep their own tags, in either order, through GET, a form-style edit and Undo/Redo', async () => {
+      for (const [first, second] of [['broken', 'opened'], ['opened', 'broken']]) {
+        const label = `${first}/${second}`
+        const base = await ledger()
+        const id = await create([line(1, 'damaged', first, 1), line(1, 'damaged', second, 2)])
+        const before = await get(id)
+        assert.deepEqual(before.items.map(item => item.condition_tag), [first, second], `${label}: GET pairs each line with its own lot`)
+        // The ordinary edit form: lines resent as GET returned them, tag = the line's tag or the default (EditReturnModal's own rule).
+        await editLines(id, before.items.map(item => ({
+          sale_item_id: item.sale_item_id, product_id: item.product_id, quantity: item.quantity, stock_action: item.stock_action, return_to_stock: item.stock_action === 'restock', branch_id: item.branch_id,
+          ...(item.stock_action === 'damaged' ? { condition_tag: item.condition_tag || 'damaged', damaged_disposition: item.damaged_disposition || 'keep' } : {}),
+        })))
+        await expectState(`D2 ${label} form-style edit changed nothing`, id, base, { restockDelta: 0, lots: [kept(1, first), kept(1, second)], lines: [rowOf(1, 'damaged'), rowOf(1, 'damaged')] })
+        await editLines(id, [line(1, 'restock', undefined, 1), line(1, 'damaged', second, 2)])
+        const after = await get(id)
+        assert.deepEqual(after.items.map(item => item.condition_tag ?? null), [null, second], `${label}: the remaining damaged line keeps ITS tag`)
+        const undo = await replay(id, before, 'Undo return edit')
+        assert.equal(undo.status, 200, JSON.stringify(undo.body))
+        await expectState(`D2 ${label} after Undo`, id, base, { restockDelta: 0, lots: [kept(1, first), kept(1, second)], lines: [rowOf(1, 'damaged'), rowOf(1, 'damaged')] })
+        assert.deepEqual((await get(id)).items.map(item => item.condition_tag), [first, second], `${label}: and GET still pairs them after the replay`)
+        const redo = await replay(id, after, 'Redo return edit')
+        assert.equal(redo.status, 200, JSON.stringify(redo.body))
+        await expectState(`D2 ${label} after Redo`, id, base, { restockDelta: 1, lots: [kept(1, second)], lines: [rowOf(1, 'restock'), rowOf(1, 'damaged')] })
+      }
+    })
+
     // ======================= E. the Worker refuses to guess ======================================================
-    await scenario('E. a line that names no stock_action is refused where the legacy default would change the stored handling', async () => {
+    await scenario('E. any line that names no stock_action is refused, whatever the default would have done', async () => {
       const damagedId = await create([line(1, 'damaged', 'expired')])
       const noneId = await create([line(1, 'none')])
       const restockId = await create([line(1, 'restock')])
@@ -300,7 +332,6 @@ async function main() {
         const current = await get(id)
         return send('PATCH', `/api/returns/${id}`, { client_request_id: requestId('legacy'), expected_updated_at: current.updated_at, reason: current.reason, items })
       }
-      const fingerprint = async id => JSON.stringify({ ledger: await ledger(), lots: await lotsOf(id), lines: await linesOf(id), movements: await movementCount(), updated: (await get(id)).updated_at })
       const expectRefused = async (label, id, items) => {
         const before = await fingerprint(id)
         const response = await patch(id, items)
@@ -320,13 +351,15 @@ async function main() {
       // Damaged data without the action is ambiguous, wherever it is sent.
       await expectRefused('E7 a tag without the action', restockId, bare(true, { condition_tag: 'expired' }))
       await expectRefused('E8 a disposition without the action', restockId, bare(true, { damaged_disposition: 'keep' }))
-      // The legacy body that the default does NOT change still works (older clients mid-deploy).
-      const noneAgain = await patch(noneId, bare(false))
-      assert.equal(noneAgain.status, 200, `E9 no-restock stays no-restock under return_to_stock false: ${JSON.stringify(noneAgain.body)}`)
-      const restockAgain = await patch(restockId, bare(true))
-      assert.equal(restockAgain.status, 200, `E10 restock stays restock under return_to_stock true: ${JSON.stringify(restockAgain.body)}`)
+      // Even where the default would change nothing: the body equals what the return holds, so accepting it would be a silent
+      // no-op (an old Undo of damaged -> restock looks exactly like this). Every current client names the action.
+      await expectRefused('E9 no-restock line, return_to_stock false (default = stored)', noneId, bare(false))
+      await expectRefused('E10 restock line, return_to_stock true (default = stored)', restockId, bare(true))
       assert.deepEqual(await linesOf(noneId), [rowOf(1, 'none')])
       assert.deepEqual(await linesOf(restockId), [rowOf(1, 'restock')])
+      // A mixed body is refused as a whole when any one line lacks the action.
+      const named = line(1, 'restock')
+      await expectRefused('E11 one named line and one bare line', restockId, [named, ...bare(true)])
     })
 
     // ======================= F. a header-only PATCH keeps the tag ===============================================
@@ -356,6 +389,56 @@ async function main() {
       assert.equal(restore.status, 200, JSON.stringify(restore.body))
       assert.deepEqual(await ledger(), base, 'G2 restoring moves no sellable stock either')
       assert.deepEqual(await lotsOf(taggedReturnId), [kept(1, 'expired')], 'G2 the same lot, same tag, units back')
+    })
+
+    // ======================= H / I. an OLD build's Undo body (the review's P2 and P3) ============================
+    // Verbatim the mapping the client used before 6.0.999: the boolean only, and the integer 0 read as `true`.
+    const oldBuildUndo = async (id, snapshot) => {
+      const current = await get(id)
+      return send('PATCH', `/api/returns/${id}`, {
+        reason: snapshot.reason || '', return_type: snapshot.return_type || 'restock', notes: 'Undo return edit',
+        total_refund_usd: snapshot.total_refund_usd || 0, total_refund_khr: snapshot.total_refund_khr || 0, branch_id: snapshot.branch_id || null,
+        items: snapshot.items.map(item => ({
+          sale_item_id: item.sale_item_id || null, product_id: item.product_id || null, product_name: item.product_name || null, quantity: item.quantity || 0,
+          applied_price_usd: item.applied_price_usd || 0, applied_price_khr: item.applied_price_khr || 0,
+          return_to_stock: item.return_to_stock !== false, branch_id: item.branch_id || snapshot.branch_id || null,
+        })),
+        expected_updated_at: current.updated_at, client_request_id: requestId('old-undo'),
+      })
+    }
+    const expectOldUndoRefused = async (label, id, snapshot) => {
+      const before = await fingerprint(id)
+      const response = await oldBuildUndo(id, snapshot)
+      assert.equal(response.status, 400, `${label}: ${JSON.stringify(response.body)}`)
+      assert.equal(response.body.code, 'return_stock_action_required', `${label}: ${JSON.stringify(response.body)}`)
+      assert.equal(await fingerprint(id), before, `${label}: a refused Undo writes nothing`)
+    }
+    await scenario('H. (P2) an old build\'s Undo of damaged->restock is refused, not accepted as a silent no-op', async () => {
+      const id = await create([line(2, 'damaged', 'expired')])
+      const before = await get(id)
+      await editLines(id, [line(2, 'restock')])
+      // The old body for the damaged line says restock, which is exactly what the return holds now: nothing would change
+      // while the history reports the edit as undone. The Worker cannot tell that from a real edit, so it refuses.
+      await expectOldUndoRefused('H1 damaged->restock', id, before)
+    })
+    // Lines matched by product (no sale_item_id), as a manual or product-picked return: a removed line then passes the cost lookup
+    // through the line that stays, which is how the review reproduced it (Toner 30 -> 31).
+    await scenario('I. (P3) an old build\'s Undo after a damaged / no-restock line was removed cannot make that unit sellable', async () => {
+      const base = await ledger()
+      const damagedId = await create([line(1, 'restock', undefined, null), line(1, 'damaged', 'expired', null)])
+      const damagedBefore = await get(damagedId)
+      await editLines(damagedId, [line(1, 'restock', undefined, null)])
+      const afterDamaged = await ledger()
+      await expectOldUndoRefused('I1 a removed damaged line', damagedId, damagedBefore)
+      assert.deepEqual(await ledger(), afterDamaged, 'I1 the removed damaged unit did not become sellable')
+      assert.deepEqual(await lotsOf(damagedId), [], 'I1 and no lot appeared')
+      const noneId = await create([line(1, 'restock', undefined, null), line(1, 'none', undefined, null)])
+      const noneBefore = await get(noneId)
+      await editLines(noneId, [line(1, 'restock', undefined, null)])
+      const afterNone = await ledger()
+      await expectOldUndoRefused('I2 a removed no-restock line', noneId, noneBefore)
+      assert.deepEqual(await ledger(), afterNone, 'I2 the removed no-restock unit did not become sellable')
+      assert.ok(base.branch + 2 === afterNone.branch, 'two restock lines kept: the ledger rose by exactly those two units')
     })
 
     if (failed) {

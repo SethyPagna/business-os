@@ -5,8 +5,10 @@
 //     (frontend/src/components/returns/helpers/returnHistoryPayload.ts) are bundled from source and compared on every input;
 //   - the client builder (returnHistoryPayloadFromSnapshot) sends stock_action for every line and the tag for a damaged
 //     one, and builds NOTHING when a line would need a guess;
-//   - the Worker's firstLineWithGuessedStockAction refuses a line whose legacy default would change the stored handling;
-//   - storedDamagedChoices pairs each damaged line with the tag of ITS lot (order + quantity), never another line's.
+//   - the Worker's firstLineWithoutStockAction refuses every line that names no valid stock_action (no condition makes the
+//     legacy restock default safe: see its comment);
+//   - pairDamagedLinesToLots / storedDamagedChoices pair each damaged line with ITS lot by order (the Kth damaged line of a
+//     product owns the Kth lot of that product), never another line's.
 // The fixtures are chosen so the plausible wrong implementation disagrees with the right one: the integer 0 (which
 // `!== false` reads as restock), two damaged lines of one product with different tags, a lot that was drawn.
 const assert = require('node:assert/strict')
@@ -28,7 +30,7 @@ function check(name, fn) {
 }
 
 async function main() {
-  const worker = await bundle("export { storedStockAction, firstLineWithGuessedStockAction, storedDamagedChoices, normalizeStockAction } from './src/lib/returnsStock'")
+  const worker = await bundle("export { storedStockAction, firstLineWithoutStockAction, pairDamagedLinesToLots, storedDamagedChoices, normalizeStockAction } from './src/lib/returnsStock'")
   const client = await bundle("export { storedStockAction, returnHistoryPayloadFromSnapshot } from '../frontend/src/components/returns/helpers/returnHistoryPayload.ts'")
 
   check('the Worker and the client read a stored line the same way, on every input', () => {
@@ -86,40 +88,28 @@ async function main() {
   })
 
   // ---- the Worker's refusal --------------------------------------------------------------------------------------
-  const stored = (extra) => ({ product_id: 5, sale_item_id: 11, return_to_stock: 1, stock_action: 'restock', ...extra })
   const posted = (extra) => ({ product_id: 5, sale_item_id: 11, quantity: 1, ...extra })
 
-  check('the Worker refuses a line without stock_action when the legacy default would change what the return holds', () => {
-    const damagedOnFile = [stored({ return_to_stock: 0, stock_action: 'damaged' })]
-    const noneOnFile = [stored({ return_to_stock: 0, stock_action: 'none' })]
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true })], damagedOnFile), 0, 'damaged read as restock')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: false })], damagedOnFile), 0, 'damaged read as no restock')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: 0 })], damagedOnFile), 0, 'the integer 0 is read as restock by the wire default')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({})], damagedOnFile), 0, 'nothing at all')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ stock_action: 'sellable' })], damagedOnFile), 0, 'an unknown action is not a named one')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true })], noneOnFile), 0, 'no restock read as restock')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ stock_action: 'restock' }), posted({ return_to_stock: true })], [...damagedOnFile]), 1, 'the index of the offending line')
+  check('the Worker refuses a line that names no valid stock_action, whatever the legacy default would have done', () => {
+    for (const [label, line] of [
+      ['nothing at all', posted({})],
+      ['return_to_stock true', posted({ return_to_stock: true })],
+      ['return_to_stock false', posted({ return_to_stock: false })],
+      ['the integer 0, which `!== false` reads as restock', posted({ return_to_stock: 0 })],
+      ['a blank action', posted({ stock_action: '  ' })],
+      ['an unknown action', posted({ stock_action: 'sellable' })],
+      ['a tag without the action', posted({ return_to_stock: true, condition_tag: 'expired' })],
+      ['a disposition without the action', posted({ return_to_stock: true, damaged_disposition: 'keep' })],
+      ['no product and no sale line either', { return_to_stock: true }],
+    ]) assert.equal(worker.firstLineWithoutStockAction([line]), 0, label)
   })
 
-  check('the Worker keeps the legacy default where it changes nothing, and for lines with nothing stored to contradict', () => {
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true })], [stored()]), -1, 'restock stays restock')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: false })], [stored({ return_to_stock: 0, stock_action: 'none' })]), -1, 'no restock stays no restock')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ product_id: 9, sale_item_id: 99, return_to_stock: true })], [stored({ return_to_stock: 0, stock_action: 'damaged' })]), -1, 'another product is not contradicted')
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true })], []), -1, 'a return with no lines on file')
-    for (const action of ['restock', 'damaged', 'none']) {
-      assert.equal(worker.firstLineWithGuessedStockAction([posted({ stock_action: action })], [stored({ return_to_stock: 0, stock_action: 'damaged' })]), -1, `a named ${action} is never a guess`)
+  check('the Worker accepts a body in which every line names its action, in any case, and reports the first bare line', () => {
+    for (const action of ['restock', 'damaged', 'none', 'RESTOCK', ' Damaged ']) {
+      assert.equal(worker.firstLineWithoutStockAction([posted({ stock_action: action })]), -1, action)
     }
-  })
-
-  check('the Worker refuses damaged data sent without the action that gives it meaning, wherever it is sent', () => {
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true, condition_tag: 'expired' })], [stored()]), 0)
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ return_to_stock: true, damaged_disposition: 'keep' })], []), 0)
-    assert.equal(worker.firstLineWithGuessedStockAction([posted({ stock_action: 'damaged', condition_tag: 'expired' })], []), -1, 'with the action it is fine')
-  })
-
-  check('a posted line that names neither product nor sale line is held to every stored line', () => {
-    assert.equal(worker.firstLineWithGuessedStockAction([{ return_to_stock: true }], [stored({ return_to_stock: 0, stock_action: 'damaged' })]), 0)
-    assert.equal(worker.firstLineWithGuessedStockAction([{ return_to_stock: true }], [stored()]), -1)
+    assert.equal(worker.firstLineWithoutStockAction([]), -1, 'no lines to guess')
+    assert.equal(worker.firstLineWithoutStockAction([posted({ stock_action: 'restock' }), posted({ stock_action: 'none' }), posted({ return_to_stock: true })]), 2, 'the index of the first bare line')
   })
 
   // ---- which tag belongs to which line ----------------------------------------------------------------------------
@@ -158,6 +148,23 @@ async function main() {
     assert.deepEqual(worker.storedDamagedChoices([line()], []), [null], 'no lot at all')
   })
 
+  check('equal-size damaged lines of one product are told apart by ORDER alone (and stay in order whatever order the lots arrive in)', () => {
+    const lines = [line({ quantity: 1 }), line({ quantity: 1 }), line({ quantity: 1 })]
+    const lots = [lot(7, { quantity: 1, quantity_remaining: 1, condition_tag: 'other' }), lot(3, { quantity: 1, quantity_remaining: 1, condition_tag: 'expired' }), lot(5, { quantity: 1, quantity_remaining: 1, condition_tag: 'opened' })]
+    assert.deepEqual(worker.pairDamagedLinesToLots(lines, lots).map((paired) => paired.id), [3, 5, 7], 'the Kth line owns the Kth lot by id')
+    assert.deepEqual(worker.storedDamagedChoices(lines, lots).map((choice) => choice.condition_tag), ['expired', 'opened', 'other'])
+    // The reverse tag order must reverse the answer: a matcher that sorts by tag, or hands out the first lot, cannot pass both.
+    const reversed = [lot(3, { quantity: 1, quantity_remaining: 1, condition_tag: 'other' }), lot(5, { quantity: 1, quantity_remaining: 1, condition_tag: 'opened' }), lot(7, { quantity: 1, quantity_remaining: 1, condition_tag: 'expired' })]
+    assert.deepEqual(worker.storedDamagedChoices(lines, reversed).map((choice) => choice.condition_tag), ['other', 'opened', 'expired'])
+  })
+
+  check('pairDamagedLinesToLots returns the lot itself (id, remaining units), null for non-damaged lines, and each lot at most once', () => {
+    const lots = [lot(1, { quantity: 2 }), lot(2, { quantity: 2 })]
+    const paired = worker.pairDamagedLinesToLots([line(), { product_id: 5, quantity: 2, return_to_stock: 1, stock_action: 'restock' }, line()], lots)
+    assert.deepEqual(paired.map((p) => (p ? p.id : null)), [1, null, 2])
+    assert.equal(new Set(paired.filter(Boolean)).size, 2)
+  })
+
   check('end to end on the pure kernels: a snapshot built from the Worker\'s read replays as a body the Worker accepts', () => {
     const lines = [server({ id: 1, sale_item_id: 11, return_to_stock: 0, stock_action: 'damaged', quantity: 1 }), server({ id: 2, sale_item_id: 12, return_to_stock: 0, stock_action: 'damaged', quantity: 2 }), server({ id: 3, sale_item_id: 13, return_to_stock: 1, stock_action: 'restock', quantity: 4 })]
     const choices = worker.storedDamagedChoices(lines, [lot(1, { quantity: 1, quantity_remaining: 1, condition_tag: 'expired' }), lot(2, { quantity: 2, quantity_remaining: 2, condition_tag: 'opened' })])
@@ -165,7 +172,7 @@ async function main() {
     const body = client.returnHistoryPayloadFromSnapshot(snapshot(attached))
     assert.ok(body)
     assert.deepEqual(body.items.map((item) => item.condition_tag ?? null), ['expired', 'opened', null])
-    assert.equal(worker.firstLineWithGuessedStockAction(body.items, lines), -1, 'every line names its action, so the Worker has nothing to guess')
+    assert.equal(worker.firstLineWithoutStockAction(body.items), -1, 'every line the new client builds names its action, so the Worker refuses nothing')
   })
 
   if (failed) { console.error(`${failed} check(s) failed`); process.exitCode = 1 } else console.log('PASS return history stock-action kernels and Worker/client parity')

@@ -35,7 +35,7 @@ const trFrom = (pack: Record<string, string>) => (key: string, fallback: string)
 // 6.0.958: cancelling an exchange return asks about its replacement items, and a grouped action too big for a Free invocation is refused up front.
 const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale', 'branch_retired_no_successor', 'return_edit_empty',
   'return_cancel_replacement_choice_required', 'return_cancel_replacement_invalid', 'return_replacement_price_forbidden', 'return_edit_replacement_floor', 'return_bulk_over_plan_budget', 'return_restore_exchange_credit', 'return_cancel_exchange_change', 'return_exchange_line_no_lot',
-  // 6.0.999: an Undo/Redo body (or any edit line) that names no stock_action where the legacy restock default would change a stored damaged / no-restock line.
+  // 6.0.999: an Undo/Redo body (or any edit line) that names no valid stock_action (an old build's body); the Worker never trusts the legacy restock default.
   'return_stock_action_required']
 
 runTest('the mapping covers exactly the FX-returns refusal codes, RET-B E1, the retired-branch one and the empty edit', () => {

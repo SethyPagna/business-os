@@ -25,7 +25,7 @@ import {
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
-  attachStoredDamagedChoices, firstLineWithGuessedStockAction,
+  attachStoredDamagedChoices, firstLineWithoutStockAction,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
@@ -3035,10 +3035,11 @@ app.patch('/:id', async (c) => {
     batch_id: number | null
   }>([id])
   // 6.0.999: Undo/Redo replay a snapshot through this route. A line that names no stock_action is read as the legacy
-  // return_to_stock boolean (restock), which silently turned stored damaged and no-restock lines into sellable stock.
-  // Refused where that guess would change what the return holds; nothing has been written yet.
+  // return_to_stock boolean (restock), which silently turned stored damaged and no-restock lines into sellable stock
+  // (and made an old Undo of damaged -> restock a silent no-op). Every current client names the action, so a line without
+  // one is refused outright; nothing has been written yet.
   if (Array.isArray(body.items)) {
-    const guessed = firstLineWithGuessedStockAction(body.items, existingItems)
+    const guessed = firstLineWithoutStockAction(body.items)
     if (guessed >= 0) {
       return c.json({
         error: 'This change came from an older version of the app and does not say how the stock of one line was handled. Refresh the app and try again. Nothing was changed.',
