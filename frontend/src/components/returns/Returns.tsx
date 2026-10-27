@@ -984,7 +984,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   const restoreReturnSnapshot = useCallback(async (
     snapshot: ReturnRow,
-    historyReason?: string,
     historyContext: DirectMutationHistoryContext | null = null,
   ): Promise<void> => {
     if (!snapshot?.id) throw new Error('Return snapshot is unavailable.')
@@ -1005,7 +1004,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         if (!currentUpdatedAt) throw new Error('Refresh the return before replaying this action.')
         body = freezeDirectMutationBody(await prepareReturnRequest(snapshot.id as number | string, {
           ...buildReturnHistoryPayload(snapshot),
-          notes: historyReason || snapshot.notes || '',
+          // The notes are the target state's own (buildReturnHistoryPayload carries snapshot.notes). Never a history label:
+          // that would write English into a user field; who undid what belongs in the history / audit record.
           expected_updated_at: currentUpdatedAt,
         }))
         savePendingHistoryRequest(snapshot.id as number | string, body, historyContext)
@@ -1066,8 +1066,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       actionHistory.pushAction({
         ...entry,
         id: entryId,
-        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
-        redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit', { entryId, direction: 'redo' }),
+        undo: () => restoreReturnSnapshot(previousSnapshot, { entryId, direction: 'undo' }),
+        redo: () => restoreReturnSnapshot(latestSnapshot, { entryId, direction: 'redo' }),
       })
       return
     }

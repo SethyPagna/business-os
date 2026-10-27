@@ -205,7 +205,7 @@ await runTest('the Undo/Redo builder refuses a snapshot without lines and sends 
   ]
   for (const [label, snapshot] of snapshots) {
     const { calls, submitted, restore } = restoreHarness()
-    await assert.rejects(() => restore(snapshot, 'Undo return edit', history), (error: Error) => {
+    await assert.rejects(() => restore(snapshot, history), (error: Error) => {
       assert.equal(error.message, LINES_UNAVAILABLE, `${label}: the operator is told why`)
       return true
     }, `${label} must be refused`)
@@ -216,11 +216,28 @@ await runTest('the Undo/Redo builder refuses a snapshot without lines and sends 
 
 await runTest('a snapshot with its lines is still replayed whole', async () => {
   const { submitted, restore } = restoreHarness()
-  await restore(structuredClone(detail), 'Undo return edit', history)
+  await restore(structuredClone(detail), history)
   assert.equal(submitted.length, 1)
   const body = submitted[0] as { items: Array<Record<string, unknown>>; expected_updated_at: string }
   assert.deepEqual(body.items.map((item) => [item.sale_item_id, item.product_id, item.quantity]), [[11, 5, 1], [12, 6, 1]])
   assert.equal(body.expected_updated_at, 'current-version')
+})
+
+// 6.0.999 round 3. Undo / Redo restore the notes of the target state. They used to send the English history label
+// ("Undo return edit") as the notes, which overwrote a user field with English text.
+await runTest('Undo restores the notes as they were, Redo restores the edited notes, and no history label reaches a user field', async () => {
+  const before = { ...structuredClone(detail), notes: 'abc' }
+  const after = { ...structuredClone(detail), notes: 'xyz' }
+  for (const [label, snapshot, expected, direction] of [
+    ['Undo', before, 'abc', 'undo'], ['Redo', after, 'xyz', 'redo'],
+    ['Undo to empty notes', { ...structuredClone(detail), notes: '' }, '', 'undo'],
+    ['Undo to Khmer notes', { ...structuredClone(detail), notes: 'កំណត់ចំណាំ' }, 'កំណត់ចំណាំ', 'undo'],
+  ] as const) {
+    const { submitted, restore } = restoreHarness()
+    await restore(structuredClone(snapshot), { entryId: 'entry-41', direction })
+    assert.equal((submitted[0] as { notes: string }).notes, expected, `${label}: the notes of the target state`)
+  }
+  assert.ok(!returnsSource.includes("'Undo return edit'") && !returnsSource.includes("'Redo return edit'"), 'Returns.tsx holds no English history label to send')
 })
 
 // 6.0.999. The snapshot is what GET /api/returns/:id returns: the database row, where return_to_stock is the integer 0 or 1
@@ -242,7 +259,7 @@ await runTest('the damaged-stock messages exist in English and Khmer', () => {
 
 await runTest('Undo/Redo replays each line with the stock handling it was stored with, never as a plain restock', async () => {
   const { submitted, restore } = restoreHarness()
-  await restore({ ...structuredClone(detail), items: structuredClone(storedMix) }, 'Undo return edit', history)
+  await restore({ ...structuredClone(detail), items: structuredClone(storedMix) }, history)
   assert.equal(submitted.length, 1)
   const body = submitted[0] as { items: Array<Record<string, unknown>> }
   assert.deepEqual(body.items.map((item) => [item.product_id, item.stock_action, item.return_to_stock]),
@@ -261,7 +278,7 @@ await runTest('a damaged line whose tag the snapshot does not carry is refused w
   for (const [label, change] of variants) {
     const { calls, submitted, restore } = restoreHarness()
     const items = structuredClone(storedMix).map((item) => (item.stock_action === 'damaged' ? { ...item, ...change } : item))
-    await assert.rejects(() => restore({ ...structuredClone(detail), items }, 'Redo return edit', { entryId: 'entry-41', direction: 'redo' }), (error: Error) => {
+    await assert.rejects(() => restore({ ...structuredClone(detail), items }, { entryId: 'entry-41', direction: 'redo' }), (error: Error) => {
       assert.equal(error.message, DAMAGED_UNAVAILABLE, `${label}: the operator is told why`)
       return true
     }, `${label} must be refused`)
@@ -285,7 +302,7 @@ function recorderHarness(latestRead: () => Promise<unknown>) {
     hasLoadedReturnLines,
     loadReturns: async () => {},
     actionHistory: { pushAction: (entry: Record<string, unknown>) => { pushed.push(entry); return entry } },
-    restoreReturnSnapshot: async (snapshot: Record<string, unknown>, _label: string, context: { direction: string }) => { restored.push({ snapshot, direction: context.direction }) },
+    restoreReturnSnapshot: async (snapshot: Record<string, unknown>, context: { direction: string }) => { restored.push({ snapshot, direction: context.direction }) },
   })
   return { pushed, restored, record }
 }
