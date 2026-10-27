@@ -546,6 +546,20 @@ async function pairing() {
       const f = await h.edit(two('damaged', undefined, 'damaged'), { reason: `Reason only ${label}` })
       assert.equal(f.applied?.status, 200, `${label} F: ${JSON.stringify(f.applied?.body ?? f.preview.body)}`)
       assert.deepEqual(await w.all('SELECT * FROM damaged_stock_lots WHERE return_id=? ORDER BY id', h.returnId), lotsBeforeF)
+
+      // G. Notes abc -> xyz -> undo -> redo: each replay writes the target snapshot's notes and reason, never a history label.
+      const notesOf = async () => { const row = await w.one('SELECT reason,notes FROM returns WHERE id=?', h.returnId); return [row.reason, row.notes] }
+      const g0 = await h.edit(two('damaged', undefined, 'damaged'), { notes: 'abc' })
+      assert.equal(g0.applied?.status, 200, `${label} G0: ${JSON.stringify(g0.applied?.body ?? g0.preview.body)}`)
+      const reasonG = (await notesOf())[0]
+      const g = await h.edit(two('damaged', undefined, 'damaged'), { notes: 'xyz' })
+      assert.equal(g.applied?.status, 200, `${label} G: ${JSON.stringify(g.applied?.body ?? g.preview.body)}`)
+      assert.deepEqual(await notesOf(), [reasonG, 'xyz'])
+      assert.equal((await h.undo(g.applied, 0)).status, 200)
+      assert.deepEqual(await notesOf(), [reasonG, 'abc'], `${label} G: undo restores the notes from the snapshot, not a label`)
+      assert.equal((await h.redo(g.applied, 1)).status, 200)
+      assert.deepEqual(await notesOf(), [reasonG, 'xyz'], `${label} G: redo restores the edited notes`)
+      assert.ok(!(await w.all('SELECT notes FROM returns')).some(row => /Undo return edit|Redo return edit/.test(String(row.notes ?? ''))), `${label} G: no history label in any notes`)
     }
     console.log('PASS native return edit pairing: damaged lines (equal and different quantities, different tags) keep their own tags through remove, re-tag, re-create, undo and redo')
   } finally {
