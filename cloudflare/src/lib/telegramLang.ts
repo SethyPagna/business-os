@@ -419,6 +419,10 @@ const HEADINGS = {
   '✅ Review approved': 'បានអនុម័តសំណើ',
   '❌ Review rejected': 'បានបដិសេធសំណើ',
   '🔁 Review resubmitted': 'បានដាក់ស្នើឡើងវិញ',
+  // A sale took a product across its low or out-of-stock threshold (owner, 6 Oct 2026; lib/stockCrossingAlert.ts).
+  // The Khmer is the packs' own `low_stock` and `out_of_stock`.
+  '⚠️ Low stock': 'ស្តុកទាប',
+  '🛑 Out of stock': 'អស់ស្តុក',
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS

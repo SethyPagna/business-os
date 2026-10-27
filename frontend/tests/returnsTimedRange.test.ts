@@ -62,7 +62,7 @@ const base = {
   withLoaderTimeout: (work: () => unknown) => work(), fetchReturns: async (params: unknown) => { assert.deepEqual(params, { scope: 'customer', ...returnRangeParams(currentRange) }); return suppliedRows },
   setRows: (value: any[]) => { rows = value }, stripRequestRef: { current: 0 }, setStripLoading: () => {},
   getReturnsReport: async (params: unknown) => { assert.deepEqual(params, { scope: 'customer', ...returnRangeParams(currentRange) }); return { count: suppliedRows.length } },
-  setStripData: (value: unknown) => { stats = value }, tr: (key: string) => key,
+  setStripData: (value: unknown) => { stats = value }, tr: (key: string) => key, setLoadedSearch: (_value: string) => {},
 }
 let currentRange = range
 const makeRange = () => evaluate(variable('returnsDateRange'), { ...hooks, stripRange: currentRange })
@@ -81,14 +81,19 @@ for (const time of ['22:00', '23:00']) {
   assert.deepEqual(rows, suppliedRows); assert.equal(stats.count, 1)
   evaluate(resetEffect.arguments[0].getText(ast), { setReturnPage: (value: number) => { pageNumber = value } })()
   assert.equal(pageNumber, 1)
-  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, canExportReturns: true, canViewCosts: true, visibleReturns: rows,
+  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, canExportReturns: true, canViewCosts: true, visibleReturns: rows, exportScope: 'S', exportScopeRef: { current: 'S' },
     notify: () => { throw Error('unexpected export rejection') }, tr: (key: string) => key,
     exportReturnRows: (value: unknown) => value, setExportDialog: (value: unknown) => { exportDialog = value } })
-  const items = evaluate(variable('exportItems'), { ...hooks, tr: (key: string) => key, exportVisible,
+  // The period entries read the COMPLETE statement of the same timed range from the server; the visible entry keeps the exact rows on screen.
+  const exportStatement = async (baseName: string, options?: unknown) => { exportDialog = { statement: true, baseName, options, range: returnsDateRange } }
+  const items = evaluate(variable('exportItems'), { ...hooks, tr: (key: string) => key, exportVisible, exportStatement,
     visibleReturns: rows, selectedReturns: [], exportSelected: () => {}, typeFilter: 'all', typeOptions: [],
-    stripRange: currentRange, filtered: rows, scope: 'customer', CUSTOMER_SCOPE: 'customer', supplierRows: [], customerRows: rows })
+    stripRange: currentRange, scope: 'customer', CUSTOMER_SCOPE: 'customer' })
   await items.find((item: any) => item.label === 'export_filtered_time_range').onClick()
-  assert.deepEqual(exportDialog, { rows: suppliedRows, baseName: 'returns-filtered' }, 'filtered export follows the new timed response, retaining loaded-row export semantics')
+  assert.deepEqual(exportDialog, { statement: true, baseName: 'returns-filtered', options: undefined, range: returnsDateRange }, 'filtered export requests the complete timed cohort, not the loaded rows')
+  await items.find((item: any) => item.label === 'export_visible_returns').onClick()
+  assert.equal((exportDialog as any).baseName, 'returns-customer', 'visible export keeps the rows on screen')
+  assert.deepEqual((exportDialog as any).rows, suppliedRows, 'visible export carries exactly the loaded visible rows')
 }
 currentRange = { ...range, startDate: '' }
 const invalidDraft = makeRange() // must not throw during render
@@ -128,3 +133,16 @@ const deniedColumns = actualColumns(false)
 assert.ok(deniedColumns.every((column: { key: string }) => !/^(Compensation|Business_Loss)_/.test(column.key)))
 assert.ok(projectExportRows(exportControls, deniedColumns, new Set(keys)).every(row => !Object.keys(row).some(key => /^(Compensation|Business Loss) /.test(key))))
 console.log('PASS Returns continuous times: Reports parity, cache identity, actual page request/reset/export flow, safe invalid drafts')
+
+// The list shows exactly what the server (and the statement export) returned for the search: once rows for the current search have arrived, the page does not
+// re-filter them locally (the server also matches SKU/barcode/brand, which the loaded rows do not carry). Only the interim preview before they arrive is local.
+{
+  const skuOnly = [{ id: 1, return_type: 'refund', return_number: 'RET-1', items: [{ product_name: 'Tea' }] }]
+  const filteredOf = (loadedSearch: string, debouncedSearch: string) => evaluate(variable('filtered'), {
+    ...hooks, rows: skuOnly, typeFilter: 'all', matchesMulti: () => true, getReturnTypeKey: () => 'refund', searchTerms: [['barcode-8851234']], loadedSearch, debouncedSearch,
+    buildReturnHaystack: () => 'ret-1 tea', matchesSearchTermGroups: () => false,
+  })
+  assert.equal(filteredOf('barcode-8851234', 'barcode-8851234').length, 1, 'rows the server returned for this search stay, even when the local haystack cannot see the barcode')
+  assert.equal(filteredOf('', 'barcode-8851234').length, 0, 'before the response lands the local preview still narrows')
+}
+console.log('PASS Returns list is not re-filtered locally once the server answered the same search')

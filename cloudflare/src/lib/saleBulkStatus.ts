@@ -347,7 +347,9 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
 export async function notifyBulkStatus(env: Env) {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
-export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null) {
+/** Units a bulk status change TAKES out of branch stock (a restore of cancelled sales), for the low / out-of-stock alert. */
+export type BulkStockTaken = Array<{ productId: number; branchId: number; quantity: number }>;
+export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, onStockTaken?: (lines: BulkStockTaken) => void) {
     permission(user);
     const request = parseRequest(raw);
     if (request.skip_stock && !isAdminControlUser(user))
@@ -581,6 +583,13 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     const effectGuards = resolver.guards();
     if (effectGuards.length)
         guards.push(bulkAssertion(branchEffectGuardPredicate('@effects'), { effects: JSON.stringify(effectGuards) }));
+    const announceStockTaken = (done: Member[]) => {
+        if (!onStockTaken)
+            return;
+        const lines: BulkStockTaken = done.filter(member => member.changed).flatMap(member => member.stock.filter(move => !move.lot && move.quantity < 0).map(move => ({ productId: Number(move.product), branchId: Number(move.branch), quantity: -move.quantity })));
+        if (lines.length)
+            onStockTaken(lines);
+    };
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));
@@ -598,12 +607,16 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
         const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements));
+        announceStockTaken(members);
         return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
     }
     catch (error) {
         const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id });
-        if (retry?.request_json === canonical)
+        if (retry?.request_json === canonical) {
+            // Committed, only the answer was lost: the alert may never have run, and its claim keys make a second run safe.
+            announceStockTaken(members);
             return JSON.parse(String(retry.receipt_json));
+        }
         const activeGuard = productStockGuardError(error)
 
         if (activeGuard) throw activeGuard

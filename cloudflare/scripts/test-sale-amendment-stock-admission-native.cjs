@@ -13,7 +13,7 @@ assert.ok(boundary > 0)
 const harness = new Module(file, module)
 harness.filename = file
 harness.paths = module.paths
-harness._compile(source.slice(0, boundary).replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB },")
+harness._compile(source.slice(0, boundary).replace('const overrides = {', "const overrides = { './db': { getDb: env => env.DB }, '../lib/stockCrossingAlert': { recordStockCrossings: (_env, input) => { (globalThis.__crossings ||= []).push(input); return Promise.resolve({ crossings: 0, claimed: 0, sent: 0 }) } },")
   + '\nmodule.exports={routeDb,request,postSale,app,executionCtx,setUser(value){currentUser=value}};', file)
 const h = harness.exports
 const admin = { id: 71, username: 'amendment_admin', role_code: 'admin', permissions: '{"all":true}' }
@@ -143,6 +143,37 @@ async function main() {
     assert.equal(number(f, 'SELECT SUM(units_moved) FROM sale_amendments'), 0)
     assert.equal(number(f, 'SELECT COUNT(*) FROM sale_amendments WHERE units_moved!=0'), 2)
     assert.equal(f.control.physicalBatches, 1)
+  })
+
+  // The amendment routes take stock like a sale (owner ruling 6 Oct 2026: alert when a deduction crosses the threshold). The
+  // recorder is a seam here; test-stock-crossing-alert-pure.cjs drives the real one.
+  const crossings = () => (globalThis.__crossings ||= [])
+  await check('a raised quantity hands the units it TOOK to the stock alert; a lowered one and a removal hand none', async () => {
+    const f = await fixture(); crossings().length = 0
+    const up = await reviewed(f, body(f, 'line_quantity_increased', { quantity: 1, pricing_quote: quote(4) }))
+    assert.equal(up.status, 200, JSON.stringify(up.body))
+    assert.deepEqual(crossings().splice(0), [{ saleId: null, lines: [{ productId: 10, branchId: 1, quantity: 1 }] }])
+    const down = await reviewed(f, body(f, 'line_quantity_decreased', { quantity: 1, pricing_quote: quote(3) }))
+    assert.equal(down.status, 200, JSON.stringify(down.body))
+    assert.deepEqual(crossings().splice(0), [{ saleId: null, lines: [] }], 'returning units is not a crossing')
+    const removed = await reviewed(f, body(f, 'line_removed'))
+    assert.equal(removed.status, 200, JSON.stringify(removed.body))
+    assert.deepEqual(crossings().splice(0), [{ saleId: null, lines: [] }])
+  })
+
+  await check('a replacement line hands the NEW product to the stock alert, not the one it replaced', async () => {
+    const f = await fixture(); crossings().length = 0
+    const result = await reviewed(f, body(f, 'line_replaced', { replacement: intent(12, 3, 'replacement') }))
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual(crossings().splice(0), [{ saleId: null, lines: [{ productId: 12, branchId: 1, quantity: 3 }] }])
+  })
+
+  await check('a lost reply (committed, answer lost) still reaches the stock alert, once per delivery', async () => {
+    const f = await fixture(); crossings().length = 0
+    f.control.lostReply = true
+    const result = await reviewed(f, body(f, 'line_quantity_increased', { quantity: 1, pricing_quote: quote(4) }))
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.deepEqual(crossings().splice(0), [{ saleId: null, lines: [{ productId: 10, branchId: 1, quantity: 1 }] }])
   })
 
   await check('ledger failure rolls back stock, line, money and idempotency receipt', async () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import EntityLink from '../shared/EntityLink.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog'
+import ReviewMergeDialog from './ReviewMergeDialog.tsx'
 import { getHubDestinations, hubAnchor } from '../shared/hubNavigation.ts'
 import { REVIEW_TIER_KEYS } from '../../utils/permissions.ts'
 import { entityFieldLabel } from '../../utils/entityRecords.ts'
@@ -20,10 +21,12 @@ import {
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
 import {
+  type ReviewMergePreview,
   REVIEW_REASON_MAX_LENGTH,
   isBranchReviewUpdate,
   localizeBranchReviewError,
   reviewApprovalRefusalText,
+  reviewMergePreview,
   reviewRejectReasonRefusalText,
   reviewStaleDecision,
   reviewStaleDecisionText,
@@ -37,6 +40,7 @@ import {
   reconcileProductCreatePendingAction,
   getPendingActions as getPendingActionsRequest,
   rejectPendingAction,
+  type ApprovePendingActionResult,
   type PendingActionRow,
   type PendingActionStatus,
 } from '../../api/reviewQueueTransport.ts'
@@ -47,6 +51,7 @@ type NotifyFn = (message: unknown, type?: string, duration?: number) => void
 interface ReviewAppContextValue {
   t: TranslateFn
   notify: NotifyFn
+  fmtUSD?: (value: unknown) => string
   getPermissionTier: (key: string) => string
   can: (key: string, action: string) => boolean
   hasPermission: (key: string) => boolean
@@ -72,6 +77,9 @@ type StatusFilter = PendingActionStatus | 'all'
 // The reject dialog's state: the request being rejected, the reason typed so far, and the Worker's refusal of
 // that reason (reason_too_long / invalid_reason) once it has been sent, shown beside the field.
 type RejectDraft = { row: PendingActionRow; reason: string; refusal: string }
+// The merge dialog's state (REVQ-A): a queued rename that now matches an existing product is approved by merging it, once the
+// approver has seen the kept product and confirmed it. The preview comes from the Worker's refusal of the unconfirmed approval.
+type MergeDraft = { row: PendingActionRow; preview: ReviewMergePreview }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
@@ -107,7 +115,7 @@ function statusBadgeClass(status: PendingActionStatus): string {
 }
 
 export default function ReviewQueue() {
-  const { t, notify, getPermissionTier, can, hasPermission, navigateTo, user } = useApp()
+  const { t, notify, getPermissionTier, can, hasPermission, navigateTo, user, fmtUSD } = useApp()
   // Part 557 slice 5: 'review' is a view-tier section. A View-only grant reads
   // the pending queue but Approve/Reject are hidden here and refused by the
   // backend (both re-check strict hasPermission('review')). Full only.
@@ -128,6 +136,7 @@ export default function ReviewQueue() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [rejectDraft, setRejectDraft] = useState<RejectDraft | null>(null)
+  const [mergeDraft, setMergeDraft] = useState<MergeDraft | null>(null)
 
   const loadRequestRef = useRef(0)
   const actionRef = useRef<Set<string>>(new Set())
@@ -181,19 +190,21 @@ export default function ReviewQueue() {
   // The reject dialog goes with the page, and Escape closes it: ConfirmDialog leaves Escape to its host
   // (useConfirmDialog answers it for the awaitable form; this dialog holds state, so the same lives here).
   const rejectOpen = rejectDraft !== null
+  const mergeOpen = mergeDraft !== null
   useEffect(() => {
-    if (!isActive) setRejectDraft(null)
+    if (!isActive) { setRejectDraft(null); setMergeDraft(null) }
   }, [isActive])
   useEffect(() => {
-    if (!rejectOpen) return undefined
+    if (!rejectOpen && !mergeOpen) return undefined
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       setRejectDraft(null)
+      setMergeDraft(null)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [rejectOpen])
+  }, [rejectOpen, mergeOpen])
 
   // N12: the server (POST /review/:id/approve) refuses self-approval and a reviewer
   // without Full access to the request's section, with these codes. Mirrored here so the
@@ -266,7 +277,7 @@ export default function ReviewQueue() {
     }
   }
 
-  const handleApprove = async (row: PendingActionRow) => {
+  const handleApprove = async (row: PendingActionRow, confirmMergeInto?: number, confirmFingerprint?: string) => {
     if (!canReview) { notify(tr('perm_view_only_generic', 'View access: you do not have permission to make this change.'), 'error'); return }
     if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
       await handleProductCreateApprove(row)
@@ -275,8 +286,8 @@ export default function ReviewQueue() {
     if (!beginKeyedAction(actionRef, row.id)) return
     setBusyId(row.id)
     try {
-      const response = await withLoaderTimeout(
-        () => approvePendingAction(row.id),
+      const response: ApprovePendingActionResult = await withLoaderTimeout(
+        () => approvePendingAction(row.id, confirmMergeInto, confirmFingerprint),
         'review:approve',
         REVIEW_MUTATION_TIMEOUT_MS,
       )
@@ -284,8 +295,21 @@ export default function ReviewQueue() {
         throw Object.assign(new Error('The result could not be confirmed. Retry the same approval request.'), { code: 'unknown_outcome' })
       }
       notify(tr('pending_action_approved', 'Approved -- the change has been applied'), 'success')
+      // A merge keeps the kept product's own values: say which queued changes it did not apply, so they can be made there.
+      const unapplied = Array.isArray(response?.rest_unapplied) ? response.rest_unapplied : []
+      if (response?.merged_into && unapplied.length) {
+        const fields = unapplied.map((field) => entityFieldLabel(field, tr)).join(', ')
+        notify(tr('review_merge_rest_unapplied', 'The products were merged, but these changes could not be saved on the kept product: {fields}. Edit the kept product to apply them.').replace('{fields}', fields), 'warning')
+      }
       await load(true)
     } catch (error) {
+      // The Worker merges only into a product the approver has confirmed: its refusal carries the merge to review, which
+      // opens the dialog; confirming sends this approval again naming exactly that product.
+      const mergePreview = reviewMergePreview(error)
+      if (mergePreview) {
+        setMergeDraft({ row, preview: mergePreview })
+        return
+      }
       // The request changed under the reviewer or was decided by someone else. Say which, and re-read
       // the queue from the server so the row is not left on screen with live buttons.
       const stale = reviewStaleDecision(error)
@@ -476,6 +500,22 @@ export default function ReviewQueue() {
           })}
         </div>
       )}
+
+      {mergeDraft ? (
+        <ReviewMergeDialog
+          t={t}
+          tr={tr}
+          fmtUSD={fmtUSD}
+          preview={mergeDraft.preview}
+          working={busyId === mergeDraft.row.id}
+          onConfirm={() => {
+            const draft = mergeDraft
+            setMergeDraft(null)
+            void handleApprove(draft.row, draft.preview.survivorId, draft.preview.fingerprint)
+          }}
+          onClose={() => setMergeDraft(null)}
+        />
+      ) : null}
 
       {rejectDraft ? (
         <ConfirmDialog

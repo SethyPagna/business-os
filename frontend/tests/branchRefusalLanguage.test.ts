@@ -68,6 +68,10 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   return_edit_replacement_floor: ['lib/returnReplacementPrice.ts', 'return_edit_replacement_floor', 403],
   // 6.0.963: restoring an exchange return from the list after its cancel moved the refund credit to Not Paid; the sentence is the Worker's word for word.
   return_restore_exchange_credit: ['lib/returnBulkAction.ts', 'return_restore_exchange_credit', 409],
+  return_restore_sale_repriced: ['lib/returnBulkAction.ts', 'return_restore_sale_repriced', 409],
+  return_export_too_large: ['routes/returns.ts', 'return_export_too_large', 400],
+  return_statement_changed: ['routes/returns.ts', 'return_statement_changed', 409],
+  return_export_maintenance: ['routes/returns.ts', 'return_export_maintenance', 503],
   // 6.0.964: cancelling an exchange that handed change back; the sentence is the Worker's word for word.
   return_cancel_exchange_change: ['lib/returnBulkAction.ts', 'return_cancel_exchange_change', 409],
   // 6.0.965: an exchange of a sale line with no lot; the sentence is the Worker's word for word.

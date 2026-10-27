@@ -2307,6 +2307,8 @@ export default function Settings() {
                 // announced unless this is off. Same unset-means-on default; the form only carries the key once it is toggled.
                 ['telegram_products_enabled', t('telegram_cat_products') || 'Product edits and merges', t('telegram_cat_products_desc') || 'Product, what changed, and who did it, for edits and merges by staff who are not administrators'],
                 ['telegram_reviews_enabled', t('telegram_cat_reviews') || 'Review requests and decisions', t('telegram_cat_reviews_desc') || "Request sent, approved, rejected or resubmitted: what was asked, the record’s name, who asked, who decided, and any rejection reason (never amounts or costs)"],
+                // Owner, 6 Oct 2026: a low or out-of-stock alert when a sale crosses the threshold; unset means on (lib/telegram.ts).
+                ['telegram_stock_alert_enabled', t('telegram_cat_stock_alert') || 'Low and out-of-stock alerts', t('telegram_cat_stock_alert_desc') || 'When a sale takes a product to its low-stock or out-of-stock level: product, branch and quantity left. Sent once per crossing'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.
                 ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch, with the shift's cash count (opening, additional change used, closing)"],

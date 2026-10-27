@@ -136,7 +136,7 @@ for (const format of ['csv', 'xlsx', 'pdf']) for (const revoke of ['never', 'bef
     return { downloadCSV: () => downloads++, downloadXLSX: () => downloads++ }
   }
   const run = evaluate(runExportSource, {
-    exportAllowed, selected: new Set(['Product']), notify: () => {}, t: (key: string) => key,
+    exportAllowed, exportBusyRef: { current: false }, beforeExportRef: { current: undefined }, mountedRef, selected: new Set(['Product']), notify: () => {}, t: (key: string) => key,
     tr: (_t: unknown, _key: string, fallback: string) => fallback, setBusy: () => {},
     projectExportRows: () => {
       if (format === 'pdf' && revoke === 'during') allowed = false

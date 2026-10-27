@@ -266,6 +266,14 @@ async function main() {
     assert.deepEqual(eventIds(), [], 'a pre-0271 document clears the live ledger instead of leaving events against rolled-back sales')
     assert.deepEqual(f.sql.pragma('foreign_key_check'), [])
     console.log('PASS sale_payment_events restores from a document that carries it and is cleared by one that predates it')
+
+    // 0272 stock_crossing_alerts is a log, not a backup table, but its claim keys embed movement and sale ids that a restore
+    // rolls back: a restore that rolls inventory_movements back clears it, so an old key cannot swallow the next crossing.
+    f.sql.prepare("INSERT INTO stock_crossing_alerts(alert_key,product_id,branch_id,tier,sale_id,quantity_before,quantity_after,created_at) VALUES ('stock-crossing:low:1:1:7',1,1,'low',1,12,9,'2026-10-25T01:00:00.000Z')").run()
+    assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM stock_crossing_alerts').get().n, 1)
+    await restoreOwned(f.env, withEvents.key)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM stock_crossing_alerts').get().n, 0, 'a restore clears the crossing log')
+    console.log('PASS a restore clears stock_crossing_alerts')
     console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
 
     const dependencyOwner = await maintenance.beginMaintenance(f.env, { backupKey: 'dependency-fixture.json', startedBy: 'legacy restore fixture' })

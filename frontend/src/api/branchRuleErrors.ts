@@ -102,6 +102,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',
   return_restore_exchange_credit: 'return_restore_exchange_credit',
+  return_restore_sale_repriced: 'return_restore_sale_repriced',
+  return_export_too_large: 'return_export_too_large',
+  return_statement_changed: 'return_statement_changed',
+  return_export_maintenance: 'return_export_maintenance',
   return_cancel_exchange_change: 'return_cancel_exchange_change',
   return_exchange_line_no_lot: 'return_exchange_line_no_lot',
   supplier_return_failed: 'supplier_return_failed',
@@ -287,12 +291,66 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
     return (t('review_section_full_required') || 'Approving this request needs Full access to {section}. Ask a reviewer who has it.')
       .replace('{section}', t(name) || name)
   }
+  // REVQ-A: approving a queued rename that now matches a product merges it. The merge-specific refusals, each one
+  // saying nothing was applied (the confirm and target-changed answers normally open the merge dialog instead).
+  if (code === 'review_merge_confirm_required') return t('review_merge_confirm_required') || 'Approving this request merges two products. Review the merge and confirm to continue.'
+  if (code === 'review_merge_target_changed') {
+    return t('review_merge_target_changed') || 'The merge changed since you reviewed it. Nothing was applied. Review it as it is now and confirm again.'
+  }
+  if (code === 'review_merge_permission_required') {
+    return t('review_merge_permission_required') || 'Approving this request merges products. Only someone who can merge products can approve it. Nothing was applied.'
+  }
+  if (code === 'merge_state_conflict' || code === 'merge_conflict_retry') {
+    return t('review_merge_state_conflict') || 'A product changed while the approval was being applied. Nothing was applied. Reload the queue and try again.'
+  }
+  if (code === 'review_merge_plan_budget') {
+    return t('review_merge_plan_budget') || 'The current plan cannot approve this merge in one step. Nothing was applied. Reject the request and make the edit directly on the product.'
+  }
+  if (code === 'review_merge_group_row') {
+    return t('review_merge_group_row') || 'Group rows cannot be merged. Nothing was applied. Reject this request and merge the variant products instead.'
+  }
+  if (code === 'request_permission_revoked' && String(section ?? '') === 'products') {
+    return t('request_permission_revoked') || 'The requester no longer has the permission this request needs, so nothing was applied. Reject it, or restore their permission and approve again.'
+  }
   // Finding I (13 Oct 2026): a queued product create or identity edit that now lands on another product's
   // identity is refused at approval (it would mint a duplicate); the request stays open.
   if (code === 'review_identity_conflict') {
     return t('review_identity_conflict') || 'This request now matches an existing product. Approving it would create a duplicate, so nothing was applied. Reject it and make the change yourself; it will merge into the existing product.'
   }
   return null
+}
+
+/** The merge an approval is waiting for the approver to confirm (409 review_merge_confirm_required / _target_changed). */
+export type ReviewMergePreview = {
+  survivorId: number; survivorName: string; stockMoved: number; priceAfter: number; sessionsClosing: number
+  // The queued fields the merge will NOT apply to the kept product, shown before the approver confirms.
+  restUnapplied: string[]
+  // Sent back with the confirmation: the Worker refuses it (review_merge_target_changed) when either product changed since.
+  fingerprint: string
+  changed: boolean
+}
+
+/**
+ * The merge preview carried by a refused approval, or null when the error is anything else. The approver confirms
+ * exactly this survivor id: the Worker merges only into the product the approval names (approve body confirm_merge_into),
+ * and answers review_merge_target_changed, with the new preview, when it is no longer the right one (`changed`).
+ */
+export function reviewMergePreview(error: unknown): ReviewMergePreview | null {
+  if (!error || typeof error !== 'object') return null
+  const { code, preview } = error as { code?: unknown; preview?: unknown }
+  if (code !== 'review_merge_confirm_required' && code !== 'review_merge_target_changed') return null
+  if (!preview || typeof preview !== 'object') return null
+  const p = preview as Record<string, unknown>
+  const survivorId = Number(p.survivorId)
+  if (!Number.isSafeInteger(survivorId) || survivorId <= 0) return null
+  const num = (value: unknown): number => (Number.isFinite(Number(value)) ? Number(value) : 0)
+  return {
+    survivorId, survivorName: typeof p.survivorName === 'string' ? p.survivorName : '',
+    stockMoved: num(p.stockMoved), priceAfter: num(p.priceAfter), sessionsClosing: Math.max(0, Math.trunc(num(p.sessionsClosing))),
+    restUnapplied: Array.isArray(p.restUnapplied) ? p.restUnapplied.filter((field): field is string => typeof field === 'string') : [],
+    fingerprint: typeof p.fingerprint === 'string' ? p.fingerprint : '',
+    changed: code === 'review_merge_target_changed',
+  }
 }
 
 /**

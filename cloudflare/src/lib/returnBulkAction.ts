@@ -9,6 +9,7 @@ import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
+import { parseSaleItemPricing } from './saleItemPricing'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { multiplyMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
@@ -1061,7 +1062,74 @@ async function refuseRestoreWithoutCredit(db: D1Compat, request: BulkRequest, re
   }
 }
 
-async function buildMembers(db: D1Compat, sent: BulkRequest, redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
+/**
+ * Finding G (owner, 12-13 Oct 2026): a cancelled return is not restored once its sale was repriced -- the refund it recorded was computed from the
+ * pricing the sale had then, so bringing it back would book a refund the sale no longer supports (and a sale could end up unreturnable). Staff record a
+ * new return instead. Applies to every path that brings a cancelled return back: the list restore, Undo of a cancel, and Redo of a restore.
+ *
+ * What "repriced" means, per return line:
+ *  - A customer return of the exact-money contract records, in refund_snapshot_json, what it was priced from: the line key, the pricing pool, the units sold and the
+ *    line's receipt allocation (its share of the header discount, membership discount and tax, and the net entitlement). The sale line's CURRENT pricing snapshot
+ *    is compared to those fields -- not to a digest of the whole string, because adding an unrelated item rewrites every line's snapshot (the allocation context lists
+ *    all lines) without moving this line's entitlement, and that must not block a restore. When the added item DOES move the line's share (a header discount or tax
+ *    is prorated over the lines), the allocation differs and the restore is refused: the line was repriced.
+ *  - A line with nothing comparable (a legacy v0 return with no recorded snapshot, a historical v0 sale whose lines carry no pricing snapshot) is judged by the
+ *    sale amendment ledger: a quantity or price change recorded for that sale line after the return was entered is a reprice. Header-level changes on a v0 sale
+ *    leave no line record and are not detected.
+ * A delivery-fee change (planDeliveryFeeChange) rewrites no line and moves no line entitlement, so it is not a reprice. A line that is gone is the entitlement check's
+ * refusal. The sale-revision guard of the batch fences a change that lands after this read.
+ */
+export const RETURN_RESTORE_SALE_REPRICED_CODE = 'return_restore_sale_repriced'
+const LEDGER_LINE_KINDS = ['line_quantity_increased', 'line_quantity_decreased', 'line_updated']
+function repricedRefusal(): never {
+  return fail('The sale was repriced after this return was recorded, so it cannot be restored. Record a new return instead. Nothing was changed.', 409, RETURN_RESTORE_SALE_REPRICED_CODE)
+}
+function sameAllocation(a: unknown, b: unknown): boolean {
+  const left = a as Record<string, unknown> | null, right = b as Record<string, unknown> | null
+  if (!left || !right) return false
+  return ['discount_usd', 'membership_discount_usd', 'tax_usd', 'net_entitlement_usd'].every((key) => Number(left[key]) === Number(right[key]))
+}
+async function refuseReactivationAfterReprice(db: D1Compat, returnIds: number[]): Promise<void> {
+  if (!returnIds.length) return
+  const rows = await rowsForIds<{ return_id: number; sale_item_id: number; return_at: string | null; refund_snapshot_json: string | null; sold_quantity: number; pricing_snapshot_json: string | null }>(db, returnIds, (marks) => `SELECT ri.return_id,ri.sale_item_id,r.created_at AS return_at,ri.refund_snapshot_json,si.quantity AS sold_quantity,si.pricing_snapshot_json
+    FROM return_items ri JOIN returns r ON r.id=ri.return_id JOIN sale_items si ON si.id=ri.sale_item_id AND si.sale_id=r.sale_id
+    WHERE ri.return_id IN (${marks}) AND COALESCE(r.return_scope,'customer')='customer' ORDER BY ri.id LIMIT 401`)
+  if (rows.length > 400) fail('Select fewer return lines (maximum 400).', 400)
+  const needLedger: typeof rows = []
+  for (const row of rows) {
+    let recorded: Record<string, unknown> | null = null
+    try { recorded = row.refund_snapshot_json ? JSON.parse(String(row.refund_snapshot_json)) as Record<string, unknown> : null } catch { recorded = null }
+    let current: ReturnType<typeof parseSaleItemPricing> = null
+    try { current = row.pricing_snapshot_json ? parseSaleItemPricing(String(row.pricing_snapshot_json)) : null } catch { current = null }
+    // The units sold are on the sale line itself, so they are compared even when its pricing snapshot is gone.
+    if (recorded && recorded.sold_quantity != null && Number(recorded.sold_quantity) !== Number(row.sold_quantity)) repricedRefusal()
+    if (!recorded || !current || !recorded.receipt_allocation) { needLedger.push(row); continue }
+    if (recorded.line_key !== current.line_key || recorded.pool_key !== current.pool.pool_key
+      || !sameAllocation(recorded.receipt_allocation, current.receipt_allocation)
+      || Number(recorded.net_entitlement_usd) !== Number(current.receipt_allocation.net_entitlement_usd)) repricedRefusal()
+  }
+  if (!needLedger.length) return
+  const itemIds = JSON.stringify([...new Set(needLedger.map((row) => Number(row.sale_item_id)))])
+  const ledger = await db.prepare(`SELECT sale_item_id,created_at FROM sale_amendments
+    WHERE sale_item_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids)) AND kind IN (${LEDGER_LINE_KINDS.map((kind) => `'${kind}'`).join(',')}) LIMIT 1001`).all<{ sale_item_id: number; created_at: string | null }>({ ids: itemIds })
+  // A truncated read cannot prove a line is unchanged: refuse rather than guess (the way forward is the same -- record a new return).
+  if (ledger.length > 1000) repricedRefusal()
+  const stamp = (value: unknown): number => Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(value)) ? String(value).replace(' ', 'T') : `${String(value).replace(' ', 'T')}Z`)
+  for (const row of needLedger) {
+    const returnedAt = stamp(row.return_at)
+    if (!Number.isFinite(returnedAt)) continue
+    if (ledger.some((entry) => Number(entry.sale_item_id) === Number(row.sale_item_id) && stamp(entry.created_at) > returnedAt)) repricedRefusal()
+  }
+}
+
+/** The members a status change brings back from cancelled to completed. A take-back return linked by an exchange cancel is already completed when the cancel is applied, so it is never a restore there. */
+function reactivatedIds(members: Member[], toward: 'before' | 'after', applying: boolean): number[] {
+  const from = toward === 'before' ? 'after' : 'before'
+  return members.filter((member) => member.changed && member.scope === 'customer' && !(applying && member.linked)
+    && member[toward].status === 'completed' && member[from].status === 'cancelled').map((member) => member.id)
+}
+
+async function buildMembers(db: D1Compat, sent: BulkRequest,redirectTarget: number | null = null, user?: SessionUser): Promise<{ members: Member[]; guards: Statement[]; replacement: Map<number, ReplacementInfo>; memberGuards: Map<number, Statement> }> {
   const request = await withFoundTakeBacks(db, sent)
   const ids = request.items.map((item) => item.id)
   // The returns the till made to take replacement units back are read, guarded and stocked together with the selected ones.
@@ -1323,6 +1391,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
   const { members, guards, replacement, memberGuards } = await buildMembers(db, request, redirectTarget, user)
+  if (request.field === 'status') await refuseReactivationAfterReprice(db, reactivatedIds(members, 'after', true))
   // What the operator selected is what the receipt, the counts and the Telegram alert speak of; the linked replacement returns ride in the snapshot.
   const selected = members.filter((member) => !member.linked)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
@@ -1436,6 +1505,8 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
   const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  // Undo of a cancel and Redo of a restore both bring a cancelled return back: refused the same way as the list restore once the sale was repriced.
+  await refuseReactivationAfterReprice(db, reactivatedIds(snapshot.members, direction === 'undo' ? 'before' : 'after', false))
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   const replayGuards: Statement[] = []

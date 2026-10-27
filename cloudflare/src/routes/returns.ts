@@ -32,6 +32,7 @@ import { applyReturnBulkActionOutcome, notifyReturnBulkAction, readReplacementOu
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
+import { returnExportWindow } from '../lib/returnExportWindow'
 import { unexpectedFailureBody } from '../lib/failureText'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
@@ -70,6 +71,7 @@ import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLi
 import type { CustomerReturnQuoteV1 } from '../lib/customerReturnEntitlement'
 import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { createExchangeReturnV1 } from '../lib/returnExchangeCreate'
+import { recordStockCrossings } from '../lib/stockCrossingAlert'
 import { RETURN_EXCHANGE_MAX_LINES, ReturnExchangeError, type ExchangeLineIntent } from '../lib/returnExchangeIntent'
 import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
 import type { ExchangeCatalogProduct } from '../lib/returnExchangeContext'
@@ -486,11 +488,14 @@ const MONEY_PRECISION_REVIEW_NEEDED = {
 
 /** The sale's recorded money precision version, or null when there is no such
  * sale (a manual return with no sale_id has no version to inherit). */
-async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown): Promise<number | null> {
+/** The sale row this request already read: the status rides along on the precision read so assertReturnableItems does not read it again (one D1 statement saved on every return; the exchange return sits at the Free 50-statement budget). */
+type SeenSaleStatus = { saleId: number; saleStatus: string | null }
+async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: unknown, seen?: { sale?: SeenSaleStatus }): Promise<number | null> {
   const id = Number(saleId)
   if (!Number.isSafeInteger(id) || id <= 0) return null
-  const row = await db.prepare('SELECT money_precision_version FROM sales WHERE id=? LIMIT 1')
-    .get<{ money_precision_version: number | null }>([id])
+  const row = await db.prepare('SELECT money_precision_version, sale_status FROM sales WHERE id=? LIMIT 1')
+    .get<{ money_precision_version: number | null; sale_status: string | null }>([id])
+  if (seen && row) seen.sale = { saleId: id, saleStatus: row.sale_status }
   return row ? Number(row.money_precision_version) || 0 : null
 }
 
@@ -503,6 +508,7 @@ async function assertReturnableItems(
   saleId: number | null,
   items: ReturnItemInput[],
   excludeReturnId: number | null = null,
+  seenSale?: SeenSaleStatus,
 ): Promise<void> {
   for (const item of items) {
     const qty = Number(item.quantity)
@@ -510,7 +516,9 @@ async function assertReturnableItems(
   }
   if (!saleId) return
 
-  const sale = await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
+  const sale = seenSale && seenSale.saleId === Number(saleId)
+    ? { id: seenSale.saleId, sale_status: seenSale.saleStatus }
+    : await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
   if (!sale) throw new Error('Original sale not found')
   // A cancelled sale's stock was already ADDED BACK by the cancellation
   // itself (routes/sales.ts PATCH /:id/status) -- recording a return on
@@ -626,22 +634,21 @@ export function returnRangePredicate(query: Record<string, string>, column: 'r.c
 }
 
 // GET /api/returns
-app.get('/', async (c) => {
-  const db = getDb(c.env)
-  const query = c.req.query()
+/**
+ * The filters of the Returns list, shared by GET / and the complete statement export (GET /export) so both select the same rows. The caller supplies the
+ * time predicate (the list's own range, or the export's exact one-year window).
+ */
+type ReturnsFilter = { scope: string; where: string[]; params: Record<string, unknown> }
+function returnsFilter(query: Record<string, string>, range: { sql: string; params: Record<string, unknown> }): ReturnsFilter {
   const scope = normalizeScope(query.scope, CUSTOMER_SCOPE)
   const search = String(query.search || query.q || '').trim().toLowerCase()
   const typeValues = String(query.type || query.returnType || '')
     .split(',')
     .map((v) => v.trim().toLowerCase())
     .filter((v) => v && v !== 'all')
-  const includeItems = Boolean(query.saleId) || ['1', 'true', 'yes'].includes(String(query.includeItems || '').trim().toLowerCase())
-  const limit = Math.min(1000, Math.max(1, Number.parseInt(String(query.limit || '500'), 10) || 500))
 
-  let range: ReturnType<typeof returnRangePredicate>
-  try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   const where: string[] = [range.sql]
-  const params: Record<string, unknown> = { limit, ...range.params }
+  const params: Record<string, unknown> = { ...range.params }
   if (query.saleId) { where.push('r.sale_id = @saleId'); params.saleId = query.saleId }
   if (scope !== 'all') { where.push(`COALESCE(r.return_scope, 'customer') = @scope`); params.scope = scope }
   if (typeValues.length === 1) {
@@ -722,6 +729,21 @@ app.get('/', async (c) => {
     where.push(groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0])
   }
 
+  return { scope, where, params }
+}
+
+app.get('/', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const includeItems = Boolean(query.saleId) || ['1', 'true', 'yes'].includes(String(query.includeItems || '').trim().toLowerCase())
+  const limit = Math.min(1000, Math.max(1, Number.parseInt(String(query.limit || '500'), 10) || 500))
+
+  let range: ReturnType<typeof returnRangePredicate>
+  try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
+  const filter = returnsFilter(query, range)
+  const where = filter.where
+  const params: Record<string, unknown> = { limit, ...filter.params }
+
   const returns = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
       replacement_sale.total_usd AS replacement_total_usd,
@@ -748,6 +770,160 @@ app.get('/', async (c) => {
     replacementsByReturn.get(row.return_id)!.push(row)
   }
   return c.json(returns.map((r) => ({ ...r, items: itemsByReturn.get(r.id) || [], replacement_items: replacementsByReturn.get(r.id) || [] })))
+})
+
+// GET /api/returns/export -- the COMPLETE Returns statement for a bounded period, read in cursor pages (RETURNS-ENDPOINT / STATEMENT-EXPORTS, 26 Oct 2026).
+// The list above is capped by the rows it loaded (500 by default, 1000 at most), so an export built from it silently stopped at the cap. This route walks the
+// same filters (returnsFilter) in a total order -- the entry time, then the id, both descending -- with an opaque keyset cursor, so no row is skipped or repeated
+// across pages and the order is the same on every run.
+// Cost: every page is a keyset seek on the indexed created_at column (idx_returns_created_pg, or idx_returns_scope_created_pg when a scope is named) in index order, so a page
+// reads about its own size, not the whole history. A request runs at most three D1 queries (maintenance flag, the snapshot aggregate, the page); the Free plan allows 1000
+// per invocation, so the bound that matters is rows: RETURN_EXPORT_PAGE_MAX_FREE per request, RETURN_EXPORT_ROWS_MAX per statement, one calendar year (returnExportWindow).
+// snapshotToken is a digest of what the pages are made of: the filter, the matched returns' count, ids, write revisions (a return, its lines, its products and its
+// replacement sale each bump one), update stamps, and the customer marker that has no revision of its own. It is computed from the whole matched set, which is one pass over
+// the statement, so it is computed twice per export -- on the first page and on verify=1 (the final and file-click check) -- never per page. Pages after the first
+// echo the token and total the client presents (shape-checked); a change anywhere in the statement while it was read makes the final verify refuse the file.
+const RETURN_EXPORT_PAGE_MAX = 500
+const RETURN_EXPORT_PAGE_MAX_FREE = 250
+const RETURN_EXPORT_ROWS_MAX = 20000
+const RETURN_EXPORT_IDS_MAX = 1000
+// The RAW indexed column (idx_returns_created_pg): never wrapped in a function. Stored timestamps come in two shapes ('YYYY-MM-DD HH:MM:SS' and ISO 'YYYY-MM-DDTHH:MM:SS...Z'),
+// so the window is the union of one bound range per shape (the ISO bounds are the same instants with a 'T'), and the order is the raw text order -- a total order
+// with the id tiebreak that is the same on every run (within one day, ISO-shaped rows sort after space-shaped ones; ISO offsets other than Z are not windowed).
+const RETURN_EXPORT_SORT_AT = 'r.created_at'
+const HEX64 = /^[0-9a-f]{64}$/
+
+// The cursor carries the RAW stored created_at (whatever shape it was written in), the id, and how many rows the statement has served so far (the statement cap holds
+// on every page, whether or not the first one was seen). Nothing validates the shape of the stored value, so no stored shape can fail a download half way.
+function encodeReturnExportCursor(sortAt: string, id: number, served: number): string {
+  return btoa(unescape(encodeURIComponent(JSON.stringify([sortAt, id, served])))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+function decodeReturnExportCursor(value: string): { sortAt: string; id: number; served: number } | null {
+  if (!/^[A-Za-z0-9_-]{1,400}$/.test(value)) return null
+  try {
+    const parsed = JSON.parse(decodeURIComponent(escape(atob(value.replace(/-/g, '+').replace(/_/g, '/'))))) as unknown
+    if (Array.isArray(parsed) && parsed.length === 3 && typeof parsed[0] === 'string' && parsed[0].length >= 1 && parsed[0].length <= 100
+      && Number.isSafeInteger(parsed[1]) && (parsed[1] as number) > 0 && Number.isSafeInteger(parsed[2]) && (parsed[2] as number) >= 0 && (parsed[2] as number) <= RETURN_EXPORT_ROWS_MAX) {
+      return { sortAt: parsed[0], id: parsed[1] as number, served: parsed[2] as number }
+    }
+  } catch { /* falls through to null */ }
+  return null
+}
+/** The seek bounds are plain TEXT on the raw column. A stored value is the local clock text of its instant, so it lies within +-14h of the UTC time (the widest offsets). The lower bound is written
+ * with a space (the smallest separator, so an ISO-shaped row on the bound's date still passes) and the upper bound with 'T' (the largest, so a space-shaped row on its date still passes): both
+ * errors only ADMIT extra rows, which the exact residual then rejects; no member is ever excluded. A value past year 9999 becomes '~', which sorts after every stored text. */
+const SEEK_MARGIN_HOURS = 14
+function seekBound(sqlUtc: string, hours: number, separator: ' ' | 'T'): string {
+  const d = new Date(sqlUtc.replace(' ', 'T') + 'Z')
+  d.setTime(d.getTime() + hours * 3600e3)
+  const iso = d.toISOString()
+  return iso.startsWith('+') ? '~' : iso.slice(0, 10) + separator + iso.slice(11, 19)
+}
+
+app.get('/export', async (c) => {
+  const user = c.get('user')
+  // The router gate admits any Returns tier to read; taking the whole statement out of the app is its own action (returns:export), and the role editor shows Review as
+  // blocked for it (test-permission-catalog-parity-pure.cjs), so only Full access passes.
+  if (getActionTier(user, 'returns', 'export') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const db = getDb(c.env)
+  const query = c.req.query()
+  let window: ReturnType<typeof returnExportWindow>
+  try { window = returnExportWindow(query) } catch (error) { return c.json({ error: (error as Error).message, code: 'return_export_range_invalid' }, 400) }
+  let ids: number[] | null = null
+  if (query.ids !== undefined && query.ids !== '') {
+    const parts = String(query.ids).split(',')
+    ids = [...new Set(parts.map((part) => (/^\d{1,15}$/.test(part.trim()) ? Number(part) : NaN)))]
+    if (!ids.length || ids.length > RETURN_EXPORT_IDS_MAX || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      return c.json({ error: `ids must list between 1 and ${RETURN_EXPORT_IDS_MAX} return ids`, code: 'return_export_ids_invalid' }, 400)
+    }
+    ids.sort((a, b) => a - b)
+  }
+  let cursor: { sortAt: string; id: number; served: number } | null = null
+  if (query.cursor) {
+    cursor = decodeReturnExportCursor(String(query.cursor))
+    if (!cursor) return c.json({ error: 'The export cursor is not valid. Restart the download.', code: 'return_export_cursor_invalid' }, 400)
+  }
+  const requestedLimit = Number.parseInt(String(query.limit || ''), 10)
+  const pageMax = getPlanLimits(c.env).d1QueriesPerInvocation < 200 ? RETURN_EXPORT_PAGE_MAX_FREE : RETURN_EXPORT_PAGE_MAX
+  const pageLimit = Math.min(pageMax, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : pageMax))
+  if (await db.prepare("SELECT 1 AS present FROM system_flags WHERE key='maintenance'").get<{ present: number }>()) {
+    return c.json({ error: 'Returns cannot be exported while a restore is running. Try again shortly.', code: 'return_export_maintenance' }, 503)
+  }
+
+  // Exact membership = the LIST's own test: datetime(created_at) inside [createdFrom, createdTo), which reads every stored shape (space, ISO, fractions, offsets) the same way.
+  // The index does the seeking, on the RAW column: a range that covers every shape of the period -- the text of an instant is at most 14h from its UTC time (offsets
+  // reach +-14h), so from-14h up to to+14h as plain text (seekBound) -- and ONE upper bound (the cursor's raw value on later pages). The datetime() test is a residual over only
+  // the rows that range reads (test-sargable-date-filters-pure carries the allowlist entry); it never drives a scan.
+  const seekFrom = seekBound(window.createdFrom, -SEEK_MARGIN_HOURS, ' '), seekTo = seekBound(window.createdTo, SEEK_MARGIN_HOURS, 'T')
+  const buildFilter = (upper: string) => {
+    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } })
+    if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }
+    return built
+  }
+  const filter = buildFilter('< @seekTo')
+  const whereSql = filter.where.join(' AND ')
+  const verifying = ['1', 'true', 'yes'].includes(String(query.verify || '').trim().toLowerCase())
+  const presented = String(query.snapshotToken || '')
+  let total: number
+  let snapshotToken: string
+  if (cursor && !verifying) {
+    // A later page: the statement-wide aggregate was taken on the first page and is re-taken by verify. Here the client's own copy is echoed so every page of one export
+    // carries the same token and total.
+    const echoedTotal = Number(query.total)
+    if (!HEX64.test(presented) || !Number.isSafeInteger(echoedTotal) || echoedTotal < 0 || echoedTotal > RETURN_EXPORT_ROWS_MAX) {
+      return c.json({ error: 'The export cursor is not valid. Restart the download.', code: 'return_export_cursor_invalid' }, 400)
+    }
+    total = echoedTotal; snapshotToken = presented
+  } else {
+    const stamp = await db.prepare(`
+      SELECT COUNT(*) AS total, COALESCE(SUM(r.id), 0) AS id_sum, COALESCE(SUM(COALESCE(v.revision, 0)), 0) AS revision_sum,
+        COALESCE(MAX(r.updated_at), '') AS updated_max,
+        COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM customers ic WHERE ic.id = r.customer_id AND ic.is_anonymous = 1) THEN 1 ELSE 0 END), 0) AS anonymous_count,
+        COALESCE(SUM(COALESCE(sv.revision, 0)), 0) AS replacement_revision_sum
+      FROM returns r
+      LEFT JOIN return_write_revisions v ON v.return_id = r.id
+      LEFT JOIN sale_write_revisions sv ON sv.sale_id = r.replacement_sale_id
+      WHERE ${whereSql}
+    `).get<Record<string, unknown>>(filter.params)
+    total = Number(stamp?.total) || 0
+    if (total > RETURN_EXPORT_ROWS_MAX) {
+      return c.json({ error: 'This period has too many returns to export at once. Choose a shorter period and export again.', code: 'return_export_too_large', total }, 400)
+    }
+    const sortedParams = Object.keys(filter.params).sort().map((key) => [key, filter.params[key]])
+    snapshotToken = await sha256Hex(JSON.stringify([whereSql, sortedParams, total, stamp?.id_sum, stamp?.revision_sum, stamp?.updated_max, stamp?.anonymous_count, stamp?.replacement_revision_sum]))
+    if (presented && presented !== snapshotToken) {
+      return c.json({ error: 'The returns changed while the statement was being read. Restart the download.', code: 'return_statement_changed' }, 409)
+    }
+    if (verifying) return c.json({ rows: [], total, snapshotToken, nextCursor: null })
+  }
+
+  const pageFilter = cursor ? buildFilter('<= @cursorAt') : filter
+  const params: Record<string, unknown> = { ...pageFilter.params, pageLimit: pageLimit + 1 }
+  let pageWhere = pageFilter.where.join(' AND ')
+  if (cursor) {
+    // The keyset seek: the index range already ends at the cursor's time; the row value drops the rows of that instant that were already served.
+    pageWhere += ` AND (${RETURN_EXPORT_SORT_AT}, r.id) < (@cursorAt, @cursorId)`
+    params.cursorAt = cursor.sortAt; params.cursorId = cursor.id
+  }
+  const fetched = await db.prepare(`
+    SELECT r.*, r.created_at AS export_sort_at,
+      EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
+      replacement_sale.total_usd AS replacement_total_usd,
+      ${DAMAGED_ITEM_COUNT_SQL}
+    FROM returns r
+    LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    WHERE ${pageWhere}
+    ORDER BY ${RETURN_EXPORT_SORT_AT} DESC, r.id DESC LIMIT @pageLimit
+  `).all<ReturnRow & { export_sort_at: string }>(params)
+  const more = fetched.length > pageLimit
+  const page = more ? fetched.slice(0, pageLimit) : fetched
+  const last = page[page.length - 1]
+  const rows = page.map(({ export_sort_at: _sortAt, ...row }) => row)
+  const served = (cursor?.served ?? 0) + rows.length
+  if (served > RETURN_EXPORT_ROWS_MAX) {
+    return c.json({ error: 'This period has too many returns to export at once. Choose a shorter period and export again.', code: 'return_export_too_large', total: served }, 400)
+  }
+  return c.json({ rows, total, snapshotToken, nextCursor: more && last ? encodeReturnExportCursor(last.export_sort_at, Number(last.id), served) : null })
 })
 
 // GET /api/returns/damaged-lots?product_id=&branch_id= -- open damaged
@@ -1327,12 +1503,13 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return row?.return_id == null ? undefined : { ...row, return_id: row.return_id }
   }
   const priorReceipt = await readReceipt()
+  const seenSaleRead: { sale?: SeenSaleStatus } = {}
   // The sale decides. A body that is not explicitly v1 (absent, or 0) may not
   // open a return against a v1 sale -- refused here, above canonicalisation, so
   // an explicit 0 gets the same reviewable code as an absent one instead of the
   // canonicaliser's generic 400.
   if (!priorReceipt && body.money_precision_version !== 1
-    && (await saleMoneyPrecisionVersion(db, body.sale_id)) === 1) {
+    && (await saleMoneyPrecisionVersion(db, body.sale_id, seenSaleRead)) === 1) {
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
   let canonicalIntent: Record<string, unknown>
@@ -1406,7 +1583,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const replacementInputsRaw = Array.isArray(body.replacement_items) ? body.replacement_items : []
   if (!isMoneyV1) {
     try {
-      await assertReturnableItems(db, requestedSaleId, body.items)
+      await assertReturnableItems(db, requestedSaleId, body.items, null, seenSaleRead.sale)
     } catch (error) {
       if (error instanceof ReturnCreateBudgetError) throw error
       const stockGuard = productStockGuardError(error)
@@ -2424,6 +2601,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
+  if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
