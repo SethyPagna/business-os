@@ -146,7 +146,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,
-  './shiftReconciliation': shiftReconciliation,
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 
 const KHMER = /[ក-៿]/
@@ -745,7 +745,7 @@ const wired = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analyticsForShift,
-  './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
 })
 
 wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
@@ -799,7 +799,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
-    './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => emptyDb, loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })),
   })
   return wiredEmpty.telegramCommandReply({}, '/shift 03/09/2026', NOW)
 }).then((reply) => {
@@ -894,7 +894,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': mappingAnalytics,
-    './shiftReconciliation': reconciliationFor(() => mappingDb, mappingAnalytics),
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => mappingDb, mappingAnalytics),
   })
   return wiredMapping.telegramCommandReply({}, '/shift 04/09/2026', NOW)
 }).then((reply) => {
@@ -949,7 +949,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },
     './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./nativeSaleChange':nativeSaleChange,'./salesAnalytics':analytics,'./lowStockSettings':lowStockStub,
-    './shiftReconciliation': shiftReconciliation,
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
   })
   const originalFetch=global.fetch; const sent=[]
   try {

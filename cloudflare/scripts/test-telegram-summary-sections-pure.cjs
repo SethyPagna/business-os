@@ -204,9 +204,13 @@ const lowStockSettings = loadReal('lib/lowStockSettings.ts', { './db': dbModule 
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': dbModule, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
+// The Received section: money by the day it was received (lane 6.0.1007; test-telegram-received-day-pure.cjs owns the dating).
+const dayPaymentsReceived = loadReal('lib/dayPaymentsReceived.ts', {
+  './db': dbModule, './businessDateWindow': businessDateWindow, './salesAnalytics': salesAnalyticsReal, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'), './shiftReconciliation': shiftReconciliation,
+})
 const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockSettings, './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
-  './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
+  './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': dayPaymentsReceived, './d1ReadCoalescer': loadReal('lib/d1ReadCoalescer.ts'), './shiftReconciliation': shiftReconciliation,
 })
 
 const posts = []
@@ -311,8 +315,8 @@ async function main() {
     check(`${section} alone reads only its own figures`, JSON.stringify(read) === JSON.stringify([section]), read.join(', '))
   }
 
-  check('Received: dollars net of change, riel, bank; cancelled, other-branch and other-day sales out; the 00:30 local sale in',
-    JSON.stringify(rowsUnder(single.sales, '=====Received=====')) === JSON.stringify(['· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00']),
+  check('Received: dollars net of change, riel, bank, then the cash refunded that day; cancelled, other-branch and other-day sales out; the 00:30 local sale in',
+    JSON.stringify(rowsUnder(single.sales, '=====Received=====')) === JSON.stringify(['· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00', '· Refunded: $10.00']),
     rowsUnder(single.sales, '=====Received=====').join('\n'))
   const salesRows = rowsUnder(single.sales, '=====Sales=====')
   check('sales & payments: Not Paid carries its receipt count, and the total discount sits under its two parts',
@@ -370,7 +374,7 @@ async function main() {
     '· Profit: $150.25', '· Profit (paid only): $110.25', '· Delivery fee: $6.00', '· Still owed: 3 · $40.00', '· Refunds: $10.00',
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
-    '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
+    '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00', '· Refunded: $10.00',
     '=====Cash count=====', '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
     '=====Cashiers=====', '· Za: 12 · $300.0000', '· Sok: 6 · $112.5000',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
@@ -406,7 +410,7 @@ async function main() {
   setting(shopA, 'telegram_language', 'km')
   const khmer = await overview(envA)
   check('Khmer: the new section titles and labels come out in Khmer',
-    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '=====ការរាប់សាច់ប្រាក់=====', '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛', '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛', '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
+    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '=====ការរាប់សាច់ប្រាក់=====', '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛', '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛', '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· បានសងប្រាក់: $10.00', '· ម្សិលមិញ: $375.00 · +10%',
       '· ចំនួនស្មើជារៀល: 41,000៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 41,000៛'),
     khmer.text)
   const packs = Object.fromEntries(['en', 'km'].map((pack) => [pack, JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', `${pack}.json`), 'utf8'))]))

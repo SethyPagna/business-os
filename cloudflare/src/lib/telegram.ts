@@ -18,9 +18,11 @@ import {
 // call the same function -- see the header note there for what changed and why.
 import {
   composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
-  refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
+  refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
+import { coalesceD1Reads } from './d1ReadCoalescer'
+import { dayPaymentsReceived } from './dayPaymentsReceived'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
@@ -912,7 +914,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // Revenue above (refunds subtracted, voids contributing nothing), never a
     // second total.
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
-    if (extra.sales) section('received', receivedRows(extra.sales.received))
+    if (extra.sales) section('received', receivedRows(extra.sales.received, extra.sales.refunded))
   }
 
   // Expenses -- the SAME split the shift report prints, through the same
@@ -963,6 +965,8 @@ async function dayReport(
   env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories,
   summary: TelegramSummarySections = NO_SUMMARY_SECTIONS, nowMs: number = Date.now(),
 ): Promise<string> {
+  // Every read of the message goes out in as few D1 calls as its slowest chain of questions (lib/d1ReadCoalescer.ts).
+  env = coalesceD1Reads(env)
   const totals = getSalesTotals(env, dayFilters(date))
   const otherLabel = withLanguage(language, () => label('other'))
   const [stats, cashiers, extra] = await Promise.all([
@@ -1959,7 +1963,8 @@ export type ShiftOverviewFigures = {
 type CountedMoney = { name: string; count: number; usd: number }
 type LowStockRow = { name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }
 export type SummarySectionFigures = {
-  sales?: { received: ShiftCashResult; notPaidCount: number; totalDiscountUsd: number }
+  /** `received` is money taken inside the day by the day it was received, `refunded` the cash handed back inside it (lib/dayPaymentsReceived.ts). */
+  sales?: { received: ShiftCashResult; refunded?: ShiftMoney; notPaidCount: number; totalDiscountUsd: number }
   /** `cashiers` is null where the message lists them anyway (the day summary); `branches` is null on a branch's overview. */
   cashiers?: { cashiers: CountedMoney[] | null; branches: CountedMoney[] | null }
   products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
@@ -1984,8 +1989,9 @@ function changeAgainst(today: number, before: number): string {
   return ` · ${percent > 0 ? '+' : percent < 0 ? '−' : ''}${Math.abs(percent)}%`
 }
 
-function receivedRows(tender: ShiftCashResult): string[] {
+function receivedRows(tender: ShiftCashResult, refunded?: ShiftMoney): string[] {
   const rows = [labeled('dollars', usd(tender.usd)), labeled('riel', riel(tender.khr)), labeled('bank', money(tender.digital.usd, tender.digital.khr))]
+  if (refunded && hasMoney(refunded)) rows.push(labeled('refunded', money(refunded.usd, refunded.khr)))
   if (tender.needsReview) rows.push(labeled('cashReview', reviewReasons(tender.reviewCodes)))
   return rows
 }
@@ -2078,7 +2084,7 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40, 4)), showSales)
-  if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
+  if (extra.sales) section('received', receivedRows(extra.sales.received, extra.sales.refunded), showSales)
   // The closing shift's drawer: always Opening, Additional change used, Closing
   // (owner, 13 Oct 2026), $0 included, whatever the Sales and Fees switches say.
   // The shift is the one the header names (its ID row is printed there, in every
@@ -2150,6 +2156,7 @@ export async function shiftOverviewFigures(
   sections: TelegramSummarySections = NO_SUMMARY_SECTIONS,
   nowMs: number = Date.now(),
 ): Promise<ShiftOverviewFigures> {
+  env = coalesceD1Reads(env)
   const scope = summaryScope(shift, nowMs)
   const { filters, params } = scope
   const db = getDb(env)
@@ -2217,7 +2224,6 @@ async function summarySectionFigures(
   { otherLabel, cashierListShown = false }: { otherLabel: string; cashierListShown?: boolean },
 ): Promise<SummarySectionFigures> {
   const { filters } = scope
-  const sold = whereActiveSales('sales', filters)
   const fold = (rows: CountedMoney[]) => foldRows(rows, SUMMARY_ROWS, (rest) => ({
     name: otherLabel,
     count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
@@ -2231,7 +2237,8 @@ async function summarySectionFigures(
     return { startDate: date, endDate: date, branchId: filters.branchId, ...sameMoment }
   }
   const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
-    sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
+    // Dated by when the money was RECEIVED, not by the day the sale was rung (owner, 27 Oct 2026).
+    sections.sales ? dayPaymentsReceived(env, { business_date: String(filters.startDate), branch_id: filters.branchId == null ? null : Number(filters.branchId) }) : null,
     sections.cashiers && !cashierListShown ? groupedBy('cashier') : null,
     sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
     sections.products ? getProductSalesRanking(env, filters, TOP_PRODUCTS) : null,
@@ -2247,7 +2254,7 @@ async function summarySectionFigures(
   ])
   const { pending_tx_count: notPaidCount, total_discount_usd: totalDiscountUsd } = await totals
   return {
-    ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
+    ...(received && { sales: { ...received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
     ...(sections.cashiers && { cashiers: { cashiers, branches } }),
     ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
     ...(sections.returns && {
@@ -2302,6 +2309,8 @@ function overviewTopicKey(config: TelegramConfig): TelegramTopicKey {
   return config.topics.telegram_topic_reports ? 'telegram_topic_reports' : 'telegram_topic_shift'
 }
 
+const OVERVIEWS_PER_DRAIN = 1
+
 export type ShiftOverviewDeliveryResult = 'sent' | 'skipped' | 'taken' | 'not-due' | 'retry' | 'failed'
 
 /**
@@ -2322,18 +2331,29 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
   ).run({ key, status, error, now, retryAt: new Date(nowMs + SHIFT_OVERVIEW_DELAY_SECONDS * 1000).toISOString() })
   let attempts = SHIFT_OVERVIEW_MAX_ATTEMPTS
   try {
-    const row = await db.prepare('SELECT shift_id, attempts FROM telegram_scheduled_sends WHERE send_key = @key').get<{ shift_id: number; attempts: number }>({ key })
-    attempts = Number(row?.attempts) || attempts
-    const config = await getTelegramConfig(env)
+    // The row, the settings and the shift it names are independent reads: one D1 call, not three (lib/d1ReadCoalescer.ts).
+    const reads = coalesceD1Reads(env)
+    const [rowRead, configRead, shiftRead] = await Promise.allSettled([
+      getDb(reads).prepare('SELECT shift_id, attempts FROM telegram_scheduled_sends WHERE send_key = @key').get<{ shift_id: number; attempts: number }>({ key }),
+      getTelegramConfig(reads),
+      getDb(reads).prepare(`SELECT ${OVERVIEW_SHIFT_COLUMNS} FROM shift_sessions WHERE id = (SELECT shift_id FROM telegram_scheduled_sends WHERE send_key = @key)`).get<OverviewShift>({ key }),
+    ])
+    // The attempt count survives a failed settings or shift read, so that failure is retried like any other.
+    if (rowRead.status === 'fulfilled') attempts = Number(rowRead.value?.attempts) || attempts
+    const failedRead = [rowRead, configRead, shiftRead].find((read) => read.status === 'rejected')
+    if (failedRead?.status === 'rejected') throw failedRead.reason
+    const row = (rowRead as PromiseFulfilledResult<{ shift_id: number; attempts: number } | undefined>).value
+    const config = (configRead as PromiseFulfilledResult<TelegramConfig>).value
+    const shift = (shiftRead as PromiseFulfilledResult<OverviewShift | undefined>).value
     // Re-read at send time: a switch turned off during the minute wins.
     if (!row || !config.enabled || !config.shiftOverview || configurationProblem(config)) { await settle('skipped', null); return 'skipped' }
-    const shift = await db.prepare(`SELECT ${OVERVIEW_SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<OverviewShift>({ id: row.shift_id })
     // Cancelled during the minute: its close is no longer a fact to report.
     if (!shift || !shift.closed_at || shift.cancelled_at) { await settle('skipped', null); return 'skipped' }
     // The fold label is the only text the DATA read produces; composed first,
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
-    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel, config.summary, nowMs)])
+    // The shop name and the figures are asked together, so they travel together.
+    const [name, figures] = await Promise.all([shopName(reads), shiftOverviewFigures(reads, shift, otherLabel, config.summary, nowMs)])
     const topicKey = overviewTopicKey(config)
     await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics[topicKey], topicKey)
     await settle('sent', null, ', sent_at = @now')
@@ -2364,7 +2384,9 @@ export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = D
   // table", which is the same answer for free: nothing to send.
   const db = getDb(env)
   const now = new Date(nowMs).toISOString()
-  const limit = options.limit ?? 3
+  // One overview per invocation, whatever the caller asks for: an overview is a dozen reads deep, and a Free-plan invocation
+  // may make 50 D1 calls (6.0.1007). What is still due is sent by the next tick or request.
+  const limit = Math.min(options.limit ?? 3, OVERVIEWS_PER_DRAIN)
   let due: Array<{ send_key: string }>
   try {
     // The cron only: the request drain stays a single indexed read.

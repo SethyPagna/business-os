@@ -364,6 +364,8 @@ const LABELS = {
   reportsOverview: { en: 'Reports overview', km: 'ទិដ្ឋភាពរួមរបាយការណ៍' }, // km.json telegram_reports_overview
   returns: { en: 'Returns', km: 'ការប្រគល់មកវិញ' },                  // km.json returns
   received: { en: 'Received', km: 'បានទទួល' },                       // km.json received
+  // Cash handed back to customers on the day, shown under Received and never subtracted from it (lib/dayPaymentsReceived.ts).
+  refunded: { en: 'Refunded', km: 'បានសងប្រាក់' },                    // km.json refunded
   dollars: { en: 'Dollars', km: 'ដុល្លារ' },                          // km.json shift_float_usd (ដុល្លារ)
   riel: { en: 'Riel', km: 'រៀល' },                                    // km.json riel
   rielEquivalent: { en: 'Riel equivalent', km: 'ចំនួនស្មើជារៀល' },    // km.json rfd_total_khr (ចំនួនស្មើ) + riel

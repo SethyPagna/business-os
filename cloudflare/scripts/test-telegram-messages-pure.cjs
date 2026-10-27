@@ -67,7 +67,7 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 
 // The shift drawer arithmetic is shared with the close routes and the app.
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') })
-const telegram = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+const telegram = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation })
 
 // --- date: UTC -> business zone, dd/mm/yyyy HH:mm, both timestamp shapes ---
 assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '03/09/2026 00:30', 'ISO with Z shifts +7h across midnight')
@@ -688,7 +688,7 @@ assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path
       { key: 'telegram_language', value: shopLanguage },
     ] }) }),
   }
-  const wired = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  const wired = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation })
   const sendSale = async (mode, sale) => {
     shopLanguage = mode
     posted.length = 0

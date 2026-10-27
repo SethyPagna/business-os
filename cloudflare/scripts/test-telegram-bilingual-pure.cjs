@@ -400,7 +400,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': salesAnalytics,
-  './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
 })
 
 const bilingualOk = (line) => {
@@ -621,7 +621,7 @@ const workerdTelegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': salesAnalytics,
-  './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
 })
 const khmerSale = underWorkerdSegmenter(() => workerdTelegram.formatSaleTelegramLines({
   receiptNumber: 'R-2', cashier: `${'ក'.repeat(58)}ស្រីពៅ`, exchangeRate: 4100,
@@ -774,7 +774,7 @@ const wired = loadReal('lib/telegram.ts', {
   // The real kernel over the same stub db, so `/shift` goes down its actual
   // query path here rather than a hand-written imitation of it.
   './salesAnalytics': stubAnalytics,
-  './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
 })
 const env = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-secret' }
 const lastSent = () => sent[sent.length - 1].body.text
@@ -857,7 +857,7 @@ const lastSent = () => sent[sent.length - 1].body.text
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': stubAnalytics,
-    './shiftReconciliation': reconciliationFor(() => stockedDb, stubAnalytics),
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliationFor(() => stockedDb, stubAnalytics),
   })
   const RULE = '━'.repeat(18)
   // Sep 23 2026 (owner: "for telegram reports, instead of plain line ------we

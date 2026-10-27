@@ -169,7 +169,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange,
-  './shiftReconciliation': shiftReconciliation,
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 
 // ---- the Telegram API, locally ---------------------------------------------

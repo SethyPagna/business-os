@@ -124,7 +124,7 @@ function makeDb(settingsRows) {
 function wireTelegram(settingsRows) {
   const singleDb = makeDb(settingsRows) // one instance: every getDb() call in this test shares it
   dbHolder.current = { getDb: () => singleDb }
-  return loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': dbProxy, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  return loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': dbProxy, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation })
 }
 
 const baseSettings = [
@@ -141,7 +141,7 @@ const baseSettings = [
 
 ;(async () => {
   // ---- 1. parseTelegramTopicId is a defensive integer-or-empty parse -------
-  const bare = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  const bare = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation })
   assert.equal(bare.parseTelegramTopicId('42'), 42)
   assert.equal(bare.parseTelegramTopicId(' 7 '), 7)
   assert.equal(bare.parseTelegramTopicId(''), undefined)

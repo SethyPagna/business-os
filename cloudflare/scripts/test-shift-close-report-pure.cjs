@@ -372,7 +372,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     // The drawer arithmetic the report prints is the SAME module the close
     // route reconciles with (lib/shiftReconciliation.ts), bound to the same
     // handle -- a stub here would let the message and the close disagree.
-    './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', {
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', {
       './db': { getDb: () => settingsOnly },
       './nativeSaleChange': nativeSaleChange,
       './salesAnalytics': closeAnalytics,

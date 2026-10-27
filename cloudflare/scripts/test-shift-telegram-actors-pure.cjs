@@ -173,7 +173,7 @@ async function main() {
     './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
     './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
     './salesAnalytics': kernelAnalytics, './nativeSaleChange': nativeSaleChange,
-    './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', {
+    './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', {
       './db': dbModule, './nativeSaleChange': nativeSaleChange, './salesAnalytics': kernelAnalytics, './paymentMethodRegistry': paymentMethodRegistry,
     }),
   })

@@ -147,7 +147,7 @@ const lowStockRule = load('lib/lowStockSettings.ts', { './db': dbModule })
 const telegram = load('lib/telegram.ts', {
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
-  './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,
+  './salesAnalytics': analytics, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,
 })
 
 const NOW = Date.parse('2026-09-06T12:00:00Z')

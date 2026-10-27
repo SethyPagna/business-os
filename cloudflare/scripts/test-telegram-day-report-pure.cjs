@@ -167,7 +167,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,
-  './shiftReconciliation': shiftReconciliation,
+  './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 
 let passed = 0

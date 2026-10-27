@@ -156,7 +156,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': dbShim,
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './businessDateWindow': businessDateWindow, './telegramLang': lang, './saleTotals': saleTotals,
-  './nativeSaleChange': nativeSaleChange, './salesAnalytics': analytics, './shiftReconciliation': shiftReconciliation,
+  './nativeSaleChange': nativeSaleChange, './salesAnalytics': analytics, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 
 let passed = 0

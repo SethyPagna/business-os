@@ -110,7 +110,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
 const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
-  './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
+  './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 
 let passed = 0
@@ -839,7 +839,7 @@ const probeTelegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
-  './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
+  './nativeSaleChange': nativeSaleChange, './dayPaymentsReceived': require('./harness/day-payments-received-unwired.cjs'), './d1ReadCoalescer': require('./harness/day-payments-received-unwired.cjs'), './shiftReconciliation': shiftReconciliation,
 })
 const lengthFaults = []
 for (let length = 1; length <= 40; length += 1) {
