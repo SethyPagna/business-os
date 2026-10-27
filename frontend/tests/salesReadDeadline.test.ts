@@ -89,10 +89,14 @@ await runTest('Sales only replays a queued filter refresh after the active reque
   assert.equal(resolvePendingSalesLoad(pendingForeground, true), pendingForeground, 'a successful stale query still needs the newest foreground filters')
   assert.equal(resolvePendingSalesLoad(pendingBackground, true), pendingBackground, 'a successful request still coalesces one pending sync refresh')
 
-  assert.match(source, /let completedSuccessfully = false[\s\S]*setSales\(rows\)[\s\S]{0,180}completedSuccessfully = true/)
+  assert.match(source, /let completedSuccessfully = false[\s\S]*publishRows\(rows\)[\s\S]{0,180}completedSuccessfully = true/)
+  // publishRows is the one place loadSales shows rows (6.0.990): the rows and the ref the row-patch handlers read change together.
+  assert.match(source, /const publishRows = \(rows: SaleRecord\[\]\) => \{\s*salesRef\.current = rows\s*setSales\(rows\)/)
   const settlement = source.slice(source.indexOf('const wrappedPromise = promise.finally'), source.indexOf('loadPromiseRef.current = wrappedPromise'))
   assert.ok(settlement.includes('if (loadPromiseRef.current !== wrappedPromise) return'), 'only the active request may consume this scope\'s queued load')
-  assert.ok(settlement.indexOf('const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)') < settlement.indexOf('pendingLoadRef.current = null'), 'settlement resolves the queued intent before consuming its slot')
+  // A read superseded by a newer query (6.0.990) also hands over to the queued load, which reads that query.
+  const resolveAt = settlement.indexOf('const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully || superseded)')
+  assert.ok(resolveAt >= 0 && resolveAt < settlement.indexOf('pendingLoadRef.current = null'), 'settlement resolves the queued intent before consuming its slot')
   assert.ok(settlement.includes('if (pending && requestSecurity === statusSecurityRef.current)'), 'a queued replay is limited to the request security scope that created it')
   assert.match(settlement, /queueMicrotask\(\(\) => \{\s*if \(requestSecurity !== statusSecurityRef\.current\) return\s*const nextLoad = latestLoadRef\.current \|\| loadSales\s*nextLoad\(Boolean\(pending\.silent\)\)/, 'the deferred replay rechecks scope immediately before invoking the latest loader')
   assert.match(source, /\{loadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{\(\) => loadSales\(false\)\}/, 'a failed refresh with retained rows must expose the manual Retry action')

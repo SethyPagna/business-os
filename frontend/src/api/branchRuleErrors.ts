@@ -99,6 +99,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
   product_supplier_edit_required: 'product_supplier_edit_required',
   idempotency_conflict: 'idempotency_conflict',
+  // Six Worker sites (sales.ts: new sale, added lines, amendment; returns.ts: create twice, edit), four sentences, one meaning: the request or the
+  // stored return is in the older money format and the sale no longer accepts it. The current app always sends v1, so the reader is never on an
+  // old app -- one class sentence: nothing saved, keep the record, an admin can review and convert it. EditReturnModal shows the stored-return case before any edit.
+  money_precision_review_needed: 'money_precision_review_needed',
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',
   return_restore_exchange_credit: 'return_restore_exchange_credit',

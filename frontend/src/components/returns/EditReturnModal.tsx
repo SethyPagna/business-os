@@ -11,6 +11,7 @@ import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { returnEditLock } from './helpers/returnEditLock.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import {
@@ -69,6 +70,8 @@ interface ExistingReturnItem extends Omit<EditableReturnItem, 'returnQty'> {}
 interface ExistingReturn {
   id: number | string
   money_precision_version?: number | string | null
+  /** The linked sale's money version (GET /api/returns/:id). */
+  sale_money_precision_version?: number | string | null
   total_refund_usd?: number | string | null
   return_number?: string | null
   reason?: string | null
@@ -158,6 +161,7 @@ function isWriteConflict(error: unknown): boolean {
 
 export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, onLegacyConverted, fmtUSD, notify }: EditReturnModalProps) {
   const { user, t } = useApp()
+  const editLock = returnEditLock(ret)
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -243,7 +247,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
   const handleSubmit = async (): Promise<void> => {
     // Temporary create-only checkpoint: never reprice a v1 return through the
     // legacy edit request. Its original pending requests remain untouched.
-    if (Number(ret.money_precision_version) === 1) return
+    // A v0 return on a v1 sale is refused by the Worker as well (returnEditLock).
+    if (returnEditLock(ret)) return
     if (!finalReason.trim()) { notify(T('return_reason','Please provide a reason'), 'error'); return }
     // A stored retry is resent unchanged so the Worker can replay its receipt.
     if (!activePendingRequest && keepsNoLine) { notify(emptyEditText, 'error'); return }
@@ -338,11 +343,13 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
     if (!submitting) closeGuard.requestClose()
   }
 
-  if (Number(ret.money_precision_version) === 1) return createPortal(
+  if (editLock) return createPortal(
     <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
       <div role="dialog" aria-modal="true" aria-label={T('edit_return', 'Edit Return')} className="modal-panel-safe w-full rounded-t-2xl bg-white p-4 dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl">
         <h2 className="text-lg font-bold">{T('edit_return', 'Edit Return')}</h2>
-        <p className="my-4 text-sm" role="status">{T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')}</p>
+        <p className="my-4 text-sm leading-relaxed" role="status" data-return-edit-lock={editLock}>{editLock === 'exact_return'
+          ? T('return_v1_edit_unavailable', 'This net-refund return cannot be edited in this version. Its saved refund remains unchanged.')
+          : T('return_legacy_edit_unavailable', 'This return uses an older money format than its sale, so it cannot be edited here. Its saved refund stays unchanged. An admin can review and convert it.')}</p>
         <div className="mb-4 flex justify-between"><span>{T('refund', 'Refund')}</span><span>{fmtUSD(toNumber(ret.total_refund_usd))}</span></div>
         <button type="button" className="btn-secondary w-full" onClick={onClose}>{T('close', 'Close')}</button>
       </div>
