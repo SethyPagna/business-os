@@ -67,7 +67,7 @@ const contacts = load('routes/contacts.ts', {
   '../lib/contactOptions': contactOptions,
   '../lib/phone': phone,
   '../lib/sqlBinding': sqlBinding,
-  '../lib/contactMerge': contactMerge,
+  '../lib/contactMerge': { ...contactMerge, contactMergeStatementBudget: (queries) => state.stepBudget ?? contactMerge.contactMergeStatementBudget(queries) },
   '../lib/planTier': planTier,
   '../lib/conflictControl': load('lib/conflictControl.ts'),
   '../lib/anonymousCustomer': load('lib/anonymousCustomer.ts'),
@@ -100,7 +100,11 @@ function fresh(seed) {
 async function post(url, body, tier = 'paid') {
   // The tier is cached per isolate; a test serving both plans resets it.
   planTier.__resetPlanTierCacheForTests()
-  const env = tier === 'free' ? { PLAN_TIER: 'free' } : {}
+  // 'free-stepped' = the Free plan with the merge batch capped at the 27 statements the old
+  // statement-counting rule allowed (50 less the route's 23). Real Free no longer steps a six-record
+  // merge (a batch is one call), so the continuation protocol is exercised through this forced budget.
+  state.stepBudget = tier === 'free-stepped' ? 50 - contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES : undefined
+  const env = tier === 'paid' ? {} : { PLAN_TIER: 'free' }
   const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, env, { waitUntil: () => {} })
   const text = await res.text()
   try { return { status: res.status, body: JSON.parse(text) } } catch { throw new Error(`POST ${url} ${res.status}: ${text}`) }
@@ -513,10 +517,10 @@ async function main() {
     assert.deepEqual(rows(raw, 'SELECT id, contact_id FROM portal_accounts ORDER BY id'), [{ id: 71, contact_id: null }, { id: 75, contact_id: 1 }])
   })
 
-  await check('free plan: six records merge in steps inside the 50-query budget, never failing, ending as the paid merge does', async () => {
+  await check('forced 27-statement budget: six records merge in steps, never failing, ending as the paid merge does', async () => {
     const raw = fresh(SIX_SEED)
     const body = sixBody(raw)
-    const first = await post('/api/customers/merge', body, 'free')
+    const first = await post('/api/customers/merge', body, 'free-stepped')
     assert.equal(first.status, 200, JSON.stringify(first.body))
     assert.deepEqual(first.body.merged_ids, [4, 5], 'the records holding the chosen number and account go first')
     assert.deepEqual(first.body.remaining_merge_ids, [2, 3, 6])
@@ -524,7 +528,7 @@ async function main() {
 
     // The same request retried after its first step committed answers from the
     // audit row with the same remaining work, instead of a false conflict.
-    const retried = await post('/api/customers/merge', body, 'free')
+    const retried = await post('/api/customers/merge', body, 'free-stepped')
     assert.equal(retried.status, 200, JSON.stringify(retried.body))
     assert.equal(retried.body.replayed, true)
     assert.deepEqual(retried.body.remaining_merge_ids, [2, 3, 6])
@@ -533,7 +537,7 @@ async function main() {
     let next = first.body.continuation
     let requests = 1
     while (next) {
-      const response = await post('/api/customers/merge', next, 'free')
+      const response = await post('/api/customers/merge', next, 'free-stepped')
       assert.equal(response.status, 200, JSON.stringify(response.body))
       requests += 1
       next = response.body.continuation
@@ -542,8 +546,7 @@ async function main() {
     assert.equal(requests, 3)
     // 50 D1 queries per request on the free plan, less what the route spends
     // outside its batch; the one-batch merge would not have fitted.
-    const budget = contactMerge.contactMergeStatementBudget(50)
-    assert.equal(budget + contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES, 50)
+    const budget = 50 - contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES
     assert.ok(paidStatements > budget, `the ${paidStatements}-statement paid batch needs stepping under the free budget of ${budget}`)
     for (const statements of state.batches) {
       assert.ok(statements <= budget, `a ${statements}-statement batch exceeds the free-plan budget of ${budget}`)
@@ -556,22 +559,48 @@ async function main() {
     assert.deepEqual(rows(raw, "SELECT details FROM audit_logs WHERE action = 'merge' ORDER BY id").map((row) => JSON.parse(row.details).clientRequestId), ['r11-six', 'r11-six:r3', 'r11-six:r1'])
   })
 
+  await check('real Free plan: a batch is ONE call, so the six-record merge is one batch of the paid size and needs no continuation', async () => {
+    const raw = fresh(SIX_SEED)
+    const res = await post('/api/customers/merge', sixBody(raw), 'free')
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal(res.body.continuation, undefined, 'Free used to split this into three requests')
+    assert.deepEqual(state.batches, [paidStatements], 'one batch, as many statements as the paid merge')
+    assert.ok(paidStatements > 50 - contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES, 'the old statement-counting budget (27) could not hold it')
+    const freeState = settled(raw)
+    assert.deepEqual(freeState.ids, paidState.ids)
+    assert.deepEqual(freeState.keeper, paidState.keeper, 'the kept record')
+  })
+
+  // The two halves of the D1 rule, on the Free limit: calls are counted one each (the route's 23 single
+  // queries plus the one batch must fit in 50) and a batch's statements are not.
+  await check('Free limit 50 counts calls: a 60-statement batch fits, the 24th call is the boundary', async () => {
+    const free = planTier.PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation
+    assert.equal(free, 50)
+    assert.ok(contactMerge.contactMergeStatementBudget(free) >= 60, 'a 60-statement batch must be allowed on Free')
+    assert.equal(contactMerge.contactMergeStatementBudget(free), contactMerge.contactMergeStatementBudget(planTier.PLAN_LIMITS_BY_TIER.paid.d1QueriesPerInvocation), 'Free and Paid allow the same batch')
+    const overhead = contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES
+    assert.equal(contactMerge.contactMergeStatementBudget(overhead + 1), contactMerge.CONTACT_MERGE_MAX_STATEMENTS, 'overhead single queries + 1 batch call fit')
+    assert.equal(contactMerge.contactMergeStatementBudget(overhead), 1, 'overhead single queries leave no call for the batch: the plan steps')
+    // 51 single queries are over a limit of 50 whatever the batches do.
+    assert.ok(Array.from({ length: 51 }).length > free && Array.from({ length: 50 }).length <= free)
+  })
+
   await check('free plan: later steps use the exact issued certificate, even once the kept record left its cluster', async () => {
     const raw = fresh(SIX_SEED)
     const body = { ...sixBody(raw), client_request_id: 'r11-typed', choices: { phone: { source_id: 2 }, name: { custom: 'Chan Dara' } } }
-    const first = await post('/api/customers/merge', body, 'free')
+    const first = await post('/api/customers/merge', body, 'free-stepped')
     assert.equal(first.status, 200, JSON.stringify(first.body))
     assert.equal(one(raw, 'SELECT name FROM customers WHERE id = 1').name, 'Chan Dara', 'the kept record no longer shares the cluster name')
     let next = first.body.continuation
     assert.ok(next && !('manual' in next), 'a continuation carries no manual flag')
     // The continuation's id with an outsider slipped in is refused.
     raw.prepare("INSERT INTO customers(id,name,is_anonymous,updated_at) VALUES (9,'Outsider',0,'2026-09-09 10:00:00')").run()
-    const smuggled = await post('/api/customers/merge', { ...next, mergeIds: [...next.mergeIds.slice(0, 1), 9], expected: expectedFor(raw, 'customers', [1, next.mergeIds[0], 9]) }, 'free')
+    const smuggled = await post('/api/customers/merge', { ...next, mergeIds: [...next.mergeIds.slice(0, 1), 9], expected: expectedFor(raw, 'customers', [1, next.mergeIds[0], 9]) }, 'free-stepped')
     assert.equal(smuggled.status, 409, JSON.stringify(smuggled.body))
     assert.equal(smuggled.body.code, 'contact_merge_not_duplicates')
     let requests = 1
     while (next) {
-      const response = await post('/api/customers/merge', next, 'free')
+      const response = await post('/api/customers/merge', next, 'free-stepped')
       assert.equal(response.status, 200, JSON.stringify(response.body))
       next = response.body.continuation
       requests += 1
@@ -589,21 +618,21 @@ async function main() {
     ]) {
       const raw = fresh(SIX_SEED)
       const body = sixBody(raw)
-      const first = await post('/api/customers/merge', body, 'free')
+      const first = await post('/api/customers/merge', body, 'free-stepped')
       assert.equal(first.status, 200)
       const next = first.body.continuation
       raw.exec(sql)
       const before = dump(raw)
-      const forged = await post('/api/customers/merge', { ...next, expected: expectedFor(raw, 'customers', [1, ...next.mergeIds]) }, 'free')
+      const forged = await post('/api/customers/merge', { ...next, expected: expectedFor(raw, 'customers', [1, ...next.mergeIds]) }, 'free-stepped')
       assert.equal(forged.status, 409, `${label}: ${JSON.stringify(forged.body)}`)
       assert.equal(forged.body.code, 'contact_merge_not_duplicates')
       assert.equal(dump(raw), before, label)
       // A lost-response retry returns its original certificate, never fresh
       // snapshots that could launder the edit into an authorized operation.
-      const replay = await post('/api/customers/merge', body, 'free')
+      const replay = await post('/api/customers/merge', body, 'free-stepped')
       assert.equal(replay.status, 200)
       assert.deepEqual(replay.body.continuation, next, label)
-      const stale = await post('/api/customers/merge', replay.body.continuation, 'free')
+      const stale = await post('/api/customers/merge', replay.body.continuation, 'free-stepped')
       assert.equal(stale.status, 409, label)
       assert.equal(dump(raw), before, label)
     }
@@ -611,7 +640,7 @@ async function main() {
 
   await check('issued continuation scope and decisions cannot be changed, including to a subset of current duplicates', async () => {
     const raw = fresh(SIX_SEED)
-    const first = await post('/api/customers/merge', sixBody(raw), 'free')
+    const first = await post('/api/customers/merge', sixBody(raw), 'free-stepped')
     assert.equal(first.status, 200)
     const next = first.body.continuation
     const before = dump(raw)
@@ -621,13 +650,13 @@ async function main() {
       { membership_source_id: 3 },
       { client_request_id: 'r11-six:r2' },
     ]) {
-      const response = await post('/api/customers/merge', { ...next, ...patch }, 'free')
+      const response = await post('/api/customers/merge', { ...next, ...patch }, 'free-stepped')
       assert.equal(response.status, 409, JSON.stringify(response.body))
       assert.equal(response.body.code, 'contact_merge_not_duplicates')
       assert.equal(dump(raw), before)
     }
     // CONTROL: refusing modified requests must not consume valid pending work.
-    const valid = await post('/api/customers/merge', next, 'free')
+    const valid = await post('/api/customers/merge', next, 'free-stepped')
     assert.equal(valid.status, 200, JSON.stringify(valid.body))
   })
 
@@ -635,7 +664,7 @@ async function main() {
     const raw = fresh(SIX_SEED)
     const body = sixBody(raw)
     state.lost = true
-    const first = await post('/api/customers/merge', body, 'free')
+    const first = await post('/api/customers/merge', body, 'free-stepped')
     assert.equal(first.status, 200)
     raw.exec("INSERT INTO customers(id,name,is_anonymous,updated_at) VALUES (9,'Unrelated',0,'2026-09-09 10:00:00')")
     const before = dump(raw)
@@ -644,18 +673,18 @@ async function main() {
       { choices: { name: { custom: 'Revised retry' } } },
       { membership_source_id: 2 },
     ]) {
-      const forged = await post('/api/customers/merge', { ...body, ...patch }, 'free')
+      const forged = await post('/api/customers/merge', { ...body, ...patch }, 'free-stepped')
       assert.equal(forged.status, 409, JSON.stringify(forged.body))
       assert.equal(forged.body.code, 'contact_merge_conflict')
       assert.equal(dump(raw), before)
     }
-    const replay = await post('/api/customers/merge', body, 'free')
+    const replay = await post('/api/customers/merge', body, 'free-stepped')
     assert.equal(replay.status, 200)
     assert.equal(replay.body.replayed, true)
     assert.deepEqual(replay.body.continuation, first.body.continuation)
-    const continued = await post('/api/customers/merge', replay.body.continuation, 'free')
+    const continued = await post('/api/customers/merge', replay.body.continuation, 'free-stepped')
     assert.equal(continued.status, 200, JSON.stringify(continued.body))
-    const replayStep = await post('/api/customers/merge', replay.body.continuation, 'free')
+    const replayStep = await post('/api/customers/merge', replay.body.continuation, 'free-stepped')
     assert.equal(replayStep.status, 200)
     assert.equal(replayStep.body.replayed, true)
     assert.deepEqual(replayStep.body.continuation, continued.body.continuation)
@@ -663,11 +692,11 @@ async function main() {
 
   await check('continuation rejects a changed storefront account snapshot without unlinking the new account', async () => {
     const raw = fresh(SIX_SEED)
-    const first = await post('/api/customers/merge', sixBody(raw), 'free')
+    const first = await post('/api/customers/merge', sixBody(raw), 'free-stepped')
     assert.equal(first.status, 200)
     raw.exec("INSERT INTO portal_accounts(id,membership_id,name,phone,password_hash,contact_id) VALUES (79,'P-9','Chan','012900900','hash',3)")
     const before = dump(raw)
-    const response = await post('/api/customers/merge', first.body.continuation, 'free')
+    const response = await post('/api/customers/merge', first.body.continuation, 'free-stepped')
     assert.equal(response.status, 409)
     assert.equal(response.body.code, 'contact_merge_conflict')
     assert.equal(dump(raw), before)
@@ -677,7 +706,7 @@ async function main() {
     const raw = fresh(SIX_SEED)
     raw.exec("CREATE TEMP TRIGGER fail_certificate BEFORE UPDATE OF details ON audit_logs WHEN json_extract(NEW.details, '$.continuation') IS NOT NULL BEGIN SELECT RAISE(ABORT, 'contact_merge_guard'); END")
     const before = dump(raw)
-    const response = await post('/api/customers/merge', sixBody(raw), 'free')
+    const response = await post('/api/customers/merge', sixBody(raw), 'free-stepped')
     assert.equal(response.status, 409, JSON.stringify(response.body))
     assert.equal(response.body.code, 'contact_merge_conflict')
     assert.equal(dump(raw), before)
@@ -687,12 +716,12 @@ async function main() {
     for (const id of [undefined, 'x'.repeat(120)]) {
       const raw = fresh(SIX_SEED)
       const body = { ...sixBody(raw), client_request_id: id }
-      let result = await post('/api/customers/merge', body, 'free')
+      let result = await post('/api/customers/merge', body, 'free-stepped')
       let count = 0
       while (result.body.continuation) {
         assert.equal(result.status, 200, JSON.stringify(result.body))
         assert.ok(result.body.continuation.client_request_id.length <= 120)
-        result = await post('/api/customers/merge', result.body.continuation, 'free')
+        result = await post('/api/customers/merge', result.body.continuation, 'free-stepped')
         assert.ok(++count < 6)
       }
       assert.equal(result.status, 200, JSON.stringify(result.body))

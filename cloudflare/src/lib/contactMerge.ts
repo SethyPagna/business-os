@@ -83,7 +83,9 @@ export const CONTACT_MERGE_MAX_RECORDS = 6
 // (up to 3), the record, storefront, table and device reads (4), the
 // system-detected cluster check (the sweep's 2 reads, plus 1 receipt read for
 // a stepped merge's later step), failure reconciliation (3), the cache-version
-// bump (up to 9) and the refresh read (1). Each batch statement is one more.
+// bump (up to 9) and the refresh read (1). The write batch itself is ONE more:
+// D1 counts a db.batch() as a single query per invocation, however many
+// statements it holds (developers.cloudflare.com/d1/platform/limits).
 export const CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES = 23
 
 const SAFE_COLUMN = /^[a-z][a-z0-9_]*$/
@@ -453,8 +455,13 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
   return { statements, backfilled, finalKeeper, resolved, mergedIds, before, after }
 }
 
+// Statements one merge batch may hold. The per-invocation limit caps CALLS, and
+// the batch is a single call, so a plan whose route overhead plus that one
+// call fits is capped only by CONTACT_MERGE_MAX_STATEMENTS. (It used to charge
+// every statement against the limit, which turned the Free limit of 50 into a
+// 27-statement batch and split a six-record merge into three requests.)
 export function contactMergeStatementBudget(queriesPerInvocation: number): number {
-  return Math.max(1, Math.min(CONTACT_MERGE_MAX_STATEMENTS, Math.floor(queriesPerInvocation) - CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES))
+  return Math.floor(queriesPerInvocation) - CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES >= 1 ? CONTACT_MERGE_MAX_STATEMENTS : 1
 }
 
 // Free plan: a merge whose batch would not fit the request's D1 query budget
