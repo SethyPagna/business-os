@@ -226,12 +226,32 @@ check('a free deployment stays inside the platform ceilings it is sized against'
   // get() + put(); a reset image delete costs one delete.
   assert.ok(free.maxAssetsPerBackup * 2 <= 50, 'a free backup run must fit the 50-subrequest ceiling')
   assert.ok(free.maxImageDeletesPerReset <= 50, 'a free reset image sweep must fit the 50-subrequest ceiling')
-  // The whole free table is sized assuming the conservative reading of
-  // Cloudflare's contradictory D1 docs. If that assumption is ever revised,
-  // it must be revised here and in planTier.ts's comment together.
-  assert.equal(free.d1QueriesPerInvocation, 50, 'documented assumption: the conservative of the two published figures')
   assert.equal(free.d1MaxDatabaseBytes, 500 * 1024 * 1024)
   assert.equal(free.scheduledBackupEnabled, false, 'a full D1 backup cannot run inside a 10ms cron invocation')
+})
+
+// Free's per-invocation D1 budget. The D1 limits page (updated 24 Oct 2026)
+// says 1000 (Paid) / 50 (Free) QUERIES per invocation and that a db.batch() is
+// ONE query. The Workers page's 1,000 internal-services figure does not
+// override it, so Free stays 50 (a 27 Oct change to 900 was reverted). The unit
+// is calls: see scripts/test-d1-call-budget-pure.cjs.
+check('free d1QueriesPerInvocation is the D1 page figure, 50 calls', async () => {
+  assert.equal(PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation, 50)
+  assert.equal(PLAN_LIMITS_BY_TIER.paid.d1QueriesPerInvocation, 1000)
+})
+
+check('no test or harness keeps its own literal copy of a plan query budget', async () => {
+  const scripts = path.join(cloudflareRoot, 'scripts')
+  const files = [
+    ...fs.readdirSync(scripts).filter((n) => /^test-.*\.cjs$/.test(n)).map((n) => path.join(scripts, n)),
+    ...fs.readdirSync(path.join(scripts, 'harness')).filter((n) => n.endsWith('.cjs')).map((n) => path.join(scripts, 'harness', n)),
+  ]
+  const literal = /\b(?:FREE|PAID)_QUERY_LIMIT\s*=\s*\d/
+  const offenders = files.filter((f) => literal.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(scripts, f))
+  assert.deepEqual(offenders, [], 'read the budget from harness/plan_query_limits.cjs, which reads planTier.ts')
+  const helper = require(path.join(scripts, 'harness', 'plan_query_limits.cjs'))
+  assert.equal(helper.FREE_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation)
+  assert.equal(helper.PAID_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.paid.d1QueriesPerInvocation)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

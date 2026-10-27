@@ -239,19 +239,27 @@ export type PlanLimits = {
   // would have been within ~14% of the wall on the staging DB alone.
   d1MaxDatabaseBytes: number
 
-  // D1 queries per Worker invocation.
+  // D1 CALLS one invocation may make (a db.batch() is ONE call, whatever its
+  // statement count). Guards compare a call counter against this number.
   //
-  // ASSUMPTION, stated because it is the most load-bearing unknown in this
-  // whole split: Cloudflare's own docs disagree with themselves here (the
-  // D1 limits page and the Workers platform page give 50 and 1000 for the
-  // Free plan). This module assumes the CONSERVATIVE 50 for Free, because
-  // sizing against 1000 and being wrong means production requests failing,
-  // while sizing against 50 and being wrong means only that a Free
-  // deployment is more chunked than it strictly had to be. Every Free
-  // figure above is chosen to keep a single invocation's query count well
-  // under 50. Settling this needs a throwaway Worker on an actual FREE
-  // account plus `wrangler tail` -- a deploy, and therefore an owner
-  // decision. Until then: 50.
+  // Free 50, Paid 1000. Settled 27 Oct 2026 from the D1-specific page,
+  // developers.cloudflare.com/d1/platform/limits (updated 24 Oct 2026):
+  // "Queries per Worker invocation ... 1000 (Workers Paid) / 50 (Free)", and
+  // "a db.batch() call counts as a single query against it, not one query per
+  // statement ... a batch containing 2,000 statements executes in a single
+  // Worker invocation, while issuing 2,000 individual queries in one
+  // invocation fails with 'Too many API requests by single Worker
+  // invocation'". The Workers limits page lists 1,000 subrequests to internal
+  // services on Free, but it does not override this D1 row, so Free stays 50.
+  // (A run on 27 Oct briefly raised it to 900 on the strength of the Workers
+  // page; reverted the same day.)
+  //
+  // Two consequences for callers: (1) count calls, not the statements inside a
+  // batch (requestMetrics.ts invocation counter, contactMergeStatementBudget);
+  // a 60-statement batch is legal on Free, 51 separate queries are not.
+  // (2) Free's real ceiling is 10 ms of CPU, which a Worker cannot measure from
+  // inside (Date.now() and performance.now() only advance after I/O), so
+  // CPU-heavy routes have to be bounded by rows, bytes or page size.
   d1QueriesPerInvocation: number
 
   // ---- Storefront AI assistant (G38 P0) ----------------------------------
