@@ -20806,3 +20806,92 @@ One line per release or major lane, newest first. "Production" lines are recorde
 - 4 Sep S4 lanes on `rc/s4-2026-09-04`, deployed as `2c497564` (Worker a164d260, migrations 0108–0115 applied): S4-17 `c730e5be`, S4-27 `d144e133`, S4-24/25 `840161ee`, S4-26 `eae31420`, S4-24b `859c8e57`, S4-12 `19555765`, S4-2 `42913b42`, S4-18 `9c282599`, S4-29 `1ce506cf`, S4-8/9 `81914be8`, S4-28 `59906158`, S4-13..16 `6794a17f`, S4-32 `27622a63`, S4-33 `979338e9`, S4-30 `0024ab19`.
 - 31 Aug–3 Sep lanes: `9354f1ce` revenue kernel on the Net sales definition (with UTC+7 day bucketing `67b8e3b9`, `efcf21e3`, `11ffeff1`, `74bd4ae6`, `1c3fa481`), `3820a971` Google Drive OAuth fix, `1378e07a` cashier identity (0098/0099), `1655ea1e` contact-merge data movement, `65fcd70b` date/time UX, `c44a4520` product merge re-parents sales and movements, `98f8ee79` Telegram events for transfers and returns, `69ed7a1f` Products cannot-save root cause, view-tier permission slices `7fa62811`, `b30e5765`, `3035bc0e`, `7ff2eff0`, `46217e43` wholesale tier (0093), `b6f3ef7a` inventory excision, `af50009b` product-detail float, `06ceac74` POS banner self-heal.
 - 31 Aug–2 Sep `242c2b75` (Part 538, migrations 0083–0087, 01:32Z 31 Aug), then the same day `0414f46b` (receipt/locale, catalog endpoint removal), `08868840` (offline sale moment, sargable date perf), `0db93598` (stock leak sealed), `d558dcfb` (17:15 security batch H1/H2/M1 and C1 transfer FIFO), `34e0228f` (20:50 Stage-1 reds reconciled, 0094 AR ledger, 13,244 invoices); `57d8f1a2` (production ahead of HEAD: fees/delivery-contact lane, 0105).
+
+## 27 Oct 2026 — 6.0.998 round 2: lean progress.md board
+
+The coordinator asked for a lean board (target ≤ 350 lines) because every session reads progress.md. The owner decisions moved verbatim to `docs/owner-decisions.md`; the release process text, holds and release history to `docs/history/releases.md`; the full text of every open queue item to `docs/queue-details.md` (one anchor per item). The board keeps the status snapshot, lane table, a short release process, open owner questions, the Golden Rules verbatim and one line per open queue item. Each item's state was re-checked by reading it; done or superseded items are recorded below. A node script proved every line removed from progress.md (against main and against round 1) now exists in progress.md, one of the new docs or this log.
+
+### Done or superseded queue items moved off the board
+
+  - the "biggest open item" of 4 Sep (in-app Discounts figure excluded line-level discounts; fix `1d67e895` on `rc/deploy-2026-09-04`) is tracked as Discount-report-port#414.
+  - Moved because superseded: tracked as Discount-report-port#414. Source: Reports, exports and receipts › **Legacy ledger leftovers (not in the register)**.
+  - the 8 Oct STOCK-ACTIVE pre-gate checklist (archive L155–L166: no active/inactive products, newest-first lots, active-branch display, image upload, nested-loading recovery, Free/Paid profiles, review repairs) shipped through the 8–9 Oct releases and is closed except the counted-damage conversion and the physical-device checks listed here.
+  - Moved because closed: 8 Oct STOCK-ACTIVE checklist shipped; remainder listed in other items. Source: Stock, catalog, contacts and suppliers › **Legacy ledger leftovers (not in the register)**.
+  - import-authority landed (finding J step 1, 6.0.73–75); J step 2 and donor ports are root-only (see Permissions). import-returns-followups in flight (above).
+  - Moved because done: import-authority step 1 landed; step 2 is tracked under Permissions. Source: Imports, exports and legacy migration › **Lane**.
+  - `payment-methods/replace` (linked scope) rewrites the payment method on sales with a settings permission only and no password: add the step-up. → *27 Oct: the step-up shipped in 6.0.986 (live, RC1).*
+  - Moved because done: payment-methods/replace step-up shipped in 6.0.986 (live, RC1). Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)**.
+  - login-duration change no longer forgets; storage-mode default unified to 'always'; draft prefix and every idempotency/pending record kept through resets with account binding; round 7: an unresolved checkout result survives a confirmed sign-out for the same account (cart still cleared) and the server origin joins retry-record keys.
+  - Moved because done: receiving-f2 shipped in release 2d (6c5e59607). Source: Accounts, sessions and drafts › **receiving-f2 (6.0.108–110, 141–142 done; round 7 6.0.147–148 in flight)**.
+  - frozen sale/return attempts survive all resets bound by actor+org only [OPUS-REVIEW-RECEIVING-F2, SONNET-REFUTE-RECEIVING-F2, CLAUDE-RECEIVING-F1].
+  - Moved because done: receiving-f2 shipped in release 2d (6c5e59607). Source: Accounts, sessions and drafts › **receiving-f2 (6.0.108–110, 141–142 done; round 7 6.0.147–148 in flight)**.
+  - SMS reset#379 SUPERSEDED.
+  - Moved because superseded: SMS reset#379. Source: Accounts, sessions and drafts › **Register**.
+  - DU-A landed (picker cancel and late change, instant preview + Retry, keyboard/inert/44px Close, 6.0.24–29).
+  - Moved because done: DU-A landed (6.0.24–29). Source: UI, mobile and device acceptance › **Owner daily-use UI (DU-A/B/C)**.
+  - CP4-UBRANCH DONE (Shop to Store executed by the 5–6 Oct cutover).
+  - Moved because done: CP4-UBRANCH, Shop to Store executed by the 5–6 Oct cutover. Source: Branch cleanup and repository hygiene › **Legacy ledger leftovers (not in the register)**.
+  - role editor Sales "View", oversized fixed discount refusal, merge default logic, employee cost/price limits and product-edit Telegram alert switch are DONE on main.
+  - Moved because done: role editor Sales View, discount refusal, merge defaults, employee limits, alert switch. Source: Owner and external actions › **Owner rulings of 5–6 Oct not (fully) in code (BC §2.6, sampled at 0baa53f2)**.
+
+### Register rows closed, superseded or covered elsewhere (moved from the board)
+
+P1-RELEASE#9 (release procedure: Status snapshot); Q13#26 CLOSED (QR-ready print gate and placeholder; printer/device acceptance is separate, see UI); A5#368 UNCERTAIN OWNER (OAuth redirect URIs, Resend domain verification, old-domain DNS and redirect live check: verify the recorded completion before asking, see Owner-only); Public-page-size-selector-decision#411 UNCERTAIN OWNER (keep the 50-row option moved before Back, or remove the selector; BC-Q23); DANGLING-AMENDMENT#98, CASHIER-HISTORICAL-ALIASES#114, WHOLESALE-THRESHOLD#122, CATEGORY-header-status#294, LIBRARY-status-conflict#326, DELIVERY-status-conflict#350, Portal Contact us#395 CLOSED or SUPERSEDED in the register; DATE-AMENDMENT-RECHECK#158, POS-SETTINGS-REFRESH#196, J3/N3a#376 DONE on main; U-DRAIN#13 and RETAINED-UI-REQUESTS#111 appear above under Accounts and UI. A row not listed anywhere in this queue is a bug in this file: grep the archive for its ID.
+
+### Lane rows retired from the board (now live or inside RC2b)
+
+| version | lane | state | branch / sha | blocker |
+| --- | --- | --- | --- | --- |
+| 6.0.982 | sale payments S4: checkout and settle writers record payment events; instalments | review (round 6) | `claude/pay-s4-20261026` @ `5db44b22b` | owner 27 Oct answers to apply; gate 40373482121 red (unused-locals budget, zombie imports) |
+| 6.0.988 | Conflicts lists unknown-cost and empty-barcode products (migration 0273) | review (fixing the delta-4 P2) | `claude/conflicts-list-20261026` @ `0656c4138` | P2: the pending "Confirm $0 cost" summary shows cost to reviewers without cost view |
+| 6.0.992 (+6.0.990) | locked old-format returns: managers update the money details; money copy merged in | gate | `61e0aa60d` | gate 40439056367 and Opus delta pending |
+| 6.0.994 | RC2 P3 follow-ups (Khmer export errors, cached crossing probe, narrower restock seek) | gate | `claude/rc2-p3-20261027` @ `54a2b03fa` | gate 40438883172; certified with exceptions |
+| 6.0.995 | read-only ops query: `returns.created_at` shape census | ready | `claude/ops-returns-shapes-20261027` @ `070340767` | run through the ops workflow after it reaches main |
+| 6.0.996 | RC3 dry-run compose (read-only rehearsal) | review | none (rehearsal `7d06eeff4`, not pushed) | redo after the 982/988/992 rounds |
+| 6.0.997 | hand-edit current-format (money v1) returns | in progress (S1, S2 running) | `claude/return-v1-edit-20261027` | S3/S4 wait on owner questions Q1–Q4 |
+| 6.0.969 | multi-client line: merge main into the multi-client branch | in progress | `claude/mc-merge-20261023` | branch only; Leang keeps its deploy path |
+| 6.0.980–981 | first admin and client secrets generated at deploy (multi-client) | in progress (committed locally) | `claude/first-admin-at-deploy-20261025` | not pushed |
+| 6.0.973, 975, 976, 979 | read-only ops queries | live (on main) | main | none |
+| 6.0.985 | review queue: approve performs the merge, idempotent pending actions, strict `?fields` | live-deploying in RC2b | `claude/review-queue-20261026` @ `018611110` | owner questions (see below) |
+| 6.0.989 | returns finding G (refuse restore after repricing) + paged complete returns exports | live-deploying in RC2b | `claude/returns-g-20261026` @ `9ad8f68b2` | owner questions (see below) |
+| 6.0.991 | low/out-of-stock alert only when a sale crosses the threshold (migration 0272) | live-deploying in RC2b | `claude/tg-lowstock-20261026` @ `798c899ec` | P3 follow-up lane later |
+| 6.0.983 | D1 reads wave 2 (product search/list, customers list) | live (RC1) | `9c0171dad` | customers index migration waits on the owner |
+| 6.0.984 | cron split so every scheduled step fits the Free 10 ms CPU | live (RC1) | `ae0aa6521` | rollback only by redeploying the prior sha |
+| 6.0.986 | atomic login lockout + payment-method replace step-up | live (RC1) | `1f468116b` | owner question (see below) |
+| 6.0.987 | Contacts tabs hide controls without permission + QuickAddModal unsaved guard | live (RC1) | `51157f3b5` | none |
+| 6.0.993 | rollback guard on cron change, system-owned settings keys, atomic portal lockout, settings-stamp fix | live (RC1) | `963b6ee99` | none |
+
+### Round-1 board text superseded the same day (headings demoted two levels)
+
+*Reorganised 27 Oct 2026 (6.0.998) into a board: status, lanes, queue by area, owner questions, rules. Rewritten 13 Oct 2026 (6.0.149) and reconciled 19 Oct 2026 (6.0.850) before that; the text those passes left here that is now history moved verbatim to `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998"). Implementation, verification, deployment and acceptance stay separate.*
+This is the shared coordination ledger for every session: where production stands, which lanes are moving, every open task by area, the questions waiting on the owner, the owner's decisions, the permanent Golden Rules and the actions that stay gated. Finished work and release narrative live in `docs/history/session-log.md`. The private local `Records/Recovery/LANES.md`, `Records/Recovery/COMMIT-VERSIONS.json` and `Records/Recovery/DEPLOYMENT-WINDOWS.json` hold the live lane log, version reservations and deploy slots (none of them is in this repository; this file summarises their state, it does not copy them). The previous 16,757-line chronological ledger is archived PRIVATELY at `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Archive/progress-2026-10-13-full.md`, with its loss map `progress-2026-10-13-map.md` beside it.
+1. [Status snapshot](#status-snapshot--27-oct-2026-cambodia-utc7)
+2. [Current status (lanes)](#current-status)
+3. [Release history since release 2e](#release-history-since-release-2e)
+4. [Standing release process](#standing-release-process)
+5. [Open owner questions](#open-owner-questions)
+7. [Owner decisions index](#owner-decisions-index)
+8. [Queue by area](#queue-by-area-open-task-queue): [Sales & money](#sales--money) · [Stock & products](#stock--products) · [Returns](#returns) · [Contacts](#contacts) · [Shift, receipts, Telegram](#shift-receipts-telegram) · [Permissions](#permissions) · [Public site](#public-site) · [Platform & ops](#platform--ops)
+9. [Holds and production-only actions](#holds-and-production-only-actions)
+- **Live:** `efaac4452` = RC1 (`rc/20261026b`: lanes 6.0.983, 6.0.984, 6.0.986, 6.0.987, 6.0.993), deployed 26 Oct 14:58Z by deploy run 40322968341, live revision `efaac4452aa9`, tier paid. Health pack HEALTHY; the 18:19Z retention recheck confirmed every ephemeral cron slice ran. **main = `74577d8e3`** (tree equals the release).
+- **Deploying now (27 Oct, slot 1):** RC2b `a8dbbe1fc` (`rc/20261027b` = RC2 `3ed6badeb` with lanes 6.0.985, 6.0.989, 6.0.991, plus the exchange statement-budget fix). Exact-SHA gate 40382886386 GREEN (Worker 1077/1077, frontend 981/981); independent Opus delta READY WITH EXCEPTIONS (the paid exchange request sits exactly at the 50-statement budget). Deploy run 40436430026. Ships migration 0272. Rollback = redeploy `efaac4452` through deploy.yml; never `wrangler rollback`, because the 6.0.984 cron change is not versioned.
+- **Next:** RC2b postflight and main promotion; then RC3 = 6.0.988 + 6.0.992 (6.0.990 merged into it) + 6.0.982 (+ 6.0.994), each only after its own exact gate and independent review; 6.0.997 S3/S4 after the owner answers its questions; turn the 27 Oct app-wide page analysis into proposals.
+- **Migrations:** production is applied through 0271 (0269 on 22 Oct, 0270 + 0271 on 24 Oct). 0272 rides RC2b; 0273 is allocated to 6.0.988; 0274 is held for the 6.0.983 customers index if the owner approves. New numbers need both the `d1_migrations` check and every ref's files.
+States: planned · in progress · review · gate · ready · live. "Review" covers an independent review round or the fixes it sent back; "ready" means gate and review are both green and the lane waits for a release candidate.
+| RC2b | release candidate: 6.0.985 + 6.0.989 + 6.0.991 + exchange budget fix, migration 0272 | live-deploying (27 Oct slot 1) | `rc/20261027b` @ `a8dbbe1fc` | postflight, then promote main |
+| analysis | app-wide page/function/float analysis, 8 read-only areas | in progress | `Records/Analysis/2026-10-27/` (private) | proposals follow |
+Plain-language questions that are blocking or shaping current lanes, newest first. Answered ones move to the Owner decisions index.
+1. **Fixing a return on a later day (6.0.997 Q1):** when a manager fixes a return's refund on a later day, does the difference go through today's drawer, or was it a typing mistake so the return's own day is corrected? Recommended: today by default, with a "typing mistake: fix the original day" choice. (The 27 Oct answer for payment corrections, "counts on the day it is made", points the same way.)
+2. **Changing a return's date (6.0.997 Q2):** may a manager change the date of a return? Recommended: no.
+3. **Typing a refund amount (6.0.997 Q3):** may a manager type a refund different from what the items add up to (for example less for an opened box)? Recommended: no for now.
+4. **Cancelling an old return today (6.0.997 Q4):** should a cancel also count in today's drawer, like an edit? Recommended: yes, as its own follow-up lane.
+5. **Approving a rename (6.0.985):** when an admin approves a queued rename, should the other queued changes (price, image, cost) also apply to the kept product if the admin may make them, or only the name and barcode? And should Undo of that merge give the retired product back its old name and barcode?
+6. **Asking for the password again (6.0.986):** besides replacing a payment method, should other money-changing settings also ask for the password again?
+7. **Returns export and repricing (6.0.989):** are these defaults right: up to 20,000 returns per export, one year at most, 250 rows per page on Free? Old returns (before the current money format) carry no price record, so a later discount on the whole sale cannot be detected: accept that? Adding an item to a sale with a whole-sale discount changes every line's share and currently blocks restoring earlier returns: keep that refusal? Review-tier staff cannot export returns: confirm.
+8. **Conflict marks (6.0.988):** should "this $0 cost is real" and "no barcode is correct" marks be kept forever in the audit log (today they follow normal retention)? Should word barcodes such as "N/A" also be listed? Is a list of existing marks to un-mark from wanted?
+9. **Customers search index (6.0.983):** may the customers list get a new database index (migration 0274) to cut reads?
+10. **Cancelled sales:** only Completed and Not Paid exist as statuses (20 Oct); the lanes keep Cancelled as it was. Confirm that Cancelled stays.
+11. **Older questions.** BC-Q2, Q3/Q4, Q7, Q10 and Q11 were answered on 13 Oct and Q5 by the "replacements use the ORIGINAL sale FX" ruling; the rest stand:
+#### Queue by area (open task queue)
+Each item is numbered `Q<n>` (stable within this revision) and marked: **owner-decided** = the owner has ruled on what to build; **needs owner** = at least one part waits on an owner answer, action or device check; **ready** = can be worked without owner input (not a claim that code is done or verified). The marker is derived from the item text (OWNER status words and owner-ruling references); notes in *italics* after `→` were reconciled on 27 Oct from the private lane log. Source sections of the 13–19 Oct queue are kept as sub-headings; nothing was dropped.
+Finished releases, the compact done log and the 13–19 Oct status narrative are in `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998").
