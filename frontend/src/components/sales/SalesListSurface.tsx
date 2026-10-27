@@ -1,5 +1,6 @@
 import { Fragment, Children, isValidElement, useEffect, type ReactNode, type ComponentProps, type RefObject } from 'react'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import CalendarRange from 'lucide-react/dist/esm/icons/calendar-range.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
@@ -125,6 +126,11 @@ interface SalesListSurfaceProps {
   getSaleLongPressState: (rowId: number) => LongPressState
   setDetailSale: (sale: SaleRecord) => void
   setSelectedSale: (sale: SaleRecord) => void
+  /** A row is about to be opened (hovered a moment, or pressed): warm its detail read. */
+  onSaleIntent?: (sale: SaleRecord, immediate: boolean) => void
+  onSaleIntentEnd?: () => void
+  /** Set when a search found nothing inside a date range: widens the search to every date. */
+  onSearchAllDates?: () => void
   showSalesActionGroups: boolean
   t: TranslateFn
   toggleSalesSection: (sectionId: string) => void
@@ -160,6 +166,9 @@ export default function SalesListSurface({
   getSaleLongPressState,
   setDetailSale,
   setSelectedSale,
+  onSaleIntent,
+  onSaleIntentEnd,
+  onSearchAllDates,
   showSalesActionGroups,
   t,
   toggleSalesSection,
@@ -172,6 +181,17 @@ export default function SalesListSurface({
   // Legacy permission contract: const { can } = useApp()
   const { can, navigateTo } = useApp()
   selectionModeActive = selectionModeActive && can('sales', 'bulk')
+  // A search that finds nothing inside the chosen dates may simply be looking in the wrong days:
+  // say so, and offer the same search over every date. Icon plus one word; the tooltip says it all.
+  const emptyState = onSearchAllDates ? (
+    <div className="flex flex-col items-center gap-2">
+      <span>{t('sales_search_no_match_range') || t('no_data')}</span>
+      <button type="button" onClick={onSearchAllDates} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" title={t('sales_search_all_dates')} aria-label={t('sales_search_all_dates')}>
+        <CalendarRange className="h-4 w-4" aria-hidden="true" />
+        {t('all')}
+      </button>
+    </div>
+  ) : t('no_data')
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
   // 11.1: the checkbox column only takes space in select mode; out of it
@@ -235,7 +255,7 @@ export default function SalesListSurface({
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={columnCount} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
+                <tr><td colSpan={columnCount} className="py-10 text-center text-gray-400">{emptyState}</td></tr>
               ) : salesSections.map((section) => {
                 const isCollapsed = collapsedSalesSections.has(section.id)
                 // Money-counting count for the day header (cancelled + awaiting
@@ -314,6 +334,9 @@ export default function SalesListSurface({
                             <tr
                               className={`table-row cursor-pointer select-none hover:bg-blue-50 dark:hover:bg-blue-900/10 ${rowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${status === 'cancelled' ? 'opacity-60' : ''}`}
                               onClick={selectionModeActive ? handleRowClick : undefined}
+                              onPointerEnter={() => onSaleIntent?.(sale, false)}
+                              onPointerLeave={onSaleIntentEnd}
+                              onPointerDown={() => onSaleIntent?.(sale, true)}
                               {...(selectionModeActive ? {} : longPress)}
                             >
                               <td className={`${selectCellPad} py-1.5`} onClick={(event) => event.stopPropagation()}>
@@ -410,7 +433,7 @@ export default function SalesListSurface({
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
+          <div className="py-10 text-center text-gray-400">{emptyState}</div>
         ) : salesSections.map((section) => {
           const isCollapsed = collapsedSalesSections.has(section.id)
           const countedCount = section.items.filter(isCountedSale).length
@@ -481,6 +504,7 @@ export default function SalesListSurface({
                         key={sale.id}
                         className={`card cursor-pointer select-none p-3 active:bg-blue-50 dark:active:bg-blue-900/10 ${cardSelected ? 'ring-1 ring-blue-300 bg-blue-50/60 dark:ring-blue-700 dark:bg-blue-900/20' : ''}`}
                         onClick={selectionModeActive ? handleCardClick : undefined}
+                        onPointerDown={() => onSaleIntent?.(sale, true)}
                         {...(selectionModeActive ? {} : cardLongPress)}
                       >
                         <div className="flex items-start justify-between gap-2">

@@ -5050,6 +5050,8 @@
   "sales_strip_expenses_whole_days": "Expenses · whole days",
   "sales_strip_expenses_time_hint": "Expenses cover the full selected dates; the time filter does not apply. Expenses stay separate from gross profit.",
   "sales_strip_loading": "Loading period totals…",
+  "sales_search_all_dates": "Search all dates",
+  "sales_search_no_match_range": "No match in the selected dates",
   "sales_strip_failed": "Period totals unavailable.",
   "sales_strip_unavailable": "Period totals are not available in this view.",
   "sales_strip_retry": "Retry totals",

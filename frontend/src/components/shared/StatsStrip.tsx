@@ -86,6 +86,7 @@ export default function StatsStrip({
   rangeDisabled = false,
   summary,
   className = '',
+  onOpenChange,
 }: {
   cards: StatCardDef[]
   t: TranslateFn
@@ -117,6 +118,8 @@ export default function StatsStrip({
    * without opening the fold. */
   summary?: ReactNode
   className?: string
+  /** Told when the cards fold open or shut, so a page can read their figures only while they are shown. */
+  onOpenChange?: (open: boolean) => void
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -126,6 +129,7 @@ export default function StatsStrip({
   // ("click to open", user Aug 31). Default closed on every mount so
   // pages open compact.
   const [statsOpen, setStatsOpen] = useState(false)
+  useEffect(() => { onOpenChange?.(statsOpen) }, [onOpenChange, statsOpen])
   // ONE fold open at a time; tapping the open card closes it.
   const [openKey, setOpenKey] = useState<string | null>(null)
   const openCard = cards.find((card) => card.key === openKey && card.details?.length) || null

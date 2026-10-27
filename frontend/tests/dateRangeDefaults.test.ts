@@ -468,15 +468,15 @@ for (const range of [preset('today'), preset('all')]) {
   }
   const canonical = evaluate(variable(dashboard, 'getCurrentDashboardRange'), { ...hooks, rangeQuery: dashboardRangeQuery(range) })()
   const dashboardReads = requestArgs(dashboard, 'getDashboardStartup')
-  assert.equal(dashboardReads.length, 3, 'startup, summary and analytics loaders each send the range')
+  assert.equal(dashboardReads.length, 1, 'the one startup loader sends the range')
   for (const args of dashboardReads) {
-    const params = evaluate(args, { query: canonical })
+    const params = evaluate(args, { query: canonical, getCurrentDashboardRange: () => canonical })
     const wire = withDashboardRangeScope(params)
     expectDates(wire, bounded ? day1 : '')
     assert.equal(wire.rangeScope, bounded ? undefined : 'all')
   }
 }
-console.log('PASS six page initializers and first list/stat/export request bounds; Dashboard startup/summary/analytics parity')
+console.log('PASS six page initializers and first list/stat/export request bounds; Dashboard startup parity')
 
 // Execute the source-aware rail callback, including colliding presets.
 const require = createRequire(import.meta.url)
@@ -530,6 +530,9 @@ assert.equal(exportRows.find((row: any) => row.metric === 'products_current').va
 assert.equal(exportRows.find((row: any) => row.metric === 'revenue_usd').value, '—')
 assert.equal(exportRows.find((row: any) => row.metric === 'range_start').value, 'all')
 assert.equal(evaluate(variable(read('sales/Sales.tsx'), 'stripStatus'), {
-  stripAvailable: true, stripHasRange: false, stripSnapshot: { status: 'ready', data: { revenue_usd: 100 } },
+  stripAvailable: true, stripOpen: true, stripHasRange: false, stripSnapshot: { status: 'ready', data: { revenue_usd: 100 } },
 }), 'no-range')
+assert.equal(evaluate(variable(read('sales/Sales.tsx'), 'stripStatus'), {
+  stripAvailable: true, stripOpen: false, stripHasRange: true, stripSnapshot: null,
+}), 'idle', 'the period cards read nothing until the Stats panel is open')
 console.log('PASS explicit preset/manual identity and honest unsupported All-time statistics')

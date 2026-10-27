@@ -95,7 +95,7 @@ await runTest('Sales only replays a queued filter refresh after the active reque
   assert.ok(settlement.indexOf('const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)') < settlement.indexOf('pendingLoadRef.current = null'), 'settlement resolves the queued intent before consuming its slot')
   assert.ok(settlement.includes('if (pending && requestSecurity === statusSecurityRef.current)'), 'a queued replay is limited to the request security scope that created it')
   assert.match(settlement, /queueMicrotask\(\(\) => \{\s*if \(requestSecurity !== statusSecurityRef\.current\) return\s*const nextLoad = latestLoadRef\.current \|\| loadSales\s*nextLoad\(Boolean\(pending\.silent\)\)/, 'the deferred replay rechecks scope immediately before invoking the latest loader')
-  assert.match(source, /\{loadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{\(\) => loadSales\(false\)\}/, 'a failed refresh with retained rows must expose the manual Retry action')
+  assert.match(source, /\{loadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{\(\) => \{ pageCacheRef\.current\.clear\(\); void loadSales\(false\) \}\}/, 'a failed refresh with retained rows must expose the manual Retry action')
 })
 
 await runTest('Sales retries an immediate network failure and accepts the successful retry', async () => {

@@ -4,6 +4,7 @@ import { transformSync } from 'esbuild'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
+import { planSalesLoad, salesLoadKey } from '../src/components/sales/salesLoadFlow.ts'
 
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const helper = fs.readFileSync(new URL('../src/components/sales/saleSettlementConfig.ts', import.meta.url), 'utf8')
@@ -226,7 +227,9 @@ const readEnv: any = {
   loadRequestRef: { current: 0 }, loadedOnceRef: { current: false }, loadWatchdogRef: { current: undefined }, latestLoadRef: { current: null },
   beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent,
   clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
-  window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
+  window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', settledSearch: '',
+  planSalesLoad, salesLoadKey, inFlightKeyRef: { current: null }, pageCacheRef: { current: { get: () => undefined, has: () => false, set() {}, clear() {} } }, // a cache hit would hide the concurrency under test
+  prefetchRunRef: { current: 0 }, schedulePrefetch: () => {},
   salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
   fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
   withLoaderTimeout: (read: () => Promise<unknown>) => read(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,

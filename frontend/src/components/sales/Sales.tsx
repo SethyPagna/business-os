@@ -1,7 +1,9 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ComponentProps } from 'react'
 import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
-import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { useSettledSearch } from './salesSearchSettle.ts'
+import { createSalesPageCache, pagesToPrefetch, planSalesLoad, salesLoadKey } from './salesLoadFlow.ts'
+import CalendarRange from 'lucide-react/dist/esm/icons/calendar-range.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -92,6 +94,11 @@ import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDispla
 import { returnOwedReductionUsd } from '../../utils/receiptTotals.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
+// Look-ahead waits this long after a page shows, so it never competes with what was just asked for.
+const SALES_PREFETCH_DELAY_MS = 400
+// A row hovered this long is probably about to be opened; a warmed detail read is good for this long.
+const SALE_DETAIL_HOVER_MS = 250
+const SALE_DETAIL_WARM_MS = 10_000
 // A status settlement writes the sale, every paired KHR line snapshot, the
 // immutable settlement receipt, Sales Records and the audit row in one D1
 // batch. Twelve seconds was shorter than the server's own 45s write window,
@@ -130,11 +137,12 @@ type SortDirection = 'asc' | 'desc'
 
 type PendingSalesLoad = { silent: boolean }
 
-// A trailing load represents newer filters or a sync event that arrived while
-// the current request was in flight. It is safe to replay after a successful
-// response, but replaying it after a timeout/failure immediately clears the
-// error and starts another foreground deadline. Keep the failed state stable
-// until the user explicitly retries; their retry reads the latest filters.
+// A trailing load is a sync event or refresh for the SAME query that arrived while
+// its request was in flight. It is safe to replay after a successful response, but
+// replaying it after a timeout/failure immediately clears the error and starts
+// another foreground deadline. Keep the failed state stable until the user
+// explicitly retries. A load for a DIFFERENT query never waits here: it preempts
+// the request in flight (planSalesLoad), so it cannot be dropped by an older failure.
 function resolvePendingSalesLoad(
   pending: PendingSalesLoad | null,
   completedSuccessfully: boolean,
@@ -611,7 +619,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   ))
   useEffect(() => { saveSortSpec('sales:sort', salesSortSpec) }, [salesSortSpec])
   const salesSortDirection: SortDirection = salesSortSpec.field === 'date' ? salesSortSpec.direction : 'desc'
-  const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
@@ -622,6 +629,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadSecurityRef = useRef(statusSecurityScope)
   const loadAbortRef = useRef<AbortController | null>(null)
+  const inFlightKeyRef = useRef<string | null>(null)
+  // Pages read recently, and the quiet look-ahead that fills it: the next two pages and the previous one.
+  const pageCacheRef = useRef(createSalesPageCache<SaleRecord[]>())
+  const prefetchRunRef = useRef(0)
+  const prefetchScopeRef = useRef('')
+  const prefetchTimerRef = useRef<number | undefined>(undefined)
+  const salesStatsTotalRef = useRef<number | null>(null)
   // A filter/search change can arrive while the initial Sales request is
   // still in flight. Returning that older promise without scheduling the
   // newer query leaves the new text visible but only re-filters the stale
@@ -675,7 +689,20 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // list narrowed on ~every keystroke while the server response that
   // actually replaced it landed on a completely different, longer cadence.
   // One debounced value for both call sites closes that gap here too.
-  const debouncedSearch = useDebouncedValue(search, 180)
+  // 350 ms of quiet, never mid-IME-composition (Khmer and predictive keyboards send fragments).
+  // Both the list and its stats read this one settled text.
+  const { settled: settledSearch, compositionProps: searchCompositionProps } = useSettledSearch(search)
+  // The page belongs to the filters it was chosen under: when any of them changes the page is 1
+  // in the SAME render, so the list is read once for the new filters, not once with the old page
+  // and again after an effect resets it.
+  const pageScope = JSON.stringify([stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, settledSearch, statusFilter, userFilter])
+  const [pageSelection, setPageSelection] = useState({ scope: '', page: 1 })
+  const salesPage = pageSelection.scope === pageScope ? pageSelection.page : 1
+  const salesPageRef = useRef(salesPage)
+  salesPageRef.current = salesPage
+  const setSalesPage = useCallback((next: number | ((current: number) => number)) => {
+    setPageSelection({ scope: pageScope, page: typeof next === 'function' ? next(salesPageRef.current) : next })
+  }, [pageScope])
   // Sales organize by DAY always (user, Aug 30: "for date in sales …
   // do date by year month and day") — the day label is the full
   // dd/mm/yyyy, so year+month+day all read off every section header
@@ -734,6 +761,33 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     loadWatchdogRef.current = undefined
   }, [])
 
+  // Quiet look-ahead after the person has paged or filtered: the next two pages, then the previous
+  // one, one at a time, never ahead of what is on screen. A new query, a refresh or leaving the
+  // page ends the queue (the read already under way finishes and is dropped).
+  const schedulePrefetch = useCallback((params: Record<string, unknown>, pageWasFull: boolean) => {
+    const scope = salesLoadKey({ ...params, page: 0 })
+    if (prefetchScopeRef.current !== scope) prefetchRunRef.current += 1
+    prefetchScopeRef.current = scope
+    const run = ++prefetchRunRef.current
+    window.clearTimeout(prefetchTimerRef.current)
+    prefetchTimerRef.current = window.setTimeout(async () => {
+      const pages = pagesToPrefetch(Number(params.page), Number(params.limit), salesStatsTotalRef.current, pageWasFull)
+      for (const page of pages) {
+        if (run !== prefetchRunRef.current || !aliveRef.current) return
+        const pageParams = { ...params, page }
+        const key = salesLoadKey(pageParams)
+        if (pageCacheRef.current.has(key)) continue
+        try {
+          const result = await fetchSales(pageParams)
+          if (run !== prefetchRunRef.current) return
+          pageCacheRef.current.set(key, normalizeSaleRows(result))
+        } catch {
+          return
+        }
+      }
+    }, SALES_PREFETCH_DELAY_MS)
+  }, [])
+
   const loadSales = useCallback(async (silent = false): Promise<void> => {
     const requestSecurity = statusSecurityScope
     if (requestSecurity !== statusSecurityRef.current) return
@@ -749,15 +803,53 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       clearLoadWatchdog()
     }
     if (!authReady || !canViewSales) { setLoading(false); return }
-    if (loadPromiseRef.current) {
+    const params = {
+      ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
+      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+      ...(settledSearch ? { search: settledSearch } : {}),
+      ...salesDateRange,
+      page: salesPage,
+      limit: salesPageSize,
+      sortBy: salesSortSpec.field,
+      sortDir: salesSortSpec.direction,
+    }
+    const loadKey = salesLoadKey(params)
+    const plan = planSalesLoad(loadPromiseRef.current ? inFlightKeyRef.current : null, loadKey)
+    if (plan === 'coalesce' && loadPromiseRef.current) {
       const pending = pendingLoadRef.current || { silent: true }
       pending.silent = pending.silent && silent
       pendingLoadRef.current = pending
       return loadPromiseRef.current
     }
+    if (plan === 'preempt') {
+      // The query changed: the answer being waited for is already wrong. Abort it and ignore
+      // whatever it returns or however it fails; this one starts now.
+      loadAbortRef.current?.abort()
+      loadAbortRef.current = null
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      pendingLoadRef.current = null
+      clearLoadWatchdog()
+    }
+    // A refresh (a push, a finished edit) must see the server; paging may use a page read a moment ago.
+    if (silent) {
+      pageCacheRef.current.clear()
+      prefetchRunRef.current += 1
+    } else {
+      const cachedRows = pageCacheRef.current.get(loadKey)
+      if (cachedRows) {
+        setSales(cachedRows)
+        loadedOnceRef.current = true
+        setLoadError(null)
+        setLoading(false)
+        schedulePrefetch(params, cachedRows.length >= salesPageSize)
+        return
+      }
+    }
     const requestId = beginTrackedRequest(loadRequestRef)
     const controller = new AbortController()
     loadAbortRef.current = controller
+    inFlightKeyRef.current = loadKey
     let completedSuccessfully = false
     const promise = (async () => {
       if (!silent && aliveRef.current) {
@@ -772,16 +864,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
       }
       try {
-        const params = {
-          ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
-          ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-          ...(debouncedSearch ? { search: debouncedSearch } : {}),
-          ...salesDateRange,
-          page: salesPage,
-          limit: salesPageSize,
-          sortBy: salesSortSpec.field,
-          sortDir: salesSortSpec.direction,
-        }
         const result = await withLoaderTimeout(
           () => fetchSales(params, { signal: controller.signal }),
           'Sales',
@@ -791,9 +873,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
           setSales(rows)
+          pageCacheRef.current.set(loadKey, rows)
           loadedOnceRef.current = true
           setLoadError(null)
           completedSuccessfully = true
+          if (!silent) schedulePrefetch(params, rows.length >= salesPageSize)
         }
       } catch (error) {
         if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -820,6 +904,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current !== wrappedPromise) return
       loadPromiseRef.current = null
+      inFlightKeyRef.current = null
       const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)
       // Always consume a queued automatic load. On failure, the visible Retry
       // action starts one deliberate request with the latest filters instead.
@@ -834,7 +919,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, schedulePrefetch, settledSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -845,6 +930,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
   const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; revenue_without_not_paid_usd: number | null; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
+  salesStatsTotalRef.current = salesStats?.total_count ?? null
 
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
@@ -859,7 +945,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const params = {
       ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
       ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-      ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      ...(settledSearch ? { search: settledSearch } : {}),
       ...salesDateRange,
     }
     try {
@@ -878,7 +964,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
       setSalesStats(null)
     }
-  }, [authReady, canViewSales, statusSecurityScope, debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, settledSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
 
   useEffect(() => {
     let cancelled = false
@@ -916,9 +1002,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     fees: FeesStripPayload | null
   } | null>(null)
   const stripRequestRef = useRef(0)
+  // The period cards read the history (payments, status mix, returns): only while they are open.
+  const [stripOpen, setStripOpen] = useState(false)
   const stripAvailable = isActive && !!user && canViewSales
   const stripHasRange = !!stripRange.startDate && !!stripRange.endDate
   const stripStatus = !stripAvailable ? 'unavailable'
+    : !stripOpen ? 'idle'
     : !stripHasRange ? 'no-range'
       : stripSnapshot?.scope === stripScope ? stripSnapshot.status : 'loading'
   // Mask on render, before effects/cleanup run, including open card details.
@@ -926,7 +1015,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const feeStripData = stripStatus === 'ready' ? stripSnapshot?.fees : null
   const stripLoading = stripStatus === 'loading'
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!stripAvailable || !stripHasRange || stripScopeRef.current !== stripScope) return
+    if (!stripAvailable || !stripOpen || !stripHasRange || stripScopeRef.current !== stripScope) return
     const requestId = beginTrackedRequest(stripRequestRef)
     const isCurrent = () => stripScopeRef.current === stripScope && isTrackedRequestCurrent(stripRequestRef, requestId)
     setStripSnapshot({ scope: stripScope, status: 'loading', data: null, fees: null })
@@ -953,7 +1042,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isCurrent()) return
       setStripSnapshot({ scope: stripScope, status: 'error', data: null, fees: null })
     }
-  }, [canViewFees, stripAvailable, stripHasRange, stripScope, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
+  }, [canViewFees, stripAvailable, stripOpen, stripHasRange, stripScope, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
   useEffect(() => {
     stripScopeRef.current = stripScope
     void loadStatsStrip()
@@ -973,6 +1062,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       invalidateTrackedRequest(salesStatsRequestRef)
       loadPromiseRef.current = null
       pendingLoadRef.current = null
+      pageCacheRef.current.clear()
+      prefetchRunRef.current += 1
       setLoading(false)
       return
     }
@@ -1031,6 +1122,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     loadAbortRef.current?.abort()
     loadAbortRef.current = null
     invalidateTrackedRequest(loadRequestRef)
+    prefetchRunRef.current += 1
+    window.clearTimeout(prefetchTimerRef.current)
     invalidateTrackedRequest(salesStatsRequestRef)
     loadPromiseRef.current = null
     pendingLoadRef.current = null
@@ -1703,10 +1796,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     [allSalesSections],
   )
 
-  useEffect(() => {
-    setSalesPage(1)
-  }, [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
-
   const totalSalesCount = salesStats?.total_count ?? allVisibleSales.length
 
   useEffect(() => {
@@ -1761,15 +1850,39 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     [visibleSales],
   )
 
+  // The detail view re-reads its sale by exact id. Do that read a moment early: after a short hover
+  // on a row, or at once on press, so the view usually opens with the fresh sale already in hand.
+  const warmedDetailRef = useRef<{ id: number; at: number; read: Promise<SaleRecord | null> } | null>(null)
+  const warmTimerRef = useRef<number | undefined>(undefined)
+  const warmSaleDetail = useCallback((sale: SaleRecord, immediate: boolean) => {
+    const id = Number(sale.id)
+    if (!Number.isFinite(id)) return
+    window.clearTimeout(warmTimerRef.current)
+    const start = () => {
+      const warmed = warmedDetailRef.current
+      if (warmed && warmed.id === id && Date.now() - warmed.at < SALE_DETAIL_WARM_MS) return
+      warmedDetailRef.current = { id, at: Date.now(), read: readAuthoritativeSale(id).catch(() => null) }
+    }
+    if (immediate) start()
+    else warmTimerRef.current = window.setTimeout(start, SALE_DETAIL_HOVER_MS)
+  }, [readAuthoritativeSale])
+  const cancelWarmSaleDetail = useCallback(() => window.clearTimeout(warmTimerRef.current), [])
+  useEffect(() => () => window.clearTimeout(warmTimerRef.current), [])
+  const searchAllDates = useCallback(() => setStripRange({ ...EMPTY_DATE_TIME_RANGE }), [])
+
   const openSaleDetail = useCallback((sale: SaleRecord): void => {
     setDetailSale(sale)
     const numericId = Number(sale.id)
     if (!Number.isFinite(numericId)) return
+    window.clearTimeout(warmTimerRef.current)
+    const warmed = warmedDetailRef.current
+    warmedDetailRef.current = null
+    const read = warmed && warmed.id === numericId && Date.now() - warmed.at < SALE_DETAIL_WARM_MS ? warmed.read : readAuthoritativeSale(numericId)
     // The list payload normally includes its grouped sale_items. Re-read the
     // selected row by exact id as well so a cached/legacy list row can never
     // open a detail modal that shows a price but an empty item list. The fresh
     // row is adopted only while this same sale remains open.
-    void readAuthoritativeSale(numericId).then((fresh) => {
+    void read.then((fresh) => {
       if (!fresh) return
       setDetailSale((current) => current && Number(current.id) === numericId ? fresh : current)
       setSelectedSale((current) => current && Number(current.id) === numericId ? fresh : current)
@@ -2691,6 +2804,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         range={stripRange}
         onRangeChange={setStripRange}
         showTime
+        onOpenChange={setStripOpen}
         iconOnly
         compactRange
         // No `summary` beside the Stats chip on Sales: the outside "N sales ·
@@ -2763,6 +2877,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             name="sales_search"
             value={search}
             onChange={setSearch}
+            {...searchCompositionProps}
             placeholder={t('search_sales_placeholder') || 'Search divide by comma, any order: receipt number, customer name, products name, barcode/sku, brand, mem id'}
             ariaLabel={t('search') || 'Search sales'}
           />
@@ -2862,7 +2977,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       {loadError && !loading ? (
         <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           <span>{loadError}</span>
-          <button type="button" onClick={() => loadSales(false)} className="btn-secondary px-3 py-1 text-xs">
+          <button type="button" onClick={() => { pageCacheRef.current.clear(); void loadSales(false) }} className="btn-secondary px-3 py-1 text-xs">
             {t('retry') || 'Retry'}
           </button>
         </div>
@@ -2894,6 +3009,9 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         selectionModeActive={selectionModeActive}
         getSaleLongPressState={getSaleLongPressState}
         setDetailSale={(sale) => openSaleDetail(sale as SaleRecord)}
+        onSaleIntent={(sale, immediate) => warmSaleDetail(sale as SaleRecord, immediate)}
+        onSaleIntentEnd={cancelWarmSaleDetail}
+        onSearchAllDates={settledSearch && (stripRange.startDate || stripRange.endDate) && !loadError ? searchAllDates : undefined}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}
         t={t}

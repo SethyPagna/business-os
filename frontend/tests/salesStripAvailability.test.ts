@@ -35,11 +35,11 @@ function render(hooks: any, props: any, api: any, helpers: any) {
   const getStatusLabel = (status: string) => status
   ${lifecycle}
   ${cards}
-  return { status: stripStatus, data: stripData, fees: feeStripData, cards: stripCards, reload: loadStatsStrip }
+  return { status: stripStatus, data: stripData, fees: feeStripData, cards: stripCards, reload: loadStatsStrip, setOpen: setStripOpen }
 }`)}; return render`)() as (hooks: unknown, props: unknown, api: unknown, helpers: unknown) => View
 
 type Card = { key: string; label: string; value: string; sub?: string; details?: unknown[]; trend?: number; tone?: string; hint?: string }
-type View = { status: string; data: unknown; fees: unknown; cards: Card[]; reload: () => Promise<void> }
+type View = { status: string; data: unknown; fees: unknown; cards: Card[]; reload: () => Promise<void>; setOpen: (open: boolean) => void }
 type Slot = { value?: any; deps?: unknown[]; cleanup?: () => void }
 type Pending = { params: Record<string, unknown>; resolve: (value: unknown) => void; reject: (reason: unknown) => void }
 const range = { startDate: '2026-09-01', endDate: '2026-09-05', startTime: '', endTime: '' }
@@ -65,7 +65,7 @@ function harness() {
     stripRange: { ...range }, isActive: true,
     user: { id: 1, username: 'staff', role_code: 'staff', permissions: { sales: 'full', product_cost_view: true } } as Record<string, unknown> | null,
     canViewSales: true, canViewFees: true, getPermissionTier: (_key: string) => 'full', language: 'en',
-    search: '', statusFilter: 'all', userFilter: 'all',
+    search: '', statusFilter: 'all', userFilter: 'all', startOpen: true,
   }
   let cursor = 0
   let dirty = false
@@ -95,7 +95,14 @@ function harness() {
   const enqueue = (queue: Pending[], params: Record<string, unknown>) => new Promise((resolve, reject) => queue.push({ params, resolve, reject }))
   const api = { getSalesStatsStrip: (params: Record<string, unknown>) => enqueue(requests.sales, params), getFeesReport: (params: Record<string, unknown>) => enqueue(requests.fees, params) }
   let view: View
-  const render = () => { cursor = 0; dirty = false; view = run(hooks, props, api, { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts }); return view }
+  const helpers = { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, buildEquation, revenueTerms, profitTerms, formatUsd4, canViewAcquisitionCosts }
+  // The Stats cards are open unless a test says otherwise: the period read waits for that (stripOpen).
+  let opened = false
+  const render = () => {
+    cursor = 0; dirty = false; view = run(hooks, props, api, helpers)
+    if (!opened && props.startOpen) { opened = true; view.setOpen(true); cursor = 0; dirty = false; view = run(hooks, props, api, helpers) }
+    return view
+  }
   const commit = () => {
     for (const [index, effect] of effects) { slots[index].cleanup?.(); slots[index].cleanup = effect() || undefined }
     effects.clear()
@@ -125,6 +132,18 @@ function masked(view: View, status: string) {
 const card = (view: View, key: string) => view.cards.find((entry) => entry.key === key)!
 let passed = 0
 async function test(name: string, check: () => void | Promise<void>) { await check(); passed++; console.log(`PASS ${name}`) }
+
+await test('the period cards read the history only while the Stats panel is open', async () => {
+  const h = harness()
+  h.props.startOpen = false
+  const closed = h.render(); h.commit()
+  assert.equal(closed.status, 'idle')
+  await h.flush(); h.commit()
+  assert.equal(h.requests.sales.length, 0, 'nothing is read for a panel nobody opened')
+  closed.setOpen(true)
+  h.render(); h.commit()
+  assert.equal(h.requests.sales.length, 1, 'opening the panel reads the period once')
+})
 
 await test('no range, partial range and initial loading are not zero-valued periods', async () => {
   const h = harness()
