@@ -135,7 +135,13 @@ type RouteOptions = {
   // (which already varies per query string and so never groups
   // anything). See beginSearchGroup/endSearchGroup.
   searchGroup?: string
+  // Opt a display-only read into "show the last data, marked, while it refreshes" (see rememberLastKnown). When this
+  // channel has no fresh cache entry but an earlier answer of the same account, route() returns that answer at once,
+  // flagged (isRefreshingRead), reads fresh in the background and calls this once with the outcome. Never for a write
+  // or for data a write is built from.
+  onLastKnownRefreshed?: (outcome: LastKnownOutcome) => void
 }
+export type LastKnownOutcome = { ok: true; data: any } | { ok: false; error: unknown }
 type RequestInitWithBody = RequestInit & { body?: string }
 type RefreshEventDetail = { reason?: string; channel?: string }
 type CallLogEntry = { ts: string; channel: string; source: string; ms: number; ok: boolean }
@@ -191,6 +197,15 @@ const _writeInflight = new Map<string, InflightWrite>()
 // invalidation) is the value it started under.
 const _readInflight = new Map<string, InflightRead>()
 let _readEpoch = 0
+// The last answer per opted-in channel, kept across invalidations (a sale clears the cache, not this) so a screen can show
+// it, flagged, while the fresh read runs. Only the same account sees it; cacheClearAll drops it.
+type LastKnown = { data: object; ts: number; scope: ActorReadScope }
+const _lastKnown = new Map<string, LastKnown>()
+const _refreshingReads = new WeakSet<object>()
+const _lastKnownCalls = new Map<string, number>()
+const LAST_KNOWN_MAX_ENTRIES = 32
+const LAST_KNOWN_MAX_AGE_MS = 15 * 60_000
+let _lastKnownSeq = 0
 const _apiMismatchCooldown = new Map<string, { error: ApiRuntimeError; until: number }>()
 const CACHE_TTL   = 20_000   // 20 seconds
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
@@ -414,6 +429,7 @@ export function cacheInvalidateWithDerived(prefix: string): void {
   for (const derived of DERIVED_READ_PREFIXES[prefix] || []) cacheInvalidate(derived)
 }
 export function cacheClearAll(): void {
+  _lastKnown.clear()
   cacheInvalidate('')
   _writeInflight.clear()
   _apiMismatchCooldown.clear()
@@ -1622,7 +1638,56 @@ async function raceServerReadWithLocalFallback<T>(
  *   - Cache tag invalidation: invalidate whole entity groups instantly
  *   - Active health awareness: skips server call if known offline
  */
-export async function route<T = any>(
+export function route<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
+  const onRefreshed = typeof options === 'object' && !options.isWrite ? options.onLastKnownRefreshed : undefined
+  if (!onRefreshed) return routeWithRetry(channel, serverFn, localFn, options)
+  const bypassCache = typeof options === 'object' && options.bypassCache === true
+  const last = bypassCache || cacheGet(channel) === null ? peekLastKnown(channel) : null
+  const seq = ++_lastKnownSeq
+  _lastKnownCalls.set(channel, seq)
+  const read = routeWithRetry(channel, serverFn, localFn, options)
+  if (!last) return read.then((data) => { rememberLastKnown(channel, data); return data })
+  read.then((data) => {
+    rememberLastKnown(channel, data)
+    if (_lastKnownCalls.get(channel) === seq) onRefreshed({ ok: true, data })
+  }, (error) => {
+    if (isReadAuthorizationError(error)) _lastKnown.delete(channel)
+    // A newer call reports for itself; a caller that cancelled has gone away.
+    if (_lastKnownCalls.get(channel) === seq && !isAbortError(error)) onRefreshed({ ok: false, error })
+  })
+  logCall(channel, 'last-known', 0)
+  _refreshingReads.add(last.data)
+  return Promise.resolve(last.data as T)
+}
+
+/** True for an answer route() returned from the last-known store while a fresh read is still running. Display only. */
+export function isRefreshingRead(value: unknown): boolean {
+  return !!value && typeof value === 'object' && _refreshingReads.has(value)
+}
+
+function rememberLastKnown(channel: string, data: unknown): void {
+  if (!data || typeof data !== 'object') return
+  _lastKnown.delete(channel)
+  _lastKnown.set(channel, { data, ts: Date.now(), scope: captureActorReadScope(channel) })
+  if (_lastKnown.size > LAST_KNOWN_MAX_ENTRIES) _lastKnown.delete(_lastKnown.keys().next().value as string)
+}
+
+function peekLastKnown(channel: string): LastKnown | null {
+  const entry = _lastKnown.get(channel)
+  if (!entry) return null
+  if (Date.now() - entry.ts > LAST_KNOWN_MAX_AGE_MS || !isActorReadScopeCurrent(entry.scope, false)) {
+    _lastKnown.delete(channel)
+    return null
+  }
+  return entry
+}
+
+async function routeWithRetry<T = any>(
   channel: string,
   serverFn: RouteFn<T>,
   localFn?: RouteFn<T> | null,
