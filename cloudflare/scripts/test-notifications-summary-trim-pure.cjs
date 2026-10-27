@@ -1,22 +1,12 @@
 'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
-// GET /api/notifications/summary: counts + a 50-item inventory preview, with the three expensive
-// sections (inventory, expiry, loyalty) answered from the Cache API between writes.
+// GET /api/notifications/summary: the version-keyed sections (expiry, supplier credit, loyalty) answered from the
+// Cache API between writes, the sales queues live, and NO standing low/out-of-stock list (the bell's inventory section is
+// the recorded crossings: scripts/test-notifications-stock-alerts-pure.cjs).
 //
-// Loads the REAL routes/notifications.ts and the REAL lib/cache.ts against an in-memory SQLite
-// database with every migration applied. Only Worker seams are stubbed: the session, the Cache API
-// (a Map keyed by URL, like caches.default) and KV (a Map holding the cache version counters).
-// The database handle counts every statement and every row it returns, so each claim is a number:
-//
-//   BEFORE (the removed code, restated below as BASELINE_INVENTORY_SQL and run on the same data):
-//     one statement returning every flagged product, up to 5,000 rows, all serialised to the client;
-//   AFTER:
-//     the same single pass but 50 rows returned, an exact count from window aggregates, and on a
-//     cache hit zero statements for inventory, expiry and loyalty.
-//
-// Each case is discriminating: the baseline comparison fails if the order, the count or the summary
-// text drifts; the invalidation cases fail if a cache does not turn over on the right version bump
-// (and the "not before the bump" half fails if nothing is cached at all).
+// Loads the REAL routes/notifications.ts and the REAL lib/cache.ts against an in-memory SQLite database with every
+// migration applied. Only Worker seams are stubbed: the session, the Cache API (a Map keyed by URL, like caches.default)
+// and KV (a Map holding the cache version counters). The database handle counts every statement and every row it returns.
 //
 // Run: node scripts/test-notifications-summary-trim-pure.cjs
 const assert = require('node:assert/strict')
@@ -75,6 +65,7 @@ const overrides = {
   './db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', currentUser); return next() }, prefetchWithSession: () => {}, takePrefetched: () => undefined },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
+  './telegram': { sendTelegramEvent: async () => false },
 }
 const modules = new Map()
 function load(rel) {
@@ -116,14 +107,8 @@ const env = {
 }
 const pending = []
 const executionCtx = { waitUntil: (promise) => { pending.push(Promise.resolve(promise).catch(() => {})) }, passThroughOnException() {} }
-const notificationsModule = load('routes/notifications.ts')
-const app = notificationsModule.default
-// The inventory section is time-keyed (5 minutes), so the test owns the clock: `minutes` is how long the shop has been open.
-let minutes = 0
-const clock = () => Date.parse('2026-10-27T00:00:00Z') + minutes * 60_000
-notificationsModule.resetInventoryBellCache(clock)
+const app = load('routes/notifications.ts').default
 const cacheModule = load('lib/cache.ts')
-const lowStock = load('lib/lowStockSettings.ts')
 
 async function call(method, pathname, user) {
   currentUser = user
@@ -152,34 +137,6 @@ function seedProducts() {
   })
 }
 
-// The removed code, restated: one query returning every flagged row (LIMIT 5000), split in JS.
-function baselineInventory(config) {
-  const lowSql = lowStock.lowStockThresholdSql(config, 'low_stock_threshold')
-  const rows = raw.db.prepare(`
-    SELECT id, name, stock_quantity,
-      COALESCE(out_of_stock_threshold, 0) AS out_threshold,
-      ${lowSql} AS low_threshold
-    FROM products
-    WHERE is_active = 1
-      AND (COALESCE(stock_quantity, 0) <= ${lowSql}
-           OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
-    ORDER BY stock_quantity ASC
-    LIMIT 5000
-  `).all()
-  const out = rows.filter((row) => Number(row.stock_quantity || 0) <= Number(row.out_threshold || 0))
-  const low = rows.filter((row) => Number(row.stock_quantity || 0) > Number(row.out_threshold || 0))
-  return {
-    rows: rows.length,
-    outCount: out.length,
-    lowCount: low.length,
-    items: [
-      ...out.map((p) => ({ id: `out-${p.id}`, label: p.name, meta: 'Out of stock' })),
-      ...low.map((p) => ({ id: `low-${p.id}`, label: p.name, meta: `Low stock (${Number(p.stock_quantity || 0)})` })),
-    ],
-  }
-}
-const pick = (item) => ({ id: item.id, label: item.label, meta: item.meta })
-
 let passed = 0
 async function check(name, fn) {
   await fn()
@@ -189,37 +146,13 @@ async function check(name, fn) {
 
 async function main() {
   seedProducts()
-  const config = await lowStock.loadLowStockConfig(env)
-  const baseline = baselineInventory(config)
-
-  await check('fixture sanity: the baseline really is a big payload (330 flagged, ties, a raised out threshold)', () => {
-    assert.equal(baseline.rows, 330)
-    assert.equal(baseline.outCount, 120)
-    assert.equal(baseline.lowCount, 210)
-  })
-
   let first
-  await check('AFTER: inventory returns 50 rows, the exact count, and the baseline order/summary', async () => {
+  await check('no standing list: 330 low and out-of-stock products with no recorded crossing give the bell no inventory section', async () => {
     first = await summary()
     assert.equal(first.status, 200)
-    const inventory = section(first, 'inventory')
-    assert.equal(inventory.count, 330, 'count is the true size, not the preview size')
-    assert.equal(inventory.items.length, 50)
-    assert.equal(inventory.truncated, true)
-    assert.equal(inventory.itemsTotal, 330)
-    assert.equal(inventory.summary, '120 out of stock - 210 low stock')
-    assert.deepEqual(inventory.items.map(pick), baseline.items.slice(0, 50).map(pick), 'the first 50 are the first 50 the old route listed, in order')
+    assert.equal(section(first, 'inventory'), undefined)
     assert.equal(first.json.unreadCount, first.json.sections.reduce((total, entry) => total + entry.count, 0))
-  })
-
-  await check('rows and bytes: the inventory statement returns 50 rows instead of 330, and the payload shrinks to a fraction', async () => {
-    assert.equal(rowsOf('inventory'), 50, 'rows returned by the inventory statement (baseline: 330)')
-    assert.equal(statements('inventory'), 1, 'still one pass over the catalog, not one for the page plus one for the counts')
-    // Baseline payload: the old route serialised every flagged item. Rebuild that body size from the same rows.
-    const baselineBody = JSON.stringify(baseline.items.map((item) => ({ ...item, tone: 'x', kind: 'inventory_low_stock', pageId: 'inventory', anchor: `product-${item.id}` })))
-    assert.ok(first.bytes < baselineBody.length / 3, `summary ${first.bytes} B vs baseline inventory alone ${baselineBody.length} B`)
-    assert.ok(first.bytes < 20 * 1024, `summary stays under 20 KB (${first.bytes} B)`)
-    console.log(`  measured: inventory statement rows ${rowsOf('inventory')} (baseline ${baseline.rows}); summary body ${first.bytes} B vs baseline inventory items alone ${baselineBody.length} B`)
+    assert.equal(rowsOf('inventory'), 0, 'and the catalog is not read for it')
   })
 
   await check('the public shape is otherwise unchanged: preferences carry no cache-only fields', () => {
@@ -231,80 +164,22 @@ async function main() {
     assert.equal(first.json.unread, first.json.unreadCount)
   })
 
-  await check('a second call is a cache hit: zero inventory, expiry and loyalty statements, identical answer', async () => {
+  await check('a second call is a cache hit: zero expiry and loyalty statements, identical answer', async () => {
     kvReads = 0
     const again = await summary()
     assert.ok(kvReads <= 7, `each of the six data versions is read once per request, not once per section, plus at most one low-stock memo re-confirmation (${kvReads} KV reads; 9 before the per-request memo)`)
     assert.ok(statements('versions') <= 6, 'and the D1 fallback for a never-bumped version is likewise once each')
-    assert.equal(statements('inventory'), 0)
     assert.equal(statements('expiry'), 0)
     assert.equal(statements('loyalty'), 0)
     assert.deepEqual(again.json.sections, first.json.sections)
   })
 
-  await check('the inventory figure is time-keyed: a stock change and its stock bump (a sale) change nothing for 5 minutes, then it is recomputed', async () => {
-    assert.equal(first.json.inventory_computed_at, new Date(clock()).toISOString(), 'the response says when the counts were computed')
-    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run())
-    await cacheModule.bumpVersion(env, 'stock') // what a sale does
-    const sameFigure = await summary()
-    assert.equal(statements('inventory'), 0, 'a sale does not invalidate the inventory figure')
-    assert.equal(section(sameFigure, 'inventory').count, 330)
-    assert.equal(sameFigure.json.inventory_computed_at, first.json.inventory_computed_at)
-    minutes = 4.9
-    assert.equal(section(await summary(), 'inventory').count, 330, 'still inside the window')
-    minutes = 5.1
-    const fresh = await summary()
-    assert.equal(statements('inventory'), 1, 'recomputed once the figure is older than 5 minutes')
-    assert.equal(statements('expiry'), 0, 'expiry stays on its own version key')
-    assert.equal(section(fresh, 'inventory').count, 331)
-    assert.equal(section(fresh, 'inventory').summary, '121 out of stock - 210 low stock')
-    assert.equal(fresh.json.inventory_computed_at, new Date(clock()).toISOString())
-  })
-
-  await check("a product edit ('products' bump) re-runs expiry but not inventory or loyalty", async () => {
+  await check("a product edit ('products' bump) re-runs expiry but not loyalty", async () => {
     await cacheModule.bumpVersion(env, 'products')
     await summary()
     assert.equal(statements('inventory'), 0)
     assert.equal(statements('expiry'), 1)
     assert.equal(statements('loyalty'), 0)
-  })
-
-  await check('one recompute at a time: concurrent polls on a cold isolate read the catalog once, and another isolate reuses the shared entry', async () => {
-    minutes += 6
-    currentUser = ADMIN
-    ledger.length = 0
-    const responses = await Promise.all([1, 2, 3, 4].map(() => app.request('http://local/summary', { method: 'GET' }, env, executionCtx)))
-    await Promise.all(pending.splice(0))
-    const burst = await Promise.all(responses.map(async (response) => ({ status: response.status, json: await response.json() })))
-    assert.equal(burst.every((response) => response.status === 200), true)
-    assert.equal(statements('inventory'), 1, 'four simultaneous polls, one read of the catalog')
-    assert.equal(new Set(burst.map((response) => response.json.inventory_computed_at)).size, 1)
-    // another isolate: no memo, but the colo's Cache API entry is fresh
-    notificationsModule.resetInventoryBellCache(clock)
-    const other = await summary()
-    assert.equal(statements('inventory'), 0, 'a fresh isolate reads the shared entry, not the catalog')
-    assert.equal(other.json.inventory_computed_at, burst[0].json.inventory_computed_at)
-    // an older entry while another isolate holds the lock: serve it, do not recompute alongside
-    minutes += 5.5
-    notificationsModule.resetInventoryBellCache(clock)
-    const lockUrl = [...cacheStore.keys()].find((url) => url.includes('/_inventory/entry'))?.replace('/entry', '/lock')
-    assert.ok(lockUrl, 'control: the entry exists')
-    cacheStore.set(lockUrl, new Response(String(clock())))
-    const older = await summary()
-    assert.equal(statements('inventory'), 0, 'lock held: the older figure is served')
-    assert.equal(older.json.inventory_computed_at, burst[0].json.inventory_computed_at)
-    cacheStore.delete(lockUrl)
-    const recomputed = await summary()
-    assert.equal(statements('inventory'), 1, 'no lock: exactly one recompute')
-    assert.notEqual(recomputed.json.inventory_computed_at, burst[0].json.inventory_computed_at)
-  })
-
-  await check('the sales queues stay live while the inventory figure is held', async () => {
-    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-LIVE', 7, 'awaiting_payment')").run())
-    const live = await summary()
-    assert.equal(statements('inventory'), 0, 'inventory still held')
-    assert.ok(section(live, 'sales').items.some((item) => item.label === 'R-LIVE'), 'the new unpaid sale shows on the very next poll')
-    seedStockFixture(raw.db, () => raw.db.prepare("DELETE FROM sales WHERE receipt_number = 'R-LIVE'").run())
   })
 
   await check('supplier credit is answered from the cache between writes: a second call reads no lots, a lot or product change re-reads them', async () => {
@@ -345,7 +220,7 @@ async function main() {
     }
   })
 
-  await check("a settings save re-runs the version-keyed sections (the inventory figure is time-keyed, its low-stock rule is in its key)", async () => {
+  await check("a settings save re-runs the version-keyed sections", async () => {
     await cacheModule.bumpVersion(env, 'settings')
     await summary()
     assert.equal(statements('inventory'), 0)
@@ -356,19 +231,6 @@ async function main() {
     await summary()
   })
 
-  await check('changing the low-stock config changes the answer at once -- the config is part of the cache key, no bump needed', async () => {
-    seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('low_stock_alert_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
-    lowStock.invalidateLowStockConfigMemo() // what the Settings POST does in this isolate
-    const off = await summary()
-    const inventory = section(off, 'inventory')
-    assert.equal(statements('inventory'), 1, 'a different config is a different cache entry')
-    assert.equal(inventory.count, 121 + 0, 'alerts off: only out-of-stock rows remain (the OR keeps them)')
-    assert.equal(inventory.summary, '121 out of stock')
-    seedStockFixture(raw.db, () => raw.db.prepare("DELETE FROM settings WHERE key = 'low_stock_alert_enabled'").run())
-    lowStock.invalidateLowStockConfigMemo()
-    assert.equal(section(await summary(), 'inventory').count, 331, 'switching back returns the earlier numbers')
-  })
-
   await check('users never see each other\'s sections through the shared cache', async () => {
     await summary(ADMIN) // warm every cached section as an administrator
     const cashier = await summary(CASHIER)
@@ -376,7 +238,7 @@ async function main() {
     assert.equal(section(cashier, 'expiry'), undefined)
     assert.equal(section(cashier, 'loyalty'), undefined)
     const stockOnly = await summary(STOCK_ONLY)
-    assert.equal(section(stockOnly, 'inventory').count, 331)
+    assert.equal(section(stockOnly, 'inventory'), undefined, 'no crossing, no inventory section, whatever the stock')
     assert.equal(section(stockOnly, 'supplier_credit'), undefined, 'supplier credit stays admin-only')
     assert.equal(section(stockOnly, 'security'), undefined)
   })
@@ -402,48 +264,6 @@ async function main() {
     assert.ok(!ids.includes('R-D2') && !ids.includes('R-D3'), 'a cancelled tagged sale and an untagged sale are not')
   })
 
-  await check('GET /summary/items returns the whole inventory list for "show all", gated like the section', async () => {
-    const all = await call('GET', '/summary/items?section=inventory', ADMIN)
-    assert.equal(all.status, 200)
-    assert.equal(all.json.count, 331)
-    assert.equal(all.json.items.length, 331, 'nothing is lost: every flagged product is reachable')
-    const baselineNow = baselineInventory(await lowStock.loadLowStockConfig(env))
-    assert.deepEqual(all.json.items.map((item) => item.id), baselineNow.items.map((item) => item.id), 'same order as the old full list')
-    assert.equal((await call('GET', '/summary/items?section=inventory', CASHIER)).status, 403)
-    assert.equal((await call('GET', '/summary/items?section=sales', ADMIN)).status, 404)
-    const cached = await call('GET', '/summary/items?section=inventory', ADMIN)
-    assert.equal(statements('inventory'), 0, 'the expanded list is cached too')
-    assert.equal(cached.json.items.length, 331)
-  })
-
-  await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
-    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run())
-    minutes += 6 // the inventory figure is time-keyed
-    const small = await summary()
-    const inventory = section(small, 'inventory')
-    assert.equal(inventory.items.length, inventory.count)
-    assert.equal(inventory.truncated, undefined)
-    assert.equal(inventory.itemsTotal, undefined)
-  })
-
-  await check('no Cache API (unit harness, workers.dev): the isolate memo alone holds the figure for 5 minutes', async () => {
-    const saved = globalThis.caches
-    delete globalThis.caches
-    try {
-      minutes += 6
-      await summary()
-      assert.equal(statements('inventory'), 1)
-      await summary()
-      assert.equal(statements('inventory'), 0)
-      minutes += 5.1
-      await summary()
-      assert.equal(statements('inventory'), 1)
-    } finally {
-      globalThis.caches = saved
-    }
-  })
-
-  // ---- the expiry statement uses migration 0228's index and must list exactly what the removed full scan listed ------
   await check('expiry: the index-assisted statement lists exactly what the removed full scan listed, boundaries and a legacy inactive-with-stock row included', async () => {
     const visible = load('lib/productStockGuard.ts').stockVisibleProductSql()
     const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10)

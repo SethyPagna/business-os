@@ -333,7 +333,8 @@ async function main() {
     ['routes/inventory.ts', "Inventory's stockState=low filter"],
     ['routes/products.ts', "Products' stockState=low/healthy filters"],
     ['routes/branches.ts', "Branches' per-branch stockState filter"],
-    ['routes/notifications.ts', 'the notification bell'],
+    // The bell no longer decides "is this row low": its inventory section lists recorded crossings, which
+    // lib/stockCrossingAlert.ts classifies with effectiveLowStockThreshold (the same rule, in code).
   ]
 
   await check('every server low-stock reader goes through the shared rule', () => {
@@ -401,9 +402,9 @@ async function main() {
         `${relPath}'s healthy clause must state the out-of-stock term, not imply it from low >= out`,
       )
     }
-    // The bell and the bot fetch BOTH tiers in one query, so each needs the OR
+    // The bot fetches BOTH tiers in one query, so it needs the OR
     // that keeps out-of-stock alive when the low-quantity alert is off.
-    for (const relPath of ['routes/notifications.ts', 'lib/telegram.ts']) {
+    for (const relPath of ['lib/telegram.ts']) {
       assert.match(
         readCf(relPath),
         /OR COALESCE\(stock_quantity, 0\) <= COALESCE\(out_of_stock_threshold, 0\)/,

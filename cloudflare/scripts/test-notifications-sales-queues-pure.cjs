@@ -85,6 +85,10 @@ const small = openDb(loadAll())
 small.db.limits.exprDepth = 100
 const put = small.db.prepare(`INSERT INTO sales ${COLUMNS} VALUES (?, ?, ?, ?, ?, 5)`)
 for (let i = 0; i < 2000; i += 1) put.run(`C${i}`, `2026-09-${String(1 + (i % 27)).padStart(2, '0')} 10:00:${String(i % 60).padStart(2, '0')}`, 'completed', null, 0)
+// Large groups of the other statuses, so the statistics describe a bigger shop.
+for (let i = 0; i < 1500; i += 1) put.run(`X${i}`, `2026-08-${String(1 + (i % 27)).padStart(2, '0')} 11:00:${String(i % 60).padStart(2, '0')}`, 'cancelled', null, 0)
+for (let i = 0; i < 600; i += 1) put.run(`T${i}`, `2026-08-${String(1 + (i % 27)).padStart(2, '0')} 12:00:${String(i % 60).padStart(2, '0')}`, 'returned', 'completed', 0)
+for (let i = 0; i < 300; i += 1) put.run(`P${i}`, `2026-08-${String(1 + (i % 27)).padStart(2, '0')} 13:00:${String(i % 60).padStart(2, '0')}`, 'partial_return', 'completed', 0)
 const shortRows = [
   ['awaiting_payment', null, 0], ['returned', 'awaiting_payment', 0], ['partial_return', 'awaiting_payment', 0], ['partial_return', 'completed', 0],
   ['awaiting_delivery', null, 0], ['completed', null, 1], ['cancelled', null, 1], ['awaiting_delivery', null, 1], ['returned', 'awaiting_delivery', 0],
@@ -110,5 +114,12 @@ check('with statistics neither queue scans sales: every term is an index seek', 
     assert.ok(!scansSales(sql), plan(sql).join(' | '))
     assert.ok(plan(sql).filter((detail) => /^SEARCH sales USING INDEX/.test(detail)).length >= 2, plan(sql).join(' | '))
   }
+})
+check('every term names its index: the planner is not left to choose (it walks idx_sales_created_pg for the IN term on some statistics)', () => {
+  // Pinned in text because the flip needs production-like statistics (15.8k sales); scripts/test-notifications-summary-rows-native.cjs
+  // measures the rows on such a database and goes red (31k rows) without these hints.
+  assert.equal((AWAITING_PAYMENT_SQL.match(/INDEXED BY idx_sales_status_created_pg/g) || []).length, 2)
+  assert.equal((AWAITING_DELIVERY_SQL.match(/INDEXED BY idx_sales_status_created_pg/g) || []).length, 2)
+  assert.equal((AWAITING_DELIVERY_SQL.match(/INDEXED BY idx_sales_delivery_pending_created/g) || []).length, 1)
 })
 console.log(`${passed} checks passed`)

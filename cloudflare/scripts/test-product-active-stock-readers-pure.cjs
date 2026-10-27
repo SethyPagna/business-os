@@ -58,11 +58,10 @@ async function main() {
     ...deps, ...load('./dashboardStockOverview'), dateRange: () => ({}), DASHBOARD_INSIGHT_LIST_LIMIT: 300,
   })
   assert.equal((await insights.dashboardInsightList({}, {}, 'expiring_products')).items.length, 5)
-  const notifications = functionsFrom('routes/notifications.ts', ['buildInventorySection', 'buildExpirySection'], {
+  const notifications = functionsFrom('routes/notifications.ts', ['buildExpirySection'], {
     ...deps, joinSummary: items => items.filter(Boolean).join(', '),
   })
-  assert.equal((await notifications.buildInventorySection({}, lowStock, 20)).count, 5)
-  assert.equal((await notifications.buildExpirySection({}, 30)).count, 5)
+  assert.equal((await notifications.buildExpirySection(adapter, 30)).count, 5)
   const search = load('./productSearchQuery')
   const rankedParams = {}
   const ranked = search.buildProductSearchQuery('', rankedParams, { rankedIds: { ids: [900001,900002,900003,900004,900005,900006], tiers: [] } })

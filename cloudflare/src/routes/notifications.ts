@@ -3,11 +3,11 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb, type BindParams } from '../lib/db'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
-import { productHasStockSql, stockVisibleProductSql } from '../lib/productStockGuard'
+import { productHasStockSql } from '../lib/productStockGuard'
+import { stockCrossingTableAvailable } from '../lib/stockCrossingAlert'
 import { buildPortalConfig, createPointsAccumulator, accumulatePoints, summarizePointTotals, type PointsAccumulator, type PointsLedger } from './portal'
 import { getPlanLimits } from '../lib/planTier'
 import { requestMetricsOf } from '../lib/requestMetrics'
-import { loadLowStockConfig, lowStockThresholdSql, resolveLowStockConfig, LOW_STOCK_SETTING_KEYS, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionsWithFallback } from '../lib/cache'
 import { requireAuth, prefetchWithSession, takePrefetched, type SessionUser } from '../lib/auth'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
@@ -23,7 +23,7 @@ import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } fr
 // look stale or just permanently "off" regardless of real inventory/sales
 // state.
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-// GET /summary reads the preferences (and the three low-stock keys) in the session lookup's own D1 batch.
+// GET /summary reads the preferences in the session lookup's own D1 batch.
 app.use('/summary', async (c, next) => {
   if (c.req.method === 'GET') prefetchWithSession(c, [preferencesStatement()])
   return next()
@@ -63,8 +63,6 @@ const NOTIFICATION_SETTING_KEYS = [
   // Presence-only read: loadPreferences reduces this to a boolean and the
   // token value never leaves that function.
   'drive_sync_refresh_token',
-  // The low-stock rule (lib/lowStockSettings.ts), so the summary needs no second settings read for it.
-  ...LOW_STOCK_SETTING_KEYS,
 ]
 const SUMMARY_SEPARATOR = ' - '
 
@@ -154,7 +152,6 @@ async function loadPreferences(env: Env, prefetched?: Array<{ key: string; value
     .all<{ key: string; value: string }>(NOTIFICATION_SETTING_KEYS)
   const map = rowsToSettingMap(rows)
   return {
-    lowStockConfig: resolveLowStockConfig(map),
     inventoryEnabled: normalizeBoolean(map.notifications_inventory_enabled, true),
     salesEnabled: normalizeBoolean(map.notifications_sales_enabled, true),
     loyaltyEnabled: normalizeBoolean(map.notifications_loyalty_enabled, true),
@@ -177,8 +174,8 @@ async function loadPreferences(env: Env, prefetched?: Array<{ key: string; value
   }
 }
 
-// The three sections that cost real reads on every call -- inventory and expiry
-// each walk every active product, loyalty groups every sale ever made -- are
+// The sections that cost real reads on every call -- expiry and supplier credit
+// look through the products and lots, loyalty groups every sale ever made -- are
 // answered from the Workers Cache API for a short while, keyed by the data
 // versions their inputs live in. Every writer of those inputs already bumps
 // the same versions the product/sales/contacts caches use: stock moves bump
@@ -191,75 +188,14 @@ async function loadPreferences(env: Env, prefetched?: Array<{ key: string; value
 // leak across users: the cached value is the same for everyone who is allowed
 // to ask for it.
 export const NOTIFICATION_SECTION_CACHE_TTL_SECONDS = 45
-// Rows the summary carries per inventory section. The panel pages client-side
-// and reaches the rest through GET /summary/items; the headline count is exact
-// either way.
-export const INVENTORY_PREVIEW_ITEMS = 50
-// What the full list was capped at before the preview existed.
-export const INVENTORY_FULL_ITEMS = 5000
-
-// The bell's low/out-of-stock section is a figure that may be up to 5 minutes old (owner ruling, 27 Oct: the
-// dashboard stock overview is the same kind of figure), shown with the time it was computed. It is keyed by
-// organization, the low-stock rule and TIME, never by the stock version: counting every flagged product costs
-// O(catalog) rows, and a sale used to invalidate it on every poll. Sales/delivery queues, expiry and the rest stay live.
-// Three tiers, cheapest first: this isolate's memo; the Cache API entry every isolate of the colo shares (no
-// daily write cap, unlike KV's 1,000 on Free); a recompute. One recompute at a time: concurrent callers in an
-// isolate share one in-flight promise, and a short-lived lock entry makes other isolates serve the (older) entry
-// instead of recomputing alongside. Without a Cache API (tests, workers.dev) the memo alone applies.
-export const INVENTORY_SECTION_MAX_AGE_MS = 5 * 60 * 1000
-const INVENTORY_ENTRY_TTL_SECONDS = 10 * 60
-const INVENTORY_LOCK_TTL_SECONDS = 20
-type TimedInventory = { computedAt: string; section: NotificationSection | null }
-const inventoryMemo = new Map<string, TimedInventory>()
-const inventoryFlights = new Map<string, Promise<TimedInventory>>()
-let inventoryNow = () => Date.now()
-/** Test seams: forget the isolate memo (a fresh isolate) and move the clock. */
-export function resetInventoryBellCache(now?: () => number): void {
-  inventoryMemo.clear()
-  inventoryFlights.clear()
-  inventoryNow = now || (() => Date.now())
-}
-const isFresh = (entry: TimedInventory) => inventoryNow() - Date.parse(entry.computedAt) < INVENTORY_SECTION_MAX_AGE_MS
-
-async function timedInventory(c: NotificationContext, key: string, produce: () => Promise<NotificationSection | null>): Promise<TimedInventory> {
-  const remembered = inventoryMemo.get(key)
-  if (remembered && isFresh(remembered)) return remembered
-  const running = inventoryFlights.get(key)
-  if (running) return running
-  const flight = (async (): Promise<TimedInventory> => {
-    const cache = typeof caches === 'undefined' ? null : caches.default
-    const origin = new URL(c.req.url).origin
-    const entryRequest = new Request(`${origin}/api/notifications/_inventory/entry?k=${encodeURIComponent(key)}`)
-    const lockRequest = new Request(`${origin}/api/notifications/_inventory/lock?k=${encodeURIComponent(key)}`)
-    let older: TimedInventory | null = null
-    if (cache) {
-      const hit = await cache.match(entryRequest)
-      if (hit) {
-        const entry = await hit.json<TimedInventory>()
-        if (isFresh(entry)) return entry
-        older = entry
-      }
-      // Someone else is recomputing: answer with the older figure rather than read the catalog twice.
-      if (older) {
-        const lock = await cache.match(lockRequest)
-        // The lock carries its own start time, so it lapses on schedule whatever the cache does with max-age.
-        if (lock && inventoryNow() - Number(await lock.text()) < INVENTORY_LOCK_TTL_SECONDS * 1000) return older
-      }
-      c.executionCtx.waitUntil(cache.put(lockRequest, new Response(String(inventoryNow()), { headers: { 'cache-control': `public, max-age=${INVENTORY_LOCK_TTL_SECONDS}` } })))
-    }
-    const entry: TimedInventory = { section: await produce(), computedAt: new Date(inventoryNow()).toISOString() }
-    if (cache) {
-      c.executionCtx.waitUntil(cache.put(entryRequest, new Response(JSON.stringify(entry), {
-        headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INVENTORY_ENTRY_TTL_SECONDS}` },
-      })))
-    }
-    return entry
-  })()
-  inventoryFlights.set(key, flight)
-  const settle = () => { if (inventoryFlights.get(key) === flight) inventoryFlights.delete(key) }
-  flight.then((entry) => { if (isFresh(entry)) inventoryMemo.set(key, entry); settle() }, settle)
-  return flight
-}
+// The bell's stock alerts are the crossings sales recorded (stock_crossing_alerts, migration 0272; owner ruling
+// 6 Oct 2026: low / out-of-stock alerts only when a SALE pushes a product across the threshold, no standing list;
+// a manual Remove / Set and a transfer are silent because they never record a crossing). The newest few from the
+// last day, through idx_stock_crossing_alerts_recent (created_at DESC, id DESC): about 150 rows however large the
+// catalog is, so nothing is cached. Whether one was seen is the panel's per-item-id state (NotificationCenter.tsx),
+// as for every other section, so an item keeps a stable id.
+export const STOCK_ALERT_WINDOW_HOURS = 24
+export const STOCK_ALERT_LIMIT = 50
 
 // What a section builder reads through: the live database, or the batch below.
 type SectionDb = { prepare(sql: string): { all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> } }
@@ -344,78 +280,48 @@ function sectionCacheFor(c: NotificationContext): SectionCache {
   }
 }
 
-function lowStockCacheInput(config: LowStockConfig): string {
-  return `${config.enabled ? 1 : 0}:${config.mode}:${config.threshold}`
-}
+type StockAlertRow = { id: number; tier: string; product_id: number; quantity_after: number; name: string | null }
 
-// `itemLimit` is how many rows come back (the section's `count` is always the
-// exact size). The totals ride on the same single pass as window aggregates, so
-// asking for 50 rows reads the catalog once, exactly as asking for 5,000 did --
-// it just stops shipping 4,950 rows nobody scrolled to.
-async function buildInventorySection(db: SectionDb, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
-  const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')
-  // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
-  // low-quantity alert off. With the alert off the low fragment is -1, and
-  // this one query fetches BOTH tiers -- so a single `qty <= low` filter
-  // would have silently taken the out-of-stock rows down with the low ones,
-  // which is not what a low-QUANTITY switch means.
-  // Out-of-stock rows list first (then fewest-in-stock first), the same order
-  // the two-array split of the old ORDER BY stock_quantity produced.
-  const rows = await db.prepare(`
-    SELECT id, name, stock_quantity,
-      CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,
-      SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,
-      COUNT(*) OVER () AS flagged_total
-    FROM products p
-    WHERE ${stockVisibleProductSql()}
-      AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
-           OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
-    ORDER BY is_out DESC, stock_quantity ASC, name ASC, id ASC
-    LIMIT @itemLimit
-  `).all<{ id: number; name: string; stock_quantity: number; is_out: number; out_total: number; flagged_total: number }>({ itemLimit })
+export const STOCK_ALERTS_SQL = `
+  SELECT a.id, a.tier, a.product_id, a.quantity_after, p.name
+  FROM stock_crossing_alerts a LEFT JOIN products p ON p.id = a.product_id
+  WHERE a.created_at >= @since
+  ORDER BY a.created_at DESC, a.id DESC
+  LIMIT @limit`
+
+async function buildStockAlertsSection(db: SectionDb): Promise<NotificationSection | null> {
+  const since = new Date(Date.now() - STOCK_ALERT_WINDOW_HOURS * 3600_000).toISOString()
+  const rows = await db.prepare(STOCK_ALERTS_SQL).all<StockAlertRow>({ since, limit: STOCK_ALERT_LIMIT })
   if (!rows.length) return null
 
-  const outCount = Number(rows[0].out_total || 0)
-  const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)
-  const count = outCount + lowCount
-
-  // anchor: 'product-<id>' -- lets Inventory.tsx scroll to and briefly
-  // highlight this exact row once it lands on the page, instead of just
-  // dropping the person on the page with a broad stock-state filter (see
-  // Inventory.tsx's `#product-` hash handling). pageId stays 'inventory'
-  // either way so a click still works even if the row can't be located
-  // (e.g. it was restocked between the notification firing and the click).
-  const items: NotificationItem[] = rows.map((product) => (Number(product.is_out) === 1
-    ? {
-        id: `out-${product.id}`,
-        tone: 'danger' as const,
-        label: product.name,
-        meta: 'Out of stock',
-        kind: 'inventory_out_of_stock',
-        pageId: 'inventory',
-        anchor: `product-${product.id}`,
-      }
-    : {
-        id: `low-${product.id}`,
-        tone: 'warning' as const,
-        label: product.name,
-        meta: `Low stock (${Number(product.stock_quantity || 0)})`,
-        kind: 'inventory_low_stock',
-        pageId: 'inventory',
-        anchor: `product-${product.id}`,
-      }))
-
+  let outCount = 0
+  // anchor: 'product-<id>' lets Inventory.tsx scroll to and highlight the exact row (its #product- hash handling).
+  const items: NotificationItem[] = rows.map((row) => {
+    const isOut = row.tier === 'out'
+    if (isOut) outCount += 1
+    const quantity = Number(row.quantity_after || 0)
+    return {
+      id: `crossing-${row.id}`,
+      tone: isOut ? 'danger' as const : 'warning' as const,
+      label: row.name || `Product #${row.product_id}`,
+      meta: isOut ? 'Out of stock' : `Low stock (${quantity})`,
+      metaKey: isOut ? 'notification_inventory_out_of_stock' : 'notification_inventory_low_stock',
+      metaParams: { quantity },
+      kind: isOut ? 'inventory_out_of_stock' : 'inventory_low_stock',
+      pageId: 'inventory',
+      anchor: `product-${row.product_id}`,
+    }
+  })
+  const lowCount = items.length - outCount
   return {
     id: 'inventory',
     label: 'Inventory',
     pageId: 'inventory',
-    count,
-    summary: joinSummary([
-      outCount ? `${outCount} out of stock` : null,
-      lowCount ? `${lowCount} low stock` : null,
-    ]),
+    count: items.length,
+    summary: joinSummary([outCount ? `${outCount} out of stock` : null, lowCount ? `${lowCount} low stock` : null]),
+    summaryKey: 'notification_inventory_summary',
+    summaryParams: { outCount, lowCount },
     items,
-    ...(items.length < count ? { itemsTotal: count, truncated: true } : {}),
     enabledKey: 'notifications_inventory_enabled',
   }
 }
@@ -547,17 +453,22 @@ async function buildSupplierCreditSection(db: SectionDb, days: number): Promise<
 // and test every sale; with ANALYZE statistics (production has them) it does, so a shop with few unpaid
 // sales read the whole table (15.8k rows) for each queue. Order is created_at then id, both descending:
 // the walk the old form took. scripts/test-notifications-sales-queues-pure.cjs pins both forms together.
-const salesQueueSeek = (where: string) => `SELECT * FROM (SELECT id, receipt_number, total_usd, created_at FROM sales WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT 50)`
-const salesQueue = (terms: string[], join: string) => `SELECT id, receipt_number, total_usd FROM (${terms.map(salesQueueSeek).join(join)}) ORDER BY created_at DESC, id DESC LIMIT 50`
+// INDEXED BY because the planner cannot be trusted with these: an IN term (the retired return statuses) beside the
+// ORDER BY ... LIMIT makes it walk idx_sales_created_pg and test every sale once the statistics show a few big statuses
+// (measured: 15.8k rows per queue on a database where each term alone is a seek). Both indexes are old (0001, 0263).
+const STATUS_INDEX = 'idx_sales_status_created_pg'
+const DELIVERY_INDEX = 'idx_sales_delivery_pending_created'
+const salesQueueSeek = ([where, index]: [string, string]) => `SELECT * FROM (SELECT id, receipt_number, total_usd, created_at FROM sales INDEXED BY ${index} WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT 50)`
+const salesQueue = (terms: Array<[string, string]>, join: string) => `SELECT id, receipt_number, total_usd FROM (${terms.map(salesQueueSeek).join(join)}) ORDER BY created_at DESC, id DESC LIMIT 50`
 export const AWAITING_PAYMENT_SQL = salesQueue([
-  "sale_status = 'awaiting_payment'",
-  "sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_payment'",
+  ["sale_status = 'awaiting_payment'", STATUS_INDEX],
+  ["sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_payment'", STATUS_INDEX],
 ], ' UNION ALL ')
 // UNION, not UNION ALL: a sale can be both delivery_pending and awaiting_delivery.
 export const AWAITING_DELIVERY_SQL = salesQueue([
-  "delivery_pending = 1 AND COALESCE(sale_status, '') <> 'cancelled'",
-  "sale_status = 'awaiting_delivery'",
-  "sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_delivery'",
+  ["delivery_pending = 1 AND COALESCE(sale_status, '') <> 'cancelled'", DELIVERY_INDEX],
+  ["sale_status = 'awaiting_delivery'", STATUS_INDEX],
+  ["sale_status IN ('partial_return', 'returned') AND status_before_return = 'awaiting_delivery'", STATUS_INDEX],
 ], ' UNION ')
 
 async function buildSalesSection(db: SectionDb): Promise<NotificationSection | null> {
@@ -895,7 +806,7 @@ async function buildDeviceApprovalSection(db: SectionDb): Promise<NotificationSe
 app.get('/summary', async (c) => {
   const user = c.get('user')
   // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
-  const { loyaltyPointsEnabled, lowStockConfig, ...preferences } = await loadPreferences(c.env, takePrefetched(c, 0))
+  const { loyaltyPointsEnabled, ...preferences } = await loadPreferences(c.env, takePrefetched(c, 0))
   const sections: NotificationSection[] = []
   const cachedSection = sectionCacheFor(c)
   const batch = sectionBatch(c.env)
@@ -916,15 +827,8 @@ app.get('/summary', async (c) => {
     return section
   }
   let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
-  let inventoryTask: Promise<TimedInventory> | undefined
-  if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
-    const queued = batch.join()
-    const timed = timedInventory(c, `${user.organization_id ?? 0}:${lowStockCacheInput(lowStockConfig)}`,
-      () => { const produced = buildInventorySection(batch.db, lowStockConfig, INVENTORY_PREVIEW_ITEMS); queued(); return produced })
-    timed.then(queued, queued)
-    inventoryTask = timed
-    tasks.push(timed.then((entry) => entry.section))
-  }
+  // Deploy order: without migration 0272 there are no crossings (a memoised positive probe, so one extra read per isolate).
+  if (preferences.inventoryEnabled && hasPermission(user, 'inventory') && await stockCrossingTableAvailable(c.env)) tasks.push(direct(buildStockAlertsSection))
   if (preferences.expiryEnabled && hasPermission(user, 'products')) {
     tasks.push(cached('expiry', ['products', 'settings'], String(preferences.expiryDays),
       (db) => buildExpirySection(db, preferences.expiryDays)))
@@ -989,26 +893,9 @@ app.get('/summary', async (c) => {
     unreadCount,
     unread: unreadCount,
     generatedAt: new Date().toISOString(),
-    // When the inventory section's counts were computed (up to INVENTORY_SECTION_MAX_AGE_MS ago); absent without the section.
-    ...(inventoryTask ? { inventory_computed_at: (await inventoryTask).computedAt } : {}),
     preferences,
     sections,
   })
-})
-
-// The full inventory list behind the panel's "show all". Not part of /summary so
-// the poll that runs on every sync broadcast and tab focus stays small; the panel
-// asks for this once, on request, and keeps re-asking only while it stays expanded.
-app.get('/summary/items', async (c) => {
-  const user = c.get('user')
-  if (String(c.req.query('section') || '') !== 'inventory') return c.json({ error: 'Unknown notification section' }, 404)
-  if (!hasPermission(user, 'inventory')) return c.json({ error: 'Forbidden' }, 403)
-  const { inventoryEnabled } = await loadPreferences(c.env)
-  if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
-  const lowStockConfig = await loadLowStockConfig(c.env)
-  const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
-    () => buildInventorySection(getDb(c.env), lowStockConfig, INVENTORY_FULL_ITEMS))
-  return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [] })
 })
 
 export default app
