@@ -119,6 +119,48 @@ async function main() {
       })
     }
 
+    // GET /api/auth/bootstrap hands the settings map to the same accounts at login, and must follow the same rule:
+    // it once applied only the secret redaction, so every cashier received the Telegram ids, the report switches,
+    // the Drive-sync configuration and the audit-retention window at sign-in.
+    const bootstrapSettings = async (as) => {
+      const response = await world.api('GET', '/api/auth/bootstrap', undefined, { as })
+      return { status: response.status, settings: response.json && response.json.settings }
+    }
+    for (const [label, as] of [['an account with no permission', 'nobody'], ['the Employee preset', 'cashier'], ['a portal-posts editor', 'posts_editor']]) {
+      await check(`bootstrap: ${label} gets no telegram_*, drive_sync_*, audit-retention or assistant-prompt setting`, async (t) => {
+        const { status, settings } = await bootstrapSettings(as)
+        t.eq('status', status, 200)
+        t.eq('withheld keys present', withheld.filter((key) => hasAny(settings, [key])), [])
+        t.eq('any telegram_/drive_sync_ key present', Object.keys(settings || {}).filter((key) => /^(telegram_|drive_sync_)/.test(key)), [])
+      })
+      await check(`bootstrap: ${label} still gets every key the POS, receipts, shifts, bell and theme read`, async (t) => {
+        const { settings } = await bootstrapSettings(as)
+        t.eq('missing visible keys', visible.filter((key) => !hasAll(settings, [key])), [])
+        t.eq('values are intact', { business_name: settings.business_name, exchange_rate: settings.exchange_rate, receipt_footer: settings.receipt_footer }, { business_name: 'Leang Cosmetics', exchange_rate: '4100', receipt_footer: 'Thank you' })
+      })
+    }
+    for (const [label, as] of [['a settings holder', 'configurer'], ['a view-only settings account', 'auditor'], ['the built-in admin', 'admin']]) {
+      await check(`bootstrap: ${label} still gets the full configuration`, async (t) => {
+        const { status, settings } = await bootstrapSettings(as)
+        t.eq('status', status, 200)
+        t.eq('missing withheld keys', withheld.filter((key) => !hasAll(settings, [key])), [])
+        t.eq('missing visible keys', visible.filter((key) => !hasAll(settings, [key])), [])
+        t.eq('secrets still never leave the Worker', hasAny(settings, ['drive_sync_refresh_token']), false)
+      })
+    }
+    await check('bootstrap: a customer_portal holder keeps the website assistant keys and nothing else withheld', async (t) => {
+      const { settings } = await bootstrapSettings('webmaster')
+      t.eq('assistant keys present', hasAll(settings, PORTAL_PRIVATE), true)
+      t.eq('other withheld keys present', withheld.filter((key) => !PORTAL_PRIVATE.includes(key) && hasAny(settings, [key])), [])
+    })
+    await check('bootstrap and GET /api/settings carry the same keys for every account (one rule, no drift)', async (t) => {
+      for (const as of ['nobody', 'cashier', 'posts_editor', 'webmaster', 'configurer', 'auditor', 'admin']) {
+        const boot = Object.keys((await bootstrapSettings(as)).settings || {}).sort()
+        const direct = Object.keys((await world.api('GET', '/api/settings', undefined, { as })).json || {}).filter((key) => key !== 'updatedAt').sort()
+        t.eq(`${as}: bootstrap keys equal settings keys`, boot, direct)
+      }
+    })
+
     await check('a customer_portal holder keeps the website assistant keys the Website Editor edits, and nothing else withheld', async (t) => {
       const response = await world.api('GET', '/api/settings', undefined, { as: 'webmaster' })
       t.eq('assistant keys present', hasAll(response.json, PORTAL_PRIVATE), true)

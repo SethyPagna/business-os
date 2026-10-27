@@ -1,5 +1,5 @@
 import { getPermissionTier, hasPermission, type PermissionUser } from './permissions'
-import { isSystemOwnedSettingKey } from './settingsSensitive'
+import { isSystemOwnedSettingKey, stripSensitiveSettings } from './settingsSensitive'
 
 // GET /api/settings hands the settings table to every signed-in account,
 // because the POS, receipts, sales, returns, shifts, the notification bell, the
@@ -7,8 +7,9 @@ import { isSystemOwnedSettingKey } from './settingsSensitive'
 // DENYLIST of rows that only the Settings screen (and the Worker itself) reads.
 // A key goes on the list only after its readers were checked, because listing it
 // hides it from every account without Settings access; a key left off stays
-// visible. The settings block of GET /api/auth/bootstrap (routes/auth.ts) has to
-// go through settingsReadableBy as well, or it hands the same rows out.
+// visible. Every route that returns the settings map to a signed-in account calls
+// settingsVisibleTo below (GET /api/settings and the settings block of GET
+// /api/auth/bootstrap), so the two cannot drift apart.
 //
 //   - telegram_*        where reports go (chat and topic ids), what is sent, in which language
 //   - drive_sync_*      Google Drive sync configuration; the Backup screen reads a curated
@@ -60,4 +61,13 @@ export function settingsReadableBy<T>(user: PermissionUser, settings: Record<str
     if (canRead(key)) readable[key] = value
   }
   return readable
+}
+
+// The one rule for "the settings map this account may be handed": secret-bearing
+// and system-owned rows never leave the Worker (stripSensitiveSettings), then the
+// Settings-only rows are withheld from accounts without Settings access. Any route
+// that returns the map to a signed-in account goes through this, not through
+// either half alone.
+export function settingsVisibleTo<T>(user: PermissionUser, settings: Record<string, T>): Record<string, T> {
+  return settingsReadableBy(user, stripSensitiveSettings(settings))
 }

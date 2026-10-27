@@ -111,7 +111,7 @@ const authLib = {
 const authRoute = load('routes/auth.ts', {
   '../lib/db': { getDb: () => fakeDb },
   '../lib/auth': authLib,
-  '../lib/settingsSensitive': settingsSensitive,
+  '../lib/settingsVisibility': settingsVisibility,
   '../lib/planTier': { resolvePlanTier: () => 'paid' },
 }).default
 

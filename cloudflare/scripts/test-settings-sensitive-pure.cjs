@@ -69,21 +69,21 @@ check('ordinary settings keys pass through untouched', () => {
 
 check('source lock: GET /api/settings strips before responding', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
-  assert.ok(/from '\.\.\/lib\/settingsSensitive'/.test(src), 'settings.ts must import the shared redaction')
-  assert.ok(/\.\.\.settingsReadableBy\(user, stripSensitiveSettings\(map\)\)/.test(src), 'the GET / response must spread the STRIPPED map, narrowed to what the account may read')
+  assert.ok(/from '\.\.\/lib\/settingsVisibility'/.test(src), 'settings.ts must import the shared visibility rule')
+  assert.ok(/\.\.\.settingsVisibleTo\(user, map\)/.test(src), 'the GET / response must spread the map narrowed by the shared rule (stripped, then readable by this account)')
 })
 
 check('source lock: GET /auth/bootstrap strips before responding', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
-  assert.ok(/from '\.\.\/lib\/settingsSensitive'/.test(src), 'auth.ts must import the shared redaction')
+  assert.ok(/from '\.\.\/lib\/settingsVisibility'/.test(src), 'auth.ts must import the shared visibility rule')
   const bootstrapAt = src.indexOf("app.get('/bootstrap'")
   assert.ok(bootstrapAt > -1, 'expected the /bootstrap route')
   // Whole route body (up to the next route), not a fixed window: the parallel
   // settings read added above the redaction pushed it past the old 900 chars.
   const nextRouteAt = src.indexOf('\napp.', bootstrapAt + 1)
   const bootstrapBody = src.slice(bootstrapAt, nextRouteAt > -1 ? nextRouteAt : undefined)
-  assert.ok(/const settings = stripSensitiveSettings\(/.test(bootstrapBody), 'the bootstrap settings map must pass through stripSensitiveSettings')
-  assert.ok(/\bsettings,/.test(bootstrapBody.slice(bootstrapBody.indexOf('const settings = stripSensitiveSettings('))), 'the response must carry the STRIPPED settings')
+  assert.ok(/const settings = settingsVisibleTo\(\s*user,/.test(bootstrapBody), 'the bootstrap settings map must pass through settingsVisibleTo for the signed-in user')
+  assert.ok(/\bsettings,/.test(bootstrapBody.slice(bootstrapBody.indexOf('const settings = settingsVisibleTo('))), 'the response must carry the STRIPPED settings')
   assert.ok(!/settings:\s*Object\.fromEntries/.test(bootstrapBody), 'the raw settings map must not be returned')
 })
 

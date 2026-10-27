@@ -150,7 +150,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/rateLimit': rateLimit,
   '../lib/currentPasswordGuard': guard,
   '../lib/passwordPolicy': policy,
-  '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
+  '../lib/settingsVisibility': { settingsVisibleTo: (_user, v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': {
     recordFailedLogin: async () => ({ locked: false, failedCount: 1 }),

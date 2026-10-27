@@ -7,8 +7,8 @@ import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings, isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
-import { canReadSettingKey, settingsReadableBy } from '../lib/settingsVisibility'
+import { isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
+import { canReadSettingKey, settingsVisibleTo } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
@@ -130,7 +130,7 @@ app.get('/', async (c) => {
   // every logged-in cashier gets this map. Rows only the Settings screen reads
   // (Telegram routing, Drive sync, audit retention) go to accounts with
   // Settings access alone -- see lib/settingsVisibility.ts.
-  return c.json({ ...settingsReadableBy(user, stripSensitiveSettings(map)), updatedAt })
+  return c.json({ ...settingsVisibleTo(user, map), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
