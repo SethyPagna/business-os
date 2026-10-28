@@ -1,7 +1,6 @@
-// Companion for ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql and
-// ops/scripts/audit/sale-cost-on-hand-audit.sql (U-cost Part B, owner decision
-// 2026-09-26: past sale lines whose recorded cost came from the buggy catalog
-// average get the cost of the stock on hand when they were sold).
+// Historical compatibility test for the SUPERSEDED / DO NOT APPLY held 0200
+// repair and its read-only audit. Executing it on disposable fixtures cannot
+// authorize moving or applying the repair to business data.
 //
 // Real migrated SQLite (node:sqlite via harness/d1compat.cjs): the chain
 // through 0194, a pre-0195 history seeded with the writers' statement shapes,
@@ -23,8 +22,8 @@
 //      columns, and a line edited after 0200 is left alone.
 //   6. Held: the file is NOT in cloudflare/migrations (a deploy applies every
 //      waiting file there); its number sorts after every chain file that
-//      touches a table it reads or writes (0195 among them), so moving it in
-//      unchanged runs it after all of them. It need not be the last file: a
+//      touches a table it reads or writes (0195 among them). In the historical
+//      hypothetical ordering, it need not be the last file: a
 //      chain file numbered above it must preserve repair inputs and abort
 //      guards; structurally independent additions also require both orders
 //      to preserve the full populated schema, rows and repair outcomes.
@@ -37,6 +36,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
+const { constants: sqliteConstants } = require('node:sqlite')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -503,28 +503,73 @@ const splitStatements = (code) => {
 // triggers (legacy_inventory_effects -> products, branch_stock, lots,
 // inventory_movements). So a helper counts only when its name did NOT exist
 // before this file ran (`priorTables`, from applying the chain file by file).
-// And a table the repair writes INDIRECTLY -- through triggers on what it
-// writes, to a fixed point (sale_items -> sale_write_revisions, 0120) -- is
+// And a table SQLite compiles as a potential repair write, including nested
+// triggers at every migration prefix (sale_items -> sale_write_revisions), is
 // treated like a table it writes: naming one, even in a WHERE, makes the
 // file's own result depend on the order. No context -> not independent.
-const KEYWORD_TARGETS = new Set(['on', 'of', 'or', 'set']) // trigger headers, OR-clauses, DO UPDATE SET
+// SQLite records potential compiled writes, including zero-row and nested
+// trigger paths; this is deliberately broader than rows changed at runtime.
+function nativeRepairWrites(raw, repairText) {
+  assert.equal(typeof raw.setAuthorizer, 'function', 'held compatibility proof requires Node 24.10+ SQLite authorizer')
+  const settings = ['foreign_keys', 'recursive_triggers'].map(name => [name, raw.prepare(`PRAGMA ${name}`).get()[name]])
+  const actions = new Map()
+  const before = completeState(raw)
+  try {
+    for (const [name] of settings) {
+      raw.exec(`PRAGMA ${name}=ON`)
+      assert.equal(raw.prepare(`PRAGMA ${name}`).get()[name], 1, `${name} is enabled outside the probe transaction`)
+    }
+    raw.exec('SAVEPOINT held_write_footprint')
+    try {
+      raw.setAuthorizer((code, table, column, schema, trigger) => {
+        if ([sqliteConstants.SQLITE_INSERT, sqliteConstants.SQLITE_UPDATE, sqliteConstants.SQLITE_DELETE].includes(code)) {
+          assert.equal(typeof table, 'string')
+          assert.equal(schema, 'main', 'writes outside the disposable main schema require review')
+          const action = { code, table: table.toLowerCase(), column, schema, trigger }
+          actions.set(JSON.stringify(action), action)
+        }
+        return sqliteConstants.SQLITE_OK
+      })
+      raw.exec(repairText)
+    } finally {
+      raw.setAuthorizer(null)
+      raw.exec('ROLLBACK TO held_write_footprint; RELEASE held_write_footprint')
+    }
+    assert.deepEqual(completeState(raw), before, 'footprint probe restores every schema object and row')
+  } finally {
+    for (const [name, value] of settings) {
+      raw.exec(`PRAGMA ${name}=${value}`)
+      assert.equal(raw.prepare(`PRAGMA ${name}`).get()[name], value, `${name} is restored`)
+    }
+  }
+  return [...actions.values()]
+}
+
 function flagOnlyContext(chain, chainText, repairText) {
-  const probe = openDb([]).db
+  const probe = fixedClockDb([])
   const names = () => new Set(probe.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all()
     .map((row) => row.name.toLowerCase()))
   const priorTables = new Map()
-  for (const file of chain) { priorTables.set(file, names()); probe.exec(chainText(file)) }
-  const indirectWrites = new Set(repairWrites(repairText))
-  const triggers = probe.prepare("SELECT lower(tbl_name) AS tbl, sql FROM sqlite_master WHERE type = 'trigger'").all()
-    .map((row) => ({ tbl: row.tbl, writes: repairWrites(String(row.sql).slice(Math.max(0, String(row.sql).search(/\bBEGIN\b/i)))).filter((t) => !KEYWORD_TARGETS.has(t)) }))
-  for (let grew = true; grew;) {
-    grew = false
-    for (const trigger of triggers) {
-      if (!indirectWrites.has(trigger.tbl)) continue
-      for (const table of trigger.writes) if (!indirectWrites.has(table)) { indirectWrites.add(table); grew = true }
+  const writes = new Set(), prefixes = []
+  try {
+    for (const file of chain) {
+      priorTables.set(file, names())
+      probe.exec(chainText(file))
+      if (Number(file.slice(0, 4)) < 195) continue
+      for (const action of nativeRepairWrites(probe, repairText)) writes.add(action.table)
+      prefixes.push(file)
     }
-  }
-  return { priorTables, indirectWrites, finalTables: names() }
+    assert.deepEqual(prefixes, chain.filter(file => Number(file.slice(0, 4)) >= 195), 'every executable repair prefix is covered')
+    assert.ok(prefixes.length > 0)
+    assert.ok(writes.has('sqlite_master'), 'backup DDL schema traffic remains recorded')
+    // Legacy classifiers compare business row dependencies. Their schema-only
+    // assertions are checked separately by exact full-schema order equality.
+    const indirectWrites = new Set([...writes].filter(table => table !== 'sqlite_master'))
+    return { priorTables, indirectWrites, finalTables: names(), nativeProof: {
+      complete: true, foreignKeys: true, recursiveTriggers: true, prefixFloor: 195, allPrefixes: true,
+      writes, repairHash: executableHash(repairText), prefixes,
+    } }
+  } finally { probe.close() }
 }
 
 const flagColumnsUnread = (text, repairText, context) => {
@@ -757,6 +802,188 @@ function assertLoyaltyResetStatic(text, repairText, context) {
   }
 }
 
+const REFUSAL_EXECUTABLE_HASH = 'ab98e288a40f98cbe7f5f03dcf178a45fa148ecb94185a5a391fe6dad2a27e7b'
+const REFUSAL_REPAIR_HASH = 'edc19472b89441a9561781bb0471693b9f14003f8aaaead9bc9a42fa7861789d'
+const REFUSAL_INPUTS = ['sales', 'system_flags', 'sale_create_refusals']
+const refusalFenceIndependent = (text, repairText, context) => {
+  const proof = context?.nativeProof
+  if (!(context?.priorTables instanceof Set) || !(proof?.writes instanceof Set)
+    || proof.complete !== true || proof.foreignKeys !== true || proof.recursiveTriggers !== true
+    || proof.prefixFloor !== 195 || proof.allPrefixes !== true
+    || !Array.isArray(proof.prefixes) || proof.prefixes.length === 0) return false
+  const repairHash = executableHash(repairText)
+  if (executableHash(text) !== REFUSAL_EXECUTABLE_HASH
+    || repairHash !== REFUSAL_REPAIR_HASH || proof.repairHash !== repairHash) return false
+  return !context.priorTables.has('sale_create_refusals')
+    && !namedIn(repairText)('sale_create_refusals')
+    && REFUSAL_INPUTS.every(table => !proof.writes.has(table))
+}
+
+function assertRefusalFenceStatic(text, repairText, context) {
+  assert.ok(refusalFenceIndependent(text, repairText, context), 'exact reviewed control DDL is independent under native mutation proof')
+  assert.ok(refusalFenceIndependent(`-- harmless comment\n${text}`, repairText, context))
+  assert.equal(refusalFenceIndependent(text, repairText), false, 'no lexical/no-context fallback')
+  assert.equal(refusalFenceIndependent(text, repairText, { ...context, nativeProof: undefined }), false)
+  for (const key of ['complete', 'foreignKeys', 'recursiveTriggers', 'allPrefixes']) {
+    assert.equal(refusalFenceIndependent(text, repairText, { ...context, nativeProof: { ...context.nativeProof, [key]: false } }), false, key)
+  }
+  assert.equal(refusalFenceIndependent(text, repairText, {
+    ...context, priorTables: new Set([...context.priorTables, 'sale_create_refusals']),
+  }), false, 'the created control table must really be fresh')
+  for (const table of REFUSAL_INPUTS) {
+    const nativeProof = { ...context.nativeProof, writes: new Set([...context.nativeProof.writes, table]) }
+    assert.equal(refusalFenceIndependent(text, repairText, { ...context, nativeProof }), false, `native writes to ${table} invalidate proof`)
+  }
+  for (const wrong of [
+    `${text}\nDELETE FROM sale_create_refusals;`,
+    `${text}\nREPLACE INTO system_flags(key,value) VALUES('maintenance','restore');`,
+    `${text}\nUPDATE OR REPLACE sales SET client_request_id='changed';`,
+    text.replace('BEFORE INSERT ON sales', 'BEFORE INSERT ON branches'),
+    text.replace("RAISE(ABORT,'sale_create_terminal_refusal')", '1'),
+    text.replace("END = 'restore'", "END = 'RESTORE'"),
+  ]) {
+    assert.notEqual(wrong, text)
+    assert.equal(refusalFenceIndependent(wrong, repairText, context), false, 'changed executable DDL needs a new proof')
+  }
+  const wrongRepair = `${repairText}\nDELETE FROM sales WHERE 0;`
+  assert.equal(refusalFenceIndependent(text, wrongRepair, {
+    ...context, nativeProof: { ...context.nativeProof, repairHash: executableHash(wrongRepair) },
+  }), false, 'even zero-row changed repair SQL is outside the reviewed content')
+}
+
+const REFUSAL_TABLE = 'sale_create_refusals'
+const REFUSAL_INSERT_GUARD = 'sales_create_refusal_insert_0276'
+const REFUSAL_UPDATE_GUARD = 'sales_create_refusal_update_0276'
+const REFUSAL_EXISTING_KEY = 'sales-import:J:1'
+const REFUSAL_RETIRED_KEY = 'held0200:retired-key'
+const REFUSAL_EPOCH = 'legacy-separate-pool-v1'
+const REFUSAL_MARKER = /sale_create_terminal_refusal/
+const REFUSAL_SCHEMA_HASHES = Object.freeze({
+  sale_create_refusals: '18bf13790ef7859fa16fc1e9ef1c20ffcf90320625227556fe0190c21af8d844',
+  sales_create_refusal_insert_0276: '15bd97515d1553095eda36bbb49060be488c165a4cb9a5d5451762ac67225127',
+  sales_create_refusal_update_0276: 'f6350baed1333dbf60287abb817e2c2a233c3a37c48a16b25a5310e4b7a87ab9',
+})
+const refusalRows = raw => raw.prepare('SELECT rowid AS saved_rowid,* FROM sale_create_refusals ORDER BY client_request_id').all()
+
+function assertRefusalSchema(raw) {
+  const rows = raw.prepare(`SELECT name,sql FROM sqlite_master WHERE name IN(?,?,?) ORDER BY name`)
+    .all(REFUSAL_TABLE, REFUSAL_INSERT_GUARD, REFUSAL_UPDATE_GUARD)
+  assert.deepEqual(rows.map(row => row.name).sort(), Object.keys(REFUSAL_SCHEMA_HASHES).sort(), 'all three refusal objects survive full chain/recovery')
+  for (const row of rows) {
+    assert.equal(typeof row.sql, 'string')
+    const canonical = row.sql.trim().replace(/;\s*$/, '').replace(/\s+/g, ' ')
+    assert.equal(createHash('sha256').update(canonical).digest('hex'), REFUSAL_SCHEMA_HASHES[row.name], `exact refusal schema: ${row.name}`)
+  }
+  assert.deepEqual(raw.prepare('PRAGMA foreign_key_list(sale_create_refusals)').all(), [], 'control durability has no actor FK/cascade')
+}
+
+function seedRefusalOrderRows(raw) {
+  assertRefusalSchema(raw)
+  assert.equal(refusalRows(raw).length, 0, 'seed immediately after control DDL creates its empty table')
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sales WHERE client_request_id=?').get(REFUSAL_EXISTING_KEY).n, 1)
+  const actor = 900001
+  const owner = JSON.stringify({ version: 1, actor_id: actor, organization_id: null, authority: 'https://fixture.invalid', runtime: 'cloudflare-workers' })
+  for (const key of [REFUSAL_EXISTING_KEY, REFUSAL_RETIRED_KEY]) {
+    raw.prepare(`INSERT INTO sale_create_refusals(client_request_id,actor_id,owner_json,reason,created_at)
+      VALUES(?,?,?,'sale_snapshot_too_large',?)`).run(key, actor, owner, fixedNow)
+  }
+  return refusalRows(raw)
+}
+
+let refusalProbeSequence = 0
+function refusalRollbackProbe(raw, fn) {
+  const before = completeState(raw)
+  const name = `held_refusal_probe_${++refusalProbeSequence}`
+  raw.exec(`SAVEPOINT ${name}`)
+  try { return fn() }
+  finally {
+    raw.exec(`ROLLBACK TO ${name}`)
+    raw.exec(`RELEASE ${name}`)
+    assert.deepEqual(completeState(raw), before, 'every refusal probe rolls back complete schema/state')
+  }
+}
+
+function setRefusalProbeControl(raw, mode, permit, epoch = REFUSAL_EPOCH) {
+  const flag = raw.prepare('INSERT INTO system_flags(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+  raw.prepare("DELETE FROM system_flags WHERE key IN('maintenance','stock_transaction_permit')").run()
+  flag.run('stock_schema_epoch', REFUSAL_EPOCH)
+  flag.run('stock_transaction_permit', REFUSAL_EPOCH)
+  if (mode !== null) raw.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)")
+    .run(typeof mode === 'string' ? mode : JSON.stringify(mode))
+  flag.run('stock_schema_epoch', epoch)
+  raw.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'").run()
+  if (permit !== null) raw.prepare("INSERT INTO system_flags(key,value) VALUES('stock_transaction_permit',?)").run(permit)
+}
+
+function insertRetiredSale(raw) {
+  return raw.prepare(`INSERT INTO sales(receipt_number,client_request_id,subtotal_usd,total_usd,sale_status,branch_id)
+    VALUES('HELD-REFUSAL-PROBE',?,0,0,'completed',1)`).run(REFUSAL_RETIRED_KEY)
+}
+function updateSaleToRetired(raw) {
+  return raw.prepare('UPDATE sales SET client_request_id=? WHERE client_request_id=?').run(REFUSAL_RETIRED_KEY, REFUSAL_EXISTING_KEY)
+}
+function assertRefusalBarriers(raw, ids) {
+  refusalRollbackProbe(raw, () => {
+    setRefusalProbeControl(raw, null, null)
+    const before = completeState(raw)
+    assert.throws(() => insertRetiredSale(raw), REFUSAL_MARKER, 'ordinary insertion must hit actual refusal trigger')
+    assert.throws(() => updateSaleToRetired(raw, ids), REFUSAL_MARKER, 'ordinary key change must hit actual refusal trigger')
+    assert.deepEqual(completeState(raw), before, 'refused writes change no business/control/schema state')
+    raw.prepare('UPDATE sales SET client_request_id=client_request_id WHERE client_request_id=?').run(REFUSAL_EXISTING_KEY)
+  })
+}
+
+function assertRefusalOrderIntegrity(raw, expectedRows, ids, phase) {
+  assertRefusalSchema(raw)
+  assert.deepEqual(refusalRows(raw), expectedRows, `${phase}: retained refusal rows/metadata/rowids`)
+  assertRefusalBarriers(raw, ids)
+}
+
+function assertRefusalRestoreConjunction(raw, ids) {
+  const denied = [
+    [null, null, REFUSAL_EPOCH], [null, REFUSAL_EPOCH, REFUSAL_EPOCH],
+    [{ mode: 'restore' }, null, REFUSAL_EPOCH], [{ mode: 'restore' }, 'wrong-epoch', REFUSAL_EPOCH],
+    [{ mode: 'restore' }, REFUSAL_EPOCH, 'wrong-epoch'],
+    [{ mode: 'reset' }, REFUSAL_EPOCH, REFUSAL_EPOCH], [{ mode: 'RESTORE' }, REFUSAL_EPOCH, REFUSAL_EPOCH],
+    [{ mode: ['restore'] }, REFUSAL_EPOCH, REFUSAL_EPOCH],
+    ['restore', REFUSAL_EPOCH, REFUSAL_EPOCH], ['not-json', REFUSAL_EPOCH, REFUSAL_EPOCH],
+  ]
+  for (const args of denied) refusalRollbackProbe(raw, () => {
+    setRefusalProbeControl(raw, ...args)
+    const before = completeState(raw)
+    assert.throws(() => insertRetiredSale(raw), REFUSAL_MARKER, JSON.stringify(args))
+    assert.throws(() => updateSaleToRetired(raw, ids), REFUSAL_MARKER, JSON.stringify(args))
+    assert.deepEqual(completeState(raw), before, 'incomplete/wrong restore authority cannot mutate state')
+  })
+  refusalRollbackProbe(raw, () => {
+    const fences = refusalRows(raw)
+    setRefusalProbeControl(raw, { mode: 'restore', token: 'fixture-current', phase: 'inserting' }, REFUSAL_EPOCH)
+    assert.equal(insertRetiredSale(raw).changes, 1, 'validated restore really inserts one sale')
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sales WHERE client_request_id=?').get(REFUSAL_RETIRED_KEY).n, 1)
+    assert.deepEqual(refusalRows(raw), fences, 'authorized restore does not consume/alter refusal rows')
+  })
+  refusalRollbackProbe(raw, () => {
+    setRefusalProbeControl(raw, { mode: 'restore' }, REFUSAL_EPOCH)
+    const before = completeState(raw)
+    assert.throws(() => updateSaleToRetired(raw, ids), /loyalty_sale_identity_immutable/,
+      '0276 restore exception preserves the existing0251 sale identity guard')
+    assert.deepEqual(completeState(raw), before)
+  })
+  assertRefusalBarriers(raw, ids)
+}
+
+function assertNoopRefusalGuardNegative(raw, ids) {
+  for (const [name, event] of [[REFUSAL_INSERT_GUARD, 'INSERT'], [REFUSAL_UPDATE_GUARD, 'UPDATE OF client_request_id']]) {
+    refusalRollbackProbe(raw, () => {
+      raw.exec(`DROP TRIGGER ${name}; CREATE TRIGGER ${name} BEFORE ${event} ON sales BEGIN SELECT 1; END;`)
+      assert.throws(() => assertRefusalSchema(raw), /exact refusal schema/, 'same-name no-op cannot pass native schema authentication')
+      assert.throws(() => assertRefusalBarriers(raw, ids), error => error.code === 'ERR_ASSERTION' && error.operator === 'throws'
+        && (event === 'INSERT' ? error.actual === undefined : /loyalty_sale_identity_immutable/.test(error.actual?.message)),
+      'live terminal-refusal assertion independently kills no-op guard for the expected reason')
+    })
+  }
+}
+
 const fixedNow = '2026-10-03 10:00:00'
 const clockSql = openDb([]).db
 function freezeClock(raw) {
@@ -771,7 +998,60 @@ function fixedClockDb(sql) {
   return raw
 }
 
-function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revisionTriggers = [], loyaltyResets = []) {
+check('native footprint: conflict, nested, transient and foreign-key writes survive zero-row probes and roll back', () => {
+  const raw = fixedClockDb([`
+    CREATE TABLE src(id INTEGER PRIMARY KEY AUTOINCREMENT,token TEXT UNIQUE,v INTEGER);
+    CREATE TABLE rev(id INTEGER PRIMARY KEY,n INTEGER); CREATE TABLE fence(k TEXT PRIMARY KEY);
+    CREATE TABLE tomb(k TEXT PRIMARY KEY); CREATE TABLE parent(id INTEGER PRIMARY KEY);
+    CREATE TABLE child(id INTEGER PRIMARY KEY,p INTEGER REFERENCES parent(id) ON DELETE CASCADE ON UPDATE CASCADE);
+    INSERT INTO src VALUES(1,'a',0),(2,'b',0); INSERT INTO rev VALUES(1,0);
+    INSERT INTO fence VALUES('held'); INSERT INTO tomb VALUES('held');
+    INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1,1);
+    CREATE TRIGGER src_revision AFTER UPDATE OF v ON src BEGIN UPDATE rev SET n=n+1; END;
+    CREATE TRIGGER rev_guard AFTER UPDATE ON rev BEGIN DELETE FROM fence; END;
+    CREATE TRIGGER src_deleted AFTER DELETE ON src BEGIN DELETE FROM tomb; END;
+  `])
+  const has = (events, code, table, trigger) => events.some(event => event.code === code && event.table === table
+    && (trigger === undefined || event.trigger === trigger))
+  const collect = sql => nativeRepairWrites(raw, sql)
+  const { SQLITE_INSERT: insert, SQLITE_UPDATE: update, SQLITE_DELETE: remove } = sqliteConstants
+  try {
+    assert.throws(() => nativeRepairWrites({}, 'SELECT 1'), /requires Node 24.10/, 'missing authorizer fails closed')
+    assert.ok(has(collect('DELETE FROM "fence" WHERE 0'), remove, 'fence'), 'quoted zero-row DELETE')
+    const replace = collect("REPLACE INTO src VALUES(3,'a',0)")
+    assert.ok(has(replace, insert, 'src'))
+    assert.ok(has(replace, remove, 'tomb', 'src_deleted'), 'REPLACE includes implicit delete trigger')
+    const updateReplace = collect("UPDATE OR REPLACE src SET token='b' WHERE id=1")
+    assert.ok(has(updateReplace, update, 'src'))
+    assert.ok(has(updateReplace, remove, 'tomb', 'src_deleted'), 'UPDATE OR REPLACE includes delete trigger')
+    const earlier = collect('UPDATE src SET v=v+1 WHERE 0')
+    assert.ok(has(earlier, update, 'rev', 'src_revision'))
+    assert.ok(has(earlier, remove, 'fence', 'rev_guard'), 'zero-row two-hop trigger path')
+    raw.exec('DROP TRIGGER rev_guard')
+    const final = collect('UPDATE src SET v=v+1 WHERE 0')
+    assert.equal(has(final, remove, 'fence'), false, 'final schema alone misses a transient trigger')
+    assert.ok(has([...earlier, ...final], remove, 'fence'), 'prefix union retains transient writes')
+    assert.ok(has(collect('DELETE FROM parent WHERE id=1'), remove, 'child'), 'FK delete cascade')
+    assert.ok(has(collect('UPDATE parent SET id=2 WHERE id=1'), update, 'child'), 'FK update cascade')
+    assert.ok(has(collect('REPLACE INTO parent VALUES(1)'), remove, 'child'), 'REPLACE FK cascade')
+    assert.ok(collect('CREATE TABLE scratch(id INTEGER PRIMARY KEY AUTOINCREMENT); INSERT INTO scratch DEFAULT VALUES;')
+      .some(event => /^sqlite_(master|schema)$/.test(event.table)), 'internal schema writes remain in the evidence')
+    const beforeFailure = completeState(raw)
+    assert.throws(() => collect('UPDATE src SET v=v+1; SELECT * FROM missing_auth_probe_table;'), /missing_auth_probe_table/)
+    assert.deepEqual(completeState(raw), beforeFailure, 'failed multi-statement probe rolls back all rows')
+    const preparedEvents = []
+    raw.setAuthorizer((...event) => { preparedEvents.push(event); return sqliteConstants.SQLITE_OK })
+    const prepared = raw.prepare('UPDATE src SET v=v+1 WHERE 0')
+    assert.ok(preparedEvents.some(([code, table]) => code === update && table === 'rev'))
+    preparedEvents.length = 0
+    prepared.run()
+    assert.equal(preparedEvents.length, 0, 'a step-only trace can miss already compiled writes')
+    raw.setAuthorizer(null)
+    assert.ok(has(collect('UPDATE src SET v=v+1 WHERE 0'), update, 'rev'), 'fresh exec retains compilation evidence')
+  } finally { raw.setAuthorizer(null); raw.close() }
+})
+
+function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revisionTriggers = [], loyaltyResets = [], refusalDdl = []) {
   const { raw, ids } = seed()
   raw.limits.exprDepth = 100
   freezeClock(raw)
@@ -792,7 +1072,16 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
     const run = (before, override = new Map(), repeat = true) => {
       raw.exec('SAVEPOINT held_order_probe')
       try {
-        for (const file of (before ? [heldName, ...later] : [...later, heldName])) raw.exec(file === heldName ? migrationText : override.get(file) ?? chainText(file))
+        let expectedRefusals
+        for (const file of (before ? [heldName, ...later] : [...later, heldName])) {
+          raw.exec(file === heldName ? migrationText : override.get(file) ?? chainText(file))
+          if (refusalDdl.includes(file)) {
+            assert.equal(expectedRefusals, undefined, 'refusal control creation occurs once')
+            expectedRefusals = seedRefusalOrderRows(raw, ids)
+          }
+        }
+        assert.ok(expectedRefusals, 'both order paths seed refusal rows immediately at DDL creation')
+        assertRefusalOrderIntegrity(raw, expectedRefusals, ids, 'after full chain/first repair')
         const state = completeState(raw)
         const audit = auditStatements().map(statement => raw.prepare(statement).all())
         const repaired = raw.prepare('SELECT sale_item_id,new_cost_price_usd FROM sale_cost_repair_0200 ORDER BY sale_item_id').all()
@@ -800,9 +1089,15 @@ function assertPopulatedOrders(chain, chainText, mixed, backfills = [], revision
         if (repeat) {
           raw.exec(migrationText)
           assert.deepEqual(completeState(raw), state, 'populated second apply preserves complete state')
+          assertRefusalOrderIntegrity(raw, expectedRefusals, ids, 'after repeat')
         }
         assert.throws(() => raw.exec('INSERT INTO branches(name) SELECT NULL WHERE 1'), /NOT NULL/, 'branch sentinel still aborts')
         raw.exec(recoverySql())
+        assertRefusalOrderIntegrity(raw, expectedRefusals, ids, 'after recovery')
+        if (override.size === 0) {
+          assertRefusalRestoreConjunction(raw, ids)
+          assertNoopRefusalGuardNegative(raw, ids)
+        }
         const loyaltyReset = JSON.parse(raw.prepare("SELECT value FROM system_flags WHERE key='loyalty_points_reset'").get().value)
         const loyaltyEnabled = raw.prepare("SELECT value FROM settings WHERE key='loyalty_points_enabled'").get().value
         return { state, audit, repaired, returned, recovered: completeState(raw), loyaltyReset, loyaltyEnabled }
@@ -845,6 +1140,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const chainText = (f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')
   assert.ok(!chain.some((f) => /sale_cost_on_hand_repair/.test(f)), 'the repair must not sit in the deploy chain')
   assert.ok(!chain.some((f) => f.startsWith('0200_')), 'slot 0200 is this held file, not a chain file')
+  assert.match(migrationText, /SUPERSEDED[^\n]*DO NOT APPLY/, 'the historical repair remains held under the zero-cost owner decision')
   assert.ok(chain.includes('0195_catalog_cost_on_hand.sql'), '0195 stays in the chain')
   assert.ok(!loadAll().some((sql) => /CREATE TABLE sale_cost_repair_/.test(sql)), 'the full chain creates no repair table')
   assert.match(heldName, /^\d{4}_[a-z0-9_]+\.sql$/, 'wrangler migration file name shape')
@@ -860,6 +1156,11 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
   // ---- RET-B 0235 call (begin) ----
   const flagContext = flagOnlyContext(chain, chainText, migrationText)
+  const refusalDdl = chain.filter(file => refusalFenceIndependent(chainText(file), migrationText,
+    { ...flagContext, priorTables: flagContext.priorTables.get(file) }))
+  assert.equal(refusalDdl.length, 1, 'exact reviewed refusal DDL is admitted once')
+  assertRefusalFenceStatic(chainText(refusalDdl[0]), migrationText,
+    { ...flagContext, priorTables: flagContext.priorTables.get(refusalDdl[0]) })
   assertLoyaltyResetStatic(chainText(LOYALTY_RESET_FILE), migrationText, flagContext)
   const loyaltyResets = chain.filter(file => file === LOYALTY_RESET_FILE && loyaltyResetIndependent(chainText(file), migrationText, flagContext))
   assert.deepEqual(loyaltyResets, [LOYALTY_RESET_FILE])
@@ -941,7 +1242,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
       || (/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]','\$\[\w+\]'\) END$/.test(statement)
         && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement)))
   }
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && !refusalDdl.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -1047,8 +1348,8 @@ ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
     'A later file must have proven structural independence: wrangler applies whatever is ' +
     'unapplied in file-number order, so where that file is already applied (production) the repair runs after it, and on a ' +
-    'fresh database it runs before it -- the two orders agree only when they cannot interact. Otherwise number the repair ' +
-    'above that file in the owner-approved move.')
+    'fresh fixture it runs before it -- the two orders agree only when they cannot interact. ' +
+    'A changed interaction needs a new proof; the historical repair remains SUPERSEDED / DO NOT APPLY.')
   // The chain plus it: production's order (every chain file already applied) ...
   fresh.exec(migrationText)
   assert.equal(fresh.prepare('SELECT COUNT(*) n FROM sale_cost_repair_0200').get().n, 0, 'fresh database: nothing to repair')
@@ -1058,7 +1359,7 @@ ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
   fresh.close()
   byNumber.close()
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
-  assertPopulatedOrders(chain, chainText, mixed, backfills, revisionTriggers, loyaltyResets)
+  assertPopulatedOrders(chain, chainText, mixed, backfills, revisionTriggers, loyaltyResets, refusalDdl)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
