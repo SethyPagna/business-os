@@ -13,6 +13,7 @@
 --
 -- Deliberately NOT audited, because the id is provenance and the row it
 -- named is meant to be gone:
+--   sale_create_refusals.actor_id -- 0276 retains captured owner identity after physical user deletion; terminal refusal keys must survive
 --   inventory_check_sessions.branch_id -- 0259 freezes the session branch identity; branch retirement cannot reparent the baseline
 --   inventory_check_items.branch_id -- 0259 freezes the branch counted at session admission, independent of the live branch row
 --   inventory_check_items.product_id -- 0259 freezes selected membership and product_snapshot_json, independent of the live product row

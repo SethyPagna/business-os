@@ -99,6 +99,7 @@ const NOT_A_REFERENCE = new Set([
  * write, so the exemption cannot quietly become a cover for a real orphan.
  */
 const HISTORICAL_REFERENCE = {
+  'sale_create_refusals.actor_id': '0276 retains captured owner identity after physical user deletion; terminal refusal keys must survive',
   'inventory_check_sessions.branch_id': '0259 freezes the session branch identity; branch retirement cannot reparent the baseline',
   'inventory_check_items.branch_id': '0259 freezes the branch counted at session admission, independent of the live branch row',
   'inventory_check_items.product_id': '0259 freezes selected membership and product_snapshot_json, independent of the live product row',
@@ -284,6 +285,108 @@ function assertInventorySnapshotControls(schema) {
     assert.deepEqual(findings().map(r => r.relation).sort(), ['inventory_check_events.session_id->inventory_check_sessions', 'inventory_check_items.session_id->inventory_check_sessions'])
     assert.throws(() => db.exec('UPDATE inventory_check_items SET product_id=1'), /inventory_check_baseline_immutable/)
     assert.throws(() => db.exec('DELETE FROM inventory_check_events'), /inventory_check_history_immutable/)
+  } finally { db.close() }
+}
+
+function assertRefusalHistoryControls(schema) {
+  const column = 'sale_create_refusals.actor_id'
+  assert.ok(schema.historical.includes(column), 'durable refusal actor is explicitly historical')
+  assert.equal(schema.relations.some(relation => `${relation.child}.${relation.column}` === column), false,
+    'captured refusal owner does not require a live users row')
+  assert.equal(resolveOwner('actor', new Set(['users'])), 'users', 'ordinary actor resolution is retained')
+  for (const child of ['return_create_receipts', 'fee_operation_receipts', 'stock_mutation_receipts']) {
+    assert.ok(schema.relations.some(relation => relation.child === child && relation.column === 'actor_id'
+      && relation.parent === 'users' && relation.source === 'convention'),
+    `a single historical column must not hide the live actor convention for ${child}`)
+  }
+  const sql = fs.readFileSync(path.join(root, 'migrations', '0276_sale_create_refusals.sql'), 'utf8')
+  const db = new DatabaseSync(':memory:')
+  const refused = /sale_create_terminal_refusal/
+  const retiredKey = 'orphan-history-retired-key'
+  const deletedActor = 990071
+  const liveActor = 990072
+  const owner = JSON.stringify({ version: 1, actor_id: deletedActor, organization_id: null,
+    authority: 'https://fixture.invalid', runtime: 'cloudflare-workers' })
+  const fences = () => db.prepare('SELECT rowid AS saved_rowid,* FROM sale_create_refusals ORDER BY client_request_id').all()
+  const state = () => ({
+    users: db.prepare('SELECT * FROM users ORDER BY id').all(),
+    sales: db.prepare('SELECT * FROM sales ORDER BY id').all(),
+    fences: fences(),
+    flags: db.prepare('SELECT * FROM system_flags ORDER BY key').all(),
+  })
+  try {
+    db.exec(`PRAGMA foreign_keys=ON;
+      CREATE TABLE users(id INTEGER PRIMARY KEY);
+      CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+      CREATE TABLE sales(id INTEGER PRIMARY KEY,client_request_id TEXT,
+        cashier_id INTEGER REFERENCES users(id),receipt_number TEXT);
+      CREATE UNIQUE INDEX fixture_sale_request ON sales(client_request_id)
+        WHERE client_request_id IS NOT NULL AND client_request_id<>'';
+      INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');`)
+    assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
+    db.exec(sql)
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_list(sale_create_refusals)').all(), [],
+      'actual0276 refuses an owner FK/cascade that could delete durable control state')
+    db.prepare('INSERT INTO users(id) VALUES(?),(?)').run(deletedActor, liveActor)
+    db.prepare(`INSERT INTO sale_create_refusals(client_request_id,actor_id,owner_json,reason,created_at)
+      VALUES(?,?,?,'sale_snapshot_too_large','2026-10-29 00:00:00')`).run(retiredKey, deletedActor, owner)
+    assert.equal(fences().length, 1, 'retention control must be populated')
+    const beforeDeletion = fences()
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id=?').get(deletedActor).n, 1)
+    assert.equal(db.prepare('DELETE FROM users WHERE id=?').run(deletedActor).changes, 1,
+      'the captured actor must really be physically deleted')
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id=?').get(deletedActor).n, 0)
+    assert.deepEqual(fences(), beforeDeletion, 'actor deletion preserves exact key/owner/reason/time/rowid')
+    const diagnostic = { child: 'sale_create_refusals', column: 'actor_id', parent: 'users', parentKey: 'id' }
+    assert.equal(db.prepare(orphanSql(diagnostic)).get().orphan_count, 1,
+      'a live-parent join really reports this deliberate historical absence')
+    const exported = auditFileText(schema.relations)
+    assert.ok(exported.includes(`--   ${column} -- ${HISTORICAL_REFERENCE[column]}`))
+    assert.equal(exported.split('\n').some(line => !line.startsWith('--') && /sale_create_refusals/.test(line)), false,
+      'the zero-required audit must exclude only the explicitly historical relation')
+
+    const mutable = Number(db.prepare('INSERT INTO sales(client_request_id,cashier_id,receipt_number) VALUES(?,?,?)')
+      .run('orphan-history-mutable-key', liveActor, 'ORPHAN-HISTORY-MUTABLE').lastInsertRowid)
+    assert.ok(mutable > 0)
+    const insert = () => db.prepare('INSERT INTO sales(client_request_id,cashier_id,receipt_number) VALUES(?,?,?)')
+      .run(retiredKey, liveActor, 'ORPHAN-HISTORY-REFUSED')
+    const changeKey = () => db.prepare('UPDATE sales SET client_request_id=? WHERE id=?').run(retiredKey, mutable)
+    const afterDeletion = state()
+    assert.throws(insert, refused, 'a different live actor cannot create the retired request')
+    assert.deepEqual(state(), afterDeletion, 'refused INSERT changes no state')
+    assert.throws(changeKey, refused, 'a different live actor cannot reassign an existing sale to the retired request')
+    assert.deepEqual(state(), afterDeletion, 'refused key UPDATE changes no state')
+    assert.equal(db.prepare('UPDATE sales SET client_request_id=client_request_id WHERE id=?').run(mutable).changes, 1,
+      'same-key UPDATE remains supported')
+    assert.equal(db.prepare('INSERT INTO sales(client_request_id,cashier_id,receipt_number) VALUES(?,?,?)')
+      .run('orphan-history-fresh-key', liveActor, 'ORPHAN-HISTORY-FRESH').changes, 1,
+    'a distinct request remains insertable')
+    assert.deepEqual(fences(), beforeDeletion, 'both barriers and supported writes leave the retired key durable')
+
+    // Instrument control: each assertion genuinely depends on its own actual
+    // barrier. All schema/writes below are rollback-only in this local fixture.
+    for (const [name, event, operation] of [
+      ['sales_create_refusal_insert_0276', 'INSERT', insert],
+      ['sales_create_refusal_update_0276', 'UPDATE OF client_request_id', changeKey],
+    ]) {
+      const before = state()
+      const ddlBefore = db.prepare("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").all()
+      db.exec('SAVEPOINT refusal_instrument_control')
+      try {
+        db.exec(`DROP TRIGGER ${name}; CREATE TRIGGER ${name} BEFORE ${event} ON sales BEGIN SELECT 1; END;`)
+        assert.equal(operation().changes, 1, 'the corresponding forbidden operation must actually succeed with only its barrier neutralized')
+        assert.deepEqual(fences(), beforeDeletion, 'a guard fault cannot consume the retained refusal row')
+      } finally {
+        db.exec('ROLLBACK TO refusal_instrument_control')
+        db.exec('RELEASE refusal_instrument_control')
+      }
+      assert.deepEqual(state(), before, 'instrument probe restores all local rows')
+      assert.deepEqual(db.prepare("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").all(), ddlBefore,
+        'instrument probe restores actual0276 definitions')
+      assert.throws(insert, refused)
+      assert.throws(changeKey, refused)
+      assert.deepEqual(state(), before)
+    }
   } finally { db.close() }
 }
 
@@ -481,6 +584,9 @@ async function main() {
 
   try { assertInventorySnapshotControls(schema); report('Inventory snapshot identities are historical and declared session FKs remain audited') }
   catch (error) { report('Inventory snapshot identities are historical and declared session FKs remain audited', error) }
+
+  try { assertRefusalHistoryControls(schema); report('durable refusal actor history survives physical deletion and both actual0276 barriers remain active') }
+  catch (error) { report('durable refusal actor history survives physical deletion and both actual0276 barriers remain active', error) }
 
   try {
     const expected = auditFileText(schema.relations)
