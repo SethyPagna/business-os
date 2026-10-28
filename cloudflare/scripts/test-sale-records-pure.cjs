@@ -1329,15 +1329,17 @@ runTest('the records route is gated on READING a sale, not on amending one', () 
   assert.match(body, /String\(saleId\)/, "audit_logs.entity_id is TEXT; binding the number matches nothing")
 })
 
-runTest('the list badge is one statement per chunk, not one query per sale', () => {
-  // recordsBySale is now the third leg of a Promise.all fan-out (D5: three
-  // independent read chains off the same saleIds run concurrently instead
-  // of sequentially) -- its own IIFE still starts right after the
-  // "Records n" comment, so anchor there instead of a bare `const
-  // recordsBySale` declaration that no longer exists standalone.
-  const list = ROUTES.slice(ROUTES.indexOf('// "Records n" on every row.'), ROUTES.indexOf('records_count:'))
+runTest('the list badge plans one statement per chunk in the child batch, not one query per sale', () => {
+  const start = ROUTES.indexOf('const recordReads = chunkForBinding')
+  const end = ROUTES.indexOf('records_count:', start)
+  assert.ok(start >= 0 && end > start, 'the actual Records plan group must exist')
+  const list = ROUTES.slice(start, end)
   assert.match(list, /chunkForBinding\(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID\)/,
     'the chunker must account for every repeated id list in the count union')
+  assert.match(list, /buildSaleRecordsCountSql\(placeholders\), params: saleRecordsCountBinds\(chunk\)/,
+    'the plan must use the current shared count SQL and typed binds')
+  assert.match(list, /await db\.batch\(\[\.\.\.itemReads, \.\.\.refundReads, \.\.\.recordReads\]\)/,
+    'the record plans belong to the same child batch')
   assert.ok(!/for \(const sale of sales\)/.test(list), 'a per-sale loop over the database is the N+1 this exists to avoid')
   assert.match(ROUTES, /records_count: \(recordsBySale\.get\(sale\.id\) \|\| 0\) \+ SALE_RECORDS_SELF_COUNT/,
     'the badge adds the sale\'s own creation, which no table records')

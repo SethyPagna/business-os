@@ -8,9 +8,11 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 // Execute the exact item read used by GET /sales, which supplies both the
 // list and SaleDetailModal (including refreshes after amendments).
 const source = fs.readFileSync(path.join(__dirname, '../src/routes/sales.ts'), 'utf8')
-const marker = 'const itemRows = await selectInChunks(saleIds'
-const begin = source.indexOf('`', source.indexOf(marker)) + 1
-const end = source.indexOf('`).all<', begin)
+const marker = 'const itemReads = chunkForBinding(saleIds, 0).map((chunk) => ({'
+const start = source.indexOf(marker)
+assert.ok(start >= 0 && source.indexOf(marker, start + marker.length) < 0, 'the actual item read plan is unique')
+const begin = source.indexOf('`', start) + 1
+const end = source.indexOf('`,', begin)
 assert.ok(begin > 0 && end > begin)
 // The sale-line branch label is snapshot-first (CUTOVER-LD): expand the inlined helper the way TypeScript would.
 const helper = /const branchHistoryNameSql = \(snapshot: string, fallback: string\): string =>\r?\n\s*`([^`]*)`/.exec(source)

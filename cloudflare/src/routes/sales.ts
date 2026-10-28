@@ -6146,14 +6146,12 @@ app.get('/', async (c) => {
   // one `?limit=101` away from the same crash GET /api/products hit.
     const saleIds = sales.map((s) => s.id)
 
-    // itemRows, refundRows and recordsBySale are three independent read
-    // chains off the same saleIds -- none reads a value the others produce
-    // -- so they fan out with Promise.all instead of running one after
-    // another. Each keeps its own chunking (selectInChunks/chunkForBinding)
-    // exactly as before; only the sequencing between the three changed.
-    const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([
-      (async () => {
-        const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+    // Keep the child SQL, bindings and chunk order in one native read batch.
+    const [itemsBySale, refundsBySale, recordsBySale] = await (async () => {
+      const returnVersion = await hasColumn(db, 'returns', 'money_precision_version')
+        ? 'money_precision_version' : '0 AS money_precision_version'
+      const itemReads = chunkForBinding(saleIds, 0).map((chunk) => ({
+        sql: `
       SELECT si.*, ${branchHistoryNameSql('CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END', 'b.name')} AS branch_name, p.barcode AS barcode, p.category AS category,
         p.unit AS unit, p.supplier AS supplier,
         -- A single received date is factual only for an explicit lot or a
@@ -6196,54 +6194,60 @@ app.get('/', async (c) => {
       LEFT JOIN product_batches pb ON pb.id = si.batch_id AND pb.variant_product_id = si.product_id
       WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
       ORDER BY si.id ASC
-    `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
-        const map = new Map<number, unknown[]>()
-        for (const row of itemRows) {
-          if (!map.has(row.sale_id)) map.set(row.sale_id, [])
-          map.get(row.sale_id)!.push(row)
-        }
-        return map
-      })(),
-      (async () => {
-        // Was a fresh `PRAGMA table_info(returns)` every GET /api/sales
-        // cache miss just to learn whether money_precision_version exists;
-        // hasColumn() memoizes the column set per isolate instead.
-        const returnVersion = await hasColumn(db, 'returns', 'money_precision_version')
-          ? 'money_precision_version' : '0 AS money_precision_version'
-        // Read recorded operands, never SQLite binary-money SUM. A bounded page
-        // must refuse excessive linked history rather than silently omit refunds.
-        const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+    `,
+        params: chunk,
+      }))
+      const refundReads = chunkForBinding(saleIds, 0).map((chunk) => ({
+        sql: `
       SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnDebtLoweredSql('returns')} AS debt_lowered_usd,${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
       ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
-    `).all<Record<string,unknown>>(chunk))
-        if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
-        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal;debtLowered:unknown[]}>()
-        for(const row of refundRows){
-          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero(),debtLowered:[]}
+    `,
+        params: chunk,
+      }))
+      // "Records n" on every row keeps the current count SQL and bind helper.
+      const recordReads = chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID).map((chunk) => {
+        const placeholders = chunk.map(() => '?').join(',')
+        return { sql: buildSaleRecordsCountSql(placeholders), params: saleRecordsCountBinds(chunk) }
+      })
+      const results = await db.batch([...itemReads, ...refundReads, ...recordReads])
+      const expectedResults = itemReads.length + refundReads.length + recordReads.length
+      if (!Array.isArray(results) || results.length !== expectedResults) throw new Error('Incomplete sales page child batch')
+      for (let index = 0; index < expectedResults; index++) {
+        const result = results[index]
+        if (result?.success !== true || !Array.isArray(result.results)) throw new Error('Incomplete sales page child batch')
+      }
+      const itemResults = results.slice(0, itemReads.length)
+      const refundResults = results.slice(itemReads.length, itemReads.length + refundReads.length)
+      const recordResults = results.slice(itemReads.length + refundReads.length)
+      const refundRowCount = refundResults.reduce((count, result) => count + (result.results?.length ?? 0), 0)
+      if(refundRowCount>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
+
+      const itemsBySale = new Map<number, unknown[]>()
+      for (const result of itemResults) {
+        for (const row of (result.results ?? []) as Array<{ sale_id: number; [key: string]: unknown }>) {
+          if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
+          itemsBySale.get(row.sale_id)!.push(row)
+        }
+      }
+      const refundsBySale=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal;debtLowered:unknown[]}>()
+      for (const result of refundResults) {
+        for(const row of (result.results ?? []) as Array<Record<string,unknown>>){
+          const id=Number(row.sale_id),group=refundsBySale.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero(),debtLowered:[]}
           group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
           group.debtLowered.push(row.debt_lowered_usd??0)
-          map.set(id,group)
+          refundsBySale.set(id,group)
         }
-        return map
-      })(),
-      (async () => {
-        // "Records n" on every row. ONE statement per chunk over three tables
-        // rather than a query per sale -- a 500-row page would otherwise fire 500
-        // reads. chunkForBinding is told the real cost (each id is bound into
-        // three IN lists, not one) so a full page cannot trip D1's 100-parameter
-        // ceiling the way GET /api/products once did.
-        const map = new Map<number, number>()
-        for (const chunk of chunkForBinding(saleIds, 0, SALE_RECORDS_COUNT_BINDS_PER_ID)) {
-          const placeholders = chunk.map(() => '?').join(',')
-          const countRows = await db.prepare(buildSaleRecordsCountSql(placeholders))
-            .all<{ sale_id: number; n: number }>(saleRecordsCountBinds(chunk))
-          for (const row of countRows) map.set(Number(row.sale_id), Number(row.n) || 0)
+      }
+      const recordsBySale = new Map<number, number>()
+      for (const result of recordResults) {
+        for (const row of (result.results ?? []) as Array<{ sale_id: number; n: number }>) {
+          recordsBySale.set(Number(row.sale_id), Number(row.n) || 0)
         }
-        return map
-      })(),
-    ])
+      }
+      return [itemsBySale, refundsBySale, recordsBySale] as const
+    })()
 
     return Promise.all(sales.map(async(sale) => {
       const { linked_driver_name, linked_driver_phone, ...snapshot } = sale

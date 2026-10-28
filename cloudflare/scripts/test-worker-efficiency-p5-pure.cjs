@@ -119,11 +119,16 @@ async function main() {
     assert.equal(result.items.length, 1)
   }
 
-  // --- D5: GET /api/sales list runs itemRows/refundRows/recordsBySale concurrently ---
+  // --- D5: GET /api/sales sends its child read plans in one native batch ---
   {
     const source = readSrc('routes/sales.ts')
-    const start = source.indexOf('const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([')
-    assert.ok(start >= 0, 'the three independent sales-list read chains must be combined via one Promise.all')
+    const start = source.indexOf('const [itemsBySale, refundsBySale, recordsBySale] = await (async () => {')
+    const end = source.indexOf('return Promise.all(sales.map', start)
+    assert.ok(start >= 0 && end > start, 'the Sales child read producer must exist')
+    const child = source.slice(start, end)
+    assert.match(child, /await db\.batch\(\[\.\.\.itemReads, \.\.\.refundReads, \.\.\.recordReads\]\)/,
+      'all three ordered plan groups must use the native batch')
+    assert.doesNotMatch(child, /db\.prepare\(/, 'the producer must not send child plans as separate calls')
   }
 
   // --- D1: products.ts loadLowStockConfig + promotion-rules query run concurrently ---
@@ -258,7 +263,7 @@ async function main() {
       'the debug log poll must run every 15s, not every 3s')
   }
 
-  console.log('PASS worker efficiency sweep: D4 schema-probe memoization, D2 familyPagination single batch, D5 sales-list fan-out, D1 products bootstrap fan-out, D3 attach-helper fan-out (with clobbering regression pin), R1 uploads read-through cache (with bucket.get() call-count proof and portal.ts non-cache pin), K1 bumpVersions batched D1 fallback, F1 15s debug-log poll interval')
+  console.log('PASS worker efficiency sweep: D4 schema-probe memoization, D2 familyPagination single batch, D5 sales-list child batch, D1 products bootstrap fan-out, D3 attach-helper fan-out (with clobbering regression pin), R1 uploads read-through cache (with bucket.get() call-count proof and portal.ts non-cache pin), K1 bumpVersions batched D1 fallback, F1 15s debug-log poll interval')
 }
 
 main().catch((error) => {

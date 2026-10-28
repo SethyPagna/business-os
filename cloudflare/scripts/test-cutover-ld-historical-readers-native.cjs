@@ -60,10 +60,15 @@ function fixture() {
     const prepared = sql.prepare(text)
     const args = Array.isArray(values) ? values : [values]
     return {
-      text, values,
+      text, values, columnCount: prepared.columns().length,
       async first() { return prepared.get(...args) || null },
-      async all() { return { results: prepared.all(...args) } },
-      async run() { const result = prepared.run(...args); return { meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } },
+      async all() {
+        const before = sql.prepare('SELECT total_changes() AS n').get().n
+        const results = prepared.all(...args)
+        const meta = sql.prepare('SELECT total_changes()-? AS changes,last_insert_rowid() AS last_row_id').get(before)
+        return { success: true, results, meta: { changes: Number(meta.changes), last_row_id: Number(meta.last_row_id) } }
+      },
+      async run() { const result = prepared.run(...args); return { success: true, results: [], meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } },
     }
   }
   const DB = {
@@ -72,7 +77,7 @@ function fixture() {
       sql.exec('BEGIN')
       try {
         const results = []
-        for (const item of statements) results.push(await item.run())
+        for (const item of statements) results.push(await (item.columnCount ? item.all() : item.run()))
         sql.exec('COMMIT')
         return results
       } catch (error) { sql.exec('ROLLBACK'); throw error }
