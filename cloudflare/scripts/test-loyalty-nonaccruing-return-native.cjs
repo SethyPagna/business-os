@@ -10,23 +10,39 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
 const { createHash } = require('node:crypto'), { build } = require('esbuild'), { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
+const { FREE_QUERY_LIMIT, PAID_QUERY_LIMIT } = require('./harness/plan_query_limits.cjs')
+const { METER_WORKER_SOURCE, assertMeterProbes } = require('./harness/loyalty_physical_meter.cjs')
 const root = process.env.LOYALTY_SCOPE_BASELINE || path.resolve(__dirname, '..')
 const script = `
 import worker from './src/index.ts';
 import { executeRawStockTransaction } from './src/lib/stockTransaction.ts';
-let active=[],wrapped;
-const note=(sql,r)=>active.push({sql,rows:r.results?.length||0,meta:r.meta});
-function statement(sql,s){return {inner:s,sql,bind(...v){return statement(sql,s.bind(...v))},async all(){const r=await s.all();note(sql,r);return r},async run(){const r=await s.run();note(sql,r);return r},async first(c){const r=await this.all();return c?r.results[0]?.[c]??null:r.results[0]??null}}}
+import { D1Compat } from './src/lib/db.ts';
+${METER_WORKER_SOURCE}
 export default {async fetch(request,env,ctx){
 const input=await request.json();
+if (input.op === 'meterProbe') {
+  try { return Response.json(await meterProbe(env, input.name)); }
+  catch (error) { return Response.json({ error: String(error?.stack || error) }, { status: 500 }); }
+}
 if(input.op==='seed'){for(const s of input.statements){try{await env.DB.prepare(s.sql).bind(...(s.params||[])).run()}catch(e){return Response.json({error:String(e),sql:s.sql})}}return Response.json({ok:true})}
 if(input.op==='seedStock'){try{await executeRawStockTransaction(env.DB,input.statements.map(s=>env.DB.prepare(s.sql).bind(...(s.params||[]))));return Response.json({ok:true})}catch(error){return Response.json({error:String(error)})}}
 if(input.op==='read')return Response.json((await env.DB.prepare(input.sql).all()).results);
-if(!wrapped)wrapped={prepare:sql=>statement(sql,env.DB.prepare(sql)),async batch(items){const r=await env.DB.batch(items.map(x=>x.inner));r.forEach((v,i)=>note(items[i].sql,v));return r}};
-active=[];const pending=[],started=Date.now();const saved=globalThis.caches;globalThis.caches=undefined;
-const headers={cookie:'bos_session='+input.token,origin:'https://admin.scope.example','content-type':'application/json'};
-const response=await worker.fetch(new Request('https://admin.scope.example'+input.path,{method:input.body?'POST':'GET',headers,...(input.body?{body:JSON.stringify(input.body)}:{})}),{...env,DB:wrapped},{waitUntil(p){pending.push(p)},passThroughOnException(){}});
-await Promise.allSettled(pending);globalThis.caches=saved;return Response.json({status:response.status,body:await response.text().then(text=>{try{return JSON.parse(text)}catch{return text}}),log:active,wallMs:Date.now()-started});
+const meter = createInvocationMeter(env.DB, Number(env.LOYALTY_METER_LIMIT));
+const pending = collectWaitUntil(), started = Date.now(), saved = globalThis.caches;
+globalThis.caches = undefined;
+try {
+  let response, text;
+  try {
+    const headers = { cookie: 'bos_session=' + input.token, origin: 'https://admin.scope.example', 'content-type': 'application/json' };
+    response = await worker.fetch(new Request('https://admin.scope.example' + input.path, {
+      method: input.body ? 'POST' : 'GET', headers, ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+    }), { ...env, DB: meter.db }, { waitUntil: pending.waitUntil, passThroughOnException() {} });
+    text = await response.text();
+  } finally { await pending.drain(); }
+  let body; try { body = JSON.parse(text); } catch { body = text; }
+  return Response.json({ status: response.status, body, log: meter.log, meter: { ...meter.stats },
+    attempts: meter.attempts, background: pending.snapshot(), wallMs: Date.now() - started });
+} finally { globalThis.caches = saved; }
 }};`
 const failures = []
 async function check(name, fn) {
@@ -35,7 +51,7 @@ async function check(name, fn) {
 async function main() {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: script }, bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:workers'], logLevel: 'silent' })
   for (const tier of ['free', 'paid']) {
-    const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], kvNamespaces: ['CACHE'], bindings: { PLAN_TIER: tier, BUSINESS_OS_ADMIN_URL: 'https://admin.scope.example' }, log: new Log(LogLevel.ERROR) })
+    const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], port: 0, d1Databases: ['DB'], kvNamespaces: ['CACHE'], bindings: { PLAN_TIER: tier, LOYALTY_METER_LIMIT: tier === 'free' ? FREE_QUERY_LIMIT : PAID_QUERY_LIMIT, LOYALTY_METER_FREE_LIMIT: FREE_QUERY_LIMIT, BUSINESS_OS_ADMIN_URL: 'https://admin.scope.example' }, log: new Log(LogLevel.ERROR) })
     const call = async input => (await mf.dispatchFetch('http://local/', { method: 'POST', body: JSON.stringify(input) })).json()
     const seed = async statements => { const r = await call({ op: 'seed', statements }); assert.equal(r.ok, true, JSON.stringify(r)) }
     const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,await call({op:'read',sql:'SELECT * FROM '+table+' ORDER BY rowid'})])))
@@ -48,7 +64,8 @@ async function main() {
       assert.deepEqual(await stockState(),before,'refused raw mutation preserves every stock row and system flag')
     }
     try {
-      const migrations = []
+      await assertMeterProbes(call, tier)
+const migrations = []
       for (const name of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) for (const sql of split(fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))) {
         if (name === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(sql.trim())) continue
         migrations.push({ sql })
@@ -74,7 +91,13 @@ async function main() {
       ])
       const request = async (path, body) => {
         const r = await call({ path, token, body })
-        assert.ok(r.log.length <= (tier === 'free' ? 50 : 1000), JSON.stringify({ tier, path, queries: r.log.length, status: r.status }))
+        const limit = tier === 'free' ? FREE_QUERY_LIMIT : PAID_QUERY_LIMIT;
+        assert.equal(r.meter.limit, limit);
+        assert.ok(Number.isSafeInteger(r.meter.physicalAttempts) && r.meter.physicalAttempts > 0
+          && r.meter.physicalAttempts <= limit, JSON.stringify({ tier, path, meter: r.meter, status: r.status, background: r.background }));
+        assert.equal(r.meter.rejectedAtLimit, 0);
+        assert.equal(r.background.registered, r.background.drained);
+        assert.equal(r.background.registered, r.background.settled);
         return r
       }
       const membership = async () => { const r = await request('/api/customers/membership/LC-9902'); assert.equal(r.status, 200, JSON.stringify(r.body)); return r.body.points.balance }
