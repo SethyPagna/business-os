@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
-import { saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
+import { isSaleSnapshotRefusal, saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
 import { SaleDiscountRefusedError } from '../src/utils/saleItemPricing.ts'
 
 const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
@@ -42,7 +42,7 @@ assert.ok(priceSentence && km.sale_discount_exceeds_price && km.sale_discount_ex
 }
 
 {
-  const provesNoCommit = actual(sales, 'saleLineRefusalProvesNoCommit', {})
+  const provesNoCommit = actual(sales, 'saleLineRefusalProvesNoCommit', { isSaleSnapshotRefusal })
   assert.equal(provesNoCommit({ status: 400, code: 'sale_discount_exceeds_price' }), true, 'a discount refusal is answered before any write')
   assert.equal(provesNoCommit({ status: 400, code: 'sale_discount_exceeds_subtotal' }), true)
   for (const name of ['handleAmendSale', 'handleAddSaleItems']) {

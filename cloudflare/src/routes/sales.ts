@@ -154,6 +154,9 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
+import { assertSaleSnapshotBudget, isAtomicSaleSnapshotBudgetFailure, saleSnapshotBudgetSql, SALE_SNAPSHOT_BYTE_BUDGET, SALE_SNAPSHOT_FRAMING_RESERVE, SaleSnapshotBudgetError, serializedSaleSnapshotBytes } from '../lib/saleSnapshotBudget'
+import { certifySaleCreateRefusal, readSaleCreateRefusal, SaleCreateRefusalUnavailableError, type SaleCreateRefusalDecision } from '../lib/saleCreateRefusal'
+import { jsonObjectSql } from '../lib/jsonObjectSql'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -417,9 +420,18 @@ const CANONICAL_SALE_ITEM_KEYS = ['id','sale_id','product_id','product_name','sk
     'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
     'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json'] as const
 
+function canonicalSaleItemSql() {
+  return jsonObjectSql(CANONICAL_SALE_ITEM_KEYS.map(key=>[key,`i.${key}`] as const))
+}
+
 function canonicalSaleItemsSql() {
-  return `(SELECT json_group_array(json_object(${CANONICAL_SALE_ITEM_KEYS.map(key => `'${key}',i.${key}`).join(',')}))
+  return `(SELECT json_group_array(${canonicalSaleItemSql()})
     FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+function canonicalSaleItemBytesSql(saleIdSql: string): string {
+  return `(SELECT 2+COALESCE(SUM(length(CAST(${canonicalSaleItemSql()} AS BLOB))),0)+MAX(COUNT(*)-1,0)
+    FROM sale_items i WHERE i.sale_id=${saleIdSql})`
 }
 
 function canonicalSaleIdentityBindingsSql(){
@@ -430,18 +442,51 @@ function canonicalSaleIdentityBindingsSql(){
       AND i.sale_id=json_extract(proof.value,'$.sale_id') AND i.product_id=json_extract(proof.value,'$.current_product_id'))`
 }
 
-/** Financial snapshot stored inside the mutation transaction, never reconstructed on retry. */
-function canonicalMutationResponseSql(responseSql: string): string {
-  const fields = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
+const CANONICAL_SALE_HEADER_KEYS = ['id','receipt_number','sale_status','updated_at','exchange_rate','subtotal_usd','subtotal_khr',
     'discount_usd','discount_khr','membership_discount_usd','membership_discount_khr','tax_usd','tax_khr',
     'delivery_fee_usd','delivery_fee_khr','delivery_actual_cost_usd','delivery_actual_cost_khr','is_delivery',
     'total_usd','total_khr','amount_paid_usd','amount_paid_khr','change_usd','change_khr','change_is_actual',
     'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
-    'calculated_total_usd','rounding_adjustment_usd']
-  return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
-    'items',json(${canonicalSaleItemsSql()}),'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+    'calculated_total_usd','rounding_adjustment_usd'] as const
+
+function canonicalMutationResponseShapeSql(responseSql: string, itemsSql: string, bindingsSql: string): string {
+  const sale=jsonObjectSql([...CANONICAL_SALE_HEADER_KEYS.map(key=>[key,`s.${key}`] as const),
+    ['items',`json(${itemsSql})`],['pricing_identity_bindings',`json(${bindingsSql})`]])
+  return `(SELECT json_set(${responseSql},'$.sale',${sale}, '$.moneyPrecisionVersion',s.money_precision_version,
     '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
     FROM sales s WHERE s.id=@saleId)`
+}
+
+/** Size each item separately before constructing the transaction's durable aggregate. */
+function canonicalMutationResponseSql(responseSql: string, otherBytesSql: string): string {
+  const empty = canonicalMutationResponseShapeSql(responseSql,"'[]'","'[]'")
+  const itemBytes = `(${canonicalSaleItemBytesSql('@saleId')}-2)`
+  const bindingBytes = `(SELECT length(CAST(${canonicalSaleIdentityBindingsSql()} AS BLOB))-2 FROM sales s WHERE s.id=@saleId)`
+  return `CASE WHEN length(CAST(${empty} AS BLOB))+${itemBytes}+${bindingBytes}+(${otherBytesSql})+${SALE_SNAPSHOT_FRAMING_RESERVE}<=${SALE_SNAPSHOT_BYTE_BUDGET}
+    THEN ${canonicalMutationResponseShapeSql(responseSql,canonicalSaleItemsSql(),canonicalSaleIdentityBindingsSql())}
+    ELSE json_extract('{}','sale_snapshot_too_large') END`
+}
+
+function storedMutationOtherBytesSql(): string {
+  return `(SELECT ${['id','actor_id','sale_id','mutation_kind','request_id','request_digest','request_json','before_json','after_json','history_id','generation','sale_revision','created_at','updated_at']
+    .map(key=>`COALESCE(length(CAST(${key} AS BLOB)),0)`).join('+')} FROM sale_mutation_receipts WHERE id=@operation)`
+}
+
+function canonicalMutationResponseForBudget(response: Record<string,unknown>, sale: Record<string,unknown>, items: readonly Record<string,unknown>[], bindings: unknown) {
+  const project=(keys:readonly string[],row:Record<string,unknown>)=>Object.fromEntries(keys.map(key=>[key,row[key]??null]))
+  return {...response,sale:{...project(CANONICAL_SALE_HEADER_KEYS,sale),items:items.map(row=>project(CANONICAL_SALE_ITEM_KEYS,row)),pricing_identity_bindings:bindings},
+    moneyPrecisionVersion:sale.money_precision_version,calculatedTotalUsd:sale.calculated_total_usd,roundingAdjustmentUsd:sale.rounding_adjustment_usd}
+}
+
+function plannedSnapshotItems(lines: readonly import('../lib/saleLineAddition').PlannedSaleLine[], saleId: number): Record<string,unknown>[] {
+  return lines.map(line=>{
+    const snapshot=parseSaleItemPricing(line.pricingSnapshotJson!)!
+    const take=line.takes.length===1&&line.takes[0].quantity===line.quantity?line.takes[0]:null
+    return materializeCapturedPricingRow({id:0,sale_id:saleId,product_id:line.productId,product_name:line.productName,
+      quantity:line.quantity,branch_id:line.recordedBranchId??line.branchId,cost_price_usd:line.costPriceUsd,cost_price_khr:line.costPriceKhr,
+      batch_id:take?.batchId??null,batch_label:take?.lotCode??null,batch_expiry_date:take?.expiryDate??null},
+      snapshot.pool,snapshot.quantities,snapshot.line_key,snapshot.allocation_context)
+  })
 }
 
 async function committedMutationResponse(db: ReturnType<typeof getDb>, operationId: string) {
@@ -466,6 +511,29 @@ async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: n
     return {...snapshot,pricing_identity_bindings:lineage.bindings}
   }
   return snapshot
+}
+
+function terminalSaleCreateRefusalBody(requestId:string){
+  const refusal=new SaleSnapshotBudgetError()
+  return {error:refusal.message,code:refusal.code,proven_uncommitted:true,terminal_request_refused:true,client_request_id:requestId}
+}
+
+async function respondToSaleCreateDecision(c:AmendmentContext,decision:SaleCreateRefusalDecision,requestId:string,owner:ReturnType<typeof canonicalOfflineSaleOwner>){
+  if(decision.kind==='committed'){
+    if(Number(decision.sale.item_count)<1)return c.json({error:'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',code:'sale_incomplete'},409)
+    return c.json({id:decision.sale.id,receiptNumber:decision.sale.receipt_number,duplicate:true,offline_owner:owner,client_request_id:requestId,sale:await authoritativeSaleSnapshot(getDb(c.env),decision.sale.id)})
+  }
+  if(decision.kind==='owner_mismatch')return c.json(offlineSaleOwnerMismatch(),409)
+  if(decision.kind==='refused')return c.json(terminalSaleCreateRefusalBody(requestId),409)
+  throw new SaleCreateRefusalUnavailableError()
+}
+
+async function refuseSaleCreate(c:AmendmentContext,requestId:string,owner:ReturnType<typeof canonicalOfflineSaleOwner>){
+  try{return await respondToSaleCreateDecision(c,await certifySaleCreateRefusal(getDb(c.env),requestId,owner),requestId,owner)}
+  catch(error){
+    if(error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+    throw error
+  }
 }
 
 app.get('/money-precision-capability', async (c) => {
@@ -498,9 +566,19 @@ app.get('/create-receipt', async (c) => {
   const requestId = c.req.query('client_request_id') || ''
   if (!requestId || requestId !== normalizeClientRequestId(requestId)) return c.json({ error: 'A valid request identity is required.' },400)
   const db = getDb(c.env)
-  const receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
+  let receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
     AND (cashier_id=? OR ?=1) LIMIT 1`).get<{ id:number }>([requestId,Number(user.id),isAdminControlUser(user)?1:0])
-  if (!receipt) return c.json({ committed: false })
+  if (!receipt) {
+    try{
+      const decision=await readSaleCreateRefusal(db,requestId,canonicalOfflineSaleOwner(user,c.req.url))
+      if(decision.kind==='refused')return c.json({committed:false,...terminalSaleCreateRefusalBody(requestId)})
+      if(decision.kind==='committed')receipt={id:decision.sale.id}
+      else return c.json({committed:false})
+    }catch(error){
+      if(error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+      throw error
+    }
+  }
   const sale = await authoritativeSaleSnapshot(db,receipt.id)
   if (!sale || !sale.items.length) return c.json({ committed: false, code: 'sale_incomplete' })
   return c.json({ committed: true, response: { id:receipt.id, receiptNumber:sale.receipt_number, duplicate:true, sale } })
@@ -618,6 +696,8 @@ app.post('/', async (c) => {
       }
       return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
     }
+    const refusal=await readSaleCreateRefusal(db,clientRequestId,offlineOwner)
+    if(refusal.kind!=='missing')return respondToSaleCreateDecision(c,refusal,clientRequestId,offlineOwner)
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
   const clientTime = resolveClientCreatedAt(body.created_at)
@@ -1451,6 +1531,7 @@ app.post('/', async (c) => {
   // ---- 5. Atomically write the sale header, items, allocations, stock,
   // movement log, and creation audit. A stable write key lets every statement
   // resolve the new auto-generated sale id inside the same D1 transaction. ----
+  assertSaleSnapshotBudget({ header:saleInsertStatement.params, items:priced })
   let saleId = 0
   let recoveredCommittedCreate = false
   // The branch quantity each deduction left, straight out of the atomic batch (RETURNING on the stock update): exact for THIS
@@ -1807,6 +1888,9 @@ app.post('/', async (c) => {
       {sql:'DELETE FROM sale_mutation_guards',params:{}},
       canonicalSaleChildrenGuard(saleWriteKey),
       {sql:'DELETE FROM sale_mutation_guards',params:{}},
+      {sql:`SELECT CASE WHEN @snapshotHeaderBytes+${canonicalSaleItemBytesSql("(SELECT id FROM sales WHERE client_request_id=@sale_write_key AND client_request_id<>'')")}+${SALE_SNAPSHOT_FRAMING_RESERVE}<=${SALE_SNAPSHOT_BYTE_BUDGET}
+        THEN 1 ELSE json_extract('{}','sale_snapshot_too_large') END`,
+       params:{sale_write_key:saleWriteKey,snapshotHeaderBytes:serializedSaleSnapshotBytes(saleInsertStatement.params)}},
       {
       sql: `SELECT CASE WHEN COALESCE((
               SELECT COUNT(*) FROM sale_items WHERE sale_id = (
@@ -1870,6 +1954,7 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
+      if (isAtomicSaleSnapshotBudgetFailure(error)||String(error).includes('sale_create_terminal_refusal'))return refuseSaleCreate(c,saleWriteKey,offlineOwner)
       // Checked BEFORE the generic guesses below: the receipt guard fails
       // with the same "malformed JSON" text as the pricing/loyalty guards, and
       // a UNIQUE failure on the column (should an index ever exist) matches
@@ -2007,6 +2092,12 @@ app.post('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    if (error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+    if (error instanceof SaleSnapshotBudgetError) {
+      const requestId=normalizeClientRequestId(body.client_request_id)
+      if(requestId)return refuseSaleCreate(c,requestId,offlineOwner)
+      return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
+    }
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
@@ -3826,6 +3917,10 @@ app.post('/:id/items', async (c) => {
   }
 
   const statementsForPlan: StatementList = []
+  assertSaleSnapshotBudget({ request:addItemsCanonical, before:precisionBasket.lines, after:lineMoneyAfter, undo:reversal, response:baseResponse })
+  assertSaleSnapshotBudget({kind:'sale.add_items',status:'applied',payload:reversal,createdBy:user.id,createdByName:actorSnapshot(user)},32*(plan.lines.length+1))
+  const addedSnapshotItems=plannedSnapshotItems(plan.lines,saleId)
+  const snapshotItemsAfter=[...precisionBasket.lines.map(row=>({...row,...lineMoneyAfter.find(after=>after.id===row.id)})),...addedSnapshotItems]
   const lineOrdinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
   for (const [statementIndex, statement] of plan.statements.entries()) {
     statementsForPlan.push(statement)
@@ -3878,6 +3973,7 @@ app.post('/:id/items', async (c) => {
         after: { money: moneyAfter, lines: lineMoneyAfter },
         response: baseResponse, stamp: addItemsStamp,
         identityBindings:precisionBasket.identityBindings,
+        budgetStates:[{sale,items:precisionBasket.lines},{sale:{...sale,...moneyAfter},items:snapshotItemsAfter}],
       }),
       ...planUnlottedSaleLineGuards(plan.lines),
       ...statementsForPlan,
@@ -3889,8 +3985,8 @@ app.post('/:id/items', async (c) => {
       ...ledgerStatements,
       {
         sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
-              VALUES('sale.add_items','applied',${snapshotExpression},@byId,@byName)`,
-        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user) },
+              VALUES('sale.add_items','applied',${saleSnapshotBudgetSql(snapshotExpression,'@undoOtherBytes')},@byId,@byName)`,
+        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user),undoOtherBytes:serializedSaleSnapshotBytes({kind:'sale.add_items',status:'applied',byId:user.id,byName:actorSnapshot(user)}) },
       },
       {
         sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
@@ -3917,7 +4013,7 @@ app.post('/:id/items', async (c) => {
       {
         sql: `UPDATE sale_mutation_receipts SET history_id=last_insert_rowid(),generation=0,
               sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
-              response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())")},updated_at=@stamp
+              response_json=${canonicalMutationResponseSql("json_set(response_json,'$.undoActionId',last_insert_rowid(),'$.actionHistoryId',last_insert_rowid())",storedMutationOtherBytesSql())},updated_at=@stamp
               WHERE id=@operation`,
         params: { operation: addItemsOperationId, saleId, stamp: addItemsStamp,validatedIdentityBindings:JSON.stringify(precisionBasket.identityBindings) },
       },
@@ -3942,6 +4038,8 @@ app.post('/:id/items', async (c) => {
       return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
+
+    if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
     const message = (error as Error).message || ''
     if (/malformed JSON/i.test(message)) {
       const sourceConflict = await classifyPricingSourceConflict(db, products, addRuleRows)
@@ -3977,6 +4075,7 @@ app.post('/:id/items', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof SaleHeaderQuoteError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -4548,6 +4647,7 @@ app.post('/:id/amendments', async (c) => {
           identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
+          budgetStates:[{sale:{...sale,...moneyAfterSnapshot},items:precisionBasket!.lines}],
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -4561,6 +4661,8 @@ app.post('/:id/amendments', async (c) => {
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) {
         return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       }
@@ -4657,6 +4759,7 @@ app.post('/:id/amendments', async (c) => {
           stamp: mutationStamp,
           identityBindings:precisionBasket?.identityBindings??[],
           canonicalAvailable:precisionBasket!==null,
+          budgetStates:precisionBasket?[{sale:{...sale,...moneyAfterWithCost},items:precisionBasket.lines}]:[],
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -4670,6 +4773,8 @@ app.post('/:id/amendments', async (c) => {
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the actual delivery cost.', 'sale_delivery_cost_failed'), 500)
     }
@@ -4794,6 +4899,7 @@ app.post('/:id/amendments', async (c) => {
           identityBindings:precisionBasket!.identityBindings,
           response,
           stamp: mutationStamp,
+          budgetStates:[{sale:{...sale,...moneyAfterSnapshot},items:precisionBasket!.lines}],
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
@@ -4807,6 +4913,8 @@ app.post('/:id/amendments', async (c) => {
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the delivery fee.', 'sale_delivery_fee_failed'), 500)
     }
@@ -5286,6 +5394,10 @@ app.post('/:id/amendments', async (c) => {
   const response = buildAmendmentResponsePayload({
     saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
   }, mutationStamp)
+  assertSaleSnapshotBudget({ request:amendmentCanonical,
+    before:{money:moneyBeforeSnapshot,lines:precisionBasket!.lines},
+    after:{money:moneyAfterSnapshot,lines:pricingRowsAfter},
+    receiptBefore:lineMoneyBefore,receiptAfter:lineMoneyAfterAtLatestRate,response })
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
   // the ledger entries recording all three. A committed line change whose
@@ -5314,21 +5426,23 @@ app.post('/:id/amendments', async (c) => {
         identityBindings:precisionBasket!.identityBindings,
         response,
         stamp: mutationStamp,
+        budgetStates:[{sale,items:precisionBasket!.lines},{sale:{...sale,...moneyAfterSnapshot},items:pricingRowsAfter.map(row=>Number(row.id)===0?{...plannedSnapshotItems(replacementLines??[],saleId)[0],...row}:row)}],
       }),
       ...statements,
       ...taxPlan.statements,
       canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
       saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
       ...ledgerEntries.map(amendmentEntryStatement),
-      {
-        sql: `UPDATE sale_mutation_receipts SET
-          sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
-          response_json=${canonicalMutationResponseSql('@responseJson')} WHERE id=@operation`,
-        params: { operation: mutationOperationId, saleId, responseJson: JSON.stringify(response), validatedIdentityBindings: JSON.stringify(precisionBasket!.identityBindings) },
-      },
       ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
         (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
         params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
+      {
+        sql: `UPDATE sale_mutation_receipts SET
+          sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
+          response_json=${canonicalMutationResponseSql('@responseJson',storedMutationOtherBytesSql())} WHERE id=@operation`,
+        params: { operation: mutationOperationId, saleId, responseJson: JSON.stringify(response), validatedIdentityBindings: JSON.stringify(precisionBasket!.identityBindings) },
+      },
+
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     ]
@@ -5345,6 +5459,8 @@ app.post('/:id/amendments', async (c) => {
       return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
+
+    if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
     const message = (error as Error).message || ''
     if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
@@ -5379,6 +5495,7 @@ app.post('/:id/amendments', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError || error instanceof AllocationShortfallError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -5538,14 +5655,22 @@ function saleMutationReceiptStatement(input: {
   stamp: string
   identityBindings: readonly import('../lib/saleItemPricing').CapturedProductIdentityBinding[]
   canonicalAvailable?:boolean
+  budgetStates: readonly {sale:Record<string,unknown>;items:readonly Record<string,unknown>[]}[]
 }): StatementList[number] {
+  const {budgetStates,canonicalAvailable,identityBindings,response,...row}=input
+  const unavailableResponse={...response,canonical_receipt_available:false}
+  if(canonicalAvailable===false)assertSaleSnapshotBudget({...row,response:unavailableResponse})
+  else for(const state of budgetStates){
+    assertSaleSnapshotBudget({...row,response:canonicalMutationResponseForBudget(response,state.sale,state.items,identityBindings)},
+      64*state.items.filter(item=>!item.id).length)
+  }
   return {
     sql: `INSERT INTO sale_mutation_receipts(
             id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
             before_json,after_json,response_json,generation,sale_revision,updated_at
           ) VALUES(
             @operation,@actor,@saleId,@kind,@request,@digest,@requestJson,
-            @beforeJson,@afterJson,${input.canonicalAvailable===false?"json_set(@responseJson,'$.canonical_receipt_available',json('false'))":canonicalMutationResponseSql('@responseJson')},0,
+            @beforeJson,@afterJson,${canonicalAvailable===false?saleSnapshotBudgetSql("json_set(@responseJson,'$.canonical_receipt_available',json('false'))",'@snapshotOtherBytes'):canonicalMutationResponseSql('@responseJson','@snapshotOtherBytes')},0,
             COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),@stamp
           )`,
     params: {
@@ -5561,6 +5686,7 @@ function saleMutationReceiptStatement(input: {
       responseJson: JSON.stringify(input.response),
       validatedIdentityBindings:JSON.stringify(input.identityBindings),
       stamp: input.stamp,
+      snapshotOtherBytes:serializedSaleSnapshotBytes(row),
     },
   }
 }

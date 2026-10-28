@@ -89,7 +89,9 @@ function all(db, sql, params = {}) { return db.prepare(sql).all(params) }
 // routes consume, so mirror that thin boundary here while keeping the real
 // SQL engine and transactional batch underneath.
 function routeDb(db, hooks = {}) {
+  let writeHookCalls = 0
   const api = {
+    get writeHookCalls() { return writeHookCalls },
     prepare(sql) {
       const statement = db.prepare(sql)
       return {
@@ -107,7 +109,10 @@ function routeDb(db, hooks = {}) {
     },
     batchOnce(statements) { return this.batch(statements) },
     batch: async (statements) => {
-      if (hooks.beforeBatch) await hooks.beforeBatch({ rawDb: db, statements })
+      if (hooks.beforeBatch && statements.some(({ sql }) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) {
+        writeHookCalls++
+        await hooks.beforeBatch({ rawDb: db, statements })
+      }
       return db.batch(statements)
     },
     exec: (sql) => db.exec(sql),
@@ -144,13 +149,14 @@ async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
     offline_owner: { version: 1, actor_id: 51, organization_id: null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
     ...overrides,
   }
+  const runtime = routeDb(db, hooks)
   const response = await app.request('/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, { DB: routeDb(db, hooks) }, executionCtx)
+  }, { DB: runtime }, executionCtx)
   const text = await response.text()
-  return { status: response.status, body: text ? JSON.parse(text) : null }
+  return { status: response.status, body: text ? JSON.parse(text) : null, writeHookCalls: runtime.writeHookCalls }
 }
 
 function fixture({ legacyThrough0153 = false } = {}) {
@@ -164,7 +170,10 @@ function fixture({ legacyThrough0153 = false } = {}) {
   // to match; production never needs this (one isolate == one real D1
   // database whose schema does not change mid-lifetime).
   load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
-  const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
+  const db = openDb(legacyThrough0153 ? [
+    ...legacyMigrationsThrough0153,
+    fs.readFileSync(path.join(migrationsDir, '0276_sale_create_refusals.sql'), 'utf8'),
+  ] : loadAll())
   const seed = () => {
   run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
@@ -240,6 +249,7 @@ function counts(db) {
     )
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.equal(result.writeHookCalls, 1, 'branch must change after preflight at the actual write batch')
     assert.deepEqual(counts(db), before)
   }
   console.log('PASS 1b -- Shop identity is rechecked inside the write batch')
@@ -258,6 +268,7 @@ function counts(db) {
     )
     assert.equal(result.status, 409, JSON.stringify(result.body))
     assert.equal(result.body.code, 'sale_identity_conflict')
+    assert.equal(result.writeHookCalls, 1, 'lot ownership must change at the actual write batch')
     assert.deepEqual(counts(db), before)
   }
   console.log('PASS 1c -- lot product ownership is rechecked inside the write batch')
@@ -277,6 +288,7 @@ function counts(db) {
       },
     )
     assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(result.writeHookCalls, 1, 'lot metadata correction must race the actual write batch')
     assert.deepEqual({ ...get(db, 'SELECT batch_label,batch_expiry_date FROM sale_items') }, {
       batch_label: 'SERUM-CURRENT',
       batch_expiry_date: '2030-12-31',
@@ -351,7 +363,8 @@ function counts(db) {
     assert.deepEqual(counts(db), before)
   }
 
-  // A database through migration 0153 lacks the precision snapshot schema.
+  // Isolate the missing precision schema with the current refusal barrier
+  // installed on an otherwise through-0153 database.
   // Explicit-v1 checkout must fail at that readiness barrier without writes;
   // the equivalent unlotted provenance refusal remains covered below on the
   // fully migrated schema.

@@ -17,7 +17,8 @@ import { stagedLineFromSheetPick, stagedLinePricingIntent, mergeStagedAddLine } 
 import { nativeChangeAmounts, sumMoney4, multiplyMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../src/utils/moneyPrecision.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { normalizeOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE } from '../src/api/offlineQueueOwnership.ts'
-import { saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
+import { isSaleSnapshotRefusal, isTerminalSaleCreateRefusal, saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
+import { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } from '../src/utils/saleCheckoutRefusal.ts'
 
 const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345, total_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23, subtotal_khr: 4938, discount_khr: 0, membership_discount_khr: 0, tax_khr: 0, total_khr: 4920, delivery_fee_usd: 0, delivery_fee_khr: 0, change_usd: 0, change_khr: 0 }
 const pricingJson = serializeSaleItemPricing({ version: 1, pool_key: 'callback-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [], lines: [{ line_key: 'callback-line', source: 'manual', product: { id: 7, selling_price_usd: 1.24 }, selling_price_input_usd: 1.24, manual: { type: 'fixed', value: 0.0055 } }] }, { 'callback-line': 1 }, 'callback-line', { version: 1, lines: [{ line_key: 'callback-line', amount: 1.2345 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
@@ -116,6 +117,8 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
     savingBlocked: options.savingBlocked === true, savingBlockedText: 'no-connection',
     loading: false, checkoutInFlightRef: { current: false }, resolvedActiveId: 'order1',
     active: { checkoutRequestId: 'request-1', checkoutPayload: options.body, cart: [{ intentionallyChanged: true }] },
+    ordersRef: { current: [{ id: 'order1', checkoutRequestId: 'request-1', checkoutPayload: options.body }] },
+    posOrdersStorageKey: 'money-test-orders',
     checkoutRequestIdsRef: { current: new Map() },
     captureActorReadScope: () => generation, isActorReadScopeCurrent: (scope: number) => scope === generation,
     assertActorSessionDispatchAllowed: (scope: number) => { if (scope !== generation) throw new Error('stale actor') },
@@ -129,7 +132,7 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
     t: (key: string) => key, notify: (message: string) => notices.push(message),
     getErrorMessage: (error: Error) => error.message, localizeBranchRuleError: (error: unknown) => error,
     // POS.tsx imports it; the extracted callback runs with the real one.
-    saleSubmitRefusalText,
+    saleSubmitRefusalText, isTerminalSaleCreateRefusal, persistRefusedCheckoutDraft, releaseRefusedSaleCheckout,
   }
   const callback = new Function('env', `with(env) { ${callbackCode}; return handleCheckout }`)(env)
   await callback()
@@ -273,7 +276,7 @@ function rawSalesCallback(name: string, env: Record<string, unknown>) {
 function actualSalesCallback(name: string, input: Record<string, unknown>) {
   const env: Record<string, any> = { ...input, mutationVersionAtLeast }
   const provesStart = salesSource.indexOf('export function saleLineRefusalProvesNoCommit'), provesEnd = salesSource.indexOf('\n}\n', provesStart) + 3
-  env.saleLineRefusalProvesNoCommit = new Function(`${transformSync(salesSource.slice(provesStart + 'export '.length, provesEnd), { loader: 'ts' }).code}; return saleLineRefusalProvesNoCommit`)()
+  env.saleLineRefusalProvesNoCommit = new Function('isSaleSnapshotRefusal', `${transformSync(salesSource.slice(provesStart + 'export '.length, provesEnd), { loader: 'ts' }).code}; return saleLineRefusalProvesNoCommit`)(isSaleSnapshotRefusal)
   env.setLineRefreshGate = (value: any) => { env.lineRefreshGate = typeof value === 'function' ? value(env.lineRefreshGate) : value }
   env.readAuthoritativeSale = async (id: number, accept: (row: any) => boolean) => {
     const row = { id, updated_at: '2026-10-04T00:00:01.000Z', items: [] }

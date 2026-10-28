@@ -102,7 +102,8 @@ import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesT
 import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
-import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { isTerminalSaleCreateRefusal, saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } from '../../utils/saleCheckoutRefusal.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -3348,6 +3349,21 @@ export default function POS() {
     if (savingBlocked) return notify(savingBlockedText, 'error')
     const checkoutScope = captureActorReadScope('pos-checkout')
     const orderKey = String(resolvedActiveId || 'pos-order')
+    const releaseProvenRefusal = (error:unknown, requestId:string) => {
+      const next = releaseRefusedSaleCheckout({error,requestId,orderId:resolvedActiveId,orders:ordersRef.current,
+        isCurrent:()=>isActorReadScopeCurrent(checkoutScope),
+        owns:payload=>{
+          try { assertPosCheckoutOwner(payload as Record<string,unknown>,user); return true } catch { return false }
+        },
+        persist:orders=>persistRefusedCheckoutDraft({key:posOrdersStorageKey,
+          previous:JSON.stringify(ordersRef.current),next:JSON.stringify(orders),
+          local:()=>window.localStorage,session:()=>window.sessionStorage}),
+      })
+      if (!next) return
+      checkoutRequestIdsRef.current.delete(orderKey)
+      ordersRef.current=next
+      setOrders(next)
+    }
     const finishRecorded = (result: unknown) => {
       if (!isActorReadScopeCurrent(checkoutScope)) return
       try {
@@ -3389,6 +3405,11 @@ export default function POS() {
         else notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
+          releaseProvenRefusal(error,pendingId)
+          if((error as {code?:unknown})?.code==='sale_snapshot_too_large'&&!isTerminalSaleCreateRefusal(error,pendingId)){
+            notify(t('money_checkout_recovery_required'),'error')
+            return
+          }
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
           notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
@@ -3614,6 +3635,11 @@ export default function POS() {
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
+      if (submittedRequestId) releaseProvenRefusal(e,submittedRequestId)
+      if((e as {code?:unknown})?.code==='sale_snapshot_too_large'&&!isTerminalSaleCreateRefusal(e,submittedRequestId||'')){
+        notify(t('money_checkout_recovery_required'),'error')
+        return
+      }
       if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying

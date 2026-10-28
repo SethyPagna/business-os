@@ -1955,6 +1955,28 @@ await runTest('HTTP errors preserve only known outcome and action metadata witho
   } finally { globalThis.fetch=originalFetch; resetApiState() }
 })
 
+await runTest('sale-create terminal proof preserves strict flags and the exact server request identity',async()=>{
+  const originalFetch=globalThis.fetch
+  try{
+    for(const [terminal,id,expectedTerminal,expectedId] of [
+      [true,'terminal-request',true,'terminal-request'],[false,'terminal-request',false,'terminal-request'],
+      ['true','terminal-request',false,'terminal-request'],[undefined,123,false,null],
+    ] as const){
+      resetApiState();setSyncServerUrl('https://sync.example.test')
+      globalThis.fetch=(async()=>new Response(JSON.stringify({error:'Size refused',code:'sale_snapshot_too_large',proven_uncommitted:true,
+        terminal_request_refused:terminal,client_request_id:id}),{status:409,headers:{'Content-Type':'application/json'}})) as typeof fetch
+      await assert.rejects(apiFetch('POST','/api/sales',{client_request_id:'terminal-request'},1000),(error:unknown)=>{
+        const value=error as {status:number;proven_uncommitted:boolean;terminal_request_refused:boolean;client_request_id:unknown}
+        assert.equal(value.status,409)
+        assert.equal(value.proven_uncommitted,true)
+        assert.equal(value.terminal_request_refused,expectedTerminal)
+        assert.equal(value.client_request_id,expectedId)
+        return true
+      })
+    }
+  }finally{globalThis.fetch=originalFetch;resetApiState()}
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

@@ -463,6 +463,8 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // the sale detail can offer "Review the updated total" for that request.
   error.header_quote = parsed?.header_quote || null
   error.proven_uncommitted = parsed?.proven_uncommitted === true
+  error.terminal_request_refused = parsed?.terminal_request_refused === true
+  error.client_request_id = typeof parsed?.client_request_id === 'string' ? parsed.client_request_id : null
   // A Library delete refused as still in use (409 forceable) names what uses
   // the file, so the dialog can switch to its locked / unlock-anyway form.
   error.usage = parsed?.usage || null

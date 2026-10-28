@@ -349,13 +349,17 @@ async function assertNativeD1TriggerMetadata() {
   }
 
   {
+    let customerRaceInjected=false
     const f = fixture({
-      beforeBatch(db) {
+      beforeBatch(db,statements) {
+        if(customerRaceInjected||!statements.some(({sql})=>/INSERT\s+INTO\s+sales\s*\(/i.test(sql)))return
+        customerRaceInjected=true
         db.prepare('UPDATE customers SET is_anonymous=1 WHERE id=20').run()
       },
     })
     f.raw.prepare("INSERT INTO customers(id,name,is_anonymous) VALUES(20,'Changed Customer',0)").run()
     const raced = await postSale(f.route, { ...request('customer-race'), customer_id: 20 })
+    assert.equal(customerRaceInjected,true,'customer must change at the business transaction after its snapshot')
     assert.equal(raced.status, 409, JSON.stringify(raced.body))
     assert.equal(raced.body.code, 'customer_state_conflict')
     assert.deepEqual(creationState(f.raw), {

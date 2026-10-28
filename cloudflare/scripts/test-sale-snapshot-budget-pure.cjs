@@ -1,0 +1,35 @@
+'use strict'
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const ts = require('typescript')
+const {DatabaseSync}=require('node:sqlite')
+const moduleUnderTest = { exports:{} }
+const source = fs.readFileSync(path.join(__dirname,'../src/lib/saleSnapshotBudget.ts'),'utf8')
+new Function('module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(moduleUnderTest,moduleUnderTest.exports)
+const {assertSaleSnapshotBudget,serializedSaleSnapshotBytes,SaleSnapshotBudgetError,saleSnapshotBudgetSql,isAtomicSaleSnapshotBudgetFailure}=moduleUnderTest.exports
+const ascii={items:[{pricing_snapshot_json:'a'.repeat(700_000)}]}
+const unicode={items:[{pricing_snapshot_json:'ក'.repeat(700_000)}]}
+assertSaleSnapshotBudget(ascii)
+assert.throws(()=>assertSaleSnapshotBudget(unicode),SaleSnapshotBudgetError)
+assert.equal(serializedSaleSnapshotBytes(unicode),Buffer.byteLength(JSON.stringify(unicode),'utf8'))
+const quoted={items:[{pricing_snapshot_json:'"\\'.repeat(450_000)}]}
+assert.ok(Buffer.byteLength(quoted.items[0].pricing_snapshot_json,'utf8')<1_000_000)
+assert.throws(()=>assertSaleSnapshotBudget(quoted),SaleSnapshotBudgetError)
+assertSaleSnapshotBudget({items:[{pricing_snapshot_json:'😀'.repeat(100_000)}]})
+assertSaleSnapshotBudget('a'.repeat(1_783_614))
+assert.throws(()=>assertSaleSnapshotBudget('a'.repeat(1_783_615)),SaleSnapshotBudgetError)
+assert.throws(()=>assertSaleSnapshotBudget({before:'a'.repeat(600_000),after:'a'.repeat(600_000),response:'a'.repeat(600_000)}),SaleSnapshotBudgetError)
+assert.throws(()=>assertSaleSnapshotBudget('a'.repeat(1_783_614),32),SaleSnapshotBudgetError)
+const db=new DatabaseSync(':memory:')
+try{
+  const sql=`SELECT ${saleSnapshotBudgetSql('$value','$other')} AS value`
+  assert.equal(db.prepare(sql).get({value:'ក"\\',other:0}).value,'ក"\\')
+  assert.throws(()=>db.prepare(sql).get({value:'a'.repeat(900_000),other:900_000}),isAtomicSaleSnapshotBudgetFailure)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('D1 connection lost')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('malformed JSON')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('User data sale_snapshot_too_large')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('D1_ERROR: string or blob too big: SQLITE_TOOBIG')),true)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('The response was too big')),false)
+}finally{db.close()}
+console.log('PASS sale snapshot UTF8, JSON escaping, complete envelope and exact framing boundary')

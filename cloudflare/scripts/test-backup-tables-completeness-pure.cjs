@@ -20,6 +20,7 @@ const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const EXCLUDED = {
+  sale_create_refusals: '0276 durable request-control state: retained across application restores/resets; captured by encrypted physical export',
   // Auth ephemera: a restore must not resurrect sessions, lockouts or
   // half-finished password resets (staff and storefront alike).
   permission_extras_0270_state: 'migration 0270 audit ledger: read once by its own POST checks and by the restore twin, never restored',
