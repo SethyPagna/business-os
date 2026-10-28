@@ -15,6 +15,12 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // Stock moved (a Remove, another till's sale) between the sale's reads and its write: the Worker aborts the whole
   // write, so nothing was recorded and the same checkout can simply be sent again. Not a pricing change.
   sale_stock_changed: 'sale_stock_changed',
+  sale_snapshot_too_large: 'sale_snapshot_too_large',
+}
+
+export function isSaleSnapshotRefusal(error: unknown): boolean {
+  const value = error as {status?:unknown;code?:unknown;proven_uncommitted?:unknown} | null
+  return Number(value?.status) === 409 && value?.code === 'sale_snapshot_too_large' && value?.proven_uncommitted === true
 }
 
 /**

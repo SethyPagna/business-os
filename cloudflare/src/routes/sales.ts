@@ -154,6 +154,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
+import { assertSaleSnapshotBudget, SaleSnapshotBudgetError } from '../lib/saleSnapshotBudget'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -1078,6 +1079,7 @@ app.post('/', async (c) => {
   const allocationContext={version:1 as const,lines:priced.map(line=>({line_key:line.client_line_key!,amount:line.lineTotalUsd})),
     discount_usd:discountUsd,membership_discount_usd:membershipDiscountUsd,tax_usd:taxUsd}
   for (const line of priced) line.pricing_snapshot_json=serializeSaleItemPricing(pricingPool,pricingQuantities,line.client_line_key!,allocationContext)
+  assertSaleSnapshotBudget(priced)
 
   // Delivery scalars are resolved here, above the totals, because the
   // customer-paid portion of the fee is PART of the total. They used to be
@@ -2007,6 +2009,7 @@ app.post('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
+    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
@@ -3826,6 +3829,7 @@ app.post('/:id/items', async (c) => {
   }
 
   const statementsForPlan: StatementList = []
+  assertSaleSnapshotBudget({ request:addItemsCanonical, before:precisionBasket.lines, after:lineMoneyAfter, undo:reversal, response:baseResponse })
   const lineOrdinalByStatement = new Map(plan.saleItemStatementIndexByLine.map((statementIndex, ordinal) => [statementIndex, ordinal]))
   for (const [statementIndex, statement] of plan.statements.entries()) {
     statementsForPlan.push(statement)
@@ -3977,6 +3981,7 @@ app.post('/:id/items', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof SaleHeaderQuoteError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -5286,6 +5291,10 @@ app.post('/:id/amendments', async (c) => {
   const response = buildAmendmentResponsePayload({
     saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
   }, mutationStamp)
+  assertSaleSnapshotBudget({ request:amendmentCanonical,
+    before:{money:moneyBeforeSnapshot,lines:precisionBasket!.lines},
+    after:{money:moneyAfterSnapshot,lines:pricingRowsAfter},
+    receiptBefore:lineMoneyBefore,receiptAfter:lineMoneyAfterAtLatestRate,response })
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
   // the ledger entries recording all three. A committed line change whose
@@ -5379,6 +5388,7 @@ app.post('/:id/amendments', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError || error instanceof AllocationShortfallError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }

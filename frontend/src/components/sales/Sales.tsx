@@ -87,6 +87,7 @@ import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
+import { isSaleSnapshotRefusal } from '../../api/saleSubmitErrors.ts'
 import { PAID_SALE_STATUSES, salePaymentStatus, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 import { saleStatusDisplay, saleStatusWords } from '../../utils/saleStatusDisplay.ts'
 import { returnOwedReductionUsd } from '../../utils/receiptTotals.ts'
@@ -314,7 +315,7 @@ function isWriteConflict(error: unknown): boolean {
  * conflicts, money-contract errors) stays unproven. */
 export function saleLineRefusalProvesNoCommit(error: unknown): boolean {
   const row = (error || {}) as { status?: unknown; code?: unknown }
-  return Number(row.status) === 403 || ['write_conflict', 'exchange_rate_changed', 'sale_header_quote_conflict', 'sale_discount_exceeds_price', 'sale_discount_exceeds_subtotal'].includes(String(row.code || ''))
+  return isSaleSnapshotRefusal(error) || Number(row.status) === 403 || ['write_conflict', 'exchange_rate_changed', 'sale_header_quote_conflict', 'sale_discount_exceeds_price', 'sale_discount_exceeds_subtotal'].includes(String(row.code || ''))
 }
 
 function normalizeFiniteIdsFrom<T = unknown>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {

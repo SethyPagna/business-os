@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
+import { isSaleSnapshotRefusal } from '../src/api/saleSubmitErrors.ts'
 import {
   SALE_LINE_IN_FLIGHT_BOUND_MS,
   directMutationStorageKey,
@@ -115,8 +116,11 @@ function actual(source: string, name: string, env: Record<string, unknown>) {
   const code = ts.transpileModule('const actual = ' + text, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   return new Function('env', 'with(env) { ' + code + '; return actual }')(env)
 }
-const provesNoCommit = actual(sales, 'saleLineRefusalProvesNoCommit', {})
+const provesNoCommit = actual(sales, 'saleLineRefusalProvesNoCommit', {isSaleSnapshotRefusal})
 for (const [error, expected] of [
+  [{ status:409,code:'sale_snapshot_too_large',proven_uncommitted:true },true],
+  [{ status:409,code:'sale_snapshot_too_large',proven_uncommitted:false },false],
+  [{ status:500,code:'sale_snapshot_too_large',proven_uncommitted:true },false],
   [{ status: 409, code: 'write_conflict' }, true], [{ status: 403, code: null }, true], [{ status: 409, code: 'exchange_rate_changed' }, true],
   [{ status: 409, code: 'sale_header_quote_conflict' }, true], [{ status: 409, code: 'idempotency_conflict' }, false], [{ status: 429, code: null }, false],
   [{ status: 500, code: null }, false], [{ status: 503, code: 'money_precision_schema_not_ready' }, false], [{ code: 'loader_timeout' }, false],

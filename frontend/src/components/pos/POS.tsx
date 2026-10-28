@@ -103,6 +103,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { releaseRefusedSaleCheckout } from '../../utils/saleCheckoutRefusal.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -3348,6 +3349,23 @@ export default function POS() {
     if (savingBlocked) return notify(savingBlockedText, 'error')
     const checkoutScope = captureActorReadScope('pos-checkout')
     const orderKey = String(resolvedActiveId || 'pos-order')
+    const releaseProvenRefusal = (error:unknown, requestId:string) => {
+      const next = releaseRefusedSaleCheckout({error,requestId,orderId:resolvedActiveId,orders:ordersRef.current,firstAttempt:true,
+        isCurrent:()=>isActorReadScopeCurrent(checkoutScope),
+        owns:payload=>{
+          try { assertPosCheckoutOwner(payload as Record<string,unknown>,user); return true } catch { return false }
+        },
+        persist:orders=>{
+          const serialized = JSON.stringify(orders)
+          writePosDraft(posOrdersStorageKey,serialized)
+          return readPosDraft(posOrdersStorageKey,'bos_pos_orders')===serialized
+        },
+      })
+      if (!next) return
+      checkoutRequestIdsRef.current.delete(orderKey)
+      ordersRef.current=next
+      setOrders(next)
+    }
     const finishRecorded = (result: unknown) => {
       if (!isActorReadScopeCurrent(checkoutScope)) return
       try {
@@ -3614,6 +3632,7 @@ export default function POS() {
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
+      if (submittedRequestId) releaseProvenRefusal(e,submittedRequestId)
       if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
