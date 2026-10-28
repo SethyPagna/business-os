@@ -1073,12 +1073,30 @@ function reportSnapshotScalars(snapshot: SalesReportSnapshot): string[] {
   return rows
 }
 
+type ReportReadPurpose = 'full' | 'totals'
+
+const REPORT_TOTALS_SALE_FIELDS = new Set([
+  'id', 'sale_status', 'status_before_return', 'subtotal_usd', 'discount_usd', 'membership_discount_usd', 'tax_usd', 'total_usd',
+  'delivery_fee_usd', 'delivery_fee_paid_by', 'delivery_actual_cost_usd', 'is_delivery', 'source_return_id',
+  'amount_paid_usd', 'amount_paid_khr', 'exchange_rate', 'money_precision_version', 'calculated_total_usd',
+  'rounding_adjustment_usd', 'delivery_has_linked_fee',
+])
+const REPORT_TOTALS_ITEM_FIELDS = new Set([
+  'id', 'sale_id', 'quantity', 'total_usd', 'cost_price_usd', 'product_discount_usd', 'manual_discount_usd',
+])
+const REPORT_TOTALS_VOID_FIELDS = new Set(['id'])
+
+function reportSelectForPurpose(fields: Record<string, string>, purpose: ReportReadPurpose, totalsFields: ReadonlySet<string>): string {
+  return Object.entries(fields).filter(([key]) => purpose === 'full' || totalsFields.has(key)).map(([, sql]) => sql).join(',')
+}
+
 async function readSalesReportPass(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees: boolean,
   scalarScope: CapturedSalesReportScalarScope | null,
   options: SalesReportReadOptions,
+  purpose: ReportReadPurpose,
 ): Promise<SalesReportSnapshot> {
   const db = getDb(env)
   const salesColumns = await reportTableColumns(db, 'sales')
@@ -1094,9 +1112,6 @@ async function readSalesReportPass(
     && returnColumns.has('calculated_refund_usd') && returnColumns.has('rounding_adjustment_usd')
   // Never name 0158 columns in SQL prepared against a pre-0158 database.
   // Missing properties naturally select the version-0 exact-recorded path.
-  const salePrecision = preciseSales
-    ? ',s.money_precision_version,s.calculated_total_usd,s.rounding_adjustment_usd'
-    : ''
   const returnPrecision = preciseReturns
     ? ',r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd'
     : ''
@@ -1110,21 +1125,37 @@ async function readSalesReportPass(
   const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
   const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
   const rowBudget = { count: 0 }
-  const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,${saleColumn('status_before_return','NULL')},s.branch_id,s.branch_name,
-      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
-      ${customerAnonymous} AS customer_is_anonymous,
-      s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
-      s.delivery_fee_usd,s.delivery_fee_paid_by,s.delivery_actual_cost_usd,s.is_delivery,
-      s.source_return_id,s.amount_paid_usd,${saleColumn('amount_paid_khr','0')},${saleColumn('exchange_rate','NULL')}${salePrecision},
-      ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
-      ${linkedDeliveryFee} AS delivery_has_linked_fee
+  const saleSelect = reportSelectForPurpose({
+    id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', status_before_return: saleColumn('status_before_return', 'NULL'),
+    branch_id: 's.branch_id', branch_name: 's.branch_name', cashier_id: 's.cashier_id', cashier_name: 's.cashier_name',
+    customer_id: 's.customer_id', customer_name: 's.customer_name', customer_phone: 's.customer_phone', receipt_number: 's.receipt_number',
+    payment_method: 's.payment_method', customer_is_anonymous: `${customerAnonymous} AS customer_is_anonymous`,
+    subtotal_usd: 's.subtotal_usd', discount_usd: 's.discount_usd', membership_discount_usd: 's.membership_discount_usd',
+    tax_usd: 's.tax_usd', total_usd: 's.total_usd', delivery_fee_usd: 's.delivery_fee_usd', delivery_fee_paid_by: 's.delivery_fee_paid_by',
+    delivery_actual_cost_usd: 's.delivery_actual_cost_usd', is_delivery: 's.is_delivery', source_return_id: 's.source_return_id',
+    amount_paid_usd: 's.amount_paid_usd', amount_paid_khr: saleColumn('amount_paid_khr', '0'), exchange_rate: saleColumn('exchange_rate', 'NULL'),
+    ...(preciseSales ? {
+      money_precision_version: 's.money_precision_version', calculated_total_usd: 's.calculated_total_usd',
+      rounding_adjustment_usd: 's.rounding_adjustment_usd',
+    } : {}),
+    delivery_contact_id: saleColumn('delivery_contact_id', 'NULL'), delivery_contact_name: saleColumn('delivery_contact_name', "''"),
+    delivery_has_linked_fee: `${linkedDeliveryFee} AS delivery_has_linked_fee`,
+  }, purpose, REPORT_TOTALS_SALE_FIELDS)
+  const voidSelect = reportSelectForPurpose({
+    id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', branch_id: 's.branch_id', branch_name: 's.branch_name',
+    cashier_id: 's.cashier_id', cashier_name: 's.cashier_name', customer_id: 's.customer_id', customer_name: 's.customer_name',
+    customer_phone: 's.customer_phone', payment_method: 's.payment_method', customer_is_anonymous: `${customerAnonymous} AS customer_is_anonymous`,
+  }, purpose, REPORT_TOTALS_VOID_FIELDS)
+  const itemSelect = reportSelectForPurpose({
+    id: 'si.id', sale_id: 'si.sale_id', product_id: itemColumn('product_id', 'NULL'), product_name: itemColumn('product_name', "''"),
+    quantity: 'si.quantity', total_usd: itemColumn('total_usd', '0'), cost_price_usd: 'si.cost_price_usd',
+    product_discount_usd: itemColumn('product_discount_usd', '0'), manual_discount_usd: itemColumn('manual_discount_usd', '0'),
+  }, purpose, REPORT_TOTALS_ITEM_FIELDS)
+  const sales = await reportKeysetRows(db, `SELECT ${saleSelect}
     FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget, options.maxReceipts)
-  const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
-      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
-      ${customerAnonymous} AS customer_is_anonymous
+  const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT ${voidSelect}
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
-  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
-      ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
+  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT ${itemSelect}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   // The debt half of a refund (0260); absent columns read as a pre-0260 row.
   const returnDebt = returnColumns.has('owed_reduction_usd') && returnColumns.has('refund_currency') ? ',r.owed_reduction_usd,r.refund_currency' : ''
@@ -1185,12 +1216,13 @@ async function readSalesReportPass(
 
 /** Two complete ordered scalar passes are compared directly. A changed pass
  * is discarded in full, retried once, and never leaks a partial aggregate. */
-export async function readSalesReportSnapshot(
+async function readSalesReportSnapshotForPurpose(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
-  includeDeliveryFees = false,
-  scalarScope?: SalesReportScalarScope,
-  options: SalesReportReadOptions = {},
+  includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined,
+  options: SalesReportReadOptions,
+  purpose: ReportReadPurpose,
 ): Promise<SalesReportSnapshot> {
   if (options.maxReceipts !== undefined && (!Number.isSafeInteger(options.maxReceipts)
     || options.maxReceipts < 1 || options.maxReceipts > 10_000)) throw new SalesReportExportTooLargeError()
@@ -1201,13 +1233,45 @@ export async function readSalesReportSnapshot(
   const capturedScope = captureSalesReportScalarScope(scalarScope)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await assertReportReadable(db)
-    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
+    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options, purpose)
     await assertReportReadable(db)
-    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
+    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options, purpose)
     await assertReportReadable(db)
     if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
   }
   throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+export async function readSalesReportSnapshot(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
+): Promise<SalesReportSnapshot> {
+  return readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'full')
+}
+
+export interface SalesReportTotalsResult {
+  totals: SalesTotals
+  sale_count: number
+  cancelled_count: number
+  precision_mode: ReportMoneyPrecisionMode
+  row_count: number
+}
+
+export async function readSalesReportTotals(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
+): Promise<SalesReportTotalsResult> {
+  const snapshot = await readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'totals')
+  return {
+    totals: salesTotalsFromSnapshot(snapshot), sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length,
+    precision_mode: snapshot.precision_mode, row_count: snapshot.row_count,
+  }
 }
 
 const REPORT_EXACT_KEYS = [
