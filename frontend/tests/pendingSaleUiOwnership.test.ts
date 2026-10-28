@@ -114,7 +114,8 @@ setSyncServerUrl('https://shop.test')
 setActor(userA)
 const money = await import('../src/utils/saleMoneyV1.ts')
 // POS.tsx imports it; the extracted callback below runs with the real one.
-const { saleSubmitRefusalText } = await import('../src/api/saleSubmitErrors.ts')
+const { isTerminalSaleCreateRefusal, saleSubmitRefusalText } = await import('../src/api/saleSubmitErrors.ts')
+const { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } = await import('../src/utils/saleCheckoutRefusal.ts')
 const { assertPosCheckoutOwner } = evaluate(extract(posSource, 'assertPosCheckoutOwner'), ['assertPosCheckoutOwner'], ownership)
 const input = { client_request_id: 'unchanged-request', money_precision_version: 1, items: [{ quantity: 1, applied_price_usd: 2 }], subtotal_usd: 2, total_usd: 2, amount_paid_usd: 2, amount_paid_khr: 0, exchange_rate: 4000, sale_status: 'completed' }
 const frozen = money.frozenSaleCheckoutBody('unchanged-request', undefined, () => ownership.stampOfflineSaleOwner(input))
@@ -142,12 +143,14 @@ async function retry(payload: Record<string, unknown> | undefined, failure: Erro
   const { handleCheckout } = evaluate(extract(posSource, 'handleCheckout'), ['handleCheckout'], {
     ...scopes, ...money, assertPosCheckoutOwner, loading: false, user: userA, savingBlocked: false, savingBlockedText: '',
     checkoutInFlightRef: { current: false }, resolvedActiveId: 'order-1', active: retained,
+    ordersRef: { current: [{ id: 'order-1', ...retained }] }, posOrdersStorageKey: 'pending-test-orders',
     checkoutRequestIdsRef: { current: new Map([['order-1', 'unchanged-request']]) },
     getSaleWriteTransport: async () => ({ recoverSaleCreateReceipt: async () => { lookedUp++; return { committed: false } } }),
     createPosSale: async (value: unknown) => { dispatched++; assert.equal(JSON.stringify(value), original); throw failure },
     withLoaderTimeout: (fn: () => unknown) => fn(), POS_CHECKOUT_TIMEOUT_MS: 45000,
     setLoading: () => {}, notify: (message: string) => notifications.push(message), t: (key: string) => key,
     getErrorMessage: (error: Error) => error.message, saleSubmitRefusalText,
+    isTerminalSaleCreateRefusal, persistRefusedCheckoutDraft, releaseRefusedSaleCheckout,
     closeOrder: () => assert.fail('failed checkout must remain open'),
     setOrders: () => assert.fail('failed checkout must not reset the saved request'),
   })
@@ -165,6 +168,8 @@ assert.deepEqual(retried.notifications, ['Unknown network outcome'])
 // through t (the pack), not shown in the Worker's English.
 const raced = await retry(frozen, Object.assign(new Error('Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.'), { status: 409, code: 'receipt_number_conflict' }))
 assert.deepEqual(raced.notifications, ['receipt_number_conflict'], 'the retry restates receipt_number_conflict through t')
+const nonterminal = await retry(frozen, Object.assign(new Error('Oversized attempt'), { status: 409, code: 'sale_snapshot_too_large', proven_uncommitted: true }))
+assert.deepEqual(nonterminal.notifications, ['money_checkout_recovery_required'], 'attempt-only size refusal preserves the unknown original request')
 assert.equal(JSON.stringify(frozen), original)
 const checkoutSource = extract(posSource, 'handleCheckout')
 const stampAt = checkoutSource.indexOf('() => stampOfflineSaleOwner(saleData)')
