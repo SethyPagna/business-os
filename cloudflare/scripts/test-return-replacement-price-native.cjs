@@ -95,10 +95,10 @@ async function main() {
       forbidden(cheap)
     })
     r.check(`the refusals wrote nothing: ${JSON.stringify(after)} == ${JSON.stringify(before)}`, () => assert.deepEqual(after, before))
-    const refusalStatements = h.metrics.filter(entry => /returns-only \$(0|8) replacement/.test(entry.label)).map(entry => entry.statements)
-    r.check(`a refusal costs ${refusalStatements.join('/')} D1 statements (Free limit ${H.FREE_QUERY_LIMIT})`, () => {
-      assert.equal(refusalStatements.length, 2)
-      assert.ok(refusalStatements.every(count => count <= H.FREE_QUERY_LIMIT))
+    const refusalMetrics = h.metrics.filter(entry => /returns-only \$(0|8) replacement/.test(entry.label))
+    r.check(`a refusal costs ${refusalMetrics.map(entry => entry.calls).join('/')} D1 calls (${refusalMetrics.map(entry => entry.statements).join('/')} statements; Free limit ${H.FREE_QUERY_LIMIT})`, () => {
+      assert.equal(refusalMetrics.length, 2)
+      assert.ok(refusalMetrics.every(entry => entry.calls <= H.FREE_QUERY_LIMIT))
     })
 
     // ---- 3. the ordinary prices are untouched ------------------------------------------------------------------------------------------
@@ -140,8 +140,10 @@ async function main() {
     // catalog. A receipt number minted in the same business second as an earlier one costs one probe read each for the
     // return and the sale, so each measured request above starts in a fresh second and the counts are comparable.
     const statementsOf = label => h.metrics.find(entry => entry.label === label).statements
-    const evaluated = ['returns-only at the promotion price', 'returns-only between promotion and catalog'].map(statementsOf)
-    r.check(`a request that evaluates the promotions stays inside the Free limit: ${evaluated.join('/')} statements (the same request at the catalog price: ${statementsOf('returns-only at the catalog price (promotion active)')}; limit ${H.FREE_QUERY_LIMIT})`, () => {
+    const callsOf = label => h.metrics.find(entry => entry.label === label).calls
+    const evaluatedLabels = ['returns-only at the promotion price', 'returns-only between promotion and catalog']
+    const evaluated = evaluatedLabels.map(callsOf)
+    r.check(`a request that evaluates the promotions stays inside the Free limit: ${evaluated.join('/')} calls (${evaluatedLabels.map(statementsOf).join('/')} statements; the same request at the catalog price: ${callsOf('returns-only at the catalog price (promotion active)')} calls/${statementsOf('returns-only at the catalog price (promotion active)')} statements; limit ${H.FREE_QUERY_LIMIT})`, () => {
       assert.ok(evaluated.every(count => count <= H.FREE_QUERY_LIMIT))
     })
 

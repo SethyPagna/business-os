@@ -134,7 +134,7 @@ async function seedWorker(h, statements) {
   await assert.rejects(h.db.prepare("INSERT INTO products(name) VALUES('unadmitted native probe')").run(), /stock_transaction_required/)
 }
 async function wholeWorker() {
-  const { startWorker, budgetLine } = require('./harness/al_money_native.cjs')
+  const { startWorker, budgetLine, PAID_QUERY_LIMIT } = require('./harness/al_money_native.cjs')
   const h = await startWorker()
   try {
     for (const [index, kind] of ['manual', 'lot'].entries()) {
@@ -182,7 +182,7 @@ async function wholeWorker() {
       assert.deepEqual(await h.all("SELECT * FROM audit_logs WHERE action='cost_override' ORDER BY id"), events)
       pass('authenticated ' + kind + ': advisory/real receipt/breakdown/merge/Undo/Redo8, later changed stock refuses replay with history intact')
     }
-    assert.ok(h.metrics.every(row => row.statements <= 1000))
+    assert.ok(h.metrics.every(row => row.calls <= PAID_QUERY_LIMIT))
   } finally { budgetLine(h.metrics); await h.mf.dispose() }
 }
 async function main() {

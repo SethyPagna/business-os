@@ -285,10 +285,13 @@ function recorder(prefix) {
 // Every request is printed; the returned worst case covers the requests under
 // test only -- reads a check makes just to observe state are marked observe.
 function budgetLine(metrics) {
-  const worst = metrics.filter(entry => !entry.observe && !entry.setup).reduce((max, entry) => entry.statements > max.statements ? entry : max, { statements: 0 })
+  for (const entry of metrics) assert.ok(entry && Number.isSafeInteger(entry.calls) && entry.calls >= 0,
+    'D1 budget requires a nonnegative safe-integer physical call count')
+  const worst = metrics.filter(entry => !entry.observe && !entry.setup)
+    .reduce((max, entry) => max === null || entry.calls > max.calls ? entry : max, null) ?? { calls: 0, statements: 0 }
   for (const entry of metrics) {
     console.log(`D1 ${entry.setup ? '(setup) ' : entry.observe ? '(observation) ' : ''}${entry.label}: status ${entry.status}, ${entry.calls} calls, ${entry.statements} statements` +
-      ` (Server-Timing q=${entry.serverTimingStatements ?? 'n/a'}); Free ${entry.statements <= FREE_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${FREE_QUERY_LIMIT}, Paid ${entry.statements <= PAID_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${PAID_QUERY_LIMIT}`)
+      ` (Server-Timing q=${entry.serverTimingStatements ?? 'n/a'}); Free ${entry.calls <= FREE_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${FREE_QUERY_LIMIT}, Paid ${entry.calls <= PAID_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${PAID_QUERY_LIMIT}`)
   }
   return worst
 }
@@ -458,8 +461,8 @@ async function main() {
     })
 
     const worst = budgetLine(h.metrics)
-    r.check(`D1 budget: worst request ${worst.label} used ${worst.statements} statements (Free ${FREE_QUERY_LIMIT})`, () => {
-      assert.ok(worst.statements <= FREE_QUERY_LIMIT, `exceeds the Free per-invocation limit of ${FREE_QUERY_LIMIT}`)
+    r.check(`D1 budget: worst request ${worst.label} used ${worst.calls} calls (${worst.statements} statements) (Free ${FREE_QUERY_LIMIT})`, () => {
+      assert.ok(worst.calls <= FREE_QUERY_LIMIT, `exceeds the Free per-invocation limit of ${FREE_QUERY_LIMIT}`)
     })
   } finally {
     await h.mf.dispose()

@@ -152,7 +152,7 @@ async function main() {
 }
 
 async function wholeWorker() {
-  const {startWorker}=require('./harness/al_money_native.cjs')
+  const {startWorker,FREE_QUERY_LIMIT,PAID_QUERY_LIMIT}=require('./harness/al_money_native.cjs')
   const arrangeNative = async (db, statements) => {
     const permits = async () => (await db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='stock_transaction_permit'").first()).n
     assert.equal(await permits(), 0)
@@ -182,7 +182,7 @@ async function wholeWorker() {
       }
       const measured=h.metrics.filter(m=>m.label.endsWith(' preview'))
       assert.equal(measured[0].statements,measured[1].statements,'full request query count constant from1to25')
-      assert.ok(measured.every(m=>m.statements<=(tier==='free'?50:1000)))
+      assert.ok(measured.every(m=>m.calls<=(tier==='free'?FREE_QUERY_LIMIT:PAID_QUERY_LIMIT)))
       assert.deepEqual(await snapshot(),before,'actual full Worker preview creates no persistent database changes')
       const viewer=await h.addEmployee(911,'preview_viewer',{products:true,inventory:true,product_cost_view:true})
       assert.equal((await h.call('POST','/api/products/receiving-cost-preview',{lines:[lines[0]]},`${tier} viewer`,{cookie:viewer})).status,200)

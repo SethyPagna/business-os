@@ -258,16 +258,16 @@ async function main() {
     const retired = await h.all("SELECT id,sale_status FROM sales WHERE sale_status IN ('partial_return','returned') AND id<>?", Number(pastFull.body.id))
     r.check(`no returns writer left a retired status word (base: every returned sale) -- ${JSON.stringify(retired)}`, () => assert.deepEqual(retired, []))
 
-    // Single-record requests must fit the Free per-request limit. A 25-return group moves stock for every
-    // member and was over it before this lane; its counts are printed for the report and bounded by Paid.
+    // Single-record requests are checked against the Free call limit. Keep the 25-return groups as separate
+    // Paid-scenario observations, printing both physical calls and statement diagnostics.
     const groups = h.metrics.filter(entry => /25/.test(entry.label) && !entry.setup)
     for (const entry of groups) entry.observe = true
     const worst = H.budgetLine(h.metrics)
-    r.check(`D1 budget: worst single-record request ${worst.label} used ${worst.statements} statements (Free ${H.FREE_QUERY_LIMIT})`, () => {
-      assert.ok(worst.statements <= H.FREE_QUERY_LIMIT)
+    r.check(`D1 budget: worst single-record request ${worst.label} used ${worst.calls} calls (${worst.statements} statements) (Free ${H.FREE_QUERY_LIMIT})`, () => {
+      assert.ok(worst.calls <= H.FREE_QUERY_LIMIT)
     })
-    r.check(`D1 budget: 25-return groups ${groups.map(entry => `${entry.label}=${entry.statements}`).join(', ')} fit Paid ${H.PAID_QUERY_LIMIT}`, () => {
-      assert.ok(groups.length === 4 && groups.every(entry => entry.statements <= H.PAID_QUERY_LIMIT))
+    r.check(`D1 budget: 25-return groups ${groups.map(entry => `${entry.label}=${entry.calls} calls/${entry.statements} statements`).join(', ')} fit Paid ${H.PAID_QUERY_LIMIT}`, () => {
+      assert.ok(groups.length === 4 && groups.every(entry => entry.calls <= H.PAID_QUERY_LIMIT))
     })
   } finally {
     await h.mf.dispose()

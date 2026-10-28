@@ -519,20 +519,25 @@ async function main() {
         const m2 = h.metrics.length
         const done = await cancelNow(out.ret.id, `xc-count-cancel-${n}`, { return_ids: [taken] })
         assert.equal(done.status, 200, JSON.stringify(done.body))
-        const cancelN = h.metrics.slice(m2).find(entry => entry.label === `cancel ${out.ret.id}`).statements
+        const cancelMetric = h.metrics.slice(m2).find(entry => entry.label === `cancel ${out.ret.id}`)
+        const cancelN = cancelMetric.calls
         const undone = await H.historyStep(h, done.body.actionHistoryId, 'undo', await generationOf(done.body.actionHistoryId), `undo ${n}`)
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
-        const undoN = h.metrics.find(entry => entry.label === `undo ${n}`).statements
+        const undoMetric = h.metrics.find(entry => entry.label === `undo ${n}`)
+        const undoN = undoMetric.calls
         const redone = await H.historyStep(h, done.body.actionHistoryId, 'redo', await generationOf(done.body.actionHistoryId), `redo ${n}`)
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
-        const redoN = h.metrics.find(entry => entry.label === `redo ${n}`).statements
-        return { cancelN, undoN, redoN, createN: made.find(entry => entry.label.startsWith('exchange create'))?.statements }
+        const redoMetric = h.metrics.find(entry => entry.label === `redo ${n}`)
+        const redoN = redoMetric.calls
+        const createMetric = made.find(entry => entry.label.startsWith('exchange create'))
+        return { cancelN, undoN, redoN, createN: createMetric?.calls,
+          statements: { cancel: cancelMetric.statements, undo: undoMetric.statements, redo: redoMetric.statements, create: createMetric?.statements } }
       }
       for (let i = 0; i < 5; i += 1) { await H.seedProduct(h, 9710 + i, `XC Back ${i}`, 10, 200, 4); await H.seedProduct(h, 9730 + i, `XC Out ${i}`, 10, 200, 4) }
       for (const n of [1, 5]) {
         const got = await countsOf(n)
-        console.log(`D1 statements, ${n} back / ${n} out: create ${got.createN}, cancel+take-back ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN} (Free limit ${FREE})`)
-        r.check(`statements, ${n} back / ${n} out: cancel ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN} (Free limit ${FREE}, Paid limit ${H.PAID_QUERY_LIMIT})`, () => {
+        console.log(`D1 calls, ${n} back / ${n} out: create ${got.createN}, cancel+take-back ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN}; statements create ${got.statements.create}, cancel+take-back ${got.statements.cancel}, undo ${got.statements.undo}, redo ${got.statements.redo} (Free call limit ${FREE})`)
+        r.check(`calls, ${n} back / ${n} out: cancel ${got.cancelN}, undo ${got.undoN}, redo ${got.redoN} (Free limit ${FREE}, Paid limit ${H.PAID_QUERY_LIMIT})`, () => {
           for (const [name, count] of [['cancel', got.cancelN], ['undo', got.undoN], ['redo', got.redoN]]) assert.ok(count > 0 && count <= FREE, `${name} ${count} > ${FREE}`)
         })
       }

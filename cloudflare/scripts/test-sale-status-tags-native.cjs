@@ -259,8 +259,8 @@ async function main() {
     r.check(`no writer of this lane left a retired word (only the returns writer's rows may carry one until lane S2a) -- ${JSON.stringify(retired)}`, () => assert.deepEqual(retired, []))
 
     const worst = H.budgetLine(h.metrics)
-    r.check(`D1 budget: worst request ${worst.label} used ${worst.statements} statements (Free ${H.FREE_QUERY_LIMIT})`, () => {
-      assert.ok(worst.statements <= H.FREE_QUERY_LIMIT)
+    r.check(`D1 budget: worst request ${worst.label} used ${worst.calls} calls (${worst.statements} statements) (Free ${H.FREE_QUERY_LIMIT})`, () => {
+      assert.ok(worst.calls <= H.FREE_QUERY_LIMIT)
     })
   } finally {
     await h.mf.dispose()

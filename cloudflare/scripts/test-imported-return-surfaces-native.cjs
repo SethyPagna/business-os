@@ -55,8 +55,8 @@ async function main() {
       assert.equal(Number(control.item.imported_returned_quantity), 0)
     })
     const worst = H.budgetLine(h.metrics)
-    r.check(`D1 budget: worst request ${worst.label} used ${worst.statements} statements (Free ${H.FREE_QUERY_LIMIT})`, () => {
-      assert.ok(worst.statements <= H.FREE_QUERY_LIMIT)
+    r.check(`D1 budget: worst request ${worst.label} used ${worst.calls} calls (${worst.statements} statements) (Free ${H.FREE_QUERY_LIMIT})`, () => {
+      assert.ok(worst.calls <= H.FREE_QUERY_LIMIT)
     })
   } finally {
     await h.mf.dispose()

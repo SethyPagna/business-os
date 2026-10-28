@@ -2,8 +2,8 @@
 // The per-invocation D1 call budgets of both plans, read from
 // src/lib/planTier.ts so a native test's "fits Free" assertion can never keep a
 // number that planTier.ts has since changed (it used to be a literal 50 in two
-// files). These harnesses count every statement of a batch, which is stricter
-// than the platform (a batch is one call), so a pass here is conservative.
+// files). A batch uses one physical call; statement counts remain separate
+// diagnostics and independent plan-size bounds.
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require(path.join(__dirname, '..', '..', 'node_modules', 'typescript'))

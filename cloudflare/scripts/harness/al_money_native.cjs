@@ -2,7 +2,7 @@
 // Shared whole-Worker harness for the AL money native tests: the real
 // src/index.ts bundled and served by Miniflare (workerd) with every migration
 // applied, a real bcrypt login and the real session cookie, and a D1 proxy
-// that counts every statement an invocation makes (waitUntil work included).
+// that counts physical calls and separate statement diagnostics (waitUntil work included).
 // Copied verbatim from the exported part of test-al-money-c-native.cjs
 // (0a78962f0, branch claude/al-money-repro-20261012) so a lane can carry one
 // AL file without carrying the others' red cases; only the repository root is
@@ -315,10 +315,13 @@ function recorder(prefix) {
 // Every request is printed; the returned worst case covers the requests under
 // test only -- reads a check makes just to observe state are marked observe.
 function budgetLine(metrics) {
-  const worst = metrics.filter(entry => !entry.observe && !entry.setup).reduce((max, entry) => entry.statements > max.statements ? entry : max, { statements: 0 })
+  for (const entry of metrics) assert.ok(entry && Number.isSafeInteger(entry.calls) && entry.calls >= 0,
+    'D1 budget requires a nonnegative safe-integer physical call count')
+  const worst = metrics.filter(entry => !entry.observe && !entry.setup)
+    .reduce((max, entry) => max === null || entry.calls > max.calls ? entry : max, null) ?? { calls: 0, statements: 0 }
   for (const entry of metrics) {
     console.log(`D1 ${entry.setup ? '(setup) ' : entry.observe ? '(observation) ' : ''}${entry.label}: status ${entry.status}, ${entry.calls} calls, ${entry.statements} statements` +
-      ` (Server-Timing q=${entry.serverTimingStatements ?? 'n/a'}); Free ${entry.statements <= FREE_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${FREE_QUERY_LIMIT}, Paid ${entry.statements <= PAID_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${PAID_QUERY_LIMIT}`)
+      ` (Server-Timing q=${entry.serverTimingStatements ?? 'n/a'}); Free ${entry.calls <= FREE_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${FREE_QUERY_LIMIT}, Paid ${entry.calls <= PAID_QUERY_LIMIT ? 'fits' : 'EXCEEDS'} ${PAID_QUERY_LIMIT}`)
   }
   return worst
 }

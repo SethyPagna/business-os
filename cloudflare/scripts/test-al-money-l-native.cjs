@@ -256,8 +256,8 @@ async function main() {
       printedSetup.add(entry.label)
       return true
     }))
-    r.check(`D1 budget: worst report request ${worst.label} used ${worst.statements} statements (Free ${H.FREE_QUERY_LIMIT}, Paid ${H.PAID_QUERY_LIMIT})`, () => {
-      assert.ok(worst.statements <= H.FREE_QUERY_LIMIT, `exceeds the Free per-invocation limit of ${H.FREE_QUERY_LIMIT}`)
+    r.check(`D1 budget: worst report request ${worst.label} used ${worst.calls} calls (${worst.statements} statements) (Free ${H.FREE_QUERY_LIMIT}, Paid ${H.PAID_QUERY_LIMIT})`, () => {
+      assert.ok(worst.calls <= H.FREE_QUERY_LIMIT, `exceeds the Free per-invocation limit of ${H.FREE_QUERY_LIMIT}`)
     })
   } finally {
     await h.mf.dispose()
