@@ -53,7 +53,7 @@ function refusalDecision(row:RefusalRow|undefined,requestId:string,owner:Offline
 export async function readSaleCreateRefusal(db:D1Compat,requestId:string,owner:OfflineSaleOwner):Promise<SaleCreateRefusalDecision>{
   let results:Awaited<ReturnType<D1Compat['batch']>>
   try{
-    results=await db.batch([{sql:schemaSql},{sql:committedSaleSql,params:{request:requestId}},{sql:refusalSql,params:{request:requestId}}])
+    results=await db.batch([{sql:schemaSql},{sql:committedSaleSql,params:{request:requestId}},{sql:refusalSql,params:{request:requestId}},ordinaryBusinessMaintenanceGuard])
   }catch(error){throw new SaleCreateRefusalUnavailableError(error)}
   const sale=results[1].results[0] as CommittedSale|undefined
   if(sale)return sale.cashier_id===owner.actor_id?{kind:'committed',sale}:{kind:'owner_mismatch'}
