@@ -77,7 +77,7 @@ jobs:
         run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
 
       - name: Safety tests (every test file on its own, retried on timeout)
-        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 4
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 1
 
       - name: Keep the test log
         if: always()
