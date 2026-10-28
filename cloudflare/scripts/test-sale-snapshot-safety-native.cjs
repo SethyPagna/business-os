@@ -14,6 +14,8 @@ async function main() {
   const mutants = {
     'no-admission':{file:'src/lib/saleSnapshotBudget.ts',from:'if (serializedSaleSnapshotBytes(value) + generatedIdBytes + SALE_SNAPSHOT_FRAMING_RESERVE > SALE_SNAPSHOT_BYTE_BUDGET)',to:'if (false)'},
     'character-count':{file:'src/lib/saleSnapshotBudget.ts',from:'return encoder.encode(json).byteLength',to:'return json.length'},
+    'no-create-residual':{file:'src/routes/sales.ts',from:'SELECT CASE WHEN @snapshotHeaderBytes+',to:'SELECT CASE WHEN @snapshotHeaderBytes*0-100000000+'},
+    'no-canonical-residual':{file:'src/routes/sales.ts',from:'return `CASE WHEN length(CAST(${empty} AS BLOB))+',to:'return `CASE WHEN length(CAST(${empty} AS BLOB))*0-100000000+'},
   }
   if(process.env.MUTANT&&!mutants[process.env.MUTANT])throw new Error('Unknown snapshot mutant')
   const patches = process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : historicalSeedPatch
@@ -111,10 +113,15 @@ async function main() {
     assert.equal(amended.body.proven_uncommitted,true)
     assert.deepEqual(await state(),amendBefore)
     await h.db.prepare('INSERT INTO delivery_contacts(id,name,address) VALUES(?,?,?)')
-      .bind(17000,'Snapshot courier','ក'.repeat(400_000)).run()
+      .bind(17000,'Snapshot courier','ក'.repeat(100_000)).run()
     const deliveryBefore=await state()
     const delivery=await H.amendSale(h,amendBase.body.id,{client_request_id:'snapshot-delivery-too-large',kind:'delivery_added',
       delivery_contact_id:17000,delivery_fee_usd:1,expected_updated_at:amendBase.body.sale.updated_at})
+    if(delivery.status===200){
+      const row=await h.one(`SELECT length(CAST(request_json AS BLOB))+length(CAST(before_json AS BLOB))+length(CAST(after_json AS BLOB))+length(CAST(response_json AS BLOB)) AS text_bytes
+        FROM sale_mutation_receipts WHERE request_id='snapshot-delivery-too-large'`)
+      console.log(JSON.stringify({control:'combined receipt accepted',...row}))
+    }
     assert.equal(delivery.status,409,JSON.stringify(delivery.body))
     assert.equal(delivery.body.code,'sale_snapshot_too_large')
     assert.equal(delivery.body.proven_uncommitted,true)
