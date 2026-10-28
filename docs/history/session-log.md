@@ -20895,3 +20895,11 @@ Plain-language questions that are blocking or shaping current lanes, newest firs
 #### Queue by area (open task queue)
 Each item is numbered `Q<n>` (stable within this revision) and marked: **owner-decided** = the owner has ruled on what to build; **needs owner** = at least one part waits on an owner answer, action or device check; **ready** = can be worked without owner input (not a claim that code is done or verified). The marker is derived from the item text (OWNER status words and owner-ruling references); notes in *italics* after `→` were reconciled on 27 Oct from the private lane log. Source sections of the 13–19 Oct queue are kept as sub-headings; nothing was dropped.
 Finished releases, the compact done log and the 13–19 Oct status narrative are in `docs/history/session-log.md` (entry "27 Oct 2026 — 6.0.998").
+
+## 28 October 2026 — Codex takeover and backend 1004 local checkpoint
+
+Preserved the unfinished work and isolated backend 1004 from the deployed RC3 baseline. The repaired call budgets count a D1 batch once while retaining statement telemetry, retries and transaction bounds. Indexed orphan cleanup now discovers child candidates before parent IDs and rechecks current parents on main-database operations, preventing a concurrent import from being deleted.
+
+Local candidate application tree: integration cc02e34a1, lane 1df07bfbd. Twenty-seven focused/composition tests passed, including native Free admission, replay, undo, import, legacy-return conversion and restore guards. Both deliberately broken admission controls failed behaviorally. Both typechecks, translation verification and the frontend build passed. Independent source/composition reviews were bounded GO. Full release-wide gates, Free CPU/daily-cap certification and physical-device acceptance remain separate. No deployment, remote migration, data repair or frontend refinement was applied by this takeover.
+
+All 212 queue obligations remain. Settled owner decisions moved to the decision index. Next: owner review of the fixture-only large-sale refusal/recovery prototype, then the approved safety fix; backend 1001 read-volume and oversized-result issues remain pending. External encrypted backup/recovery verification and legacy-password transition are still required before the 30 October Free switch.
