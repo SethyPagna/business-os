@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } from '../src/utils/saleCheckoutRefusal.ts'
-import { isSaleSnapshotRefusal, saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
+import { isSaleSnapshotRefusal, isTerminalSaleCreateRefusal, saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
 import fs from 'node:fs'
 
-const refusal={status:409,code:'sale_snapshot_too_large',proven_uncommitted:true}
+const refusal={status:409,code:'sale_snapshot_too_large',proven_uncommitted:true,terminal_request_refused:true,client_request_id:'same-request'}
 const orders=[{id:'order-a',checkoutRequestId:'same-request',checkoutPayload:{owner:'actor-a'},checkoutReviewRequestId:'same-request',cart:[{id:7,quantity:5}],amountPaidUsd:'90',paymentDetails:[{method:'ABA',amountUsd:'90',amountKhr:'2000'}],notes:'keep me'},
   {id:'order-b',checkoutRequestId:'other-request',checkoutPayload:{owner:'actor-b'},cart:[{id:8,quantity:2}],amountPaidUsd:'20',notes:'other draft'}]
 let persisted:unknown
-const options={error:refusal,requestId:'same-request',orderId:'order-a',orders,firstAttempt:true,isCurrent:()=>true,owns:(payload:unknown)=>(payload as {owner:string}).owner==='actor-a',persist:(next:typeof orders)=>{persisted=JSON.parse(JSON.stringify(next));return true}}
+const options={error:refusal,requestId:'same-request',orderId:'order-a',orders,isCurrent:()=>true,owns:(payload:unknown)=>(payload as {owner:string}).owner==='actor-a',persist:(next:typeof orders)=>{persisted=JSON.parse(JSON.stringify(next));return true}}
 const released=releaseRefusedSaleCheckout(options)!
 assert.ok(released)
 assert.equal(released[0].checkoutRequestId,'')
@@ -26,7 +26,17 @@ for(const error of [{...refusal,status:500},{...refusal,proven_uncommitted:false
 assert.equal(releaseRefusedSaleCheckout({...options,requestId:'stale-request'}),null)
 assert.equal(releaseRefusedSaleCheckout({...options,isCurrent:()=>false}),null)
 assert.equal(releaseRefusedSaleCheckout({...options,owns:()=>false}),null)
-assert.equal(releaseRefusedSaleCheckout({...options,firstAttempt:false}),null,'A pending earlier send is not disproved by a later refused attempt')
+for(const error of [
+  {...refusal,terminal_request_refused:undefined},{...refusal,terminal_request_refused:false},
+  {...refusal,terminal_request_refused:'true'},{...refusal,terminal_request_refused:1},
+  {...refusal,client_request_id:undefined},{...refusal,client_request_id:'another-request'},
+  {...refusal,client_request_id:123},
+]){
+  let writes=0
+  assert.equal(isTerminalSaleCreateRefusal(error,options.requestId),false)
+  assert.equal(releaseRefusedSaleCheckout({...options,error,persist:()=>{writes++;return true}}),null)
+  assert.equal(writes,0)
+}
 assert.equal(releaseRefusedSaleCheckout({...options,persist:()=>false}),null)
 assert.equal(releaseRefusedSaleCheckout({...options,persist:()=>{throw new Error('storage full')}}),null)
 let current=true

@@ -5,6 +5,8 @@ import fs from 'node:fs'
 test.use({ serviceWorkers:'block' })
 const account=E2E_ACCOUNTS.cashierA
 const en=JSON.parse(fs.readFileSync(new URL('../src/lang/en.json',import.meta.url),'utf8')) as Record<string,string>
+const terminalRefusal=(request:Record<string,unknown>)=>({error:'Fixture size refusal',code:'sale_snapshot_too_large',proven_uncommitted:true,terminal_request_refused:true,client_request_id:request.client_request_id})
+
 type Draft={id:string;cart:Array<{id:number;quantity:number}>;paidUsd?:string;paymentDetails?:unknown;checkoutRequestId?:string;checkoutPayload?:Record<string,unknown>}
 
 async function draft(page:Page):Promise<Draft|undefined>{
@@ -56,7 +58,7 @@ test('proven size refusal preserves the basket and tender and allows editing',as
   await page.route(url=>url.pathname==='/api/sales',async route=>{
     if(route.request().method()!=='POST')return route.continue()
     requests.push(route.request().postDataJSON())
-    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Fixture size refusal',code:'sale_snapshot_too_large',proven_uncommitted:true})})
+    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify(terminalRefusal(route.request().postDataJSON()))})
   })
   const {before,usd}=await ringOne(page)
   const tender=await usd.inputValue()
@@ -112,7 +114,7 @@ test('a later refusal never releases an earlier unknown checkout',async({page})=
 test('a session-only clear cannot unlock a stale preferred local draft',async({page})=>{
   await page.route(url=>url.pathname==='/api/sales',async route=>{
     if(route.request().method()!=='POST')return route.continue()
-    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Fixture size refusal',code:'sale_snapshot_too_large',proven_uncommitted:true})})
+    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify(terminalRefusal(route.request().postDataJSON()))})
   })
   const {before}=await ringOne(page)
   await page.evaluate(({id,key})=>{
@@ -137,7 +139,7 @@ test('a session-only clear cannot unlock a stale preferred local draft',async({p
 test('a failed session mirror clear leaves the preferred draft frozen',async({page})=>{
   await page.route(url=>url.pathname==='/api/sales',async route=>{
     if(route.request().method()!=='POST')return route.continue()
-    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Fixture size refusal',code:'sale_snapshot_too_large',proven_uncommitted:true})})
+    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify(terminalRefusal(route.request().postDataJSON()))})
   })
   const {before}=await ringOne(page)
   await page.evaluate(({id,key})=>{
@@ -156,4 +158,60 @@ test('a failed session mirror clear leaves the preferred draft frozen',async({pa
   await openCart(page)
   await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
   expect((await draft(page))?.cart).toEqual(before.cart)
+})
+
+test('a fresh refusal without a terminal certificate stays frozen',async({page})=>{
+  const requests:Record<string,unknown>[]=[]
+  await page.route(url=>url.pathname==='/api/sales',async route=>{
+    if(route.request().method()!=='POST')return route.continue()
+    requests.push(route.request().postDataJSON())
+    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Attempt refused',code:'sale_snapshot_too_large',proven_uncommitted:true})})
+  })
+  const {before}=await ringOne(page)
+  expect((await submit(page)).status()).toBe(409)
+  await expect.poll(async()=>(await draft(page))?.checkoutRequestId).toBe(requests[0].client_request_id)
+  const frozen=(await draft(page))!
+  await page.getByRole('button',{name:'Increase quantity',exact:true}).click()
+  expect((await draft(page))?.cart).toEqual(before.cart)
+  expect((await draft(page))?.checkoutPayload).toEqual(frozen.checkoutPayload)
+  await page.reload()
+  await openCart(page)
+  await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
+  expect((await draft(page))?.checkoutRequestId).toBe(frozen.checkoutRequestId)
+  expect((await draft(page))?.checkoutPayload).toEqual(frozen.checkoutPayload)
+})
+
+test('a matching terminal certificate releases an earlier unknown checkout',async({page})=>{
+  const requests:Record<string,unknown>[]=[]
+  const lookups:string[]=[]
+  let terminal=false
+  await page.route(url=>url.pathname==='/api/sales',async route=>{
+    if(route.request().method()!=='POST')return route.continue()
+    const request=route.request().postDataJSON()
+    requests.push(request)
+    await route.fulfill({status:terminal?409:500,contentType:'application/json',body:JSON.stringify(terminal?terminalRefusal(request):{error:'Fixture outcome unknown'})})
+  })
+  await page.route(url=>url.pathname==='/api/sales/create-receipt',async route=>{
+    lookups.push(new URL(route.request().url()).searchParams.get('client_request_id')||'')
+    await route.fulfill({status:200,contentType:'application/json',body:'{"committed":false}'})
+  })
+  const {before}=await ringOne(page)
+  expect((await submit(page)).status()).toBe(500)
+  await expect.poll(async()=>(await draft(page))?.checkoutRequestId).toBe(requests[0].client_request_id)
+  const frozen=(await draft(page))!
+  await page.reload()
+  await openCart(page)
+  expect((await draft(page))?.checkoutPayload).toEqual(frozen.checkoutPayload)
+  terminal=true
+  expect((await submit(page)).status()).toBe(409)
+  await expect.poll(async()=>(await draft(page))?.checkoutRequestId||'').toBe('')
+  const after=(await draft(page))!
+  expect(after.cart).toEqual(before.cart)
+  expect(after.paymentDetails).toEqual(before.paymentDetails)
+  expect(after.checkoutPayload).toBeUndefined()
+  expect(requests).toHaveLength(2)
+  expect(requests[1]).toEqual(requests[0])
+  expect(lookups).toEqual([frozen.checkoutRequestId])
+  await page.getByRole('button',{name:'Increase quantity',exact:true}).click()
+  await expect.poll(async()=>(await draft(page))?.cart[0].quantity).toBe(2)
 })

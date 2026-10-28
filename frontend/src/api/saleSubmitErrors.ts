@@ -23,6 +23,11 @@ export function isSaleSnapshotRefusal(error: unknown): boolean {
   return Number(value?.status) === 409 && value?.code === 'sale_snapshot_too_large' && value?.proven_uncommitted === true
 }
 
+export function isTerminalSaleCreateRefusal(error:unknown,requestId:string):boolean{
+  const value=error as {terminal_request_refused?:unknown;client_request_id?:unknown}|null
+  return !!requestId&&isSaleSnapshotRefusal(error)&&value?.terminal_request_refused===true&&value.client_request_id===requestId
+}
+
 /**
  * The pack sentence for a coded sale-submit refusal (a thrown API error or a
  * result carrying `code`), or null for anything else, so each checkout path
