@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { releaseRefusedSaleCheckout } from '../src/utils/saleCheckoutRefusal.ts'
+import { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } from '../src/utils/saleCheckoutRefusal.ts'
 import { isSaleSnapshotRefusal, saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
 import fs from 'node:fs'
 
@@ -37,3 +37,56 @@ for(const language of ['en','km']){
   assert.equal(saleSubmitRefusalText(refusal,key=>pack[key]),pack.sale_snapshot_too_large)
 }
 console.log('PASS proven size refusal releases only the persisted matching checkout; basket/tender/notes and uncertain identities survive')
+
+const previous=JSON.stringify(orders), next=JSON.stringify(released)
+const store=(value:string|null,blocked=false)=>({value,getItem(){return this.value},setItem(_key:string,newValue:string){if(blocked)throw new Error('quota');this.value=newValue}})
+const persist=(local:ReturnType<typeof store>,session:ReturnType<typeof store>)=>persistRefusedCheckoutDraft({key:'orders',previous,next,local:()=>local,session:()=>session})
+{
+  const local=store(previous), session=store(previous)
+  assert.equal(persist(local,session),true)
+  assert.equal(local.value,next)
+  assert.equal(session.value,next)
+}
+{
+  const local=store(previous), session=store(previous,true)
+  assert.equal(persist(local,session),false)
+  assert.equal(local.value,previous,'failed session clear must leave preferred pending draft untouched')
+  assert.equal(session.value,previous)
+}
+{
+  const local=store(previous,true), session=store(previous)
+  assert.equal(persist(local,session),false)
+  assert.equal(local.value,previous)
+  assert.equal(session.value,next)
+}
+for(const blockedKind of ['local','session'] as const){
+  const local=store(blockedKind==='local'?null:previous,blockedKind==='local')
+  const session=store(blockedKind==='session'?null:previous,blockedKind==='session')
+  assert.equal(persist(local,session),true,'an absent readable mirror cannot resurrect a request')
+}
+for(const kind of ['local','session'] as const){
+  const local=store(previous), session=store(previous)
+  const divergent=JSON.stringify([...orders,{id:'unknown-order',checkoutRequestId:'unknown-request'}])
+  const target=kind==='local'?local:session
+  target.value=divergent
+  assert.equal(persist(local,session),false)
+  assert.equal(target.value,divergent)
+  assert.equal((kind==='local'?session:local).value,previous)
+}
+assert.equal(persist(store(null),store(null)),false)
+{
+  const local=store(previous), session=store(previous)
+  assert.equal(persistRefusedCheckoutDraft({key:'orders',previous,next,local:()=>local,session:()=>{throw new Error('blocked')}}),false)
+  assert.equal(local.value,previous)
+  session.getItem=()=>{throw new Error('unreadable')}
+  assert.equal(persist(local,session),false)
+  assert.equal(local.value,previous)
+}
+{
+  const local=store(previous), session=store(previous)
+  session.setItem=()=>{session.value=next;local.value='changed by another tab'}
+  assert.equal(persist(local,session),false)
+  assert.equal(local.value,'changed by another tab')
+  assert.equal(session.value,next)
+}
+console.log('PASS session-first refusal persistence, both partial failures, readable-null fallback, divergent mirrors and inaccessible storage')

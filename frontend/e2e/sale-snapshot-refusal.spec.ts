@@ -133,3 +133,27 @@ test('a session-only clear cannot unlock a stale preferred local draft',async({p
   await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
   expect((await draft(page))?.cart).toEqual(before.cart)
 })
+
+test('a failed session mirror clear leaves the preferred draft frozen',async({page})=>{
+  await page.route(url=>url.pathname==='/api/sales',async route=>{
+    if(route.request().method()!=='POST')return route.continue()
+    await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Fixture size refusal',code:'sale_snapshot_too_large',proven_uncommitted:true})})
+  })
+  const {before}=await ringOne(page)
+  await page.evaluate(({id,key})=>{
+    const set=Storage.prototype.setItem
+    Storage.prototype.setItem=function(name,value){
+      if(this===sessionStorage&&name===key){
+        const rows=JSON.parse(value) as Draft[]
+        if(rows.some(row=>row.id===id&&!row.checkoutRequestId))throw new DOMException('Fixture session quota','QuotaExceededError')
+      }
+      return set.call(this,name,value)
+    }
+  },{id:before.id,key:`businessos_pos_orders_${account.id}`})
+  expect((await submit(page)).status()).toBe(409)
+  await expect.poll(async()=>(await draft(page))?.checkoutRequestId||'').not.toBe('')
+  await page.reload()
+  await openCart(page)
+  await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
+  expect((await draft(page))?.cart).toEqual(before.cart)
+})

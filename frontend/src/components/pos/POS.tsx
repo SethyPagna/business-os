@@ -103,7 +103,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
-import { releaseRefusedSaleCheckout } from '../../utils/saleCheckoutRefusal.ts'
+import { persistRefusedCheckoutDraft, releaseRefusedSaleCheckout } from '../../utils/saleCheckoutRefusal.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -3355,11 +3355,9 @@ export default function POS() {
         owns:payload=>{
           try { assertPosCheckoutOwner(payload as Record<string,unknown>,user); return true } catch { return false }
         },
-        persist:orders=>{
-          const serialized = JSON.stringify(orders)
-          writePosDraft(posOrdersStorageKey,serialized)
-          return readPosDraft(posOrdersStorageKey,'bos_pos_orders')===serialized
-        },
+        persist:orders=>persistRefusedCheckoutDraft({key:posOrdersStorageKey,
+          previous:JSON.stringify(ordersRef.current),next:JSON.stringify(orders),
+          local:()=>window.localStorage,session:()=>window.sessionStorage}),
       })
       if (!next) return
       checkoutRequestIdsRef.current.delete(orderKey)
