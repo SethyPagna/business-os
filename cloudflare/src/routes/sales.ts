@@ -155,6 +155,7 @@ import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren }
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
 import { assertSaleSnapshotBudget, isAtomicSaleSnapshotBudgetFailure, saleSnapshotBudgetSql, SALE_SNAPSHOT_BYTE_BUDGET, SALE_SNAPSHOT_FRAMING_RESERVE, SaleSnapshotBudgetError, serializedSaleSnapshotBytes } from '../lib/saleSnapshotBudget'
+import { certifySaleCreateRefusal, readSaleCreateRefusal, SaleCreateRefusalUnavailableError, type SaleCreateRefusalDecision } from '../lib/saleCreateRefusal'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -510,6 +511,29 @@ async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: n
   return snapshot
 }
 
+function terminalSaleCreateRefusalBody(requestId:string){
+  const refusal=new SaleSnapshotBudgetError()
+  return {error:refusal.message,code:refusal.code,proven_uncommitted:true,terminal_request_refused:true,client_request_id:requestId}
+}
+
+async function respondToSaleCreateDecision(c:AmendmentContext,decision:SaleCreateRefusalDecision,requestId:string,owner:ReturnType<typeof canonicalOfflineSaleOwner>){
+  if(decision.kind==='committed'){
+    if(Number(decision.sale.item_count)<1)return c.json({error:'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',code:'sale_incomplete'},409)
+    return c.json({id:decision.sale.id,receiptNumber:decision.sale.receipt_number,duplicate:true,offline_owner:owner,client_request_id:requestId,sale:await authoritativeSaleSnapshot(getDb(c.env),decision.sale.id)})
+  }
+  if(decision.kind==='owner_mismatch')return c.json(offlineSaleOwnerMismatch(),409)
+  if(decision.kind==='refused')return c.json(terminalSaleCreateRefusalBody(requestId),409)
+  throw new SaleCreateRefusalUnavailableError()
+}
+
+async function refuseSaleCreate(c:AmendmentContext,requestId:string,owner:ReturnType<typeof canonicalOfflineSaleOwner>){
+  try{return await respondToSaleCreateDecision(c,await certifySaleCreateRefusal(getDb(c.env),requestId,owner),requestId,owner)}
+  catch(error){
+    if(error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+    throw error
+  }
+}
+
 app.get('/money-precision-capability', async (c) => {
   if (!hasAnyPermission(c.get('user'), ['pos','sales'])) return c.json({ error: 'Permission denied' }, 403)
   c.header('Cache-Control','private, no-store')
@@ -540,9 +564,19 @@ app.get('/create-receipt', async (c) => {
   const requestId = c.req.query('client_request_id') || ''
   if (!requestId || requestId !== normalizeClientRequestId(requestId)) return c.json({ error: 'A valid request identity is required.' },400)
   const db = getDb(c.env)
-  const receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
+  let receipt = await db.prepare(`SELECT id FROM sales WHERE client_request_id=? AND client_request_id<>''
     AND (cashier_id=? OR ?=1) LIMIT 1`).get<{ id:number }>([requestId,Number(user.id),isAdminControlUser(user)?1:0])
-  if (!receipt) return c.json({ committed: false })
+  if (!receipt) {
+    try{
+      const decision=await readSaleCreateRefusal(db,requestId,canonicalOfflineSaleOwner(user,c.req.url))
+      if(decision.kind==='refused')return c.json({committed:false,...terminalSaleCreateRefusalBody(requestId)})
+      if(decision.kind==='committed')receipt={id:decision.sale.id}
+      else return c.json({committed:false})
+    }catch(error){
+      if(error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+      throw error
+    }
+  }
   const sale = await authoritativeSaleSnapshot(db,receipt.id)
   if (!sale || !sale.items.length) return c.json({ committed: false, code: 'sale_incomplete' })
   return c.json({ committed: true, response: { id:receipt.id, receiptNumber:sale.receipt_number, duplicate:true, sale } })
@@ -660,6 +694,8 @@ app.post('/', async (c) => {
       }
       return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db, existingSale.id) })
     }
+    const refusal=await readSaleCreateRefusal(db,clientRequestId,offlineOwner)
+    if(refusal.kind!=='missing')return respondToSaleCreateDecision(c,refusal,clientRequestId,offlineOwner)
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Keep the original pending sale and review it with the current app before recording it.', code: 'money_precision_review_needed' }, 409)
   const clientTime = resolveClientCreatedAt(body.created_at)
@@ -1916,7 +1952,7 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
-      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+      if (isAtomicSaleSnapshotBudgetFailure(error)||String(error).includes('sale_create_terminal_refusal'))return refuseSaleCreate(c,saleWriteKey,offlineOwner)
       // Checked BEFORE the generic guesses below: the receipt guard fails
       // with the same "malformed JSON" text as the pricing/loyalty guards, and
       // a UNIQUE failure on the column (should an index ever exist) matches
@@ -2054,7 +2090,12 @@ app.post('/', async (c) => {
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
-    if (error instanceof SaleSnapshotBudgetError) return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
+    if (error instanceof SaleCreateRefusalUnavailableError)return c.json({error:error.message,code:error.code},503)
+    if (error instanceof SaleSnapshotBudgetError) {
+      const requestId=normalizeClientRequestId(body.client_request_id)
+      if(requestId)return refuseSaleCreate(c,requestId,offlineOwner)
+      return c.json({error:error.message,code:error.code,proven_uncommitted:true},409)
+    }
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
