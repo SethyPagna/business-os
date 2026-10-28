@@ -4,6 +4,12 @@ One line per decision, newest rules win. Dates are when the owner said it (Cambo
 
 Moved verbatim from progress.md on 27 Oct 2026 (6.0.998): dated sections newest first, then the thematic index. The board links here.
 
+**28 Oct 2026 newest design steering (6.0.1010; supersedes the broader Dashboard-first review scope below)**
+
+- The owner is satisfied with the previous POS and main Dashboard layout, excluding Stats. Preserve those preferred layouts and POS interaction while fixing defects; this is not approval of any new prototype or UI change.
+- Review Stats designs first, then Sales, Products subpages, Branch subpages, Inventory and Contacts, including their floats and functions. Work one thing at a time. Each changed surface still needs a versioned prototype and owner approval before application.
+- The large-sale safety prototype is not approved. The committed-but-error/recovery defect remains open; a backend repair must preserve the preferred POS interaction. Stats v1 is ready for review with focused fixture browser checks passed; owner approval and application verification remain pending. Free-plan readiness and release approval remain separate.
+
 **28 Oct 2026 takeover decisions (6.0.1009; owner approved the takeover plan in the current chat)**
 
 - Fixes first, one implementation slice at a time: preserve uncommitted/staged/untracked work, finish backend 1004, prevent large-sale committed-but-error/recovery failures, finish 1001 reads, then review and compose reliability work. Dashboard is the first visible page, Sales second. Broader restyling and return-edit expansion stay outside the urgent Free-readiness release.
