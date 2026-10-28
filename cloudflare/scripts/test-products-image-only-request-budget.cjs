@@ -105,7 +105,7 @@ async function world() {
   f.env.DB = new Proxy(raw, { get(t, key) {
     if (key === 'prepare') return (sql) => statement(t.prepare(sql))
     if (key === 'batch') return (ss) => {
-      physical += ss.length
+      physical += 1 // a db.batch() is ONE call against the per-invocation limit
       ss.forEach((s) => note(s.text, 'batch: '))
       if (physical > CAP) throw new Error(`conservative free cap exceeded: ${physical}`)
       // The stock fixture's batch() shim only runs writes (it returns metadata, never rows), so a
@@ -128,7 +128,7 @@ async function world() {
     const tasks = await Promise.allSettled(pending)
     assert.equal(tasks.filter((task) => task.status === 'rejected').length, 0)
     if (process.env.BUDGET_DEBUG || observed.invocation.attemptedStatements !== physical) console.log(log.map((line, i) => `${i + 1}. ${line}`).join('\n'))
-    assert.equal(observed.invocation.attemptedStatements, physical, 'invocation admission count equals the physical statements')
+    assert.equal(observed.invocation.attemptedStatements, physical, 'invocation admission count equals the physical calls')
     return { status: response.status, body, physical }
   }
   return { f, read }

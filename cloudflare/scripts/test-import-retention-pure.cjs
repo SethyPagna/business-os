@@ -247,6 +247,118 @@ async function main() {
     assert.deepStrictEqual(bucket.deletedKeys, ['imports/ghost/raw.csv'])
   })
 
+  await check('orphan scan: a clean database is checked per JOB through a job_id index, never per row', async () => {
+    const db = openDb(migrationSqls)
+    const bucket = makeBucket()
+    for (let i = 0; i < 25; i++) { seedJob(db, 'live' + i, 'completed', 1 * HOUR); seedDetail(db, 'live' + i) }
+    // 500 staging rows under one job: a per-row read would show in the plan and in the statements issued.
+    db.exec("WITH RECURSIVE s(n) AS (SELECT 2 UNION ALL SELECT n+1 FROM s WHERE n < 500) INSERT INTO import_job_rows (job_id, phase, row_number, action, identifier, result_json) SELECT 'live0','analyze',n,'create','x','{}' FROM s")
+    const seen = []
+    const spy = Object.create(db)
+    spy.prepare = (sql) => { seen.push(sql); return db.prepare(sql) }
+    spy.batch = (items) => { items.forEach((item) => seen.push(item.sql)); return db.batch(items) }
+    spy.staging = spy
+    currentDb = spy
+    const report = await retention.cleanOrphanImportStaging({ ASSETS: bucket }, { apply: true })
+    currentDb = db
+    assert.deepStrictEqual(Object.values(report.tables).filter(Boolean), [], 'nothing is orphaned')
+    assert.strictEqual(report.tables.import_job_rows, 0)
+    assert.deepStrictEqual(seen.filter((sql) => /GROUP BY|NOT IN|COUNT\(\*\)|^\s*DELETE/i.test(sql)), [],
+      'a database with no orphans issues no per-row count, no NOT IN scan and no DELETE')
+    const tables = [...DETAIL_TABLES, ...SUMMARY_TABLES]
+    assert.strictEqual(tables.length, 12)
+    for (const table of tables) {
+      const plan = db.prepare('EXPLAIN QUERY PLAN ' + retention.distinctJobIdsSql(table)).all({}).map((row) => String(row.detail))
+      assert.ok(!plan.some((detail) => detail.startsWith('SCAN ' + table)), table + ' is scanned: ' + plan.join(' | '))
+      assert.ok(plan.some((detail) => detail.startsWith('SEARCH ' + table + ' USING COVERING INDEX')), table + ' is not stepped through a covering job_id index')
+      const stepped = db.prepare(retention.distinctJobIdsSql(table)).all({}).map((row) => String(row.id)).sort()
+      const grouped = db.prepare('SELECT DISTINCT job_id FROM ' + table).all({}).map((row) => String(row.job_id)).sort()
+      assert.deepStrictEqual(stepped, grouped, table + ': the stepped scan finds the same job ids as DISTINCT')
+    }
+  })
+
+  await check('orphan scan: only orphaned jobs are counted and deleted, in one statement per table', async () => {
+    const db = openDb(migrationSqls)
+    const bucket = makeBucket()
+    seedJob(db, 'live', 'completed', 1 * HOUR)
+    seedDetail(db, 'live')
+    seedDetail(db, 'ghost-a')
+    seedDetail(db, 'ghost-b')
+    const seen = []
+    const spy = Object.create(db)
+    spy.prepare = (sql) => { seen.push(sql); return db.prepare(sql) }
+    spy.batch = (items) => { items.forEach((item) => seen.push(item.sql)); return db.batch(items) }
+    spy.staging = spy
+    currentDb = spy
+    const report = await retention.cleanOrphanImportStaging({ ASSETS: bucket }, { apply: true })
+    currentDb = db
+    assert.strictEqual(report.tables.import_job_rows, 2, 'two ghost jobs, one staging row each')
+    assert.strictEqual(report.tables.import_job_files, 4)
+    assert.strictEqual(report.r2Keys, 2)
+    assert.strictEqual(seen.filter((sql) => /^\s*DELETE/i.test(sql)).length, 12, 'one DELETE per orphaned table, not per job')
+    for (const table of [...DETAIL_TABLES, ...SUMMARY_TABLES]) {
+      assert.strictEqual(count(db, table, 'ghost-a') + count(db, table, 'ghost-b'), 0, table)
+      assert.ok(count(db, table, 'live') > 0, table + ' live rows wrongly deleted')
+    }
+  })
+
+  await check('orphan cleanup preserves a new import created after the parent snapshot', async () => {
+    const db = openDb(migrationSqls)
+    const staging = openDb(migrationSqls)
+    const bucket = makeBucket()
+    const spy = Object.create(db)
+    let inserted = false
+    spy.prepare = (sql) => {
+      const statement = db.prepare(sql)
+      if (sql.trim() !== 'SELECT id FROM import_jobs') return statement
+      return { ...statement, all: async (params) => {
+        const rows = await statement.all(params)
+        seedJob(db, 'born-during-cleanup', 'analyzing', 0)
+        seedDetail(db, 'born-during-cleanup')
+        seedDetail(staging, 'born-during-cleanup')
+        inserted = true
+        return rows
+      } }
+    }
+    spy.staging = staging
+    currentDb = spy
+    try {
+      await retention.cleanOrphanImportStaging({ ASSETS: bucket }, { apply: true })
+      assert.ok(inserted, 'the import was created after the parent snapshot')
+      for (const table of [...DETAIL_TABLES, ...SUMMARY_TABLES]) {
+        assert.ok(count(db, table, 'born-during-cleanup') > 0, table + ' lost a live import')
+      }
+      assert.strictEqual(count(staging, 'import_job_rows', 'born-during-cleanup'), 1)
+      assert.strictEqual(count(staging, 'import_job_source_rows', 'born-during-cleanup'), 1)
+      assert.deepStrictEqual(bucket.deletedKeys, [], 'a live upload must remain in R2')
+    } finally { currentDb = db }
+  })
+
+  await check('orphan cleanup rechecks a main-table parent before selecting files or deleting rows', async () => {
+    const db = openDb(migrationSqls)
+    const bucket = makeBucket()
+    seedDetail(db, 'rescued-during-cleanup')
+    const spy = Object.create(db)
+    let inserted = false
+    spy.prepare = (sql) => {
+      if (/SELECT stored_path FROM import_job_files/.test(sql) && !inserted) {
+        seedJob(db, 'rescued-during-cleanup', 'analyzing', 0)
+        inserted = true
+      }
+      return db.prepare(sql)
+    }
+    spy.staging = spy
+    currentDb = spy
+    try {
+      await retention.cleanOrphanImportStaging({ ASSETS: bucket }, { apply: true })
+      assert.ok(inserted, 'the parent was inserted after orphan classification')
+      for (const table of SUMMARY_TABLES) {
+        assert.ok(count(db, table, 'rescued-during-cleanup') > 0, table + ' ignored its current parent')
+      }
+      assert.deepStrictEqual(bucket.deletedKeys, [], 'a currently owned file must remain in R2')
+    } finally { currentDb = db }
+  })
+
   await check('deleteObjectsBulk: 1000-key chunks, a failing chunk is reported while the rest proceed', async () => {
     const keys = Array.from({ length: 2500 }, (_, i) => `k${i}`)
     const calls = []

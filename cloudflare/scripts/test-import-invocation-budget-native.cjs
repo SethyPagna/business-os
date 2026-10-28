@@ -32,8 +32,8 @@ const UNCUT_MUTANT = process.env.BUDGET_MUTANT === 'none' ? null : 'no-sales-bud
 
 const MUTANTS = {
   'no-sales-budget': {
-    find: "Object.assign(callBudget, { unit: 'call', enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })",
-    replace: "Object.assign(callBudget, { unit: 'call', enabled: false, reserve: 0 })",
+    find: 'Object.assign(callBudget, { enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })',
+    replace: 'Object.assign(callBudget, { enabled: false, reserve: 0 })',
   },
 }
 

@@ -39,7 +39,7 @@ import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { SaleMoneyContractError } from './saleMoneyPrecision'
 import { buildSaleRecordEventsInsert, sha256Hex } from './saleRecordEvents'
 import { normalizeSearchText } from './searchMatch'
-import { executeStockTransaction, stockTransactionRefusal, stockTransactionStatementCount } from './stockTransaction'
+import { executeStockTransaction, stockTransactionRefusal } from './stockTransaction'
 import { recordStockCrossings } from './stockCrossingAlert'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from './stockCondition'
 import { formatSaleTelegramLines, sendReturnTelegramEvent } from './telegram'
@@ -612,7 +612,7 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
   // ---- admission: a plan this invocation cannot carry is refused before it writes anything -----------------------------------------
-  const transactionStatementCount = stockTransactionStatementCount(statements.length)
+  const transactionStatementCount = 1 // the plan commits as ONE db.batch(): one call
   try {
     assertReturnCreatePlanBounds(statements, args.intent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including retries (six + the replacement alert's two).

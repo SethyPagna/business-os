@@ -36,7 +36,7 @@ async function world(options={}) {
   const raw=f.env.DB
   const maybeFail=sql=>{const kind=/SELECT namespace, version FROM cache_versions/.test(sql)?'version-read':/INSERT INTO quota_usage/.test(sql)?'quota':/INSERT INTO cache_versions/.test(sql)?'version-write':null;if(options.tailRetries&&kind&&!failures.has(kind)){failures.add(kind);throw new Error('D1_ERROR: internal error') }}
   const statement=p=>new Proxy(p,{get(t,k){if(k==='bind')return(...params)=>statement(t.bind(...params));if(['all','run','first'].includes(k))return(...params)=>{physical++;sqls.push(t.text);maybeFail(t.text);return t[k](...params)};return t[k]}})
-  f.env.DB=new Proxy(raw,{get(t,k){if(k==='prepare')return sql=>statement(t.prepare(sql));if(k==='batch')return ss=>{assert.ok(ss.every(s=>s.params.length<=100),'packed statements remain below D1 bind limit');physical+=ss.length;batches++;sqls.push(...ss.map(s=>s.text));ss.forEach(s=>maybeFail(s.text));return t.batch(ss)};return t[k]}})
+  f.env.DB=new Proxy(raw,{get(t,k){if(k==='prepare')return sql=>statement(t.prepare(sql));if(k==='batch')return ss=>{assert.ok(ss.every(s=>s.params.length<=100),'packed statements remain below D1 bind limit');physical+=1;batches++;sqls.push(...ss.map(s=>s.text));ss.forEach(s=>maybeFail(s.text));return t.batch(ss)};return t[k]}})
   const tasks=[],ctx={waitUntil(p){tasks.push(p)},passThroughOnException(){}}
   const app=new Hono()
   app.use('/api/*',metrics.requestMetricsMiddleware)
@@ -47,7 +47,7 @@ async function world(options={}) {
     physical=0;batches=0;sqls.length=0;failures.clear()
     const response=await app.request(url,{method:'POST',headers:{cookie:'bos_session='+token,'content-type':'application/json'},body:JSON.stringify(body)},f.env,ctx)
     await Promise.all(tasks.splice(0))
-    assert.equal(acc.attemptedStatements+1,physical,'raw maintenance consumes one physical statement outside D1Compat metrics')
+    assert.equal(acc.invocation.attemptedStatements,physical,'invocation calls include raw maintenance, batches and retries')
     return {status:response.status,json:await response.json(),physical,batches,sqls:[...sqls]}
   }
   return {...f,call}
@@ -65,7 +65,7 @@ async function world(options={}) {
     assert.equal(replay.status,200);assert.equal(replay.json.replayed,true);assert.equal(replay.batches,0);assert.equal(replay.physical,50,'saved receipt resolves before new budget admission at actual50 statements')
     const fresh=await f.call('/api/inventory/sessions',{...request,client_request_id:request.client_request_id+'-fresh'},45)
     assert.equal(fresh.status,409);assert.equal(fresh.json.code,'stock_session_query_budget_exceeded');assert.ok(fresh.physical<=50);assert.equal(fresh.batches,0)
-    const refusedUndo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/undo',{require_applied:true,expected_generation:0},20)
+    const refusedUndo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/undo',{require_applied:true,expected_generation:0},35)
     assert.equal(refusedUndo.status,409);assert.equal(refusedUndo.json.code,'stock_session_query_budget_exceeded');assert.equal(refusedUndo.batches,0);assert.ok(refusedUndo.physical<=50)
     assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5);assert.equal(f.sql.prepare('SELECT generation n FROM stock_session_operations').get().n,0)
     const undo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/undo',{require_applied:true,expected_generation:0})
@@ -73,7 +73,7 @@ async function world(options={}) {
     assert.equal(undo.status,200);assert.ok(undo.physical<=50);assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0)
     const repeat=await f.call('/api/action-history/'+result.json.actionHistoryId+'/undo',{require_applied:true,expected_generation:0})
     assert.equal(repeat.status,200);assert.ok(repeat.physical<=50)
-    const refusedRedo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/redo',{require_applied:true,expected_generation:1},20)
+    const refusedRedo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/redo',{require_applied:true,expected_generation:1},35)
     assert.equal(refusedRedo.status,409);assert.equal(refusedRedo.json.code,'stock_session_query_budget_exceeded');assert.equal(refusedRedo.batches,0);assert.ok(refusedRedo.physical<=50)
     assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0);assert.equal(f.sql.prepare('SELECT generation n FROM stock_session_operations').get().n,1)
     const redo=await f.call('/api/action-history/'+result.json.actionHistoryId+'/redo',{require_applied:true,expected_generation:1})
@@ -82,9 +82,10 @@ async function world(options={}) {
   }
   const large=await world();seedDistinctProducts(large,2)
   const body=receiveRequest('real-route-too-large');body.items.push({...body.items[0],line_id:'second',product_id:2})
-  const refused=await large.call('/api/inventory/sessions',body)
-  assert.equal(refused.status,409);assert.equal(refused.json.code,'stock_session_query_budget_exceeded');assert.equal(refused.batches,0)
-  assert.equal(large.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,0)
+  // Two lines are still ONE db.batch(): one call. Free used to refuse this (409) while every statement of the batch was charged.
+  const accepted=await large.call('/api/inventory/sessions',body)
+  assert.equal(accepted.status,200);assert.equal(accepted.batches,1);assert.ok(accepted.physical<=50)
+  assert.equal(large.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,1)
   large.sql.close()
   const paid=await world({tier:'paid'});seedDistinctProducts(paid,25)
   const paidBody=receiveRequest('paid-real-route-25');paidBody.items=Array.from({length:25},(_,i)=>({...paidBody.items[0],line_id:'paid-'+i,product_id:i+1,received_date:'2026-09-'+String(i+1).padStart(2,'0')}))

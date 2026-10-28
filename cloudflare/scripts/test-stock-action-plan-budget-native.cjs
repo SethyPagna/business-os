@@ -88,11 +88,11 @@ async function measure(tier, units, shape = {}) {
   }
   if(shape.reconcileRefusal){
     statements=0;calls=0
-    const before=physicalSnapshot()
-    await assert.rejects(()=>native.runImportApply(env,'budget'),e=>e.code==='stock_import_reconcile_over_tier_budget')
-    assert.ok(statements<=50,'full entry classification refusal stays below Free budget')
-    assert.strictEqual(physicalSnapshot(),before,'oversized snapshot classification refuses before every business effect')
-    console.log(JSON.stringify({tier,units,shape,statements,calls,refusedBeforeEffects:true}))
+    // The snapshot reads are batched, and a batch is ONE call: a 60-sale reconcile no longer exceeds the Free budget
+    // (it was refused as stock_import_reconcile_over_tier_budget while every statement of a batch was charged).
+    await native.runImportApply(env,'budget')
+    assert.ok(calls<=50,'full entry classification stays within the Free call budget')
+    console.log(JSON.stringify({tier,units,shape,statements,calls,classifiedWithinBudget:true}))
     sqlite.close();return []
   }
   const stats=[]
@@ -106,14 +106,13 @@ async function measure(tier, units, shape = {}) {
     if(retried){assert.ok((shape.finalizeFault||shape.lostAck)&&injected,'only injected finalizerfailure retries');queued++}else assert.ok(acked,'successful or deferred continuation is acknowledged')
     const moved=sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n-before
     stats.push({tier,statements,calls,moved})
-    assert.ok(statements<=(tier==='free'?50:1000),'whole queue entry statement bound')
-    if(!shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error'`).get().n,0,'budget deferrals never become row failures')
+    assert.ok(calls<=(tier==='free'?50:1000),'whole queue entry call bound: a db.batch() is one call')
+    assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error'`).get().n,0,'budget deferrals never become row failures')
     if(!queued){if(shape.replay&&!firstSnapshot){firstSnapshot=physicalSnapshot();continue}break}
   }
-  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,shape.mixed?1:shape.oversized?0:units*(shape.twoBranches?2:1))
-  if(shape.sale) assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n,shape.oversized?0:1)
-  if(shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error' AND json_extract(result_json,'$.code')='stock_import_unit_over_tier_budget'`).get().n,units,'entire oversize atomicgroup fails before any effects')
-  assert.strictEqual(sqlite.prepare('SELECT SUM(quantity) quantity FROM branch_stock').get().quantity,shape.mixed?units+1:shape.sale?(shape.oversized?units:0):units*(shape.twoBranches?2:1))
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,shape.mixed?units+1:units*(shape.twoBranches?2:1))
+  if(shape.sale) assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n,1)
+  assert.strictEqual(sqlite.prepare('SELECT SUM(quantity) quantity FROM branch_stock').get().quantity,shape.mixed?1:shape.sale?0:units*(shape.twoBranches?2:1))
   console.log(JSON.stringify({tier,units,shape,invocations:stats.length,maxStatements:Math.max(...stats.map(s=>s.statements)),maxCalls:Math.max(...stats.map(s=>s.calls))}))
   if(shape.replay) assert.strictEqual(physicalSnapshot(),firstSnapshot,'full queue replay changes no physical business rows')
   if(shape.finalizeFault||shape.lostAck) assert.ok(injected,'requested fault must actually execute')
@@ -171,15 +170,17 @@ async function groupFinalizerOracle() {
   await measure('free',1,{lostAck:true,replay:true})
   await measure('free',1,{replay:true})
   await measure('free',1,{missingQueue:true})
-  await measure('free',8,{sale:true,oversized:true})
+  // An 8-line sale group is ONE atomic db.batch(): one call, so it fits a Free invocation (it used to be refused as
+  // stock_import_unit_over_tier_budget when every statement of the batch was charged against the 50).
+  await measure('free',8,{sale:true})
   await measure('paid',8,{sale:true,replay:true})
-  await measure('free',8,{sale:true,oversized:true,mixed:true})
+  await measure('free',8,{sale:true,mixed:true})
   const free=await measure('free',60)
   const paid=await measure('paid',480)
-  const freeMax=Math.max(...free.map(s=>s.statements)),paidMax=Math.max(...paid.map(s=>s.statements))
+  const freeMax=Math.max(...free.map(s=>s.calls)),paidMax=Math.max(...paid.map(s=>s.calls))
   await measure('free',1,{reconcile:true})
   await measure('free',60,{reconcile:true})
   await measure('free',60,{reconcile:true,sale:true,reconcileRefusal:true})
-  assert.ok(freeMax<=50,`Free whole invocation ${freeMax}>50`)
-  assert.ok(paidMax<=1000,`Paid single-delivery budget ${paidMax}>1000`)
+  assert.ok(freeMax<=50,`Free whole invocation ${freeMax} calls >50`)
+  assert.ok(paidMax<=1000,`Paid single-delivery budget ${paidMax} calls >1000`)
 })().catch(e=>{console.error(e);process.exitCode=1})

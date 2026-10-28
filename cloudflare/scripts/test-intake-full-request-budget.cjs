@@ -53,7 +53,7 @@ async function world(tier, mode, verified, options = {}) {
   let claimLostAck = options.claimLostAck
   const raw = f.env.DB
   const dispatch = (statements, params) => {
-    physical += statements.length
+    physical += 1 // a db.batch() is ONE call against the per-invocation limit
     if (tier === 'free') assert.ok(physical <= 50, `conservative app cap exceeded: ${physical}`)
     for (const sql of statements) {
       if (completionFault && /UPDATE stock_mutation_receipts SET response_status/.test(sql)) throw Error('constraint failed: synthetic completion failure')
@@ -122,8 +122,8 @@ async function world(tier, mode, verified, options = {}) {
     const response = await responsePromise
     releaseKv()
     const tasks = await Promise.allSettled(pending)
-    assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding attempts equal invocation admission count')
-    if (tier === 'free') assert.ok(physical <= 50, 'including swallowed background failures, every attempted statement fits the cap')
+    assert.equal(observed.invocation.attemptedStatements, physical, 'full physical binding calls equal invocation admission count')
+    if (tier === 'free') assert.ok(physical <= 50, 'including swallowed background failures, every attempted call fits the cap')
     assert.equal(tasks.filter(x => x.status === 'rejected').length, 0)
     return { status: response.status, body: await response.json(), physical, failures: [...failures], effects: effects() }
   }

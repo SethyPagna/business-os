@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import type { StockWriteStatement } from './productBatches'
-import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, stockTransactionRefusal } from './stockTransaction'
+import { executeStockTransaction, StockTransactionUnavailableError, stockTransactionRefusal } from './stockTransaction'
 
 // Per-line idempotency for the two single-line stock write kernels --
 // routes/inventory.ts's runAdjustAction and routes/batches.ts's
@@ -128,7 +128,7 @@ export async function executeStockMutationBatch(
 ): Promise<void> {
   const mark = (outcome && atomicMark?.completedStatement ? atomicMark.completedStatement(outcome) : atomicMark?.statement()) ?? null
   const batch = [...statements, ...(mark ? [mark] : [])]
-  atomicMark?.admit?.(stockTransactionStatementCount(batch.length))
+  atomicMark?.admit?.(1) // one db.batch() = one call
   // A durable marker makes a lost acknowledgement recoverable on the next
   // request. Never automatically repeat an accumulating stock transaction.
   await executeStockTransaction(db, batch, mark ? 'once' : 'retry')

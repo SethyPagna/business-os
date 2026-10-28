@@ -449,7 +449,7 @@ function sessionRowSql(columns: Set<string>): string {
   return sql
 }
 
-function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
+export function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   const db = getDb(env)
   const initial = budget?.statementsUsed() ?? 0
   const reserve = budget?.reserveStatements ?? 12
@@ -484,8 +484,8 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   }
   return { db: counted, begin() { admission = true }, check,
     async commit(statements: StockWriteStatement[]) {
-      check(stockTransactionStatementCount(statements.length))
-      local += stockTransactionStatementCount(statements.length)
+      check(1) // the whole stock transaction is one db.batch(): one call
+      local += 1
       return executeStockTransaction(db, statements, 'once')
     },
     finishReads() { admission = false; tailReads = true },

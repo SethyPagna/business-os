@@ -1238,7 +1238,7 @@ app.post('/bulk', async (c) => {
     // The grouped action is one atomic batch: it is sized against what this invocation has left (Free runs 50 D1 queries) before it is sent.
     const bulkMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
     const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c),
-      bulkMetrics ? { statementsUsed: () => bulkMetrics.attemptedStatements + 1, reserveStatements: 8 } : undefined)
+      bulkMetrics ? { statementsUsed: () => (bulkMetrics.invocation?.attemptedStatements ?? bulkMetrics.attemptedStatements) + 1, reserveStatements: 8 } : undefined)
     if (!result.dryRun) c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
@@ -1455,10 +1455,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   let routeStatements = 0
   let admissionEnabled = false
   const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as (RequestMetrics & { attemptedStatements?: number }) | undefined
-  const initialStatements = requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
+  const initialStatements = requestMetrics?.invocation?.attemptedStatements ?? requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
   const statementsUsed = () => {
     if (!requestMetrics) return routeStatements + 10
-    const attempted = requestMetrics.attemptedStatements
+    const attempted = requestMetrics.invocation?.attemptedStatements ?? requestMetrics.attemptedStatements
     if (attempted == null && requestMetrics.failed) return Infinity
     return Math.max(initialStatements + routeStatements, attempted ?? requestMetrics.statements) + 3
   }
@@ -2584,7 +2584,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
   const hasStockWrite = touchedProducts.size > 0 || returnItems.some(item => normalizeStockAction(item) === 'damaged')
-  const transactionStatementCount = hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length + 1
+  const transactionStatementCount = 1 // the plan commits as ONE db.batch(): one call
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including

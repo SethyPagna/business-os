@@ -37,8 +37,7 @@ const bcrypt = require('bcryptjs')
 
 const root = path.resolve(__dirname, '..')
 const ORIGIN = 'http://127.0.0.1:4391'
-const FREE_QUERY_LIMIT = 50
-const PAID_QUERY_LIMIT = 1000
+const { FREE_QUERY_LIMIT, PAID_QUERY_LIMIT } = require('./harness/plan_query_limits.cjs')
 
 const WRAPPER = `
 import worker, { SyncUploadSession, BroadcastHub } from './src/index';

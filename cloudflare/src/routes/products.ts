@@ -5626,7 +5626,7 @@ app.get('/merge-duplicates/preview', async (c) => {
     const quotedGroups = (scope ? manifestGroups : groups.filter(group => previewGroups.find(row=>row.canonicalId===group.canonical.id)?.mergeable))
       .sort((a,b)=>a.canonical.id-b.canonical.id)
     const members = new Set(quotedGroups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
-    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100 || counted.statementCount() + Math.ceil(members.size/80)*8 + 1 > getPlanLimits(c.env).d1QueriesPerInvocation) {
+    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100 || counted.callCount() + Math.ceil(members.size/80)*8 + 1 > getPlanLimits(c.env).d1QueriesPerInvocation) {
       costAuthorityUnavailable = { code: 'resolve_plan_budget' }
     } else if (quotedGroups.length) {
       try {
@@ -5738,25 +5738,30 @@ export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
 
 type MergeDuplicateInterruptionCode = 'merge_budget_reached' | 'merge_infrastructure_interrupted'
 
-function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
+// statementCount feeds the pacing estimate (statements per product); callCount is what the per-invocation D1 limit
+// counts, where a db.batch() is ONE call (D1 limits page).
+export function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
   db: ReturnType<typeof getDb>
   statementCount: () => number
+  callCount: () => number
 } {
   let statements = 0
+  let calls = 0
   const counted = Object.create(db) as ReturnType<typeof getDb>
   counted.prepare = ((sql: string) => {
     const prepared = db.prepare(sql)
     return {
-      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; return prepared.get(params) },
-      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; return prepared.all(params) },
-      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; return prepared.run(params) },
+      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; calls += 1; return prepared.get(params) },
+      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; calls += 1; return prepared.all(params) },
+      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; calls += 1; return prepared.run(params) },
     }
   }) as typeof counted.prepare
   counted.batch = (items) => {
     statements += items.length
+    calls += 1
     return db.batch(items)
   }
-  return { db: counted, statementCount: () => statements }
+  return { db: counted, statementCount: () => statements, callCount: () => calls }
 }
 
 export function shouldPauseProductMergeBeforeGroup(input: {
@@ -5893,7 +5898,7 @@ app.post('/merge-duplicates', async (c) => {
       group.duplicates.sort((a,b)=>a.id-b.id)
     }
     const members = new Set(groups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
-    if (countedDb.statementCount()+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
+    if (countedDb.callCount()+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
     try {
       const reviews = await readBulkCostReviews(db,groups)
       for (const review of reviews) {
