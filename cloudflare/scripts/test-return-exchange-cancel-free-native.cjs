@@ -33,7 +33,7 @@ const MUTANTS = {
 async function main() {
   if (process.env.MUTANT && !MUTANTS[process.env.MUTANT]) throw new Error(`unknown MUTANT ${process.env.MUTANT}; known: ${Object.keys(MUTANTS).join(', ')}`)
   const mutant = process.env.MUTANT ? MUTANTS[process.env.MUTANT].map((patch, index) => ({ name: `mutant:${process.env.MUTANT}:${index}`, ...patch })) : null
-  const h = await H.startWorker({ patches: mutant || (process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : []) })
+  const h = await H.startWorker({ patches: mutant || (process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : []), d1CallLimit: H.FREE_QUERY_LIMIT })
   const r = H.recorder('RET-EXCHANGE-CANCEL-FREE')
   try {
     for (let i = 0; i < 10; i += 1) { await H.seedProduct(h, 9810 + i, `CF Back ${i}`, 10, 200, 4); await H.seedProduct(h, 9830 + i, `CF Out ${i}`, 10, 200, 4) }
@@ -86,6 +86,7 @@ async function main() {
     const statusOf = async id => (await h.one('SELECT status FROM returns WHERE id=?', id)).status
     const historyRows = async () => Number((await h.one("SELECT COUNT(*) AS n FROM action_history WHERE scope='returns'")).n)
     const statementsOf = (label) => h.metrics.find(entry => entry.label === label)?.statements ?? -1
+    const callsOf = (label) => h.metrics.find(entry => entry.label === label)?.calls ?? -1
 
     // ---- 1. the typical exchange: cancel, undo and redo fit ----------------------------------------------------------------------------------------------------
     {
@@ -93,7 +94,7 @@ async function main() {
       const taken = await takeBack(x.s2, 0, 1, 'cf-take-1')
       assert.equal(taken.status, 200, JSON.stringify(taken.body))
       const done = await cancel(x.ret.id, 'cf-cancel-1', [taken.id])
-      const cancelN = statementsOf(`cancel ${x.ret.id}`)
+      const cancelN = callsOf(`cancel ${x.ret.id}`)
       r.check(`1 back / 1 out: cancel with the replacement taken back is recorded on Free (${done.status}); ${cancelN} statements (limit ${H.FREE_QUERY_LIMIT})`, () => {
         assert.equal(done.status, 200, JSON.stringify(done.body))
         assert.ok(cancelN > 0 && cancelN <= H.FREE_QUERY_LIMIT, `cancel ${cancelN}`)
@@ -103,7 +104,7 @@ async function main() {
       r.check(`1 back / 1 out: undo (${undone.status}, ${statementsOf('cf undo 1')} statements) and redo (${redone.status}, ${statementsOf('cf redo 1')}) fit too`, () => {
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
-        assert.ok(statementsOf('cf undo 1') <= H.FREE_QUERY_LIMIT && statementsOf('cf redo 1') <= H.FREE_QUERY_LIMIT)
+        assert.ok(callsOf('cf undo 1') <= H.FREE_QUERY_LIMIT && callsOf('cf redo 1') <= H.FREE_QUERY_LIMIT)
       })
     }
 
@@ -116,7 +117,7 @@ async function main() {
       const exchanged = await columns()
       const done = await cancel(x.ret.id, 'cf-cancel-keep', [])
       const reversed = await columns()
-      const cancelN = statementsOf(`cancel ${x.ret.id}`)
+      const cancelN = callsOf(`cancel ${x.ret.id}`)
       r.check(`1 back / 1 out, replacement kept: the credit moves to Not Paid on Free (${done.status}); ${cancelN} statements (limit ${H.FREE_QUERY_LIMIT})`, () => {
         assert.equal(done.status, 200, JSON.stringify(done.body))
         assert.ok(cancelN > 0 && cancelN <= H.FREE_QUERY_LIMIT, `cancel ${cancelN}`)
@@ -130,7 +131,7 @@ async function main() {
       r.check(`...undo (${undone.status}, ${statementsOf('cf undo keep')} statements) and redo (${redone.status}, ${statementsOf('cf redo keep')}) fit and restore the exact columns`, () => {
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
-        assert.ok(statementsOf('cf undo keep') <= H.FREE_QUERY_LIMIT && statementsOf('cf redo keep') <= H.FREE_QUERY_LIMIT)
+        assert.ok(callsOf('cf undo keep') <= H.FREE_QUERY_LIMIT && callsOf('cf redo keep') <= H.FREE_QUERY_LIMIT)
         assert.deepEqual(afterUndo, exchanged)
         assert.deepEqual(afterRedo, reversed)
       })
@@ -157,7 +158,7 @@ async function main() {
       console.log(`5 / 5 take-back steps (quote + create statements): ${stepCounts.join(', ')}`)
       r.check(`5 take-back steps, one line each (quote+create statements ${stepCounts.join(', ')}): every step fits a Free invocation`, () => {
         for (let i = 0; i < 5; i += 1) {
-          assert.ok(statementsOf(`quote cf-take-5-${i}`) <= H.FREE_QUERY_LIMIT && statementsOf(`take back cf-take-5-${i}`) <= H.FREE_QUERY_LIMIT, stepCounts[i])
+          assert.ok(callsOf(`quote cf-take-5-${i}`) <= H.FREE_QUERY_LIMIT && callsOf(`take back cf-take-5-${i}`) <= H.FREE_QUERY_LIMIT, stepCounts[i])
         }
       })
       // The retry of a step whose outcome was not seen: the same request id answers the recorded return and writes nothing.
@@ -176,7 +177,7 @@ async function main() {
       const returnStatuses = async () => ({ ret: await statusOf(x.ret.id), taken: await Promise.all(taken.map(statusOf)) })
       const withTakeBacks = await shelf()
       const done = await cancel(x.ret.id, 'cf-cancel-5', taken)
-      const cancelN = statementsOf(`cancel ${x.ret.id}`)
+      const cancelN = callsOf(`cancel ${x.ret.id}`)
       const afterCancel = await shelf()
       const appliedMoves = await movementsOf('Apply grouped return status')
       const statusAfterCancel = await returnStatuses()
@@ -197,7 +198,7 @@ async function main() {
       const statusAfterUndo = await returnStatuses()
       r.check(`...undo (${undone.status}, ${statementsOf('cf undo 5')} statements) fits and reverses it: the return is completed again, the five take-backs are cancelled, the shelf is the exchange's`, () => {
         assert.equal(undone.status, 200, JSON.stringify(undone.body))
-        assert.ok(statementsOf('cf undo 5') <= H.FREE_QUERY_LIMIT)
+        assert.ok(callsOf('cf undo 5') <= H.FREE_QUERY_LIMIT)
         assert.deepEqual(statusAfterUndo, { ret: 'completed', taken: taken.map(() => 'cancelled') })
         assert.deepEqual(afterUndo.back, afterCancel.back.map(n => n + 1), 'the returned units are back on the shelf')
         assert.deepEqual(afterUndo.out, afterCancel.out.map(n => n - 1), 'the replacement units are with the customer again')
@@ -210,7 +211,7 @@ async function main() {
       const statusAfterRedo = await returnStatuses()
       r.check(`...and redo (${redone.status}, ${statementsOf('cf redo 5')} statements) puts the cancel back exactly`, () => {
         assert.equal(redone.status, 200, JSON.stringify(redone.body))
-        assert.ok(statementsOf('cf redo 5') <= H.FREE_QUERY_LIMIT)
+        assert.ok(callsOf('cf redo 5') <= H.FREE_QUERY_LIMIT)
         assert.deepEqual(afterRedo, afterCancel)
         assert.deepEqual(statusAfterRedo, { ret: 'cancelled', taken: taken.map(() => 'completed') })
       })
@@ -221,7 +222,7 @@ async function main() {
     {
       const x = await exchange(await makeSale([9815, 9816, 9817, 9818, 9819]), 5)
       const kept = await cancel(x.ret.id, 'cf-cancel-5-keep', [])
-      const keptN = statementsOf(`cancel ${x.ret.id}`)
+      const keptN = callsOf(`cancel ${x.ret.id}`)
       const keptState = { ret: await statusOf(x.ret.id), sale: (await h.one('SELECT sale_status FROM sales WHERE id=?', x.s2.id)).sale_status }
       r.check(`5 back cancelled with the replacement kept: ${kept.status}, ${keptN} statements (limit ${H.FREE_QUERY_LIMIT}); the sale owes the credit as Not Paid`, () => {
         assert.equal(kept.status, 200, JSON.stringify(kept.body))
@@ -246,20 +247,22 @@ async function main() {
         const res = await h.call('POST', '/api/returns/bulk', { client_request_id: `cf-multi-${tag}`, field: 'status', source: 'completed', target: 'cancelled', items }, `multi ${tag}`)
         const after = { stock: await stockSum(), lots: await lotSum(), history: await historyRows() }
         const statuses = await Promise.all(made.map(x => statusOf(x.ret.id)))
-        return { made, res, before, after, statuses, statements: statementsOf(`multi ${tag}`) }
+        return { made, res, before, after, statuses, statements: statementsOf(`multi ${tag}`), calls: callsOf(`multi ${tag}`) }
       }
       const six = await together(6, 'six')
       r.check(`6 exchanges cancelled in one request: ${six.res.status}, ${six.statements} statements (limit ${H.FREE_QUERY_LIMIT}); every one is cancelled`, () => {
         assert.equal(six.res.status, 200, JSON.stringify(six.res.body))
-        assert.ok(six.statements <= H.FREE_QUERY_LIMIT)
+        assert.ok(six.calls > 0 && six.calls <= H.FREE_QUERY_LIMIT)
         assert.deepEqual(six.statuses, six.made.map(() => 'cancelled'))
       })
       const eight = await together(8, 'eight')
-      r.check(`8 exchanges in one request: ${eight.res.status} ${eight.res.body.code ?? ''} -- refused up front (the batch plus the statements the route still needs would pass a Free invocation); nothing is written`, () => {
-        assert.equal(eight.res.status, 400)
-        assert.equal(eight.res.body.code, 'return_bulk_over_plan_budget')
-        assert.deepEqual(eight.after, eight.before)
-        assert.deepEqual(eight.statuses, eight.made.map(() => 'completed'))
+      // The cancel is ONE db.batch(): one call. Eight used to be refused up front (return_bulk_over_plan_budget) while every statement
+      // of the batch was charged against the Free limit of 50; the D1 limits page counts a batch as a single query.
+      r.check(`8 exchanges in one request: ${eight.res.status}, ${eight.statements} statements in ${eight.calls} calls; every one is cancelled`, () => {
+        assert.equal(eight.res.status, 200, JSON.stringify(eight.res.body))
+        assert.ok(eight.statements > six.statements, 'more statements than six')
+        assert.ok(eight.calls > 0 && eight.calls <= H.FREE_QUERY_LIMIT, 'at most 50 calls')
+        assert.deepEqual(eight.statuses, eight.made.map(() => 'cancelled'))
       })
     }
 
@@ -410,7 +413,7 @@ async function main() {
       const done = await cancel(x.ret.id, 'cf-order-cancel', linked)
       r.check(`...and the cancel links the three steps (${done.status}, ${statementsOf(`cancel ${x.ret.id}`)} statements)`, () => {
         assert.equal(done.status, 200, JSON.stringify(done.body))
-        assert.ok(statementsOf(`cancel ${x.ret.id}`) <= H.FREE_QUERY_LIMIT)
+        assert.ok(callsOf(`cancel ${x.ret.id}`) <= H.FREE_QUERY_LIMIT)
       })
     }
 

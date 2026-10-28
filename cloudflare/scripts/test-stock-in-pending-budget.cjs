@@ -21,7 +21,7 @@ let fixture = fs.readFileSync(path.join(__dirname, 'test-intake-full-request-bud
 fixture = fixture.replace('let failures = new Set()', 'let failures = new Set(); let pairs = new Map()')
 fixture = fixture.replace('physical = 0; failures = new Set()', 'physical = 0; failures = new Set(); pairs = new Map()')
 fixture = fixture.replace('async function world(tier, mode, verified, options = {}) {', `async function world(tier, mode, verified, options = {}) { options.enforceCap ??= ${!baseline};`)
-fixture = fixture.replace('physical += statements.length', "physical += statements.length; if (options.enforceCap) assert.ok(physical <= (tier === 'free' ? 50 : 1000), 'physical plan cap including background')")
+fixture = fixture.replace('physical += 1 // a db.batch() is ONE call against the per-invocation limit', "physical += 1 // a db.batch() is ONE call against the per-invocation limit; if (options.enforceCap) assert.ok(physical <= (tier === 'free' ? 50 : 1000), 'physical plan cap including background')")
 fixture = fixture.replace('if (kind && options.tailRetries && !failures.has(kind)) {', `const pair = sql + JSON.stringify(params); const nth = (pairs.get(pair) || 0) + 1
       if (kind) pairs.set(pair, nth)
       if (kind && options.tailRetries && nth % 2 === 1) {`)
@@ -37,7 +37,7 @@ fixture = fixture.replace('const kind = /SELECT namespace', `const kind = option
 fixture = fixture.replace("throw Error('D1_ERROR: network synthetic tail retry')", "throw Error('D1_ERROR: network synthetic ' + kind + ' retry')")
 fixture = fixture.replace('let physical = 0', 'let physical = 0; let requests = 0')
 fixture = fixture.replace('let physical = 0', 'let physical = 0; let trace = []')
-fixture = fixture.replace('physical += statements.length', 'trace.push(...statements); physical += statements.length')
+fixture = fixture.replace('physical += 1 // a db.batch() is ONE call against the per-invocation limit', 'trace.push(...statements); physical += 1 // a db.batch() is ONE call against the per-invocation limit')
 fixture = fixture.replace('physical = 0; failures = new Set()', 'physical = 0; trace = []; failures = new Set()')
 fixture = fixture.replace('const call = async (cold = false) => {', 'const call = async (cold = false) => { requests++')
 fixture = fixture.replace('physical, failures:', `physical, requests, attemptedStatements: observed.invocation.attemptedStatements,
@@ -143,13 +143,19 @@ async function lifecycleChecks() {
   // Every line settled; the continuation set is empty, so the client issues no retry request.
   f.sql.close()
 
+  // A db.batch() is one call, so a 24-line Paid request with every retry no longer reaches the real limit of 1000. The pending-tail
+  // machinery (admit a line only while the whole line plus its reserve fits, defer the untouched suffix, continue it in a second
+  // request) is exercised by giving this Paid invocation a call budget the same workload does overrun.
+  const paidLimits = load('lib/planTier.ts').PLAN_LIMITS_BY_TIER.paid
+  const realPaidQueries = paidLimits.d1QueriesPerInvocation
+  paidLimits.d1QueriesPerInvocation = Number(process.env.PRESSURE_CALL_BUDGET || 300)
   const pressureOptions = { multiLine: true, tailRetries: true, preflightRetries: true, branchPreflightRetries: true, lotPreflightRetries: false, delayedKv: true, enforceCap: true }
   const pressure = await world('paid', 'optional-tagged', false, pressureOptions)
   const pressureBefore = pressure.effects()
   const pressured = await pressure.call(true)
   assert.equal(pressured.status, 200)
   assert.equal(pressured.attemptedStatements, pressured.physical)
-  assert.ok(pressured.physical <= 1000)
+  assert.ok(pressured.physical <= paidLimits.d1QueriesPerInvocation, 'the overrun workload is held to the reduced budget: ' + pressured.physical)
   assert.equal(pressured.body.results.length, 24)
   const saved = pressured.body.results.filter(r => r.ok).length
   const deferred = pressured.body.results.filter(r => r.code === 'deferred').length
@@ -186,6 +192,7 @@ async function lifecycleChecks() {
   assert.equal(replay.attemptedStatements, replay.physical)
   assert.ok(replay.physical <= 1000)
   pressure.sql.close()
+  paidLimits.d1QueriesPerInvocation = realPaidQueries
   const singleAttempts = {}
   for (const tier of ['free', 'paid']) {
     const singleOptions = { tailRetries: true, multiLine: true }

@@ -274,7 +274,7 @@ function parseRequest(raw: Row): BulkRequest {
   return { client_request_id: raw.client_request_id, field, source, target, items, ...(dryRun ? { dry_run: true as const } : {}) }
 }
 
-function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
+export function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
   if (used + planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {
     fail('This selection is too large for the current plan. Select fewer returns or replacement items, then try again.', 400, 'return_bulk_over_plan_budget')
   }
@@ -1465,11 +1465,11 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   if (request.dry_run) {
     // A take-back the till announces becomes a linked member of this action: its guard, its split update and its membership row ride in the statements above.
     const announced = request.items.filter((item) => item.replacement?.planned?.length).length
-    if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length + announced) : statements.length + announced, queryBudget.reserveStatements)
+    if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), 1, queryBudget.reserveStatements)
     // takeBackPerLine tells the till how to make the take-backs it announced: one return per line on a plan this small, one return for all the lines otherwise.
     return { receipt: { dryRun: true, ok: true, statements: statements.length + announced, takeBackPerLine: takeBackPerLine(env) }, wrote: false }
   }
-  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), 1, queryBudget.reserveStatements)
   try {
     const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
     return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
@@ -1538,7 +1538,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   statements.push(auditStatement(user, String(operation.id), `action_${direction}`, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
-  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), 1, queryBudget.reserveStatements)
   try {
     await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
   } catch (error) {

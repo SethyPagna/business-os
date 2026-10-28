@@ -115,7 +115,7 @@ async function main() {
     }
     sql.prepare("UPDATE system_flags SET value=? WHERE key='stock_schema_epoch'").run(executor.STOCK_SCHEMA_EPOCH)
   })
-  await check('receipt admission charges both permit statements and preserves lost-ACK once', async () => {
+  await check('receipt admission charges the whole permit-and-receipt transaction as ONE call (4 physical statements) and preserves lost-ACK once', async () => {
     sql.exec("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(7,'bridge-native-receipt','adjust','[]')")
     let admitted = 0, committed = false
     const mark = { statement: () => ({ sql: "UPDATE stock_mutation_receipts SET written=1 WHERE request_id='bridge-native-receipt'" }), admit: n => { admitted = n }, committed: () => { committed = true } }
@@ -123,13 +123,13 @@ async function main() {
     const beforeCalls = calls, beforeAttempts = attempts
     loseAck = true
     await assert.rejects(receipts.executeStockMutationBatch(db, [statement], mark), /lost acknowledgement/)
-    assert.equal(admitted, 4); assert.equal(attempts-beforeAttempts, 4); assert.equal(calls-beforeCalls, 1); assert.equal(committed, false)
+    assert.equal(admitted, 1, 'one db.batch() is one call against the invocation limit'); assert.equal(attempts-beforeAttempts, 4); assert.equal(calls-beforeCalls, 1); assert.equal(committed, false)
     assert.equal(sql.prepare('SELECT stock_quantity q FROM products WHERE id=1002').get().q, 1)
     assert.equal(sql.prepare("SELECT written FROM stock_mutation_receipts WHERE request_id='bridge-native-receipt'").get().written, 1)
   })
   await check('budget refusal remains before permit and receipt writes', async () => {
     const before = state(), beforeCalls = calls
-    const mark = { statement: () => ({ sql: 'SELECT 1' }), admit: n => { assert.equal(n,4); throw new receipts.StockMutationBudgetError() }, committed: () => assert.fail('must not commit') }
+    const mark = { statement: () => ({ sql: 'SELECT 1' }), admit: n => { assert.equal(n,1); throw new receipts.StockMutationBudgetError() }, committed: () => assert.fail('must not commit') }
     await assert.rejects(receipts.executeStockMutationBatch(db, [{ sql: 'UPDATE products SET stock_quantity=9 WHERE id=1002' }], mark), receipts.StockMutationBudgetError)
     assert.equal(calls,beforeCalls); assert.equal(state(), before)
   })

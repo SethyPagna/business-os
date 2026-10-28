@@ -94,7 +94,7 @@ function executeRaw(
   const permit = authority ? restorePermit(authority) : { sql: permitSql, values: [] }
   return execute(statements.length, () => {
     const hook = (globalThis as unknown as Record<symbol, { rawD1Start?(count: number): void } | undefined>)[Symbol.for('business-os.request-metrics.v1')]
-    hook?.rawD1Start?.(stockTransactionStatementCount(statements.length))
+    hook?.rawD1Start?.(1) // one db.batch() is one call, however many statements it holds
     return db.batch([db.prepare(permit.sql).bind(...permit.values), ...statements, db.prepare(releaseSql)])
   })
 }

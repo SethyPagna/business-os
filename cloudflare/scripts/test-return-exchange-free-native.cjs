@@ -1,14 +1,5 @@
 'use strict'
-// 6.0.958 -- an in-return exchange on the Cloudflare FREE plan (PLAN_TIER "free": 50 D1 statements per invocation). The whole Worker on
-// workerd + D1 (harness/al_money_native.cjs), counting the statements each request really runs (waitUntil work included).
-//
-// The exchange is one set-based write (lib/returnExchangeWrite.ts): the statement count does not grow with the number of lines, only with
-// the kinds of work (a fallback lot, a damaged line) a line brings. So:
-//   1. 1 line back + 1 line out and 5 + 5 both fit the Free budget (printed: the quote request and the create request);
-//   2. a plan this invocation cannot carry (a returned line that needs a fallback lot per unit, a damaged line per row, ten lines of
-//      each) is refused UP FRONT with customer_return_over_plan_budget / 4xx, with nothing written: row counts and stock unchanged;
-//   3. the same request replayed answers from the receipt (idempotent) inside the budget too.
-// MUTANT=<name> bundles ONE deliberate defect; BASE_COMMIT=<sha> runs the same checks against an older source.
+// Real Worker exchanges, replay and atomicity with the Free limit enforced on physical D1 calls.
 process.env.AL_PLAN_TIER = 'free'
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
@@ -22,10 +13,20 @@ const MUTANTS = {
 async function main() {
   if (process.env.MUTANT && !MUTANTS[process.env.MUTANT]) throw new Error(`unknown MUTANT ${process.env.MUTANT}; known: ${Object.keys(MUTANTS).join(', ')}`)
   const mutant = process.env.MUTANT ? [{ name: `mutant:${process.env.MUTANT}`, ...MUTANTS[process.env.MUTANT] }] : null
-  const h = await H.startWorker({ patches: mutant || (process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : []) })
+  const h = await H.startWorker({ patches: mutant || (process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : []), d1CallLimit: H.FREE_QUERY_LIMIT })
   const r = H.recorder('RET-EXCHANGE-FREE')
   const report = []
   try {
+    const batched = await h.call('GET', '/__fixture/d1-call-budget?batch=1', undefined, 'budget batch')
+    const singles = await h.call('GET', '/__fixture/d1-call-budget', undefined, 'budget singles')
+    r.check('native budget allows sixty batched statements and refuses physical call51', () => {
+      assert.equal(batched.status, 200)
+      assert.equal(batched.body.calls, 1)
+      assert.equal(batched.body.statements, 60)
+      assert.equal(singles.status, 503)
+      assert.equal(singles.body.calls, 51)
+      assert.match(singles.body.error, /Too many API requests/)
+    })
     // Ten products to sell and ten to swap for, two more for the heavy cases.
     for (let i = 0; i < 22; i += 1) await H.seedProduct(h, 9600 + i, `FX Item ${i}`, 10 + i, 200, 4)
     let seq = 0
@@ -56,16 +57,17 @@ async function main() {
       const created = await h.call('POST', '/api/returns', body, `${label}: create`)
       return { quote, quoted, created, body, metrics: h.metrics.slice(mark) }
     }
+    const callsOf = (result, suffix) => result.metrics.find((entry) => entry.label.endsWith(suffix))?.calls ?? -1
     const statementsOf = (result, suffix) => result.metrics.find((entry) => entry.label.endsWith(suffix))?.statements ?? -1
 
     // ---- 1a. one line back, one out (the typical till exchange) ---------------------------------------------------------------------------
     {
       const sale = await sellLines([9600])
       const result = await exchange(sale, [0], [9601], 'exchange 1+1', { payment: { details: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], change_currency: 'USD' } })
-      const quoteN = statementsOf(result, 'quote')
-      const createN = statementsOf(result, 'create')
+      const quoteN = callsOf(result, 'quote')
+      const createN = callsOf(result, 'create')
       report.push(['1 back + 1 out', quoteN, createN])
-      r.check(`1+1 is recorded on Free (${result.created?.status}); quote ${quoteN} statements, create ${createN} (limit ${H.FREE_QUERY_LIMIT})`, () => {
+      r.check(`1+1 is recorded on Free (${result.created?.status}); quote ${quoteN} calls, create ${createN} (limit ${H.FREE_QUERY_LIMIT})`, () => {
         assert.equal(result.created.status, 200, JSON.stringify(result.created?.body))
         assert.ok(quoteN > 0 && quoteN <= H.FREE_QUERY_LIMIT, `quote ${quoteN}`)
         assert.ok(createN > 0 && createN <= H.FREE_QUERY_LIMIT, `create ${createN}`)
@@ -74,7 +76,7 @@ async function main() {
       const before = await counts()
       const replay = await h.call('POST', '/api/returns', result.body, 'exchange 1+1: replay')
       const after = await counts()
-      const replayN = statementsOf({ metrics: h.metrics.slice(-1) }, 'replay')
+      const replayN = callsOf({ metrics: h.metrics.slice(-1) }, 'replay')
       report.push(['1 back + 1 out, replayed', 0, replayN])
       r.check(`1+1 replay answers from the receipt (${replay.status}), writes nothing (${replayN} statements)`, () => {
         assert.equal(replay.status, 200)
@@ -90,10 +92,10 @@ async function main() {
       const outIds = [9607, 9608, 9609, 9610, 9611]
       const owed = outIds.reduce((sum, id) => sum + 10 + (id - 9600), 0) - sale.total
       const result = await exchange(sale, [0, 1, 2, 3, 4], outIds, 'exchange 5+5', { payment: { details: owed > 0 ? [{ method: 'Cash', amount_usd: owed, amount_khr: 0 }] : [], change_currency: 'USD' } })
-      const quoteN = statementsOf(result, 'quote')
-      const createN = statementsOf(result, 'create')
+      const quoteN = callsOf(result, 'quote')
+      const createN = callsOf(result, 'create')
       report.push(['5 back + 5 out', quoteN, createN])
-      r.check(`5+5 is recorded on Free (${result.created?.status}); quote ${quoteN} statements, create ${createN} (limit ${H.FREE_QUERY_LIMIT})`, () => {
+      r.check(`5+5 is recorded on Free (${result.created?.status}); quote ${quoteN} calls, create ${createN} (limit ${H.FREE_QUERY_LIMIT})`, () => {
         assert.equal(result.created.status, 200, JSON.stringify(result.created?.body))
         assert.ok(quoteN > 0 && quoteN <= H.FREE_QUERY_LIMIT, `quote ${quoteN}`)
         assert.ok(createN > 0 && createN <= H.FREE_QUERY_LIMIT, `create ${createN}`)
@@ -107,37 +109,32 @@ async function main() {
     {
       const sale = await sellLines([9620, 9621])
       const result = await exchange(sale, [0, 1], [9612, 9613], 'exchange 2 back (1 damaged) + 2 out', { damagedCount: 1, payment: { details: [{ method: 'Cash', amount_usd: 2, amount_khr: 0 }], change_currency: 'USD' } })
-      const createN = statementsOf(result, 'create')
+      const createN = callsOf(result, 'create')
       report.push(['2 back (1 damaged) + 2 out', statementsOf(result, 'quote'), createN])
-      r.check(`a damaged line still fits Free (${result.created?.status}); create ${createN} statements`, () => {
+      r.check(`a damaged line still fits Free (${result.created?.status}); create ${createN} calls`, () => {
         assert.equal(result.created.status, 200, JSON.stringify(result.created?.body))
         assert.ok(createN <= H.FREE_QUERY_LIMIT)
       })
     }
 
-    // ---- 2. what this invocation cannot carry is refused up front, before anything is written -------------------------------------------------
+    // ---- 2. a batch is ONE call: a plan far above 50 statements still fits a Free invocation ----------------------------------------------------
     {
       const sale = await sellLines([9612, 9613, 9614, 9615, 9616, 9617, 9618, 9619, 9620, 9621])
-      const before = await counts()
-      const stockBefore = [await stockSum(), await lotSum()]
-      // Ten damaged lines: every one is its own disposal statements -- more than any Free invocation holds. (The sale was 265, the two
-      // units out cost 21; the difference is given back, so the payment is empty.)
+      // Ten damaged lines: every one is its own disposal statements. (The sale was 265, the two units out cost 21; the difference is given
+      // back, so the payment is empty.) It used to be refused up front (over_plan_budget) because every statement of the batch was charged
+      // against the Free limit of 50; the D1 limits page counts a db.batch() as one query, so the exchange is recorded.
       const heavy = await exchange(sale, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [9600, 9601], 'exchange 10 damaged + 2', { damagedCount: 10, payment: { details: [], change_currency: 'USD' } })
-      const refusedN = statementsOf(heavy, 'create')
-      report.push(['10 damaged back + 2 out (refused)', statementsOf(heavy, 'quote'), refusedN])
-      const after = await counts()
-      const stockAfter = [await stockSum(), await lotSum()]
-      r.check(`10 damaged lines + 2 out is refused up front (${heavy.created?.status} ${heavy.created?.body?.code}) after ${refusedN} statements, writing nothing`, () => {
-        assert.ok(heavy.created, JSON.stringify(heavy.quote?.body))
-        assert.ok(heavy.created.status === 413 || heavy.created.status === 409 || heavy.created.status === 400 || heavy.created.status === 422, String(heavy.created.status))
-        assert.match(String(heavy.created.body?.code), /over_plan_budget|return_too_large|plan_budget/)
-        assert.ok(refusedN <= H.FREE_QUERY_LIMIT, `refusal itself ran ${refusedN}`)
-        assert.deepEqual(after, before)
-        assert.deepEqual(stockAfter, stockBefore)
+      const heavyStatements = statementsOf(heavy, 'create')
+      const heavyCalls = heavy.metrics.find((entry) => entry.label.endsWith('create'))?.calls ?? -1
+      report.push(['10 damaged back + 2 out', statementsOf(heavy, 'quote'), heavyStatements + ' (' + heavyCalls + ' calls)'])
+      r.check(`10 damaged lines + 2 out is recorded on Free (${heavy.created?.status}): ${heavyStatements} statements in ${heavyCalls} calls`, () => {
+        assert.equal(heavy.created.status, 200, JSON.stringify(heavy.created?.body))
+        assert.ok(heavyStatements > H.FREE_QUERY_LIMIT, 'the plan holds more statements than the Free limit, which is not the limit')
+        assert.ok(heavyCalls > 0 && heavyCalls <= H.FREE_QUERY_LIMIT, 'but it makes at most 50 calls')
       })
     }
   } finally {
-    console.log('FREE-PLAN STATEMENT COUNTS (limit 50 per invocation):')
+    console.log('FREE-PLAN STATEMENT COUNTS (limit 50 CALLS per invocation; a batch is one call):')
     for (const [label, quote, create] of report) console.log(`  ${label}: quote ${quote}, create ${create}`)
     await h.mf.dispose()
   }

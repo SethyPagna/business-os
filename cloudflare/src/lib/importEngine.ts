@@ -6097,13 +6097,13 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  */
 const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
 class StockQueryBudgetDeferred extends Error {}
-// 'statement' charges every statement of a batch (the stock-actions path's conservative count). 'call' charges one per
-// db round trip, which is what the D1 binding sends (one fetch per batch) and what the per-invocation limit counts.
-type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; unit: 'statement' | 'call' }
+// Charges one per db round trip, which is what the D1 binding sends (one fetch per batch) and what the per-invocation
+// limit counts: a db.batch() is ONE call however many statements it holds.
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number }
 type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
-function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
+export function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
   if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
-  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0, unit: 'statement' }
+  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0 }
   const wrap = (source: D1Compat): BudgetDb => {
     const result = Object.create(source) as BudgetDb
     Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
@@ -6134,7 +6134,7 @@ function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): Bu
       }
     }) as D1Compat['prepare']
     const execute = (statements: Parameters<D1Compat['batch']>[0]) => {
-      charge(budget.unit === 'call' ? 1 : statements.length + ((source as BudgetDb).importWriteFenceStatements ?? 0))
+      charge(1)
       if (statements.some(statement => /(?:UPDATE|INSERT INTO|INSERT OR IGNORE INTO)\s+(?:branch_stock|branch_batch_stock|products|sales)\b/i.test(statement.sql))) budget.physicalBatches++
       if (source.batchOnce) return source.batchOnce(statements)
       if ((source as BudgetDb).importWriteFenceStatements != null) throw new Error('Budgeted import adapter requires single-attempt batches')
@@ -7795,13 +7795,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const receiptNumbers = await planHistoricalSaleReceiptNumbers(db, jobId, actionable, nowIso)
       // Bounded by the per-invocation call budget, not by the row window: see applyHistoricalSalesReceipts.
       const callBudget = (db as BudgetDb)[STOCK_QUERY_BUDGET]
-      if (callBudget) Object.assign(callBudget, { unit: 'call', enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })
+      if (callBudget) Object.assign(callBudget, { enabled: true, reserve: SALES_APPLY_TAIL_RESERVE })
       try {
         appliedReceipts = await applyHistoricalSalesReceipts(db, actionable, {
           jobId, nowIso, actor: authority.actor, accrueLoyalty, concurrency: limits.historicalSalesImportConcurrency, receiptNumbers,
         })
       } finally {
-        if (callBudget) Object.assign(callBudget, { unit: 'statement', enabled: false, reserve: 0 })
+        if (callBudget) Object.assign(callBudget, { enabled: false, reserve: 0 })
       }
     }
     sw.lap('salesItemsMs')

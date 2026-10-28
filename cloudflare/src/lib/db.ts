@@ -252,7 +252,6 @@ export class D1Compat {
 
   async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     const prepared = this.prepareBatch(statements)
-    // One meta per statement: a batch of N counts as N statements.
     return metered(() => this.d1.batch(prepared), metasOf, statements.length)
   }
 

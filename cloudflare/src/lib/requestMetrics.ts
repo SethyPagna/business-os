@@ -265,16 +265,17 @@ const store = new AsyncLocalStorage<RequestMetrics>()
 
 // The hook db.ts and cache.ts look up by Symbol.for(REQUEST_METRICS_HOOK_KEY).
 // Every entry swallows its own errors: it runs inside a database call.
+// The invocation's legacy attemptedStatements field counts physical calls, including retries and attached background work.
 export type RequestMetricsHook = {
   d1Start(statements: number): void
-  rawD1Start?(statements: number): void
+  rawD1Start?(calls: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
 }
 
 const hook: RequestMetricsHook = {
   rawD1Start(statements) { try { const acc = store.getStore(); if (acc) acc.invocation.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
-  d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements) } } catch { /* no-op */ } },
+  d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += 1 } } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
 }

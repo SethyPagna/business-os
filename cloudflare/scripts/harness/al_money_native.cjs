@@ -27,17 +27,22 @@ export { SyncUploadSession, BroadcastHub };
 // Diagnostic only: the message of every rejected D1 batch, so a route's
 // generic write_conflict can be traced to the statement that refused.
 const d1Errors = [];
+const d1CallLimit = __AL_D1_CALL_LIMIT__;
 function counting(real, counter) {
+  const begin = (statements) => {
+    counter.calls++; counter.statements += statements;
+    if (counter.calls > d1CallLimit) throw new Error('Too many API requests by single Worker invocation');
+  };
   const statement = (inner) => new Proxy(inner, { get(target, key) {
     if (key === '__alInner') return target;
     if (key === 'bind') return (...values) => statement(target.bind(...values));
-    if (key === 'first' || key === 'all' || key === 'run' || key === 'raw') return (...args) => { counter.calls++; counter.statements++; return target[key](...args) };
+    if (key === 'first' || key === 'all' || key === 'run' || key === 'raw') return (...args) => { begin(1); return target[key](...args) };
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
   return new Proxy(real, { get(target, key) {
     if (key === 'prepare') return (sql) => statement(target.prepare(sql));
-    if (key === 'batch') return (items) => { counter.calls++; counter.statements += items.length;
+    if (key === 'batch') return (items) => { begin(items.length);
       return target.batch(items.map((item) => item.__alInner || item)).catch((error) => { d1Errors.push(String(error && error.message || error)); throw error }) };
-    if (key === 'exec') return (sql) => { counter.calls++; counter.statements++; return target.exec(sql) };
+    if (key === 'exec') return (sql) => { begin(1); return target.exec(sql) };
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
 }
 export default { ...worker, async fetch(request, env, ctx) {
@@ -49,6 +54,14 @@ export default { ...worker, async fetch(request, env, ctx) {
   }
   if (url.pathname === '/__fixture/d1-errors') return Response.json(d1Errors.splice(0));
   const counter = { calls: 0, statements: 0 };
+  if (url.pathname === '/__fixture/d1-call-budget') {
+    const db = counting(env.DB, counter);
+    try {
+      if (url.searchParams.get('batch') === '1') await db.batch(Array.from({ length: 60 }, () => db.prepare('SELECT 1')));
+      else for (let i = 0; i < 51; i++) await db.prepare('SELECT 1').all();
+      return Response.json(counter);
+    } catch (error) { return Response.json({ ...counter, error: String(error.message) }, { status: 503 }) }
+  }
   const pending = [];
   const context = { waitUntil(promise) { pending.push(Promise.resolve(promise).catch(() => {})) }, passThroughOnException() {} };
   const response = await worker.fetch(request, { ...env, DB: counting(env.DB, counter) }, context);
@@ -73,7 +86,8 @@ export default { ...worker, async fetch(request, env, ctx) {
 // patches: [{ name, file: 'src/lib/x.ts', from, to }] rewrite SOURCE TEXT IN MEMORY
 // at bundle time (a negative control's mutant). Nothing on disk changes, and an
 // anchor that does not occur exactly once is a hard error, never a silent no-op.
-async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
+async function startWorker({ returnIdFloor = 100000, patches = [], d1CallLimit = Infinity } = {}) {
+  if (d1CallLimit !== Infinity && (!Number.isInteger(d1CallLimit) || d1CallLimit < 1)) throw new Error('Invalid D1 call limit')
   const applied = new Set()
   const plugins = patches.length ? [{ name: 'al-source-patches', setup(b) {
     b.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, args => {
@@ -90,7 +104,7 @@ async function startWorker({ returnIdFloor = 100000, patches = [] } = {}) {
       return { contents: text, loader: 'ts' }
     })
   } }] : []
-  const bundle = await build({ stdin: { contents: WRAPPER, resolveDir: root, loader: 'ts' }, bundle: true, write: false,
+  const bundle = await build({ stdin: { contents: WRAPPER.replace('__AL_D1_CALL_LIMIT__', String(d1CallLimit)), resolveDir: root, loader: 'ts' }, bundle: true, write: false,
     platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'], logLevel: 'silent', plugins })
   for (const p of patches) assert.ok(applied.has(p.name), `patch ${p.name} was not applied`)
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-01',

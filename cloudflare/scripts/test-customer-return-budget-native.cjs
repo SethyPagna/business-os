@@ -105,7 +105,7 @@ function meter(db, limit, outer, options = {}) {
       async run() { count(1, 'write', sql); return db.prepare(sql).run(statement.values) } }
     return statement
   }, async batch(items) {
-    count(items.length, 'atomic', items.map(item => item.sql).join('\n'))
+    count(1, 'atomic', items.map(item => item.sql).join('\n'))
     const out = await db.batch(items.map(item => ({ sql: item.sql, params: item.values })))
     if (options.lostAck && !injected.has('ack')) { injected.add('ack'); throw new Error('network timeout after committed batch') }
     return out
@@ -121,7 +121,9 @@ async function main() {
     plan.__resetPlanTierCacheForTests()
     const m = meter(f.raw, tier === 'free' ? 50 : 1000, 10)
     const result = await request(m.db, '/', f.body, f.env)
-    if (allocations === 1 || allocations === 81) {
+    // A return of any size that fits the plan bounds is ONE db.batch(): one call. Four allocations on Free used to be refused
+    // as customer_return_over_plan_budget while every statement of the batch was charged against the 50.
+    if (allocations !== 82) {
       assert.equal(result.status, 200, JSON.stringify(result))
       assert.ok(10 + m.events.reduce((sum, event) => sum + event.n, 0) <= (tier === 'free' ? 50 : 1000), 'all attempted tail statements fit')
       assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, allocations)
@@ -134,14 +136,14 @@ async function main() {
       assert.equal(replayMeter.events.length, 1)
     } else {
       assert.equal(result.status, 400, JSON.stringify(result))
-      assert.equal(result.body.code, allocations === 82 ? 'return_too_large' : 'customer_return_over_plan_budget')
+      assert.equal(result.body.code, 'return_too_large')
       assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
       assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM return_items').get().n, 0)
       assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 0)
       assert.equal(m.events.filter(event => event.kind === 'atomic').length, 0)
       assert.equal(f.raw.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity, 0)
     }
-    console.log(`PASS ${tier} allocations${allocations}: ${m.used()} cumulative statements, status${result.status}`)
+    console.log(`PASS ${tier} allocations${allocations}: ${m.used()} cumulative calls, status${result.status}`)
   }
   const prior = await fixture(2)
   prior.env.PLAN_TIER = 'paid'
@@ -179,7 +181,7 @@ async function main() {
   const result = await request(worst.db, '/', retry.body, retry.env)
   assert.equal(result.status, 200, JSON.stringify(result))
   assert.ok(worst.used() <= 50, 'all physical retry attempts fit')
-  console.log(`PASS warm observed context with native transient tail retries: ${worst.used()} physical statements`)
+  console.log(`PASS warm observed context with native transient tail retries: ${worst.used()} physical calls`)
   const warm = await fixture(2)
   const warmMetrics = { statements: 1, attemptedStatements: 1, failed: 1 }
   warm.env.TEST_METRICS = warmMetrics
@@ -187,12 +189,12 @@ async function main() {
   const warmResult = await request(warmMeter.db, '/', warm.body, warm.env)
   assert.equal(warmResult.status, 200, JSON.stringify(warmResult))
   assert.ok(warmMeter.used() <= 50)
-  console.log(`PASS observed warm capacity2 with known failed attempt cost: ${warmMeter.used()} physical statements`)
+  console.log(`PASS observed warm capacity2 with known failed attempt cost: ${warmMeter.used()} physical calls`)
   const cold = await fixture(1)
   const coldMeter = meter(cold.raw, 50, 10, { transient: true })
   assert.equal((await request(coldMeter.db, '/', cold.body, cold.env)).status, 200)
   assert.ok(coldMeter.used() <= 50, 'cold fallback includes every real cache/Telegram retry attempt')
-  console.log(`PASS cold context fallback with worst transient tails: ${coldMeter.used()} physical statements`)
+  console.log(`PASS cold context fallback with worst transient tails: ${coldMeter.used()} physical calls`)
   for (const replacement of [false, true]) {
     const enabled = await fixture(1)
     enabled.env.TELEGRAM_BOT_TOKEN = 'fixture-token'
@@ -237,7 +239,7 @@ async function main() {
   const handoffResult = await request(handoffMeter.db, '/', handoff.body, handoff.env)
   assert.equal(handoffResult.status, 200)
   assert.ok(handoffMeter.used() <= 50, 'cold missing cache versions with Free quota and KV handoff includes every attempt')
-  console.log(`PASS cold KV quota handoff/retries: ${handoffMeter.used()} physical statements`)
+  console.log(`PASS cold KV quota handoff/retries: ${handoffMeter.used()} physical calls`)
   for (const option of ['lostAck', 'receiptFailure']) {
     const recovery = await fixture(1)
     const m = meter(recovery.raw, 50, 10, { lostAck: true, [option]: true })

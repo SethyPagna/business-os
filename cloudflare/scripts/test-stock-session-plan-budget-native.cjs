@@ -6,19 +6,20 @@ const { stockTransactionStatementCount } = loadStockSession('lib/stockTransactio
 const coldKernelStatements = stockTransactionStatementCount(33)
 function measuredFixture() {
   const f = fixture(), raw = f.env.DB
-  let queries = 0, batches = 0
+  let queries = 0, batches = 0, calls = 0
   const batchSql = []
   const statement = p => new Proxy(p, { get(t,k) {
     if(k === 'bind') return (...params) => statement(t.bind(...params))
-    if(['first','all','run'].includes(k)) return (...params) => { queries += 1; return t[k](...params) }
+    if(['first','all','run'].includes(k)) return (...params) => { queries += 1; calls += 1; return t[k](...params) }
     return t[k]
   } })
   f.env.DB = new Proxy(raw, { get(t,k) {
     if(k === 'prepare') return sql => statement(t.prepare(sql))
-    if(k === 'batch') return statements => { batchSql.push(statements.map(statement => statement.text)); queries += statements.length; batches += 1; return t.batch(statements) }
+    if(k === 'batch') return statements => { batchSql.push(statements.map(statement => statement.text)); queries += statements.length; calls += 1; batches += 1; return t.batch(statements) }
     return t[k]
   } })
-  return Object.assign(f, { count: () => queries, batches: () => batches, batchSql, reset() { queries = 0; batches = 0; batchSql.length = 0 } })
+  // count = every statement run; calls = D1 calls (a db.batch() is ONE), the unit of the per-invocation limit.
+  return Object.assign(f, { count: () => queries, calls: () => calls, batches: () => batches, batchSql, reset() { queries = 0; calls = 0; batches = 0; batchSql.length = 0 } })
 }
 async function outerProof(staleAuth) {
   const f=measuredFixture(),core=loadStockSession('lib/coreDataInvariants.ts')
@@ -33,10 +34,10 @@ async function outerProof(staleAuth) {
   const app=new Hono()
   app.use('*',async(c,next)=>{await core.ensureCoreDataInvariantsForBuild(c.env,{buildKey:'outer-proof',reverifyAfterMs:3600000});assert.equal(f.count(),6);assert.equal(await maintenance.getMaintenance(c.env),null);await next()})
   app.use('*',auth.requireAuth)
-  app.post('/',async c=>{await Promise.all(tasks);try{return c.json(await kernel.commitStockSession(c.env,c.get('user'),await c.req.json(),null,{statementsUsed:f.count,reserveStatements:4}))}catch(e){return c.json({code:e.code},e.statusCode||500)}})
+  app.post('/',async c=>{await Promise.all(tasks);try{return c.json(await kernel.commitStockSession(c.env,c.get('user'),await c.req.json(),null,{statementsUsed:f.calls,reserveStatements:4}))}catch(e){return c.json({code:e.code},e.statusCode||500)}})
   f.reset()
   const response=await app.request('/',{method:'POST',headers:{cookie:'bos_session='+token,'content-type':'application/json'},body:JSON.stringify(receiveRequest('outer-proof-'+staleAuth))},f.env,ctx)
-  {assert.equal(response.status,200);await cache.bumpVersion(f.env,'products');await telegram.drainDueTelegramShiftOverviews(f.env);console.log(staleAuth?'Cold renewed-auth outer+cache fallback+empty drain':'Cold healthy outer+cache fallback+empty drain',f.count());assert.ok(f.count()<=50);assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
+  {assert.equal(response.status,200);await cache.bumpVersion(f.env,'products');await telegram.drainDueTelegramShiftOverviews(f.env);console.log(staleAuth?'Cold renewed-auth outer+cache fallback+empty drain':'Cold healthy outer+cache fallback+empty drain',f.count());assert.ok(f.calls()<=50);assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
 }
 
 ;(async () => {
@@ -47,6 +48,9 @@ async function outerProof(staleAuth) {
   const receipt = await commitStockSession(f.env,user,body)
   assert.equal(f.count(), coldKernelStatements)
   assert.equal(f.batches(),1)
+  const coldKernelCalls = f.calls()
+  assert.equal(coldKernelCalls, coldKernelStatements - (f.batchSql[0].length - 1), 'the batch is one call; every other statement is a call of its own')
+  console.log('one-line commit: statements',coldKernelStatements,'calls',coldKernelCalls)
   assert.match(f.batchSql[0][0], /INSERT INTO system_flags[\s\S]*stock_transaction_permit/)
   assert.match(f.batchSql[0].at(-1), /DELETE FROM system_flags[\s\S]*stock_transaction_permit/)
   assert.equal(f.batchSql[0].filter(sql => /(?:INSERT INTO|DELETE FROM) system_flags[\s\S]*stock_transaction_permit/.test(sql)).length, 2)
@@ -63,14 +67,16 @@ async function outerProof(staleAuth) {
   assert.equal(f.count(),1,'stored success must resolve first')
   const large = measuredFixture(); large.env.PLAN_TIER = 'free'; seedDistinctProducts(large,2)
   const input=receiveRequest('free-two-line-budget'); input.items.push({...input.items[0],line_id:'second',product_id:2})
-  await assert.rejects(()=>commitStockSession(large.env,user,input),e=>e.code==='stock_session_query_budget_exceeded')
-  assert.equal(large.batches(),0)
-  assert.equal(large.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,0)
-  assert.equal(large.sql.prepare('SELECT SUM(stock_quantity) n FROM products').get().n,0)
+  // Two lines are still ONE db.batch(): one call. They used to be refused on Free because every statement of the batch was charged.
+  await commitStockSession(large.env,user,input)
+  assert.equal(large.batches(),1)
+  assert.ok(large.calls()<=50,'two lines stay inside the Free call budget')
+  assert.equal(large.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n,1)
+  assert.equal(large.sql.prepare('SELECT SUM(stock_quantity) n FROM products').get().n,10)
   for (const tier of ['free','paid']) {
     for (const extra of [0,1]) {
       const bound=measuredFixture();bound.env.PLAN_TIER=tier
-      const offset=(tier==='free'?50:1000)-coldKernelStatements+extra
+      const offset=(tier==='free'?50:1000)-coldKernelCalls+extra
       const boundedKernel=loadStockSession()
       const perform=()=>boundedKernel.commitStockSession(bound.env,user,receiveRequest('boundary-'+tier+'-'+extra),null,{statementsUsed:()=>offset,reserveStatements:0})
       if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(bound.batches(),0);assert.equal(bound.auditRows().length,0)}
@@ -100,7 +106,7 @@ async function outerProof(staleAuth) {
   const smallHistory=f.sql.prepare('SELECT * FROM action_history WHERE id=?').get(receipt.actionHistoryId)
   f.loseNextCommitAcknowledgement()
   await replayStockSession(f.env,user,'undo',receipt.actionHistoryId,0,JSON.parse(smallHistory.undo_payload))
-  const undoQueries=f.count()-1
+  const undoQueries=f.count()-1,undoCalls=f.calls()-1
   assert.equal(f.batches(),1,'lost undo acknowledgement cannot retry the atomic mutation')
   assert.equal(f.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,0)
   assert.equal(f.sql.prepare('SELECT generation n FROM stock_session_operations WHERE id=?').get(receipt.operationId).n,1)
@@ -108,7 +114,7 @@ async function outerProof(staleAuth) {
     const c=measuredFixture();c.env.PLAN_TIER=tier;const k=loadStockSession()
     const r=await k.commitStockSession(c.env,user,receiveRequest('replay-bound-'+tier+'-'+extra))
     const row=c.sql.prepare('SELECT * FROM action_history WHERE id=?').get(r.actionHistoryId),payload=JSON.parse(row.undo_payload)
-    c.reset();const offset=(tier==='free'?50:1000)-undoQueries-1+extra
+    c.reset();const offset=(tier==='free'?50:1000)-undoCalls-1+extra
     const perform=()=>k.replayStockSession(c.env,user,'undo',r.actionHistoryId,0,payload,{statementsUsed:()=>offset,reserveStatements:0})
     if(extra){await assert.rejects(perform,e=>e.code==='stock_session_query_budget_exceeded');assert.equal(c.batches(),0);assert.equal(c.sql.prepare('SELECT generation n FROM stock_session_operations WHERE id=?').get(r.operationId).n,0);assert.equal(c.sql.prepare('SELECT stock_quantity n FROM products WHERE id=1').get().n,5)}
     else {await perform();assert.equal(c.count(),undoQueries)}

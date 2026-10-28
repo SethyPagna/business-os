@@ -62,7 +62,38 @@ const tests = []
 function check(name, fn) { tests.push({ name, fn }) }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-check('attempted statements include pending and failed batches before they finish', async () => {
+check('a db.batch() is ONE call against the invocation limit: 60 statements fit Free, 51 single calls do not', async () => {
+  const free = load('lib/planTier.ts').PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation
+  assert.equal(free, 50)
+  const sixty = Array.from({ length: 60 }, (_, i) => ({ sql: 'S' + i }))
+  const run = async (path, body) => {
+    const native = scriptedD1(() => ({ results: [], meta: {} }))
+    const db = new dbModule.D1Compat(native)
+    let acc
+    const app = appWith(a => a.get(path, async c => {
+      acc = metrics.requestMetricsOf(c)
+      await body(db)
+      return c.json({ ok: true })
+    }))
+    const response = await app.request(path, {}, {}, executionCtx())
+    assert.equal(response.status, 200)
+    return acc
+  }
+  const batches = await run('/api/sixty', async db => { await db.batch(sixty); await db.batchOnce(sixty) })
+  assert.equal(batches.invocation.attemptedStatements, 2, 'two 60-statement batches are two calls')
+  assert.equal(batches.attemptedStatements, 120, 'attempted statement metrics stay separate from the two physical calls')
+  assert.ok(batches.invocation.attemptedStatements < free, 'a 60-statement batch is allowed on Free')
+  const singles = await run('/api/singles', async db => { for (let i = 0; i < 51; i++) await db.prepare('Q' + i).getOnce() })
+  assert.equal(singles.invocation.attemptedStatements, 51)
+  assert.ok(singles.invocation.attemptedStatements > free, '51 single calls exceed the Free limit of 50')
+  // The raw stock-transaction hook is one call per batch too.
+  const hook = globalThis[Symbol.for(metrics.REQUEST_METRICS_HOOK_KEY)]
+  const raw = await run('/api/raw', async () => { hook.rawD1Start(1) })
+  assert.equal(raw.invocation.attemptedStatements, 1)
+  assert.ok(!/rawD1Start\?\.\(stockTransactionStatementCount/.test(fs.readFileSync(path.join(SRC, 'lib/stockTransaction.ts'), 'utf8')), 'stockTransaction.ts must report one call, not its statement count')
+})
+
+check('attempted calls include pending and failed batches before they finish', async () => {
   let release
   const barrier = new Promise(resolve => { release = resolve })
   const native = scriptedD1(() => ({ results: [], meta: {} }))
@@ -73,12 +104,15 @@ check('attempted statements include pending and failed batches before they finis
     acc = metrics.requestMetricsOf(c)
     const pending = db.batchOnce([{ sql: 'A' }, { sql: 'B' }, { sql: 'C' }])
     pending.catch(() => {})
-    assert.equal(acc.attemptedStatements, 3, 'pending statements already consume the invocation allowance')
+    assert.equal(acc.attemptedStatements, 3, 'all pending statements are observed before the batch finishes')
+    assert.equal(acc.invocation.attemptedStatements, 1, 'a pending batch consumes one physical call')
     release()
     await assert.rejects(pending, /constraint failed/)
-    assert.equal(acc.attemptedStatements, 3, 'a failed batch still counts every submitted statement')
+    assert.equal(acc.attemptedStatements, 3, 'failed statements remain in attempted-statement metrics')
+    assert.equal(acc.invocation.attemptedStatements, 1)
     await db.prepare('single').getOnce()
     assert.equal(acc.attemptedStatements, 4)
+    assert.equal(acc.invocation.attemptedStatements, 2)
     return c.json({ ok: true })
   }))
   try {
@@ -578,11 +612,11 @@ check('invocation budgets include raw, failed, attached background and late atte
     return c.json({})
   }))
   await Promise.all(['a', 'b'].map(id => app.request('/api/invocation/' + id, {}, {}, executionCtx())))
-  assert.equal(accs.get('a').invocation.attemptedStatements, 3)
-  assert.equal(accs.get('b').invocation.attemptedStatements, 5)
+  assert.equal(accs.get('a').invocation.attemptedStatements, 2)
+  assert.equal(accs.get('b').invocation.attemptedStatements, 2)
   release(); await Promise.all(held)
-  assert.equal(accs.get('a').invocation.attemptedStatements, 6)
-  assert.equal(accs.get('b').invocation.attemptedStatements, 10)
+  assert.equal(accs.get('a').invocation.attemptedStatements, 3)
+  assert.equal(accs.get('b').invocation.attemptedStatements, 3)
   assert.equal(accs.get('a').attemptedStatements, 2, 'route metrics retain background separation')
   assert.equal(accs.get('b').attemptedStatements, 4)
   const isolated = metrics.createRequestMetrics('api', 'new')

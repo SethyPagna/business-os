@@ -331,45 +331,45 @@ export interface OrphanStagingReport {
 // ledgers). Per the locked plan this cleanup is NEVER automatic: the
 // admin endpoint (routes/system.ts) defaults to a dry-run report and only
 // deletes on an explicit force, after the operator has a backup.
+// SQLite does not skip repeated leading index keys for DISTINCT; seek between job ids instead of scanning every row.
+export function distinctJobIdsSql(table: string): string {
+  return `WITH RECURSIVE j(id) AS (SELECT MIN(job_id) FROM ${table} UNION ALL SELECT (SELECT MIN(job_id) FROM ${table} WHERE job_id > j.id) FROM j WHERE j.id IS NOT NULL) SELECT id FROM j WHERE id IS NOT NULL`
+}
+
 export async function cleanOrphanImportStaging(env: Env, options: { apply: boolean }): Promise<OrphanStagingReport> {
   const db = getDb(env)
   const tables: Record<string, number> = {}
-  for (const table of JOB_SCOPED_TABLES) {
-    const row = await db.prepare(
-      `SELECT COUNT(*) AS n FROM ${table} WHERE job_id NOT IN (SELECT id FROM import_jobs)`,
-    ).get<{ n: number }>()
-    tables[table] = row?.n ?? 0
-  }
 
-  // The bulk staging tables live on the separate import-staging DB (see
-  // lib/db.ts). import_jobs is on the MAIN DB and D1 has no cross-database
-  // queries, so the `NOT IN (SELECT id FROM import_jobs)` subquery used above
-  // cannot run here. Read the live job ids once from the main DB, then group
-  // each staging table by job_id on its own DB and treat every group whose id
-  // is not live as orphaned -- bounded by the (small) number of distinct jobs,
-  // not by row count.
+  const candidates: Record<string, string[]> = {}
+  const discover = async (conn: typeof db, table: string) => {
+    candidates[table] = (await conn.prepare(distinctJobIdsSql(table)).all<{ id: string }>()).map(row => String(row.id))
+  }
+  for (const table of JOB_SCOPED_TABLES) await discover(db, table)
+  for (const table of STAGING_JOB_SCOPED_TABLES) await discover(db.staging, table)
+
+  // Discover children before reading parents so a concurrently created import can never enter the orphan candidate set.
   const liveJobRows = await db.prepare(`SELECT id FROM import_jobs`).all<{ id: string }>()
   const liveJobIds = new Set(liveJobRows.map((r) => String(r.id)))
-  const stagingOrphanJobIds: Record<string, string[]> = {}
-  for (const table of STAGING_JOB_SCOPED_TABLES) {
-    const grouped = await db.staging.prepare(`SELECT job_id, COUNT(*) AS n FROM ${table} GROUP BY job_id`).all<{ job_id: string; n: number }>()
-    const orphanIds: string[] = []
-    let count = 0
-    for (const group of grouped) {
-      if (liveJobIds.has(String(group.job_id))) continue
-      orphanIds.push(String(group.job_id))
-      count += Number(group.n) || 0
-    }
-    stagingOrphanJobIds[table] = orphanIds
-    tables[table] = count
+  const orphanJobIds: Record<string, string[]> = {}
+  const scan = async (conn: typeof db, table: string) => {
+    const orphanIds = candidates[table].filter(id => !liveJobIds.has(id))
+    orphanJobIds[table] = orphanIds
+    tables[table] = orphanIds.length
+      ? Number((await conn.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE job_id IN (SELECT value FROM json_each(@ids))${conn === db ? ` AND NOT EXISTS (SELECT 1 FROM import_jobs WHERE id = ${table}.job_id)` : ''}`).get<{ n: number }>({ ids: JSON.stringify(orphanIds) }))?.n) || 0
+      : 0
   }
+  for (const table of JOB_SCOPED_TABLES) await scan(db, table)
+  for (const table of STAGING_JOB_SCOPED_TABLES) await scan(db.staging, table)
 
   // Orphaned raw files: only ever the unlinked ones -- a Library-linked
   // object belongs to the Library row, not the import job.
-  const orphanFiles = await db.prepare(`
-    SELECT stored_path FROM import_job_files
-    WHERE job_id NOT IN (SELECT id FROM import_jobs) AND file_asset_id IS NULL
-  `).all<{ stored_path: string }>()
+  const orphanFiles = orphanJobIds.import_job_files.length
+    ? await db.prepare(`
+      SELECT stored_path FROM import_job_files
+      WHERE job_id IN (SELECT value FROM json_each(@ids)) AND file_asset_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM import_jobs WHERE id = import_job_files.job_id)
+    `).all<{ stored_path: string }>({ ids: JSON.stringify(orphanJobIds.import_job_files) })
+    : []
   const r2Keys = orphanFiles.map((f) => String(f.stored_path || '')).filter(Boolean)
 
   if (!options.apply) {
@@ -377,19 +377,12 @@ export async function cleanOrphanImportStaging(env: Env, options: { apply: boole
   }
 
   const r2 = await deleteObjectsBulk(env.ASSETS, r2Keys)
-  await db.batch(
-    JOB_SCOPED_TABLES.map((table) => ({
-      sql: `DELETE FROM ${table} WHERE job_id NOT IN (SELECT id FROM import_jobs)`,
-    })),
-  )
-  // Delete the staging-DB orphans by their explicit (already-computed) job ids,
-  // since a cross-database subquery is not available there.
-  const stagingDeletes: JobScopedStatement[] = []
-  for (const table of STAGING_JOB_SCOPED_TABLES) {
-    for (const jobId of stagingOrphanJobIds[table]) {
-      stagingDeletes.push({ sql: `DELETE FROM ${table} WHERE job_id = @id`, params: { id: jobId } })
-    }
-  }
+  const deletesFor = (list: readonly string[], sameDatabase: boolean): Array<{ sql: string; params: { ids: string } }> => list
+    .filter((table) => orphanJobIds[table].length)
+    .map((table) => ({ sql: `DELETE FROM ${table} WHERE job_id IN (SELECT value FROM json_each(@ids))${sameDatabase ? ` AND NOT EXISTS (SELECT 1 FROM import_jobs WHERE id = ${table}.job_id)` : ''}`, params: { ids: JSON.stringify(orphanJobIds[table]) } }))
+  const mainDeletes = deletesFor(JOB_SCOPED_TABLES, true)
+  if (mainDeletes.length) await db.batch(mainDeletes)
+  const stagingDeletes = deletesFor(STAGING_JOB_SCOPED_TABLES, db.staging === db)
   if (stagingDeletes.length) await db.staging.batch(stagingDeletes)
   return { applied: true, tables, r2Keys: r2Keys.length, r2Deleted: r2.deleted, r2Errors: r2.errors.length ? r2.errors : undefined }
 }
