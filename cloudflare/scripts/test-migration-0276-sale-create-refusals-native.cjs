@@ -1,7 +1,6 @@
 'use strict'
 
-// PRIVATE PROPOSAL ONLY. Not executed or installed in the application tree.
-// Parent runner: node <this-file> <sale-safety-worktree>
+// Native SQLite coverage for the durable sale-create refusal barrier.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')

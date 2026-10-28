@@ -156,6 +156,7 @@ import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecima
 import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
 import { assertSaleSnapshotBudget, isAtomicSaleSnapshotBudgetFailure, saleSnapshotBudgetSql, SALE_SNAPSHOT_BYTE_BUDGET, SALE_SNAPSHOT_FRAMING_RESERVE, SaleSnapshotBudgetError, serializedSaleSnapshotBytes } from '../lib/saleSnapshotBudget'
 import { certifySaleCreateRefusal, readSaleCreateRefusal, SaleCreateRefusalUnavailableError, type SaleCreateRefusalDecision } from '../lib/saleCreateRefusal'
+import { jsonObjectSql } from '../lib/jsonObjectSql'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -420,7 +421,7 @@ const CANONICAL_SALE_ITEM_KEYS = ['id','sale_id','product_id','product_name','sk
     'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json'] as const
 
 function canonicalSaleItemSql() {
-  return `json_object(${CANONICAL_SALE_ITEM_KEYS.map(key => `'${key}',i.${key}`).join(',')})`
+  return jsonObjectSql(CANONICAL_SALE_ITEM_KEYS.map(key=>[key,`i.${key}`] as const))
 }
 
 function canonicalSaleItemsSql() {
@@ -449,8 +450,9 @@ const CANONICAL_SALE_HEADER_KEYS = ['id','receipt_number','sale_status','updated
     'calculated_total_usd','rounding_adjustment_usd'] as const
 
 function canonicalMutationResponseShapeSql(responseSql: string, itemsSql: string, bindingsSql: string): string {
-  return `(SELECT json_set(${responseSql},'$.sale',json_object(${CANONICAL_SALE_HEADER_KEYS.map(key => `'${key}',s.${key}`).join(',')},
-    'items',json(${itemsSql}),'pricing_identity_bindings',json(${bindingsSql})), '$.moneyPrecisionVersion',s.money_precision_version,
+  const sale=jsonObjectSql([...CANONICAL_SALE_HEADER_KEYS.map(key=>[key,`s.${key}`] as const),
+    ['items',`json(${itemsSql})`],['pricing_identity_bindings',`json(${bindingsSql})`]])
+  return `(SELECT json_set(${responseSql},'$.sale',${sale}, '$.moneyPrecisionVersion',s.money_precision_version,
     '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
     FROM sales s WHERE s.id=@saleId)`
 }
