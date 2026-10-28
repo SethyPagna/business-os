@@ -1338,6 +1338,7 @@ function reportRestocked(row: ReportScalarRow): boolean {
 
 type ReportSaleFacts = {
   sale: ReportScalarRow; version: 0 | 1; recognized: boolean; awaiting: boolean; valued: boolean
+  subtotal: ReportExactDecimal; storeDiscount: ReportExactDecimal; membershipDiscount: ReportExactDecimal
   net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
@@ -1521,7 +1522,8 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     const owed = recognized && awaiting ? reportStillOwed(sale, returns.get(Number(sale.id)) || []) : ReportExactDecimal.zero()
-    return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
+    return { sale, version, recognized, awaiting, valued, subtotal, storeDiscount, membershipDiscount,
+      net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
       cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, knownCostLines, owed }
   })
 }
@@ -1567,9 +1569,7 @@ function aggregateReportSnapshot(
     const { sale, version } = fact
     const bucket = getBucket(bucketForSale(sale))
     bucket.tx += 1
-    const subtotal = reportMoney(sale, 'subtotal_usd', version)
-    const storeDiscount = reportMoney(sale, 'discount_usd', version)
-    const membershipDiscount = reportMoney(sale, 'membership_discount_usd', version)
+    const { subtotal, storeDiscount, membershipDiscount } = fact
     const tax = reportMoney(sale, 'tax_usd', version)
     const deliveryFee = reportMoney(sale, 'delivery_fee_usd', version)
     const storeDelivery = String(sale.delivery_fee_paid_by || 'customer') === 'store' ? deliveryFee : ReportExactDecimal.zero()
