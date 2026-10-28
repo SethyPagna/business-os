@@ -88,7 +88,7 @@ function routeDb(db, hooks = {}) {
     batch: async (statements) => {
       if (hooks.beforeBatch) await hooks.beforeBatch(db, statements)
       const results = await db.batch(statements)
-      if (hooks.afterBatchThrow) throw new Error('simulated lost D1 batch response')
+      if (hooks.afterBatchThrow && statements.some(({sql}) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) throw new Error('simulated lost D1 batch response')
       return results.map((result, index) => {
         const directChanges = Number(result.meta?.changes || 0)
         return /INSERT\s+INTO\s+sales\s*\(/i.test(statements[index].sql) && directChanges > 0

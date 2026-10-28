@@ -412,12 +412,13 @@ async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boole
     && items.has('pricing_snapshot_json')
 }
 
-function canonicalSaleItemsSql() {
-  const keys = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
+const CANONICAL_SALE_ITEM_KEYS = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
     'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
     'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
-    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json']
-  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json'] as const
+
+function canonicalSaleItemsSql() {
+  return `(SELECT json_group_array(json_object(${CANONICAL_SALE_ITEM_KEYS.map(key => `'${key}',i.${key}`).join(',')}))
     FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
 }
 
@@ -449,13 +450,15 @@ async function committedMutationResponse(db: ReturnType<typeof getDb>, operation
   return JSON.parse(receipt.response_json) as Record<string,unknown>
 }
 
-/** A single SQL snapshot prevents a later edit mixing a header with older lines. */
+/** One read transaction keeps header and lines coherent without a D1-sized aggregate value. */
 async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
-  const row = await db.prepare(`SELECT s.*,${canonicalSaleItemsSql()} AS canonical_items
-    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
-  if (!row) return null
-  const { canonical_items, ...sale } = row
-  const snapshot={ ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  const results = await db.batch([
+    { sql:'SELECT * FROM sales WHERE id=?',params:[saleId] },
+    { sql:`SELECT ${CANONICAL_SALE_ITEM_KEYS.join(',')} FROM sale_items WHERE sale_id=? ORDER BY id`,params:[saleId] },
+  ])
+  const sale = results[0].results[0] as Record<string,unknown> | undefined
+  if (!sale) return null
+  const snapshot={ ...sale, items:results[1].results as Record<string,unknown>[] }
   if(Number(sale.money_precision_version)===1){
     const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
     validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)
