@@ -1,38 +1,51 @@
 # progress.md — Business OS live ledger
 
-*Lean board, reorganised 27 Oct 2026 (6.0.998). Read it every session; the detail lives in the linked files. Never put customer names, phone numbers or other personal data in this file or any tracked file.*
+*Lean board, reorganised 27 Oct 2026 (6.0.998), reconciled 28 Oct (6.0.1009). Read it every session; the detail lives in the linked files. All 212 queue IDs remain open under their recorded states. Never put customer names, phone numbers or other personal data in this file or any tracked file.*
 
-**Contents:** [Status](#status-snapshot--27-oct-2026-cambodia-utc7) · [Lanes](#current-status) · [Release process](#release-process) · [Owner questions](#open-owner-questions) · [Golden Rules](#golden-rules) · [Queue](#queue) — elsewhere: [owner decisions](docs/owner-decisions.md) · [queue details](docs/queue-details.md) · [releases, holds, history](docs/history/releases.md) · [session log](docs/history/session-log.md)
+**Contents:** [Status](#status-snapshot--28-oct-2026-cambodia-utc7) · [Lanes](#current-status) · [Release process](#release-process) · [Owner questions](#open-owner-questions) · [Golden Rules](#golden-rules) · [Queue](#queue) — elsewhere: [owner decisions](docs/owner-decisions.md) · [queue details](docs/queue-details.md) · [releases, holds, history](docs/history/releases.md) · [session log](docs/history/session-log.md)
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 27 Oct 2026 (Cambodia, UTC+7)
+## Status snapshot — 28 Oct 2026 (Cambodia, UTC+7)
 
-- **Live:** `efaac4452` = RC1 (`rc/20261026b`: 6.0.983, 984, 986, 987, 993), deployed 26 Oct 14:58Z (run 40322968341), tier paid, health pack HEALTHY. **main = `74577d8e3`** (tree equals the release).
-- **Deploying (27 Oct, slot 1):** RC2b `a8dbbe1fc` = 6.0.985 + 6.0.989 + 6.0.991 + the exchange budget fix, migration 0272. Gate 40382886386 GREEN (Worker 1077/1077, frontend 981/981); Opus delta READY WITH EXCEPTIONS. Rollback = redeploy `efaac4452` through deploy.yml, never `wrangler rollback` (6.0.984 crons).
-- **Next:** RC2b postflight and main promotion; RC3 = 6.0.988 + 6.0.992 (with 6.0.990) + 6.0.982 (+ 6.0.994) after each exact gate and review; 6.0.997 S3/S4 after owner questions 1–4; proposals from the 27 Oct page analysis.
-- **Migrations:** production through 0271; 0272 rides RC2b; 0273 is 6.0.988's; 0274 is held for the 6.0.983 customers index if the owner approves.
+- **Last verified deployment:** RC3 `a9ba6f20a3cc36b45466c079db3fd9c545234c02`, Paid, [run 40528438213](https://github.com/SethyPagna/business-os/actions/runs/40528438213), published 27 Oct 17:21:59Z = **28 Oct 00:21 Cambodia / 01:21 Hong Kong**. It contains 6.0.988, 6.0.992 (+990), 6.0.994 and the restore deletion/maintenance fixes, on deployed RC2b. It does **not** contain 982, 997, 999, 1000 or the performance lanes.
+- **Release evidence and limits:** that deployment's sweep passed Worker 1084/1084 and frontend 985/985. Cloudflare API identity matched Worker `cf59f491-f154-4547-bcf9-2b51470f8aaf`; eight business-table counts matched. Site, `/health` and admin HTTP checks met bot challenges. Deployment/API and count postflight passed; a full semantic health pack and device acceptance are **not certified by this evidence**. Reconcile the actual Cambodia publish date before counting release slots.
+- **Git state:** remote main last freshly fetched is `1e38ae527`; main alone is not deployment evidence. Local integration `cc02e34a1` combines deployed RC3 with backend 1004 `1df07bfbd`; its integrated verification is in progress. The original dirty worktrees and separate legacy repository are preserved; their local refs do not establish remote main.
+- **Current focus:** one implementation slice at a time: finish integrated 1004 verification, prevent large-sale committed-but-error/recovery failures, then 1001 reads and reviewed reliability composition. Dashboard is the first visible page, Sales second; each changed page, float and interaction needs its own versioned prototype and owner approval before application. Eight analyses are complete; consolidated proposals and prototypes remain pending.
+- **Free deadline and backup:** the owner switches to Free on **30 Oct, no extension**; the reduced-read build must be live by Cambodia 29 Oct. Keep Free/Paid configurations, local testing and separate deployment approval. External encrypted backups on Free are selected; workflow/recovery verification and changed in-app guidance remain open. 1004's bounded checks do not certify CPU, daily quotas or whole-app Free readiness.
+- **Migrations:** release evidence confirms 0272 from RC2b and 0273 from RC3. 0274 remains held for the unapproved customers index; 997 S2's 0275 is not deployed. Never apply a migration from a lane's existence alone.
 
 ## Current status
 
-States: planned · in progress · review · gate · ready · live. Lanes already live are in the [release history](docs/history/releases.md).
+States distinguish local implementation, bounded review, integrated verification and deployment. Earlier live lanes are in the [release history](docs/history/releases.md); the newer RC3 evidence is recorded above. A deployed subpart does not close a compound queue item.
 
 | version | lane | state | branch / sha | blocker |
 | --- | --- | --- | --- | --- |
-| RC2b | 6.0.985 + 6.0.989 + 6.0.991 + exchange budget fix, migration 0272 | live (deploying 27 Oct) | `rc/20261027b` @ `a8dbbe1fc` | postflight, then promote main |
-| 6.0.982 | sale payments S4: checkout/settle payment events, instalments | review (round 6) | `claude/pay-s4-20261026` @ `5db44b22b` | owner 27 Oct answers; gate 40373482121 red (unused-locals, zombie imports) |
-| 6.0.988 | Conflicts lists unknown-cost and empty-barcode products (0273) | review | `claude/conflicts-list-20261026` @ `ffe409cd6` | value-bound marks in 0273 being built |
-| 6.0.992 (+990) | locked old-format returns: managers update the money details | gate | `claude/return-legacy-admin-20261026` @ `61e0aa60d` | gate 40439056367; History label still says "format" |
-| 6.0.994 | RC2 P3 follow-ups | gate | `claude/rc2-p3-20261027` @ `54a2b03fa` | gate 40438883172 |
-| 6.0.996 | RC3 dry-run compose (read-only) | review | rehearsal `7d06eeff4`, not pushed | redo after the 982/988/992 rounds |
-| 6.0.997 | hand-edit current-format returns | in progress (S1, S2) | `claude/return-v1-edit-20261027` | S3/S4 wait on owner questions 1–4 |
-| 6.0.998 | this board | review | `claude/progress-organize-20261027` | lead merges |
-| analysis | app-wide page/function/float analysis (8 read-only areas) | in progress | `Records/Analysis/2026-10-27/` (private) | proposals follow |
+| RC2b / RC3 | deployed release line, migrations 0272 / 0273 | deployed, qualified postflight | `a8dbbe1fc` / `a9ba6f20a` | HTTP/semantic health and device acceptance remain separate |
+| 6.0.982 | sale payments S4: checkout/settle payment events, instalments | review; not deployed | `claude/pay-s4-20261026` @ `dff9f02d7` | exact-tip review/gates and composition; later payment slices remain open |
+| 6.0.988 | Conflicts lists unknown-cost and empty-barcode products (0273) | deployed in RC3 | `29428256b` | cost-reader sweep and unanswered mark questions remain open |
+| 6.0.992 (+990) | locked old returns: managers update money details; paged Sales | deployed in RC3 | `a06239cb6` | current-format editing and residual obligations remain separate |
+| 6.0.994 | RC2 P3 follow-ups | deployed in RC3 | `54a2b03fa` | number-probe headroom and deferred P3s remain open |
+| 6.0.996 | RC3 dry-run compose (read-only) | historical rehearsal | `7d06eeff4`, not pushed | actual release is RC3 above; rehearsal is not release evidence |
+| 6.0.997 | hand-edit current-format returns | S1/S2 committed; not deployed | S1 `eb64ca1de`; S2 `e54d42ab7` | Q1–Q4 answered; S3/S4, integration, prototypes and acceptance remain pending |
+| 6.0.998 | lean task board | merged into remote main | `82be2aefa` | stale status/decisions reconciled by 1009; all 212 obligations retained |
+| 6.0.999 | return edit Undo/Redo keeps damaged handling and notes | review; not deployed | `dd882ebbd` | exact-tip/composition verification and old-client admission ruling |
+| 6.0.1000 | bootstrap settings visibility | reviewed with notes; not deployed | `9a3e0394b` | gate recorded green; integrate and verify on the release candidate |
+| 6.0.1001 | Dashboard/Sales Worker reads | preserved unfinished work; not certified | `claude/perf-reads-20261027` | row consumption, oversized results, parity and Free/Paid certification |
+| 6.0.1002 | transport coalescing and read recovery | earlier tip READY-WITH-NOTES; delta pending | `1893baf98` | recheck latest delta, account boundaries and composition |
+| 6.0.1003 | Dashboard/Sales screens and bell | **NOT READY; prototype approval pending** | `9ff25546a` | IME search, prefetch cancellation, stale explicit refresh, actor isolation and refresh starvation |
+| 6.0.1004 | physical D1-call accounting and staging cleanup | local checks/bounded review done; integrated verification in progress | lane `1df07bfbd`, integration `cc02e34a1` | not deployed or full-release/Free-readiness certified |
+| 6.0.1005 | middleware reads and counts-only bell | READY-WITH-NOTES; not deployed | `f5b3629c3` | index-presence preflight, latest delta and integration verification |
+| 6.0.1006 | whole-hundreds riel cash | committed; not deployed | `cab83488f` | owner residuals, review, 982 dependency and visible prototype approval |
+| 6.0.1007 | Telegram received by actual payment day | committed; not deployed | `aa522b9dd` | payment-event dependencies, review and composition |
+| 6.0.1008 | Free-budget operations; large-sale failure | committed; release blockers remain | `a7a5412a0` | large-sale pre-write/recovery fix, CPU measurement and independent verification |
+| 6.0.1009 | takeover board, decisions and queue reconciliation | local documentation checkpoint | this three-document change | no queue closures; app verification belongs to 1004 |
+| analysis | app-wide page/function/float analysis (8 read-only areas) | complete code analysis | `Records/Analysis/2026-10-27/` (private) | recheck stale findings; ranked plan and versioned prototypes pending |
 | 6.0.969, 980–981 | multi-client line: merge main in; first admin and client secrets at deploy | in progress | `claude/mc-merge-20261023`, `claude/first-admin-at-deploy-20261025` | branch only; 980–981 not pushed |
 
 ## Release process
 
-- Every candidate: exact-SHA full GitHub gate, independent review, threat review and secrets scan, `deploy.yml plan=paid`, independent postflight and health pack; never infer that main is deployed. Follow the [deploy-provenance skill](.claude/skills/deploy-provenance/SKILL.md) before any deploy.
+- Every candidate: exact-SHA full GitHub gate, independent review, threat review and secrets scan, `deploy.yml` with the explicitly selected Free/Paid plan, matching runtime-tier verification, independent postflight and health pack; never infer that main is deployed. Implementation approval is not production-deployment or migration approval. Follow the [deploy-provenance skill](.claude/skills/deploy-provenance/SKILL.md) before any deploy.
 - At most two deploys per Cambodia date (07:00, and one after 20:00 with fresh `open_today=0`); since 22 Oct a daytime deploy is allowed once work is finished, gated and reviewed.
 - Remote D1 only through the ops workflows; never wrangler `--remote` or a D1 connector from an agent. Migrations are append-only, LF-only, with pre/post assertions; a new number must clear `d1_migrations` and every ref.
 - Versions are reserved in `Records/Recovery/COMMIT-VERSIONS.json`; titles are `n.n.n — concise description`; never rewrite pushed history.
@@ -42,10 +55,8 @@ States: planned · in progress · review · gate · ready · live. Lanes already
 
 Newest first. **Owner decisions:** every ruling, newest first, is in [docs/owner-decisions.md](docs/owner-decisions.md); read it before planning, never re-ask a settled question, and move answers there.
 
-1. **Fixing a return on a later day (6.0.997 Q1):** does the refund difference go through today's drawer, or is it a typing mistake fixed on the return's own day? Recommended: today, with a "fix the original day" choice (the 27 Oct payment-correction answer points the same way).
-2. **Changing a return's date (6.0.997 Q2):** may a manager change it? Recommended: no.
-3. **Typing a refund amount (6.0.997 Q3):** may a manager refund less than the items add up to (an opened box)? Recommended: no for now.
-4. **Cancelling an old return today (6.0.997 Q4):** should the cancel count in today's drawer, like an edit? Recommended: yes, as its own lane.
+**Settled 27 Oct:** 997 Q1–Q4 are in [owner decisions](docs/owner-decisions.md): correction defaults to today's drawer with an explicit original-day typo choice; no return date edits; refund follows items; old cancels count today as a separate lane. Implementation remains pending. The remaining question numbers below retain their earlier identities.
+
 5. **Approving a rename (6.0.985):** should the other queued changes (price, image, cost) apply too when the admin may make them? Should Undo give the retired product its old name and barcode back?
 6. **Password again (6.0.986):** should other money-changing settings also ask for the password, like replacing a payment method?
 7. **Returns export (6.0.989):** are 20,000 returns per export, one year, 250 rows per page on Free right? Accept that old returns cannot detect a later whole-sale discount? Keep refusing restores after an item is added to a discounted sale? Review-tier staff cannot export returns: confirm.

@@ -26,6 +26,8 @@ Source: Consolidation lanes (last recorded state 19 Oct) · owner-decided
 
 - [~] **CONSOL-F — paid basket growth:** real HTTP808 confirms paid10/total10 plus Add20 becomes total30/paid10 while still Completed, absent from Not Paid; Overview collected rises10→30. Five independent first passes, anonymous cross-critiques (one disclosed substitute) and chair verdict are saved. Implementation remains OPEN: retained money/status, replay, collection/debt reports and settlement must agree; preserve actual change and correction authority. Debt-first return allocation is settled below; no financial runtime fix acceptance is claimed. → *27 Oct: sale payments S1–S3 are live; S4 is 6.0.982 (review).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): 982 is not in RC3; retained money, status and settlement work remains open.
+
 ### Q002
 
 Source: Returns, sales money, shifts and expenses › **Sales and POS** · needs owner
@@ -44,6 +46,8 @@ Source: Returns, sales money, shifts and expenses › **Sales and POS** · needs
 
   - S4R6-2#422 PARTIAL (today Show-all with bounded cursor); S4R5-2#423 DONE; POS-quickadd-permission#348 UNCERTAIN; PRODUCT-REVENUE-ALLOCATION#113 PARTIAL OWNER (line sums ignore whole-sale discounts); KERNEL-pricing#363 UNCERTAIN, KERNEL-sale-return#365 OPEN (one subtotal/discount/fee/tax/reversal helper); tax on an added sale line (archive L5584) OWNER (no stored tax rate: schema + pricing policy decision). → *26 Oct owner: no Show all; Previous/Next paging instead (6.0.990 removed it).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): 990 in RC3 removes Show all. Revenue allocation, kernels, tax and acceptance subparts remain open.
+
 ### Q005
 
 Source: Returns, sales money, shifts and expenses › **Sales and POS** · ready
@@ -55,6 +59,8 @@ Source: Returns, sales money, shifts and expenses › **Sales and POS** · ready
 Source: Returns, sales money, shifts and expenses › **Money rules and loyalty** · needs owner
 
   - REDEEM-1000#204, LOYALTY-khr-step#249 UNCERTAIN OWNER (BC-Q13); FX-forward-only#264, Currency-forward-only#388 PARTIAL (lock behaviour with a test and explain "applies to new sales" beside the rate editor); CHANGE-RATE-STAMP#195 DONE; Loyalty-switch-balance-acceptance#413 OWNER; Loyalty lookup disabled by policy#417 DONE (keep disabled unless the owner changes it).
+
+Takeover reconciliation, 28 Oct (6.0.1009): 990 ancestry contains the forward-only exchange-rate note. Loyalty and remaining test/editor acceptance stay open.
 
 ### Q007
 
@@ -140,17 +146,23 @@ Source: Reports, exports and receipts › **Completeness-pass additions (archive
 
   - REVENUE-DEFINITION-DRIFT OPEN verify (`compat.ts` still holds un-apportioned `- COALESCE(rf.refund_usd, 0)` copies near lines 390/400/434/444 and `attributedLineRevenue` near 345, and the Dashboard summary tiles use `SUM(total_usd)` over non-cancelled sales, a third revenue definition, so the tiles and the Analytics panel disagree on the same screen, archive L16605–L16611; related Discount-report-port#414).
 
+Takeover reconciliation, 28 Oct (6.0.1009): 1001 covers related Dashboard/Sales reads; revenue-definition correctness remains open pending certification.
+
 ### Q021
 
 Source: Added 27 Oct from the lane log · owner-decided
 
 - Sale payments S5–S8: the remaining slices of the 24 Oct payments design after S1–S3 (live) and S4 (6.0.982), including the five flagged old short sales (record the payment with its real date, "recorded late", kept out of current drawers).
 
+Takeover reconciliation, 28 Oct (6.0.1009): S5–S8 and the recorded-late repair remain open. No historic-data write is authorized.
+
 ### Q022
 
 Source: Added 27 Oct from the lane log · ready
 
 - 6.0.982 P3 follow-ups: a credit-only sale is counted and its revision bumped by the linked rename; add tests for the preview, audit and summary counts.
+
+Takeover reconciliation, 28 Oct (6.0.1009): 982 is not deployed in RC3; its P3 follow-ups remain open.
 
 ### Q023
 
@@ -172,17 +184,23 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 
   - cost-unknown + Conflicts: $0 cost = $0 loss, NULL cost = unknown and flagged, every unknown-cost item and empty-barcode product listed in Conflicts; sweep EVERY cost reader (reports, salesAnalytics, removalLosses, conflicts). Also closes the Reports courier column that prints a hidden figure as $0.00, and multilot NOTE 1 (a $0-cost lot disposal valued at catalog price). → *27 Oct: the Conflicts list is lane 6.0.988 (review).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): 988 Conflicts lists/marks and 0273 are deployed. The cost-reader sweep and remaining subparts stay open.
+
 ### Q026
 
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Import approve costs about 2,170 statements against the Paid 1,000-per-invocation limit: HIGH, VERIFY the production path before relying on large imports (multilot r3 refute).
 
+Takeover reconciliation, 28 Oct (6.0.1009): 1004 counts physical D1 calls separately from the historical 2,170-statement measurement. Capacity verification remains open.
+
 ### Q027
 
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - A 150-row plain CSV Add becomes one batch of 301 statements, over the 300 chunk (pre-existing, CPU split makes it harmless today): fold into the import lane.
+
+Takeover reconciliation, 28 Oct (6.0.1009): A 301-statement batch is one D1 call under 1004. Row, bind, CPU and atomicity limits remain separate open checks.
 
 ### Q028
 
@@ -418,6 +436,8 @@ Source: Added 27 Oct from the lane log · ready
 
 - 6.0.991 P3 follow-ups: the scanner test is weak, a residual race outside sale create, wide expiry seeks.
 
+Takeover reconciliation, 28 Oct (6.0.1009): 991 scanner, race and expiry-seek residuals remain open; deployment of 994 does not close them all.
+
 ## Returns
 
 ### Q067
@@ -426,11 +446,15 @@ Source: Returns, sales money, shifts and expenses › **Findings still MISSING o
 
   - (repro tests RED by design, kept out of release candidates): C imported returned quantity ignored in capacity (`returns.ts:733`; N1 returns-capacity landed 6.0.82–86 for release 2, check composition); D partial return on Not Paid leaves the Not Paid list, settlement refused, drawer pays out (`sales.ts:2420`); E replacement on a Not Paid sale booked as Cash (`returns.ts:101`; BC-Q5 rate rule).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Imported capacity, Not Paid debt/cash and replacement correctness require current-code proof; no subpart is closed here.
+
 ### Q068
 
 Source: Returns, sales money, shifts and expenses › **Findings still MISSING on production** · owner-decided
 
   - F paid sale that grows stays Completed, $20 unsettleable (`saleLineAddition.ts:592`); G restore after same-line repricing (owner ruling 12 Oct: refuse with "record a new return"); M return id N collides with sale-keyed movements (first blocking id 16780, latent); capacity float-sum refusal (`returnCreateAction.ts:355`) [BC §1.3, §3 N1, N2 (needs BC-Q1, Q4, Q5), OPUS-AREA-REVIEW-R2-STOCK-RETURNS, FINAL-a3e831ad6cc0d4e8c]. → *27 Oct: G (refuse restore after repricing) is 6.0.989 (RC2b, deploying); F belongs to the sale-payments work (6.0.982).*
+
+Takeover reconciliation, 28 Oct (6.0.1009): 989/RC2b includes restore-after-reprice refusal. Paid-sale growth belongs to outstanding 982; ID/capacity residuals remain open.
 
 ### Q069
 
@@ -438,17 +462,23 @@ Source: Returns, sales money, shifts and expenses › **Returns register** · ne
 
   - F2#10 PARTIAL (Not Paid returns until RETURNS-MONEY 0204; held migration 0238 backfill: see Holds); RETURN-atomicity#248 / PART77-RETURNS-ATOMIC#185 PARTIAL (cross-step atomic create/edit, unpaged/N+1 sites); RETURN-replacement#330 PARTIAL (same-name replacement/settlement, unified chooser); RETURN-cancel-policy#296 PARTIAL OWNER (cancellation semantics for refund/stock/COGS).
 
+Takeover reconciliation, 28 Oct (6.0.1009): 997 and old-cancel policies are answered. Implementation and cancellation, stock and COGS gaps remain open.
+
 ### Q070
 
 Source: Returns, sales money, shifts and expenses › **Returns register** · ready
 
   - SALE-RETURN-ID#97 UNCERTAIN (equal sale/return ids, finding M); RETURN-SUBCENT#96 DONE; legacy v0 customer return create/edit does per-line N+1 capacity reads (Free-plan P1, OPUS-EFFICIENCY-REVIEW-R2 W2); two-line mixed CREATE over Free budget (CRB spin-off); edit/create `batch_id` asymmetry; EditReturnModal never sends `stock_condition` (7077327 finding 1), PATCH not actor-fenced (finding 8).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Related work is in 1004 budgets, 999 damaged handling and 997 edits. Atomicity and the other named gaps remain open.
+
 ### Q071
 
 Source: Returns, sales money, shifts and expenses › **Legacy ledger leftovers (not in the register)** · needs owner
 
   - RETURNS-ENDPOINT OPEN — returns endpoint/UI `66399fef` isolated pending lifecycle integration; list/export 500/1000 loaded-row cap is a separate completeness issue (archive L1081); P1-RULINGS-PRECISION OWNER — non-blocking rulings on Precision v1: cached old PWA `409 money_precision_review_needed`, preview page-size key, zero-result pager, sub-cent return cancel, spurious `write_conflict` on return create (archive L1947).
+
+Takeover reconciliation, 28 Oct (6.0.1009): RC3 includes 992 legacy unlock/money-detail handling. Export completeness and unresolved Precision rulings remain open.
 
 ### Q072
 
@@ -461,6 +491,8 @@ Source: Returns, sales money, shifts and expenses › **Legacy ledger leftovers 
 Source: Added 27 Oct from the lane log · ready
 
 - 6.0.994 E1 follow-up: return and receipt number probes retry on same-second collisions; give the exchange request statement headroom (RC2b sits exactly at the budget of 50).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Exchange number-probe/headroom work remains open; 994 in RC3 does not complete E1.
 
 ## Contacts
 
@@ -489,6 +521,8 @@ Source: Stock, catalog, contacts and suppliers › **Contacts and suppliers** ·
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Shift-cash leftovers: amend opened_at later, sales between close and reopen (resolved by the round 6 parent-close float), admin time edits that leave money outside a shift.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Return corrections and old cancels counting today are settled policy. Shift time/cash residuals remain open.
 
 ### Q078
 
@@ -520,6 +554,8 @@ Source: Returns, sales money, shifts and expenses › **Shifts and expenses** ·
 
   - N43 (shift open/close cash semantics) and N44 (field-specific compact input sizing) legacy-OPEN (archive L15949, L15966; shift lines now covered by shift-cash-everywhere 6.0.104–107 + 6.0.154–157 refuter fixes in flight: telegram-topics pin, Additional on the shift list card, per-shift drawer mutation guard, reopen/close actor named).
 
+Takeover reconciliation, 28 Oct (6.0.1009): 1006 covers whole-hundreds cash and 1007 payment-day reports. Shift field and money acceptance remain open.
+
 ### Q083
 
 Source: Returns, sales money, shifts and expenses › **Shifts and expenses** · ready
@@ -538,17 +574,23 @@ Source: Telegram and notifications · ready
 
 - Pending-tag + Telegram-per-review lane (release 3 slice C, above); Khmer wording unification (Stock-in session, import row codes, Audit Log context block English labels "Before", "Created By", "Pending Action Id", "Requested By", km "sale" is bare លក់ where ការលក់ is more natural, 18 uses) OPEN [CLAUDE-RELEASE-2-GATE-FIXES, P-KM key map KM-STOCKIN-WORDING-KEYS].
 
+Takeover reconciliation, 28 Oct (6.0.1009): RC3 strings do not certify the whole glossary or Khmer copy; this scope remains open.
+
 ### Q086
 
 Source: Telegram and notifications · needs owner
 
 - TG-TOPICS-OPS#37 / OPS-settings OPEN OWNER (guarded deployment-only write of the six Telegram topic ids supplied by the owner 27 Sep; production stores none; single-tenant per organization, never a migration); Telegram-live-shift-acceptance#399 OPEN (live shift-close behaviour); S4-6#143 PARTIAL (status message names the actual updater; amend message now names the actor in shift-cash-everywhere); TG-ASTRAL#88 PARTIAL (shared astral-character fixture for `cleanLine` and `saleItemNameLayout`); Notifications low/out alerts only on a sale crossing the threshold (donor NOTIF-V2 `ca36cfb3b`, `telegram.ts:1024` still a standing list) MISSING; Telegram carries profit/courier chat-wide by design (owner info); LOYALTY-notification manual adjustment#416 DONE; QUEUE-ERROR-CODE#91 PARTIAL (raw English `last_error`); Telegram report images (REPORT-CENTER#56). → *27 Oct: crossing-only alerts are lane 6.0.991 (RC2b, deploying).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): 1007 is related Telegram work. Live, device and data-specific subparts still need separate evidence.
+
 ### Q087
 
 Source: Telegram and notifications › **Legacy ledger leftovers (not in the register)** · needs owner
 
   - CP3B1-SETTOPIC OPEN (PENDING entry for the /settopic broadcast, U-broadcast, archive L184); BP-10 OWNER (Telegram settings permissions question left open after CP-3d, archive L188); amend message names the actor (done in shift-cash-everywhere), but who amended a sale/return status in older status messages: S4-6#143.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Telegram settings authority and legacy-actor residuals remain open; 1007 does not satisfy the whole obligation.
 
 ### Q088
 
@@ -576,6 +618,8 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 
   - Review before/after records: a before/after record for every action and a record viewer (owner 14 Oct).
 
+Takeover reconciliation, 28 Oct (6.0.1009): The 27 Oct ruling requires Records on every row/page. Systemic writers, viewers, retention and permissions remain open.
+
 ### Q092
 
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)** · ready
@@ -599,6 +643,8 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · needs owner
 
   - Stock Set undo/redo writes no audit row. Owner questions (all prunable today): promotions, `product/delete` with stock, loyalty `award_points`, whether review rejects matter after 21 days; also award_points and promotion replay receipts after 21 days, a record of the purge itself, and a purge cost that grows.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Backup-created/refused attempts now have an explicit keep-forever ruling. Wider stock audit/retention questions remain open.
 
 ### Q096
 
@@ -629,6 +675,8 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 Source: Accounts, sessions and drafts › **account-isolation-2 OPEN (queued after receiving-f1)** · ready
 
   - server switch does not reset the account (`AppContext.tsx:1903-1909`); import `apiFormPost` server-switch fence only (keep the same-server pin in `privateTransportScope.test.ts:84-90`); server component in actor-scoped pending keys (fee create, transfer run, shift, return/sale mutations, POS carts) with read-new-then-legacy, never delete.
+
+Takeover reconciliation, 28 Oct (6.0.1009): 1002 transport and the 1003 bell actor-reset blocker are related work. Server-switch/pending-key acceptance remains open.
 
 ### Q101
 
@@ -678,6 +726,8 @@ Source: Permissions, review queue, audit and undo › **Review-queue completion 
 
   - A approve-performs-merge (shared `runIdentityEditFold`, `confirm_merge_into` preview, reviewer merge/image/survivor-price/cost checks, approval inside the merge batch, undo restores identity, Free budget refusal); B mini pending-review tag + shared store (Products, Inventory, Fees, Branches, reasons); C Telegram alert per review + queue route (`reviewAlert.ts`, `requestDefer.ts`, reviewGate, reviewQueue, telegram.ts/telegramLang.ts, Settings). → *27 Oct: slice A is lane 6.0.985 (RC2b, deploying).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): 985 is deployed in RC2b. The extra queued-field/undo-identity owner question remains distinct and unanswered.
+
 ### Q109
 
 Source: Permissions, review queue, audit and undo › **Review-queue completion plan (OPUS-PLAN-REVIEW-QUEUE-COMPLETION): historical B, C and D shipped in release2e; sliceA and the listed follow-ups remain OPEN** · needs owner
@@ -708,11 +758,15 @@ Source: Permissions, review queue, audit and undo › **Register** · ready
 
   - AUDIT-PER-RECORD#18 PARTIAL; AUDIT-FILTER-CAP#20 PARTIAL (cheap: cap values per filter, `auditLogQuery.ts:208-216`); K1#169, K1-create-delete#221, K1-scopes#222, K1-remaining#383 PARTIAL (server undo/redo appliers missing for contacts, files, lookups, users/roles, settings, fees, sale/return create); UNDO-status-conflict#322 DONE.
 
+Takeover reconciliation, 28 Oct (6.0.1009): The Records programme requires applies-to dates and audit completeness; the named subparts remain open.
+
 ### Q114
 
 Source: Permissions, review queue, audit and undo › **Register** · needs owner
 
   - K6#171 DONE; PERM-action-editor#244 PARTIAL (direct per-action admin selection, preset bundles; BC-Q12); Custom-permissions#391 PARTIAL (reject unsupported combinations, `users.ts:1014-1075`); SECURITY-SETTINGS#41 UNCERTAIN OWNER (keep or remove the unused key); REPAIR-permission-rule#247 UNCERTAIN OWNER (`POST /repair-integrity` backup-or-settings gate).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Resets, restore and factory reset require backup_restore plus password. Broader catalog and repair permission scope remains open.
 
 ### Q115
 
@@ -726,11 +780,15 @@ Source: Permissions, review queue, audit and undo › **Register** · needs owne
 
   - Wide-Records-cascades#407 PARTIAL; permission deep-walk (archive L9374, L8614, L9385) legacy-OPEN; Organization-concept removal ORG-removal#306 OPEN OWNER (audit read sites before removing or hard-coding the default business); donors PERM-PROMO-DISC `86c3a2fb3`, PROD-PERM `c7d8529ee` PARTIAL.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Records on every row/page is answered. Visibility, retention, cascades and organisation removal remain open.
+
 ### Q117
 
 Source: Permissions, review queue, audit and undo › **Correctness hunt R2 follow-ups (OPUS-CORRECTNESS-HUNT-R2, 13 Oct 09:15Z; no blocker)** · ready
 
   - H3 OPEN (an approved review's exact discount differs from the direct-edit rounding: review-queue slice A); H7 OPEN (a same-user network blip causes a permission refresh and `resetActorReadSession`, which locks the Fee/Branch forms with a false "account changed" and drops typed text: fees-k-frontend 6.0.158–160 puts a shared `useFrozenDraftAuthority` on the write identity, also efficiency A6).
+
+Takeover reconciliation, 28 Oct (6.0.1009): 1002/1003 address the current account-scope incident; earlier Dashboard sign-in fixes do not close this obligation.
 
 ### Q118
 
@@ -796,6 +854,8 @@ Source: Consolidation lanes (last recorded state 19 Oct) · ready
 
 - [~] **CONSOL-RECONCILE — full task ledger:** stable requirement/source/test/donor/release/acceptance mapping is underway. Inventory count sessions are in progress and image-only received-date filters remain queued; date/session/baseline/customer decisions are settled; their composed implementation and acceptance remain open. Physical devices/PWA, licence/compliance, broader correctness/performance and safe cleanup remain OPEN/HOLD. Preserve the entire historical queue below; old MISSING or checked rows need current evidence.
 
+Takeover reconciliation, 28 Oct (6.0.1009): This reconciliation preserves all 212 IDs. The full requirement/code/test/release/acceptance audit remains partial.
+
 ### Q128
 
 Source: Consolidation lanes (last recorded state 19 Oct) · ready
@@ -825,6 +885,8 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
 
   - Free-plan paths over 50 statements: the conflict review loop alone, Dashboard startup at about 4.2k sales (view-more lists now 2–3 statements after the card); lanes E-TG, E-RET, E-ECHO, E-SNAP, E-PUT, E-STOCKIN, E-CLEAN stay queued behind slice A.
+
+Takeover reconciliation, 28 Oct (6.0.1009): 1001–1008 cover related work. The current ceiling counts physical D1 calls; historical statement observations remain evidence, not a whole-app Free certificate.
 
 ### Q133
 
@@ -856,11 +918,15 @@ Source: UI, mobile and device acceptance › **Owner daily-use UI (DU-A/B/C)** �
 
   - DU-B landed (newest-first lots, sole-branch chip, fences, 6.0.30–35, 6.0.90). **DU-C OPEN (queued after DU-A)**: `ProductsImageOnlyView:227` lot order, StockSessionLineEntry `isComposing` guard, inputMode/visual-viewport pins, ProductForm `<form>`/Enter, Modal keyboard opt-in + focus trap/restore (FastStockInModal Esc), image preview/save/reopen mounted test + Safari compression fallback test, EN/KM `new_batch`/`open_files`/`export_format_excel` [HAIKU-DAILY-USE-COVERAGE]. Remaining sole-branch chip sites per OWNER-BRANCH and Haiku map (ManageBatchesModal, VariantFormModal, NewSupplierReturnModal, POS CartItem, POS ProductDetailSheet) were widened into DU-B: verify composed.
 
+Takeover reconciliation, 28 Oct (6.0.1009): UI requests remain open; each changed surface/version needs prototype approval before application.
+
 ### Q138
 
 Source: UI, mobile and device acceptance › **Physical devices (DEVICE, owner action; NOT RUN)** · needs owner
 
   - P1-PHYSICAL#5, Physical-authenticated-acceptance#404 — iOS/Android camera and library photo (preview immediate, survives save/reopen), HEIC from library, native keyboard and Add/Remove/Set, installed-PWA restart bar, Android back, printing, installed-PWA lifecycle; checklist `Lanes/2026-10-12/OWNER-DEVICE-ACCEPTANCE-RECEIVING.md` (steps 1–12 for release 1). Owner has not tested the live photo fix on a phone.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Physical iOS/Android/PWA acceptance remains open and distinct from desktop simulation.
 
 ### Q139
 
@@ -868,17 +934,23 @@ Source: UI, mobile and device acceptance › **Open owner-UI register** · ready
 
   - P1-OWNER-UI#6 PARTIAL umbrella; RESPONSIVE-PASS#71 / ADMIN-responsive-live#317 PARTIAL (full compact, mobile, public, portal pass); VISUAL14#104 PARTIAL (14-reference pagination/precision/security matrices); QA-initial-live#316, QA-page-pass#358, UI-label-live#300, MODAL-live#305, ROLE-live#307, SYNC-live#301 OPEN live verification after deploy.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Responsive/live acceptance remains open; visible changes need versioned prototype approval.
+
 ### Q140
 
 Source: UI, mobile and device acceptance › **Open owner-UI register** · ready
 
   - Q-MINIMIZE#16, F3-DRAFT-CHROME#168, F3-tabs#216 PARTIAL (only 14 flow kinds can park; about 30 dirty-state modals cannot; universal minimize for the other 24 draft modals, one modal per slice, last); S4-20#148 PARTIAL (Save at page end, minimize across forms); S4-21#149 PARTIAL (shared Discard/Back contract; QuickAddModal has no guard). → *27 Oct: the QuickAddModal guard shipped in 6.0.987 (live, RC1).*
 
+Takeover reconciliation, 28 Oct (6.0.1009): Minimize, close and unsaved-work behavior remain open; each affected float needs prototype review before change.
+
 ### Q141
 
 Source: UI, mobile and device acceptance › **Open owner-UI register** · needs owner
 
   - S4-22#150 PARTIAL (global Khmer line-height/clipping); S4R4-11#426 PARTIAL (sale-detail scan button); S4R4-7#424, S4R4-8/9#425 DONE; B1-STATS#164 / B1-stats-sweep#211 PARTIAL; N3a/N3#174, N3-palette#219 OWNER (palette confirmation), N3-section-sweep#220 PARTIAL (SectionCard rows page by page); Y16#177 / Y16-toolbar#232 PARTIAL (History/Manage join the chip row on six hubs).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Khmer, palette and toolbar scope remains open. Preserve current typography; changed layouts need packet approval.
 
 ### Q142
 
@@ -891,6 +963,8 @@ Source: UI, mobile and device acceptance › **Open owner-UI register** · needs
 Source: UI, mobile and device acceptance › **Open owner-UI register** · needs owner
 
   - TOUCH-TARGETS#189 MISSING OWNER (BC-Q24: 44px on touch only?); PAGER-visual-check#293; PAGESIZE-KEYBOARD#95 SUPERSEDED; ZERO-PAGER#94 DONE; UI-theme-audit#269 UNCERTAIN; SETTINGS-visual#290 UNCERTAIN; Profile-modal-redesign#394 UNCERTAIN; Archived-visual-verification#386 OPEN; Thumbnail-simultaneous-detail#387 OPEN (verify with a real image).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Touch, pager and theme checks remain open. Products remains the first shared-style checkpoint.
 
 ### Q144
 
@@ -921,6 +995,8 @@ Source: UI, mobile and device acceptance › **Legacy ledger leftovers (not in t
 Source: UI, mobile and device acceptance › **Legacy ledger leftovers (not in the register)** · needs owner
 
   - SW-LIVE-SMOKE, SMOKE-ENDSHIFT, PHYSICAL-PRINT, P4-IOS-LAG DEVICE (legacy browser upgrade warm-reload proof; signed-in POS End Shift smoke; physical receipt print with the driver-forms default of the four Print Settings modes; iOS PWA lag re-measure after wave 2); P4-KM-DUPKEY OWNER (Khmer for `contact_duplicate_will_use_existing` composed in-file, needs a native-speaker check).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Owner-device smokes remain open. A successful deployment with bot challenges is not physical acceptance.
 
 ### Q149
 
@@ -970,6 +1046,8 @@ Source: UI, mobile and device acceptance › **Early-Sep defect lists (Part 549 
 
   - layering HIGH — InfoHint `z-[1000]` renders under Modal `z-[1050]` (move to `z-[1055]`); InventoryReasonManagerModal (RenameCascadeModal was fixed in `352ed476`) `z-50` are buried; about 19 inline `fixed inset-0` overlays and the `Sidebar.tsx:498` backdrop remain.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Shared-layer fixes remain open; visible dialog/guard changes need prototype approval.
+
 ### Q157
 
 Source: UI, mobile and device acceptance › **Early-Sep defect lists (Part 549 / Part 539 / Part 77, archive L6435–L6492; verify each against current code)** · ready
@@ -994,6 +1072,8 @@ Source: Efficiency, performance and Free/Paid › **Release-2 efficiency review 
 
   - W1 P2 `PUT /api/products/:id` reads the same row 7–8 times before one write (`products.ts` 2413–2507, `productWrites.ts:140`); W2 P1 on Free — legacy v0 customer return create/edit does per-line N+1 capacity reads duplicating a set-based check; W3 P1 on Free — Telegram overview and /report re-read the same sales snapshot up to five times per message.
 
+Takeover reconciliation, 28 Oct (6.0.1009): 1001/1007 are related read reductions. Each named efficiency and behavior subpart still needs evidence.
+
 ### Q161
 
 Source: Efficiency, performance and Free/Paid › **Release-2 efficiency review (OPUS-EFFICIENCY-REVIEW-R2, COMPLETE 13 Oct 09:05Z, no blocking bug)** · ready
@@ -1013,11 +1093,15 @@ Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan 
 
   - A3-CATALOG#46 PARTIAL (one scan per page, parallel stock reads, cached filters); A4-DASHBOARD#47 PARTIAL (20 s startup cache keyed by permissions + versions); A5-SEARCH#48 UNCERTAIN (Khmer tokenizer probe, FTS only if confirmed); A6-THUMBNAILS#49 PARTIAL (wire w160/320/640 + srcset, orphan audit report-only); A7-R2-LIFECYCLE#50 UNCERTAIN (imports 7 d, quarantine 30 d, aborted multipart 1 d, backups in their own bucket).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Dashboard freshness is settled: at most five minutes old, with calculation time and prepared figures. 1001 implementation/certification remains open.
+
 ### Q164
 
 Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · needs owner
 
   - A8-READ-MODELS#51 UNCERTAIN (only if 7 days of A0 numbers cross thresholds); F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) OPEN; F2 Durable Object auto-pong and pause polls while the tab is hidden, F3 stop pre-downloading every route on deploy OPEN; B1 backups keyset paging instead of OFFSET, full backup at 03:00 local, separate backups bucket (owner decision) OPEN.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Free external encrypted backups are selected. Bucket, schedule, assets, recovery and other architecture subparts remain open.
 
 ### Q165
 
@@ -1044,6 +1128,8 @@ Source: Efficiency, performance and Free/Paid › **Register** · ready
 
   - P1-SW-FALLBACK-LIMITS#4 PARTIAL (forever-pending storage operations, install/activation failures); PERF-CPU-WORKLOAD#65 DATA (real Free-account measurement, 500 MB check, daily read budget); PERF-7-SITES#188 PARTIAL (non-sargable report/stat/audit WHERE, audit indexes); PERF-inventory-summary#250 (`inventory.ts:759` unpaged `SELECT p.*`), PERF-customers#251, PERF-sales-date#252, PERF-returns-date#253 (`datetime(col)` windows) PARTIAL (measure p95 first).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Actual CPU, storage, daily consumption and result-size measurements remain open; fewer calls alone is insufficient.
+
 ### Q169
 
 Source: Efficiency, performance and Free/Paid › **Register** · ready
@@ -1062,17 +1148,23 @@ Source: Efficiency, performance and Free/Paid › **Register** · needs owner
 
   - SENTRY-decision#262 OWNER; BLOAT-DEFERRED#119 PARTIAL (FTS optimize, portal screenshot GC, upload/orphan GC); PRELOAD-DEFERRAL#70 DONE; P1-FREE-REUSE#3 DONE; OWNER-PLANS (Free/Paid both profiles build; storefront budget unchanged); Free-plan budgets: restore 38 and add-items 41 statements near the 50 limit.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Sentry, GC and budget-edge questions remain open. Separate Free/Paid profiles and no silent switch are retained.
+
 ### Q172
 
 Source: Efficiency, performance and Free/Paid › **Legacy ledger leftovers (not in the register)** · needs owner
 
   - FREE-CAPACITY OPEN (actual CPU/query/storage/daily budgets for the Free plan; restore dependency discovery exceeds the Free query budget, archive L665); INC-FREE-READY OPEN (Free-plan readiness unfinished; Free and Paid stay separate profiles, never switched silently, archive L187); P1-RULINGS-FREE OWNER (non-blocking: free-account measurement deploy, live D1 size read vs the 500 MB cap, bulk re-import about 150k writes vs the 100k/day cap, last_error_code migration, archive L1933).
 
+Takeover reconciliation, 28 Oct (6.0.1009): The 30 Oct Free switch, no extension and external backup strategy are settled. Readiness, measurement, recovery and deployment approval remain open.
+
 ### Q173
 
 Source: Efficiency, performance and Free/Paid › **Legacy ledger leftovers (not in the register)** · ready
 
   - U-SYNC PARTIAL (sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers: phase 1 done, refuter was running, shipping not seen, archive L305); C3V4-NEWITEMS OPEN (tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, version bumps into the D1 write batch before the money cache, W2 7-day shadow compare; `Records/Performance/2026-09-27/C3v4-council-synthesis.md`).
+
+Takeover reconciliation, 28 Oct (6.0.1009): 1002 contains related sync coalescing; latest-delta review, composition and adoption remain pending.
 
 ### Q174
 
@@ -1104,6 +1196,8 @@ Source: Privacy, security and secrets › **Owner-requested audits (13 Oct)** ·
 
   - **Reports COMPLETE (13 Oct), follow-ups OPEN**: OPUS-SECURITY-AUDIT-WHOLE-APP covers11 checklist areas (7 MEDIUM findings); LICENSE-AUDIT inventories shipped/dev dependencies, assets and terms. Their original candidate was `dde1ba879`; the reports do not certify current code. The owner settled the project licence on14 Oct: proprietary, all rights reserved. The LICENSE file, package metadata, THIRD_PARTY_NOTICES and remaining remediation stay in Release3.
 
+Takeover reconciliation, 28 Oct (6.0.1009): License/security follow-ups remain open; RC3 deployment does not certify whole-app compliance.
+
 ### Q179
 
 Source: Privacy, security and secrets › **Owner-requested audits (13 Oct)** · ready
@@ -1116,6 +1210,8 @@ Source: Privacy, security and secrets › **Public-repo customer data (owner Opt
 
   - Q21#34 MISSING — customer names/phones remain in tracked docs (old `progress.md`, four lines of `docs/history/session-log.md`) and in git history. Steps: (1) this rewrite removed them from `progress.md`; (2) scrub `docs/history/session-log.md` (use ids); (3) after the current lanes merge, purge history (force-push; breaks open branches; Haiku privacy scan ace55b9 of pushed branches reports).
   - (4) create a private GitHub copy pushed regularly; (5) customer data stays organised in local Records. Do not rewrite history before then.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Private Records and gated history-purge boundaries remain. No deletion or force-push is authorized by this takeover.
 
 ### Q181
 
@@ -1159,11 +1255,15 @@ Source: Branch cleanup and repository hygiene › **Branch cleanup checkpoint CO
 
   - Historical BRANCH-CLEANUP-MANIFEST inventoried1096 remote refs/996 tips with merged, patch-equivalent, release-only and unique classes. The independently reviewed13 Oct run deleted416 branches after preserving all tips, a53-tip bundle and47 keep tags; its postflight retained main, releases and protected PR refs. Evidence: LANES.md13 Oct11:14Z and private branch backup logs. No new cleanup has run. Revalidate current tips, claims, open PR heads/bases and redundancy before any further expected-SHA deletion; preserve active, unmerged and uncertain work.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Branch/worktree cleanup remains held pending a current manifest and authorization; this reconciliation deletes nothing.
+
 ### Q188
 
 Source: Branch cleanup and repository hygiene · needs owner
 
 - PR9#44 OWNER (`codex/verified-resume-20260925` fully contained in urgent; close after RELEASE-1 with the owner's OK); P-public (archive L277) OPEN — `claude/p-public-20260925` (`97587c5b`, 19 commits) was never merged, the earlier [x] was wrong; reconcile lane queued ahead of storefront lanes; RC-UNMERGED-CANDIDATES#108 PARTIAL (merge-cost, customer/POS performance, indexed barcode, Reports, bulk actions); P1-PARKED#8 PARTIAL (freshly composed parked lanes: P-DON donor ports P-RET, SEC-SALES, SALE-CORNER-TAG `163d6c989`, DATE-UI `30c23c558`/DATE-W `39cf7331f`, DATA-AUDIT-B `63979fb4a`, REVERT-SET `ceb9af819`, NOTIF-V2, G38 members/telegram, G37-P2 HOLD, DEBLOAT `d08348422`, PROD-PERM; Codex 2 Oct stock family and PR9 DROP); P10-18#67 parked patch; U-branch-prep (retire Shop into Store; execution done by the cutover; never rerun); Q12#25 OWNER (private main + public sanitized mirror; new repo from `archive/docker-postgres-2026-07-26`, owner OK before creating any repo); downloads/worktrees: one checkout rule, push archive/<name> for anything unmerged, then remove.
+
+Takeover reconciliation, 28 Oct (6.0.1009): Unknown/unmerged candidates and the separate legacy repository stay preserved. Snapshots do not prove integration.
 
 ### Q189
 
@@ -1189,6 +1289,8 @@ Source: Docs, tooling and code hygiene · ready
 
 - progress.md rewrite — DONE by this commit (6.0.149); remaining documentation debt: `docs/history/session-log.md` customer-data lines (Privacy); LOG-PROTOCOL-BACKFILL#130 PARTIAL (board-only records / missing narrative 545/546/554/556); Q19#32 PARTIAL (tidy ledgers and folders); HYGIENE#24 PARTIAL (dead code, naming, no comments; final pass at the end on one release branch with the tokenizer strip); SONNET-NO-COMMENTS-SIMPLIFY-R2 (766 new comment lines in 78 files in release 2 to remove or shorten; defers to the `no-comments` skill) OPEN; TOOLING#38 OPEN (agent-friendly CDP/devtools verification skills, isolated parallel worktree instances, timeout-8 browser tests); I18N-ORPHAN-KEYS#160 MISSING (remove `special_price*` x4; `returns_count_label`, `still_need_decision` dormant → owner list), I18N-GOOGLE-LOGIN#161 (ask the Khmer reviewer), Unused-i18n-keys#393, I18N-unused-km#268; ZOMBIE-ROUTES-TABLES#194 UNCERTAIN (delete four dead GET routes in `compat.ts:1191,1200,1201,1205` after a route-order test; 28 uncalled routes, password-reset table, RFID stubs), ZOMBIE-OTHER#200 PARTIAL, CONTACT-LEGACY-404#192 DONE, BOOTSTRAP-PHANTOM-FIELDS#193 MISSING, ZOMBIE-DATED-OLD#199 SUPERSEDED, PROMO-wired-audit#266 PARTIAL (all ten routes live), Part535/dead-state#381 MISSING; P3-CDP-TIMEOUT OPEN (raw CDP send()/evaluate() without timeout in eight browser tests; unreachable `bulkImport*` wrappers); DEBLOAT-REMAINDER OPEN (114 exported symbols with no production caller, 40 unused-local diagnostics, BulkImportModal dead review-conflict UI x17; unused is not dead, so list for the owner); PICKER-GUARD-WIDEN OPEN (searchablePickersP6 watches only category|brand|supplier|unit: widen to product name and barcode bindings; row #69 itself is DONE); the U-1 per-lane checklist (refuter per lane, hygiene sweep per lane, discriminating tests registered in `test:utils`, docs updated when behaviour changes) is standing process for every lane; per-checkpoint exact-SHA gates replaced the old CERT sweep.
 
+Takeover reconciliation, 28 Oct (6.0.1009): Only board staleness is addressed here; documentation, hygiene, zombie and per-lane obligations remain open.
+
 ### Q193
 
 Source: Docs, tooling and code hygiene › **Early-Sep ledger leftovers (archive L4690, L5715, L6170, L6492; unused is not dead: list for the owner, never delete on sight)** · ready
@@ -1213,11 +1315,15 @@ Source: Backup, restore, Library and production data › **Register** · owner-d
 
   - 0098-REPLAY#63 UNCERTAIN; RESTORE-UI-ASSETS#64 / BACKUP-restore-C#246 PARTIAL (typed-phrase danger confirm, use the server dry-run, `restorable` flag read nowhere, "validated" toast after a real restore, resumable restore; restore is Paid-only; maintenance write-blocking; design K10a = replace with the backup); DRIVE-connect#257 / A3#163,#367 OWNER-MANAGED14Oct (owner handles Drive; no agent setup task; backup/asset integrity checks remain separate).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Permission/password rules and external encrypted backups on Free are settled. Restore UI, assets and recovery checks remain open.
+
 ### Q197
 
 Source: Backup, restore, Library and production data › **Register** · ready
 
   - DRIVE-assets-restore#267, Drive-asset-mirror#390 PARTIAL (manifest + referenced assets, retry 401/403/429/5xx, checksums, round trip, cancel UI); BACKUP-finalize-sets#329 (newest 2 valid R2 sets); QA-reset-ripple#355, QA-restore-assets-ripple#356, QA-infra-pass#359, QA-transfer-ripple#354 OPEN live checks; MIGRATION-RECOVERY#43 (every data-changing migration writes a backup table first and ships tested recovery SQL: migrate → recover → byte-identical).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Drive assets, checksums, live reset/restore and migration recovery remain open; owner-managed setup is not integrity proof.
 
 ### Q198
 
@@ -1243,11 +1349,15 @@ Source: Backup, restore, Library and production data › **Legacy ledger leftove
 
   - RESTORE-TOCTOU OPEN (restore admission-read TOCTOU and restore effects after force-clear, archive L815); RESTORE-UI-CONFIRM-ASSETS (#64) and Free restore capacity; HIST-HEADER-ONLY-SALES / HIST-DUP-CONTACTS data items are listed under Returns and Contacts.
 
+Takeover reconciliation, 28 Oct (6.0.1009): RC3 chunks restore deletion and releases maintenance on pre-delete refusal. TOCTOU, assets and Free recovery scope remain open.
+
 ### Q202
 
 Source: Owner and external actions · needs owner
 
 - A2 live verification (owner, since 31 Aug): reset-data, a POS sale with lots and bare receipt ids, storefront install on iPhone, import round-trip, R2 keeps exactly two finalised sets (archive L4560, L6320); A3 connect Google Drive in Settings → Backup (archive L6326).
+
+Takeover reconciliation, 28 Oct (6.0.1009): Drive setup is owner-managed and settled; A2/live asset verification remains open.
 
 ### Q203
 
@@ -1267,11 +1377,15 @@ Source: Owner and external actions › **Owner rulings of 5–6 Oct not (fully) 
 
   - changed-fields-only saves PARTIAL (Settings main form done; receipt settings, roles and Website Editor unchecked); products have no created-date filter UNCERTAIN (use received date); every return must link to a sale PARTIAL (NewReturnModal requires one, the Worker still accepts none: `returns.ts:1519`); Not Paid return lowers the debt MISSING (finding D).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Changed-fields saves, return links and Not Paid semantics remain open until each is verified.
+
 ### Q206
 
 Source: Owner and external actions › **Owner rulings of 5–6 Oct not (fully) in code (BC §2.6, sampled at 0baa53f2)** · owner-decided
 
   - import slash dates read day-first unless the header says mm/dd/yyyy MISSING (`batchCode.ts:50`, donors DATE-UI `30c23c558` / DATE-W `39cf7331f`); low/out alerts only when a sale crosses the threshold MISSING (`telegram.ts:1024`); website phone sign-ups OFF MISSING until portal-csrf ships (6.0.44, default `portal.ts:531` still true). → *27 Oct: lane 6.0.991 (RC2b, deploying).*
+
+Takeover reconciliation, 28 Oct (6.0.1009): 991 crossing-alert work is deployed in RC2b. Import-date/phone-signup current-code and acceptance residuals remain open.
 
 ### Q207
 
@@ -1299,17 +1413,23 @@ Source: Added 27 Oct from the lane log · ready
 
 - Run the 6.0.995 `returns.created_at` shape census through the ops workflow once it is on main.
 
+Takeover reconciliation, 28 Oct (6.0.1009): 995 supplies the census query; execution remains open and was not dispatched by this reconciliation.
+
 ### Q211
 
 Source: Added 27 Oct from the lane log · ready
 
 - Multi-client template must render the 6.0.984 crons (*/5, */15, 17 */3) (reconciler, multi-client line).
 
+Takeover reconciliation, 28 Oct (6.0.1009): Multi-client cron verification remains open. The Leang-only takeover does not certify BM Shop.
+
 ### Q212
 
 Source: Added 27 Oct from the lane log · ready
 
 - `test-branch-review-state-pure` hangs at check 9 on the base too (pre-existing, seen 26 Oct).
+
+Takeover reconciliation, 28 Oct (6.0.1009): 29428256b in RC3 repairs the original hang; the release passed its 1,084-file Worker sweep. Retain this ID and its evidence.
 
 ## Evidence pointers by source section
 

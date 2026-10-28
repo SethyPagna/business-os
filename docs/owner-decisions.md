@@ -4,6 +4,29 @@ One line per decision, newest rules win. Dates are when the owner said it (Cambo
 
 Moved verbatim from progress.md on 27 Oct 2026 (6.0.998): dated sections newest first, then the thematic index. The board links here.
 
+**28 Oct 2026 takeover decisions (6.0.1009; owner approved the takeover plan in the current chat)**
+
+- Fixes first, one implementation slice at a time: preserve uncommitted/staged/untracked work, finish backend 1004, prevent large-sale committed-but-error/recovery failures, finish 1001 reads, then review and compose reliability work. Dashboard is the first visible page, Sales second. Broader restyling and return-edit expansion stay outside the urgent Free-readiness release.
+- Every visible refinement needs a versioned prototype for the affected page, floats and interactions before application. Show phone/desktop, English/Khmer, normal/loading/empty/error/retry/stale/offline/permission-refusal states and an acceptance checklist. Approval covers that packet only; implement and verify it before the next page. Preserve compact layout and current typography; the first shared style change goes through the Products checkpoint.
+- Use fixture-only local prototypes unless the official Figma connection and editing capability are verified. An installed skill or historical account/seat note is not proof of a live connection or permission. No prototype approval has been inferred from the analysis reports.
+- Free backups use an external encrypted workflow with recovery verification. Changed in-app guidance is prototype-gated. This chooses the strategy; it does not certify an implementation, recovery drill, Time Travel sufficiency or in-app whole-database export.
+- The implementation request does not authorize production deployment, remote migrations, historic-data rewrites or irreversible cleanup. Exact candidate gates, independent review, separate deployment approval and postflight still apply. Free/Paid profiles stay separate; local testing comes before deployment.
+
+**Later 27 Oct 2026 decisions, reconciled 28 Oct [memory owner-answers-27-oct items 6–17; paid-plan-ends-30-oct later confirmation]**
+
+- Return corrections on a later day affect today's drawer by default. An explicit typing-mistake choice fixes the original day instead. Records distinguishes the return's created date, each change time and the date the change applies to. This answers 6.0.997 Q1; implementation is still open.
+- A return's date cannot be changed in an edit (997 Q2). The refund follows the items; managers cannot type a different amount (997 Q3).
+- Cancelling an old return affects today's drawer, as its own lane (997 Q4). Having the correction ledger does not complete the cancel behavior.
+- Every row and every page gets Records for every change/edit: before → after, who changed it, when, and which date it applies to. Record visibility and retention questions outside the explicit rules below remain separate.
+- All resets, backup restore and factory reset require `backup_restore` plus the current password; only admin-level roles have the permission by default. This replaces the older built-in-default-admin restriction for those operations.
+- Keep every backup-created record and every refused restore/reset attempt (`step_up_refused`) forever. Other audit-retention classes keep their existing rules; this does not settle all product-mark or contact-history questions.
+- Google Drive connect/disconnect is gated by `drive_credentials` (admin-level default) and records who, when and which Google account. Owner-managed setup does not replace audit or asset-integrity verification.
+- Cash riel amounts must be multiples of 100 on every cash path, enforced in the Worker as well as the UI; non-cash riel may hold any amount. This covers tender, later payments, correction, refunds, returns, exchanges, shift counts and imports.
+- Telegram daily received is money actually received that day, using payment time rather than sale creation time, consistent with in-app reports.
+- Dashboard stock overview may be up to five minutes old and shows its calculation time. Prefer prepared figures; POS, product pages and stock alerts remain live.
+- Workers Paid ends 30 Oct 2026, then Free, with no extension. The reduced-read build must be live by Cambodia 29 Oct; the 28 Oct evening target and 29 Oct fallback do not waive release approval or verification.
+- Free D1 admission counts physical calls: 50 per invocation on Free, 1000 on Paid, with `db.batch()` counting as one. Preserve separate statement/byte/atomicity bounds, CPU and daily-read/write budgets. This corrects earlier same-day notes that confused D1 queries with generic internal subrequests; it is a platform constraint, not a financial-rule change. [memory cloudflare-free-plan-facts; 1004 lane evidence]
+
 **19–27 Oct 2026 owner decisions (newest; they supersede anything older) [memory owner-answers-19-oct, -20-oct, -21-oct-shift-cash, -21-oct-design, -22-oct, -24-oct-sale-additions, -26-oct, -27-oct, owner-ask-19-oct-design-pass]**
 - 27 Oct — Locked old-format returns: admins AND managers (full Returns access) may convert or edit them by hand; UI copy calls it updating the return's money details, never a "format".
 - 27 Oct — A review-tier staff member who confirms a $0 cost or a missing barcode as correct is queued for admin approval, not refused.
