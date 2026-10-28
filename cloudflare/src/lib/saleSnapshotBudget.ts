@@ -1,5 +1,5 @@
 export const SALE_SNAPSHOT_BYTE_BUDGET = 1_800_000
-const SALE_SNAPSHOT_FRAMING_RESERVE = 16_384
+export const SALE_SNAPSHOT_FRAMING_RESERVE = 16_384
 const encoder = new TextEncoder()
 
 export class SaleSnapshotBudgetError extends Error {
@@ -16,8 +16,17 @@ export function serializedSaleSnapshotBytes(value: unknown): number {
   return encoder.encode(json).byteLength
 }
 
-export function assertSaleSnapshotBudget(value: unknown): void {
-  if (serializedSaleSnapshotBytes(value) + SALE_SNAPSHOT_FRAMING_RESERVE > SALE_SNAPSHOT_BYTE_BUDGET) {
+export function assertSaleSnapshotBudget(value: unknown, generatedIdBytes = 0): void {
+  if (serializedSaleSnapshotBytes(value) + generatedIdBytes + SALE_SNAPSHOT_FRAMING_RESERVE > SALE_SNAPSHOT_BYTE_BUDGET) {
     throw new SaleSnapshotBudgetError()
   }
+}
+
+export function saleSnapshotBudgetSql(valueSql: string, otherBytesSql = '0'): string {
+  return `CASE WHEN length(CAST((${valueSql}) AS BLOB))+(${otherBytesSql})+${SALE_SNAPSHOT_FRAMING_RESERVE}<=${SALE_SNAPSHOT_BYTE_BUDGET}
+    THEN (${valueSql}) ELSE json_extract('{}','sale_snapshot_too_large') END`
+}
+
+export function isSaleSnapshotBudgetFailure(error: unknown): boolean {
+  return error instanceof SaleSnapshotBudgetError || /(?:JSON path|bad JSON path)[^\n]*sale_snapshot_too_large/i.test(String(error))
 }

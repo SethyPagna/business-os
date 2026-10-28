@@ -6,16 +6,24 @@ const path = require('node:path')
 const H = require('./harness/al_money_native.cjs')
 
 async function main() {
-  const guard = 'assertSaleSnapshotBudget(priced)'
+  const guard = 'assertSaleSnapshotBudget({ header:saleInsertStatement.params, items:priced })'
   const historicalSeedPatch = fs.readFileSync(path.join(__dirname,'../src/routes/sales.ts'),'utf8').includes(guard)
-    ? [{name:'historical pre-guard fixture only',file:'src/routes/sales.ts',from:guard,to:`if(c.req.header('x-al-historical-fixture')!=='1') ${guard}`}] : []
+    ? [{name:'historical pre-guard fixture only',file:'src/routes/sales.ts',from:guard,to:`if(c.req.header('x-al-historical-fixture')!=='1') ${guard}`},
+       {name:'historical create residual fixture only',file:'src/routes/sales.ts',from:'snapshotHeaderBytes:serializedSaleSnapshotBytes(saleInsertStatement.params)',
+        to:"snapshotHeaderBytes:c.req.header('x-al-historical-fixture')==='1'?-100_000_000:serializedSaleSnapshotBytes(saleInsertStatement.params)"}] : []
   const mutants = {
-    'no-admission':{file:'src/lib/saleSnapshotBudget.ts',from:'if (serializedSaleSnapshotBytes(value) + SALE_SNAPSHOT_FRAMING_RESERVE > SALE_SNAPSHOT_BYTE_BUDGET)',to:'if (false)'},
+    'no-admission':{file:'src/lib/saleSnapshotBudget.ts',from:'if (serializedSaleSnapshotBytes(value) + generatedIdBytes + SALE_SNAPSHOT_FRAMING_RESERVE > SALE_SNAPSHOT_BYTE_BUDGET)',to:'if (false)'},
     'character-count':{file:'src/lib/saleSnapshotBudget.ts',from:'return encoder.encode(json).byteLength',to:'return json.length'},
   }
   if(process.env.MUTANT&&!mutants[process.env.MUTANT])throw new Error('Unknown snapshot mutant')
   const patches = process.env.BASE_COMMIT ? H.basePatches(process.env.BASE_COMMIT) : historicalSeedPatch
   if(process.env.MUTANT)patches.push({name:process.env.MUTANT,...mutants[process.env.MUTANT]})
+  if(!process.env.BASE_COMMIT)patches.push({name:'lot label changes after preflight',file:'src/routes/sales.ts',
+    from:"createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults",
+    to:"if(c.req.header('x-al-lot-growth')==='1'&&attempt===0)await db.prepare('UPDATE product_batches SET lot_code=? WHERE variant_product_id IN(15000,15001,15002,15003)').run(['ក'.repeat(200_000)]); createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults"})
+  if(process.env.RESIDUAL_ONLY==='1')patches.push({name:'exercise SQL receipt residual',file:'src/routes/sales.ts',
+    from:'const {budgetStates,canonicalAvailable,identityBindings,response,...row}=input',
+    to:'const {budgetStates:omittedBudgetStates,canonicalAvailable,identityBindings,response,...row}=input; const budgetStates=[]'})
   const h = await H.startWorker({ d1CallLimit: H.FREE_QUERY_LIMIT,patches })
   const metrics = []
   try {
@@ -64,6 +72,8 @@ async function main() {
     assert.equal(forbidden.status,200)
     assert.equal(forbidden.body.committed,false,'receipt recovery stays bound to original cashier or admin')
     const state = async () => ({
+      sales:await h.all('SELECT * FROM sales ORDER BY id'),
+      items:await h.all('SELECT * FROM sale_items ORDER BY id'),
       tables:await h.one(`SELECT (SELECT COUNT(*) FROM sales) sales,(SELECT COUNT(*) FROM sale_items) items,
         (SELECT COUNT(*) FROM sale_mutation_receipts) receipts,(SELECT COUNT(*) FROM inventory_movements) movements,
         (SELECT COUNT(*) FROM sale_amendments) amendments,(SELECT COUNT(*) FROM action_history) history`),
@@ -99,6 +109,48 @@ async function main() {
     assert.equal(amended.body.code,'sale_snapshot_too_large')
     assert.equal(amended.body.proven_uncommitted,true)
     assert.deepEqual(await state(),amendBefore)
+    await h.db.prepare('INSERT INTO delivery_contacts(id,name,address) VALUES(?,?,?)')
+      .bind(17000,'Snapshot courier','ក'.repeat(400_000)).run()
+    const deliveryBefore=await state()
+    const delivery=await H.amendSale(h,amendBase.body.id,{client_request_id:'snapshot-delivery-too-large',kind:'delivery_added',
+      delivery_contact_id:17000,delivery_fee_usd:1,expected_updated_at:amendBase.body.sale.updated_at})
+    assert.equal(delivery.status,409,JSON.stringify(delivery.body))
+    assert.equal(delivery.body.code,'sale_snapshot_too_large')
+    assert.equal(delivery.body.proven_uncommitted,true)
+    assert.deepEqual(await state(),deliveryBefore)
+    await h.db.prepare('UPDATE sales SET is_delivery=1 WHERE id=?').bind(stored.id).run()
+    const costBefore=await state()
+    const cost=await H.amendSale(h,stored.id,{client_request_id:'snapshot-cost-too-large',kind:'delivery_actual_cost_changed',
+      delivery_actual_cost_usd:1,expected_updated_at:recovered.body.response.sale.updated_at})
+    assert.equal(cost.status,409,JSON.stringify(cost.body))
+    assert.equal(cost.body.code,'sale_snapshot_too_large')
+    assert.equal(cost.body.proven_uncommitted,true)
+    assert.deepEqual(await state(),costBefore)
+    const lotGrowthBefore=await state()
+    h.call = (method,url,body,label,options={}) => ordinaryCall(method,url,body,label,{...options,headers:{...options.headers,'x-al-lot-growth':'1'}})
+    const lotGrowth=await H.createSale(h,{key:'snapshot-lot-growth',lines:lines.slice(0,4),paymentDetails:[{method:'Cash',amount_usd:40,amount_khr:0}]})
+    h.call=ordinaryCall
+    assert.equal(lotGrowth.status,409,JSON.stringify(lotGrowth.body))
+    assert.equal(lotGrowth.body.code,'sale_snapshot_too_large')
+    assert.equal(lotGrowth.body.proven_uncommitted,true)
+    assert.deepEqual(await state(),lotGrowthBefore)
+    await h.db.prepare("UPDATE product_batches SET lot_code='Recovered fixture lot' WHERE variant_product_id IN(15000,15001,15002,15003)").run()
+    const fallbackBase=await H.createSale(h,{key:'snapshot-small-fallback',lines:lines.slice(0,1),paymentDetails:[{method:'Cash',amount_usd:10,amount_khr:0}],extra:{is_delivery:true,delivery_fee_usd:0,delivery_fee_paid_by:'customer'}})
+    assert.equal(fallbackBase.status,200,JSON.stringify(fallbackBase.body))
+    await h.db.prepare("UPDATE sale_items SET pricing_snapshot_json='{}' WHERE sale_id=?").bind(fallbackBase.body.id).run()
+    const fallbackBefore=await state()
+    const fallbackRequest={client_request_id:'snapshot-small-fallback-cost',kind:'delivery_actual_cost_changed',delivery_actual_cost_usd:1,expected_updated_at:fallbackBase.body.sale.updated_at}
+    const fallback=await H.amendSale(h,fallbackBase.body.id,fallbackRequest)
+    assert.equal(fallback.status,200,JSON.stringify(fallback.body))
+    assert.equal(fallback.body.canonical_receipt_available,false)
+    const fallbackAfter=await state()
+    assert.deepEqual(fallbackAfter.items,fallbackBefore.items)
+    assert.deepEqual(fallbackAfter.stock,fallbackBefore.stock)
+    assert.deepEqual(fallbackAfter.lots,fallbackBefore.lots)
+    const fallbackReplay=await H.amendSale(h,fallbackBase.body.id,fallbackRequest)
+    assert.equal(fallbackReplay.status,200,JSON.stringify(fallbackReplay.body))
+    assert.deepEqual(fallbackReplay.body,fallback.body)
+    assert.deepEqual(await state(),fallbackAfter)
     await h.db.batch(lines.slice(0,25).map(({productId})=>h.db.prepare('UPDATE products SET brand=? WHERE id=?').bind('a'.repeat(1000),productId)))
     const ascii = await H.createSale(h,{key:'snapshot-ascii-25',lines:lines.slice(0,25),paymentDetails:[{method:'Cash',amount_usd:250,amount_khr:0}]})
     assert.equal(ascii.status,200,JSON.stringify(ascii.body).slice(0,250))
@@ -110,7 +162,7 @@ async function main() {
     assert.deepEqual(await state(),unicodeBefore)
     for (const entry of h.metrics.filter(entry=>entry.label!=='login')) assert.ok(entry.calls <= H.FREE_QUERY_LIMIT,JSON.stringify(entry))
     console.log(JSON.stringify({status:'PASS',tier:process.env.AL_PLAN_TIER,bytes,createdStatus:created.status,
-      cases:{create:refused.status,add:added.status,amend:amended.status,ascii:ascii.status,khmer:unicode.status},
+      cases:{create:refused.status,add:added.status,amend:amended.status,delivery:delivery.status,cost:cost.status,lotGrowth:lotGrowth.status,ascii:ascii.status,khmer:unicode.status},
       maxPhysicalCalls:Math.max(...h.metrics.filter(entry=>entry.label!=='login').map(entry=>entry.calls)),metrics}))
   } finally { await h.mf.dispose() }
 }
