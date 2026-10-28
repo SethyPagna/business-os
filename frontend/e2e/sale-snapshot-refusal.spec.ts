@@ -17,7 +17,14 @@ async function draft(page:Page):Promise<Draft|undefined>{
 }
 
 async function ringOne(page:Page){
+  await page.route(/\/api\/auth\/(bootstrap|login|me)(\?|$)/,async route=>{
+    const response=await route.fetch()
+    const body=await response.json()
+    if(body?.user&&body.user.organization_id===undefined)body.user.organization_id=body.user.organizationId??null
+    await route.fulfill({response,json:body})
+  })
   await signIn(page,account)
+  expect(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('businessos_user')||localStorage.getItem('businessos_user')||'{}').organization_id)).toBe(1)
   await gotoAdminPage(page,'/pos')
   await page.getByText('E2E Product 002 Belle Roux',{exact:true}).first().click()
   const cart=page.getByRole('button',{name:'Cart',exact:true})
