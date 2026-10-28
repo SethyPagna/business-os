@@ -27,6 +27,7 @@ export function saleSnapshotBudgetSql(valueSql: string, otherBytesSql = '0'): st
     THEN (${valueSql}) ELSE json_extract('{}','sale_snapshot_too_large') END`
 }
 
-export function isSaleSnapshotBudgetFailure(error: unknown): boolean {
-  return error instanceof SaleSnapshotBudgetError || /(?:JSON path|bad JSON path)[^\n]*sale_snapshot_too_large/i.test(String(error))
+export function isAtomicSaleSnapshotBudgetFailure(error: unknown): boolean {
+  return error instanceof SaleSnapshotBudgetError
+    || /(?:JSON path|bad JSON path)[^\n]*sale_snapshot_too_large|\bSQLITE_TOOBIG\b/i.test(String(error))
 }

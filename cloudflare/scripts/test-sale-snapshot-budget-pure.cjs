@@ -7,7 +7,7 @@ const {DatabaseSync}=require('node:sqlite')
 const moduleUnderTest = { exports:{} }
 const source = fs.readFileSync(path.join(__dirname,'../src/lib/saleSnapshotBudget.ts'),'utf8')
 new Function('module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(moduleUnderTest,moduleUnderTest.exports)
-const {assertSaleSnapshotBudget,serializedSaleSnapshotBytes,SaleSnapshotBudgetError,saleSnapshotBudgetSql,isSaleSnapshotBudgetFailure}=moduleUnderTest.exports
+const {assertSaleSnapshotBudget,serializedSaleSnapshotBytes,SaleSnapshotBudgetError,saleSnapshotBudgetSql,isAtomicSaleSnapshotBudgetFailure}=moduleUnderTest.exports
 const ascii={items:[{pricing_snapshot_json:'a'.repeat(700_000)}]}
 const unicode={items:[{pricing_snapshot_json:'ក'.repeat(700_000)}]}
 assertSaleSnapshotBudget(ascii)
@@ -25,9 +25,11 @@ const db=new DatabaseSync(':memory:')
 try{
   const sql=`SELECT ${saleSnapshotBudgetSql('$value','$other')} AS value`
   assert.equal(db.prepare(sql).get({value:'ក"\\',other:0}).value,'ក"\\')
-  assert.throws(()=>db.prepare(sql).get({value:'a'.repeat(900_000),other:900_000}),isSaleSnapshotBudgetFailure)
-  assert.equal(isSaleSnapshotBudgetFailure(new Error('D1 connection lost')),false)
-  assert.equal(isSaleSnapshotBudgetFailure(new Error('malformed JSON')),false)
-  assert.equal(isSaleSnapshotBudgetFailure(new Error('User data sale_snapshot_too_large')),false)
+  assert.throws(()=>db.prepare(sql).get({value:'a'.repeat(900_000),other:900_000}),isAtomicSaleSnapshotBudgetFailure)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('D1 connection lost')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('malformed JSON')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('User data sale_snapshot_too_large')),false)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('D1_ERROR: string or blob too big: SQLITE_TOOBIG')),true)
+  assert.equal(isAtomicSaleSnapshotBudgetFailure(new Error('The response was too big')),false)
 }finally{db.close()}
 console.log('PASS sale snapshot UTF8, JSON escaping, complete envelope and exact framing boundary')

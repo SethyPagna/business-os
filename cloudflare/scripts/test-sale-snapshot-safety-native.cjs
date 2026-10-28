@@ -20,7 +20,7 @@ async function main() {
   if(process.env.MUTANT)patches.push({name:process.env.MUTANT,...mutants[process.env.MUTANT]})
   if(!process.env.BASE_COMMIT)patches.push({name:'lot label changes after preflight',file:'src/routes/sales.ts',
     from:"createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults",
-    to:"if(c.req.header('x-al-lot-growth')==='1'&&attempt===0)await db.prepare('UPDATE product_batches SET lot_code=? WHERE variant_product_id IN(15000,15001,15002,15003)').run(['ក'.repeat(200_000)]); createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults"})
+    to:"if(c.req.header('x-al-lot-growth')&&attempt===0)await db.prepare('UPDATE product_batches SET lot_code=? WHERE variant_product_id IN(15000,15001,15002,15003)').run([c.req.header('x-al-lot-growth')==='quoted'?'\"'.repeat(1_100_000):'ក'.repeat(200_000)]); createResults = await executeStockTransaction(db, statements, 'retry') as typeof createResults"})
   if(process.env.RESIDUAL_ONLY==='1')patches.push({name:'exercise SQL receipt residual',file:'src/routes/sales.ts',
     from:'const {budgetStates,canonicalAvailable,identityBindings,response,...row}=input',
     to:'const {budgetStates:omittedBudgetStates,canonicalAvailable,identityBindings,response,...row}=input; const budgetStates=[]'})
@@ -74,6 +74,7 @@ async function main() {
     const state = async () => ({
       sales:await h.all('SELECT * FROM sales ORDER BY id'),
       items:await h.all('SELECT * FROM sale_items ORDER BY id'),
+      saleAudit:await h.all("SELECT * FROM audit_logs WHERE entity IN('sale','sale_creation') ORDER BY id"),
       tables:await h.one(`SELECT (SELECT COUNT(*) FROM sales) sales,(SELECT COUNT(*) FROM sale_items) items,
         (SELECT COUNT(*) FROM sale_mutation_receipts) receipts,(SELECT COUNT(*) FROM inventory_movements) movements,
         (SELECT COUNT(*) FROM sale_amendments) amendments,(SELECT COUNT(*) FROM action_history) history`),
@@ -135,6 +136,15 @@ async function main() {
     assert.equal(lotGrowth.body.proven_uncommitted,true)
     assert.deepEqual(await state(),lotGrowthBefore)
     await h.db.prepare("UPDATE product_batches SET lot_code='Recovered fixture lot' WHERE variant_product_id IN(15000,15001,15002,15003)").run()
+    const quotedBefore=await state()
+    h.call = (method,url,body,label,options={}) => ordinaryCall(method,url,body,label,{...options,headers:{...options.headers,'x-al-lot-growth':'quoted'}})
+    const quotedGrowth=await H.createSale(h,{key:'snapshot-quoted-lot-growth',lines:lines.slice(0,4),paymentDetails:[{method:'Cash',amount_usd:40,amount_khr:0}]})
+    h.call=ordinaryCall
+    assert.equal(quotedGrowth.status,409,JSON.stringify(quotedGrowth.body))
+    assert.equal(quotedGrowth.body.code,'sale_snapshot_too_large')
+    assert.equal(quotedGrowth.body.proven_uncommitted,true)
+    assert.deepEqual(await state(),quotedBefore)
+    await h.db.prepare("UPDATE product_batches SET lot_code='Recovered fixture lot' WHERE variant_product_id IN(15000,15001,15002,15003)").run()
     const fallbackBase=await H.createSale(h,{key:'snapshot-small-fallback',lines:lines.slice(0,1),paymentDetails:[{method:'Cash',amount_usd:10,amount_khr:0}],extra:{is_delivery:true,delivery_fee_usd:0,delivery_fee_paid_by:'customer'}})
     assert.equal(fallbackBase.status,200,JSON.stringify(fallbackBase.body))
     await h.db.prepare("UPDATE sale_items SET pricing_snapshot_json='{}' WHERE sale_id=?").bind(fallbackBase.body.id).run()
@@ -162,7 +172,7 @@ async function main() {
     assert.deepEqual(await state(),unicodeBefore)
     for (const entry of h.metrics.filter(entry=>entry.label!=='login')) assert.ok(entry.calls <= H.FREE_QUERY_LIMIT,JSON.stringify(entry))
     console.log(JSON.stringify({status:'PASS',tier:process.env.AL_PLAN_TIER,bytes,createdStatus:created.status,
-      cases:{create:refused.status,add:added.status,amend:amended.status,delivery:delivery.status,cost:cost.status,lotGrowth:lotGrowth.status,ascii:ascii.status,khmer:unicode.status},
+      cases:{create:refused.status,add:added.status,amend:amended.status,delivery:delivery.status,cost:cost.status,lotGrowth:lotGrowth.status,quotedGrowth:quotedGrowth.status,fallback:fallback.status,ascii:ascii.status,khmer:unicode.status},
       maxPhysicalCalls:Math.max(...h.metrics.filter(entry=>entry.label!=='login').map(entry=>entry.calls)),metrics}))
   } finally { await h.mf.dispose() }
 }

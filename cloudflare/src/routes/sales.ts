@@ -154,7 +154,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
 import { canonicalMoney4, SaleMoneyContractError, hasRecordedSaleMoneyPrecision } from '../lib/saleMoneyPrecision'
-import { assertSaleSnapshotBudget, isSaleSnapshotBudgetFailure, saleSnapshotBudgetSql, SALE_SNAPSHOT_BYTE_BUDGET, SALE_SNAPSHOT_FRAMING_RESERVE, SaleSnapshotBudgetError, serializedSaleSnapshotBytes } from '../lib/saleSnapshotBudget'
+import { assertSaleSnapshotBudget, isAtomicSaleSnapshotBudgetFailure, saleSnapshotBudgetSql, SALE_SNAPSHOT_BYTE_BUDGET, SALE_SNAPSHOT_FRAMING_RESERVE, SaleSnapshotBudgetError, serializedSaleSnapshotBytes } from '../lib/saleSnapshotBudget'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError } from '../lib/saleMutationHeaderQuote'
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
@@ -1916,7 +1916,7 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
-      if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       // Checked BEFORE the generic guesses below: the receipt guard fails
       // with the same "malformed JSON" text as the pricing/loyalty guards, and
       // a UNIQUE failure on the column (should an index ever exist) matches
@@ -3996,7 +3996,7 @@ app.post('/:id/items', async (c) => {
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
 
-    if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+    if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
     const message = (error as Error).message || ''
     if (/malformed JSON/i.test(message)) {
       const sourceConflict = await classifyPricingSourceConflict(db, products, addRuleRows)
@@ -4619,7 +4619,7 @@ app.post('/:id/amendments', async (c) => {
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
 
-      if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) {
         return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       }
@@ -4731,7 +4731,7 @@ app.post('/:id/amendments', async (c) => {
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
 
-      if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the actual delivery cost.', 'sale_delivery_cost_failed'), 500)
     }
@@ -4871,7 +4871,7 @@ app.post('/:id/amendments', async (c) => {
       if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
 
-      if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+      if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the delivery fee.', 'sale_delivery_fee_failed'), 500)
     }
@@ -5417,7 +5417,7 @@ app.post('/:id/amendments', async (c) => {
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
 
-    if (isSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
+    if (isAtomicSaleSnapshotBudgetFailure(error)) { const refusal=new SaleSnapshotBudgetError(); return c.json({error:refusal.message,code:refusal.code,proven_uncommitted:true},409) }
     const message = (error as Error).message || ''
     if (/CHECK constraint|constraint failed|malformed JSON/i.test(message)) {
       return c.json({ error: 'The sale, stock, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
