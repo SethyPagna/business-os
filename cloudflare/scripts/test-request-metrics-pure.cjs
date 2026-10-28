@@ -91,6 +91,24 @@ check('a db.batch() is ONE call against the invocation limit: 60 statements fit 
   const raw = await run('/api/raw', async () => { hook.rawD1Start(1) })
   assert.equal(raw.invocation.attemptedStatements, 1)
   assert.ok(!/rawD1Start\?\.\(stockTransactionStatementCount/.test(fs.readFileSync(path.join(SRC, 'lib/stockTransaction.ts'), 'utf8')), 'stockTransaction.ts must report one call, not its statement count')
+
+  let attempts = 0
+  const native = scriptedD1(() => ({ results: [], meta: {} }))
+  native.batch = async items => {
+    if (++attempts === 1) throw new Error('D1_ERROR: network reset')
+    return items.map(() => ({ results: [], meta: {} }))
+  }
+  const retriedDb = new dbModule.D1Compat(native)
+  let retried
+  const app = appWith(a => a.get('/api/retried-batch', async c => {
+    retried = metrics.requestMetricsOf(c)
+    await retriedDb.batch(sixty)
+    return c.json({ ok: true })
+  }))
+  assert.equal((await app.request('/api/retried-batch', {}, {}, executionCtx())).status, 200)
+  assert.equal(attempts, 2)
+  assert.equal(retried.invocation.attemptedStatements, 2, 'the failed dispatch and its retry are separate physical calls')
+  assert.equal(retried.attemptedStatements, 120, 'both attempts retain every submitted statement')
 })
 
 check('attempted calls include pending and failed batches before they finish', async () => {

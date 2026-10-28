@@ -47,7 +47,7 @@ async function world(options={}) {
     physical=0;batches=0;sqls.length=0;failures.clear()
     const response=await app.request(url,{method:'POST',headers:{cookie:'bos_session='+token,'content-type':'application/json'},body:JSON.stringify(body)},f.env,ctx)
     await Promise.all(tasks.splice(0))
-    assert.equal(acc.attemptedStatements+1,physical,'raw maintenance consumes one physical call outside D1Compat metrics (a db.batch() is one call)')
+    assert.equal(acc.invocation.attemptedStatements,physical,'invocation calls include raw maintenance, batches and retries')
     return {status:response.status,json:await response.json(),physical,batches,sqls:[...sqls]}
   }
   return {...f,call}

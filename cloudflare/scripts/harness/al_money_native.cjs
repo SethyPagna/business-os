@@ -28,21 +28,31 @@ export { SyncUploadSession, BroadcastHub };
 // generic write_conflict can be traced to the statement that refused.
 const d1Errors = [];
 const d1CallLimit = __AL_D1_CALL_LIMIT__;
-function counting(real, counter) {
+function counting(real, counter, pressure = 0) {
   const begin = (statements) => {
     counter.calls++; counter.statements += statements;
     if (counter.calls > d1CallLimit) throw new Error('Too many API requests by single Worker invocation');
   };
+  let warmed = false;
+  const warmup = async () => {
+    if (warmed) return;
+    warmed = true;
+    for (let i = 0; i < pressure; i++) {
+      begin(1);
+      globalThis[Symbol.for('business-os.request-metrics.v1')]?.rawD1Start?.(1);
+      await real.prepare('SELECT 1').all();
+    }
+  };
   const statement = (inner) => new Proxy(inner, { get(target, key) {
     if (key === '__alInner') return target;
     if (key === 'bind') return (...values) => statement(target.bind(...values));
-    if (key === 'first' || key === 'all' || key === 'run' || key === 'raw') return (...args) => { begin(1); return target[key](...args) };
+    if (key === 'first' || key === 'all' || key === 'run' || key === 'raw') return async (...args) => { await warmup(); begin(1); return target[key](...args) };
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
   return new Proxy(real, { get(target, key) {
     if (key === 'prepare') return (sql) => statement(target.prepare(sql));
-    if (key === 'batch') return (items) => { begin(items.length);
+    if (key === 'batch') return async (items) => { await warmup(); begin(items.length);
       return target.batch(items.map((item) => item.__alInner || item)).catch((error) => { d1Errors.push(String(error && error.message || error)); throw error }) };
-    if (key === 'exec') return (sql) => { begin(1); return target.exec(sql) };
+    if (key === 'exec') return async (sql) => { await warmup(); begin(1); return target.exec(sql) };
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
 }
 export default { ...worker, async fetch(request, env, ctx) {
@@ -64,7 +74,8 @@ export default { ...worker, async fetch(request, env, ctx) {
   }
   const pending = [];
   const context = { waitUntil(promise) { pending.push(Promise.resolve(promise).catch(() => {})) }, passThroughOnException() {} };
-  const response = await worker.fetch(request, { ...env, DB: counting(env.DB, counter) }, context);
+  const pressure = Math.max(0, Math.min(45, Number(request.headers.get('x-al-d1-pressure')) || 0));
+  const response = await worker.fetch(request, { ...env, DB: counting(env.DB, counter, pressure) }, context);
   const body = await response.arrayBuffer();
   // Background work handed to waitUntil belongs to this invocation's D1 budget too.
   for (let i = 0; i < pending.length; i++) await pending[i];
@@ -141,7 +152,7 @@ async function startWorker({ returnIdFloor = 100000, patches = [], d1CallLimit =
   async function call(method, url, body, label, options = {}) {
     const sessionCookie = options.cookie === undefined ? cookie : options.cookie
     const response = await mf.dispatchFetch(ORIGIN + url, { method, headers: { 'content-type': 'application/json',
-      'sec-fetch-site': 'same-origin', origin: ORIGIN, ...(sessionCookie ? { cookie: sessionCookie } : {}) },
+      'sec-fetch-site': 'same-origin', origin: ORIGIN, ...(sessionCookie ? { cookie: sessionCookie } : {}), ...options.headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
     const text = await response.text()
     let parsed

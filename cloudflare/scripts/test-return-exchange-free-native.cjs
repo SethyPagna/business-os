@@ -43,7 +43,7 @@ async function main() {
     const stockSum = async () => Number((await h.one('SELECT COALESCE(SUM(quantity),0) AS n FROM branch_stock')).n)
     const lotSum = async () => Number((await h.one('SELECT COALESCE(SUM(quantity),0) AS n FROM branch_batch_stock')).n)
 
-    const exchange = async (sale, back, out, label, { key, payment, stockAction = 'restock', damagedCount = 0 } = {}) => {
+    const exchange = async (sale, back, out, label, { key, payment, stockAction = 'restock', damagedCount = 0, pressure = 0 } = {}) => {
       const mark = h.metrics.length
       const quote = await h.call('POST', '/api/returns/quote', { sale_id: sale.id,
         items: back.map((index) => ({ sale_item_id: sale.items[index].id, quantity: 1 })),
@@ -54,11 +54,28 @@ async function main() {
         expected_quote: expected, expected_exchange: quoted, exchange_payment: payment || { details: [], change_currency: 'USD' },
         items: back.map((index, position) => ({ sale_item_id: sale.items[index].id, quantity: 1, stock_action: position < damagedCount ? 'damaged' : stockAction, branch_id: 1 })),
         replacement_items: out.map((product_id) => ({ branch_id: 1, product_id, quantity: 1 })) }
-      const created = await h.call('POST', '/api/returns', body, `${label}: create`)
+      const created = await h.call('POST', '/api/returns', body, `${label}: create`, { headers: { 'x-al-d1-pressure': String(pressure) } })
       return { quote, quoted, created, body, metrics: h.metrics.slice(mark) }
     }
     const callsOf = (result, suffix) => result.metrics.find((entry) => entry.label.endsWith(suffix))?.calls ?? -1
     const statementsOf = (result, suffix) => result.metrics.find((entry) => entry.label.endsWith(suffix))?.statements ?? -1
+
+    {
+      const sale = await sellLines([9600])
+      const before = await counts()
+      const stock = [await stockSum(), await lotSum()]
+      const pressured = await exchange(sale, [0], [9601], 'pressured exchange', {
+        pressure: 36, payment: { details: [{ method: 'Cash', amount_usd: 1, amount_khr: 0 }], change_currency: 'USD' },
+      })
+      const after = await counts()
+      r.check('a pressured exchange is refused before any business write and before physical call51', () => {
+        assert.ok(pressured.created.status >= 400 && pressured.created.status < 500, JSON.stringify(pressured.created))
+        assert.equal(pressured.created.body.code, 'customer_return_over_plan_budget')
+        assert.deepEqual(after, before)
+        assert.ok(callsOf(pressured, 'create') > 36 && callsOf(pressured, 'create') <= H.FREE_QUERY_LIMIT)
+      })
+      assert.deepEqual([await stockSum(), await lotSum()], stock)
+    }
 
     // ---- 1a. one line back, one out (the typical till exchange) ---------------------------------------------------------------------------
     {

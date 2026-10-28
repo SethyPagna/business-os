@@ -27,7 +27,7 @@ const MUTANTS = {
   'dry-run-take-back-size-ignored': [{ file: FILE, from: 'if (request.dry_run) assertTakeBackFitsPlan(env, request)', to: '' }],
   // 6.0.966: the dry run no longer tells the till to make the take-backs one line at a time on a small plan.
   'per-line-flag-off': [{ file: FILE, from: 'return getPlanLimits(env).d1QueriesPerInvocation < SMALL_PLAN_QUERY_LIMIT', to: 'return false' }],
-  'used-forgotten': [{ file: FILE, from: 'assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) :', to: 'assertReturnBulkBudget(env, 0, members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) :' }],
+  'used-forgotten': [{ file: FILE, from: 'if (used + planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {', to: 'if (planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {' }],
 }
 
 async function main() {
@@ -74,11 +74,11 @@ async function main() {
       const created = await h.call('POST', '/api/returns', request, `take back ${key}`)
       return { status: created.status, body: created.body, id: created.body.id, request }
     }
-    const cancel = async (id, key, returnIds) => {
+    const cancel = async (id, key, returnIds, pressure = 0) => {
       const row = await h.one('SELECT status,return_type,updated_at FROM returns WHERE id=?', id)
       return h.call('POST', '/api/returns/bulk', { client_request_id: key, field: 'status', source: 'completed', target: 'cancelled',
         items: [{ id, expected_status: String(row.status || 'completed'), expected_method: String(row.return_type || 'restock'), expected_updated_at: row.updated_at ?? null,
-          ...(returnIds === undefined ? {} : { replacement: { return_ids: returnIds } }) }] }, `cancel ${id}`)
+          ...(returnIds === undefined ? {} : { replacement: { return_ids: returnIds } }) }] }, `cancel ${id}`, { headers: { 'x-al-d1-pressure': String(pressure) } })
     }
     const generationOf = async historyId => JSON.parse((await h.one('SELECT undo_payload FROM action_history WHERE id=?', historyId)).undo_payload).generation
     const stockSum = async () => Number((await h.one('SELECT COALESCE(SUM(quantity),0) AS n FROM branch_stock')).n)
@@ -87,6 +87,22 @@ async function main() {
     const historyRows = async () => Number((await h.one("SELECT COUNT(*) AS n FROM action_history WHERE scope='returns'")).n)
     const statementsOf = (label) => h.metrics.find(entry => entry.label === label)?.statements ?? -1
     const callsOf = (label) => h.metrics.find(entry => entry.label === label)?.calls ?? -1
+
+    {
+      const x = await exchange(await makeSale([9810]), 1)
+      const taken = await takeBack(x.s2, 0, 1, 'cf-pressure-take')
+      assert.equal(taken.status, 200, JSON.stringify(taken.body))
+      const before = [await stockSum(), await lotSum(), await historyRows(), await statusOf(x.ret.id), await statusOf(taken.id)]
+      const refused = await cancel(x.ret.id, 'cf-pressure-cancel', [taken.id], 28)
+      const after = [await stockSum(), await lotSum(), await historyRows(), await statusOf(x.ret.id), await statusOf(taken.id)]
+      r.check('a pressured cancellation is refused before stock, history or return statuses change', () => {
+        assert.deepEqual(after, before)
+        assert.ok(refused.status >= 400 && refused.status < 500, JSON.stringify(refused))
+        assert.equal(refused.body.code, 'return_bulk_over_plan_budget')
+        assert.deepEqual(after, before)
+        assert.ok(callsOf(`cancel ${x.ret.id}`) > 28 && callsOf(`cancel ${x.ret.id}`) <= H.FREE_QUERY_LIMIT)
+      })
+    }
 
     // ---- 1. the typical exchange: cancel, undo and redo fit ----------------------------------------------------------------------------------------------------
     {
