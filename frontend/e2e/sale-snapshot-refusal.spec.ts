@@ -16,6 +16,12 @@ async function draft(page:Page):Promise<Draft|undefined>{
   },account.id)
 }
 
+async function openCart(page:Page){
+  const cart=page.getByRole('button',{name:/^Cart(?: \d+)?$/})
+  await expect(cart.or(page.getByRole('button',{name:'Complete Sale',exact:true})).first()).toBeVisible()
+  if(await cart.count())await cart.first().click()
+}
+
 async function ringOne(page:Page){
   await page.route(/\/api\/auth\/(bootstrap|login|me)(\?|$)/,async route=>{
     const response=await route.fetch()
@@ -27,8 +33,7 @@ async function ringOne(page:Page){
   expect(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('businessos_user')||localStorage.getItem('businessos_user')||'{}').organization_id)).toBe(1)
   await gotoAdminPage(page,'/pos')
   await page.getByText('E2E Product 002 Belle Roux',{exact:true}).first().click()
-  const cart=page.getByRole('button',{name:'Cart',exact:true})
-  if(await cart.count())await cart.first().click()
+  await openCart(page)
   await expect.poll(async()=>(await draft(page))?.cart?.length).toBe(1)
   await page.getByRole('button',{name:'Exact $',exact:true}).click()
   const usd=page.getByRole('spinbutton',{name:'Amount Paid USD 1',exact:true})
@@ -38,6 +43,8 @@ async function ringOne(page:Page){
 }
 
 async function submit(page:Page){
+  const installNotice=page.getByRole('status').filter({hasText:en.ios_install_hint})
+  if(await installNotice.isVisible())await installNotice.getByRole('button',{name:en.dismiss_notification,exact:true}).click()
   const response=page.waitForResponse(result=>new URL(result.url()).pathname==='/api/sales'&&result.request().method()==='POST')
   await page.getByRole('button',{name:'Complete Sale',exact:true}).click()
   await page.locator('[data-pos-status-option="completed"]').click()
@@ -90,8 +97,7 @@ test('a later refusal never releases an earlier unknown checkout',async({page})=
   await page.reload()
   await expect.poll(async()=>(await draft(page))?.checkoutRequestId).toBe(frozen.checkoutRequestId)
   expect((await draft(page))?.checkoutPayload).toEqual(frozen.checkoutPayload)
-  const cart=page.getByRole('button',{name:'Cart',exact:true})
-  if(await cart.count())await cart.first().click()
+  await openCart(page)
   proven=true
   expect((await submit(page)).status()).toBe(409)
   await expect.poll(async()=>(await draft(page))?.checkoutRequestId).toBe(frozen.checkoutRequestId)
@@ -123,6 +129,7 @@ test('a session-only clear cannot unlock a stale preferred local draft',async({p
   await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
   await expect.poll(async()=>(await draft(page))?.checkoutRequestId||'').not.toBe('')
   await page.reload()
+  await openCart(page)
   await expect(page.getByText(en.money_checkout_recovery_required,{exact:true})).toBeVisible()
   expect((await draft(page))?.cart).toEqual(before.cart)
 })
