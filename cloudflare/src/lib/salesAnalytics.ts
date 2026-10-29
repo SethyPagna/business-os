@@ -1210,7 +1210,7 @@ function reportSnapshotScalars(snapshot: SalesReportSnapshot): string[] {
   return rows
 }
 
-type ReportReadPurpose = 'full' | 'totals'
+type ReportReadPurpose = 'full' | 'totals' | 'dashboard'
 
 const REPORT_TOTALS_SALE_FIELDS = new Set([
   'id', 'sale_status', 'status_before_return', 'subtotal_usd', 'discount_usd', 'membership_discount_usd', 'tax_usd', 'total_usd',
@@ -1223,8 +1223,27 @@ const REPORT_TOTALS_ITEM_FIELDS = new Set([
 ])
 const REPORT_TOTALS_VOID_FIELDS = new Set(['id'])
 
-function reportSelectForPurpose(fields: Record<string, string>, purpose: ReportReadPurpose, totalsFields: ReadonlySet<string>): { sql: string; columns: string[] } {
-  const selected = Object.entries(fields).filter(([key]) => purpose === 'full' || totalsFields.has(key))
+function reportDashboardAllTimeProjectionEligible(f: SalesFilters): boolean {
+  if (Object.getPrototypeOf(f) !== Object.prototype || Object.getOwnPropertySymbols(f).length) return false
+  const supported = ['startDate', 'endDate', 'branchId', 'createdFrom', 'createdTo']
+  for (const key of Object.getOwnPropertyNames(f)) {
+    const descriptor = Object.getOwnPropertyDescriptor(f, key)
+    if (!supported.includes(key) || !descriptor || !Object.hasOwn(descriptor, 'value')) return false
+  }
+  return reportAtomicFiltersEligible(f)
+    && (f.branchId == null || typeof f.branchId === 'string' || Number.isSafeInteger(f.branchId))
+}
+
+const REPORT_DASHBOARD_OMITTED_HEADER_FIELDS = new Set([
+  'cashier_id', 'cashier_name', 'customer_phone', 'receipt_number', 'delivery_contact_id', 'delivery_contact_name',
+])
+
+function reportSelectForPurpose(
+  fields: Record<string, string>, purpose: ReportReadPurpose, totalsFields: ReadonlySet<string>,
+  dashboardOmittedFields?: ReadonlySet<string>,
+): { sql: string; columns: string[] } {
+  const selected = Object.entries(fields).filter(([key]) => (purpose !== 'totals' || totalsFields.has(key))
+    && (purpose !== 'dashboard' || !dashboardOmittedFields?.has(key)))
   return { sql: selected.map(([, sql]) => sql).join(','), columns: selected.map(([key]) => key) }
 }
 
@@ -1238,9 +1257,19 @@ function reportDashboardDateContextEligible(
   f: SalesFilters, includeDeliveryFees: boolean, scalarScope: CapturedSalesReportScalarScope | null,
   options: SalesReportReadOptions, purpose: ReportReadPurpose,
 ): boolean {
-  return purpose === 'full' && !includeDeliveryFees && scalarScope === null
+  return (purpose === 'full' || purpose === 'dashboard') && !includeDeliveryFees && scalarScope === null
     && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
     && reportDashboardDateFiltersEligible(f)
+}
+
+function reportDashboardProjectionContextEligible(
+  f: SalesFilters, includeDeliveryFees: boolean, scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions, dashboardDateContext: boolean,
+): boolean {
+  if (dashboardDateContext) return reportDashboardDateContextEligible(f, includeDeliveryFees, scalarScope, options, 'dashboard')
+  return !includeDeliveryFees && scalarScope === null
+    && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+    && reportDashboardAllTimeProjectionEligible(f)
 }
 
 function reportEmptyGroups(): ReportReadGroups {
@@ -1264,6 +1293,7 @@ async function buildSalesReportReadPlan(
   purpose: ReportReadPurpose,
   dashboardDateContext = false,
 ): Promise<ReportReadPlan> {
+  if (purpose === 'dashboard' && !reportDashboardProjectionContextEligible(f, includeDeliveryFees, scalarScope, options, dashboardDateContext)) purpose = 'full'
   const datedDashboard = dashboardDateContext && reportDashboardDateContextEligible(f, includeDeliveryFees, scalarScope, options, purpose)
   const db = getDb(env)
   const salesColumns = await reportTableColumns(db, 'sales')
@@ -1307,12 +1337,12 @@ async function buildSalesReportReadPlan(
     } : {}),
     delivery_contact_id: saleColumn('delivery_contact_id', 'NULL'), delivery_contact_name: saleColumn('delivery_contact_name', "''"),
     delivery_has_linked_fee: `${linkedDeliveryFee} AS delivery_has_linked_fee`,
-  }, purpose, REPORT_TOTALS_SALE_FIELDS)
+  }, purpose, REPORT_TOTALS_SALE_FIELDS, REPORT_DASHBOARD_OMITTED_HEADER_FIELDS)
   const voidSelect = reportSelectForPurpose({
     id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', branch_id: 's.branch_id', branch_name: 's.branch_name',
     cashier_id: 's.cashier_id', cashier_name: 's.cashier_name', customer_id: 's.customer_id', customer_name: 's.customer_name',
     customer_phone: 's.customer_phone', payment_method: 's.payment_method', customer_is_anonymous: `${customerAnonymous} AS customer_is_anonymous`,
-  }, purpose, REPORT_TOTALS_VOID_FIELDS)
+  }, purpose, REPORT_TOTALS_VOID_FIELDS, REPORT_DASHBOARD_OMITTED_HEADER_FIELDS)
   const itemSelect = reportSelectForPurpose({
     id: 'si.id', sale_id: 'si.sale_id', product_id: itemColumn('product_id', 'NULL'), product_name: itemColumn('product_name', "''"),
     quantity: 'si.quantity', total_usd: itemColumn('total_usd', '0'), cost_price_usd: 'si.cost_price_usd',
@@ -1690,23 +1720,28 @@ async function readSalesReportAtomicTotalsSnapshot(
   capturedScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions, purpose: ReportReadPurpose,
   dashboardDateContext = false,
 ): Promise<SalesReportSnapshot> {
+  const fullFamily = purpose !== 'totals'
+  const fallbackPurpose: ReportReadPurpose = purpose === 'dashboard' ? 'full' : purpose
+  if (purpose === 'dashboard' && !reportDashboardProjectionContextEligible(f, includeDeliveryFees, capturedScope, options, dashboardDateContext)) {
+    return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
+  }
   if (dashboardDateContext && !reportDashboardDateContextEligible(f, includeDeliveryFees, capturedScope, options, purpose)) {
-    return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose)
+    return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
   }
   const db = getDb(env)
   const policy = reportTotalsPolicy(REPORT_TOTALS_POLICY)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let state: ReportRestoreState | null
-    try { state = await readBoundedReportRestoreState(db, policy.maxBytes, true, policy, purpose === 'full' ? 'fallback' : 'refuse') } catch (error) {
-      if (purpose === 'full' && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, false)
+    try { state = await readBoundedReportRestoreState(db, policy.maxBytes, true, policy, fullFamily ? 'fallback' : 'refuse') } catch (error) {
+      if (fullFamily && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, false)
       throw error
     }
-    if (!state) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose)
-    if (!state.atomicSupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
+    if (!state) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
+    if (!state.atomicSupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
     const plan = await buildSalesReportReadPlan(env, f, includeDeliveryFees, capturedScope, options, purpose, dashboardDateContext)
     let batch: ReturnType<typeof reportTotalsBatchStatements>
     try { batch = reportTotalsBatchStatements(plan, state, options, policy) } catch (error) {
-      if (error instanceof ReportAtomicPlanUnsupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
+      if (error instanceof ReportAtomicPlanUnsupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
       throw error
     }
     let results: D1Result[]
@@ -1714,7 +1749,7 @@ async function readSalesReportAtomicTotalsSnapshot(
       if (reportGuardFailure(error, 'report_restore_state_changed')) continue
       if (reportGuardFailure(error, 'report_totals_receipts')) throw new SalesReportExportTooLargeError()
       if (reportGuardFailure(error, 'report_totals_rows')) throw new ReportMoneyPrecisionError('too_many_rows')
-      if (purpose === 'full' && reportGuardFailure(error, 'report_totals_bytes')) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
+      if (fullFamily && reportGuardFailure(error, 'report_totals_bytes')) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
       if (reportGuardFailure(error, 'report_totals_bytes')) throw new ReportMoneyPrecisionError('too_many_rows')
       if (reportGuardFailure(error, 'report_totals_storage')) throw new ReportMoneyPrecisionError('unsupported_row')
       throw error
@@ -1738,8 +1773,8 @@ async function readSalesReportAtomicTotalsSnapshot(
     const snapshot = reportSnapshotFromPlan(plan, groups)
     if (snapshot.row_count !== reportNonnegativeInteger(admission.data_rows) || snapshot.row_count > policy.maxRows) throw new ReportMoneyPrecisionError('unsupported_row')
     let post: ReportRestoreState | null
-    try { post = await readBoundedReportRestoreState(db, batch.postBudget(reportNonnegativeInteger(admission.detail_upper)), false, policy, purpose === 'full' ? 'fallback' : 'refuse') } catch (error) {
-      if (purpose === 'full' && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, false)
+    try { post = await readBoundedReportRestoreState(db, batch.postBudget(reportNonnegativeInteger(admission.detail_upper)), false, policy, fullFamily ? 'fallback' : 'refuse') } catch (error) {
+      if (fullFamily && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, false)
       throw error
     }
     if (!post) continue
@@ -2546,7 +2581,7 @@ const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_us
 /** The totals of one verified window without the removal-loss block, for a comparison that reads revenue and sale count only. */
 export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Promise<SalesTotals> {
   const snapshot = reportDashboardDateFiltersEligible(f)
-    ? await readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
+    ? await readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
     : await readSalesReportSnapshot(env, f)
   return salesTotalsFromSnapshot(snapshot)
 }
@@ -2615,9 +2650,9 @@ export async function getSalesTotalsAndPeriodSeries(
 ): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
   const [snapshot, loss] = await Promise.all([
     reportAtomicFiltersEligible(f)
-      ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+      ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, reportDashboardAllTimeProjectionEligible(f) ? 'dashboard' : 'full')
       : reportDashboardDateFiltersEligible(f)
-        ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
+        ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
         : readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
   ])

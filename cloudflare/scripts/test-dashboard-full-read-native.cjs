@@ -194,7 +194,21 @@ async function main() {
   const sameFull = (record, expected, fixture) => { financial(record.value, fixture); assert.deepEqual(record.value.snapshot, expected.value.snapshot); assert.deepEqual(record.value.views, expected.value.views) }
   const tiny = { name: 'tiny', items: 1, customer: 'Fixture customer', product: 'Fixture item' }
   await seed(tiny); const tinyAuthority = await authority(tiny)
-  const tinyCombined = await invoke({ mode: 'combined' }, 'tiny-combined'); assert.equal(tinyCombined.value.kind, 'combined'); assert.equal(tinyCombined.metrics.atomic_main_batches, 1, 'Eligible combined helper must dispatch exactly one full atomic main'); noUnexpectedErrors(tinyCombined.value); combinedParity(tinyCombined, tinyAuthority); accept('tiny-combined-atomic', tinyCombined)
+  const tinyCombined = await invoke({ mode: 'combined' }, 'tiny-combined'); assert.equal(tinyCombined.value.kind, 'combined'); assert.equal(tinyCombined.metrics.atomic_main_batches, 1, 'Eligible combined helper must dispatch exactly one full atomic main'); noUnexpectedErrors(tinyCombined.value); combinedParity(tinyCombined, tinyAuthority)
+  const tinyMain = tinyCombined.value.calls.find(call => call.phase === 'atomic-main')
+  const omittedSalesFields = ['cashier_id', 'cashier_name', 'customer_phone', 'receipt_number', 'delivery_contact_id', 'delivery_contact_name']
+  const fullSalesFields = Object.keys(tinyAuthority.value.snapshot.sales[0])
+  assert.ok(omittedSalesFields.every(key => fullSalesFields.includes(key)), 'Actual FULL authority retains all six declared metadata fields')
+  assert.deepEqual(tinyMain.detail_groups[0].columns, fullSalesFields.filter(key => !omittedSalesFields.includes(key)), 'Dashboard native sales fields must omit only the six unused FULL metadata fields after complete financial parity')
+  const fullItemFields = Object.keys(tinyAuthority.value.snapshot.items[0])
+  assert.equal(fullItemFields.length, 9); assert.deepEqual(tinyMain.detail_groups[2].columns, fullItemFields, 'Dashboard native items retain all nine FULL fields')
+  const nativeSalesBytes = tinyMain.results[2].result_array_utf8_bytes, fullSalesBytes = Buffer.byteLength(JSON.stringify(tinyAuthority.value.snapshot.sales), 'utf8')
+  assert.equal(typeof nativeSalesBytes, 'number'); assert.ok(nativeSalesBytes < fullSalesBytes, 'Dashboard native sales result array must shrink against the actual complete FULL authority')
+  const emptyVoidParts = tinyMain.sqls[3].split(/\bFROM sales s WHERE\b/); assert.equal(emptyVoidParts.length, 2)
+  const emptyVoidSelect = emptyVoidParts[0]
+  assert.doesNotMatch(emptyVoidSelect, /\bs\.(cashier_id|cashier_name|customer_phone)\b/, 'Empty void group: SQL-only omission of its three unused metadata fields')
+  assert.match(emptyVoidSelect, /\bs\.sale_status\b/, 'Empty void group: SQL-only retention of sale status; no void-row value proof')
+  accept('tiny-combined-atomic', tinyCombined)
   const tinyFull = await invoke({ mode: 'atomic-full-snapshot' }, 'tiny-full-bridge'); sameFull(tinyFull, tinyAuthority, tiny); noUnexpectedErrors(tinyFull.value); assert.equal(tinyFull.metrics.atomic_main_batches, 1); accept('tiny-full-bridge', tinyFull)
   const tinyPoison = await invoke({ mode: 'atomic-full-snapshot', poison: true }, 'tiny-native-poison-calibration'), poisonCall = tinyPoison.value.calls.find(call => call.phase === 'atomic-main')
   assert.equal(tinyPoison.value.kind, 'refusal'); assert.equal(tinyPoison.value.error.marker, '__dashboard_full_detail_poison'); assert.equal(poisonCall.arity, 8); assert.match(poisonCall.error, /bad JSON path|JSON path error/i); assert.ok(poisonCall.error.includes('__dashboard_full_detail_poison')); assert.equal(poisonCall.unknown_metadata, 8); assert.equal(tinyPoison.value.calls.filter(call => detailPhases.includes(call.phase) || call.phase === 'legacy-restore' || call.phase === 'flags-post').length, 0); noUnexpectedErrors(tinyPoison.value, poisonCall); accept('tiny-native-poison-calibration', tinyPoison)
