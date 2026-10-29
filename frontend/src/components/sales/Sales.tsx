@@ -742,14 +742,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...salesDateRange,
   }), [isAdmin, userFilter, statusFilter, debouncedSearch, salesDateRange])
-  const salesStatsScope = JSON.stringify([statusSecurityScope, salesStatsParams])
+  const salesReadAuthority = captureActorReadScope('sales').authority
+  const salesStatsScope = JSON.stringify([statusSecurityScope, salesReadAuthority, salesStatsParams])
   const salesStatsScopeRef = useRef(salesStatsScope)
   salesStatsScopeRef.current = salesStatsScope
   const salesPageParams = useMemo(() => ({
     ...salesStatsParams, page: salesPage, limit: salesPageSize,
     sortBy: salesSortSpec.field, sortDir: salesSortSpec.direction,
   }), [salesStatsParams, salesPage, salesPageSize, salesSortSpec.field, salesSortSpec.direction])
-  const salesPageScope = JSON.stringify([statusSecurityScope, salesPageParams])
+  const salesPageScope = JSON.stringify([statusSecurityScope, salesReadAuthority, salesPageParams])
   const salesPageRowsRef = useRef<{
     scope: string; count: number; readScope: ReturnType<typeof captureActorReadScope>
   } | null>(null)

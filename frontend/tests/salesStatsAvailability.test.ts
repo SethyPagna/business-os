@@ -9,6 +9,7 @@ import * as http from '../src/api/http.ts'
 import { getSalesStats } from '../src/api/salesTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
 import { clampPageNumber } from '../src/utils/pagerState.ts'
+import { saleSecurityFingerprint } from '../src/components/sales/saleSettlementConfig.ts'
 
 const read = (rel: string) => readFileSync(new URL('../src/' + rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const source = read('components/sales/Sales.tsx')
@@ -48,14 +49,23 @@ const retryExpressions = retryButtons.map(n => {
 })
 const rowFailure = statements.find(n => ts.isIfStatement(n) && /loadError.*!loading.*!sales.length/.test(n.expression.getText(ast))) as ts.IfStatement
 assert.ok(rowFailure, 'actual row-only early error gate')
-const projections = ['salesStatsParams', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
+const statsReadEffects = statements.filter(n => ts.isExpressionStatement(n)
+  && n.getText(ast).startsWith('useEffect(') && n.getText(ast).includes('void loadSalesStats().then'))
+const pageReadEffects = statements.filter(n => ts.isExpressionStatement(n)
+  && n.getText(ast).startsWith('useEffect(') && n.getText(ast).includes('loadSales(false)')
+  && n.getText(ast).includes('if (!isActive)') && n.getText(ast).includes('clearLoadWatchdog'))
+assert.equal(statsReadEffects.length, 1, 'actual Stats callback dependency effect')
+assert.equal(pageReadEffects.length, 1, 'actual list callback dependency effect')
+const projections = ['salesStatsParams', 'salesReadAuthority', 'salesStatsScope', 'salesStatsScopeRef', 'salesPageParams', 'salesPageScope',
   'salesPageRowsRef', 'salesStatsRead', 'currentSalesStatsRead', 'salesStats', 'salesStatsError', 'salesReadError',
   'loadSales', 'loadSalesStats', 'retrySalesReads', 'totalSalesCount', 'currentSalesPageItems', 'revenue', 'revenueCount', 'creditUsd', 'paidOnlyUsd']
 const code = `${pending.getText(ast)}\n${projections.map(declaration).join('\n')}\n${statsScopeAssignment.getText(ast)}\n${clampEffect.getText(ast)}\n${syncEffect.getText(ast)}\n`
 const compile = (body: string, result: string) => new Function('env', `with(env){${transformSync(body, { loader: 'tsx', target: 'es2022', jsxFactory: 'jsx', jsxFragment: 'Fragment' }).code};return (${result})}`)
-const run = compile(code, `{ sales, loading, loadError, salesReadError, salesStatsRead, salesStats, salesStatsError,
-  salesStatsScope, salesStatsParams, salesPageScope, totalSalesCount, currentSalesPageItems, revenue, revenueCount, creditUsd, paidOnlyUsd,
-  loadSales, loadSalesStats, retries:[${retryExpressions.join(',')}], rowFailure:(${rowFailure.expression.getText(ast)}) }`)
+const viewExpression = `{ sales, loading, loadError, salesReadError, salesStatsRead, salesStats, salesStatsError,
+  salesReadAuthority, salesStatsScope, salesStatsParams, salesPageScope, totalSalesCount, currentSalesPageItems, revenue, revenueCount, creditUsd, paidOnlyUsd,
+  loadSales, loadSalesStats, retries:[${retryExpressions.join(',')}], rowFailure:(${rowFailure.expression.getText(ast)}) }`
+const run = compile(code, viewExpression)
+const runReadEffects = compile(`${code}\n${statsReadEffects[0].getText(ast)}\n${pageReadEffects[0].getText(ast)}\n`, viewExpression)
 
 type Slot = { value?: any; deps?: unknown[]; cleanup?: () => void }
 function hooks() {
@@ -83,11 +93,11 @@ const browserEvents: Event[] = []
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: true } })
 Object.assign(globalThis, { window: { localStorage: store, sessionStorage: store, location: { origin: 'https://stats.fixture.invalid' }, addEventListener() {}, dispatchEvent(event: Event) { browserEvents.push(event); return true }, setTimeout, clearTimeout } })
 function actor(id = 1) { data.set('businessos_user', JSON.stringify({ id })); scopes.resetActorReadSession() }
-function harness(statsApi?: (params: any) => Promise<unknown>) {
+function harness(statsApi?: (params: any) => Promise<unknown>, options: { autoReadEffects?: boolean; props?: Record<string, unknown> } = {}) {
   actor()
   const h = hooks(), rows: any[] = [], stats: any[] = []
   const props: any = { isActive: true, authReady: true, canViewSales: true, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
-    salesDateRange: { startDate: '2026-09-01' }, statusSecurityScope: 'security-A', salesPage: 4, salesPageSize: 20, salesSortSpec: { field: 'date', direction: 'desc' }, syncChannel: null }
+    salesDateRange: { startDate: '2026-09-01' }, statusSecurityScope: 'security-A', salesPage: 4, salesPageSize: 20, salesSortSpec: { field: 'date', direction: 'desc' }, syncChannel: null, ...options.props }
   const model: any = { sales: [], loadError: null, loading: false, stripCalls: 0 }, pageChanges: number[] = []
   const ref = (current: any) => ({ current })
   const refs: any = { statusSecurityRef: ref(props.statusSecurityScope), loadSecurityRef: ref(props.statusSecurityScope), latestLoadRef: ref(null), loadAbortRef: ref(null),
@@ -96,7 +106,7 @@ function harness(statsApi?: (params: any) => Promise<unknown>) {
     captureActorReadScope: scopes.captureActorReadScope, isActorReadScopeCurrent: scopes.isActorReadScopeCurrent, assertActorReadScope: scopes.assertActorReadScope,
     clampPage: clampPageNumber, clearLoadWatchdog() {}, withLoaderTimeout: (fn: () => unknown) => fn(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
     normalizeSaleRows: (value: unknown) => Array.isArray(value) ? value : [], getErrorMessage: (e: any) => e.message,
-    translateOr: (_key: string, fallback: string) => fallback, loadStatsStrip: async () => { model.stripCalls++ }, setUserOptionsLoaded() {},
+    translateOr: (_key: string, fallback: string) => fallback, loadStatsStrip: async () => { model.stripCalls++ }, setUserOptionsLoaded() {}, setHistoryReady() {},
     saleListRevenueUsd() { throw new Error('PAGE_SUBTOTAL_IS_NOT_COHORT_AUTHORITY') }, saleListCreditUsd() { throw new Error('PAGE_CREDIT_IS_NOT_COHORT_AUTHORITY') }, isCountedSale: () => true,
     setSales: (v: unknown) => { model.sales = v }, setLoadError: (v: unknown) => { model.loadError = v }, setLoading: (v: unknown) => { model.loading = v },
     setSalesPage: (v: any) => { const next = typeof v === 'function' ? v(props.salesPage) : v; pageChanges.push(next); props.salesPage = next },
@@ -104,7 +114,8 @@ function harness(statsApi?: (params: any) => Promise<unknown>) {
     fetchSalesStats: (params: any) => { if (statsApi) return statsApi(params); const d = deferred(); stats.push({ ...d, params }); return d.promise }, window: { setTimeout: () => 1, clearTimeout() {} },
     console: { error() {} } }
   let view: any
-  const render = () => { h.begin(); refs.statusSecurityRef.current = props.statusSecurityScope; view = run({ ...h.api, ...props, ...model, ...refs, ...helpers }); return view }
+  const execute = options.autoReadEffects ? runReadEffects : run
+  const render = () => { h.begin(); refs.statusSecurityRef.current = props.statusSecurityScope; view = execute({ ...h.api, ...props, ...model, ...refs, ...helpers }); return view }
   const commit = () => { refs.latestLoadRef.current = view.loadSales; h.commit(); return render() }
   const flush = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); return render() }
   render()
@@ -281,5 +292,90 @@ try {
     assert.ok(unavailable.includes(`— ${pack.sales} | —`), unavailable); assert.ok(unavailable.includes(`${pack.rpt_pending_credit} —`)); assert.deepEqual(formatted, [])
     const zero = render(0, 0, 0, 0); assert.ok(zero.includes(`0 ${pack.sales} | $0.00`), zero); assert.deepEqual(formatted, [0])
   })
+for (const wasReady of [true, false]) await test(`same React authority session reset reruns actual Stats and page effects (ready=${wasReady})`, async () => {
+  const user = Object.freeze({ id: 1, role_code: 'staff', permissions: { sales: 'full' } })
+  const fingerprint = saleSecurityFingerprint(user, true)
+  const security = 'stable:' + fingerprint
+  const h = harness(undefined, { autoReadEffects: true, props: { user, statusSecurityScope: security } })
+  h.commit()
+  assert.equal(h.stats.length, 1); assert.equal(h.rows.length, 1)
+  const params = JSON.stringify(h.stats[0].params)
+  const pageParams = JSON.stringify(h.rows[0].params)
+  h.rows[0].resolve(page())
+  if (wasReady) h.stats[0].resolve(valid())
+  else h.stats[0].reject(new Error('old Stats failed'))
+  await h.flush(); h.commit()
+  assert.ok(wasReady ? h.view.salesStats : h.view.salesStatsError)
+  const oldAuthority = h.view.salesReadAuthority
+  const oldStatsScope = h.view.salesStatsScope, oldPageScope = h.view.salesPageScope
+  const oldStatsCallback = h.view.loadSalesStats, oldRowsCallback = h.view.loadSales
+
+  scopes.resetActorReadSession()
+  h.render() // Deliberately BEFORE effects.
+  assert.strictEqual(h.props.user, user)
+  assert.equal(h.props.statusSecurityScope, security)
+  assert.equal(saleSecurityFingerprint(user, true), fingerprint)
+  assert.notEqual(h.view.salesReadAuthority, oldAuthority)
+  unknown(h.view); assert.equal(h.view.salesStatsError, null, 'old authority error must not cross session reset')
+  assert.notEqual(h.view.salesStatsScope, oldStatsScope, 'Stats query lifecycle observes actual authority')
+  assert.notEqual(h.view.salesPageScope, oldPageScope, 'page lifecycle observes actual authority')
+  assert.notStrictEqual(h.view.loadSalesStats, oldStatsCallback)
+  assert.notStrictEqual(h.view.loadSales, oldRowsCallback)
+  assert.equal(h.stats.length, 1); assert.equal(h.rows.length, 1, 'render itself must not dispatch')
+  h.commit() // THE witness: actual callback-dependent effects start fresh reads.
+  assert.equal(h.stats.length, 2, 'actual Stats effect reruns')
+  assert.equal(h.rows.length, 2, 'actual page effect reruns')
+  assert.equal(JSON.stringify(h.stats[1].params), params, 'authority stays out of URL parameters')
+  assert.equal(JSON.stringify(h.rows[1].params), pageParams)
+  h.stats[1].resolve(valid(88)); h.rows[1].resolve(page())
+  await h.flush(); h.commit()
+  assert.equal(h.view.revenue, 88); assert.equal(h.view.salesStatsError, null)
+  assert.equal(h.view.currentSalesPageItems, 20)
+  h.render(); h.commit()
+  assert.equal(h.stats.length, 2); assert.equal(h.rows.length, 2, 'unchanged authority rerender adds no requests')
+})
+
+await test('actual authority-key refresh supersedes pending rows through existing coalescer and ignores late Stats', async () => {
+  for (const oldFails of [false, true]) {
+    const h = harness(undefined, { autoReadEffects: true })
+    h.commit()
+    assert.equal(h.rows.length, 1); assert.equal(h.stats.length, 1)
+    const oldSignal = h.rows[0].options.signal as AbortSignal
+    const oldPageScope = h.view.salesPageScope
+    scopes.resetActorReadSession(); h.render(); unknown(h.view); h.commit()
+    assert.notEqual(h.view.salesPageScope, oldPageScope)
+    assert.equal(oldSignal.aborted, true, 'new page authority must supersede the old query')
+    assert.equal(h.rows.length, 1, 'existing coalescer waits for the old request to settle')
+    assert.equal(h.stats.length, 2, 'Stats effect starts the new authority')
+    h.stats[1].resolve(valid(77)); await h.flush()
+    assert.equal(h.view.revenue, 77)
+    if (oldFails) h.stats[0].reject(new Error('late old authority failure'))
+    else h.stats[0].resolve(valid(999))
+    h.rows[0].resolve([{ id: 'old-private-page' }]); await h.flush()
+    assert.equal(h.view.revenue, 77); assert.equal(h.view.salesStatsError, null)
+    assert.equal(h.rows.length, 2, 'old finally hands the queued load to the new page scope')
+    assert.deepEqual(h.view.sales, [], 'old page result must not publish')
+    h.rows[1].resolve(page()); await h.flush(); h.commit()
+    assert.equal(h.view.currentSalesPageItems, 20)
+    assert.equal(h.view.revenue, 77)
+  }
+})
+
+await test('plain revision change keeps authority query keys stable and causes no added read-effect loop', async () => {
+  const h = harness(undefined, { autoReadEffects: true })
+  h.commit(); h.rows[0].resolve(page()); h.stats[0].resolve(valid())
+  await h.flush(); h.commit()
+  const authority = h.view.salesReadAuthority
+  const statsScope = h.view.salesStatsScope, pageScope = h.view.salesPageScope
+  const statsCallback = h.view.loadSalesStats, rowsCallback = h.view.loadSales
+  scopes.invalidateActorReadChannel('sales')
+  h.render()
+  assert.equal(h.view.salesReadAuthority, authority)
+  assert.equal(h.view.salesStatsScope, statsScope); assert.equal(h.view.salesPageScope, pageScope)
+  assert.strictEqual(h.view.loadSalesStats, statsCallback); assert.strictEqual(h.view.loadSales, rowsCallback)
+  unknown(h.view); assert.ok(h.view.salesStatsError, 'invalidated numbers remain unavailable with current-actor Retry')
+  h.commit(); h.render(); h.commit()
+  assert.equal(h.stats.length, 1); assert.equal(h.rows.length, 1, 'revision alone cannot loop callback effects')
+})
 } finally { (globalThis as any).window = priorWindow; globalThis.fetch = priorFetch; http.__resetApiHealthForTests(); if (priorNavigator) Object.defineProperty(globalThis, 'navigator', priorNavigator); else delete (globalThis as any).navigator }
 if (failures) process.exitCode = 1
