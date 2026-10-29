@@ -46,6 +46,22 @@ assert.equal(ReportExactDecimal.recorded('1e2').toText(4), '100.0000')
 assert.equal(ReportExactDecimal.recorded(1).divide(ReportExactDecimal.recorded(3))
   .multiply(ReportExactDecimal.recorded(3)).toText(24), '1.000000000000000000000000')
 
+const identityZero = ReportExactDecimal.zero()
+const identityTiny = ReportExactDecimal.recorded('1e-24')
+const tinyText = '0.000000000000000000000001'
+assert.equal(identityTiny.add(identityZero).toText(24), tinyText)
+assert.equal(identityZero.add(identityTiny).toText(24), tinyText)
+assert.equal(identityTiny.subtract(identityZero).toText(24), tinyText)
+assert.equal(identityZero.subtract(identityTiny).toText(24), `-${tinyText}`)
+
+const moneyLimit = ReportExactDecimal.recorded('100000000000')
+const doubleLimit = moneyLimit.add(moneyLimit)
+const identityTwo = ReportExactDecimal.recorded(2)
+assert.equal(doubleLimit.add(identityZero).subtract(moneyLimit).toText(4), '100000000000.0000')
+assert.equal(doubleLimit.subtract(identityZero).divide(identityTwo).toText(4), '100000000000.0000')
+assert.equal(identityZero.subtract(doubleLimit).divide(identityTwo).toText(4), '-100000000000.0000')
+refusal('aggregate_overflow', () => doubleLimit.add(identityZero).toText(4))
+
 const exact = new ReportMoneyAccumulator()
 exact.addPage([cost('line:1', '1.2345', '.3333')])
 assert.equal(exact.totals().cost_of_goods, '0.4115')
