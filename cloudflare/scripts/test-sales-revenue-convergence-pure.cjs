@@ -51,7 +51,21 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
 
 // ---- 2. Real SQLite with the columns both surfaces read --------------------
 const db = new Database(':memory:')
+
+let reportReadBatches = 0
+const reportBatch = db.transaction((statements) => statements.map(({ sql, params = {} }) => {
+  assert.match(sql, /^\s*SELECT\b/i, 'Report batches contain reads only')
+  const bindings = Object.fromEntries(Object.entries(params).map(([name, value]) => [name,
+    value instanceof ArrayBuffer ? Buffer.from(value)
+      : ArrayBuffer.isView(value) ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : value]))
+  return { success: true, results: db.prepare(sql).all(bindings), meta: {} }
+}))
+db.batch = (statements) => {
+  reportReadBatches++
+  return reportBatch(statements)
+}
 db.exec(`
+  CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT NOT NULL);
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY,
     created_at TEXT,
@@ -301,7 +315,9 @@ check('the totals-purpose projection preserves the full-kernel precision and cos
   JSON.stringify(lib.reportMoneyDiagnostic(statsTotals)) === JSON.stringify(lib.reportMoneyDiagnostic(kernel)))
 
 const selectedScope = lib.salesListFilterReportScope(['1=1', 's.id IN (@creditId, @cancelledId)'], { creditId: 4, cancelledId: 5 })
+const selectedBatchesBefore = reportReadBatches
 const selectedReport = await lib.readSalesReportTotals({ __db: db }, {}, false, selectedScope)
+check('the selected factory scope uses three transactional read batches', reportReadBatches - selectedBatchesBefore === 3)
 check('a scope selecting credit and cancelled sales keeps one active, one cancelled and two matches',
   selectedReport.sale_count === 1 && selectedReport.cancelled_count === 1
   && selectedReport.sale_count + selectedReport.cancelled_count === 2)
