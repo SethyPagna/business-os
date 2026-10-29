@@ -1375,6 +1375,7 @@ const REPORT_FLAG_META_BYTES = 256
 const REPORT_FLAG_MAX_ROWS = 100_000
 const REPORT_FLAG_WHERE = "key IN ('maintenance','maintenance_mode')"
 class ReportAtomicPlanUnsupported extends Error {}
+class ReportAtomicResourceMiss extends Error {}
 type ReportRestoreFlag = { key: string; kind: 'text' | 'blob'; bytes: ArrayBuffer }
 type ReportRestoreState = { flags: ReportRestoreFlag[]; atomicSupported: boolean; firstRestoreChecked: true; flagRows: number; payloadUpper: number; bindUpper: number; postUpper: number; requestUpper: number; postRequestUpper: number }
 
@@ -1512,6 +1513,7 @@ function reportRestoreValueSupported(value: unknown): boolean {
 
 async function readBoundedReportRestoreState(
   db: ReturnType<typeof getDb>, maxBytes: number, capture: boolean, policy: ReportTotalsPolicy,
+  resourceBehavior: 'refuse' | 'fallback' = 'refuse',
 ): Promise<ReportRestoreState | null> {
   const columns = await reportTableColumns(db, 'system_flags')
   if (!columns.has('key') || !columns.has('value')) return null
@@ -1524,7 +1526,10 @@ async function readBoundedReportRestoreState(
   if (statements.reduce((sum, statement) => sum + reportStatementControlUpper(statement), 0) > requestUpper) throw new ReportAtomicPlanUnsupported()
   let results: D1Result[]
   try { results = await db.batch(statements) } catch (error) {
-    if (reportGuardFailure(error, 'report_flags_bytes') || reportGuardFailure(error, 'report_flags_rows')) throw new ReportMoneyPrecisionError('too_many_rows')
+    if (reportGuardFailure(error, 'report_flags_bytes') || reportGuardFailure(error, 'report_flags_rows')) {
+      if (resourceBehavior === 'fallback') throw new ReportAtomicResourceMiss()
+      throw new ReportMoneyPrecisionError('too_many_rows')
+    }
     throw error
   }
   if (results.length !== statements.length) throw new ReportMoneyPrecisionError('unsupported_row')
@@ -1624,25 +1629,31 @@ function reportTotalsBatchStatements(plan: ReportReadPlan, state: ReportRestoreS
 
 async function readSalesReportAtomicTotalsSnapshot(
   env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
-  capturedScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions,
+  capturedScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions, purpose: ReportReadPurpose,
 ): Promise<SalesReportSnapshot> {
   const db = getDb(env)
   const policy = reportTotalsPolicy(REPORT_TOTALS_POLICY)
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const state = await readBoundedReportRestoreState(db, policy.maxBytes, true, policy)
-    if (!state) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals')
-    if (!state.atomicSupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals', state.firstRestoreChecked)
-    const plan = await buildSalesReportReadPlan(env, f, includeDeliveryFees, capturedScope, options, 'totals')
+    let state: ReportRestoreState | null
+    try { state = await readBoundedReportRestoreState(db, policy.maxBytes, true, policy, purpose === 'full' ? 'fallback' : 'refuse') } catch (error) {
+      if (purpose === 'full' && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, false)
+      throw error
+    }
+    if (!state) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose)
+    if (!state.atomicSupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
+    const plan = await buildSalesReportReadPlan(env, f, includeDeliveryFees, capturedScope, options, purpose)
     let batch: ReturnType<typeof reportTotalsBatchStatements>
     try { batch = reportTotalsBatchStatements(plan, state, options, policy) } catch (error) {
-      if (error instanceof ReportAtomicPlanUnsupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals', state.firstRestoreChecked)
+      if (error instanceof ReportAtomicPlanUnsupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
       throw error
     }
     let results: D1Result[]
     try { results = await db.batch(batch.statements) } catch (error) {
       if (reportGuardFailure(error, 'report_restore_state_changed')) continue
       if (reportGuardFailure(error, 'report_totals_receipts')) throw new SalesReportExportTooLargeError()
-      if (reportGuardFailure(error, 'report_totals_rows') || reportGuardFailure(error, 'report_totals_bytes')) throw new ReportMoneyPrecisionError('too_many_rows')
+      if (reportGuardFailure(error, 'report_totals_rows')) throw new ReportMoneyPrecisionError('too_many_rows')
+      if (purpose === 'full' && reportGuardFailure(error, 'report_totals_bytes')) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, state.firstRestoreChecked)
+      if (reportGuardFailure(error, 'report_totals_bytes')) throw new ReportMoneyPrecisionError('too_many_rows')
       if (reportGuardFailure(error, 'report_totals_storage')) throw new ReportMoneyPrecisionError('unsupported_row')
       throw error
     }
@@ -1664,7 +1675,11 @@ async function readSalesReportAtomicTotalsSnapshot(
     }
     const snapshot = reportSnapshotFromPlan(plan, groups)
     if (snapshot.row_count !== reportNonnegativeInteger(admission.data_rows) || snapshot.row_count > policy.maxRows) throw new ReportMoneyPrecisionError('unsupported_row')
-    const post = await readBoundedReportRestoreState(db, batch.postBudget(reportNonnegativeInteger(admission.detail_upper)), false, policy)
+    let post: ReportRestoreState | null
+    try { post = await readBoundedReportRestoreState(db, batch.postBudget(reportNonnegativeInteger(admission.detail_upper)), false, policy, purpose === 'full' ? 'fallback' : 'refuse') } catch (error) {
+      if (purpose === 'full' && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose, false)
+      throw error
+    }
     if (!post) continue
     return snapshot
   }
@@ -1734,7 +1749,7 @@ export async function readSalesReportTotals(
   const eligible = reportAtomicFiltersEligible(f) && (scalarScope === undefined
     || (capturedScope !== null && reportAtomicScopeProvenanceEligible(scalarScope, capturedScope)))
   const snapshot = eligible
-    ? await readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, capturedScope, options)
+    ? await readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals')
     : await readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals')
   return {
     totals: salesTotalsFromSnapshot(snapshot), sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length,
@@ -2526,7 +2541,7 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
 // window with years of imported sales this serialized enough D1 round trips
 // to blow past the Worker's request budget before it could finish, which is
 // what the owner saw as a hang rather than a fast, honest error. One shared
-// snapshot read (still double-checked once) now backs both figures.
+// snapshot read now backs both figures; non-temporal reads use the bounded atomic path.
 export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
@@ -2534,7 +2549,9 @@ export async function getSalesTotalsAndPeriodSeries(
   rankingLimit = DASHBOARD_TOP_ROWS,
 ): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
   const [snapshot, loss] = await Promise.all([
-    readSalesReportSnapshot(env, f),
+    reportAtomicFiltersEligible(f)
+      ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+      : readSalesReportSnapshot(env, f),
     removalLossesFor(env, f),
   ])
   return {
