@@ -83,7 +83,7 @@ test('Dashboard, Sales and Inventory cards read the kernel pair (never derive it
   assert.match(dashboard, /translateOr\('profit_paid_only', 'Profit \(paid only\)'\), value: fmtUSD\(aProfitPaidOnly\)/)
   assert.match(dashboard, /translateOr\('not_paid_owed', 'Still owed'\), value: fmtUSD\(aNotPaidOwed\)/)
   const sales = read('../src/components/sales/Sales.tsx')
-  assert.match(sales, /salesStats\.revenue_without_not_paid_usd/)
+  assert.match(sales, /salesStats\?\.revenue_without_not_paid_usd \?\? null/)
   assert.match(sales, /translateOr\('revenue_paid_only', 'Revenue \(paid only\)'\), value: fmtUSD\(revenuePaidOnly\)/)
   const inventory = read('../src/components/inventory/Inventory.tsx')
   assert.match(inventory, /kernelTotals\.revenue_without_not_paid_usd/)

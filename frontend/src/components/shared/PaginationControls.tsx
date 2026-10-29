@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import { clampPageNumber, pagerState } from '../../utils/pagerState.ts'
+import { clampPageNumber, pagerState, unknownTotalPagerState } from '../../utils/pagerState.ts'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -34,6 +34,8 @@ export interface PaginationControlsProps {
   page?: NumericInput
   pageSize?: NumericInput
   totalItems?: NumericInput
+  totalItemsKnown?: boolean
+  pageItems?: number
   onPageChange?: (page: number) => void
   onPageSizeChange?: (pageSize: number) => void
   pageSizeOptions?: number[]
@@ -88,6 +90,8 @@ export default function PaginationControls({
   page = 1,
   pageSize = DEFAULT_PAGE_SIZE,
   totalItems = 0,
+  totalItemsKnown = true,
+  pageItems = 0,
   onPageChange,
   // onPageSizeChange, pageSizeOptions and editablePageSizeInput stay in
   // PaginationControlsProps (many callers still pass them) but P10-20
@@ -107,8 +111,12 @@ export default function PaginationControls({
   // One shared kernel (utils/pagerState.ts) answers all of it: the clamped
   // page, the page count, the item range, whether each arrow is dead, and
   // whether the control renders at all.
-  const state = pagerState(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
-  const { total, totalPages, start, end, backDisabled, nextDisabled } = state
+  const knownState = pagerState(page, totalItems, pageSize, DEFAULT_PAGE_SIZE)
+  const unknownTotal = layout === 'default' && compact && rangeAsPageSize && !totalItemsKnown
+  const state = unknownTotal
+    ? unknownTotalPagerState(page, pageSize, pageItems, DEFAULT_PAGE_SIZE) : knownState
+  const { total, totalPages } = knownState
+  const { start, end, backDisabled, nextDisabled } = state
   const safePageSize = state.pageSize
   const safePage = state.page
   const pageLabel = typeof t === 'function' ? (t('page') || 'Page') : 'Page'
@@ -128,11 +136,12 @@ export default function PaginationControls({
   // Next appears unresponsive. Keep the controlled page in sync for every
   // list that uses this shared control.
   useEffect(() => {
+    if (unknownTotal) return
     const requestedPage = Math.max(1, Number(page || 1))
     if (Number.isFinite(requestedPage) && requestedPage !== safePage) {
       onPageChange?.(safePage)
     }
-  }, [page, safePage, onPageChange])
+  }, [page, safePage, onPageChange, unknownTotal])
 
   const commitPageDraft = (value: string = pageDraft) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10)
@@ -140,7 +149,9 @@ export default function PaginationControls({
       setPageDraft(String(safePage))
       return
     }
-    const next = clampPage(parsed, total, safePageSize)
+    const next = unknownTotal
+      ? unknownTotalPagerState(parsed, safePageSize, pageItems, DEFAULT_PAGE_SIZE).page
+      : clampPage(parsed, total, safePageSize)
     onPageChange?.(next)
     setPageDraft(String(next))
   }
@@ -315,7 +326,7 @@ export default function PaginationControls({
           ) : (
               <span className={`${compactCentered ? 'px-0 text-[10px]' : 'px-0.5 text-xs'} font-semibold text-slate-800 dark:text-slate-100`}>{safePage}</span>
           )}
-          <span className={`shrink-0 whitespace-nowrap font-semibold text-slate-500 dark:text-slate-400 ${compactCentered ? 'text-[10px]' : 'text-xs'}`}>/ {totalPages}</span>
+          <span className={`shrink-0 whitespace-nowrap font-semibold text-slate-500 dark:text-slate-400 ${compactCentered ? 'text-[10px]' : 'text-xs'}`}>/ {unknownTotal ? '—' : totalPages}</span>
         </div>
         <button
           type="button"
