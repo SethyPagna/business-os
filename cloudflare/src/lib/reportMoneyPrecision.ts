@@ -53,6 +53,11 @@ function decimal(value: DecimalInput, canonicalV1: boolean): Fraction {
   if ((typeof value !== 'string' && typeof value !== 'number') || (typeof value === 'number' && !Number.isFinite(value))) {
     throw new ReportMoneyPrecisionError(refusal)
   }
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    const n = BigInt(value)
+    if (abs(n) > MAX_ABS) throw new ReportMoneyPrecisionError(canonicalV1 ? refusal : 'aggregate_overflow')
+    return { n, d: 1n }
+  }
   const text = String(value).trim()
   if (!text || text.length > 96 || (canonicalV1 && !/^[+-]?\d+(?:\.\d{1,4})?$/.test(text))) {
     throw new ReportMoneyPrecisionError(refusal)
