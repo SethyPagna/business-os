@@ -317,25 +317,33 @@ test('Sales statistics keep COGS, gross profit, and permitted expenses visible',
 })
 
 test('Part 564: headline + day-group counts count only what the money counts', () => {
-  // User, Aug 31: "count only what the money counts." Cancelled records still
-  // appear in the list but are excluded from every count shown, so the count
-  // reconciles with the money and with the stats strip.
-  //
-  // CORRECTED Sep 6 2026 (owner ask N6). This used to pin a predicate that
-  // dropped awaiting_payment too, and the money it was meant to reconcile with
-  // never did: recognizedExpr is `<> 'cancelled'`, so unpaid credit is INSIDE
-  // revenue and inside GET /api/sales/stats's revenue_count. The footer read
-  // "4 sales" beside a revenue built out of 5. What is pinned now is that the
-  // page takes the rule from ONE place -- the shared kernel mirror in
-  // utils/statsFormulas.ts -- rather than restating it in a local list.
+  // The backend count covers the full filtered cohort; day counts cover visible
+  // sections. Both include credit and exclude cancelled, unlike total_count.
   const sales = read('src/components/sales/Sales.tsx')
   assert.ok(/isCountedSale = useCallback\(\(sale: SaleRecord\) => isRevenueCountedSale\(sale\)/.test(sales),
     'Sales takes the money-counting predicate from the shared kernel mirror')
   assert.ok(!/isCountedSale[\s\S]{0,200}'awaiting_payment'/.test(sales),
     'and no longer restates it as a local list that drops the cohort the kernel counts')
-  assert.ok(/revenueCount[\s\S]{0,60}filter\(isCountedSale\)/.test(sales), 'Sales computes the reconciled headline count')
+  const declarations = ['isCountedSale', 'revenueCount'].map(name => {
+    const matches = [...sales.matchAll(new RegExp(`^\\s*const ${name}\\b[^\\r\\n]*`, 'gm'))]
+    assert.equal(matches.length, 1, `one actual Sales ${name} declaration`)
+    return matches[0][0]
+  })
+  const require = createRequire(import.meta.url)
+  const { isRevenueCountedSale } = require('../src/utils/statsFormulas.ts')
+  const filtered = [{ sale_status: 'completed' }, { sale_status: 'awaiting_payment' }, { sale_status: 'cancelled' }]
+  const execute = new Function('salesStats', 'filtered', 'useCallback', 'isRevenueCountedSale',
+    `${transformSync(declarations.join('\n'), { loader: 'ts', target: 'es2022' }).code};return { revenueCount, isCountedSale }`)
+  const project = (salesStats: Record<string, unknown> | null | undefined) => execute(salesStats, filtered, (callback: unknown) => callback, isRevenueCountedSale)
+  const ready = project({ revenue_count: 85, total_count: 100 })
+  assert.equal(filtered.filter(ready.isCountedSale).length, 2, 'visible day count includes credit and excludes cancelled')
+  assert.equal(ready.revenueCount, 85, 'headline count uses the backend cohort, not the loaded page or total_count')
+  for (const unavailable of [null, undefined, {}]) {
+    assert.equal(project(unavailable).revenueCount, null, 'unavailable aggregate count stays unknown despite loaded rows')
+  }
+  assert.equal(project({ revenue_count: 0, total_count: 15 }).revenueCount, 0, 'authoritative zero remains zero when the cohort contains only cancelled sales')
   const salesSurface = read('src/components/sales/SalesListSurface.tsx')
-  assert.ok(salesSurface.includes('{revenueCount}'), 'the Sales footer shows the money-counting count')
+  assert.match(salesSurface, /\{revenueCount === null \? '—' : revenueCount\}/, 'the footer distinguishes unknown aggregate count from genuine zero')
   assert.ok(/section\.items\.filter\(isCountedSale\)/.test(salesSurface), 'Sales day headers show the money-counting count')
   const returnsSurface = read('src/components/returns/ReturnsListSurface.tsx')
   assert.ok(/section\.items\.filter\(isCountedReturn\)/.test(returnsSurface), 'Returns day headers exclude cancelled from the count')
