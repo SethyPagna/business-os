@@ -1395,9 +1395,16 @@ function reportRowFraming(columns: readonly string[]): number {
   return 2 + Math.max(columns.length - 1, 0) + columns.reduce((sum, key) => sum + reportJsonBytes(key) + 1, 0)
 }
 
-function reportSqlScalarUpper(expression: string): string {
-  return `CASE typeof(${expression}) WHEN 'null' THEN 4 WHEN 'integer' THEN 32 WHEN 'real' THEN 32
-    WHEN 'text' THEN 2+6*length(CAST(${expression} AS BLOB)) WHEN 'blob' THEN 2+4*length(${expression})
+function reportSqlScalarUpper(expression: string, rowKind: 'data' | 'control' = 'control'): string {
+  const integerUpper = rowKind === 'data' ? 20 : 32
+  const rawBytes = `length(CAST(${expression} AS BLOB))`
+  const textUpper = rowKind === 'data'
+    ? `2+(CASE WHEN instr(CAST(${expression} AS BLOB),x'00')=0 AND ${expression} NOT GLOB '*[^ -~]*'
+      THEN ${rawBytes}+(${rawBytes}-length(CAST(replace(${expression},char(34),'') AS BLOB)))+(${rawBytes}-length(CAST(replace(${expression},char(92),'') AS BLOB)))
+      ELSE 6*${rawBytes} END)`
+    : `2+6*${rawBytes}`
+  return `CASE typeof(${expression}) WHEN 'null' THEN 4 WHEN 'integer' THEN ${integerUpper} WHEN 'real' THEN 32
+    WHEN 'text' THEN ${textUpper} WHEN 'blob' THEN 2+4*length(${expression})
     ELSE json_extract('[1]','$[report_totals_storage]') END`
 }
 
@@ -1581,7 +1588,7 @@ function reportTotalsBatchStatements(plan: ReportReadPlan, state: ReportRestoreS
   policy = reportTotalsPolicy(policy)
   const named = reportNamespacePlans(plan.groups)
   const summaries = named.groups.map(group => {
-    const values = group.columns.map(key => key === 'delivery_has_linked_fee' && group.kind === 'sales' ? '1' : reportSqlScalarUpper(`q."${key}"`))
+    const values = group.columns.map(key => key === 'delivery_has_linked_fee' && group.kind === 'sales' ? '1' : reportSqlScalarUpper(`q."${key}"`, 'data'))
     const row = `${reportRowFraming(group.columns)}+${values.join('+')}`
     return `SELECT '${group.kind}' kind,COUNT(*) n,COALESCE(SUM(b),0) bytes,COALESCE(MAX(b),0) largest FROM
       (SELECT ${row} b FROM (${group.sql} AND ${group.idExpr}>0 LIMIT ${policy.maxRows + 1}) q)`
