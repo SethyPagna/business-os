@@ -75,7 +75,11 @@ function decimal(value: DecimalInput, canonicalV1: boolean): Fraction {
   if (abs(parsed.n) > MAX_ABS * parsed.d) throw new ReportMoneyPrecisionError(canonicalV1 ? refusal : 'aggregate_overflow')
   return parsed
 }
-function plus(left: Fraction, right: Fraction): Fraction { return fraction(left.n * right.d + right.n * left.d, left.d * right.d) }
+function plus(left: Fraction, right: Fraction): Fraction {
+  if (right.n === 0n) return { n: left.n, d: left.d }
+  if (left.n === 0n) return { n: right.n, d: right.d }
+  return fraction(left.n * right.d + right.n * left.d, left.d * right.d)
+}
 function roundedUnits(value: Fraction, places: number): bigint {
   const scaled = value.n * 10n ** BigInt(places)
   let result = scaled / value.d
