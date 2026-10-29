@@ -25,16 +25,13 @@
 //     total. Nothing may add or subtract the two.
 //   * POSITIVE, always: netSaleExpr floors each row at 0, so the credit the
 //     header prints can never arrive as $-n.
-//   * THREE-WAY PARITY: the kernel's pending, the /stats header's pending (the
-//     number the Sales page prints as "Credit") and the frontend's own
-//     saleListCreditUsd fallback are the same figure on the same window, so
-//     the header and its offline fallback can never show two different credits.
-//   * The /stats prose must not contradict the /stats SQL.
+//   * THREE-WAY PARITY: the kernel, the Stats totals-purpose projection and
+//     the frontend saleListCreditUsd utility agree on the same full window.
+//     Failed header requests remain unavailable rather than using page totals.
 //
-// Runs the SHIPPED code: salesAnalytics.ts and frontend/src/utils/
-// statsFormulas.ts are transpiled and executed, and the header SELECT is
-// extracted from routes/sales.ts with its ${...} holes intact and evaluated
-// against the kernel's own exported fragments.
+// Runs the shipped full kernel, current totals-purpose helper and frontend
+// statsFormulas.ts utility on the same financial fixture. The route source
+// contract checks delegation; the actual Hono route suite owns wire behavior.
 //
 // Run (from cloudflare/): node scripts/test-credit-in-revenue-pure.cjs
 const assert = require('node:assert/strict')
@@ -211,64 +208,75 @@ check('collected cash is the ONE figure the credit stays out of',
 const flooredRow = db.prepare(`SELECT ${lib.netSaleExpr('')} AS net FROM (SELECT 10 AS subtotal_usd, 99 AS discount_usd, 0 AS membership_discount_usd)`).get()
 check('netSaleExpr floors a credit row at 0 rather than emitting a negative', flooredRow.net === 0)
 
-// ---- 6. The /stats header delegates to the shared exact snapshot/reducer ----
+// ---- 6. The current Stats totals projection over the same fixture ------------
 const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const statsSnapshot = await lib.readSalesReportSnapshot({ __db: db }, {}, false, alias => ({
+const statsReport = await lib.readSalesReportTotals({ __db: db }, {}, false, alias => ({
   sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale WHERE date(matched_sale.created_at, '+7 hours') >= @reportScope_startDate AND date(matched_sale.created_at, '+7 hours') <= @reportScope_endDate)`,
   params: { reportScope_startDate: '2026-08-01', reportScope_endDate: '2026-08-31' },
 }))
-const statsTotals = lib.salesTotalsFromSnapshot(statsSnapshot)
+const statsTotals = statsReport.totals
 const statsRevenue = statsTotals.revenue_usd
 const statsCredit = statsTotals.pending_revenue_usd
-const statsBlock = salesTs.slice(salesTs.indexOf("app.get('/stats'"), salesTs.indexOf("app.get('/stats-strip'"))
+const statsBlock = salesTs.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
 
 check(`/stats revenue_usd includes the credit sale (${statsRevenue} == ${IN.revenue}, not ${OUT.revenue})`,
   statsRevenue === IN.revenue && statsRevenue !== OUT.revenue)
-check(`/stats revenue_count counts the credit sale (5 non-cancelled, not 4)`,
-  statsSnapshot.sales.length === 5)
-check('/stats delegates money to the exact snapshot/reducer without a local aggregate',
-  statsBlock.includes('readSalesReportSnapshot(c.env,windowFilter,false')
-  && statsBlock.includes('salesTotalsFromSnapshot(snapshot)')
-  && statsBlock.includes('revenue_count: snapshot.sales.length')
-  && statsBlock.includes('revenue_usd: totals.revenue_usd')
-  && statsBlock.includes('pending_revenue_usd: totals.pending_revenue_usd')
-  && !/db\.prepare\([\s\S]*?(revenue_usd|pending_revenue_usd)/.test(statsBlock))
+check('/stats counts five active sales including credit, one cancelled sale and six total matches',
+  statsReport.sale_count === 5 && statsReport.cancelled_count === 1
+  && statsReport.sale_count + statsReport.cancelled_count === 6
+  && statsReport.sale_count === statsTotals.tx_count && statsReport.cancelled_count === statsTotals.cancelled_tx_count)
+check('/stats delegates money and the complete list scope to the totals-purpose reader',
+  /readSalesReportTotals\(c\.env,\s*windowFilter,\s*false,\s*salesListFilterReportScope\(where,\s*params\)\)/.test(statsBlock)
+  && /const totals\s*=\s*report\.totals\b/.test(statsBlock)
+  && /revenue_count:\s*report\.sale_count\b/.test(statsBlock)
+  && /const totalCount\s*=\s*report\.sale_count\s*\+\s*report\.cancelled_count\b/.test(statsBlock)
+  && /total_count:\s*totalCount\b/.test(statsBlock)
+  && /revenue_usd:\s*totals\.revenue_usd\b/.test(statsBlock)
+  && /pending_revenue_usd:\s*totals\.pending_revenue_usd\b/.test(statsBlock))
+check('/stats contains no local database money aggregate or financial expression',
+  !/\bdb\.prepare\s*\(|\bnetSaleExpr\s*\(|\bnetRefundExpr\s*\(|\bSUM\s*\(/.test(statsBlock))
+check('the totals-purpose projection preserves every full-kernel total on the same fixture',
+  Object.keys(statsTotals).length === Object.keys(kernel).length
+  && Object.keys(kernel).every(key => statsTotals[key] === kernel[key]))
+check('the totals-purpose projection preserves the full-kernel precision and cost diagnostics',
+  JSON.stringify(lib.reportMoneyDiagnostic(statsTotals)) === JSON.stringify(lib.reportMoneyDiagnostic(kernel)))
 check(`PARITY: the header's credit (${statsCredit}) == the kernel's credit (${kernel.pending_revenue_usd})`,
   statsCredit === kernel.pending_revenue_usd)
 check(`PARITY: the header's revenue (${statsRevenue}) == the kernel's revenue (${kernel.revenue_usd})`,
   statsRevenue === kernel.revenue_usd)
 
-// ---- 7. The frontend's own fallback shows the SAME credit -------------------
-// The Sales header prefers /stats and falls back to reducing over the rows it
-// already has. Both paths must produce one credit, or the same page shows two.
+const selectedScope = lib.salesListFilterReportScope(['1=1', 's.id IN (@creditId, @cancelledId)'], { creditId: 4, cancelledId: 5 })
+const selectedReport = await lib.readSalesReportTotals({ __db: db }, {}, false, selectedScope)
+check('a scope selecting credit and cancelled sales keeps one active, one cancelled and two matches',
+  selectedReport.sale_count === 1 && selectedReport.cancelled_count === 1
+  && selectedReport.sale_count + selectedReport.cancelled_count === 2)
+check('the selective scope keeps only the credit sale and its apportioned customer refund',
+  selectedReport.totals.revenue_usd === 153 && selectedReport.totals.pending_revenue_usd === 153
+  && selectedReport.totals.cost_usd === 50 && selectedReport.totals.refund_usd === 27)
+
+// ---- 7. Frontend formula utility parity on the complete window ---------------
 const listRows = db.prepare(`
   SELECT s.*, COALESCE(rf.refund_usd, 0) AS refund_usd,
     COALESCE(s.total_usd, 0) - COALESCE(rf.refund_usd, 0) AS net_total_usd
   FROM sales s ${lib.CUSTOMER_REFUND_JOIN}s.id
   WHERE date(s.created_at, '+7 hours') BETWEEN '2026-08-01' AND '2026-08-31'
 `).all()
-check('the fallback sees every row of the window (6)', listRows.length === 6)
+check('the utility fixture contains every row of the window (6)', listRows.length === 6)
 check('isCreditSale picks exactly the awaiting_payment row',
   listRows.filter(front.isCreditSale).map((r) => r.id).join(',') === '4')
 check(`THREE-WAY PARITY: frontend saleListCreditUsd (${front.saleListCreditUsd(listRows)}) == header (${statsCredit}) == kernel (${kernel.pending_revenue_usd})`,
   front.saleListCreditUsd(listRows) === statsCredit && statsCredit === kernel.pending_revenue_usd)
-check(`the frontend fallback's revenue includes the credit too (${front.saleListRevenueUsd(listRows)} == ${IN.revenue})`,
+check(`the frontend revenue utility includes the credit too (${front.saleListRevenueUsd(listRows)} == ${IN.revenue})`,
   front.saleListRevenueUsd(listRows) === IN.revenue)
 check('the frontend never produces a negative credit, however the row is shaped',
   front.saleListCreditUsd([{ sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 99, membership_discount_usd: 0 }]) === 0)
 
-// ---- 8. The prose must not contradict the SQL ------------------------------
-// The stale comment is the actual failure mode here: a reader who trusts
-// "never folded into revenue" edits the query back to the pre-Sep-6 rule and
-// every check above goes red at once.
 const statsPreamble = salesTs.slice(Math.max(0, salesTs.indexOf("app.get('/stats'") - 1800), salesTs.indexOf("app.get('/stats'"))
 for (const [name, text] of [['preamble', statsPreamble], ['handler', statsBlock]]) {
-  check(`the /stats ${name} no longer claims the credit is excluded from revenue`,
+  check(`the /stats ${name} does not claim credit is excluded from revenue`,
     !/never folded into revenue/i.test(text) && !/excluding cancelled\/awaiting_payment"\s*$/m.test(text))
 }
-check('the /stats handler delegates without maintaining another revenue/refund formula',
-  /no third revenue or\s*\/\/\s*refund formula is maintained in this route/.test(statsBlock))
-check('the sweep can see the sentence it forbids (positive control)',
+check('the false-policy sweep recognises the sentence it forbids',
   /never folded into revenue/i.test('reported separately as pending, never folded into revenue.'))
 
 console.log(`\nALL ${passed} CHECKS PASSED -- credit is inside revenue (${IN.revenue}), COGS (${IN.cogs}) and profit (${IN.profit}), and is reported once, positive, as ${IN.credit}`)
