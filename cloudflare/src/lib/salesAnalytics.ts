@@ -3581,8 +3581,6 @@ function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; 
 
 function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { key: string; label: string; entity_id: number | null } {
   const customerId = row.customer_id == null || Number(row.customer_is_anonymous) !== 0 ? null : Number(row.customer_id)
-  const rawDate = String(row.created_at || '')
-  const local = new Date(new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(rawDate) ? rawDate : `${rawDate.replace(' ', 'T')}Z`).getTime() + 7 * 3_600_000)
   if (groupBy === 'customer') return { key: customerId == null ? 'general' : `id:${customerId}`, label: customerId == null ? '' : String(row.customer_name || '').trim(), entity_id: customerId }
   if (groupBy === 'cashier') {
     const id = row.cashier_id == null ? null : Number(row.cashier_id)
@@ -3593,8 +3591,12 @@ function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { ke
     const label = String(row.payment_method || '').trim() || 'Unknown'
     return { key: label.toLowerCase(), label: String(row.payment_method || '').trim(), entity_id: null }
   }
-  if (groupBy === 'hour') { const key = String(local.getUTCHours()).padStart(2, '0'); return { key, label: key, entity_id: null } }
-  if (groupBy === 'weekday') { const key = String(local.getUTCDay()); return { key, label: key, entity_id: null } }
+  if (groupBy === 'hour' || groupBy === 'weekday') {
+    const rawDate = String(row.created_at || '')
+    const local = new Date(new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(rawDate) ? rawDate : `${rawDate.replace(' ', 'T')}Z`).getTime() + 7 * 3_600_000)
+    if (groupBy === 'hour') { const key = String(local.getUTCHours()).padStart(2, '0'); return { key, label: key, entity_id: null } }
+    if (groupBy === 'weekday') { const key = String(local.getUTCDay()); return { key, label: key, entity_id: null } }
+  }
   const id = row.branch_id == null ? null : Number(row.branch_id)
   return { key: String(id || 0), label: String(row.branch_name || ''), entity_id: id }
 }
