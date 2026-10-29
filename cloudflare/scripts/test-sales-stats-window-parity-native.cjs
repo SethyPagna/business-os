@@ -1,4 +1,4 @@
-// 6.0.970: GET /api/sales/stats hands its date/time window to readSalesReportSnapshot as well as to
+// 6.0.970: GET /api/sales/stats hands its date/time window to readSalesReportTotals as well as to
 // the list scope, so the keyset walks start inside the window. The cohort must not change.
 //
 // Proves, over a fixture with sales inside and outside the window (including both local-day edges),
@@ -169,7 +169,7 @@ const cases = {
     const src = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
     const block = src.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
     assert.match(block, /const windowFilter=\{startDate:query\.startDate\|\|null,endDate:query\.endDate\|\|null,startTime:query\.startTime\|\|null,endTime:query\.endTime\|\|null\}/)
-    assert.match(block, /readSalesReportSnapshot\(c\.env,windowFilter,false,salesListFilterReportScope\(where,params\)\)/)
+    assert.match(block, /readSalesReportTotals\(c\.env,windowFilter,false,salesListFilterReportScope\(where,params\)\)/)
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)
