@@ -19,10 +19,32 @@ function load(relative) {
   return mod.exports
 }
 
-const { ReportMoneyAccumulator, ReportMoneyPrecisionError } = load('src/lib/reportMoneyPrecision.ts')
+const { ReportExactDecimal, ReportMoneyAccumulator, ReportMoneyPrecisionError } = load('src/lib/reportMoneyPrecision.ts')
 const scalar = (id, channel, value_usd, version = 1) => ({ kind: 'saved_scalar', id, channel, value_usd, money_precision_version: version })
 const cost = (id, cost_price_usd, quantity, version = 1) => ({ kind: 'item_cost', id, channel: 'cost_of_goods', cost_price_usd, quantity, money_precision_version: version })
 const refusal = (code, fn) => assert.throws(fn, (error) => error instanceof ReportMoneyPrecisionError && error.code === code)
+
+for (const value of [0, -0, 1, -1, 99_999_999_999, -99_999_999_999, 100_000_000_000, -100_000_000_000]) {
+  for (const version of [0, 1]) {
+    const exactInteger = ReportExactDecimal.money(value, version)
+    assert.equal(exactInteger.toText(4), value.toFixed(4))
+    assert.equal(exactInteger.toExactNumber(), value === 0 ? 0 : value)
+  }
+}
+for (const value of [100_000_000_001, -100_000_000_001, Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER]) {
+  refusal('aggregate_overflow', () => ReportExactDecimal.recorded(value).toExactNumber())
+  refusal('aggregate_overflow', () => ReportExactDecimal.money(value, 0).toExactNumber())
+  refusal('invalid_saved_money4', () => ReportExactDecimal.money(value, 1).toExactNumber())
+  refusal('invalid_quantity', () => ReportExactDecimal.quantity(value).toExactNumber())
+}
+for (const value of [0, -0, -1]) refusal('invalid_quantity', () => ReportExactDecimal.quantity(value))
+for (const value of [Infinity, -Infinity, NaN, 1.00001, '1e2']) {
+  refusal('invalid_saved_money4', () => ReportExactDecimal.money(value, 1))
+}
+refusal('unsupported_precision_version', () => ReportExactDecimal.money(1, 2))
+assert.equal(ReportExactDecimal.recorded('1e2').toText(4), '100.0000')
+assert.equal(ReportExactDecimal.recorded(1).divide(ReportExactDecimal.recorded(3))
+  .multiply(ReportExactDecimal.recorded(3)).toText(24), '1.000000000000000000000000')
 
 const exact = new ReportMoneyAccumulator()
 exact.addPage([cost('line:1', '1.2345', '.3333')])
