@@ -759,9 +759,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     status: 'loading' | 'ready' | 'error'; value: SalesStatsResult | null
   } | null>(null)
   const currentSalesStatsRead = isActive && authReady && canViewSales && salesStatsRead?.scope === salesStatsScope
-    && isActorReadScopeCurrent(salesStatsRead.readScope, salesStatsRead.status === 'ready') ? salesStatsRead : null
-  const salesStats = currentSalesStatsRead?.status === 'ready' ? currentSalesStatsRead.value : null
+    && isActorReadScopeCurrent(salesStatsRead.readScope, false) ? salesStatsRead : null
+  const salesStats = currentSalesStatsRead?.status === 'ready' && isActorReadScopeCurrent(currentSalesStatsRead.readScope)
+    ? currentSalesStatsRead.value : null
   const salesStatsError = currentSalesStatsRead?.status === 'error'
+    || (currentSalesStatsRead?.status === 'ready' && salesStats === null)
     ? translateOr('sales_load_failed', 'Failed to load sales') : null
   const salesReadError = loadError || salesStatsError
 

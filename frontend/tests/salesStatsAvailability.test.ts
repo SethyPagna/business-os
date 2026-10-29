@@ -160,9 +160,12 @@ try {
       h.props.statusFilter = 'awaiting_payment'; h.render() // Deliberately no effect commit.
       unknown(h.view); assert.equal(h.view.salesStatsError, null)
     }
-    for (const transition of [() => scopes.invalidateActorReadChannel('sales'), () => actor(2)]) {
+    for (const transition of ['revision', 'actor']) {
       const h = harness(), p = h.view.loadSalesStats(); h.stats[0].resolve(valid()); await p; await h.flush()
-      transition(); h.render(); unknown(h.view); assert.equal(h.view.salesStatsError, null)
+      if (transition === 'revision') scopes.invalidateActorReadChannel('sales'); else actor(2)
+      h.render(); unknown(h.view)
+      if (transition === 'revision') assert.ok(h.view.salesStatsError, 'an invalidated ready answer supplies Retry instead of exposing stale numbers')
+      else assert.equal(h.view.salesStatsError, null)
     }
   })
   await test('a later same-actor cache refresh cannot hide the existing Stats Retry error', async () => {

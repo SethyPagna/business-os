@@ -65,7 +65,7 @@ for (const language of ['en', 'km']) {
 }
 await test('unknown kernel has no fabricated total and full/partial/empty states are distinct', () => {
   assert.equal(typeof arithmetic.unknownTotalPagerState, 'function')
-  for (const [page, count, start, end, next] of [[4, 20, 61, 80, false], [4, 7, 61, 67, true], [5, 0, 0, 0, true]]) {
+  for (const [page, count, start, end, next] of [[4, 20, 61, 80, false], [4, 7, 61, 67, true], [5, 0, 0, 0, true]] as const) {
     const state = arithmetic.unknownTotalPagerState(page, 20, count)
     assert.equal(state.page, page); assert.equal(state.start, start); assert.equal(state.end, end); assert.equal(state.nextDisabled, next); assert.equal(state.backDisabled, false)
     assert.equal('total' in state, false); assert.equal('totalPages' in state, false)
@@ -88,10 +88,13 @@ await test('actual top and bottom Sales mounts both opt into unknown-total behav
   const collect = (n: ts.Node): ts.Node[] => [...(ts.isJsxSelfClosingElement(n) && n.tagName.getText(ast) === 'PaginationControls' ? [n] : []), ...n.getChildren(ast).flatMap(collect)]
   const mounts = collect(ast); assert.equal(mounts.length, 2)
   for (const [index, node] of mounts.entries()) {
+    const pageChanges: number[] = []
     const compiled = transformSync(`const mount = (${node.getText(ast)});`, { loader: 'tsx', jsxFactory: 'jsx', jsxFragment: 'Fragment' }).code
     const make = new Function('env', `with(env){${compiled};return mount}`)
     const element = make({ jsx, PaginationControls: 'PaginationControls', salesPage: 4, salesPageSize: 20, totalSalesCount: null, currentSalesPageItems: 20,
-      setSalesPage() {}, setSalesPageSize() {}, t: (key: string) => key })
+      setSalesPage(page: number) { pageChanges.push(page) }, setSalesPageSize() {}, t: (key: string) => key })
+    element.props.onPageChange(5)
+    assert.deepEqual(pageChanges, [5], `Sales mount${index + 1} controls the real parent page`)
     const h = harness(element.props); h.commit()
     assert.equal(input(h).props.value, '4', `Sales mount${index + 1}`); assert.deepEqual(h.calls, []); assert.ok(text(h.tree).includes('61-80')); assert.ok(text(h.tree).includes('/ —'))
   }
