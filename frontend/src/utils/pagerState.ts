@@ -9,6 +9,31 @@
 
 export type PagerNumericInput = number | string | null | undefined
 
+export type UnknownTotalPagerState = Omit<PagerState, 'total' | 'totalPages'>
+
+export function unknownTotalPagerState(
+  page: PagerNumericInput,
+  pageSize: PagerNumericInput,
+  pageItems: number,
+  fallbackPageSize = 20,
+): UnknownTotalPagerState {
+  const safeFallback = Number.isSafeInteger(fallbackPageSize) && fallbackPageSize > 0 ? fallbackPageSize : 20
+  const rawSize = Number(pageSize)
+  const size = Number.isSafeInteger(rawSize) && rawSize > 0 ? rawSize : safeFallback
+  const maxPage = Math.max(1, Math.floor(Number.MAX_SAFE_INTEGER / size))
+  const rawPage = Number(page)
+  const current = Number.isFinite(rawPage) ? Math.max(1, Math.min(maxPage, Math.floor(rawPage))) : 1
+  const count = Number.isSafeInteger(pageItems) && pageItems >= 0 ? Math.min(pageItems, size) : 0
+  return {
+    pageSize: size, page: current,
+    start: count ? (current - 1) * size + 1 : 0,
+    end: count ? (current - 1) * size + count : 0,
+    backDisabled: current <= 1,
+    nextDisabled: count < size || current >= maxPage,
+    visible: current > 1 || count > 0,
+  }
+}
+
 export interface PagerState {
   /** Total items, floored at 0. */
   total: number

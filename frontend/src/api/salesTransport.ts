@@ -2,7 +2,9 @@ import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
 import type { SaleMutationHeaderQuote } from '../utils/saleMutationHeaderQuote.ts'
-import { apiFetch, cacheInvalidate, confirmServerReachable, route } from './http.ts'
+import { apiFetch, cacheEvictValue, cacheInvalidate, confirmServerReachable, route } from './http.ts'
+import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
+import { requireSalesStatsResult, type SalesStatsResult } from './salesStatsContract.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
@@ -422,17 +424,31 @@ export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
 // (see routes/sales.ts's /stats handler) -- used for the Sales page header
 // so it stops silently under-reporting once a filtered range has more rows
 // than the list's own page cap.
-export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
+export async function getSalesStats(params: QueryParams = {}, options: SalesReadOptions = {}): Promise<SalesStatsResult> {
   const query = buildQueryString(params, { skipEmpty: false })
-  return route(
-    // Aggregate results are filter-specific. A constant channel made the
-    // first (usually unfiltered) response a fresh-cache hit for every later
-    // search/date/status request, so a one-row receipt search displayed the
-    // all-history count and revenue until the cache expired.
-    `sales:stats:${query}`,
-    () => apiFetch('GET', appendQuery('/api/sales/stats', query)),
-    () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false }),
+  const channel = `sales:stats:${query}`
+  const scope = captureActorReadScope(channel)
+  const result = await route(
+    channel,
+    async () => requireSalesStatsResult(await apiFetch(
+      'GET', appendQuery('/api/sales/stats', query), undefined, options.timeoutMs,
+      { signal: options.signal },
+    )),
+    null,
+    { signal: options.signal, raceLocalFallback: false, staleWhileRevalidate: false },
   )
+  assertActorReadScope(scope)
+  if (options.signal?.aborted) {
+    const error = new Error('Request canceled')
+    error.name = 'AbortError'
+    throw error
+  }
+  try {
+    return requireSalesStatsResult(result)
+  } catch (error) {
+    if (result !== null) cacheEvictValue(channel, result)
+    throw error
+  }
 }
 
 // Range-scoped figures + fold breakdowns for the Sales page's StatsStrip

@@ -6,7 +6,9 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
-import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
+import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale } from '../../utils/statsFormulas'
+import { requireSalesStatsResult, type SalesStatsResult } from '../../api/salesStatsContract.ts'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
@@ -734,6 +736,34 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return out
   }, [stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
 
+  const salesStatsParams = useMemo(() => ({
+    ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
+    ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...salesDateRange,
+  }), [isAdmin, userFilter, statusFilter, debouncedSearch, salesDateRange])
+  const salesStatsScope = JSON.stringify([statusSecurityScope, salesStatsParams])
+  const salesStatsScopeRef = useRef(salesStatsScope)
+  salesStatsScopeRef.current = salesStatsScope
+  const salesPageParams = useMemo(() => ({
+    ...salesStatsParams, page: salesPage, limit: salesPageSize,
+    sortBy: salesSortSpec.field, sortDir: salesSortSpec.direction,
+  }), [salesStatsParams, salesPage, salesPageSize, salesSortSpec.field, salesSortSpec.direction])
+  const salesPageScope = JSON.stringify([statusSecurityScope, salesPageParams])
+  const salesPageRowsRef = useRef<{
+    scope: string; count: number; readScope: ReturnType<typeof captureActorReadScope>
+  } | null>(null)
+  const [salesStatsRead, setSalesStatsRead] = useState<{
+    scope: string; readScope: ReturnType<typeof captureActorReadScope>
+    status: 'loading' | 'ready' | 'error'; value: SalesStatsResult | null
+  } | null>(null)
+  const currentSalesStatsRead = isActive && authReady && canViewSales && salesStatsRead?.scope === salesStatsScope
+    && isActorReadScopeCurrent(salesStatsRead.readScope, salesStatsRead.status === 'ready') ? salesStatsRead : null
+  const salesStats = currentSalesStatsRead?.status === 'ready' ? currentSalesStatsRead.value : null
+  const salesStatsError = currentSalesStatsRead?.status === 'error'
+    ? translateOr('sales_load_failed', 'Failed to load sales') : null
+  const salesReadError = loadError || salesStatsError
+
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
     loadWatchdogRef.current = undefined
@@ -757,18 +787,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       clearLoadWatchdog()
     }
     if (!authReady || !canViewSales) { setLoading(false); return }
-    const params = {
-      ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
-      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-      ...(debouncedSearch ? { search: debouncedSearch } : {}),
-      ...salesDateRange,
-      page: salesPage,
-      limit: salesPageSize,
-      sortBy: salesSortSpec.field,
-      sortDir: salesSortSpec.direction,
-    }
+    const params = salesPageParams
     // The query generation: viewer authority, every filter, the sort and the page.
-    const queryKey = JSON.stringify([requestSecurity, params])
+    const queryKey = salesPageScope
     latestQueryKeyRef.current = queryKey
     // A different query supersedes the read in flight: stop its request now. It publishes nothing; the queued load reads this query.
     if (loadPromiseRef.current) {
@@ -779,6 +800,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       return loadPromiseRef.current
     }
     loadKeyRef.current = queryKey
+    const pageReadScope = captureActorReadScope('sales:get')
     const requestId = beginTrackedRequest(loadRequestRef)
     const controller = new AbortController()
     loadAbortRef.current = controller
@@ -790,6 +812,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // The rows, and the ref the row-patch handlers read, change in the same step.
     const publishRows = (rows: SaleRecord[]) => {
       salesRef.current = rows
+      salesPageRowsRef.current = { scope: queryKey, count: rows.length, readScope: pageReadScope }
       setSales(rows)
       loadedOnceRef.current = true
     }
@@ -865,7 +888,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, clearLoadWatchdog, salesPageParams, salesPageScope, translateOr])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -875,8 +898,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `sales` above is capped at the list endpoint's page limit, so the
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
-  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; revenue_without_not_paid_usd: number | null; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
-
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
   // effect below (fired on 'sales'/'returns' events, which every status
@@ -885,31 +906,29 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // the "N sales | $revenue" header until a filter change forced a refetch).
   const loadSalesStats = useCallback(async (): Promise<void> => {
     const requestSecurity = statusSecurityScope
-    if (!isActive || !authReady || !canViewSales || requestSecurity !== statusSecurityRef.current) return
+    const requestScope = salesStatsScope
+    if (!isActive || !authReady || !canViewSales || requestSecurity !== statusSecurityRef.current || requestScope !== salesStatsScopeRef.current) return
+    const readScope = captureActorReadScope('sales:stats')
     const requestId = beginTrackedRequest(salesStatsRequestRef)
-    const params = {
-      ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
-      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-      ...(debouncedSearch ? { search: debouncedSearch } : {}),
-      ...salesDateRange,
-    }
+    setSalesStatsRead({ scope: requestScope, readScope, status: 'loading', value: null })
+    const isCurrentRequest = () => aliveRef.current && requestSecurity === statusSecurityRef.current
+      && requestScope === salesStatsScopeRef.current && isTrackedRequestCurrent(salesStatsRequestRef, requestId)
     try {
-      const result = await fetchSalesStats(params)
-      if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
-      const row = (result || {}) as Record<string, unknown>
-      setSalesStats({
-        revenue_usd: Number(row.revenue_usd) || 0,
-        pending_revenue_usd: Number(row.pending_revenue_usd) || 0,
-        revenue_without_not_paid_usd: typeof row.revenue_without_not_paid_usd === 'number' ? row.revenue_without_not_paid_usd : null,
-        total_count: Number(row.total_count) || 0,
-        revenue_count: Number(row.revenue_count) || 0,
-        truncated_in_list: Boolean(row.truncated_in_list),
-      })
+      const result = await fetchSalesStats(salesStatsParams)
+      if (!isCurrentRequest()) return
+      assertActorReadScope(readScope)
+      const value = requireSalesStatsResult(result)
+      setSalesStatsRead({ scope: requestScope, readScope, status: 'ready', value })
     } catch {
-      if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
-      setSalesStats(null)
+      if (!isCurrentRequest() || !isActorReadScopeCurrent(readScope, false)) return
+      setSalesStatsRead({ scope: requestScope, readScope: captureActorReadScope('sales:stats'), status: 'error', value: null })
     }
-  }, [authReady, canViewSales, statusSecurityScope, debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
+  }, [authReady, canViewSales, statusSecurityScope, salesStatsScope, salesStatsParams, isActive])
+
+  const retrySalesReads = useCallback(() => {
+    void loadSales(false)
+    void loadSalesStats()
+  }, [loadSales, loadSalesStats])
 
   useEffect(() => {
     let cancelled = false
@@ -1744,9 +1763,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     setSalesPage(1)
   }, [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
-  const totalSalesCount = salesStats?.total_count ?? allVisibleSales.length
+  const totalSalesCount = salesStats?.total_count ?? null
+  const currentSalesPageItems = salesPageRowsRef.current?.scope === salesPageScope
+    && isActorReadScopeCurrent(salesPageRowsRef.current.readScope)
+    ? salesPageRowsRef.current.count : 0
 
   useEffect(() => {
+    if (totalSalesCount === null) return
     setSalesPage((current) => clampPage(current, totalSalesCount, salesPageSize))
   }, [salesPageSize, totalSalesCount])
 
@@ -2056,35 +2079,10 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
   // revenue_count. Every row still renders in the list either way.
   const isCountedSale = useCallback((sale: SaleRecord) => isRevenueCountedSale(sale), [])
 
-  // The server figure covers every matching row; this fallback can only see
-  // the page that was fetched, so it is a degraded ANSWER — but not a
-  // different QUESTION. saleListRevenueUsd is the client mirror of the kernel
-  // fragments (net of both discounts, refund apportioned onto that same net
-  // basis and capped at it, tax and delivery excluded). It used to sum
-  // `net_total_usd ?? total_usd`, which folded tax and delivery in and took
-  // the refund off on the charged basis: a third revenue definition on the
-  // one page whose header exists to agree with the Dashboard.
-  const revenue = salesStats
-    ? salesStats.revenue_usd
-    : saleListRevenueUsd(filtered)
-
-  // The headline count must reconcile with `revenue`: count only the sales
-  // that contribute to it, so the footer never reads "12 sales | $67.47" when
-  // only 6 of those 12 produced the $67.47.
-  const revenueCount = salesStats?.revenue_count
-    ?? filtered.filter(isCountedSale).length
-
-  // Credit is already inside revenue; this positive figure simply identifies
-  // how much of the net recognized revenue is unpaid; absent V1 authority
-  // keeps the fallback unavailable until authoritative server stats arrive.
-  const creditUsd: number | null = salesStats
-    ? salesStats.pending_revenue_usd
-    : saleListCreditUsd(filtered)
-  // Revenue without Not Paid sales (owner, 20 Oct 2026): the server's once-rounded figure; the page-only
-  // fallback keeps the same identity, revenue - Not Paid, from its two cent-rounded mirrors.
-  const paidOnlyUsd: number | null = salesStats
-    ? salesStats.revenue_without_not_paid_usd
-    : creditUsd === null ? null : Math.round((revenue - creditUsd) * 100) / 100
+  const revenue: number | null = salesStats?.revenue_usd ?? null
+  const revenueCount: number | null = salesStats?.revenue_count ?? null
+  const creditUsd: number | null = salesStats?.pending_revenue_usd ?? null
+  const paidOnlyUsd: number | null = salesStats?.revenue_without_not_paid_usd ?? null
 
   const toggleSelected = (saleId: number | string) => {
     if (!canBulkSales) return
@@ -2686,7 +2684,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <div className="text-4xl">!</div>
         <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
-        <button type="button" onClick={() => loadSales(false)} className="btn-primary">
+        <button type="button" onClick={retrySalesReads} className="btn-primary">
           {t('retry') || 'Retry'}
         </button>
       </div>
@@ -2846,7 +2844,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           compactCentered
           page={salesPage}
           pageSize={salesPageSize}
-          totalItems={totalSalesCount}
+          totalItems={totalSalesCount} totalItemsKnown={totalSalesCount !== null} pageItems={currentSalesPageItems}
           label={t('sales') || 'sales'}
           t={t}
           onPageChange={setSalesPage}
@@ -2896,10 +2894,10 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           </div>
         ) : null}
 
-      {loadError && !loading ? (
+      {salesReadError && !loading ? (
         <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
-          <span>{loadError}</span>
-          <button type="button" onClick={() => loadSales(false)} className="btn-secondary px-3 py-1 text-xs">
+          <span>{salesReadError}</span>
+          <button type="button" onClick={retrySalesReads} className="btn-secondary px-3 py-1 text-xs">
             {t('retry') || 'Retry'}
           </button>
         </div>
@@ -2941,7 +2939,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       />
 
       <div data-sales-bottom-pager="" className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize compactCentered page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+        <PaginationControls compact rangeAsPageSize compactCentered page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} totalItemsKnown={totalSalesCount !== null} pageItems={currentSalesPageItems} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
       </div>
 
       {exportDialog ? (
