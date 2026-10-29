@@ -37,9 +37,23 @@ function makeKernelWorld({ patches = [] } = {}) {
       sale_item_id INTEGER,total_usd REAL,refund_snapshot_json TEXT);
   `)
   let statements = 0
+  const fixtureParams = (params = {}) => {
+    const value = item => item instanceof ArrayBuffer ? Buffer.from(item) : ArrayBuffer.isView(item) ? Buffer.from(item.buffer, item.byteOffset, item.byteLength) : item
+    return Array.isArray(params) ? params.map(value) : Object.fromEntries(Object.entries(params).map(([key, item]) => [key, value(item)]))
+  }
   const db = { prepare(query) {
     const stmt = sqlite.prepare(query)
-    return { all(params = {}) { statements += 1; return stmt.all(params) }, get(params = {}) { statements += 1; return stmt.get(params) } }
+    return { all(params = {}) { statements += 1; return stmt.all(fixtureParams(params)) },
+      get(params = {}) { statements += 1; return stmt.get(fixtureParams(params)) } }
+  }, async batch(queries) {
+    assert.ok(Array.isArray(queries) && queries.length > 0)
+    return sqlite.transaction(() => queries.map(({ sql, params = {} }) => {
+      const stmt = sqlite.prepare(sql)
+      assert.equal(stmt.reader, true, 'Read batch must return actual SELECT rows')
+      assert.equal(stmt.readonly, true, 'Read batch must not mutate the fixture')
+      statements += 1
+      return { success: true, results: stmt.all(fixtureParams(params)) }
+    }))()
   } }
   function load(relative, overrides = {}) {
     const file = path.resolve(root, relative)
