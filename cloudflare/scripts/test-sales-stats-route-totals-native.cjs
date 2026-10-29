@@ -72,24 +72,59 @@ function kind(sql){
   if(/FROM sales s WHERE/.test(sql))return /s\.subtotal_usd/.test(sql)?'sales':'voidSales'
   return 'other'
 }
-function meter(db,config={}){
-  const log={operations:0,prepares:0,resultUtf8Proxy:0,groups:{sales:[],voidSales:[],items:[],returns:[],returnItems:[]}}
-  const read=async(sql,stmt,method,params)=>{
-    log.operations++;let result=await stmt[method](params)
-    const group=kind(sql),rows=method==='get'?(result?[result]:[]):result
-    if(config.map&&method==='all')result=config.map(group,rows)
-    const actual=method==='get'?(result?[result]:[]):result
+function fixtureParams(params={}){
+  const value=item=>item instanceof ArrayBuffer?Buffer.from(item):ArrayBuffer.isView(item)?Buffer.from(item.buffer,item.byteOffset,item.byteLength):item
+  return Array.isArray(params)?params.map(value):Object.fromEntries(Object.entries(params).map(([key,item])=>[key,value(item)]))
+}
+function meter(db,raw,config={}){
+  const log={operations:0,statementAttempts:0,batchCalls:0,atomicBatches:0,prepares:0,resultUtf8Proxy:0,dataImage:null,groups:{sales:[],voidSales:[],items:[],returns:[],returnItems:[]}}
+  function record(group,rows){
+    const result=config.map?config.map(group,rows):rows
     log.resultUtf8Proxy+=Buffer.byteLength(JSON.stringify(result??null),'utf8')
-    if(log.groups[group])log.groups[group].push(...actual)
-    config.after?.({sql,group,rows:actual})
+    if(log.groups[group])log.groups[group].push(...result)
     return result
   }
-  const api={prepare(sql){log.prepares++;const stmt=db.prepare(sql);return {all:params=>read(sql,stmt,'all',params),get:params=>read(sql,stmt,'get',params),run:()=>{throw Error('Stats read must not write')}}},batch:()=>{throw Error('Unexpected read batch in unchanged report reader')}}
+  const read=async(sql,stmt,method,params)=>{
+    log.operations++;log.statementAttempts++
+    const result=await stmt[method](fixtureParams(params)),group=kind(sql),rows=method==='get'?(result?[result]:[]):result
+    const actual=record(group,rows)
+    config.after?.({sql,group,rows:actual})
+    return method==='get'?actual[0]:actual
+  }
+  const api={
+    prepare(sql){log.prepares++;const stmt=db.prepare(sql);return {all:params=>read(sql,stmt,'all',params),get:params=>read(sql,stmt,'get',params),run:()=>{throw Error('Stats read must not write')}}},
+    async batch(statements){
+      assert.ok(Array.isArray(statements)&&statements.length>0)
+      log.operations++;log.batchCalls++;log.statementAttempts+=statements.length;log.prepares+=statements.length
+      const main=statements.some(item=>item.sql.includes('report_restore_state_changed'))
+      if(main)log.atomicBatches++
+      config.beforeBatch?.({statements,main})
+      const queryOnly=Number(raw.prepare('PRAGMA query_only').get().query_only)
+      const results=[]
+      raw.exec('BEGIN')
+      try{
+        raw.exec('PRAGMA query_only=ON')
+        for(const item of statements){
+          assert.match(item.sql,/^\s*(SELECT|WITH)\b/i,'Read batch requires SELECT statements')
+          assert.ok(raw.prepare(item.sql).columns().length>0,'Read batch must return actual columns')
+          results.push({success:true,results:await db.prepare(item.sql).all(fixtureParams(item.params)),meta:{changes:0}})
+        }
+        raw.exec('COMMIT')
+      }catch(error){raw.exec('ROLLBACK');throw error}
+      finally{raw.exec('PRAGMA query_only='+(queryOnly?1:0))}
+      const names=['sales','voidSales','items','returns','returnItems','deliveryFees']
+      results.forEach((result,index)=>{const group=main&&index>=2?names[index-2]||'other':'other';result.results=record(group,result.results)})
+      if(main)log.dataImage=Object.fromEntries(names.slice(0,results.length-2).map((name,index)=>[name,results[index+2].results]))
+      config.afterBatch?.({statements,main,results})
+      return results
+    },
+  }
   api.staging=api
   return {db:api,log}
 }
+
 async function call(h,f,url='/stats',user=ADMIN,config={},cache=state()){
-  h.setUser(user);const measured=meter(f.route,config)
+  h.setUser(user);const measured=meter(f.route,f.raw.db,config)
   const semantic={fullReads:0,totalsReads:0,counts:null,diagnostic:null}
   active={cache,semantic}
   try{const response=await h.app.request(url,{method:'GET'},{DB:measured.db},h.executionCtx);return {status:response.status,body:await response.json(),semantic,log:measured.log,cache}}
@@ -102,7 +137,10 @@ function same(a,b){
 }
 const before=harness(baseline),after=harness(candidateSource)
 let passed=0
-async function test(name,fn){await fn();passed++;console.log('PASS '+name)}
+async function test(name,fn){
+  try{await fn();passed++;console.log('PASS '+name)}
+  catch(error){console.log(JSON.stringify({status:'FAIL',passed,failed:[name],error:String(error?.message||error)}));throw error}
+}
 async function main(){
   before.setUser(ADMIN);const f=before.fixture()
   const prepare=f.route.prepare.bind(f.route)
@@ -141,6 +179,16 @@ async function main(){
       assert.deepEqual(Object.keys(b.log.groups.voidSales[0]),['id'])
       assert.ok(b.log.groups.returnItems.some(row=>typeof row.refund_snapshot_json==='string'&&row.refund_snapshot_json.length>200),'Actual V1 proof is read')
       assert.ok(b.log.resultUtf8Proxy<a.log.resultUtf8Proxy,'Dropping display-only columns must reduce actual SQL-result serialization')
+      assert.equal(b.log.atomicBatches,1);assert.equal(b.log.batchCalls,3)
+      assert.ok(b.log.statementAttempts>b.log.operations,'Statements and physical adapter calls stay separate')
+      const control=meter(f.route,f.raw.db)
+      const rows=await control.db.batch([{sql:'SELECT CAST(@bytes AS BLOB) AS b',params:{bytes:new Uint8Array([0,255]).buffer}},{sql:'SELECT 2 AS n'}])
+      assert.deepEqual(Array.from(rows[0].results[0].b),[0,255]);assert.equal(rows[1].results[0].n,2)
+      assert.equal(control.log.operations,1);assert.equal(control.log.statementAttempts,2);assert.equal(control.log.groups.items.length,0)
+      const count=f.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n
+      await assert.rejects(()=>control.db.batch([{sql:'WITH one AS (SELECT 1) DELETE FROM sale_items RETURNING id'}]),/readonly|read-only|read only/i)
+      assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n,count,'Read batch rejected writes before mutation')
+
     })
     const urls=['/stats?limit=1','/stats?limit=20','/stats?limit=200','/stats?startDate=2026-09-13&endDate=2026-09-13',
       '/stats?startDate=2026-09-13&endDate=2026-09-13&startTime=06:00&endTime=18:00','/stats?branchId=2',
@@ -185,23 +233,46 @@ async function main(){
       ['live customer membership','/stats?search=COHORT-MEMBER','UPDATE customers SET membership_number=? WHERE id=9000','COHORT-MEMBER','COHORT-OTHER','COHORT-MEMBER'],
       ['cashier','/stats?cashier=COHORT-CASHIER','UPDATE sales SET cashier_name=? WHERE id=1001','COHORT-CASHIER','COHORT-OTHER','Dara'],
       ['item branch','/stats?branchId=2','UPDATE sale_items SET branch_id=? WHERE id=10001',2,1,2],
-    ])await test('actual '+label+' cohort toggles between passes and refuses mixing',async()=>{
+    ])await test('actual '+label+' fallback refuses mixing and atomic batches return a coherent cohort',async()=>{
       const change=value=>seedStockFixture(f.raw.db,()=>f.raw.prepare(sql).run([value]))
-      try{for(const h of [before,after]){
-        change(included);let flips=0
-        const afterRead=({group})=>{if(group==='sales'){flips++;change(flips%2?excluded:included)}}
-        const r=await call(h,f,url,ADMIN,{after:afterRead})
-        assert.equal(r.status,409,JSON.stringify(r.body));assert.equal(r.body.code,'snapshot_changed');assert.ok(flips>=4);assert.equal(r.cache.writes,0)
-      }}finally{change(restore)}
+      try{
+        for(const [h,target]of [[before,url],[after,url+(url.includes('?')?'&':'?')+'startDate=2026-09-13&endDate=2026-09-13']]){
+          change(included);let flips=0
+          const afterRead=({group})=>{if(group==='sales'){flips++;change(flips%2?excluded:included)}}
+          const r=await call(h,f,target,ADMIN,{after:afterRead})
+          assert.equal(r.status,409,JSON.stringify(r.body));assert.equal(r.body.code,'snapshot_changed');assert.ok(flips>=4);assert.equal(r.cache.writes,0)
+        }
+        change(included);const a=await call(after,f,url);change(excluded);const b=await call(after,f,url)
+        assert.equal(a.status,200);assert.equal(b.status,200);assert.notDeepEqual(a.body,b.body)
+        change(included);let beforeWrites=0
+        const newer=await call(after,f,url,ADMIN,{beforeBatch({main}){if(main){beforeWrites++;change(excluded)}}})
+        assert.equal(beforeWrites,1);assert.deepEqual(newer.body,b.body);assert.deepEqual(newer.log.dataImage,b.log.dataImage)
+        change(included);let afterWrites=0
+        const older=await call(after,f,url,ADMIN,{afterBatch({main}){if(main){afterWrites++;change(excluded)}}})
+        assert.equal(afterWrites,1);assert.deepEqual(older.body,a.body);assert.deepEqual(older.log.dataImage,a.log.dataImage)
+      }finally{change(restore)}
     })
-    await test('retained item money swaps are refused even with unchanged total cost',async()=>{
-      try{for(const h of [before,after]){
-        seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=CASE id WHEN 10001 THEN 1 ELSE 2 END WHERE id IN (10001,10002)'))
-        let swaps=0
-        const afterRead=({group})=>{if(group==='items'){swaps++;seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=CASE cost_price_usd WHEN 1 THEN 2 ELSE 1 END WHERE id IN (10001,10002)'))}}
-        const r=await call(h,f,'/stats',ADMIN,{after:afterRead})
-        assert.equal(r.status,409,JSON.stringify(r.body));assert.equal(r.body.code,'snapshot_changed');assert.ok(swaps>=4)
-      }}finally{seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=4 WHERE id IN (10001,10002)'))}
+    await test('retained money swaps preserve fallback refusal and one complete atomic image',async()=>{
+      const seed=()=>seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=CASE id WHEN 10001 THEN 1 ELSE 2 END WHERE id IN (10001,10002)'))
+      const swap=()=>seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=CASE cost_price_usd WHEN 1 THEN 2 ELSE 1 END WHERE id IN (10001,10002)'))
+      try{
+        for(const [h,url]of [[before,'/stats'],[after,'/stats?startDate=2026-09-13&endDate=2026-09-13']]){
+          seed();let swaps=0,bandReads=0
+          const r=await call(h,f,url,ADMIN,{after({group,rows}){
+            if(group!=='items')return
+            if(rows.some(row=>Object.hasOwn(row,'cost_price_usd'))){swaps++;swap()}
+            else if(rows.some(row=>Object.hasOwn(row,'lo')&&Object.hasOwn(row,'hi')))bandReads++
+          }})
+          assert.equal(r.status,409,`${h===before?'old-full':'dated-totals'} ${url}: ${JSON.stringify(r.body)}`);assert.equal(r.body.code,'snapshot_changed');assert.ok(swaps>=4)
+          if(h===after)assert.ok(bandReads>=4,'Dated fallback band reads must not trigger retained-money swaps')
+          else assert.equal(bandReads,0,'Unfiltered full reader has no date band')
+        }
+        seed();const a=await call(after,f);swap();const b=await call(after,f)
+        assert.equal(a.status,200);assert.equal(b.status,200);assert.deepEqual(a.body,b.body);assert.notDeepEqual(a.log.dataImage,b.log.dataImage)
+        seed();let writes=0
+        const coherent=await call(after,f,'/stats',ADMIN,{afterBatch({main}){if(main){writes++;swap()}}})
+        assert.equal(writes,1);assert.equal(coherent.status,200);assert.deepEqual(coherent.body,a.body);assert.deepEqual(coherent.log.dataImage,a.log.dataImage)
+      }finally{seedStockFixture(f.raw.db,()=>f.raw.exec('UPDATE sale_items SET cost_price_usd=4 WHERE id IN (10001,10002)'))}
     })
     console.log(JSON.stringify({status:'PASS_PAIRED_HONO_STATS',passed,base:BASE,baselineLfSha256:sha(baseline),candidateLfSha256:sha(candidateSource),
       scope:'Actual Hono/full-migration SQLite with injected auth/cache/error bridge. Adapter operations/result UTF8 proxy are not native D1 rows_read/calls, production auth/cache, CPU, peak, daily or Free readiness. Native cost probe is separate.'}))

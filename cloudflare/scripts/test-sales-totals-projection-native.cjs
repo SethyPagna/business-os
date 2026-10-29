@@ -80,26 +80,62 @@ function queryKind(query, rows) {
   if (/\bFROM\s+sales\s+s\s+WHERE\b/i.test(query)) return Object.hasOwn(rows[0], 'subtotal_usd') ? 'sales' : 'voidSales'
   return 'other'
 }
+function fixtureParams(params = {}) {
+  const value = item => item instanceof ArrayBuffer ? Buffer.from(item) : ArrayBuffer.isView(item) ? Buffer.from(item.buffer, item.byteOffset, item.byteLength) : item
+  return Array.isArray(params) ? params.map(value) : Object.fromEntries(Object.entries(params).map(([key, item]) => [key, value(item)]))
+}
 function kernel(sql, hooks = {}) {
   cache.clear()
-  const metrics = { calls: 0, rowsReturned: 0, resultBytes: 0, scalarRowsReturned: 0, groups: { sales: [], voidSales: [], items: [], returns: [], returnItems: [], deliveryFees: [] } }
-  function read(query, params, one) {
-    hooks.before?.({ query, params, sql })
-    const statement = sql.prepare(query)
-    const result = one ? statement.get(params) : statement.all(params)
+  const metrics = { calls: 0, statements: 0, batches: 0, atomicBatches: 0, rowsReturned: 0, resultBytes: 0, scalarRowsReturned: 0, groups: { sales: [], voidSales: [], items: [], returns: [], returnItems: [], deliveryFees: [] } }
+  function record(query, result, one) {
     const rows = one ? (result ? [result] : []) : result
     const kind = queryKind(query, rows)
-    metrics.calls++
     metrics.rowsReturned += rows.length
     metrics.resultBytes += Buffer.byteLength(JSON.stringify(result ?? null), 'utf8')
     if (kind !== 'other') { metrics.groups[kind].push(...rows); metrics.scalarRowsReturned += rows.length }
+    return { rows, kind }
+  }
+  function read(query, params, one) {
+    hooks.before?.({ query, params, sql })
+    const statement = sql.prepare(query), bound = fixtureParams(params)
+    assert.equal(statement.readonly, true, 'Report fixture reads must be read-only')
+    metrics.calls++; metrics.statements++
+    const args = Array.isArray(bound) ? bound : [bound]
+    const result = one ? statement.get(...args) : statement.all(...args)
+    const { rows, kind } = record(query, result, one)
     hooks.after?.({ query, params, sql, rows, kind })
     return result
   }
-  const db = { prepare(query) { return { all(params = {}) { return read(query, params, false) }, get(params = {}) { return read(query, params, true) } } } }
+  const db = {
+    prepare(query) { return { all(params = {}) { return read(query, params, false) }, get(params = {}) { return read(query, params, true) } } },
+    async batch(statements) {
+      assert.ok(Array.isArray(statements) && statements.length > 0)
+      metrics.calls++; metrics.batches++; metrics.statements += statements.length
+      if (statements.some(item => item.sql.includes('report_restore_state_changed'))) metrics.atomicBatches++
+      hooks.beforeBatch?.({ statements, sql })
+      const results = sql.transaction(() => statements.map(item => {
+        const statement = sql.prepare(item.sql), bound = fixtureParams(item.params)
+        assert.equal(statement.reader, true, 'Batch must return actual SELECT rows')
+        assert.equal(statement.readonly, true, 'Read batch must not mutate the fixture')
+        return { success: true, results: statement.all(...(Array.isArray(bound) ? bound : [bound])), meta: { changes: 0 } }
+      }))()
+      results.forEach((result, index) => record(statements[index].sql, result.results, false))
+      hooks.afterBatch?.({ statements, sql, results })
+      return results
+    },
+  }
   const lib = load('src/lib/salesAnalytics.ts', { './db': { getDb: () => db } })
-  return { lib, metrics }
+  return { lib, metrics, db }
 }
+function cohortRows(rows) {
+  const seen = new Map()
+  for (const row of rows) {
+    if (seen.has(row.id)) assert.deepEqual(row, seen.get(row.id), 'Repeated stable passes must contain the same operands')
+    else seen.set(row.id, row)
+  }
+  return [...seen.values()]
+}
+
 async function oracle(sql, f = filters, includeFees = false, scope, options = {}, hooks) {
   const { lib, metrics } = kernel(sql, hooks)
   const snapshot = await lib.readSalesReportSnapshot({}, f, includeFees, scope, options)
@@ -115,7 +151,9 @@ function sameResult(full, reduced) {
   assert.deepEqual(Object.keys(reduced.result).sort(), ['totals','sale_count','cancelled_count','precision_mode','row_count'].sort(), 'do not expose reduced row arrays as a general snapshot')
   assert.deepEqual(reduced.result, full.result, 'new helper must use the existing full snapshot/reducer semantics')
   assert.deepEqual(reduced.diagnostic, full.diagnostic, 'non-enumerable money diagnostic must survive, including unknown-cost completeness')
-  assert.equal(reduced.metrics.scalarRowsReturned, full.metrics.scalarRowsReturned, 'projection changes columns, not row/cohort membership')
+  assert.equal(full.metrics.scalarRowsReturned, 2 * full.result.row_count, 'Full reader retains two scalar passes')
+  assert.equal(reduced.metrics.scalarRowsReturned, (reduced.metrics.atomicBatches ? 1 : 2) * reduced.result.row_count, 'Actual atomic image or two-pass fallback must contain the complete cohort')
+  for (const group of Object.keys(full.metrics.groups)) assert.deepEqual(cohortRows(reduced.metrics.groups[group]).map(row => row.id), cohortRows(full.metrics.groups[group]).map(row => row.id), 'Exact cohort membership ' + group)
   assert.ok(reduced.metrics.calls <= full.metrics.calls, 'projection must not add native adapter reads')
 }
 function sameRowsWithoutMetadata(full, reduced, precise) {
@@ -127,7 +165,7 @@ function sameRowsWithoutMetadata(full, reduced, precise) {
   }
   for (const row of reduced.metrics.groups.items) assert.deepEqual(Object.keys(row).sort(), [...itemKept].sort(), 'actual item rows omit product display identity')
   for (const row of reduced.metrics.groups.voidSales) assert.deepEqual(Object.keys(row), ['id'], 'void row keeps only keyset/count identity')
-  for (const group of ['returns','returnItems','deliveryFees']) assert.deepEqual(reduced.metrics.groups[group], full.metrics.groups[group], `${group} proof/fee operands remain intact`)
+  for (const group of ['returns','returnItems','deliveryFees']) assert.deepEqual(cohortRows(reduced.metrics.groups[group]), cohortRows(full.metrics.groups[group]), `${group} proof/fee operands remain intact`)
 }
 const failures = []
 let passed = 0
@@ -141,9 +179,9 @@ async function check(name, run) {
 function mutateSource(file, text) {
   if (path.resolve(file) !== path.resolve(root, 'src/lib/salesAnalytics.ts') || !process.env.MUTANT) return text
   if (process.env.MUTANT === 'force-full') {
-    const from = "const snapshot = await readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'totals')"
-    assert.equal(text.split(from).length, 2, 'MUTANT_SEAM_MISSING: totals wrapper must be unique')
-    return text.replace(from, from.replace("'totals'", "'full'"))
+    const from = "purpose === 'full' || totalsFields.has(key)"
+    assert.equal(text.split(from).length, 2, 'MUTANT_SEAM_MISSING: actual shared projection selector must be unique')
+    return text.replace(from, 'true')
   }
   if (process.env.MUTANT === 'omit-item-total') {
     const pattern = /const REPORT_TOTALS_ITEM_FIELDS = new Set\(\[([\s\S]*?)\]\)/
@@ -151,7 +189,15 @@ function mutateSource(file, text) {
     assert.ok(found && found[1].includes("'total_usd',"), 'MUTANT_SEAM_MISSING: retained item total')
     return text.replace(pattern, found[0].replace("'total_usd',", ''))
   }
-  throw new Error('Unknown MUTANT; use force-full or omit-item-total')
+  if (process.env.MUTANT === 'wrong-cohort') {
+    const start = text.indexOf('export async function readSalesReportTotals(')
+    const end = text.indexOf('\nconst REPORT_EXACT_KEYS', start)
+    assert.ok(start >= 0 && end > start, 'MUTANT_SEAM_MISSING: actual totals wrapper')
+    const body = text.slice(start, end), from = 'const capturedScope = captureSalesReportScalarScope(scalarScope)'
+    assert.equal(body.split(from).length, 2, 'MUTANT_SEAM_MISSING: actual captured cohort')
+    return text.slice(0, start) + body.replace(from, 'const capturedScope = (captureSalesReportScalarScope(scalarScope), null)') + text.slice(end)
+  }
+  throw new Error('Unknown MUTANT; use force-full, omit-item-total or wrong-cohort')
 }
 function seedRefund(sql) {
   const entitlement = load('src/lib/customerReturnEntitlement.ts')
@@ -203,6 +249,17 @@ async function matchingError(sql, expectedCode) {
     assert.equal(reduced.metrics.scalarRowsReturned, 2 * reduced.result.row_count, 'stable snapshot must read two complete scalar passes')
     assert.ok(full.metrics.groups.voidSales.length > 0 && reduced.metrics.groups.voidSales.length > 0, 'cancelled count is a positive control')
     for (const name of headerOmitted) assert.ok(Object.hasOwn(full.metrics.groups.sales[0], name), `full reader still returns ${name}`)
+    const fullAtomic = await oracle(sql, {}), atomic = await projection(sql, {})
+    sameResult(fullAtomic, atomic); sameRowsWithoutMetadata(fullAtomic, atomic, true)
+    assert.equal(atomic.metrics.atomicBatches, 1); assert.equal(atomic.metrics.batches, 3)
+    assert.ok(atomic.metrics.statements > atomic.metrics.calls, 'Batch statements and physical adapter calls stay separate')
+    const { db, metrics } = kernel(sql)
+    const binary = await db.batch([{ sql: 'SELECT CAST(@bytes AS BLOB) AS b', params: { bytes: new Uint8Array([0, 255]).buffer } }, { sql: 'SELECT 2 AS n' }])
+    assert.deepEqual(Array.from(binary[0].results[0].b), [0, 255]); assert.equal(binary[1].results[0].n, 2)
+    assert.equal(metrics.calls, 1); assert.equal(metrics.statements, 2); assert.equal(metrics.scalarRowsReturned, 0, 'Control SELECTs are not item rows')
+    await assert.rejects(() => db.batch([{ sql: 'DELETE FROM sale_items RETURNING id' }]), /read-only|read only|Read batch/)
+    assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n, 4, 'Read adapter rejected the write before mutation')
+
   })
   await check('explicit delivery fees retain full rows and contributing-row semantics', async () => {
     const sql = schema(); seedPrecise(sql)
