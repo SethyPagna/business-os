@@ -14,7 +14,7 @@ import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importM
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
-import { cachedJsonResponse, getVersionWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
+import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
@@ -404,6 +404,21 @@ function isImageOnlyRead(user: SessionUser, surface: ProductReadSurface): boolea
 // parameter against the caller's grants (lib/productImageOnlyQuery.ts) and
 // returns only what the role may see: projected rows, the page counters and the
 // filter options for the fields it is granted. promotion_rules never ride along.
+type ImageOnlyFacetCacheContext = {
+  requestUrl: string
+  waitUntil(promise: Promise<unknown>): void
+}
+
+function imageOnlyFacetCacheContext(c: Context): ImageOnlyFacetCacheContext | undefined {
+  try {
+    const ctx = c.executionCtx
+    if (!ctx || typeof ctx.waitUntil !== 'function' || typeof c.req.url !== 'string') return undefined
+    return { requestUrl: c.req.url, waitUntil: (promise) => ctx.waitUntil(promise) }
+  } catch {
+    return undefined
+  }
+}
+
 type ImageOnlyList = {
   items: Array<Partial<Record<string, unknown>>>
   total: number
@@ -414,11 +429,11 @@ type ImageOnlyList = {
   grants: ImageOnlyGrants
 }
 
-async function loadImageOnlyList(env: Env, user: SessionUser, rawQuery: Record<string, string>, extraKeys: readonly string[] = []): Promise<ImageOnlyList> {
+async function loadImageOnlyList(env: Env, user: SessionUser, rawQuery: Record<string, string>, extraKeys: readonly string[] = [], facetCache?: ImageOnlyFacetCacheContext): Promise<ImageOnlyList> {
   const mergedPermissions = getMergedPermissions(user)
   const { query, received, grants } = parseImageOnlyQuery(rawQuery, mergedPermissions, extraKeys)
   const payload = await searchImageOnlyProductsWithIndexFallback(env, query, {
-    received, facets: { brand: grants.brand, category: grants.category },
+    received, facets: { brand: grants.brand, category: grants.category }, facetCache,
   })
   return {
     items: payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, mergedPermissions)),
@@ -686,7 +701,7 @@ type ProductSearchOptions = {
   useSearchIndex?: boolean
   // Image-only reads only (see loadImageOnlyList). Adds the received-window
   // predicate and the brand/category option lists; absent for every other reader.
-  imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean } }
+  imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean }; facetCache?: ImageOnlyFacetCacheContext }
 }
 
 // Brand/category options over the same filtered cohort the list shows, each
@@ -695,7 +710,7 @@ type ProductSearchOptions = {
 // lists go out as one batch.
 async function loadImageOnlyFacets(
   db: ReturnType<typeof getDb>, query: Record<string, string>, lowStock: LowStockConfig,
-  imageOnly: NonNullable<ProductSearchOptions['imageOnly']>,
+  imageOnly: NonNullable<ProductSearchOptions['imageOnly']>, env?: Env,
 ): Promise<{ categories?: string[]; brands?: string[] }> {
   const fields = ([['brands', 'brand', imageOnly.facets.brand], ['categories', 'category', imageOnly.facets.category]] as const)
     .filter(([, , granted]) => granted)
@@ -710,11 +725,49 @@ async function loadImageOnlyFacets(
       params: filters.params,
     }
   })
+  const facetCache = imageOnly.facetCache
+  let cache: Cache | undefined
+  let cacheRequest: Request | undefined
+  if (facetCache && env) {
+    try {
+      const versions = await getVersionsWithFallback(env, PRODUCT_FILTERS_VERSIONS, { requireReadableD1: true })
+      const identity = JSON.stringify(['image-only-facets-v1', versions, fields.map(([key]) => key), statements])
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))
+      const key = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
+      const cacheUrl = new URL('/api/products/image-only-facets-cache', facetCache.requestUrl)
+      cacheUrl.searchParams.set('key', key)
+      cacheRequest = new Request(cacheUrl.toString(), { method: 'GET' })
+      cache = caches.default
+      const hit = await cache.match(cacheRequest)
+      if (hit) {
+        const cached = await hit.json<{ categories?: unknown; brands?: unknown }>()
+        if (cached && typeof cached === 'object' && !Array.isArray(cached)
+          && Object.keys(cached).length === fields.length
+          && fields.every(([field]) => {
+            const values = cached[field]
+            return Array.isArray(values) && values.every((value) => typeof value === 'string')
+          })) return cached as { categories?: string[]; brands?: string[] }
+      }
+    } catch {
+      cache = undefined
+      cacheRequest = undefined
+    }
+  }
   const results = await db.batch(statements)
   const facets: { categories?: string[]; brands?: string[] } = {}
   fields.forEach(([key], index) => {
     facets[key] = (results[index].results as Array<{ value: string }>).map((row) => row.value).filter(Boolean)
   })
+  if (facetCache && cache && cacheRequest) {
+    try {
+      const response = new Response(JSON.stringify(facets), {
+        headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${PRODUCT_FILTERS_TTL_SECONDS}` },
+      })
+      facetCache.waitUntil(cache.put(cacheRequest, response).catch(() => {}))
+    } catch {
+      // Cache failure must not turn successful facet SQL into a failed request.
+    }
+  }
   return facets
 }
 
@@ -1099,7 +1152,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     image_gallery: itemsWithGallery[index].image_gallery,
   }))
 
-  const facets = options.imageOnly ? await loadImageOnlyFacets(db, query, lowStockConfig, options.imageOnly) : undefined
+  const facets = options.imageOnly ? await loadImageOnlyFacets(db, query, lowStockConfig, options.imageOnly, env) : undefined
 
   return {
     items: mergedItems.map(normalProductRow),
@@ -1383,7 +1436,7 @@ app.get('/search', async (c) => {
   if (isImageOnlyRead(user, surface)) {
     c.header('Cache-Control', 'private, no-store')
     try {
-      const { grants: _grants, ...list } = await loadImageOnlyList(c.env, user, query)
+      const { grants: _grants, ...list } = await loadImageOnlyList(c.env, user, query, [], imageOnlyFacetCacheContext(c))
       return c.json(list)
     } catch (error) {
       return imageOnlyQueryErrorResponse(c, error)
@@ -1518,7 +1571,7 @@ app.get('/bootstrap', async (c) => {
   if (isImageOnlyRead(user, surface)) {
     c.header('Cache-Control', 'private, no-store')
     try {
-      const { grants, facets, ...list } = await loadImageOnlyList(c.env, user, query, ['metadata'])
+      const { grants, facets, ...list } = await loadImageOnlyList(c.env, user, query, ['metadata'], imageOnlyFacetCacheContext(c))
       const branches = grants.branchStock
         ? await getDb(c.env).prepare('SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
         : undefined
