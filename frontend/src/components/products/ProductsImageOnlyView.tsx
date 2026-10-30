@@ -443,13 +443,6 @@ export default function ProductsImageOnlyView() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="mb-4">
-        <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{t('products') || 'Products'}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {t('products_image_only_hint') || 'You can update product photos here. Other fields are managed elsewhere.'}
-        </p>
-      </div>
-
       <ProductsImageOnlyControls
         showBatches={showBatches}
         showStock={showStock}

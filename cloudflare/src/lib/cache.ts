@@ -171,7 +171,7 @@ const versionMemo = new Map<string, { token: string; at: number }>()
 // every namespace KV does not hold, so a reader of N namespaces costs at most one statement instead of up to N.
 // `memoMs` lets a hot anonymous reader reuse this isolate's answer briefly instead of paying N KV reads per request;
 // a bump in this isolate drops the memo at once, other isolates see it within memoMs on top of KV's own lag.
-export async function getVersionsWithFallback(env: Env, namespaces: readonly string[], options: { memoMs?: number } = {}): Promise<string[]> {
+export async function getVersionsWithFallback(env: Env, namespaces: readonly string[], options: { memoMs?: number; requireReadableD1?: boolean } = {}): Promise<string[]> {
   const now = Date.now()
   const memoMs = options.memoMs ?? 0
   const remembered = namespaces.map((namespace) => {
@@ -180,7 +180,7 @@ export async function getVersionsWithFallback(env: Env, namespaces: readonly str
   })
   const missing = namespaces.filter((_, index) => remembered[index] == null)
   const fromKv = await Promise.all(missing.map((namespace) => readKvVersion(env, namespace)))
-  const fromD1 = await readD1Versions(env, missing.filter((_, index) => fromKv[index].value == null))
+  const fromD1 = await readD1Versions(env, missing.filter((_, index) => fromKv[index].value == null), options.requireReadableD1 === true)
   const read = new Map<string, string>()
   missing.forEach((namespace, index) => {
     const kv = fromKv[index]
@@ -199,14 +199,15 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
   return `${namespace}:${version}:${suffix}`
 }
 
-async function readD1Versions(env: Env, namespaces: string[]): Promise<Map<string, number>> {
+async function readD1Versions(env: Env, namespaces: string[], requireReadable = false): Promise<Map<string, number>> {
   if (!namespaces.length) return new Map()
   try {
     const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
       WHERE namespace IN (SELECT value FROM json_each(@namespaces))`)
       .all<{ namespace: string; version: number }>({ namespaces: JSON.stringify(namespaces) })
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
-  } catch {
+  } catch (error) {
+    if (requireReadable) throw error
     return new Map()
   }
 }

@@ -1,7 +1,8 @@
 // Physical D1 statement budget of the image-only Products list (6.0.854).
 //
-// The image-only /search leaves the shared edge cache (a payload cached for one
-// grant set must never reach another), so every request pays for its own reads.
+// The image-only row/list payload stays outside the shared response cache.
+// Only grant/cohort-qualified facet strings may be cached; this always-miss cache
+// fixture still measures the full producer path and forbids cached row data.
 // This drives the REAL Worker (index.ts: real cookie auth, session, middleware)
 // over the full migration schema with a 500-row catalog (100 name families x 5
 // rows, one lot each) and counts every statement that reaches D1 -- the same
@@ -31,9 +32,17 @@ const worker = load('index.ts').default
 const core = load('lib/coreDataInvariants.ts')
 const { fixture } = require('./test-stock-session-atomic.cjs')
 globalThis.fetch = async () => new Response('{"ok":true}')
-// Only the full-access comparison reads reach the shared Cache API; the image-only path never does (asserted below).
+// Observe the image-only phase first; the full-access comparison runs afterwards.
 let cacheTouches = 0
-globalThis.caches = { default: { match: async () => { cacheTouches += 1; return undefined }, put: async () => { cacheTouches += 1 } } }
+const cachePaths = []
+const cacheBodies = []
+globalThis.caches = { default: {
+  match: async (request) => { cacheTouches += 1; cachePaths.push(new URL(request.url).pathname); return undefined },
+  put: async (request, response) => {
+    cacheTouches += 1; cachePaths.push(new URL(request.url).pathname)
+    cacheBodies.push(await response.clone().json())
+  },
+} }
 
 const FAMILIES = 100
 const ROWS = 5
@@ -154,7 +163,12 @@ async function world() {
     console.log(`MEASURE ${label}: cold=${cold.physical} warm=${warm.physical} rows=${cold.body.items.length} total=${cold.body.total}`)
     cases += 1
   }
-  assert.equal(cacheTouches, 0, 'the image-only list never reads or writes the shared response cache')
+  assert.ok(cacheTouches > 0 && cacheBodies.length > 0, 'positive facet-only CacheAPI witness')
+  assert.ok(cachePaths.every((pathname) => pathname === '/api/products/image-only-facets-cache'), 'image-only list payload never enters the shared response cache')
+  for (const body of cacheBodies) {
+    assert.deepEqual(Object.keys(body).sort(), ['brands', 'categories'], 'only granted facet keys cached; no rows/items/total')
+    for (const values of Object.values(body)) assert.ok(Array.isArray(values) && values.every((value) => typeof value === 'string'))
+  }
   // Comparison only: the same browse for a full-access reader (shared-cache path, cache stubbed empty).
   const admin = await read(7, 'pageSize=100', true)
   assert.equal(admin.status, 200)
