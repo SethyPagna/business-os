@@ -2,6 +2,10 @@
 
 Moved from progress.md on 27 Oct 2026 (6.0.998); the board keeps a short "Release process" summary that links here. Every rule below still applies.
 
+## Current verified release — 30 October 2026
+
+Urgent source `165f9f000d34186ebb4f0215015d5d63740ae545` is live on Paid: [Deploy 41009388421](https://github.com/SethyPagna/business-os/actions/runs/41009388421), published 08:04:41 UTC / 16:04 Hong Kong, Worker `4b048477-9eac-4c87-9b73-397efbf62a03`, source hash `936ad09ca3fb1dc3`. Exact-source isolated sweeps passed Worker 1085/1085 and frontend 985/985. No migrations were applied; the ledger remains through 0273, stock guards pass and eight table counts match. Later public and authenticated page smoke checks pass; runner bot challenges, physical devices, full transactions and whole-Free readiness remain qualified in [progress.md](../../progress.md). The broader local takeover is not this deployment. The owner explicitly requested urgent deployment for this incident; ordinary release-window rules continue to govern subsequent releases.
+
 ## Standing release process
 
 - **Release gate** for every new candidate: exact-SHA full GitHub gate, independent Astra review, adversarial/threat review and secrets scan, authorized Paid workflow and independent production postflight. Earlier Opus reviews remain evidence for their historical releases, not new Astra certificates.
@@ -19,10 +23,10 @@ Production actions never happen from a planning, review or lane agent. Deploymen
 - **Never rerun the cutover.** The Shop → "Old Shop" (inactive) and Warehouse → "LC Store" consolidation is done; no cutover mode is to be rerun; no Undo for it.
 - **Deploy window rule**: at most2 deploys per Cambodia date:07:00 regardless of shift, and one after20:00 with fresh Ops `open_today=0`. Every release requires its exact-SHA full GitHub gate, independent Astra review, adversarial/threat review, secrets scan, `deploy.yml plan=paid` and independent postflight. Unattended schedules remain paused. Skip unready or unchanged candidates; old one-off exceptions do not authorize extra deployments. Never infer that main is deployed.
 - **Remote D1 only through the ops workflows** (read-only counts/ids queries, results kept in local Records); never wrangler or the D1 connector directly from an agent (13 Oct: one refuter ran a read-only SELECT outside the rule; future prompts forbid it). Local D1 harness only for destructive-operation work. Use full wrangler version UUIDs, never 8-hex tokens.
-- **RC1 `efaac4452` is live (26 Oct) and RC2b `a8dbbe1fc` is deploying (27 Oct).** Every new candidate still requires its exact-SHA gate, independent review, secrets scan, a fresh slot check, the Paid workflow and postflight; a release containing 6.0.984 rolls back only by redeploying the prior sha. The historical counted-stock conversion remains HOLD.
+- **Current production is urgent 1033 `165f9f0` (30 Oct), based on RC3 `a9ba6f20a`; RC1 and RC2b are historical releases.** Every new candidate still requires its exact-SHA gate, independent review, secrets scan, a fresh slot check, the Paid workflow and postflight; a release containing 6.0.984 rolls back only by redeploying the prior sha. The historical counted-stock conversion remains HOLD.
 - **Held branches and data**: DO NOT delete remote branches before the cleanup manifest is independently reviewed (expected-SHA atomic push); do not rewrite pushed history except the owner-approved privacy purge, scheduled after the lanes merge; no permanent deletion of data, buckets or zones without the owner; historical data repairs (sales 16671/16835/16917/16827, shift 20, nine unreversed deductions, expense note, membership prefix, duplicate customer pairs) only with exact evidence, a backup and owner approval.
 - **Counted-stock root-chain commits stay out of every release candidate**; repro tests that are RED by design (`test-al-money-c/d/e/f/g-native.cjs`, M case, `test-al-stock-i-native.cjs`) must not be in a gate-bound candidate until their fix lands.
-- **Protected work and active authority**: the owner resumed Codex supervision and the full goal on15Oct; this supersedes the12Oct work pause. Unattended schedules and snapshot loop remain paused. Frozen release candidates and original dirty trees are preserved; PR9 and uncertain branches require their recorded disposition before cleanup. Never deploy a dirty tree or edit the stale `Downloads/business-os-v1` checkout.
+- **Protected work and active authority**: the owner resumed Codex supervision and the full goal on15Oct; this supersedes the12Oct work pause. Unattended schedules remain paused; check the private recovery kit for the current preservation snapshot-loop state. Frozen release candidates and original dirty trees are preserved; PR9 and uncertain branches require their recorded disposition before cleanup. Never deploy a dirty tree or edit the stale `Downloads/business-os-v1` checkout.
 
 ## Release history since release 2e
 
@@ -39,7 +43,9 @@ Dates are UTC. Gate, review and postflight evidence for each row is in the priva
 | 24 Oct | `e8613f438` | 6.0.966 follow-ups, 6.0.967 permission consistency (part A), 6.0.972 sale payments S1+S2 (migrations 0270, 0271) |
 | 25 Oct | `f07fcf82e` | 6.0.974 sale payments S3 readers |
 | 25 Oct | `0da8f9f52` | 6.0.977 scanner test deflake, 6.0.978 iPhone camera stops on close |
-| 26 Oct | `efaac4452` | RC1: 6.0.983, 6.0.984, 6.0.986, 6.0.987, 6.0.993 (live) |
-| 27 Oct | `a8dbbe1fc` | RC2b: 6.0.985, 6.0.989, 6.0.991, exchange budget fix, migration 0272 (deploying) |
+| 26 Oct | `efaac4452` | RC1: 6.0.983, 6.0.984, 6.0.986, 6.0.987, 6.0.993 |
+| 27 Oct | `a8dbbe1fc` | RC2b: 6.0.985, 6.0.989, 6.0.991, exchange budget fix, migration 0272 |
+| 27 Oct | `a9ba6f20a` | RC3: 6.0.988, 6.0.992 (+990), 6.0.994, restore deletion/maintenance fixes, migration 0273 |
+| 30 Oct | `165f9f000` | 6.0.1033: urgent image-only facet cache, strict cache authority, exact duplicate Products heading/hint removal; no migrations |
 
 Earlier releases are in the compact done log in [session-log.md](session-log.md) (entry "27 Oct 2026 — 6.0.998").
