@@ -48,10 +48,12 @@ const names = new Map(db.prepare("SELECT id,name FROM products").all().map((row)
 const expectedDesc = [1, 2, 3, 4, 5, 6].sort((a, b) => (oracle.get(b) || 0) - (oracle.get(a) || 0) || names.get(a).localeCompare(names.get(b)))
 
 const plans = []
+const executedSql = []
 const adapter = { async batch(statements) {
   db.exec('PRAGMA query_only=ON'); db.exec('BEGIN')
   try {
     return statements.map(({ sql, params = {} }) => {
+      executedSql.push(sql)
       const prepared = db.prepare(sql); prepared.setAllowUnknownNamedParameters(true)
       const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`); plan.setAllowUnknownNamedParameters(true)
       plans.push(plan.all(params).map((row) => row.detail))
@@ -73,8 +75,7 @@ const adapter = { async batch(statements) {
   assert.deepEqual(desc.rankings.customers.map((row) => [row.customer_id, row.sale_count]).sort((a, b) => a[0] - b[0]), db.prepare("SELECT s.customer_id AS c, COUNT(DISTINCT s.id) AS n FROM sales s JOIN sale_items si ON si.sale_id=s.id WHERE s.sale_status<>'cancelled' AND s.customer_id IS NOT NULL GROUP BY s.customer_id ORDER BY s.customer_id").all().map((row) => [Number(row.c), Number(row.n)]))
   assert.ok(plans.length > 0)
   assert.ok(!plans.flat().some((detail) => /CORRELATED/i.test(detail) && /buyers/i.test(detail)), 'no correlated scan of the buyers CTE')
-  const source = require('node:fs').readFileSync(path.join(__dirname, '../src/lib/inventoryCheckProducts.ts'), 'utf8')
-  assert.ok(!/SELECT COUNT\(DISTINCT customer_id\) FROM buyers buyer WHERE buyer\.product_id=c\.id/.test(source), 'per-row correlated count is gone')
-  assert.match(source, /LEFT JOIN \(SELECT product_id,COUNT\(DISTINCT customer_id\) AS customer_count FROM buyers GROUP BY product_id\) bc ON bc\.product_id=c\.id/)
+  assert.ok(executedSql.every(sql => !/SELECT COUNT\(DISTINCT customer_id\) FROM buyers buyer WHERE buyer\.product_id=c\.id/.test(sql)), 'executed SQL has no per-row correlated buyer count')
+  assert.ok(executedSql.some(sql => /LEFT JOIN \(SELECT product_id,COUNT\(DISTINCT customer_id\) AS customer_count FROM buyers GROUP BY product_id\) bc ON bc\.product_id=c\.id/.test(sql)), 'executed SQL uses one grouped buyer-count join')
   console.log('PASS customer count ordering, unique buyers, ranking and plan')
 })().catch((error) => { console.error(error); process.exitCode = 1 })

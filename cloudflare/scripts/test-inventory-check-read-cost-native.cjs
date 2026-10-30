@@ -47,11 +47,17 @@ const WORKER = `
   const lowStock = { enabled: true, mode: 'product', threshold: 5 }
   export default { async fetch(request, env) {
     const { op, actor, args = {} } = await request.json(), log = [], raw = env.DB
-    const record = (sql, result) => { log.push({ rows: result.meta?.rows_read || 0, sql: sql.slice(0, 120) }); return result }
+    let calls = 0
+    const record = (sql, result, call, slot = 0, arity = 1) => {
+      const rows = result.meta?.rows_read
+      if (!Number.isSafeInteger(rows) || rows < 0) throw new Error('Native rows_read unavailable')
+      log.push({ rows, sql, call, slot, arity, success: result.success, writes: result.meta?.rows_written ?? null })
+      return result
+    }
     const statement = sql => { const prepared = raw.prepare(sql); return { bind(...values) { const bound = prepared.bind(...values)
-      return { inner: bound, sql, async all() { return record(sql, await bound.all()) }, async run() { return record(sql, await bound.run()) },
-        async first() { const result = record(sql, await bound.all()); return result.results[0] ?? null } } } } }
-    const db = getDb({ DB: { prepare: statement, async batch(items) { const results = await raw.batch(items.map(item => item.inner)); results.forEach((result, index) => record(items[index].sql, result)); return results } } })
+      return { inner: bound, sql, async all() { const call = ++calls; return record(sql, await bound.all(), call) }, async run() { const call = ++calls; return record(sql, await bound.run(), call) },
+        async first() { const call = ++calls; const result = record(sql, await bound.all(), call); return result.results[0] ?? null } } } } }
+    const db = getDb({ DB: { prepare: statement, async batch(items) { const call = ++calls; const results = await raw.batch(items.map(item => item.inner)); results.forEach((result, index) => record(items[index].sql, result, call, index, items.length)); return results } } })
     const principal = { id: actor.id, tokenHash: actor.tokenHash }
     let out
     try {
@@ -171,11 +177,43 @@ async function main() {
     else assert.deepEqual(listRows.name.out.stats, STATS, 'summary cards')
     console.log('PASS page rows, totals, facets, rankings and summary equal the pre-change result for every sort and filter')
 
+    for (const [label, result] of Object.entries(listRows)) {
+      const reports = result.log.filter(entry => entry.arity === 5 && entry.slot >= 2)
+      assert.deepEqual(reports.map(entry => entry.slot), [2, 3, 4], `${label}: count/page/summary follow the two schema probes`)
+      assert.equal(new Set(reports.map(entry => entry.call)).size, 1, `${label}: reports share one native snapshot batch`)
+      assert.ok(reports.every(entry => entry.success === true && entry.writes === 0), `${label}: all report statements are read-only successes`)
+      const query = lists[label]
+      const namePage = (!query.sortBy || query.sortBy === 'name') && !query.stockState
+      if (namePage) {
+        assert.ok(!/ledger AS|buyers AS/.test(reports[0].sql), `${label}: family count must not read financial history`)
+        assert.match(reports[1].sql, /requested_ids\(product_id\) AS \(SELECT DISTINCT id FROM __page\)/, `${label}: financial reads use returned page IDs`)
+      } else {
+        assert.match(reports[0].sql, /ledger AS/, `${label}: metric and stock filters retain the full ranking path`)
+      }
+      assert.match(reports[2].sql, /ledger AS/, `${label}: authoritative summary retains the full financial ledger`)
+      if (['name', 'all_branches', 'qty_sold', 'brand'].includes(label)) console.log(`MEASURE ${label}: count=${reports[0].rows} page=${reports[1].rows} summary=${reports[2].rows}; reader calls=${new Set(result.log.map(entry => entry.call)).size}`)
+    }
+    console.log('PASS name count skips history; page metrics are bounded; summary and numeric/stock fallbacks remain authoritative')
+
+    const counterName = await call('list', { query: { query: '8850000001010', branchId: '1' } }, actors.counter)
+    assert.equal(counterName.out.error, undefined)
+    assert.deepEqual(counterName.out.items.map(item => [item.id, item.qty_sold, item.customer_count]), [[1010, 2, 1]], 'name-page enrichment keeps the identified sale and distinct buyer')
+    assert.deepEqual(counterName.out.stats, { total_products: 1, total_variants: 1, qty_sold: 2, unique_customer_count: 1 })
+    for (const item of counterName.out.items) for (const field of ['quantity', 'display_quantity', 'next_expiry_date', 'cost_price_usd', 'cost_price_khr', 'stock_consistent', 'stock_diagnostics', 'damaged_quantity']) {
+      assert.ok(!Object.hasOwn(item, field), `name page must not expose hidden ${field}`)
+    }
+    const deniedStock = await call('list', { query: { stockState: 'in_stock' } }, actors.counter)
+    assert.equal(deniedStock.out.error, 'inventory_check_field_hidden')
+    assert.equal(deniedStock.out.status, 403)
+    assert.equal(deniedStock.log.length, 0, 'hidden stock filters refuse before report reads')
+    console.log('PASS name-page metrics remain correct with hidden stock/cost and hidden stock filters refuse before SQL')
+
     // One snapshot batch: schema probe, empty stock probe, family count, page, summary; then the issue read.
     const ranking = result => result.log[2].rows + result.log[3].rows
     const small = await call('list', { query: { branchId: '1', pageSize: '10' } }), large = await call('list', { query: { branchId: '1', pageSize: '100' } })
     const byStock = ranking(listRows.stock), byName = ranking(listRows.name)
     console.log(`MEASURE list P=${P}: name=${listRows.name.rows} stock-sort=${listRows.stock.rows}; count+page name=${byName} stock=${byStock}; page10=${ranking(small)} page100=${ranking(large)}`)
+    assert.ok(byName < 40000, `name count/page read ${byName} rows; the pre-optimization fixture reads 46100`)
     assert.ok(byName * 2 < byStock, 'count and page statements for a name sort must not read every product\'s stock')
     assert.ok(ranking(large) - ranking(small) < 90 * 100, 'page stock grows with page size, not with the catalog')
 
