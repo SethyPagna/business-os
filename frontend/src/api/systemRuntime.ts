@@ -17,6 +17,14 @@ export function getSystemDebugLog(): Promise<unknown> {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }
 
+export function getReadSwitches(): Promise<unknown> {
+  return route('system:readSwitches', () => apiFetch('GET', '/api/runtime/read-switches'), null)
+}
+
+export function setReadSwitch(payload: { name: string; state: 'on' | 'off'; expectedEpoch: number }): Promise<unknown> {
+  return route('system:readSwitchSet', () => apiFetch('PUT', '/api/runtime/read-switches', payload), null, true)
+}
+
 export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean } = {}): Promise<unknown> {
   const deep = Boolean(options.deep || options.write)
   return route(

@@ -211,6 +211,9 @@ async function main() {
     // Real module too: the review-alert deferral scope is /api middleware that must call next(). The alert installer is
     // called once at module scope and this test sends no review alert, so it is a no-op here.
     './lib/requestDefer': load('lib/requestDefer.ts', { 'node:async_hooks': require('node:async_hooks') }),
+    // Real modules too: the /api cache-header and read-switch-header middleware wrap the handler and must call next().
+    './lib/apiCacheHygiene': load('lib/apiCacheHygiene.ts'),
+    './lib/readSwitches': load('lib/readSwitches.ts', { './db': { getDb() { throw new Error('no database in this test') } }, './analytics': { recordAnalytics() {} } }),
     './lib/reviewAlert': { installReviewAlerts() {} },
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreInvariantsGate': { ensureCoreDataInvariantsForRequest: async () => { calls.bootstrap++ } },

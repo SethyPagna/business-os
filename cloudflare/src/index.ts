@@ -65,6 +65,7 @@ import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { apiCacheHygiene } from './lib/apiCacheHygiene'
+import { readSwitchHeader } from './lib/readSwitches'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
@@ -215,6 +216,7 @@ app.use('/api/*', requestMetricsMiddleware)
 
 // Right behind the metrics wrapper so its after-next() code runs last for every /api/* response, errors and the maintenance 503 included (lib/apiCacheHygiene.ts).
 app.use('/api/*', apiCacheHygiene)
+app.use('/api/*', readSwitchHeader)
 
 // Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
 app.use('/api/*', async (c, next) => {

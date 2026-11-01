@@ -160,6 +160,8 @@ function writeShapes() {
     { id: 'w-product-price-edit', label: 'PUT /api/products/:id price edit', method: 'PUT', url: '/api/products/1003',
       prepare: async (world) => (await world.all('SELECT * FROM products WHERE id=1003'))[0],
       run: async (world, send, p) => send('PUT', '/api/products/1003', { ...p, selling_price_usd: 11, expected_updated_at: p.updated_at, client_request_id: key('edit') }) },
+    { id: 'w-read-switch-flip', label: 'PUT /api/runtime/read-switches', method: 'PUT', url: '/api/runtime/read-switches',
+      run: async (world, send) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: 0 }) },
     { id: 'w-logout', label: 'POST /api/auth/logout', method: 'POST', url: '/api/auth/logout', body: {} },
   ]
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))

@@ -346,6 +346,7 @@
     {"id":"system-config","method":"GET","route":"/api/system/config","params":"","status":200,"cold_calls_max":5,"rows_max":11,"rows_max_analyze":12,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"runtime-version","method":"GET","route":"/api/runtime/version","params":"","status":200,"cold_calls_max":4,"rows_max":8,"rows_max_analyze":8,"rows_written_max":8,"class":"P","expect":"ok"},
     {"id":"runtime-cron-health","method":"GET","route":"/api/runtime/cron-health","params":"","status":200,"cold_calls_max":7,"rows_max":11,"rows_max_analyze":12,"rows_written_max":8,"class":"N","expect":"ok"},
+    {"id":"runtime-read-switches","method":"GET","route":"/api/runtime/read-switches","params":"","status":200,"cold_calls_max":6,"rows_max":13,"rows_max_analyze":15,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"runtime-catalog-integrity-catalog-stock-diagnostics","method":"GET","route":"/api/runtime/catalog-integrity","params":"","status":200,"cold_calls_max":7,"rows_max":18277,"rows_max_analyze":18278,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"sync-owner","method":"GET","route":"/api/sync/owner","params":"","status":200,"cold_calls_max":5,"rows_max":11,"rows_max_analyze":12,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"settings","method":"GET","route":"/api/settings","params":"","status":200,"cold_calls_max":6,"rows_max":23,"rows_max_analyze":24,"rows_written_max":8,"class":"N","expect":"ok"},
@@ -596,6 +597,7 @@
     {"id":"w-fast-stock-in-3-lines","method":"POST","route":"/api/inventory/fast-stock-in/commit","params":"","status":200,"cold_calls_max":18,"rows_max":9232,"rows_max_analyze":9232,"rows_written_max":66,"class":"N","expect":"ok"},
     {"id":"w-inventory-check-session-20","method":"POST","route":"/api/inventory-checks/sessions","params":"","status":201,"cold_calls_max":17,"rows_max":10516,"rows_max_analyze":10516,"rows_written_max":75,"class":"N","expect":"ok"},
     {"id":"w-fee","method":"POST","route":"/api/fees","params":"","status":201,"cold_calls_max":11,"rows_max":884,"rows_max_analyze":884,"rows_written_max":28,"class":"N","expect":"ok"},
+    {"id":"w-read-switch-flip","method":"PUT","route":"/api/runtime/read-switches","params":"","status":200,"cold_calls_max":6,"rows_max":43,"rows_max_analyze":43,"rows_written_max":16,"class":"N","expect":"ok"},
     {"id":"w-customer-create","method":"POST","route":"/api/customers","params":"","status":200,"cold_calls_max":15,"rows_max":17143,"rows_max_analyze":17143,"rows_written_max":22,"class":"N","expect":"ok"},
     {"id":"w-product-price-edit","method":"PUT","route":"/api/products/:id","params":"","status":200,"cold_calls_max":19,"rows_max":69,"rows_max_analyze":69,"rows_written_max":38,"class":"N","expect":"ok"},
     {"id":"w-logout","method":"POST","route":"/api/auth/logout","params":"","status":200,"cold_calls_max":4,"rows_max":26,"rows_max_analyze":26,"rows_written_max":9,"class":"P","expect":"ok"}

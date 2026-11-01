@@ -1,7 +1,13 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { buildAuditStatement, changedFields } from '../lib/audit'
+import { getMaintenance } from '../lib/maintenance'
+import {
+  KNOWN_READ_SWITCHES, READ_SWITCH_KEY, READ_SWITCH_MEMO_MS, formatSwitchToken, isKnownReadSwitch, parseFlipState,
+  parseReadSwitches, primeReadSwitches, serializeReadSwitches, splitSwitchRows, SWITCH_ROWS_PARAMS, SWITCH_ROWS_SQL, type ReadSwitches,
+} from '../lib/readSwitches'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getBuildStamp } from '../lib/buildStamp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
@@ -218,6 +224,85 @@ app.get('/catalog-integrity', async (c) => {
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to inspect catalog integrity' }, 500)
   }
+})
+
+
+const SWITCH_FLIP_FIELDS = ['name', 'state', 'expectedEpoch']
+async function storedSwitches(db: ReturnType<typeof getDb>): Promise<string | null> {
+  return splitSwitchRows(await db.prepare(SWITCH_ROWS_SQL).all<{ key: string; value: string }>(SWITCH_ROWS_PARAMS)).switchesRaw
+}
+// One compare-and-swap on the exact stored text. A flip that turns something ON also refuses to run while a restore or
+// cutover holds writes; an OFF flip always may.
+const SWITCH_UPSERT_SQL = `INSERT INTO system_flags (key, value, updated_at)
+  SELECT @key, @value, CURRENT_TIMESTAMP
+  WHERE (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  WHERE system_flags.value = @expected AND (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))`
+const SWITCH_FLIP_GUARD_SQL = `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('[1]', '$[read_switch_conflict]') END`
+
+function switchListing(current: ReadSwitches) {
+  return {
+    epoch: current.epoch,
+    setAt: current.setAt,
+    setBy: current.setBy,
+    switches: KNOWN_READ_SWITCHES.map((name) => ({ name, state: current.switches[name].state, rate: current.switches[name].rate })),
+    memoSeconds: READ_SWITCH_MEMO_MS / 1000,
+  }
+}
+
+app.use('/read-switches', requireAuth)
+
+app.get('/read-switches', async (c) => {
+  if (!isAdminControlUser(c.get('user'))) return c.json({ success: false, error: 'No permission', code: 'forbidden' }, 403)
+  const current = parseReadSwitches(await storedSwitches(getDb(c.env)))
+  primeReadSwitches(current)
+  return c.json({ success: true, ...switchListing(current) })
+})
+
+app.put('/read-switches', async (c) => {
+  const user = c.get('user')
+  if (!isAdminControlUser(user)) return c.json({ success: false, error: 'No permission', code: 'forbidden' }, 403)
+  const body: unknown = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ success: false, error: 'A flip needs a JSON object.', code: 'read_switch_body' }, 400)
+  const { name, state, expectedEpoch } = body as Record<string, unknown>
+  if (Object.keys(body).some((field) => !SWITCH_FLIP_FIELDS.includes(field))) return c.json({ success: false, error: 'Only name, state and expectedEpoch are accepted.', code: 'read_switch_body' }, 400)
+  if (!isKnownReadSwitch(name)) return c.json({ success: false, error: 'Unknown switch.', code: 'read_switch_unknown' }, 400)
+  const target = parseFlipState(state)
+  if (!target) return c.json({ success: false, error: 'State must be off, on or shadow:<rate>.', code: 'read_switch_state' }, 400)
+  if (typeof expectedEpoch !== 'number' || !Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0) return c.json({ success: false, error: 'expectedEpoch must be a whole number.', code: 'read_switch_epoch' }, 400)
+
+  const db = getDb(c.env)
+  const storedRaw = await storedSwitches(db)
+  const current = parseReadSwitches(storedRaw)
+  if (current.epoch !== expectedEpoch) return c.json({ success: false, error: 'The switches changed since this page loaded.', code: 'read_switch_epoch_stale', epoch: current.epoch }, 409)
+  const from = formatSwitchToken(current.switches[name])
+  const to = formatSwitchToken(target)
+  if (from === to) {
+    primeReadSwitches(current)
+    return c.json({ success: true, changed: false, ...switchListing(current) })
+  }
+
+  const epoch = current.epoch + 1
+  const value = serializeReadSwitches(storedRaw, { name, entry: target }, { epoch, setAt: new Date().toISOString(), setBy: user.id })
+  const record = buildAuditStatement(user.id, user.name, 'read_switch_set', 'read_switch', name,
+    { name, from, to, epochBefore: current.epoch, epochAfter: epoch }, changedFields({ state: from, epoch: current.epoch }, { state: to, epoch }))
+  try {
+    await db.batch([
+      { sql: SWITCH_UPSERT_SQL, params: { key: READ_SWITCH_KEY, value, expected: storedRaw, off: target.state === 'off' ? 1 : 0 } },
+      { sql: `${record.sql} WHERE changes() = 1`, params: record.params },
+      { sql: SWITCH_FLIP_GUARD_SQL },
+    ])
+  } catch (error) {
+    const after = await storedSwitches(db)
+    if (after !== value) {
+      if (after !== storedRaw) return c.json({ success: false, error: 'The switches changed since this page loaded.', code: 'read_switch_epoch_stale', epoch: parseReadSwitches(after).epoch }, 409)
+      if (target.state !== 'off' && await getMaintenance(c.env)) return c.json({ success: false, error: 'Writes are held; only OFF is allowed now.', code: 'read_switch_maintenance' }, 503)
+      throw error
+    }
+  }
+  const written = parseReadSwitches(value)
+  primeReadSwitches(written)
+  return c.json({ success: true, changed: true, ...switchListing(written) })
 })
 
 export default app

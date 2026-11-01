@@ -241,7 +241,7 @@ function strings(node, at = [], out = []) {
 // ------------------------------------------------------ what ops.yml must be
 
 const CUTOVER_TOKEN_ENV = { BRANCH_CUTOVER_OPERATOR_TOKEN: '${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}' }
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'branch-cutover', 'd1-physical-export']
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'read-switch', 'branch-cutover', 'd1-physical-export']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
@@ -304,6 +304,12 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-settings-upsert.mjs', { OPS_APPLY: '${{ inputs.apply }}' }),
     { kind: 'upload' },
   ],
+  // Same shape: the switch input is read from the event payload file, so the job's only task-specific expression is the apply flag.
+  'read-switch': [
+    ...PRELUDE,
+    scriptStep('node ops/scripts/ops-read-switch.mjs', { OPS_APPLY: '${{ inputs.apply }}' }),
+    { kind: 'upload' },
+  ],
   // One mode per run. The operator token is the only secret beyond the Cloudflare pair, and the job runs only from main.
   'branch-cutover': [
     ...PRELUDE,
@@ -323,7 +329,7 @@ const TASK_STEPS = {
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-read-switch.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -335,6 +341,7 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-r2-lib.mjs',
   'ops/scripts/ops-secret-names.mjs',
   'ops/scripts/ops-settings-upsert.mjs',
+  'ops/scripts/ops-read-switch.mjs',
   'ops/scripts/ops-branch-cutover.mjs',
   'ops/scripts/branch-cutover-loop.mjs',
 ]
@@ -490,7 +497,7 @@ async function main() {
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'switch', 'task'])
     assert.strictEqual(inputs.cutover_mode.type, 'choice')
     assert.deepStrictEqual(inputs.cutover_mode.options, cutover.MODES, 'the workflow offers exactly the modes the script runs, in runbook order')
     assert.strictEqual(inputs.cutover_mode.default, 'inspect', 'the default mode only reads')
@@ -702,7 +709,7 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.map((t) => `jobs.${t}.steps.N.env.CONFIRM`)])
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
     assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
-    assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY'])
+    assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY', 'jobs.read-switch.steps.N.env.OPS_APPLY'])
     assert.deepStrictEqual(where('${{ inputs.cutover_mode }}'), ['jobs.branch-cutover.steps.N.env.OPS_CUTOVER_MODE'])
     assert.deepStrictEqual(where('${{ inputs.operation_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_OPERATION_ID'])
     assert.deepStrictEqual(where('${{ inputs.actor_user_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_ACTOR_USER_ID'])
@@ -710,7 +717,7 @@ async function main() {
     assert.deepStrictEqual(where(CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN), ['jobs.branch-cutover.steps.N.env.BRANCH_CUTOVER_OPERATOR_TOKEN'], 'the operator token reaches one step only')
     // The topic ids never pass through an expression or a step env (whose
     // values the public log prints): the script reads the event payload file.
-    assert.deepStrictEqual(strings(WF).filter(([, v]) => /inputs\.settings|github\.event|OPS_SETTINGS/.test(v)).map(([w]) => w), [])
+    assert.deepStrictEqual(strings(WF).filter(([, v]) => /inputs\.settings|inputs\.switch|github\.event|OPS_SETTINGS|OPS_SWITCH/.test(v)).map(([w]) => w), [])
     const r2 = code['ops/scripts/ops-r2.mjs']
     assert.ok(r2.includes("  if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {\n    const r = await create()") && count(r2, /\bcreate\(\)/g) === 1, 'only copy mode may create the destination bucket')
     assert.strictEqual(count(r2, /const mode = String\(process\.env\.OPS_R2_MODE \|\| 'copy'\)\.trim\(\)/g), 2, 'buckets and run both take the mode from the workflow input')
@@ -800,6 +807,7 @@ async function main() {
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
       'ops/scripts/ops-d1-physical-export.mjs: codesText(errorCodes)',
+      "ops/scripts/ops-read-switch.mjs: String(value).replace(':', '-')",
     ], 'publicToken() only for the query FILE name and Cloudflare error-code numbers')
     // secret-names prints counts only: no secret's name, not even an expected one.
     const sn = code['ops/scripts/ops-secret-names.mjs']
@@ -855,6 +863,7 @@ async function main() {
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",
       "ops/scripts/ops-r2.mjs: ['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION]",
       "ops/scripts/ops-r2.mjs: ['secret', 'put', 'COPY_TOKEN', ...config]",
+      'ops/scripts/ops-read-switch.mjs: wranglerArgs(sql)',
       'ops/scripts/ops-settings-upsert.mjs: wranglerArgs(sql)',
     ].sort())
     const r2 = code['ops/scripts/ops-r2.mjs']

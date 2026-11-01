@@ -77,6 +77,9 @@ Module._load = function(request, parent, isMain) {
   if (request === './lib/requestMetrics') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestMetrics.ts'), parent, isMain)
   // The review-alert deferral scope is /api middleware too (it calls next() inside AsyncLocalStorage.run): same reason.
   if (request === './lib/requestDefer') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestDefer.ts'), parent, isMain)
+  // The /api cache-header and read-switch-header middleware call next() after the handler: the real modules, not a proxy.
+  if (request === './lib/apiCacheHygiene') return originalLoad.call(this, path.join(root, 'src', 'lib', 'apiCacheHygiene.ts'), parent, isMain)
+  if (request === './lib/readSwitches') return originalLoad.call(this, path.join(root, 'src', 'lib', 'readSwitches.ts'), parent, isMain)
   if (request === './lib/coreInvariantsGate') return { ensureCoreDataInvariantsForRequest: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }

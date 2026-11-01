@@ -14,7 +14,7 @@ function getEntries(ctx) {
     ['auth/me', '/api/auth/me'], ['auth/bootstrap', '/api/auth/bootstrap'], ['auth/verification-capabilities', '/api/auth/verification-capabilities'],
     ['auth/otp/status/:id', '/api/auth/otp/status/x'], ['auth/devices/sessions', '/api/auth/devices/sessions'], ['auth/devices/pending', '/api/auth/devices/pending'], ['auth/devices', '/api/auth/devices'],
     ['organizations/bootstrap', '/api/organizations/bootstrap'], ['organizations/search', '/api/organizations/search?q=budget'], ['organizations/current', '/api/organizations/current'],
-    ['system/bootstrap', '/api/system/bootstrap'], ['system/config', '/api/system/config'], ['runtime/version', '/api/runtime/version'], ['runtime/cron-health', '/api/runtime/cron-health'],
+    ['system/bootstrap', '/api/system/bootstrap'], ['system/config', '/api/system/config'], ['runtime/version', '/api/runtime/version'], ['runtime/cron-health', '/api/runtime/cron-health'], ['runtime/read-switches', '/api/runtime/read-switches'],
     ['runtime/catalog-integrity (catalog stock diagnostics)', '/api/runtime/catalog-integrity'], ['sync/owner', '/api/sync/owner'],
     // settings
     ['settings', '/api/settings'], ['settings/meta', '/api/settings/meta'], ['settings/payment-methods/unregistered', '/api/settings/payment-methods/unregistered'],

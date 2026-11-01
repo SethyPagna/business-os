@@ -45,6 +45,8 @@ export const AUDIT_RETENTION_KEPT_STOCK_ENTITIES = [
 export const AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES = ['role', 'roles'] as const
 export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
 export const AUDIT_RETENTION_KEPT_CASH_ENTITIES = ['shift_session'] as const
+// Who turned a read optimization on or off, and when: the record that explains a change in what the app reads.
+export const AUDIT_RETENTION_KEPT_SWITCH_ENTITIES = ['read_switch'] as const
 // Entities kept only for some actions. An account row is kept when it creates or changes the account (role,
 // permissions, active flag); its sign-ins, password resets and device approvals follow the retention setting.
 // A product row is kept when it creates the product or edits its price or cost.
@@ -99,6 +101,7 @@ const AUDIT_RETENTION_KEPT_FOREVER_SQL = `${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(
   ...AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES,
   ...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES,
   ...AUDIT_RETENTION_KEPT_CASH_ENTITIES,
+  ...AUDIT_RETENTION_KEPT_SWITCH_ENTITIES,
 ])})
 ${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
   `        OR (${AUDIT_ENTITY_KEY_SQL} = '${entity}' AND ${AUDIT_ACTION_SQL} IN (${sqlList(actions)}))`).join('\n')}
