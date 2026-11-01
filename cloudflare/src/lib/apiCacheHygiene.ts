@@ -23,7 +23,8 @@ function applyApiCacheHygiene(headers: Headers): void {
 }
 
 // Registered right after the metrics middleware, so this code after next() runs last for every /api/* response,
-// the app.onError and maintenance ones included. Setting before next() would be overwritten by the route.
+// the app.onError and maintenance ones included. Before next() it would miss every response a route builds itself
+// with new Response() or takes from fetch().
 export async function apiCacheHygiene(c: Context, next: Next): Promise<void> {
   await next()
   try {
