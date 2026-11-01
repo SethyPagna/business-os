@@ -1,0 +1,16 @@
+{
+ "units": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9d7dddc0ba11",
+   "SELECT * FROM units ORDER BY lower(name) ASC"
+  ],
+  [
+   "85009ef0486e",
+   "SELECT MIN(trim(p.unit)) AS value, MAX(CASE WHEN COALESCE(p.is_active, 1) = 1 THEN 1 ELSE 0 END) AS active FRO"
+  ]
+ ]
+}

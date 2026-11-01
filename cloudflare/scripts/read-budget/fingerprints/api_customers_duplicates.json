@@ -1,0 +1,16 @@
+{
+ "customers-duplicates": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3a5bdd80f4b6",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers ORDER BY id AS"
+  ],
+  [
+   "b56d705f0b06",
+   "SELECT cluster_type, cluster_value FROM contact_duplicate_dismissals WHERE contact_table = ?1"
+  ]
+ ]
+}

@@ -1,0 +1,12 @@
+{
+ "notes": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3a086d746868",
+   "SELECT * FROM user_notes WHERE user_id = ?1 ORDER BY pinned DESC, sort_order ASC, updated_at DESC, id DESC"
+  ]
+ ]
+}

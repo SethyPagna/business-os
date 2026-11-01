@@ -27,6 +27,7 @@
 -- Ids, dates and amounts only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 27
 SELECT
   r.id AS return_id, r.return_number, r.created_at AS return_created_at,
   COALESCE(r.money_precision_version, 0) AS return_money_version,

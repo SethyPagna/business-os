@@ -1,0 +1,16 @@
+{
+ "runtime-catalog-integrity-catalog-stock-diagnostics": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "5c29bddee9eb",
+   "SELECT id, name, brand, category, unit, description, supplier FROM products WHERE is_active = 1 ORDER BY id LI"
+  ],
+  [
+   "bd107859eba8",
+   "SELECT value FROM settings WHERE key = 'product_brand_options'"
+  ]
+ ]
+}

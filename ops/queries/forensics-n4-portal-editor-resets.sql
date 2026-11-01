@@ -12,6 +12,7 @@
 --   later_writes_of_key       audited saves of this key after this one
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 10
 WITH editor_defaults(setting_key, reset_value) AS (
   VALUES
     ('customer_portal_about_title', ''), ('customer_portal_about_content', ''),

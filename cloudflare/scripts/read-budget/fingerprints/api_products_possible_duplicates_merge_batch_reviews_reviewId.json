@@ -1,0 +1,12 @@
+{
+ "products-possible-duplicates-merge-batch-reviews-id": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "02358b4129fe",
+   "SELECT id,actor_id,request_id,request_digest,draft_digest,finalize_digest,manifest_digest,status, requested_ac"
+  ]
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "files": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "336766bb96f2",
+   "WITH product_refs AS ( SELECT image_path AS public_path, id AS product_id, name AS product_name FROM products "
+  ],
+  [
+   "9bbce4295c70",
+   "WITH product_refs AS ( SELECT image_path AS public_path, id AS product_id, name AS product_name FROM products "
+  ],
+  [
+   "700fa002e733",
+   "SELECT value FROM settings"
+  ],
+  [
+   "307cc33f83b3",
+   "SELECT COUNT(*) AS file_count, COALESCE(SUM(CASE WHEN byte_size > 0 THEN byte_size ELSE 0 END), 0) AS total_by"
+  ]
+ ]
+}

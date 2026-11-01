@@ -38,6 +38,7 @@
 --                                scratch database)
 -- ops:min-rows 0
 -- ops:max-rows 500
+-- ops:max-rows-read 184332
 WITH RECURSIVE seq AS (
   SELECT id, LAG(id) OVER (ORDER BY id) AS prev_id FROM inventory_movements
 ),

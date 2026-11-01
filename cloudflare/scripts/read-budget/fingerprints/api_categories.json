@@ -1,0 +1,16 @@
+{
+ "categories": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "49b0f78f4d8b",
+   "SELECT * FROM categories ORDER BY lower(name) ASC"
+  ],
+  [
+   "ff45c855b5e1",
+   "SELECT MIN(trim(p.category)) AS value, MAX(CASE WHEN COALESCE(p.is_active, 1) = 1 THEN 1 ELSE 0 END) AS active"
+  ]
+ ]
+}

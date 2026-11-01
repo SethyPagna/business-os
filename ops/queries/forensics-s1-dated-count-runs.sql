@@ -10,6 +10,7 @@
 --   is_rerun          1 when movements_deleted > 0 (the S1 signature)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 9
 SELECT
   id AS audit_id,
   COALESCE(strftime('%Y-%m-%d %H:%M:%S', created_at), created_at) AS run_at,

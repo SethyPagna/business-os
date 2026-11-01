@@ -1,0 +1,94 @@
+{
+ "w-transfer-bulk-5-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "485944539586",
+   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+  ],
+  [
+   "73cc5956f4a0",
+   "SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipts W"
+  ],
+  [
+   "99d544d9f96b",
+   "SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr FROM pr"
+  ],
+  [
+   "8ad7fdb79b38",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ?1 AND product_id IN (?2, ?3, ?4, ?5, ?6)"
+  ],
+  [
+   "dd399bbd5e78",
+   "SELECT id, name, role FROM branches WHERE id = ?1"
+  ],
+  [
+   "dd399bbd5e78",
+   "SELECT id, name, role FROM branches WHERE id = ?1"
+  ],
+  [
+   "e92f77fc884f",
+   "SELECT id, name, role, is_active FROM branches WHERE LOWER(TRIM(COALESCE(role, name))) IN ('shop', 'warehouse'"
+  ]
+ ],
+ "w-transfer-bulk-20-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "485944539586",
+   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+  ],
+  [
+   "73cc5956f4a0",
+   "SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipts W"
+  ],
+  [
+   "1b3ad890ae1b",
+   "SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr FROM pr"
+  ],
+  [
+   "1a54aae230dc",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ?1 AND product_id IN (?2, ?3, ?4, ?5, ?6, ?7, "
+  ],
+  [
+   "dd399bbd5e78",
+   "SELECT id, name, role FROM branches WHERE id = ?1"
+  ],
+  [
+   "dd399bbd5e78",
+   "SELECT id, name, role FROM branches WHERE id = ?1"
+  ],
+  [
+   "e92f77fc884f",
+   "SELECT id, name, role, is_active FROM branches WHERE LOWER(TRIM(COALESCE(role, name))) IN ('shop', 'warehouse'"
+  ]
+ ]
+}

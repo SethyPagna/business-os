@@ -21,6 +21,7 @@
 -- Ids, shapes, lengths and dates only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:max-rows-read 19038
 WITH fields AS MATERIALIZED (
   SELECT id, is_active, discount_enabled, updated_at, 'discount_starts_at' AS field, trim(discount_starts_at) AS v
   FROM products WHERE COALESCE(trim(discount_starts_at), '') <> ''

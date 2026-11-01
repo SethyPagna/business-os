@@ -1,0 +1,52 @@
+{
+ "sales-id-records-sale-detail-records": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "aac149ca167d",
+   "SELECT id, receipt_number, sale_status, status_before_return, status_before_cancel, cashier_name, total_usd, p"
+  ],
+  [
+   "8b330d805112",
+   "SELECT id,sale_id,source_kind,source_id,generation,kind,via,subject, actor_username,occurred_at,changes_json F"
+  ],
+  [
+   "ec5dab155a9c",
+   "SELECT id, kind, group_id, product_name, quantity_before, quantity_after, amount_before_usd, amount_after_usd,"
+  ],
+  [
+   "2f1c84b6436d",
+   "SELECT id, action, details, old_value, new_value, user_name, created_at FROM audit_logs WHERE entity = 'sale' "
+  ],
+  [
+   "07b6729180f8",
+   "SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.history_id, o.generation, h.created_at AS creat"
+  ],
+  [
+   "67f3db54b118",
+   "SELECT o.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at FROM sale_bulk_members m JO"
+  ],
+  [
+   "a8a2b959ca6a",
+   "SELECT r.id, r.mutation_kind, r.request_json, r.before_json, r.after_json, r.generation, r.created_at, h.creat"
+  ],
+  [
+   "11d46f12cbb5",
+   "SELECT r.id AS operation_id, a.id AS audit_id, a.action, a.user_name, a.created_at FROM sale_mutation_receipts"
+  ],
+  [
+   "e480210ba6a6",
+   "SELECT r.id, r.return_number, r.return_scope, r.cashier_name, r.created_at FROM returns r WHERE r.sale_id = ? "
+  ],
+  [
+   "8955888cd39e",
+   "SELECT a.id AS audit_id, r.id AS return_id, a.action, a.details, a.user_name, a.created_at, r.return_number FR"
+  ],
+  [
+   "ae0d2585ce09",
+   "SELECT * FROM ( SELECT 'history:' || h.id AS audit_id, o.id AS operation_id, m.return_id, 'return_fields_bulk'"
+  ]
+ ]
+}

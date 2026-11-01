@@ -9,6 +9,7 @@
 -- Read-only. Ids, dates, quantities and USD amounts only.
 -- ops:min-rows 1
 -- ops:max-rows 500
+-- ops:max-rows-read 103
 SELECT 'ledger' AS section,
   CASE WHEN m.batch_id = 51291 THEN 'lot51291:' ELSE 'product' || m.product_id || ':' END || m.movement_type AS key,
   m.branch_id, COUNT(*) AS n,

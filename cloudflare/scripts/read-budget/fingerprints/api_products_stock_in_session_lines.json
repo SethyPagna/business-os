@@ -1,0 +1,24 @@
+{
+ "products-stock-in-session-lines": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "7884bf5d8758",
+   "SELECT s.id, s.session_line_id, s.product_id, s.product_name, s.barcode, s.sku, s.unit, s.brand, s.category, s"
+  ],
+  [
+   "a67ca6f9044d",
+   "SELECT m.batch_id, COUNT(DISTINCT CASE WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LI"
+  ],
+  [
+   "ff8fc8b99ed3",
+   "WITH target AS ( SELECT m.id, m.product_id, m.created_at FROM inventory_movements m WHERE m.id IN (SELECT CAST"
+  ],
+  [
+   "ba281145ff43",
+   "SELECT m.id AS origin_id, s.id, s.movement_type, s.quantity, s.batch_id, s.created_at, b.received_at FROM json"
+  ]
+ ]
+}

@@ -2,6 +2,7 @@
 -- a row counts only when its field-level diff has a topic KEY, and no value or details column is selected.
 -- ops:min-rows 0
 -- ops:max-rows 50
+-- ops:max-rows-read 9
 SELECT id, created_at, user_name,
   CASE WHEN details LIKE '%"source":"telegram"%' THEN 'telegram-settopic'
        WHEN user_name = 'ops:settings-upsert' THEN 'ops-task'

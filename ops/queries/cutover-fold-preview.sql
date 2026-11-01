@@ -43,6 +43,7 @@
 -- cloudflare/scripts/test-branch-cutover-fold-preview-query-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 245468
 WITH br AS MATERIALIZED (
   SELECT
     (SELECT MIN(id) FROM branches WHERE is_active = 1 AND COALESCE(canonical_key, lower(trim(name))) = 'shop') AS src,

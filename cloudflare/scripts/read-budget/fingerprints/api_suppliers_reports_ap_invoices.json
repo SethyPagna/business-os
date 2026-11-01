@@ -1,0 +1,20 @@
+{
+ "suppliers-reports-ap-invoices": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "1ccb6c5d18af",
+   "SELECT si.id, si.source_branch, si.legacy_id, si.supplier_id, si.supplier_name, si.invoice_no, si.invoice_date"
+  ],
+  [
+   "586b4018304c",
+   "SELECT COUNT(*) AS invoices, COALESCE(SUM(si.total_amount_usd), 0) AS total_usd, COALESCE(SUM(si.amount_paid_u"
+  ],
+  [
+   "b2f2f5dbdd0f",
+   "SELECT lower(trim(supplier_name)) AS key, MAX(trim(supplier_name)) AS name, COUNT(*) AS invoice_count FROM sup"
+  ]
+ ]
+}

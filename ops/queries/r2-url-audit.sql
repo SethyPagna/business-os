@@ -28,6 +28,7 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero products_move,product_images_move,promotions_move,users_move,file_assets_move,customer_share_submissions_move,import_job_files_move,import_job_image_matches_move,settings_move
+-- ops:max-rows-read 22872
 SELECT
   (SELECT COUNT(*) FROM products WHERE
       image_path LIKE '%r2.dev%' OR image_path LIKE '%r2.cloudflarestorage%'

@@ -1,0 +1,64 @@
+{
+ "w-login-cold": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "9dc4678d7a6d",
+   "INSERT INTO rate_limit_events (bucket, client_key, created_at) SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM ("
+  ],
+  [
+   "c3e07415ed45",
+   "SELECT failed_count, locked_until FROM login_lockouts WHERE username = ?"
+  ],
+  [
+   "ffc817a01eec",
+   "SELECT u.id, u.username, u.name, u.password, u.organization_id, u.role_id, u.permissions, u.is_active, u.otp_e"
+  ],
+  [
+   "1507bdd37b7e",
+   "SELECT COUNT(*) AS n FROM ( SELECT 1 FROM rate_limit_events WHERE bucket = ?1 AND client_key = ?2 AND created_"
+  ],
+  [
+   "1507bdd37b7e",
+   "SELECT COUNT(*) AS n FROM ( SELECT 1 FROM rate_limit_events WHERE bucket = ?1 AND client_key = ?2 AND created_"
+  ],
+  [
+   "1507bdd37b7e",
+   "SELECT COUNT(*) AS n FROM ( SELECT 1 FROM rate_limit_events WHERE bucket = ?1 AND client_key = ?2 AND created_"
+  ],
+  [
+   "c3e07415ed45",
+   "SELECT failed_count, locked_until FROM login_lockouts WHERE username = ?"
+  ],
+  [
+   "214e2307bf50",
+   "SELECT 1 AS legacy FROM users WHERE deleted_at IS NULL AND is_active = 1 AND substr(password, 1, 4) IN ('$2a$'"
+  ],
+  [
+   "d874066ced0f",
+   "DELETE FROM rate_limit_events WHERE id = ( SELECT id FROM rate_limit_events WHERE bucket = ?1 AND client_key ="
+  ],
+  [
+   "d969d3b92904",
+   "DELETE FROM login_lockouts WHERE username = ?"
+  ],
+  [
+   "d969d3b92904",
+   "DELETE FROM login_lockouts WHERE username = ?"
+  ],
+  [
+   "d51df7d2cf42",
+   "INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expire"
+  ],
+  [
+   "ac67568deeba",
+   "SELECT must_change_password AS flag FROM users WHERE id = ?"
+  ]
+ ]
+}

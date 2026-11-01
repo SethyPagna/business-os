@@ -1,0 +1,20 @@
+{
+ "branches-summary": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "91403a0dd406",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
+  ],
+  [
+   "e831736c188c",
+   "SELECT COUNT(*) AS count FROM branches WHERE is_active = 1"
+  ]
+ ]
+}

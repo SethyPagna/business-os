@@ -1,0 +1,16 @@
+{
+ "settings": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "4e4c9a6aa7be",
+   "B| SELECT key, value FROM settings"
+  ],
+  [
+   "2a295bf57313",
+   "B| SELECT MAX(updated_at) AS updated_at FROM settings WHERE lower(key) NOT IN ('cron_rotation_state', 'cron_he"
+  ]
+ ]
+}

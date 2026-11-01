@@ -44,6 +44,7 @@
 --                                  d: anything else (owner review)
 -- ops:min-rows 0
 -- ops:max-rows 3000
+-- ops:max-rows-read 36869
 WITH runs AS (
   SELECT id AS audit_id, COALESCE(strftime('%Y-%m-%d %H:%M:%S', created_at), created_at) AS at,
     COALESCE(CAST(json_extract(details, '$.movementsDeleted') AS INTEGER), 0) AS deleted

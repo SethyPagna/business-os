@@ -30,6 +30,7 @@
 -- LIMIT 201 against max-rows 200, so a longer list fails the check instead of truncating quietly.
 -- ops:min-rows 0
 -- ops:max-rows 200
+-- ops:max-rows-read 9139
 WITH d AS MATERIALIZED (
   SELECT products.id, products.cost_price_usd, products.purchase_price_usd, COALESCE(
       (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END

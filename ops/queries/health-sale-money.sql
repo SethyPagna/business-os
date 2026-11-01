@@ -32,6 +32,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 321138
 WITH li AS MATERIALIZED (
   SELECT sale_id, SUM(COALESCE(total_usd, 0)) AS lines_usd, COUNT(*) AS n FROM sale_items GROUP BY sale_id
 ),

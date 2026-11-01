@@ -36,6 +36,7 @@
 --   points_per_usd / points_basis / points_enabled   programme settings (not private)
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 27981
 SELECT
   (SELECT COUNT(DISTINCT r.customer_id) FROM returns r
     JOIN customers c ON c.id = r.customer_id

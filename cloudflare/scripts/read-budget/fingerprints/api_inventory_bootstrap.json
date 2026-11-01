@@ -1,0 +1,68 @@
+{
+ "inventory-bootstrap": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "6e70635dc602",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "580dc2c5bfe4",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "4ebcf6c03532",
+   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>0 "
+  ],
+  [
+   "24062535619b",
+   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<"
+  ],
+  [
+   "266d2eca9fad",
+   "SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count FROM products p WHERE (p.is_active = 1 OR (COALE"
+  ],
+  [
+   "77f42680ea21",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "414200600ffa",
+   "WITH requested_ids(product_id) AS ( SELECT DISTINCT CAST(value AS INTEGER) FROM json_each(?1) ), ledger AS ( S"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "91403a0dd406",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
+  ],
+  [
+   "16950ab19ab6",
+   "SELECT *, COALESCE(NULLIF(inventory_movements.branch_name, ''), (SELECT name FROM branches WHERE id = inventor"
+  ],
+  [
+   "c1df6b6f7c35",
+   "SELECT DISTINCT trim(brand) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>"
+  ],
+  [
+   "a936200c4549",
+   "SELECT DISTINCT trim(category) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0"
+  ],
+  [
+   "ffebd35ae2b4",
+   "SELECT * FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ]
+ ]
+}

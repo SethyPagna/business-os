@@ -1,0 +1,8 @@
+{
+ "organizations-search": [
+  [
+   "b97e0c3a2da0",
+   "SELECT id, name, slug, public_id, is_active, setup_enabled FROM organizations WHERE is_active = 1 AND (lower(t"
+  ]
+ ]
+}

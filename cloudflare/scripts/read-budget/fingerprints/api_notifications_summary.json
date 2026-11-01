@@ -1,0 +1,60 @@
+{
+ "notifications-summary-bell": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d755035fae32",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "f92c4adafc7d",
+   "SELECT id, receipt_number, total_usd FROM sales WHERE (sales.sale_status = 'awaiting_payment' OR (sales.sale_s"
+  ],
+  [
+   "0d487e4a6dce",
+   "SELECT id, receipt_number, total_usd FROM sales WHERE ((sales.delivery_pending = 1 AND COALESCE(sales.sale_sta"
+  ],
+  [
+   "eb806dfff9b2",
+   "SELECT id, customer_name, membership_number, platform FROM customer_share_submissions WHERE status = 'pending'"
+  ],
+  [
+   "bbb8498f2a15",
+   "SELECT id, type, status, warning_count, created_at, finished_at FROM import_jobs WHERE warning_count > 0 AND s"
+  ],
+  [
+   "bc1cb7fe10f3",
+   "SELECT id, user_id, user_name, details, created_at FROM audit_logs WHERE action = 'device_login_new_country' A"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "b8a0cd59d831",
+   "SELECT id, name, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry "
+  ],
+  [
+   "ba6c9bdbac80",
+   "SELECT id, name, stock_quantity, CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) "
+  ],
+  [
+   "ae4cfa1f4b39",
+   "SELECT pb.id, pb.credit_due_date, pb.supplier_name, pb.lot_code, pb.unit_cost_usd, p.name AS product_name, CAS"
+  ]
+ ]
+}

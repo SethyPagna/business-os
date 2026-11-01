@@ -1,0 +1,36 @@
+{
+ "inventory-checks-sessions-id": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "7e2e3b5e03a5",
+   "SELECT * FROM inventory_check_sessions WHERE id=?1 AND organization_id IS ?2"
+  ],
+  [
+   "783e3312f349",
+   "SELECT i.*,CASE WHEN p.id IS NOT NULL AND (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>0 OR EXISTS(SELEC"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "eb3f4882ce40",
+   "SELECT COUNT(*) AS total,SUM(state='unstarted') AS unstarted,SUM(state='done') AS done,SUM(state='issue') AS i"
+  ]
+ ]
+}

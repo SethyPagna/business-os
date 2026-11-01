@@ -3,6 +3,7 @@
 -- counts and timestamps only: no names, cash or notes.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 18229
 SELECT
   (SELECT COUNT(*) FROM shift_sessions
     WHERE closed_at IS NULL AND cancelled_at IS NULL

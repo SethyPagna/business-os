@@ -13,6 +13,7 @@
 --   product_id, branch_id, quantity, reference_id, batch_id, n, detail
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 184337
 WITH seq AS (
   SELECT id, LAG(id) OVER (ORDER BY id) AS prev_id FROM inventory_movements
 ),

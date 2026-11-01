@@ -12,6 +12,7 @@
 -- first_seen / last_seen are MIN / MAX(created_at) within the group. Every
 -- value reaches only the encrypted artifact.
 -- ops:min-rows 1
+-- ops:max-rows-read 73733
 WITH shaped AS (
   SELECT
     movement_type,

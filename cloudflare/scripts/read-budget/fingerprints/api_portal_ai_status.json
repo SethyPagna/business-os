@@ -1,0 +1,24 @@
+{
+ "portal-ai-status": [
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ],
+  [
+   "710869c2f44a",
+   "SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'"
+  ],
+  [
+   "b809a4452e06",
+   "SELECT id, name, provider, requests_per_minute FROM ai_provider_configs WHERE enabled = 1 AND provider_type = "
+  ],
+  [
+   "9a61869c1772",
+   "SELECT * FROM ai_provider_configs WHERE enabled = 1 AND provider_type = 'chat' ORDER BY priority ASC, updated_"
+  ]
+ ]
+}

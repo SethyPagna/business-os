@@ -12,6 +12,7 @@
 --   checked_at_utc           when this ran
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 17438
 SELECT
   (SELECT COUNT(*) FROM audit_logs WHERE action = 'sale_refused') AS refused_rows_total,
   (SELECT COUNT(*) FROM audit_logs WHERE action = 'sale_refused' AND created_at >= '2026-10-14 15:33:00') AS refused_rows_since_2e,

@@ -32,6 +32,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 164409
 WITH rt AS MATERIALIZED (
   SELECT id, sale_id, COALESCE(return_scope, 'customer') AS scope, COALESCE(NULLIF(status, ''), 'completed') AS st,
     COALESCE(money_precision_version, 0) AS mpv, COALESCE(total_refund_usd, 0) AS usd, COALESCE(total_refund_khr, 0) AS khr,

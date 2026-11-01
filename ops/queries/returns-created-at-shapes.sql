@@ -18,6 +18,7 @@
 -- Three compound arms (shapes, day change, unparseable): under D1's limit of 5.
 -- ops:min-rows 1
 -- ops:max-rows 40
+-- ops:max-rows-read 44
 WITH shaped AS (
   SELECT
     created_at,

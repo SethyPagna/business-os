@@ -16,6 +16,7 @@
 -- Ids, dates and quantities only.
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:refused-on-free
 WITH mv AS MATERIALIZED (
   SELECT COALESCE(product_id, -1) AS pid, COALESCE(branch_id, -1) AS bid,
     SUM(CASE WHEN movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',

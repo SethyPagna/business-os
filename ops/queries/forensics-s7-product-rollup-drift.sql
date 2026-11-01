@@ -9,6 +9,7 @@
 --   branch_rows, updated_at, last_integrity_repair_at (Branches -> Stock integrity -> Repair)
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:max-rows-read 56502
 SELECT
   p.id AS product_id, p.is_active, p.is_group,
   COALESCE(p.stock_quantity, 0) AS stock_quantity,

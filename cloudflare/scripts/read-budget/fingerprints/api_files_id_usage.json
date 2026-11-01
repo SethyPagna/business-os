@@ -1,0 +1,12 @@
+{
+ "files-id-usage": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "dea619d3a5f2",
+   "SELECT id, public_path FROM file_assets WHERE id = ?"
+  ]
+ ]
+}

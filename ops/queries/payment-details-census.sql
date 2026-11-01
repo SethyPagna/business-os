@@ -1,4 +1,5 @@
 -- payment-details-census: read-only counts of sales whose payment_details the v0 shift reader cannot use (6.0.974 E4).
+-- ops:max-rows-read 17435
 SELECT
   SUM(CASE WHEN payment_details = '' THEN 1 ELSE 0 END) AS empty_string,
   SUM(CASE WHEN payment_details IS NOT NULL AND payment_details <> '' AND TRIM(payment_details) = '' THEN 1 ELSE 0 END) AS whitespace_only,

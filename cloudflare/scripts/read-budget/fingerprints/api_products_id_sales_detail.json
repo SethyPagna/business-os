@@ -1,0 +1,12 @@
+{
+ "products-id-sales-detail": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "84e3cf8f0090",
+   "WITH requested_ids(product_id) AS (SELECT ?1) SELECT sold.product_id AS product_id, sold.grp AS grp, COUNT(DIS"
+  ]
+ ]
+}

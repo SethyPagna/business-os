@@ -34,6 +34,7 @@
 --   sep23_repair_applied    action_history rows of that repair
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 62265
 WITH imported AS MATERIALIZED (
   SELECT s.id, s.sale_status, COALESCE(s.stock_skipped, 0) AS stock_skipped, s.client_request_id AS k,
     COALESCE(s.money_precision_version, 0) AS mpv, s.creation_snapshot_json AS snap,

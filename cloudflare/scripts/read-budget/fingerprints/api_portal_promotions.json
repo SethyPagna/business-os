@@ -1,0 +1,20 @@
+{
+ "portal-promotions": [
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "8539db53700a",
+   "SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color, CASE WHE"
+  ],
+  [
+   "710869c2f44a",
+   "SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'"
+  ],
+  [
+   "1b3958f5464a",
+   "SELECT starts_at, ends_at FROM promotions WHERE is_active = 1"
+  ]
+ ]
+}

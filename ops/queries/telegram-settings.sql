@@ -2,6 +2,7 @@
 -- topics). Non-secret keys only: the bot token is never selected. Values stay
 -- in the encrypted file.
 -- ops:min-rows 0
+-- ops:max-rows-read 60
 SELECT key, value, updated_at FROM settings
 WHERE key IN (
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',

@@ -1,0 +1,514 @@
+{
+ "products-search-products-default-created-desc-50-branch-stock-images-batches-tagged-lots": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "20bc264a747f",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "42b59cc4a469",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "da931771c9cd",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "871253f74a1f",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "40eca645009a",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-text-serum": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "edf4710e74d8",
+   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+  ],
+  [
+   "afb8f50bbe0e",
+   "SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling_price_usd, p.sell"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "667e6479e642",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "ccee4c14d7b3",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "df590ccbdddd",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "5b253ffa9cb2",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "6c23830a00f7",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "0602d810fed7",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "43407a7e8c6f",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ],
+  [
+   "31767b974034",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-text-product-12": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "a1f6de8e1cfd",
+   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+  ],
+  [
+   "afb8f50bbe0e",
+   "SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling_price_usd, p.sell"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "918275c4fd95",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "83bd047cf1e4",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "6c9baf909cdc",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "682d8ad725fa",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-barcode": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "127fd129a597",
+   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+  ],
+  [
+   "011117132f73",
+   "SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling_price_usd, p.sell"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "4e0554057adc",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3) ORDER BY sort_order ASC, id"
+  ],
+  [
+   "ae1c3adc0883",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "1670c85597b6",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "77bbc2ccac2b",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-category-filter": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "59fbc3776749",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "dbc910feadcc",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "7fc3f09cba50",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "8e84d61d1458",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "ba609e44f349",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-brand-filter": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "c979e733c6ff",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "dbc910feadcc",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "7fc3f09cba50",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "8e84d61d1458",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "ba609e44f349",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-supplier-filter": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "57cda8d71fec",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "dbc910feadcc",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "7fc3f09cba50",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "8e84d61d1458",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "ba609e44f349",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-branch-1-low-stock": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "cecd3bf457e3",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "4e334263c9ff",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "77f42680ea21",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "99bc9bd47ada",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "b9c51bdd78c1",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-pos-page-name-asc-family-metadata-0": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "c15a48087480",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "9b9cb7044aa3",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "5bb8c2fa4a5d",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "334d88ac638e",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ]
+ ],
+ "products-search-pos-text": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "b3c4a9cfcd55",
+   "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
+  ],
+  [
+   "ea085b840321",
+   "SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling_price_usd, p.sell"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "19fad82b1ff5",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "fae2645cba80",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "f85be0d82056",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ]
+ ],
+ "products-search-promotions-discounted": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "75804d1e47a0",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ]
+ ],
+ "products-search-by-ids-after-write-refetch": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "5647dd1c9e5c",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "8a00fc2b157e",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "4e0554057adc",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3) ORDER BY sort_order ASC, id"
+  ],
+  [
+   "ae1c3adc0883",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "1670c85597b6",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ]
+ ]
+}

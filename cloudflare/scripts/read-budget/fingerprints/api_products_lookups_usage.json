@@ -1,0 +1,28 @@
+{
+ "products-lookups-usage": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d8b2f7b9f48f",
+   "SELECT id, name AS product_name, brand, category, unit FROM products WHERE is_active = 1"
+  ],
+  [
+   "b8558f27e342",
+   "SELECT id, name, color FROM categories ORDER BY name COLLATE NOCASE ASC"
+  ],
+  [
+   "41acd84ae13c",
+   "SELECT id, name, color FROM units ORDER BY name COLLATE NOCASE ASC"
+  ],
+  [
+   "bd107859eba8",
+   "SELECT value FROM settings WHERE key = 'product_brand_options'"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ]
+ ]
+}

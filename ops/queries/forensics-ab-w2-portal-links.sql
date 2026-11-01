@@ -13,6 +13,7 @@
 --             list items: field_not_text
 -- ops:min-rows 0
 -- ops:max-rows 500
+-- ops:max-rows-read 20
 WITH digits(d) AS (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)),
 positions(n) AS (SELECT a.d * 100 + b.d * 10 + c.d + 1 FROM digits a, digits b, digits c),
 list_link_fields(field) AS (VALUES ('mediaUrl'), ('linkUrl')),

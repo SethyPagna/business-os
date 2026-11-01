@@ -22,6 +22,7 @@
 -- Counts and rule ids only. Read-only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 25
 WITH r AS MATERIALIZED (
   SELECT id, is_active, COALESCE(min_quantity, 0) AS min_quantity, COALESCE(percent_off, 0) AS percent_off,
     CASE WHEN json_valid(product_ids) THEN json_array_length(product_ids) END AS id_count

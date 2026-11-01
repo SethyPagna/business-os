@@ -1,6 +1,7 @@
 -- ops:min-rows 0
 -- ops:max-rows 0
 -- Ledger flags are independent evidence, never additive inventory totals.
+-- ops:max-rows-read 16411
 SELECT p.id AS product_id,
   COALESCE(p.stock_quantity,0)<>0 AS cache_has_stock,
   EXISTS(SELECT 1 FROM branch_stock s WHERE s.product_id=p.id AND s.quantity<>0) AS branch_has_stock,

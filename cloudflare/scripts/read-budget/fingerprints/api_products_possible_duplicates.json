@@ -1,0 +1,24 @@
+{
+ "products-possible-duplicates-conflicts": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "df53ed04ef21",
+   "SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, COALESCE(SUM(bs.quant"
+  ],
+  [
+   "d189820e9395",
+   "SELECT cluster_type, cluster_value FROM product_duplicate_dismissals"
+  ]
+ ]
+}

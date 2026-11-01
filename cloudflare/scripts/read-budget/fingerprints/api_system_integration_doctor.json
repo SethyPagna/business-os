@@ -1,0 +1,32 @@
+{
+ "system-integration-doctor": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "bc7f4136d16d",
+   "SELECT 1 AS ok"
+  ],
+  [
+   "25a28ec06353",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "a7a34101a80a",
+   "SELECT used FROM quota_usage WHERE resource = ?1 AND window_key = ?2"
+  ],
+  [
+   "a7a34101a80a",
+   "SELECT used FROM quota_usage WHERE resource = ?1 AND window_key = ?2"
+  ],
+  [
+   "a7a34101a80a",
+   "SELECT used FROM quota_usage WHERE resource = ?1 AND window_key = ?2"
+  ],
+  [
+   "a7a34101a80a",
+   "SELECT used FROM quota_usage WHERE resource = ?1 AND window_key = ?2"
+  ]
+ ]
+}

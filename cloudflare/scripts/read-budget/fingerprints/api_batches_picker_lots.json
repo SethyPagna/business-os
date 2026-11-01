@@ -1,0 +1,16 @@
+{
+ "batches-picker-lots": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "595afbf1d1d8",
+   "SELECT pb.id AS id, pb.lot_code AS lot_code, pb.expiry_date AS expiry_date, pb.received_at AS received_at, pb."
+  ],
+  [
+   "acabce4e5b83",
+   "SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity FROM product_batches pb CROSS JOIN branch_batch_stock bbs ON"
+  ]
+ ]
+}

@@ -1,0 +1,12 @@
+{
+ "fees-labels": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "690b16cebb11",
+   "SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses FROM fees f WHERE f.label IS NOT "
+  ]
+ ]
+}

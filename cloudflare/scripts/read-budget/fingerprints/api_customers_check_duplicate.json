@@ -1,0 +1,20 @@
+{
+ "customers-check-duplicate": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "2e9aa0254a5d",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE (phone_n"
+  ],
+  [
+   "f9f6aa8e168a",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE lower(tr"
+  ],
+  [
+   "af968297c03b",
+   "SELECT id FROM customers WHERE COALESCE(is_anonymous, 0) = 1 AND id IN (?)"
+  ]
+ ]
+}

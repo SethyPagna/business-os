@@ -1,0 +1,12 @@
+{
+ "products-merge-duplicates-preview": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5df9886d3f2",
+   "SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.selling_price_khr, "
+  ]
+ ]
+}

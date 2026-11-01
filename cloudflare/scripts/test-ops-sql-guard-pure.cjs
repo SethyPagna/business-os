@@ -202,6 +202,27 @@ async function main() {
     rejects('-- ops:public-row-count yes\nSELECT 1', 'sql-unknown-directive')
   })
 
+  await check('read budget: every query file states -- ops:max-rows-read N or -- ops:refused-on-free, and a file without either is refused', () => {
+    const q = guard.guardQuery('-- ops:max-rows-read 1500\nSELECT 1')
+    assert.strictEqual(q.maxRowsRead, 1500)
+    assert.strictEqual(q.refusedOnFree, false)
+    assert.deepStrictEqual(q.rules, { minRows: 1, maxRows: null, expectZero: null })
+    const refused = guard.guardQuery('-- ops:refused-on-free\nSELECT 1')
+    assert.strictEqual(refused.refusedOnFree, true)
+    assert.strictEqual(refused.maxRowsRead, null)
+    assert.throws(() => guard.guardQuery('-- ops:max-rows-read 5\n-- ops:refused-on-free\nSELECT 1'), (e) => e.code === 'sql-bad-directive')
+    assert.deepStrictEqual(guard.guardSql('-- ops:max-rows-read 5\nSELECT 1'), { sql: 'SELECT 1', rules: { minRows: 1, maxRows: null, expectZero: null } })
+    rejects('-- ops:max-rows-read 5\n-- ops:max-rows-read 6\nSELECT 1', 'sql-duplicate-directive')
+    rejects('-- ops:max-rows-read many\nSELECT 1', 'sql-bad-directive')
+    rejects('-- ops:refused-on-free yes\nSELECT 1', 'sql-bad-directive')
+    assert.throws(() => guard.guardQuery('SELECT 1'), (e) => e.code === 'sql-missing-read-budget')
+    assert.throws(() => guard.guardQuery('-- ops:min-rows 1\nSELECT 1'), (e) => e.code === 'sql-missing-read-budget')
+    for (const name of guard.listQueries()) {
+      const loaded = guard.loadQuery(name)
+      assert.ok(loaded.refusedOnFree || loaded.maxRowsRead > 0, `${name}: no read budget`)
+    }
+  })
+
   await check('query names are validated before touching the filesystem', () => {
     for (const bad of ['', '../product-names', 'Product-Names', 'product-names.sql', 'a/b', 'a\\b', '-x', 'x'.repeat(65)]) {
       assert.throws(() => guard.loadQuery(bad), (e) => e.code === 'query-name-invalid', bad)
@@ -210,9 +231,11 @@ async function main() {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-guard-'))
     try {
       fs.writeFileSync(path.join(tmp, 'evil.sql'), 'SELECT 1; DELETE FROM products')
-      fs.writeFileSync(path.join(tmp, 'fine.sql'), 'SELECT 1')
+      fs.writeFileSync(path.join(tmp, 'fine.sql'), '-- ops:max-rows-read 10\nSELECT 1')
       assert.throws(() => guard.loadQuery('evil', tmp), (e) => e.code === 'sql-multiple-statements')
       assert.strictEqual(guard.loadQuery('fine', tmp).sql, 'SELECT 1')
+      fs.writeFileSync(path.join(tmp, 'unbudgeted.sql'), 'SELECT 1')
+      assert.throws(() => guard.loadQuery('unbudgeted', tmp), (e) => e.code === 'sql-missing-read-budget')
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true })
     }

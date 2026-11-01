@@ -1,0 +1,16 @@
+{
+ "settings-payment-methods-unregistered": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "cae9b627fff1",
+   "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''"
+  ],
+  [
+   "f04d4688f8f5",
+   "SELECT value FROM settings WHERE key = 'pos_payment_methods'"
+  ]
+ ]
+}

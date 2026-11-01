@@ -1,0 +1,20 @@
+{
+ "system-shared-general-customer-membership-repair-preview": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8ab2fc491e2d",
+   "SELECT 1 AS active FROM system_flags WHERE key='maintenance'"
+  ],
+  [
+   "9d8735c393aa",
+   "SELECT id,name,phone,membership_number,is_anonymous,updated_at FROM customers WHERE id=24969"
+  ],
+  [
+   "6f11ff2937d7",
+   "SELECT id,is_anonymous FROM customers WHERE id=22305"
+  ]
+ ]
+}

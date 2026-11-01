@@ -1,0 +1,2056 @@
+{
+ "sales-list-today": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "3cfa4241a8ef",
+   "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
+  ],
+  [
+   "cb97f6614745",
+   "SELECT si.*, CASE WHEN trim(COALESCE(CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END,''),char(9"
+  ],
+  [
+   "9159d359c519",
+   "SELECT s.id AS sale_id, (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id AND NOT ( sa.group_id"
+  ],
+  [
+   "fd0fe8effab1",
+   "SELECT id,sale_id,total_refund_usd,total_refund_khr,(CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN "
+  ]
+ ],
+ "sales-list-30d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "3cfa4241a8ef",
+   "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
+  ],
+  [
+   "cb97f6614745",
+   "SELECT si.*, CASE WHEN trim(COALESCE(CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END,''),char(9"
+  ],
+  [
+   "9159d359c519",
+   "SELECT s.id AS sale_id, (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id AND NOT ( sa.group_id"
+  ],
+  [
+   "fd0fe8effab1",
+   "SELECT id,sale_id,total_refund_usd,total_refund_khr,(CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN "
+  ]
+ ],
+ "sales-list-all-time": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "be3d747f51a3",
+   "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
+  ],
+  [
+   "cb97f6614745",
+   "SELECT si.*, CASE WHEN trim(COALESCE(CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END,''),char(9"
+  ],
+  [
+   "9159d359c519",
+   "SELECT s.id AS sale_id, (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id AND NOT ( sa.group_id"
+  ],
+  [
+   "fd0fe8effab1",
+   "SELECT id,sale_id,total_refund_usd,total_refund_khr,(CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN "
+  ]
+ ],
+ "sales-list-search-all-time": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "bc711be04e31",
+   "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
+  ],
+  [
+   "cb97f6614745",
+   "SELECT si.*, CASE WHEN trim(COALESCE(CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END,''),char(9"
+  ],
+  [
+   "9159d359c519",
+   "SELECT s.id AS sale_id, (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id AND NOT ( sa.group_id"
+  ],
+  [
+   "fd0fe8effab1",
+   "SELECT id,sale_id,total_refund_usd,total_refund_khr,(CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN "
+  ]
+ ],
+ "sales-list-receipt-search": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "0d24c9814d6f",
+   "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
+  ],
+  [
+   "ee0dbec0b308",
+   "SELECT si.*, CASE WHEN trim(COALESCE(CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END,''),char(9"
+  ],
+  [
+   "75ec70f62d85",
+   "SELECT s.id AS sale_id, (SELECT COUNT(*) FROM sale_amendments sa WHERE sa.sale_id = s.id AND NOT ( sa.group_id"
+  ],
+  [
+   "92c318eaee86",
+   "SELECT id,sale_id,total_refund_usd,total_refund_khr,(CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN "
+  ]
+ ],
+ "w-sale-1-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "65502cdb613c",
+   "SELECT id, name, role, is_active FROM branches WHERE id IN (?)"
+  ],
+  [
+   "f493b60efaad",
+   "SELECT * FROM products WHERE id IN (?)"
+  ],
+  [
+   "25d9cbcf337f",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (?)"
+  ],
+  [
+   "392e641f07bc",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "effd8ecefb2b",
+   "SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')"
+  ],
+  [
+   "29a42853b7cb",
+   "SELECT value FROM settings WHERE key = 'loyalty_points_enabled'"
+  ],
+  [
+   "870c5ff51112",
+   "SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101"
+  ],
+  [
+   "da9fbd8adb7b",
+   "SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1"
+  ],
+  [
+   "2f067b274c81",
+   "SELECT name FROM branches WHERE id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "bbdf05eedc17",
+   "B| SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(?1) expected LEFT JOIN products current ON current.id=json"
+  ],
+  [
+   "944c477964cb",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM sales WHERE receipt_number = ?1 ) THEN 1 ELSE json_extract('rec"
+  ],
+  [
+   "fd35bd1502a5",
+   "B| INSERT INTO sales ( receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name, cu"
+  ],
+  [
+   "aec545d192f0",
+   "B| SELECT CASE WHEN EXISTS ( SELECT 1 FROM sales WHERE client_request_id = ?1 AND client_request_id <> '' ) TH"
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "7dc7d0909696",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "31ff2fa01343",
+   "B| SELECT CASE WHEN COALESCE(( SELECT COUNT(*) FROM sale_items WHERE sale_id = ( SELECT id FROM sales WHERE cl"
+  ],
+  [
+   "b27718d4f4d9",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "ef92aa49e50e",
+   "SELECT id,receipt_number FROM sales WHERE client_request_id=?1 AND client_request_id<>'' LIMIT 1"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "f04d4688f8f5",
+   "SELECT value FROM settings WHERE key = 'pos_payment_methods'"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-3-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "65502cdb613c",
+   "SELECT id, name, role, is_active FROM branches WHERE id IN (?)"
+  ],
+  [
+   "595a2ab6baa9",
+   "SELECT * FROM products WHERE id IN (?,?,?)"
+  ],
+  [
+   "53e6e1e8626b",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (?,?,?)"
+  ],
+  [
+   "05c532f073d1",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "effd8ecefb2b",
+   "SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')"
+  ],
+  [
+   "29a42853b7cb",
+   "SELECT value FROM settings WHERE key = 'loyalty_points_enabled'"
+  ],
+  [
+   "870c5ff51112",
+   "SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101"
+  ],
+  [
+   "da9fbd8adb7b",
+   "SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1"
+  ],
+  [
+   "2f067b274c81",
+   "SELECT name FROM branches WHERE id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "bbdf05eedc17",
+   "B| SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(?1) expected LEFT JOIN products current ON current.id=json"
+  ],
+  [
+   "944c477964cb",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM sales WHERE receipt_number = ?1 ) THEN 1 ELSE json_extract('rec"
+  ],
+  [
+   "fd35bd1502a5",
+   "B| INSERT INTO sales ( receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name, cu"
+  ],
+  [
+   "aec545d192f0",
+   "B| SELECT CASE WHEN EXISTS ( SELECT 1 FROM sales WHERE client_request_id = ?1 AND client_request_id <> '' ) TH"
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "7dc7d0909696",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "31ff2fa01343",
+   "B| SELECT CASE WHEN COALESCE(( SELECT COUNT(*) FROM sale_items WHERE sale_id = ( SELECT id FROM sales WHERE cl"
+  ],
+  [
+   "b27718d4f4d9",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "ef92aa49e50e",
+   "SELECT id,receipt_number FROM sales WHERE client_request_id=?1 AND client_request_id<>'' LIMIT 1"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "f04d4688f8f5",
+   "SELECT value FROM settings WHERE key = 'pos_payment_methods'"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-10-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "65502cdb613c",
+   "SELECT id, name, role, is_active FROM branches WHERE id IN (?)"
+  ],
+  [
+   "6da3bce22036",
+   "SELECT * FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "04c7ca6328a5",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "b40d29a99238",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "effd8ecefb2b",
+   "SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')"
+  ],
+  [
+   "29a42853b7cb",
+   "SELECT value FROM settings WHERE key = 'loyalty_points_enabled'"
+  ],
+  [
+   "870c5ff51112",
+   "SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101"
+  ],
+  [
+   "da9fbd8adb7b",
+   "SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1"
+  ],
+  [
+   "2f067b274c81",
+   "SELECT name FROM branches WHERE id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "bbdf05eedc17",
+   "B| SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(?1) expected LEFT JOIN products current ON current.id=json"
+  ],
+  [
+   "944c477964cb",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM sales WHERE receipt_number = ?1 ) THEN 1 ELSE json_extract('rec"
+  ],
+  [
+   "fd35bd1502a5",
+   "B| INSERT INTO sales ( receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name, cu"
+  ],
+  [
+   "aec545d192f0",
+   "B| SELECT CASE WHEN EXISTS ( SELECT 1 FROM sales WHERE client_request_id = ?1 AND client_request_id <> '' ) TH"
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "7dc7d0909696",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "31ff2fa01343",
+   "B| SELECT CASE WHEN COALESCE(( SELECT COUNT(*) FROM sale_items WHERE sale_id = ( SELECT id FROM sales WHERE cl"
+  ],
+  [
+   "b27718d4f4d9",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "ef92aa49e50e",
+   "SELECT id,receipt_number FROM sales WHERE client_request_id=?1 AND client_request_id<>'' LIMIT 1"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "f04d4688f8f5",
+   "SELECT value FROM settings WHERE key = 'pos_payment_methods'"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-30-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "65502cdb613c",
+   "SELECT id, name, role, is_active FROM branches WHERE id IN (?)"
+  ],
+  [
+   "2e75b47f8f85",
+   "SELECT * FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "6093994c1616",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?"
+  ],
+  [
+   "961a4a5c7a0b",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "effd8ecefb2b",
+   "SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')"
+  ],
+  [
+   "29a42853b7cb",
+   "SELECT value FROM settings WHERE key = 'loyalty_points_enabled'"
+  ],
+  [
+   "870c5ff51112",
+   "SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101"
+  ],
+  [
+   "da9fbd8adb7b",
+   "SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1"
+  ],
+  [
+   "2f067b274c81",
+   "SELECT name FROM branches WHERE id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "bbdf05eedc17",
+   "B| SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(?1) expected LEFT JOIN products current ON current.id=json"
+  ],
+  [
+   "944c477964cb",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM sales WHERE receipt_number = ?1 ) THEN 1 ELSE json_extract('rec"
+  ],
+  [
+   "fd35bd1502a5",
+   "B| INSERT INTO sales ( receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name, cu"
+  ],
+  [
+   "aec545d192f0",
+   "B| SELECT CASE WHEN EXISTS ( SELECT 1 FROM sales WHERE client_request_id = ?1 AND client_request_id <> '' ) TH"
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "7dc7d0909696",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "31ff2fa01343",
+   "B| SELECT CASE WHEN COALESCE(( SELECT COUNT(*) FROM sale_items WHERE sale_id = ( SELECT id FROM sales WHERE cl"
+  ],
+  [
+   "b27718d4f4d9",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "ef92aa49e50e",
+   "SELECT id,receipt_number FROM sales WHERE client_request_id=?1 AND client_request_id<>'' LIMIT 1"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "f04d4688f8f5",
+   "SELECT value FROM settings WHERE key = 'pos_payment_methods'"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-86-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ]
+ ],
+ "w-sale-not-paid-3-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "b767a444e4f0",
+   "SELECT id, receipt_number, cashier_id, (SELECT COUNT(*) FROM sale_items WHERE sale_id = sales.id) AS item_coun"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "65502cdb613c",
+   "SELECT id, name, role, is_active FROM branches WHERE id IN (?)"
+  ],
+  [
+   "595a2ab6baa9",
+   "SELECT * FROM products WHERE id IN (?,?,?)"
+  ],
+  [
+   "53e6e1e8626b",
+   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (?,?,?)"
+  ],
+  [
+   "05c532f073d1",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "effd8ecefb2b",
+   "SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')"
+  ],
+  [
+   "29a42853b7cb",
+   "SELECT value FROM settings WHERE key = 'loyalty_points_enabled'"
+  ],
+  [
+   "870c5ff51112",
+   "SELECT * FROM promotion_rules WHERE is_active=1 ORDER BY id LIMIT 101"
+  ],
+  [
+   "da9fbd8adb7b",
+   "SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1"
+  ],
+  [
+   "2f067b274c81",
+   "SELECT name FROM branches WHERE id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "bbdf05eedc17",
+   "B| SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(?1) expected LEFT JOIN products current ON current.id=json"
+  ],
+  [
+   "944c477964cb",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM sales WHERE receipt_number = ?1 ) THEN 1 ELSE json_extract('rec"
+  ],
+  [
+   "fd35bd1502a5",
+   "B| INSERT INTO sales ( receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name, cu"
+  ],
+  [
+   "aec545d192f0",
+   "B| SELECT CASE WHEN EXISTS ( SELECT 1 FROM sales WHERE client_request_id = ?1 AND client_request_id <> '' ) TH"
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "df1455a93f36",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "43b98ffa48b4",
+   "B| WITH current_batch AS ( SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date FROM product_batches pb JOIN "
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "09fb74a1eb15",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "e7792fd734f7",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "7dc7d0909696",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "31ff2fa01343",
+   "B| SELECT CASE WHEN COALESCE(( SELECT COUNT(*) FROM sale_items WHERE sale_id = ( SELECT id FROM sales WHERE cl"
+  ],
+  [
+   "b27718d4f4d9",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "ef92aa49e50e",
+   "SELECT id,receipt_number FROM sales WHERE client_request_id=?1 AND client_request_id<>'' LIMIT 1"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "ba23ef460fc9",
+   "SELECT s.*,(SELECT json_group_array(json_object('id',i.id,'sale_id',i.sale_id,'product_id',i.product_id,'produ"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

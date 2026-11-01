@@ -1,0 +1,28 @@
+{
+ "products-id-cost-breakdown": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "385d1d2fb2f0",
+   "SELECT id,cost_review_key,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_us"
+  ],
+  [
+   "fa4c6871f865",
+   "SELECT cost_price_usd, cost_price_khr FROM products WHERE id = ?1"
+  ],
+  [
+   "c3d91bb1f259",
+   "SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, CASE WHEN trim(COA"
+  ],
+  [
+   "d9bd91ade30d",
+   "SELECT id, cost_usd, cost_khr, previous_cost_usd, user_name, created_at, baseline_batch_id FROM product_cost_e"
+  ],
+  [
+   "385d1d2fb2f0",
+   "SELECT id,cost_review_key,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_us"
+  ]
+ ]
+}
