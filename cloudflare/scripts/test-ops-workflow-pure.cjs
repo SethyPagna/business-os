@@ -241,7 +241,7 @@ function strings(node, at = [], out = []) {
 // ------------------------------------------------------ what ops.yml must be
 
 const CUTOVER_TOKEN_ENV = { BRANCH_CUTOVER_OPERATOR_TOKEN: '${{ secrets.BRANCH_CUTOVER_OPERATOR_TOKEN }}' }
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'branch-cutover', 'd1-physical-export']
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'branch-cutover', 'd1-physical-export', 'consistency']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 // The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale and
@@ -320,10 +320,16 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-d1-physical-export.mjs', {}, { stepTimeout: true }),
     { kind: 'upload', retention: '1' },
   ],
+  // One pack of guarded read-only queries per run; the pack is the only task-specific input. The step stops 30 minutes before the job.
+  consistency: [
+    ...PRELUDE,
+    scriptStep('node ops/scripts/ops-consistency.mjs', { OPS_PACK: '${{ inputs.pack }}' }, { stepTimeout: true }),
+    { kind: 'upload' },
+  ],
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-branch-cutover.mjs', 'ops/scripts/ops-d1-physical-export.mjs', 'ops/scripts/ops-consistency.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -337,6 +343,8 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-settings-upsert.mjs',
   'ops/scripts/ops-branch-cutover.mjs',
   'ops/scripts/branch-cutover-loop.mjs',
+  'ops/scripts/ops-consistency.mjs',
+  'ops/scripts/metrics/storage-alarm.mjs',
 ]
 const WORKER_SCRIPTS = ['ops/r2-copy-worker/src/index.mjs', 'ops/r2-copy-worker/src/core.mjs']
 const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url'])
@@ -450,6 +458,7 @@ async function main() {
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
   const secretNames = await load('ops', 'scripts', 'ops-secret-names.mjs')
   const cutover = await load('ops', 'scripts', 'ops-branch-cutover.mjs')
+  const consistency = await load('ops', 'scripts', 'ops-consistency.mjs')
 
   const WF_TEXT = read('.github', 'workflows', 'ops.yml')
   let WF = null
@@ -490,7 +499,7 @@ async function main() {
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'query', 'settings', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['actor_user_id', 'apply', 'approved_folds', 'confirm', 'cutover_mode', 'mode', 'operation_id', 'pack', 'query', 'settings', 'task'])
     assert.strictEqual(inputs.cutover_mode.type, 'choice')
     assert.deepStrictEqual(inputs.cutover_mode.options, cutover.MODES, 'the workflow offers exactly the modes the script runs, in runbook order')
     assert.strictEqual(inputs.cutover_mode.default, 'inspect', 'the default mode only reads')
@@ -505,6 +514,9 @@ async function main() {
     assert.strictEqual(inputs.mode.type, 'choice')
     assert.deepStrictEqual(inputs.mode.options, driver.MODES)
     assert.strictEqual(inputs.mode.default, 'copy')
+    assert.strictEqual(inputs.pack.type, 'choice')
+    assert.deepStrictEqual(inputs.pack.options, Object.keys(consistency.PACKS), 'the workflow offers exactly the packs the script runs')
+    assert.strictEqual(inputs.pack.default, 'recent', 'the default pack is the small one')
     assert.strictEqual(inputs.query.type, 'string')
     assert.strictEqual(inputs.settings.type, 'string')
     assert.strictEqual(inputs.settings.required, 'false')
@@ -688,7 +700,7 @@ async function main() {
   await check('ops.yml: nothing is interpolated into a shell script, and every expression is on the allowlist', () => {
     const allowed = new Set([
       '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}',
-      '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', '${{ inputs.approved_folds }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
+      '${{ inputs.pack }}', '${{ inputs.cutover_mode }}', '${{ inputs.operation_id }}', '${{ inputs.actor_user_id }}', '${{ inputs.approved_folds }}', CUTOVER_TOKEN_ENV.BRANCH_CUTOVER_OPERATOR_TOKEN,
       SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH,
     ])
     for (const [where, value] of strings(WF)) {
@@ -703,6 +715,7 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
     assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
     assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY'])
+    assert.deepStrictEqual(where('${{ inputs.pack }}'), ['jobs.consistency.steps.N.env.OPS_PACK'])
     assert.deepStrictEqual(where('${{ inputs.cutover_mode }}'), ['jobs.branch-cutover.steps.N.env.OPS_CUTOVER_MODE'])
     assert.deepStrictEqual(where('${{ inputs.operation_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_OPERATION_ID'])
     assert.deepStrictEqual(where('${{ inputs.actor_user_id }}'), ['jobs.branch-cutover.steps.N.env.OPS_ACTOR_USER_ID'])
@@ -730,6 +743,57 @@ async function main() {
       assert.ok(mode.includes(phrase), `the mode help must say: ${phrase}`)
     }
     assert.ok(/deleting it\n#\s+later is a manual owner step outside this workflow\./.test(WF_TEXT), 'ops.yml must say deleting the old bucket is a manual owner step')
+  })
+
+  await check('consistency-watch.yml: dispatch-only until R5 is ruled, the same read-only job as the consistency task, behind the production approval', () => {
+    const text = read('.github', 'workflows', 'consistency-watch.yml')
+    const wf = parseYaml(text)
+    assert.deepStrictEqual(Object.keys(wf).sort(), ['concurrency', 'jobs', 'name', 'on', 'permissions'])
+    assert.deepStrictEqual(Object.keys(wf.on), ['workflow_dispatch'], 'no trigger but the button is switched on')
+    assert.deepStrictEqual(Object.keys(wf.on.workflow_dispatch), ['inputs'])
+    assert.ok(!/^\s*schedule:/m.test(text), 'the schedule block stays commented out until the owner rules on R5; switching it on means changing this test with it')
+    assert.deepStrictEqual(text.match(/^\s*# {3}- cron: .*$/gm), ["  #   - cron: '40 22 * * *'", "  #   - cron: '0 23 * * 0'"], 'the two cron lines are 22:40 UTC daily (05:40 Cambodia) and 23:00 UTC Sundays')
+    assert.ok(!/continue-on-error/.test(text), 'no step or job may continue on error')
+    assert.deepStrictEqual(wf.permissions, { contents: 'read' })
+    assert.deepStrictEqual(wf.concurrency, WF.concurrency, 'the same production-deploy group as Deploy and Ops')
+    const inputs = wf.on.workflow_dispatch.inputs
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['confirm', 'pack'])
+    assert.deepStrictEqual(inputs.pack.options, Object.keys(consistency.PACKS))
+    assert.strictEqual(inputs.pack.default, 'recent')
+    assert.strictEqual(inputs.confirm.required, 'true')
+    assert.ok(!('default' in inputs.confirm), 'a default confirm word would confirm by itself')
+    assert.deepStrictEqual(Object.keys(wf.jobs), ['watch'])
+    const job = wf.jobs.watch
+    assert.deepStrictEqual(Object.keys(job).filter((k) => !JOB_KEYS.has(k)), [])
+    assert.ok(!('needs' in job) && !('if' in job), 'the job has no condition of its own: the environment approval is the gate')
+    assert.strictEqual(job.environment, 'production')
+    assert.deepStrictEqual(job.defaults, { run: { shell: 'pwsh' } })
+    const task = 'consistency-watch'
+    const confirm = job.steps[0]
+    assert.deepStrictEqual(Object.keys(confirm).sort(), ['env', 'if', 'name', 'run'])
+    assert.strictEqual(confirm.if, "github.event_name == 'workflow_dispatch'", 'only a button run has a confirm box')
+    assert.deepStrictEqual(confirm.env, { CONFIRM: '${{ inputs.confirm }}' })
+    assert.strictEqual(confirm.run, confirmScript(task))
+    const packExpression = "${{ inputs.pack || (github.event.schedule == '0 23 * * 0' && 'full' || 'recent') }}"
+    const specs = [
+      { kind: 'checkout' }, { kind: 'setup-node' }, { kind: 'npm-ci' },
+      scriptStep('node ops/scripts/ops-consistency.mjs', { OPS_PACK: packExpression }, { stepTimeout: true }),
+      { kind: 'upload' },
+    ]
+    assert.strictEqual(job.steps.length, specs.length + 1)
+    specs.forEach((spec, n) => checkStep(task, job, job.steps[n + 1], spec, `${task} step ${n + 2}`))
+    for (const step of job.steps.slice(1)) if ('if' in step) assert.strictEqual(step.if, AFTER_CHECKOUT)
+    for (const [n, line] of text.split('\n').entries()) {
+      if (/^\s*#/.test(line)) continue
+      if (/secrets/.test(line)) assert.ok(/^\s+(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID): \$\{\{ secrets\.\1 \}\}$/.test(line), `line ${n + 1}: secrets only as env, named after themselves`)
+      assert.ok(!/github\.token|GITHUB_TOKEN|add-mask|GITHUB_ENV|GITHUB_OUTPUT|toJSON/i.test(line), `line ${n + 1}: ${line.trim()}`)
+    }
+    const allowedExpressions = new Set(['${{ inputs.confirm }}', SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH, packExpression])
+    for (const [where, value] of strings(wf)) {
+      if (!value.includes('${{')) continue
+      assert.ok(!/\.run$/.test(where), `${where}: no expression inside a run script`)
+      assert.ok(allowedExpressions.has(value), `${where}: ${value} is not on the allowlist`)
+    }
   })
 
   await check('ops scripts: write only the encrypted report and the job summary', () => {
@@ -797,6 +861,8 @@ async function main() {
     assert.deepStrictEqual(tokens.sort(), [
       'ops/scripts/ops-branch-cutover.mjs: text',
       'ops/scripts/ops-common.mjs: value',
+      'ops/scripts/ops-consistency.mjs: codesText(result.errorCodes)',
+      'ops/scripts/ops-consistency.mjs: result.name',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
       'ops/scripts/ops-d1-physical-export.mjs: codesText(errorCodes)',
@@ -850,6 +916,7 @@ async function main() {
     assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /export function runWrangler\(args, /g), 1)
     assert.deepStrictEqual(calls.sort(), [
       "ops/scripts/ops-branch-cutover.mjs: ['d1', 'time-travel', 'info', DATABASE, '--json']",
+      'ops/scripts/ops-consistency.mjs: wranglerArgs(sql)',
       'ops/scripts/ops-d1-export.mjs: wranglerArgs(query.sql)',
       'ops/scripts/ops-d1-physical-export.mjs: wranglerArgs(canonical)',
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",

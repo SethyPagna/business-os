@@ -33,6 +33,7 @@ export const PUBLIC_WORDS = new Set([
   'present', 'absent', 'created', 'deleted', 'already-absent', 'still-present',
   'apac', 'eeur', 'weur', 'wnam', 'enam', 'oc', 'default',
   'secret', 'plain-text', 'other-type',
+  'OK', 'WATCH', 'ALARM', 'UNKNOWN', 'recent', 'full',
 ])
 
 const TOKEN = Symbol('public-token')

@@ -75,6 +75,22 @@
 #                 Not a point-in-time snapshot (D1 has none across statements):
 #                 run it with trading closed; tables that gained rows meanwhile
 #                 are listed in the manifest.
+#   consistency   one PACK of the fixed read-only health queries in ops/queries,
+#                 in a row, under ONE approval: pack recent = Tier A (the five
+#                 recent-*.sql: only what the last two business days touched, about
+#                 20 thousand rows read in all; run it right after every deploy and
+#                 after any Time Travel restore) or pack full = Tier B (the fourteen
+#                 health-*.sql, about 2 million rows read: start it when the shop is
+#                 closed, weekly and after a change to a stock or money writer, an
+#                 import or a repair). Each file is guarded and carries its own read
+#                 ceiling; a query that reads more than its ceiling fails. The run
+#                 also reads the database size from the responses and FAILS at
+#                 400 MB (ops/scripts/metrics/storage-alarm.mjs). Never repairs.
+#                 The public log carries query file names, PASS or FAIL, how many
+#                 alarm columns were not zero, the pack's read ceiling and the
+#                 storage level; every figure is only in the encrypted file.
+#                 consistency-watch.yml holds the same job for a schedule and is
+#                 dispatch-only until the owner rules on R5 (RELIABILITY-PLAN 10).
 #
 # THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and
 # artifacts. The log and summary carry counts, byte totals, pass/fail and
@@ -102,6 +118,7 @@ on:
           - settings-upsert
           - branch-cutover
           - d1-physical-export
+          - consistency
       mode:
         description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
         required: true
@@ -111,6 +128,14 @@ on:
           - copy
           - verify-only
           - topup
+      pack:
+        description: consistency only - recent (Tier A, only what the last two business days touched, about 20 thousand rows read) or full (Tier B, the whole health pack, about 2 million rows read; start it when the shop is closed)
+        required: true
+        default: recent
+        type: choice
+        options:
+          - recent
+          - full
       query:
         description: d1-export only - the name of a file in ops/queries, without .sql (for example migrations-applied)
         required: false
@@ -555,4 +580,61 @@ jobs:
           name: ops-d1-physical-export
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 1
+          if-no-files-found: ignore
+
+  consistency:
+    name: consistency
+    needs: gate
+    if: inputs.task == 'consistency'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'consistency', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type consistency in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      # One guarded, read-only query after the other. Logs only the file names, verdicts, the
+      # count of alarm columns that were not zero, the storage level and the encrypted file's size.
+      - name: Run the pack (read-only, encrypted on the runner)
+        timeout-minutes: 90
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_PACK: ${{ inputs.pack }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-consistency.mjs
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-consistency
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
           if-no-files-found: ignore
