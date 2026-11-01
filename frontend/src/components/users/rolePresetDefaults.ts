@@ -93,6 +93,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       'contacts:bulk': false,
       'contacts:financial_history': false,
       contacts_suppliers: false,
+      contacts_full_phone: false,
     },
   },
   {
@@ -132,6 +133,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       // Managers keep the Suppliers tab (Part 383 R2 hid it behind this
       // extra grant); the Employee preset deliberately does not get it.
       contacts_suppliers: true,
+      contacts_full_phone: false,
       library: true,
       audit_log: true,
       review: true,

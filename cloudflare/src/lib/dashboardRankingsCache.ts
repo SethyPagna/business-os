@@ -10,12 +10,16 @@
 //
 // FRESHNESS: the key folds in the versions every sale, return, customer and product writer already bumps (the same four
 // the Sales read cache uses), so a write makes the stored rows unreachable at once; the TTL is only the ceiling for a
-// writer that forgets to bump. The rows are actor-neutral: product names are the sale lines' own and the caller applies
+// writer that forgets to bump. The product rows are actor-neutral: product names are the sale lines' own and the caller applies
 // the current ones, and the route applies the cost projection after the read, as for every other cached read.
+// The customer rows carry phone numbers, so the key carries the full-phone grant and the rows stored for an account
+// without it are already masked (lib/phoneCache.ts).
 // A cache that is missing or fails is never a request fault: the list is computed.
 
 import type { Env } from '../index'
 import { getVersionsWithFallback } from './cache'
+import { projectPhones, type PhoneActor } from './phoneAccess'
+import { phoneCacheVariant } from './phoneCache'
 import type { DashboardCustomerRow, DashboardProductRow, DashboardRankKind, SalesFilters } from './salesAnalytics'
 
 export type RankingRow = DashboardCustomerRow | DashboardProductRow
@@ -28,6 +32,8 @@ const VERSION_NAMESPACES = ['sales', 'returns', 'customers', 'products'] as cons
 export type DashboardRankingsCacheContext = {
   // The request's own URL: the Cache API only stores keys on the zone serving the request.
   requestUrl: string
+  // The account asking; decides the phone variant of the key and of the stored rows. Absent = without the grant.
+  user?: PhoneActor
   waitUntil(promise: Promise<unknown>): void
   // Injected by tests; defaults to the Workers Cache API when present.
   cache?: Pick<Cache, 'match' | 'put'> | null
@@ -67,7 +73,7 @@ export async function openDashboardRankingsCache(
     const url = new URL('/__internal-cache/dashboard-ranking', ctx.requestUrl)
     const parts: Array<[string, unknown]> = [['schema', CACHE_SCHEMA], ['kind', kind], ['limit', DASHBOARD_RANKING_ROWS],
       ['startDate', filters.startDate], ['endDate', filters.endDate], ['createdFrom', filters.createdFrom], ['createdTo', filters.createdTo],
-      ['branchId', filters.branchId], ...VERSION_NAMESPACES.map((namespace, index): [string, unknown] => [`v_${namespace}`, versions[index]])]
+      ['branchId', filters.branchId], ['phone', phoneCacheVariant(ctx.user)], ...VERSION_NAMESPACES.map((namespace, index): [string, unknown] => [`v_${namespace}`, versions[index]])]
     for (const [name, value] of parts) url.searchParams.set(name, value == null ? '' : String(value))
     return new Request(url.toString(), { method: 'GET' })
   }
@@ -84,7 +90,7 @@ export async function openDashboardRankingsCache(
     },
     write(kind, rows) {
       try {
-        const response = new Response(JSON.stringify({ rows }), {
+        const response = new Response(JSON.stringify({ rows: projectPhones(rows, ctx.user) }), {
           headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${DASHBOARD_RANKING_CACHE_SECONDS}` },
         })
         ctx.waitUntil(cache.put(keyFor(kind), response).catch(() => {}))

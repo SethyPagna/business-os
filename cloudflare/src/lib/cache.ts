@@ -94,10 +94,14 @@ export async function cachedJsonResponse<T>(
   version: string,
   ttlSeconds: number,
   producer: () => Promise<T> | T,
+  // Part of the key when the body depends on who asks (lib/phoneCache.ts: the full-phone grant). A producer that
+  // passes one must also return a body that is already right for that variant.
+  variant?: string,
 ): Promise<T> {
   const cache = caches.default
   const cacheUrl = new URL(request.url)
   cacheUrl.searchParams.set('_v', version)
+  if (variant) cacheUrl.searchParams.set('_g', variant)
   const cacheKey = new Request(cacheUrl.toString(), request)
 
   const cached = await cache.match(cacheKey)

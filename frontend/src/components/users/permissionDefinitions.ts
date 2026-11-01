@@ -449,6 +449,10 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // fields=names read stays open) -- this key gates the contact
       // records themselves.
       { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high', shortTKey: 'suppliers', short: 'Suppliers' },
+      // Owner, 2 Nov 2026: a separate grant, off for every role except Administrator until it is given to a role or a
+      // person. Without it the Worker masks every phone (012 *** 678) on every channel (lib/phoneAccess.ts); Contacts
+      // Full, Sales Full and Settings Full do not imply it.
+      { key: 'contacts_full_phone', tKey: 'perm_contacts_full_phone', label: 'See full phone numbers', sensitivity: 'high', shortTKey: 'perm_short_full_phone', short: 'Full phones', hintTKey: 'perm_hint_full_phone', hint: 'Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works.' },
     ],
   },
   // Users & roles management is DELIBERATELY admin-only (Part 557 slice 3):

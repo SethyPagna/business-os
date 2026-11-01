@@ -14,14 +14,21 @@ const root = path.resolve(__dirname, '..', '..')
 const sha256 = (text) => createHash('sha256').update(text).digest('hex')
 
 // `transformEntry(source)` rewrites src/index.ts in the in-memory bundle only (a test-only route, say); src/ is untouched.
-async function bundleWorker(transformEntry) {
+// `transformSources(file, source)` (path relative to src/, source text) may rewrite any other source file the same way, for a mutant.
+async function bundleWorker(transformEntry, transformSources) {
   const { build } = require('esbuild')
   const entry = path.join(root, 'src', 'index.ts')
-  const plugins = transformEntry ? [{
-    name: 'transform-entry',
-    setup: (b) => b.onLoad({ filter: /src[\\/]index\.ts$/ }, (args) => (
-      args.path === entry ? { contents: transformEntry(fs.readFileSync(args.path, 'utf8')), loader: 'ts', resolveDir: path.dirname(args.path) } : undefined
-    )),
+  const srcDir = path.join(root, 'src') + path.sep
+  const plugins = (transformEntry || transformSources) ? [{
+    name: 'transform-sources',
+    setup: (b) => b.onLoad({ filter: /src[\\/].*\.ts$/ }, (args) => {
+      if (!args.path.startsWith(srcDir)) return undefined
+      const original = fs.readFileSync(args.path, 'utf8')
+      let source = original
+      if (transformEntry && args.path === entry) source = transformEntry(source)
+      if (transformSources) source = transformSources(path.relative(srcDir, args.path).split(path.sep).join('/'), source) ?? source
+      return source === original ? undefined : { contents: source, loader: 'ts', resolveDir: path.dirname(args.path) }
+    }),
   }] : []
   const result = await build({
     entryPoints: [entry], plugins,
@@ -49,10 +56,10 @@ async function migrate(db) {
   }
 }
 
-async function bootWorld({ adminPassword, transformEntry }) {
+async function bootWorld({ adminPassword, transformEntry, transformSources }) {
   assert.ok(adminPassword, 'adminPassword seeds the built-in admin account')
   const { Miniflare, Log, LogLevel } = require('miniflare')
-  const script = await bundleWorker(transformEntry)
+  const script = await bundleWorker(transformEntry, transformSources)
   console.log('world: Worker bundled')
   const mf = new Miniflare({
     modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat', 'no_handle_cross_request_promise_resolution'],

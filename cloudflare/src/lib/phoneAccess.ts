@@ -1,0 +1,157 @@
+// Who sees a full phone number, and the one projection that hides it from everybody else (owner ruling 2 Nov 2026,
+// round 1 Q3; builds on the 14 Oct ruling "full phone number is admin-only").
+//
+// `contacts_full_phone` is a separate, explicit grant (owner, 21 Oct: extras are separate permissions and Full means
+// main access only). It is off for every non-admin role until an administrator grants it to a role or a person; an
+// administrator-control account holds it implicitly. Nothing else implies it: Contacts Full, Sales Full and Settings
+// Full do not.
+//
+// The projection is a rule on the OUTGOING value, not a per-screen edit. Every JSON body leaves the Worker through
+// c.json (lib/phoneMaskMiddleware.ts wraps it for the whole /api surface), so a route added tomorrow inherits the
+// mask without knowing about it. The rule names what a phone looks like, not where it happens to be today:
+//   - a string under any key that names a phone (phone, customer_phone, driver_phone, phone_key, matchedPhone, ...);
+//   - a phone inside serialized JSON text at any depth: the Contact Options kept in an address field, audit details,
+//     undo payloads, snapshots, import rows;
+//   - a name field that is itself a number (a contact saved under its phone);
+//   - the search helper text the sale and return rows carry (search_normalized holds the customer's digits).
+// Business phone numbers (the shop's own line on a branch, in Settings and on the storefront) are not personal data
+// and keep showing. This is the second wall: a shared server cache that holds a phone-bearing body is keyed on the grant and
+// stores the masked variant for everyone else (lib/phoneCache.ts), so neither layer depends on the other.
+import { hasPermission, type PermissionUser } from './permissions'
+import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
+
+export const FULL_PHONE_PERMISSION = 'contacts_full_phone'
+
+export type PhoneActor = (NonNullable<PermissionUser> & { id?: number | string | null }) | null | undefined
+
+export function canSeeFullPhones(user: PhoneActor): boolean {
+  return !!user && hasPermission(user, 'contacts_full_phone')
+}
+
+const MAX_DEPTH = 48
+const MAX_ENVELOPE_CHARS = 2_000_000
+
+// The shop's own numbers. Matched by key because they sit in flat settings maps.
+const BUSINESS_PHONE_KEYS = new Set(['business_phone', 'portal_legal_identity_phone', 'web_editor_phone'])
+const BUSINESS_PHONE_PREFIXES = ['customer_portal_']
+
+// Keys whose string is a person or a label. A whole value that is a number there is a phone (a contact saved under its number).
+const NAME_KEY = /(^|_)(name|label|title|customer|supplier|contact|driver|recipient|buyer|party|payer|payee|holder|display|note|notes|memo|description|summary)$/
+// Keys that hold serialized JSON (audit details, undo payloads, snapshots). Always decoded, not only when the word phone appears.
+const ENVELOPE_KEY = /(^|_)(details?|old_value|new_value|payload|snapshot|undo_payload|redo_payload|before|after)$/
+
+const keyClass = new Map<string, number>()
+const PHONE = 1
+const NAME = 2
+const SEARCH_TEXT = 4
+const ENVELOPE = 8
+const BUSINESS = 16
+
+function classify(key: string): number {
+  const hit = keyClass.get(key)
+  if (hit !== undefined) return hit
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+  let kind = 0
+  if (/(^|_)(phone|phones|mobile|telephone)(_|$)/.test(normalized)) kind |= PHONE
+  if (NAME_KEY.test(normalized)) kind |= NAME
+  if (ENVELOPE_KEY.test(normalized) || normalized.endsWith('_json')) kind |= ENVELOPE
+  if (/(^|_)(search|searchable|normalized)(_|$)/.test(normalized)) kind |= SEARCH_TEXT
+  if (BUSINESS_PHONE_KEYS.has(normalized) || BUSINESS_PHONE_PREFIXES.some((prefix) => normalized.startsWith(prefix))) kind |= BUSINESS
+  if (keyClass.size < 4096) keyClass.set(key, kind)
+  return kind
+}
+
+/** The branch rows carry the shop's own line: location + manager mark the row (migrations/0001_init.sql). */
+function isBranchRow(node: Record<string, unknown>): boolean {
+  return Object.hasOwn(node, 'manager') && Object.hasOwn(node, 'location') && !Object.hasOwn(node, 'customer_id')
+}
+
+function maskValue(value: unknown): unknown {
+  if (typeof value === 'string') return maskPhone(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return maskPhone(String(Math.trunc(value)))
+  return value
+}
+
+/** Serialized JSON text, decoded, projected and written back only if something changed (formatting untouched otherwise). */
+function projectJsonText(text: string, depth: number, actorId: string | null): string {
+  try {
+    const parsed = JSON.parse(text)
+    const projected = walk(parsed, depth + 1, actorId)
+    return projected === parsed ? text : JSON.stringify(projected)
+  } catch {
+    return maskPhonesInText(text)
+  }
+}
+
+/** Contact Options JSON: [{ label, name, phone, email, address }]. Anything else is returned untouched. */
+export function maskContactOptionsText(raw: string): string {
+  const text = raw.trim()
+  if (!text.startsWith('[') && !text.startsWith('{')) return raw
+  if (!/phone/i.test(text)) return raw
+  return projectJsonText(text, 0, null)
+}
+
+function projectString(text: string, kind: number, depth: number, actorId: string | null): string {
+  if (kind & PHONE) return maskPhone(text) as string
+  if (kind & SEARCH_TEXT) return maskPhonesInText(text)
+  if ((kind & NAME) && isPhoneShaped(text)) return maskPhone(text) as string
+  if (text.length > 2 && text.length <= MAX_ENVELOPE_CHARS) {
+    const first = text.charCodeAt(0)
+    if (first === 0x7b || first === 0x5b || first === 0x20 || first === 0x0a) {
+      const trimmed = text.trim()
+      if ((trimmed.startsWith('[') || trimmed.startsWith('{')) && ((kind & ENVELOPE) !== 0 || /phone/i.test(trimmed))) { const out = projectJsonText(trimmed, depth, actorId); return out === trimmed ? text : out }
+    }
+  }
+  return text
+}
+
+function walk(node: unknown, depth: number, actorId: string | null): unknown {
+  if (node === null || typeof node !== 'object') {
+    return typeof node === 'string' ? projectString(node, 0, depth, actorId) : node
+  }
+  if (depth > MAX_DEPTH) return null
+  if (Array.isArray(node)) {
+    let out: unknown[] | null = null
+    for (let i = 0; i < node.length; i++) {
+      const next = walk(node[i], depth + 1, actorId)
+      if (next !== node[i] && out === null) out = node.slice(0, i)
+      if (out !== null) out.push(next)
+    }
+    return out ?? node
+  }
+  const source = node as Record<string, unknown>
+  const branch = isBranchRow(source)
+  const own = actorId !== null && Object.hasOwn(source, 'username') && source.id != null && String(source.id) === actorId
+  let out: Record<string, unknown> | null = null
+  for (const key in source) {
+    if (!Object.hasOwn(source, key)) continue
+    const value = source[key]
+    let next: unknown = value
+    const kind = classify(key)
+    const exempt = (kind & BUSINESS) !== 0 || (branch && (kind & PHONE) !== 0) || (own && key === 'phone')
+    if (typeof value === 'string') {
+      if (!exempt) {
+        if (kind & (PHONE | NAME | SEARCH_TEXT | ENVELOPE)) next = projectString(value, kind, depth, actorId)
+        else if (value.length > 2) next = projectString(value, 0, depth, actorId)
+      }
+    } else if (value !== null && typeof value === 'object') {
+      next = exempt ? value : walk(value, depth + 1, actorId)
+      if ((kind & PHONE) && !exempt && Array.isArray(value)) next = (next as unknown[]).map(maskValue)
+    } else if (typeof value === 'number' && !exempt && key === 'phone') {
+      next = maskValue(value)
+    }
+    if (next !== value && out === null) out = { ...source }
+    if (out !== null) out[key] = next
+  }
+  return out ?? node
+}
+
+/**
+ * The value as `user` may see it. A holder of the grant gets the very same object back; everybody else gets a copy in
+ * which every phone is masked (the input is never modified: caches and server-side callers keep the full value).
+ */
+export function projectPhones<T>(value: T, user: PhoneActor): T {
+  if (canSeeFullPhones(user)) return value
+  const id = user && user.id != null ? String(user.id) : null
+  return walk(value, 0, id) as T
+}

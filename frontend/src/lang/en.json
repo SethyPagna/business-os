@@ -7885,5 +7885,8 @@
   "inventory_check_scan_not_in_session": "Not in this session.",
   "perm_ai_providers": "AI provider keys",
   "perm_short_ai_providers": "AI keys",
-  "sale_moved_to_not_paid": "The total is now above what was paid, so this sale is Not Paid for the difference."
+  "sale_moved_to_not_paid": "The total is now above what was paid, so this sale is Not Paid for the difference.",
+  "perm_contacts_full_phone": "See full phone numbers",
+  "perm_short_full_phone": "Full phones",
+  "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works."
 }

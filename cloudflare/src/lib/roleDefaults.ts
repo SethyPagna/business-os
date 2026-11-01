@@ -45,6 +45,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     fees: true,
     contacts: true,
     contacts_suppliers: true,
+    // Owner, 2 Nov 2026: seeing a full phone number is its own grant, off for every role but Administrator.
+    contacts_full_phone: false,
     library: true,
     audit_log: true,
     review: true,
@@ -119,5 +121,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     'contacts:bulk': false,
     'contacts:financial_history': false,
     contacts_suppliers: false,
+    contacts_full_phone: false,
   },
 }

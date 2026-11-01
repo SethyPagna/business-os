@@ -89,6 +89,7 @@ import { createMembershipNumberAllocator, membershipGlob } from './membershipNum
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
+import { MASKED_PHONE_MESSAGE, rowHasMaskedPhone } from './phoneWriteGuard'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
@@ -2609,6 +2610,11 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   const results: ImportRowResult[] = []
   for (const row of rows) {
     const name = str(row.name)
+    // A file exported while the number was hidden (012 *** 678) must not overwrite the real one.
+    if (rowHasMaskedPhone(row)) {
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: name || null, existingId: null, message: MASKED_PHONE_MESSAGE, changes: {}, data: row })
+      continue
+    }
     const contactState = buildImportedContactState(row, contactMode)
     const phone = formatPhoneP8(contactState.primary.phone || str(row.phone))
     const address = formatContactOptionPhones(contactState.serialized || str(row.address) || null, contactMode) as string | null
@@ -4148,6 +4154,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
     // shared name), name only as a fallback; an ambiguous name (>1 customer
     // shares it, see the `null` case above) intentionally resolves to no
     // match rather than guessing -- same as leaving it unmatched today.
+    if (rowHasMaskedPhone(first)) {
+      results.push({ rowNumber: first._rowNumber, action: 'error', identifier, existingId: null, message: MASKED_PHONE_MESSAGE, changes: {}, data: first })
+      continue
+    }
     const rowCustomerPhoneRaw = str(first.customer_phone).trim()
     const rowCustomerPhoneKey = canonicalizePhone(rowCustomerPhoneRaw)
     const rowCustomerNameKey = lower(first.customer_name)

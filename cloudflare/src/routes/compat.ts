@@ -451,9 +451,10 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
+function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void }; get(key: 'user'): unknown }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
+    user: c.get('user') as DashboardRankingsCacheContext['user'],
     waitUntil(promise) {
       try { c.executionCtx.waitUntil(promise) } catch { void promise.catch(() => {}) }
     },

@@ -28,6 +28,8 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cachedPhoneJson } from '../lib/phoneCache'
+import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
@@ -733,9 +735,9 @@ app.post('/', async (c) => {
     `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
   ).all<{ key: string; value: string }>())
   const customerRead = body.customer_id
-    ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_id]))
+    ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous, phone, address FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number; phone: string | null; address: string | null }>([body.customer_id]))
     : body.customer_membership_number
-      ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([body.customer_membership_number]))
+      ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous, phone, address FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) AND COALESCE(is_anonymous,0)=0').get<{ id: number; name: string | null; membership_number: string | null; phone: string | null; address: string | null; is_anonymous: number }>([body.customer_membership_number]))
       : null
   const loyaltyEnabledRowRead = readStarted(db.prepare(
     `SELECT value FROM settings WHERE key = 'loyalty_points_enabled'`,
@@ -950,7 +952,7 @@ app.post('/', async (c) => {
   const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate)
     : Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
   const changeExchangeRateSetting = rateSettings.change_exchange_rate
-  let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
+  let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number; phone?: string | null; address?: string | null } | null = null
   if (customerRead) customer = await customerRead || null
   const customerStateGuard = customer ? {
     id: customer.id,
@@ -962,7 +964,17 @@ app.post('/', async (c) => {
   const anonymousCustomerSelected = isAnonymousCustomer(customer)
   if (anonymousCustomerSelected) customer = null
   const saleCustomerName = anonymousCustomerSelected ? null : body.customer_name || customer?.name || null
-  const saleCustomerPhone = anonymousCustomerSelected ? null : body.customer_phone || null
+  // The till filled this from a customer picked with the number hidden (012 *** 678) when the cashier lacks the full-phone
+  // grant: the sale keeps the number that customer holds, never the mask. A number typed at the till passes as typed.
+  let saleCustomerPhone: string | null = null
+  if (!anonymousCustomerSelected) {
+    try {
+      saleCustomerPhone = resolvePhoneInput(body.customer_phone || null, storedPhonesOf(customer))
+    } catch (error) {
+      if (isMaskedPhoneInputError(error)) return c.json({ error: error.message, code: error.code }, 400)
+      throw error
+    }
+  }
   const saleCustomerAddress = anonymousCustomerSelected ? null : contactDisplayAddress(body.customer_address) || null
 
   const membershipPointsRedeemed = Math.max(0, Number(body.membership_points_redeemed) || 0)
@@ -5977,7 +5989,7 @@ app.get('/', async (c) => {
   const orderSql = `${sortExpression} ${sortDirection}, s.id ${sortDirection}`
 
   const cacheVersion = await getSalesReadCacheVersion(c.env)
-  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
+  const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, user, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
 
     const sales = await db.prepare(`
       SELECT s.*,

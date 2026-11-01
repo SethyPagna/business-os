@@ -65,6 +65,7 @@ import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { apiCacheHygiene } from './lib/apiCacheHygiene'
+import { phoneMaskResponses } from './lib/phoneMaskMiddleware'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
@@ -538,6 +539,10 @@ app.use('/api/*', async (c, next) => {
   })()
   try { c.executionCtx.waitUntil(drain) } catch { void drain }
 })
+
+// A full phone number leaves the Worker only for an account holding contacts_full_phone (lib/phoneAccess.ts). Last of
+// the /api/* middleware and ahead of every route, so each c.json below is projected, cache hits and errors included.
+app.use('/api/*', phoneMaskResponses)
 
 app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
 
