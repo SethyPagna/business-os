@@ -388,6 +388,42 @@ try {
   emptyPastLastPage = false
   productTotal = 1
 
+  // Back / Next / rows-per-page contract (owner ask, 1 Nov 2026). 45 families at the fixed 20 per page = 3 pages.
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  productTotal = 45
+  const paging = await mount()
+  const pager = () => paging.find(node => node.getAttribute('data-inventory-check-pager-lock') !== null, 'paging controls')
+  const arrow = (name: 'back' | 'next') => paging.button(name, pager())
+  const lastPage = () => productRequests.at(-1)?.page
+  assert.equal(lastPage(), 1, 'the list opens on page 1')
+  assert.equal(propsOf(arrow('back')).disabled, true, 'Back is disabled on the first page')
+  assert.equal(propsOf(arrow('next')).disabled, false)
+  await paging.click(arrow('next')); assert.equal(lastPage(), 2)
+  await paging.click(arrow('next')); assert.equal(lastPage(), 3)
+  assert.equal(propsOf(arrow('next')).disabled, true, 'Next is disabled on the last page')
+  assert.equal(propsOf(arrow('back')).disabled, false)
+  await paging.click(arrow('back')); assert.equal(lastPage(), 2, 'Back from page 3 requests page 2')
+  await paging.click(arrow('back')); assert.equal(lastPage(), 1, 'Back from page 2 requests page 1')
+  assert.equal(propsOf(arrow('back')).disabled, true)
+  await paging.click(arrow('next')); await paging.click(arrow('next'))
+  await chooseFilter(paging, 'brand', 'Off-page brand')
+  assert.equal(lastPage(), 1, 'a filter change returns to page 1')
+  assert.equal(productRequests.at(-1)?.brand, 'Off-page brand')
+  await paging.click(arrow('next'))
+  await chooseFilter(paging, 'sort', 'stock: high → low')
+  assert.equal(lastPage(), 1, 'a sort change returns to page 1')
+  assert.equal(productRequests.at(-1)?.sortBy, 'stock')
+  await paging.click(arrow('next'))
+  await paging.type(paging.field('inventory-check-search'), 'serum')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) }); await paging.settle()
+  assert.equal(productRequests.at(-1)?.query, 'serum')
+  assert.equal(lastPage(), 1, 'a new search returns to page 1')
+  // P10-20 removed the rows-per-page chooser from every shared pager, so Inventory Check always asks for 20.
+  assert.equal(paging.findAll(node => node.tagName === 'SELECT' && pager().contains(node)).length, 0, 'no rows-per-page chooser is offered')
+  assert.ok(productRequests.slice(-12).every(request => Number(request.pageSize) === 20), 'every paged request uses the default 20 rows')
+  await paging.unmount()
+  productTotal = 1
+
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')
   app.user = { ...app.user, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, contacts: true } }
   const beforeRanking = productRequests.length
