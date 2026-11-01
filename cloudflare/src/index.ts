@@ -64,6 +64,7 @@ import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
+import { apiCacheHygiene } from './lib/apiCacheHygiene'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
@@ -210,6 +211,9 @@ const app = new Hono<{ Bindings: Env }>()
 // C3v2 A0: per-request D1/cache metrics (lib/requestMetrics.ts). First, so it
 // wraps every /api/* middleware and handler below; adds no I/O to the request.
 app.use('/api/*', requestMetricsMiddleware)
+
+// Right behind the metrics wrapper so its after-next() code runs last for every /api/* response, errors and the maintenance 503 included (lib/apiCacheHygiene.ts).
+app.use('/api/*', apiCacheHygiene)
 
 // Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
 app.use('/api/*', async (c, next) => {

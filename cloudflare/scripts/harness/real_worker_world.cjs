@@ -13,10 +13,18 @@ const { createHash } = require('node:crypto')
 const root = path.resolve(__dirname, '..', '..')
 const sha256 = (text) => createHash('sha256').update(text).digest('hex')
 
-async function bundleWorker() {
+// `transformEntry(source)` rewrites src/index.ts in the in-memory bundle only (a test-only route, say); src/ is untouched.
+async function bundleWorker(transformEntry) {
   const { build } = require('esbuild')
+  const entry = path.join(root, 'src', 'index.ts')
+  const plugins = transformEntry ? [{
+    name: 'transform-entry',
+    setup: (b) => b.onLoad({ filter: /src[\\/]index\.ts$/ }, (args) => (
+      args.path === entry ? { contents: transformEntry(fs.readFileSync(args.path, 'utf8')), loader: 'ts', resolveDir: path.dirname(args.path) } : undefined
+    )),
+  }] : []
   const result = await build({
-    entryPoints: [path.join(root, 'src', 'index.ts')],
+    entryPoints: [entry], plugins,
     bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
     conditions: ['workerd', 'worker', 'browser'], external: ['node:*', 'cloudflare:*'], logLevel: 'error',
   })
@@ -41,10 +49,10 @@ async function migrate(db) {
   }
 }
 
-async function bootWorld({ adminPassword }) {
+async function bootWorld({ adminPassword, transformEntry }) {
   assert.ok(adminPassword, 'adminPassword seeds the built-in admin account')
   const { Miniflare, Log, LogLevel } = require('miniflare')
-  const script = await bundleWorker()
+  const script = await bundleWorker(transformEntry)
   console.log('world: Worker bundled')
   const mf = new Miniflare({
     modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat', 'no_handle_cross_request_promise_resolution'],
@@ -113,7 +121,7 @@ async function bootWorld({ adminPassword }) {
     const text = await response.text()
     let json = null
     try { json = JSON.parse(text) } catch { /* not JSON */ }
-    return { status: response.status, json, text }
+    return { status: response.status, json, text, headers: response.headers }
   }
 
   world.dispose = () => mf.dispose()

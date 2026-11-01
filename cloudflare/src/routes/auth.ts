@@ -504,6 +504,10 @@ app.post('/login', async (c) => {
   })
 })
 
+// Empties the browser's HTTP cache for this origin so no /api body outlives the sign-out on a shared till. Only
+// "cache": "storage" would also wipe the PWA's app-code cache and the drafts the owner keeps.
+const CLEAR_HTTP_CACHE = '"cache"'
+
 app.post('/logout', async (c) => {
   const body: unknown = await c.req.json().catch(() => null)
   if (body && typeof body === 'object' && ('expected_actor_id' in body || 'expected_organization_id' in body)) {
@@ -514,7 +518,10 @@ app.post('/logout', async (c) => {
       return c.json({ error: 'The original sign-out account is required.', code: 'invalid_signout_owner' }, 400)
     }
     const user = await getSessionUser(c)
-    if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+    if (!user) {
+      c.header('Clear-Site-Data', CLEAR_HTTP_CACHE)
+      return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+    }
     if (user.id !== expectedActor || (user.organization_id ?? null) !== expectedOrg) {
       return c.json({ error: 'The signed-in account changed. This sign-out did not change it.', code: 'signout_actor_changed' }, 409)
     }
@@ -523,6 +530,7 @@ app.post('/logout', async (c) => {
   // original account, including a newer session of that same account, never B.
   await revokeSession(c)
   clearSessionCookie(c)
+  c.header('Clear-Site-Data', CLEAR_HTTP_CACHE)
   return c.json({ ok: true })
 })
 
