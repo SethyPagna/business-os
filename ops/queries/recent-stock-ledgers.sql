@@ -10,14 +10,22 @@
 --   tracked_pairs_unlotted / _units    branch_stock above the lot sum on a pair the POS treats as lot-tracked
 --   damaged_remaining_on_inactive_product  tagged damaged units left on a missing or inactive row of a moved product
 --   info_pairs_without_branch_row      context: a moved pair with no branch_stock row (not an alarm: legacy ids)
--- Blind spot, by design: stock written WITHOUT any movement (a products import snapshot, the old STK-C drain) is not
--- in the window; the weekly full pack (health-stock-ledgers, health-movement-balance) covers it.
+-- Blind spots, by design: (1) stock written WITHOUT any movement (a products import snapshot, the old STK-C drain) is not in the
+-- window. (2) Stock written NOW under a BACKDATED movement is not in it either: a dated stock count stamps its movement
+-- "<date> 00:00:00" (datedStockCountApply.ts) and a stock-in import stamps its movement date (importEngine.ts), yet both write
+-- branch_stock and the lots now, so a drift they leave on a pair whose movements are all older than the window reads as
+-- pairs_checked 0 and PASS here. The weekly full pack (health-stock-ledgers, health-movement-balance) covers both, and so Tier B
+-- is to be run after every import and every dated count (RELIABILITY-PLAN 5.2).
 -- Every plan is pinned (INDEXED BY): without statistics the planner read the whole movement table for the pair list.
 -- Counts only; ids stay in the encrypted file.
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero rollup_drift_products,pairs_lots_exceed_branch,tracked_pairs_unlotted,tracked_units_unlotted,damaged_remaining_on_inactive_product
--- ops:max-rows-read 4917
+-- Ceiling rule (pinned by test-ops-query-budget-native.cjs): at least 3 x the rows the production-sized seed reads in a day (the larger of plain and
+-- ANALYZE), never under 2,000, never over the plan's 20,000 for one Tier A file. A busy trading day or the day after a large import must not
+-- fail the run with read-ceiling-exceeded; a plan that flips to a table scan (36k to 540k rows on these tables) still does.
+-- Seed day 4,470 rows, so 13,410; 14,000 leaves the measurement room to drift.
+-- ops:max-rows-read 14000
 WITH win AS MATERIALIZED (
   SELECT datetime(date('now', '+7 hours', '-1 day'), '-7 hours') AS cut
 ),

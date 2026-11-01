@@ -52,6 +52,15 @@ async function main() {
       }
     }
   } finally { await world.dispose() }
+  // Tier A (recent-*) ceilings leave room for a busy day or the day after a large import (6.0.1043): at least 3 x the seed day, never under
+  // the floor, never over the plan's 20,000 for one file. A ceiling is there to catch a plan that flips to a table scan, not to bound growth.
+  const TIER_A = { cap: 20000, floor: 2000, headroom: 3 }
+  for (const q of runnable.filter((x) => x.name.startsWith('recent-'))) {
+    const seen = rows.get(q.name) || 0
+    const want = Math.min(TIER_A.cap, Math.max(TIER_A.floor, TIER_A.headroom * seen))
+    if (q.maxRowsRead > TIER_A.cap) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is over the plan's ${TIER_A.cap} for one Tier A file`)
+    if (q.maxRowsRead < want) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is under ${TIER_A.headroom} x the seed day (${seen} rows): a busy day would fail with read-ceiling-exceeded (want at least ${want})`)
+  }
   console.log(`test-ops-query-budget: ${runnable.length} queries measured, ${Object.keys(UNMEASURABLE).length} unmeasurable here, ${REFUSED_ON_FREE.length} refused on Free, ${reds.length} red`)
   for (const line of reds) console.error('RED ' + line)
   if (reds.length) process.exitCode = 1

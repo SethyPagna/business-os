@@ -30,7 +30,7 @@ import { interpretD1Output, wranglerArgs } from './ops-d1-export.mjs'
 import { loadQuery } from './ops-sql-guard.mjs'
 import { evaluateStorage, loadBaseline, sizeFromMetas } from './metrics/storage-alarm.mjs'
 
-// A new health file is added to the pack on purpose: test-ops-consistency-pure.cjs fails when ops/queries holds a recent-* or
+// A new health file is added to the pack on purpose: test-ops-consistency-native.cjs fails when ops/queries holds a recent-* or
 // health-* file that is in neither list.
 export const PACKS = Object.freeze({
   recent: Object.freeze([

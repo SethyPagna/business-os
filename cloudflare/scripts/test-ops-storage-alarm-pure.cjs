@@ -90,6 +90,8 @@ async function main() {
     assert.ok(series.length >= 8, 'the measured series')
     assert.deepStrictEqual(series.map((p) => p.date), [...series.map((p) => p.date)].sort())
     assert.ok(series.every((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.bytes > 100e6 && p.bytes < 400e6), 'every point is a real size under the alarm')
+    const newest = Date.parse(`${series[series.length - 1].date}T00:00:00Z`)
+    assert.ok(series.some((p) => (newest - Date.parse(`${p.date}T00:00:00Z`)) / 86400000 >= alarm.MIN_BASELINE_AGE_DAYS), 'a refreshed baseline must keep a point at least a week older than its newest, or the slope is null and WATCH silently becomes OK')
     const now = alarm.evaluateStorage({ sizeBytes: 253.7e6, now: new Date('2026-11-02T00:00:00Z'), baseline: series })
     assert.strictEqual(now.level, 'WATCH', 'at 253.7 MB growing 1-2 MB/day the 12-month projection passes 450 MB')
     assert.ok(now.growthMBPerDay > 0.5 && now.growthMBPerDay < 3.5, `slope ${now.growthMBPerDay}`)

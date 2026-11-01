@@ -829,12 +829,17 @@ function assertImportRefused(result) {
     assert.deepStrictEqual(lib.parseCounts([{ results: [row] }]), row, 'the same one-row parser reads both modes')
     assert.strictEqual(lib.commandCatalog.counts('rowid').gate, 'confirm')
     assert.strictEqual(lib.commandCatalog.migrationNames().gate, 'confirm')
-    assert.strictEqual(lib.chooseCountsMode('auto', 0), 'rowid')
+    assert.strictEqual(lib.DEFAULT_COUNTS, 'full', 'the default row count is the full one')
+    assert.deepStrictEqual(lib.COUNTS_REQUESTS, ['full', 'auto'])
+    for (const pending of [0, 1, null, undefined]) assert.strictEqual(lib.chooseCountsMode(undefined, pending), 'full', `no request (waiting=${String(pending)}) must be the full count, even when nothing is waiting`)
+    assert.strictEqual(lib.chooseCountsMode('auto', 0), 'rowid', 'the quick count is opt-in')
     for (const unsafe of [1, 12, null, undefined, NaN, -1, '0']) assert.strictEqual(lib.chooseCountsMode('auto', unsafe), 'full', `waiting=${String(unsafe)} must keep the full count`)
     assert.strictEqual(lib.chooseCountsMode('full', 0), 'full', '-Counts full is the old behaviour')
     assert.throws(() => lib.chooseCountsMode('quick', 0), /Unknown counts request/)
     assert.strictEqual(lib.parseArgs(['live', '-Counts', 'FULL']).counts, 'full')
-    assert.throws(() => lib.parseArgs(['snapshot', '-Counts', 'none']), /auto or full/)
+    assert.throws(() => lib.parseArgs(['snapshot', '-Counts', 'none']), /full \(the default\) or auto/)
+    assert.strictEqual(lib.parseArgs(['snapshot']).counts, undefined, 'no -Counts means no request, so the default applies')
+    assert.strictEqual(lib.parseArgs(['snapshot', '-Counts', 'auto']).counts, 'auto')
     const applied = ['0001_a.sql', '0002_b.sql']
     assert.strictEqual(lib.pendingMigrationCount(applied, ['0001_a.sql', '0002_b.sql', 'README.md']), 0)
     assert.strictEqual(lib.pendingMigrationCount(applied, ['0001_a.sql', '0002_b.sql', '0003_c.sql']), 1)
@@ -853,6 +858,28 @@ function assertImportRefused(result) {
     assert.ok(!catalog.ok && catalog.failed[0].table === 'products', 'a new product with no migration is unexplained')
     assert.strictEqual(sold.mode, 'rowid')
     assert.strictEqual(lib.compareCounts(pre, pre).mode, 'full', 'the mode defaults to the old comparison')
+  })
+
+  check('the quick count is not a loss check, which is why it is opt-in: deleted middle rows pass it and fail the full count', () => {
+    // Ten middle inventory_movements deleted by the Worker (undo, a dated stock count, a merge), then one item sold. AUTOINCREMENT never
+    // reuses an id, so the highest id still rises. The full count sees 50 -> 41; the high-water mark sees 50 -> 51.
+    const base = Object.fromEntries(lib.KEY_TABLES.map((t) => [t, 50]))
+    const full = lib.compareCounts(base, { ...base, inventory_movements: 41, sales: 51 }, new Set(), 'full')
+    assert.ok(!full.ok && full.failed.some((r) => r.table === 'inventory_movements' && r.verdict === 'UNEXPECTED'), 'COUNT(*) fails the release')
+    const quick = lib.compareCounts(base, { ...base, inventory_movements: 51, sales: 51 }, new Set(), 'rowid')
+    assert.ok(quick.ok && quick.warnings.some((r) => r.table === 'inventory_movements' && r.verdict === 'grew-live-traffic'), 'the high-water mark passes the same release')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 53 }, { ci: true, mode: 'rowid' }), '+3 ids', 'a high-water change is a number of ids, not rows')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 51 }, { ci: true, mode: 'rowid' }), '+1 id')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 53 }, { ci: true }), '+3 rows')
+    assert.strictEqual(lib.countChange({ pre: 50, post: 41 }, { ci: true }), '-9 rows')
+  })
+
+  check('deploy.yml cannot ask for the quick count, so CI runs the default, which is the full count', () => {
+    const y = read('.github', 'workflows', 'deploy.yml')
+    assert.ok(!/-Counts/i.test(y), 'deploy.yml passes no -Counts')
+    const release = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+    assert.ok(release.includes('const requested = ctx.args.counts || lib.DEFAULT_COUNTS'), 'the snapshot step falls back to the library default')
+    assert.ok(!/ctx\.args\.counts \|\| 'auto'/.test(release), 'no hard-coded auto default')
   })
 
   // The stub answers each counts command by what its SQL asks for, so a step that sends the wrong mode reads the wrong numbers.
@@ -905,28 +932,38 @@ function assertImportRefused(result) {
       fs.mkdirSync(path.join(dir, 'cloudflare', 'migrations'), { recursive: true })
       for (const name of migrations) fs.writeFileSync(path.join(dir, 'cloudflare', 'migrations', name), '-- fixture\n')
       const seen = []
+      const asked = []
       const ctx = { sha: SHA, args, ci: true, dryRun: false, releaseDir: dir, recordDir: dir, plan: 'paid', ciConfirmWord: 'DEPLOY', state: {} }
       const out = await withStubs({
         runSpec: async (spec, _c, approval) => {
           lib.assertApproved(spec, approval)
           if (spec.id.startsWith('time-travel-info:')) return { code: 0, out: JSON.stringify({ bookmark: '00000001-00000002-00000003-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }) }
           if (spec.id === 'deployments-status') return { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: V_BEFORE, percentage: 100 }] }) }
+          asked.push(spec.id)
           if (spec.id === 'migration-names') return ledger === 'fail' ? { code: 1, out: 'no such table: d1_migrations' } : { code: 0, out: JSON.stringify([{ results: ledger.map((name) => ({ name })), success: true }]) }
           return countsStub({}, seen)(spec, _c, approval)
         },
       }, () => COMMANDS.snapshot(ctx))
       fs.rmSync(dir, { recursive: true, force: true })
-      return { ...out, seen, snapshot: ctx.state.snapshot }
+      return { ...out, seen, asked, snapshot: ctx.state.snapshot }
     }
-    const waiting = await run({ ledger: ['0001_a.sql'], migrations: ['0001_a.sql', '0002_b.sql'] })
-    assert.deepStrictEqual([waiting.seen, waiting.snapshot.countsMode], [['full'], 'full'], 'one update waiting -> full')
-    const none = await run({ ledger: ['0001_a.sql', '0002_b.sql'], migrations: ['0001_a.sql', '0002_b.sql'] })
-    assert.deepStrictEqual([none.seen, none.snapshot.countsMode], [['rowid'], 'rowid'], 'nothing waiting -> quick')
-    assert.match(none.text, /no database update is waiting/)
-    const unreadable = await run({ ledger: 'fail', migrations: ['0001_a.sql'] })
-    assert.deepStrictEqual([unreadable.seen, unreadable.snapshot.countsMode], [['full'], 'full'], 'an unreadable ledger keeps the full count')
+    const applied = ['0001_a.sql', '0002_b.sql']
+    // THE DEFAULT: no -Counts at all. Nothing waiting and a readable ledger, and still the full count (and no ledger read at all).
+    const defaulted = await run({ ledger: applied, migrations: applied })
+    assert.deepStrictEqual([defaulted.seen, defaulted.snapshot.countsMode], [['full'], 'full'], 'no -Counts -> the full count, even with nothing waiting')
+    assert.ok(!defaulted.asked.includes('migration-names'), 'the default needs no migration-ledger read')
+    assert.match(defaulted.text, /full \(every table counted: the default\)/)
+    const waiting = await run({ args: { counts: 'auto' }, ledger: ['0001_a.sql'], migrations: ['0001_a.sql', '0002_b.sql'] })
+    assert.deepStrictEqual([waiting.seen, waiting.snapshot.countsMode], [['full'], 'full'], '-Counts auto, one update waiting -> full')
+    const none = await run({ args: { counts: 'auto' }, ledger: applied, migrations: applied })
+    assert.deepStrictEqual([none.seen, none.snapshot.countsMode], [['rowid'], 'rowid'], '-Counts auto, nothing waiting -> quick')
+    assert.match(none.text, /as asked with -Counts auto/)
+    assert.match(none.text, /A deleted row is NOT seen/)
+    const unreadable = await run({ args: { counts: 'auto' }, ledger: 'fail', migrations: ['0001_a.sql'] })
+    assert.deepStrictEqual([unreadable.seen, unreadable.snapshot.countsMode], [['full'], 'full'], '-Counts auto with an unreadable ledger keeps the full count')
     const forced = await run({ args: { counts: 'full' }, ledger: ['0001_a.sql'], migrations: ['0001_a.sql'] })
     assert.deepStrictEqual([forced.seen, forced.snapshot.countsMode], [['full'], 'full'], '-Counts full ignores the ledger')
+    assert.ok(!forced.asked.includes('migration-names'))
   })
 
   if (process.exitCode) {

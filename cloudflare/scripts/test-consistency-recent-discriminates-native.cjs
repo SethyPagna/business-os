@@ -137,7 +137,7 @@ async function main() {
       for (const col of q.rules.expectZero) assert.ok(col in row, `${name}: expect-zero names ${col}, which it does not return`)
       db.close()
     }
-    assert.ok(PACK.reduce((n, name) => n + queries[name].maxRowsRead, 0) <= 40000, 'the pack ceiling is above the Tier A day allowance (RELIABILITY-PLAN 8)')
+    assert.ok(PACK.reduce((n, name) => n + queries[name].maxRowsRead, 0) <= 100000, 'even at every ceiling the pack must stay under 2% of a Free day (5,000,000 reads)')
   })
 
   await check('a clean shop is green, and the recent one is not an empty window', () => {

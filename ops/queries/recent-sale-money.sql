@@ -17,7 +17,12 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero v1_subtotal_ne_lines,v1_calc_ne_components,v1_payable_equation,v1_khr_twin,completed_short,not_paid_but_covered,system_sales_without_lines,negative_totals,bad_rate,payment_events_mismatch,parity_undeducted,parity_over_deducted,parity_cancelled_still_deducted,parity_cancelled_alloc_held,parity_alloc_over_line
--- ops:max-rows-read 8138
+-- Ceiling rule (pinned by test-ops-query-budget-native.cjs): at least 3 x the rows the production-sized seed reads in a day (the larger of plain and
+-- ANALYZE), never under 2,000, never over the plan's 20,000 for one Tier A file. A busy trading day or the day after a large import must not
+-- fail the run with read-ceiling-exceeded; a plan that flips to a table scan (36k to 540k rows on these tables) still does.
+-- Seed day 7,398 rows: 3 x would be 22,194, so the cap of 20,000. The seed already carries 6.6 lines per sale in the window against about 2.4 in
+-- production (ESTIMATED), so 20,000 is about 8 x a production day.
+-- ops:max-rows-read 20000
 WITH win AS MATERIALIZED (
   SELECT datetime(date('now', '+7 hours', '-1 day'), '-7 hours') AS cut
 ),

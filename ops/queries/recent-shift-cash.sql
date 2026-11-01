@@ -15,7 +15,12 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero sales_outside_shift,returns_outside_shift,fees_outside_shift,payment_events_outside_shift,open_shifts_before_today,closed_before_opened,close_expected_ne_parts_usd,close_expected_ne_parts_khr,close_difference_ne_counted_usd,close_difference_ne_counted_khr
--- ops:max-rows-read 6527
+-- Ceiling rule (pinned by test-ops-query-budget-native.cjs): at least 3 x the rows the production-sized seed reads in a day (the larger of plain and
+-- ANALYZE), never under 2,000, never over the plan's 20,000 for one Tier A file. A busy trading day or the day after a large import must not
+-- fail the run with read-ceiling-exceeded; a plan that flips to a table scan (36k to 540k rows on these tables) still does.
+-- Seed day 5,933 rows (4,260 of them one seed artefact: 4,240 old-system expenses stamped with a migration time that is inside the
+-- window on a seed built today), so 17,799; 19,000 leaves the measurement room to drift.
+-- ops:max-rows-read 19000
 WITH win AS MATERIALIZED (
   SELECT datetime(date('now', '+7 hours', '-1 day'), '-7 hours') AS cut, date('now', '+7 hours', '-7 days') AS bd
 ),

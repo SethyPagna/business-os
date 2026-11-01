@@ -14,7 +14,11 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero v1_refund_equation,v1_refund_khr_twin,v1_refund_khr_paid,riel_only_customer_returns,returns_on_missing_sale,sales_refunded_over_total,debt_lowered_over_total,return_tag_without_evidence,return_evidence_without_tag,cash_out_over_paid
--- ops:max-rows-read 77
+-- Ceiling rule (pinned by test-ops-query-budget-native.cjs): at least 3 x the rows the production-sized seed reads in a day (the larger of plain and
+-- ANALYZE), never under 2,000, never over the plan's 20,000 for one Tier A file. A busy trading day or the day after a large import must not
+-- fail the run with read-ceiling-exceeded; a plan that flips to a table scan (36k to 540k rows on these tables) still does.
+-- Seed day 69 rows (the seed holds 9 returns): 3 x would be 207, too tight for a day with a return import, so the floor of 2,000.
+-- ops:max-rows-read 2000
 WITH win AS MATERIALIZED (
   SELECT datetime(date('now', '+7 hours', '-1 day'), '-7 hours') AS cut
 ),

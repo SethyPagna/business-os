@@ -2,8 +2,10 @@
 -- A prepared figure is one the database or the Worker stores so that readers need not recompute it. Today that is the catalog cost:
 -- products.cost_price_usd and its mirror purchase_price_usd, kept by the migration 0195 / 0256 / 0261 triggers and the receipt
 -- writers from CATALOG_COST_DERIVE_SQL (lib/catalogCostRecompute.ts). The expression below is that constant VERBATIM, as in
--- health-catalog-cost (test-ops-health-tiers-native.cjs pins it). Only active products that had a stock movement in the last two
--- business days are read (window: see recent-stock-ledgers); inactive rows are frozen history (0195 header).
+-- health-catalog-cost (test-data-match-health-queries-native.cjs pins both). Only active products that had a stock movement in the last two
+-- business days are read (window: see recent-stock-ledgers); inactive rows are frozen history (0195 header). Blind spot, by design: a
+-- product whose movements are all older than the window (stock written now under a BACKDATED movement, see recent-stock-ledgers, or under
+-- none) is not read; the weekly health-catalog-cost covers it.
 --   cost_drift         rows the formula would move (the triggers stand down only during a backup restore)
 --   mirror_drift       the purchase_price_usd twin not aligned with cost_price_usd
 --   mirror_drift_khr   the same rule for the KHR pair
@@ -15,7 +17,11 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero cost_drift,mirror_drift,mirror_drift_khr
--- ops:max-rows-read 3508
+-- Ceiling rule (pinned by test-ops-query-budget-native.cjs): at least 3 x the rows the production-sized seed reads in a day (the larger of plain and
+-- ANALYZE), never under 2,000, never over the plan's 20,000 for one Tier A file. A busy trading day or the day after a large import must not
+-- fail the run with read-ceiling-exceeded; a plan that flips to a table scan (36k to 540k rows on these tables) still does.
+-- Seed day 3,189 rows, so 9,567; 10,000 leaves the measurement room to drift.
+-- ops:max-rows-read 10000
 WITH win AS MATERIALIZED (
   SELECT datetime(date('now', '+7 hours', '-1 day'), '-7 hours') AS cut
 ),

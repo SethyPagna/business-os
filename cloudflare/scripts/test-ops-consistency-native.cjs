@@ -142,7 +142,7 @@ async function main() {
     assert.strictEqual(new Set([...c.PACKS.recent, ...c.PACKS.full]).size, 19, 'no file in both packs')
   })
 
-  await check('every pack file passes the guard with a numeric read ceiling; Tier A files stay under 20k each and 40k together', () => {
+  await check('every pack file passes the guard with a numeric read ceiling; Tier A files stay under 20k each and the pack under 2% of a Free day at every ceiling', () => {
     for (const pack of Object.keys(c.PACKS)) {
       const queries = c.loadPack(pack)
       assert.strictEqual(queries.length, c.PACKS[pack].length)
@@ -156,7 +156,8 @@ async function main() {
       assert.ok(q.maxRowsRead <= 20000, `${q.name}: ${q.maxRowsRead} is over the 20,000 of one Tier A file`)
       assert.ok(q.rules.expectZero && q.rules.expectZero.length > 0 && q.rules.expectZero !== '*', `${q.name}: names its alarm columns`)
     }
-    assert.ok(c.packCeiling(recent) <= 40000, `Tier A ceilings sum to ${c.packCeiling(recent)}, over the 40,000 a day of the plan`)
+    assert.ok(c.packCeiling(recent) <= 100000, `Tier A ceilings sum to ${c.packCeiling(recent)}, over 2% of a 5,000,000 Free day`)
+    assert.ok(recent.every((q) => q.maxRowsRead >= 2000), 'no Tier A ceiling is so tight that a quiet import day fails it')
     assert.ok(c.packCeiling(c.loadPack('full')) < 2.5e6, 'the weekly pack stays under half a Free day')
   })
 
