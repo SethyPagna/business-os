@@ -10,9 +10,10 @@ const { bootWorld } = require('./read-budget/world.cjs')
 const { roundUp } = require('./read-budget/budgets.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-// health-movement-balance-rows.sql read 349,382,402 rows on the seed (140 s) and stk-c-lot-drain-without-movement.sql
-// 209,756,641 (224 s), against 5,000,000 reads a day on Free. Rewrite one to a ceiling before it leaves this list.
-const REFUSED_ON_FREE = ['health-movement-balance-rows', 'stk-c-lot-drain-without-movement']
+// Empty since 6.0.1043: health-movement-balance-rows.sql (349,382,402 rows read on the seed) and stk-c-lot-drain-without-movement.sql
+// (209,756,641) were rewritten to a few hundred thousand and left this list. A query too costly for the 5,000,000 reads a day on Free
+// goes back here with -- ops:refused-on-free and a rewrite plan in its header.
+const REFUSED_ON_FREE = []
 // The local runtime has no dbstat table, so this query cannot be measured here. It reads about one row per database page
 // (~22,000 pages at 85 MB), so its directive must stay at or under the ceiling below.
 const UNMEASURABLE = { 'd1-dbstat-probe': 100000 }
