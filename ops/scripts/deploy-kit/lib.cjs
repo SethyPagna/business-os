@@ -78,7 +78,7 @@ const FLAG_ALIASES = {
   plan: 'plan', ref: 'ref', records: 'records', worktree: 'worktree',
   'auth-from': 'authFrom', authfrom: 'authFrom', site: 'site', jobs: 'jobs',
   retries: 'retries', ci: 'ci', 'release-dir': 'releaseDir', releasedir: 'releaseDir',
-  'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply',
+  'use-cert': 'useCert', usecert: 'useCert', 'no-apply': 'noApply', noapply: 'noApply', counts: 'counts',
   target: 'target', db: 'db', bookmark: 'bookmark', 'version-id': 'versionId', versionid: 'versionId',
   'previous-sha': 'previousSha', previoussha: 'previousSha',
   help: 'help', h: 'help',
@@ -112,6 +112,10 @@ function parseArgs(argv) {
     throw new Error(`-Plan must be paid or free, not ${out.plan}`)
   }
   if (out.plan) out.plan = String(out.plan).toLowerCase()
+  if (out.counts !== undefined) {
+    out.counts = String(out.counts).toLowerCase()
+    if (!COUNTS_REQUESTS.includes(out.counts)) throw new Error(`-Counts must be auto or full, not ${out.counts}`)
+  }
   return out
 }
 
@@ -127,8 +131,29 @@ function npm(id, pkg, script, gate, extra = {}) {
 // One row, one column per table, each a scalar sub-count. D1's SQLite caps
 // compound SELECTs at a few terms, so one UNION ALL term per table failed with
 // "too many terms in compound SELECT" once the list grew past that cap.
-function countsSql(tables = KEY_TABLES) {
+function countsSql(tables = KEY_TABLES, mode = 'full') {
+  if (mode === 'rowid') return `SELECT ${tables.map((t) => `(SELECT COALESCE(MAX(rowid), 0) FROM ${t}) AS ${t}`).join(', ')}`
   return `SELECT ${tables.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ')}`
+}
+
+// Reading the eight key tables in full costs about 155,000 rows each time and the release reads them twice (before and after):
+// 6.2% of a Free day per deploy (RELIABILITY-PLAN 5.5). 'rowid' reads each table's high-water mark instead (8 rows). It still
+// answers the question the comparison asks of a release that changes no table: did rows appear (the shop kept selling) or did
+// the newest rows disappear. What it cannot see is a row deleted from the middle, which only a migration could do, so a
+// release that has a database update waiting (or whose waiting updates cannot be read) keeps the full count.
+//   -Counts auto (default): rowid when nothing is waiting, full otherwise.   -Counts full: always the full count (the old behaviour).
+const COUNTS_REQUESTS = ['auto', 'full']
+function chooseCountsMode(requested = 'auto', pendingMigrations = null) {
+  if (!COUNTS_REQUESTS.includes(requested)) throw new Error(`Unknown counts request ${requested}`)
+  if (requested === 'full') return 'full'
+  return Number.isInteger(pendingMigrations) && pendingMigrations === 0 ? 'rowid' : 'full'
+}
+// How many files of the release's migrations folder production has not applied. null when the ledger could not be read as a
+// non-empty list (an empty ledger is not "nothing waiting"), so the caller falls back to the full count.
+function pendingMigrationCount(appliedNames, candidateNames) {
+  const applied = new Set([...(appliedNames || [])].filter((n) => typeof n === 'string' && n))
+  if (applied.size === 0) return null
+  return [...(candidateNames || [])].filter((n) => /\.sql$/.test(n) && !applied.has(n)).length
 }
 
 // Every production command the kit can run. Parameters are filled in by the
@@ -139,7 +164,8 @@ const commandCatalog = {
   whoami: () => wrangler('whoami', ['whoami'], 'none'),
   timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
   deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
-  counts: () => wrangler('counts', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', countsSql()], 'confirm'),
+  counts: (mode = 'full') => wrangler('counts', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', countsSql(KEY_TABLES, mode)], 'confirm'),
+  migrationNames: () => wrangler('migration-names', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'], 'confirm'),
   importMigrationLedger: () => wrangler('import-migration-ledger', ['d1', 'execute', 'business-os-import', '--remote', '--json', '--command', 'SELECT name FROM d1_migrations ORDER BY name'], 'confirm'),
   migrationsList: (db) => wrangler(`migrations-list:${db}`, ['d1', 'migrations', 'list', db, '--remote'], 'confirm'),
   migrationsApply: (db) => {
@@ -199,6 +225,8 @@ function sampleCatalog() {
     ...DATABASES.map((d) => commandCatalog.timeTravelInfo(d.name)),
     commandCatalog.deploymentStatus(),
     commandCatalog.counts(),
+    commandCatalog.counts('rowid'),
+    commandCatalog.migrationNames(),
     commandCatalog.importMigrationLedger(),
     commandCatalog.guardState(guardStateSql()),
     commandCatalog.guardStageApply('.guard-stage-sample.toml'),
@@ -419,7 +447,7 @@ function parseCounts(json, tables = KEY_TABLES) {
 // migrations change on purpose (warning) and tables the live shop writes to
 // while the release runs (warning when they only grew). A table that lost
 // rows without a migration touching it is a failure.
-function compareCounts(pre, post, touched = new Set()) {
+function compareCounts(pre, post, touched = new Set(), mode = 'full') {
   const rows = []
   for (const table of KEY_TABLES) {
     const a = pre ? pre[table] : undefined
@@ -434,7 +462,7 @@ function compareCounts(pre, post, touched = new Set()) {
   }
   const failed = rows.filter((r) => r.verdict === 'UNEXPECTED' || r.verdict === 'MISSING')
   const warnings = rows.filter((r) => r.verdict === 'changed-by-migration' || r.verdict === 'grew-live-traffic')
-  return { rows, ok: failed.length === 0, failed, warnings }
+  return { rows, ok: failed.length === 0, failed, warnings, mode }
 }
 
 // Row counts are business numbers, and the repository's Actions logs and job
@@ -517,7 +545,7 @@ module.exports = {
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseCrons, cronRollbackCheck, ROLLBACK_REDEPLOY_ADVICE,
-  parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
+  parseArgs, commandCatalog, sampleCatalog, countsSql, chooseCountsMode, pendingMigrationCount, COUNTS_REQUESTS, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, validateImportMigrationLedger, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,
