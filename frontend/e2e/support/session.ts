@@ -19,6 +19,10 @@ export const E2E_ACCOUNTS = {
   admin: { username: 'admin', id: 1, name: 'E2E Admin' },
   cashierA: { username: 'cashier_a', id: 11, name: 'Cashier A' },
   cashierB: { username: 'cashier_b', id: 12, name: 'Cashier B' },
+  /** The seeded Employee preset: no Settings, no Website Editor. */
+  employee: { username: 'employee', id: 13, name: 'Employee' },
+  /** A Website Editor holder (customer_portal) with no Settings access. */
+  webmaster: { username: 'webmaster', id: 14, name: 'Webmaster' },
 } as const
 
 export type E2EAccount = typeof E2E_ACCOUNTS[keyof typeof E2E_ACCOUNTS]

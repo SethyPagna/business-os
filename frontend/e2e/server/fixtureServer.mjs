@@ -352,7 +352,24 @@ function readServiceWorker(swGeneration) {
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------
-// Three accounts on one device. The shop really works this way -- a shared
+// The Employee preset, as cloudflare/src/lib/roleDefaults.ts DEFAULT_ROLE_PERMISSIONS.employee seeds it: no Settings,
+// no Website Editor, no Dashboard. bootstrap-settings-visibility.spec.ts signs in as it and as a Website Editor holder
+// (customer_portal only), the two kinds of account GET /api/auth/bootstrap no longer hands the Settings-only rows to.
+const EMPLOYEE_PERMISSIONS = {
+  pos: true, inventory_checks: true, inventory_check_show_price: true, inventory_check_show_barcode: true,
+  inventory_check_show_category: true, inventory_check_show_brand: true, inventory_check_show_stock: true,
+  inventory_check_show_received: true, inventory_check_show_sales: true, inventory_check_show_customers: true,
+  inventory_check_show_cost: false, receipt_settings: true,
+  products: true, 'products:add': false, 'products:delete': false, 'products:bulk_delete': false, 'products:variant': false,
+  'products:import': false, 'products:import_replace_all': false, 'products:export': false, 'products:merge_duplicates': false,
+  'products:zero_qty_cleanup': false, 'products:manage_lookups': false, 'products:price': false, 'products:supplier': false,
+  'products:history': false, product_cost_view: false, product_cost_edit: false,
+  sales: true, 'sales:status': true, 'sales:customer': true, 'sales:add_items': true, 'sales:amend': true,
+  'sales:bulk': false, 'sales:import': false, 'sales:export': false,
+  returns: true, 'returns:bulk': false, 'returns:export': false,
+  contacts: true, 'contacts:bulk': false, 'contacts:financial_history': false, contacts_suppliers: false,
+}
+// Three cashier accounts on one device (the Employee and Website Editor accounts below are permission-scoped). The shop really works this way -- a shared
 // till tablet that several cashiers sign into in turn -- and
 // storage-isolation.spec.ts needs two DIFFERENT signed-in identities in one
 // browser profile to prove that one cashier's parked work never surfaces for
@@ -366,6 +383,8 @@ const SESSION_USERS = {
   admin: ADMIN_SESSION.user,
   cashier_a: { ...ADMIN_SESSION.user, id: 11, username: 'cashier_a', name: 'Cashier A' },
   cashier_b: { ...ADMIN_SESSION.user, id: 12, username: 'cashier_b', name: 'Cashier B' },
+  employee: { ...ADMIN_SESSION.user, id: 13, username: 'employee', name: 'Employee', role_code: 'employee', role_permissions: EMPLOYEE_PERMISSIONS },
+  webmaster: { ...ADMIN_SESSION.user, id: 14, username: 'webmaster', name: 'Webmaster', role_code: 'sv_portal', role_permissions: { customer_portal: true } },
 }
 // Any non-empty password is accepted; only the username selects the account.
 // A real password check would prove nothing here and would tempt someone into
