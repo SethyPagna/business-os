@@ -6,7 +6,43 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 27 Oct 2026 (Cambodia, UTC+7)
+## Status snapshot — 2 Nov 2026 (Cambodia, UTC+7)
+
+- **Live:** `05ef61b73` = 6.0.1035, which makes Inventory Check name pages read sales only for the page rows (−55% rows). Deployed 1 Nov 15:24Z (run 41309455223), tier paid, no migration, health pack clean. The previous release was 6.0.1033 `165f9f000` (Codex, 30 Oct). Production migrations run through 0273.
+- **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
+- **Plan:** the account is back on Workers Paid until 30 Nov after the 30 Oct Free outage. The owner's goal is the FREE plan permanently.
+- **Goal:** by 30 Nov, production runs on Free with every function intact. Measured as:
+  - 7 consecutive days at ≤3.0M D1 rows read per day on the Free config;
+  - ≤10k rows written per day;
+  - every route at ≤45 D1 calls cold, and the 86-line sale within limits;
+  - 10 ms CPU proven for the till routes;
+  - the governor enforcing, and every optimization behind a read switch.
+
+  Production read about 34–39M rows per day before 1035.
+- **Next:** RC `rc/20261102a` (`cbff55c8e`) = 6.0.1040 leak stop + `/api` no-store + 6.0.1039 CI read-budget gate. Its exact gate and Opus review are running, for the 07:00 2 Nov slot.
+
+### Free-plan programme board
+
+Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on the owner. The slice ids are the private plan's (MASTER-PLAN, 1 Nov).
+
+- [x] 6.0.1035 Inventory Check name-page reads (live)
+- [x] 6.0.1036–1038 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
+- [~] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config)
+- [~] P0.2 6.0.1040 leak stop: bootstrap settings follow Settings visibility; `/api` is `private, no-store`; logout clears the HTTP cache
+- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling
+- [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
+- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), cheap release-kit counts, storage alarm at 400 MB
+- [~] P1.6a 6.0.1044 Inventory Check simplified to the owner's design (Products-style list + check status as a note, no sales stats) · P1.7 6.0.1045 Fix stock (count minus damaged → Set session)
+- [ ] P1.1 call counting · P1.2 1008 operations · P1.3 sole-branch read · P1.4–P1.5 report calls · P1.8 bell + 5-minute overview with its time beside the date
+- [ ] P2.1 sale-money CPU (86 lines) · P2.2 merges · P2.3 paged integrity scan · P2.5 fast stock-in · P2.6 imports on Free
+- [!] P2.4 off-site backups: waits on the owner's backup token
+- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov)
+- [ ] P2.7 tills keep only the search index · P2.9 documents off public `/uploads` · P2.10 push hub closes on revoke · P2.11 isolation tests
+- [ ] P3 per-sale report facts + day rollups + sales search + 10 ms CPU rehearsal · P4 catalog SQL, customers, tracked ids, hidden-tab hold, client fixes
+- [ ] Switch gate: Free-config rehearsal from about 22 Nov + 7 measured days; switch on or before 30 Nov
+- [ ] After the switch: D1 version vector, ETag/304, live push, KV retirement, storage (the DB is 253.7 MB; the 500 MB Free cap lands between Mar and Dec 2027), design
+
+## Status snapshot — 27 Oct 2026 (superseded; kept for the lanes below)
 
 - **Live:** `efaac4452` = RC1 (`rc/20261026b`: 6.0.983, 984, 986, 987, 993), deployed 26 Oct 14:58Z (run 40322968341), tier paid, health pack HEALTHY. **main = `74577d8e3`** (tree equals the release).
 - **Deploying (27 Oct, slot 1):** RC2b `a8dbbe1fc` = 6.0.985 + 6.0.989 + 6.0.991 + the exchange budget fix, migration 0272. Gate 40382886386 GREEN (Worker 1077/1077, frontend 981/981); Opus delta READY WITH EXCEPTIONS. Rollback = redeploy `efaac4452` through deploy.yml, never `wrangler rollback` (6.0.984 crons).
