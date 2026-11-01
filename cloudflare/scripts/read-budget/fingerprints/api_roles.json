@@ -1,0 +1,12 @@
+{
+ "roles": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "86981e6972eb",
+   "SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles ORDER BY is_system DESC, lowe"
+  ]
+ ]
+}

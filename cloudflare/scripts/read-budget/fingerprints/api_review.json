@@ -1,0 +1,12 @@
+{
+ "review": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a2809a758253",
+   "SELECT * FROM pending_actions WHERE status = ?1 ORDER BY created_at DESC, id DESC"
+  ]
+ ]
+}

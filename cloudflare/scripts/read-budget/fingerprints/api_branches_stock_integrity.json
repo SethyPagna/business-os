@@ -1,0 +1,16 @@
+{
+ "branches-stock-integrity": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a4f404af3f3e",
+   "SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1"
+  ],
+  [
+   "5c0857770664",
+   "SELECT p.id AS product_id, p.name AS product_name, COALESCE(p.stock_quantity, 0) AS stored_quantity, COALESCE("
+  ]
+ ]
+}

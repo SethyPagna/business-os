@@ -1,0 +1,104 @@
+{
+ "reports-overview-30d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "dd8ba3d281aa",
+   "SELECT f.id,f.delivery_contact_id,COALESCE(NULLIF(TRIM(dc.name),''),'') AS delivery_contact_name, f.amount_usd"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "dd8ba3d281aa",
+   "SELECT f.id,f.delivery_contact_id,COALESCE(NULLIF(TRIM(dc.name),''),'') AS delivery_contact_name, f.amount_usd"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "a344b68ca924",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total"
+  ],
+  [
+   "698cd86728be",
+   "SELECT COALESCE(NULLIF(TRIM(reason), ''), '') AS reason, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_us"
+  ],
+  [
+   "c83b32743405",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr)"
+  ],
+  [
+   "a1671ff574bf",
+   "SELECT COALESCE(fee_type, '') AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount"
+  ]
+ ]
+}

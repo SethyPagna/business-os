@@ -1,0 +1,12 @@
+{
+ "products-stock-in-sessions": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "37bfb4aa5155",
+   "SELECT grouped.*, COUNT(*) OVER () AS total FROM ( SELECT s.session_key, MIN(s.created_at) AS created_at, MAX("
+  ]
+ ]
+}

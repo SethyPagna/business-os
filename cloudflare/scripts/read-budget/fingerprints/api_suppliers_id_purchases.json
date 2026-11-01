@@ -1,0 +1,20 @@
+{
+ "suppliers-id-purchases": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "057359c035fa",
+   "SELECT id, name FROM suppliers WHERE id = ?"
+  ],
+  [
+   "55fb62102739",
+   "SELECT COUNT(*) AS batches, COUNT(DISTINCT pb.variant_product_id) AS products, COALESCE(SUM(CASE WHEN pb.recei"
+  ],
+  [
+   "b6be0b53a7ab",
+   "SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.received_quantity, pb.unit_cost_usd, pb.receive"
+  ]
+ ]
+}

@@ -1,0 +1,890 @@
+{
+ "dashboard-startup-today": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "67ff2741f102",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr F"
+  ],
+  [
+   "eb57865c4531",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd FROM returns WHERE date(returns.crea"
+  ],
+  [
+   "ce5cf8ec256f",
+   "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "30a136f2a95e",
+   "WITH matching_returns AS ( SELECT r.id, r.total_refund_usd FROM returns r WHERE date(r.created_at, '+7 hours')"
+  ],
+  [
+   "a3f4e1fc4538",
+   "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "bc0aa72b88f0",
+   "SELECT id, name FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ]
+ ],
+ "dashboard-startup-7d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "67ff2741f102",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr F"
+  ],
+  [
+   "eb57865c4531",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd FROM returns WHERE date(returns.crea"
+  ],
+  [
+   "ce5cf8ec256f",
+   "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "30a136f2a95e",
+   "WITH matching_returns AS ( SELECT r.id, r.total_refund_usd FROM returns r WHERE date(r.created_at, '+7 hours')"
+  ],
+  [
+   "a3f4e1fc4538",
+   "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "dfe27ffb650b",
+   "SELECT id, name FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ]
+ ],
+ "dashboard-startup-30d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "67ff2741f102",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr F"
+  ],
+  [
+   "eb57865c4531",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd FROM returns WHERE date(returns.crea"
+  ],
+  [
+   "ce5cf8ec256f",
+   "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "30a136f2a95e",
+   "WITH matching_returns AS ( SELECT r.id, r.total_refund_usd FROM returns r WHERE date(r.created_at, '+7 hours')"
+  ],
+  [
+   "a3f4e1fc4538",
+   "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "bc0aa72b88f0",
+   "SELECT id, name FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ]
+ ],
+ "dashboard-startup-365d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "67ff2741f102",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr F"
+  ],
+  [
+   "eb57865c4531",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd FROM returns WHERE date(returns.crea"
+  ],
+  [
+   "ce5cf8ec256f",
+   "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "3c26374fe4ff",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "30a136f2a95e",
+   "WITH matching_returns AS ( SELECT r.id, r.total_refund_usd FROM returns r WHERE date(r.created_at, '+7 hours')"
+  ],
+  [
+   "a3f4e1fc4538",
+   "SELECT COUNT(*) AS return_count, COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd, C"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4d4e8ebbbf06",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bb23890c6e57",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98f3f1d6544a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "93bb331a8b50",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "0c312ffc2b25",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "032e94cc54e9",
+   "SELECT id, name FROM products WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?"
+  ]
+ ]
+}

@@ -1,0 +1,16 @@
+{
+ "customers-points-summary": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c942d73bc28d",
+   "SELECT id, name, phone, membership_number FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) ORDER BY lo"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ]
+ ]
+}

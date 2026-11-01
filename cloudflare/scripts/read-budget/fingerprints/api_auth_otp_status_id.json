@@ -1,0 +1,12 @@
+{
+ "auth-otp-status-id": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "5d60e7e55ca7",
+   "SELECT u.id, u.username, u.name, u.password, u.otp_enabled, u.otp_secret, u.otp_pending_secret, u.permissions,"
+  ]
+ ]
+}

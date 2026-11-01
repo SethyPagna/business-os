@@ -1,0 +1,132 @@
+{
+ "shifts-id-history": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d70c91e55b7a",
+   "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
+  ],
+  [
+   "3b5c720e247b",
+   "SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')"
+  ],
+  [
+   "0bf788383186",
+   "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
+  ],
+  [
+   "86af87ac23a7",
+   "SELECT id, shift_session_id, actor_user_id, actor_name, reason, before_json, after_json, created_at FROM shift"
+  ],
+  [
+   "8ae772072593",
+   "SELECT key, value FROM settings WHERE key IN ('pos_payment_methods', 'pos_payment_method_kinds')"
+  ],
+  [
+   "a162a66f429e",
+   "SELECT figures_json FROM shift_close_figures WHERE shift_session_id = ?1"
+  ],
+  [
+   "f3761077da46",
+   "SELECT m.id AS id, m.created_at AS created_at, m.quantity AS quantity, m.unit_cost_usd AS unit_cost_usd, m.tot"
+  ],
+  [
+   "981617994552",
+   "SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label, COALESCE(SUM(amount_usd), 0) AS usd, C"
+  ],
+  [
+   "67163d6054df",
+   "SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE datetime(fees."
+  ],
+  [
+   "0c21bb96ceab",
+   "SELECT COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "91cd6d4ab1de",
+   "SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr, change_usd, change_khr, change_is_ac"
+  ],
+  [
+   "981617994552",
+   "SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label, COALESCE(SUM(amount_usd), 0) AS usd, C"
+  ],
+  [
+   "54fc16395159",
+   "SELECT COALESCE(SUM((CASE WHEN returns.refund_currency = 'KHR' THEN 0 ELSE (COALESCE(returns.total_refund_usd,"
+  ],
+  [
+   "0c21bb96ceab",
+   "SELECT COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_"
+  ],
+  [
+   "bff0d24ecb60",
+   "SELECT json_extract(after_json, '$.time_review') AS review FROM shift_session_amendments WHERE shift_session_i"
+  ],
+  [
+   "1f1cd1776d1c",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "0e326a1225fb",
+   "SELECT e.id, e.sale_id, e.direction, e.drawer_effect, e.payment_method, e.payment_details, e.amount_paid_usd, "
+  ],
+  [
+   "bdc06bf81ffa",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "14f01c41ce19",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "aac2edf10f30",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98c8df696d56",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "23d873282557",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "1f1cd1776d1c",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "bdc06bf81ffa",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "14f01c41ce19",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "aac2edf10f30",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "98c8df696d56",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "23d873282557",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ]
+ ]
+}

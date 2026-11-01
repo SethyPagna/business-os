@@ -1,0 +1,24 @@
+{
+ "returns-report": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3938a267df2a",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd, ROUND(COALESCE(SUM(total"
+  ],
+  [
+   "92865c291ae6",
+   "SELECT date(created_at, '+7 hours') AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) A"
+  ],
+  [
+   "4d513caace7e",
+   "SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_u"
+  ],
+  [
+   "0f80d5a7036d",
+   "SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ROUND(COALESCE(SU"
+  ]
+ ]
+}

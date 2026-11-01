@@ -1,0 +1,16 @@
+{
+ "reports-business-summary-expenses": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e3f7435472c1",
+   "SELECT MAX(f.id) AS max_id FROM fees f WHERE 1=1 AND f.fee_date >= ?1 AND f.fee_date <= ?2"
+  ],
+  [
+   "49dbd6bf168b",
+   "SELECT f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label, CASE WH"
+  ]
+ ]
+}

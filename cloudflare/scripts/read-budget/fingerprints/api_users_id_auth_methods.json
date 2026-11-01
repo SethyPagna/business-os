@@ -1,0 +1,16 @@
+{
+ "users-id-auth-methods": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "514b573974aa",
+   "SELECT u.id, u.username, u.permissions, u.role_id, r.permissions AS role_permissions, r.code AS role_code FROM"
+  ],
+  [
+   "133783c191d7",
+   "SELECT email, email_verified, otp_enabled, is_active, google_subject, google_email, google_linked_at FROM user"
+  ]
+ ]
+}

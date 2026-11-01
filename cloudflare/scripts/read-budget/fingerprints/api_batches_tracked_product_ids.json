@@ -1,0 +1,24 @@
+{
+ "batches-tracked-product-ids-active-or-stock-batch-catalog": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "17897e202e94",
+   "SELECT DISTINCT pb.variant_product_id AS productId FROM product_batches pb WHERE pb.is_active = 1 OR EXISTS (S"
+  ]
+ ]
+}

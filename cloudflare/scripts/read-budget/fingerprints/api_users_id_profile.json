@@ -1,0 +1,16 @@
+{
+ "users-id-profile": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "514b573974aa",
+   "SELECT u.id, u.username, u.permissions, u.role_id, r.permissions AS role_permissions, r.code AS role_code FROM"
+  ],
+  [
+   "0d6989e57094",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.emai"
+  ]
+ ]
+}

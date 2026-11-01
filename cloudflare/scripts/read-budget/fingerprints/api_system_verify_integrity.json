@@ -1,0 +1,28 @@
+{
+ "system-verify-integrity": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c9fa6a21fc25",
+   "SELECT product_id, branch_id, quantity FROM branch_stock WHERE quantity < 0"
+  ],
+  [
+   "40244389b60a",
+   "SELECT p.id, COALESCE(p.stock_quantity, 0) AS stock_quantity, COALESCE(SUM(CASE WHEN bs.quantity < 0 THEN 0 EL"
+  ],
+  [
+   "1faf1bbedc39",
+   "SELECT id, sale_status, stored, expected FROM ( SELECT s.id, s.sale_status, CASE s.sale_status WHEN 'returned'"
+  ],
+  [
+   "5c0186055508",
+   "SELECT COUNT(*) AS n FROM sale_items WHERE cost_price_usd IS NULL"
+  ],
+  [
+   "3c1403bf3774",
+   "SELECT COUNT(*) AS n FROM inventory_movements WHERE unit_cost_usd IS NULL AND movement_type IN ('sale', 'retur"
+  ]
+ ]
+}

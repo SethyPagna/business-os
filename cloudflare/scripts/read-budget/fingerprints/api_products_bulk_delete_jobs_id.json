@@ -1,0 +1,20 @@
+{
+ "products-bulk-delete-jobs-id": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9b2dba9b6e0a",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM system_flags WHERE key = 'maintenance' ) THEN 1 ELSE json_extra"
+  ],
+  [
+   "5f66178b0fa1",
+   "B| UPDATE bulk_delete_jobs SET status = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMEST"
+  ],
+  [
+   "f68e022704f3",
+   "SELECT * FROM bulk_delete_jobs WHERE id = ?1"
+  ]
+ ]
+}

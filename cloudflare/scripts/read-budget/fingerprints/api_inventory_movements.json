@@ -1,0 +1,44 @@
+{
+ "inventory-movements-default": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "18cb4c7e9b0c",
+   "B| SELECT COUNT(*) AS count FROM inventory_movements"
+  ],
+  [
+   "430349d5e67e",
+   "B| SELECT *, COALESCE(NULLIF(inventory_movements.branch_name, ''), (SELECT name FROM branches WHERE id = inven"
+  ]
+ ],
+ "inventory-movements-30d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "cd51d591b283",
+   "B| SELECT COUNT(*) AS count FROM inventory_movements WHERE date(created_at, '+7 hours') >= ?1 AND created_at >"
+  ],
+  [
+   "e887b2b1f07a",
+   "B| SELECT *, COALESCE(NULLIF(inventory_movements.branch_name, ''), (SELECT name FROM branches WHERE id = inven"
+  ]
+ ],
+ "inventory-movements-search": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "f4a712fa6bd3",
+   "B| SELECT COUNT(*) AS count FROM inventory_movements WHERE (lower(COALESCE(( COALESCE(inventory_movements.prod"
+  ],
+  [
+   "dce1f685987d",
+   "B| SELECT *, COALESCE(NULLIF(inventory_movements.branch_name, ''), (SELECT name FROM branches WHERE id = inven"
+  ]
+ ]
+}

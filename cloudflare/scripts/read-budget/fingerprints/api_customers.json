@@ -1,0 +1,162 @@
+{
+ "customers-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "1e9675446fbc",
+   "SELECT COUNT(*) AS count FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1)"
+  ],
+  [
+   "15f66d35efc0",
+   "SELECT * FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) ORDER BY lower(name) ASC, id ASC LIMIT ?1 OF"
+  ],
+  [
+   "2e38d7382c4c",
+   "SELECT DISTINCT substr(date(created_at, '+7 hours'), 1, 4) AS year FROM customers WHERE NOT (COALESCE(is_anony"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ],
+  [
+   "fb38170632a3",
+   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,?,?,?,?,?,?,?"
+  ]
+ ],
+ "customers-search": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "137558dcd65b",
+   "SELECT COUNT(*) AS count FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FRO"
+  ],
+  [
+   "2f62c72e6d68",
+   "SELECT * FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FROM customers_fts "
+  ],
+  [
+   "e4199a589b56",
+   "SELECT DISTINCT substr(date(created_at, '+7 hours'), 1, 4) AS year FROM customers WHERE NOT (COALESCE(is_anony"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ],
+  [
+   "fb38170632a3",
+   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,?,?,?,?,?,?,?"
+  ]
+ ],
+ "customers-phone-search": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "d0306b1c67bf",
+   "SELECT COUNT(*) AS count FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FRO"
+  ],
+  [
+   "01f3a70381af",
+   "SELECT * FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FROM customers_fts "
+  ],
+  [
+   "c9995e7664eb",
+   "SELECT DISTINCT substr(date(created_at, '+7 hours'), 1, 4) AS year FROM customers WHERE NOT (COALESCE(is_anony"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ],
+  [
+   "f3e73bf3bbe4",
+   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?)"
+  ]
+ ],
+ "w-customer-create": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "2e9aa0254a5d",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE (phone_n"
+  ],
+  [
+   "f9f6aa8e168a",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE lower(tr"
+  ],
+  [
+   "6a52be0de899",
+   "SELECT membership_number FROM customers WHERE lower(trim(membership_number)) GLOB 'lc-[0-9]*' AND lower(trim(m"
+  ],
+  [
+   "1252974e1bfc",
+   "SELECT membership_id FROM portal_accounts WHERE lower(trim(membership_id)) GLOB 'lc-[0-9]*' AND lower(trim(mem"
+  ],
+  [
+   "fec1fe10c16f",
+   "B| INSERT INTO customers (id, name) SELECT candidate.id, candidate.name FROM customers AS candidate WHERE cand"
+  ],
+  [
+   "24126f390cb0",
+   "B| INSERT INTO customers (name, phone, phone_normalized, membership_number, updated_at) VALUES (?1, ?2, ?3, ?4"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "46b57cbdaa01",
+   "SELECT * FROM customers WHERE id = ?1"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

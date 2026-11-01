@@ -1,0 +1,32 @@
+{
+ "dashboard": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "67ff2741f102",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr F"
+  ],
+  [
+   "eb57865c4531",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd FROM returns WHERE date(returns.crea"
+  ],
+  [
+   "ce5cf8ec256f",
+   "SELECT id, receipt_number, created_at, sale_status, status_before_return, return_state, delivery_pending, bran"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ]
+ ]
+}

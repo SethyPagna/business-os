@@ -1,0 +1,332 @@
+{
+ "settings-payment-methods-impact": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d8ee1f48f4c2",
+   "SELECT value,updated_at FROM settings WHERE key='pos_payment_methods'"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ],
+  [
+   "edadf9234ef7",
+   "SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name, s.payment_method,s"
+  ]
+ ]
+}

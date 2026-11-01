@@ -1,0 +1,28 @@
+{
+ "branches-id-stock": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "b1c7f37bfec9",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
+  ],
+  [
+   "e9019d3cd751",
+   "SELECT SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN 1 ELSE 0 END) AS positive_products, COALESCE(SUM(CASE W"
+  ],
+  [
+   "3b0637d960f0",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, "
+  ],
+  [
+   "9dcbedaf2ddf",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, "
+  ]
+ ]
+}

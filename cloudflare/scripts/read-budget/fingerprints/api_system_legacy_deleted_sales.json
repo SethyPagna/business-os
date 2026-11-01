@@ -1,0 +1,20 @@
+{
+ "system-legacy-deleted-sales": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "5cf9ac8cabb9",
+   "SELECT d.id, d.event_key, d.event_started_at, d.event_ended_at, d.invoice_no, d.reference_no, d.cashier_name, "
+  ],
+  [
+   "dd50bda2df65",
+   "SELECT COUNT(DISTINCT d.event_key) AS events, COUNT(*) AS lines, COALESCE(SUM(d.quantity), 0) AS units, COALES"
+  ],
+  [
+   "45a42c349076",
+   "SELECT lower(trim(COALESCE(cashier_name, deleted_by, ''))) AS key, MAX(trim(COALESCE(cashier_name, deleted_by,"
+  ]
+ ]
+}

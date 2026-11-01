@@ -1,0 +1,12 @@
+{
+ "ai-providers": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8e689d2cf1a4",
+   "SELECT * FROM ai_provider_configs ORDER BY enabled DESC, priority ASC, updated_at DESC, id DESC"
+  ]
+ ]
+}

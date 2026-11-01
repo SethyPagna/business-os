@@ -1,0 +1,12 @@
+{
+ "system-drive-sync-status": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "25a28ec06353",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?)"
+  ]
+ ]
+}

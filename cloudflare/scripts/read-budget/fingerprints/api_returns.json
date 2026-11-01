@@ -1,0 +1,272 @@
+{
+ "returns-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "f27994bc4164",
+   "SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is"
+  ]
+ ],
+ "returns-list-30d": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c863d6154a92",
+   "SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is"
+  ]
+ ],
+ "w-return-1-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "46568b79cea8",
+   "SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id, (SELECT COALESCE(MAX(id),0)"
+  ],
+  [
+   "60f23468c17c",
+   "SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,s.subtotal_usd,s.discount_usd,s.membe"
+  ],
+  [
+   "ed15107e3bc6",
+   "SELECT id,sale_id,product_id,quantity,total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,appl"
+  ],
+  [
+   "35986dbc27c9",
+   "SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd, r.rounding_adjustment_usd,r.total_"
+  ],
+  [
+   "2561fd1ee5a9",
+   "SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "6bed7ad25789",
+   "SELECT id,name,cost_price_usd,cost_price_khr, selling_price_usd,selling_price_khr,updated_at,is_active FROM pr"
+  ],
+  [
+   "c968c3f00e8d",
+   "SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id"
+  ],
+  [
+   "da651ef172ec",
+   "SELECT 'branch' AS kind,CAST(j.key AS INTEGER) AS ordinal, COALESCE((SELECT quantity FROM branch_stock WHERE p"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "beec0cf3e9d2",
+   "B| INSERT INTO return_create_guards(operation_id,phase,guard_value) SELECT ?1,?2,CASE WHEN ( NOT EXISTS(SELECT"
+  ],
+  [
+   "3e6294438037",
+   "B| INSERT INTO returns( return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name, custom"
+  ],
+  [
+   "ffdb31162eab",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=?1 AND is_active IS 1) THEN json_extract('[]','"
+  ],
+  [
+   "97cbf589ea6d",
+   "B| UPDATE product_batches SET is_active = 1, expiry_date = CASE WHEN ?1 = 1 THEN ?2 ELSE expiry_date END, note"
+  ],
+  [
+   "0e56ecf121c1",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(batch_id, br"
+  ],
+  [
+   "4b69caa5ee28",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "26f92e981649",
+   "B| UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + ?1, updated_at = CURRENT_TIMESTAMP WHERE"
+  ],
+  [
+   "f517b742787b",
+   "B| INSERT INTO return_items(return_id,sale_item_id,product_id,product_name,quantity,applied_price_usd,applied_"
+  ],
+  [
+   "596c89e03ef3",
+   "B| INSERT INTO return_item_batch_allocations(return_item_id,sale_item_id,batch_id,branch_id,quantity) VALUES(("
+  ],
+  [
+   "54020c9f128f",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,movement_type,quantity,unit_cost_usd,unit"
+  ],
+  [
+   "399745bc2af2",
+   "B| UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=?1)"
+  ],
+  [
+   "31fdd50ec427",
+   "B| UPDATE sales SET return_state=t.tag, return_review_state=CASE WHEN t.tag='full' AND COALESCE(CASE sale_stat"
+  ],
+  [
+   "09d3f281ef65",
+   "B| INSERT INTO sale_record_events( id,sale_id,source_kind,source_id,generation,kind,via,subject, actor_id,acto"
+  ],
+  [
+   "3a4fea284637",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VA"
+  ],
+  [
+   "dff68e77c950",
+   "B| INSERT INTO return_create_receipts( id,actor_id,return_id,sale_id,request_id,request_digest,request_json,re"
+  ],
+  [
+   "9c2c471be862",
+   "B| INSERT INTO return_create_guards(operation_id,phase,guard_value) SELECT ?1,?2,CASE WHEN ( EXISTS(SELECT 1 F"
+  ],
+  [
+   "58ee5539294f",
+   "B| DELETE FROM return_create_guards WHERE operation_id=?1"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-return-3-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "46568b79cea8",
+   "SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id, (SELECT COALESCE(MAX(id),0)"
+  ],
+  [
+   "60f23468c17c",
+   "SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,s.subtotal_usd,s.discount_usd,s.membe"
+  ],
+  [
+   "ed15107e3bc6",
+   "SELECT id,sale_id,product_id,quantity,total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,appl"
+  ],
+  [
+   "35986dbc27c9",
+   "SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd, r.rounding_adjustment_usd,r.total_"
+  ],
+  [
+   "2561fd1ee5a9",
+   "SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "37483b57df30",
+   "SELECT id,name,cost_price_usd,cost_price_khr, selling_price_usd,selling_price_khr,updated_at,is_active FROM pr"
+  ],
+  [
+   "e5f21f4b73cf",
+   "SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id"
+  ],
+  [
+   "da651ef172ec",
+   "SELECT 'branch' AS kind,CAST(j.key AS INTEGER) AS ordinal, COALESCE((SELECT quantity FROM branch_stock WHERE p"
+  ]
+ ],
+ "w-return-10-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "46568b79cea8",
+   "SELECT r.return_id,r.sale_id,r.request_digest,r.response_json,o.id AS occupied_id, (SELECT COALESCE(MAX(id),0)"
+  ],
+  [
+   "60f23468c17c",
+   "SELECT s.id,s.money_precision_version,s.calculated_total_usd,s.total_usd,s.subtotal_usd,s.discount_usd,s.membe"
+  ],
+  [
+   "ed15107e3bc6",
+   "SELECT id,sale_id,product_id,quantity,total_usd,total_khr,base_price_usd,base_price_khr,applied_price_usd,appl"
+  ],
+  [
+   "35986dbc27c9",
+   "SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd, r.rounding_adjustment_usd,r.total_"
+  ],
+  [
+   "2561fd1ee5a9",
+   "SELECT 1 AS hit FROM returns WHERE return_number=? LIMIT 1"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "2e268530e17a",
+   "SELECT id,name,cost_price_usd,cost_price_khr, selling_price_usd,selling_price_khr,updated_at,is_active FROM pr"
+  ],
+  [
+   "d272957e41a8",
+   "SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id"
+  ],
+  [
+   "da651ef172ec",
+   "SELECT 'branch' AS kind,CAST(j.key AS INTEGER) AS ordinal, COALESCE((SELECT quantity FROM branch_stock WHERE p"
+  ]
+ ]
+}

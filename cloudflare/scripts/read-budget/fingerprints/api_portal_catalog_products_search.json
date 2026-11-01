@@ -1,0 +1,52 @@
+{
+ "portal-catalog-products-search": [
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "13512951eeab",
+   "SELECT key, value FROM settings WHERE key IN ('customer_portal_show_stock_status', 'customer_portal_show_out_o"
+  ],
+  [
+   "710869c2f44a",
+   "SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "d64dada4b73f",
+   "B| WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_"
+  ],
+  [
+   "a595fb37e07d",
+   "B| WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_"
+  ],
+  [
+   "641f579e021b",
+   "SELECT upper(substr(trim(p.brand), 1, 1)) AS value, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id "
+  ],
+  [
+   "c97898ef36aa",
+   "SELECT starts_at, ends_at FROM promotion_rules WHERE is_active = 1"
+  ],
+  [
+   "d04b65cf1e04",
+   "SELECT id, stock_quantity, low_stock_threshold, out_of_stock_threshold FROM products WHERE id IN (1000, 1001, "
+  ],
+  [
+   "e0cd16900bea",
+   "SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "ddbf2e8ca970",
+   "SELECT key, value FROM settings WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_sto"
+  ],
+  [
+   "f85be0d82056",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ]
+ ]
+}

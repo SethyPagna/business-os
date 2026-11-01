@@ -1,0 +1,12 @@
+{
+ "auth-devices-sessions": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "91b53a9d7833",
+   "SELECT s.id, s.user_id, s.device_id, s.device_name, s.device_tz, s.user_agent, s.last_ip, s.created_at, s.last"
+  ]
+ ]
+}

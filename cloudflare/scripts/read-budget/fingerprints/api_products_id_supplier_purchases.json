@@ -1,0 +1,12 @@
+{
+ "products-id-supplier-purchases": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d1ddc9afe2a1",
+   "SELECT pb.id, pb.lot_code, pb.batch_number, pb.received_at, pb.expiry_date, pb.unit_cost_usd, pb.supplier_name"
+  ]
+ ]
+}
