@@ -21,6 +21,11 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
+import { recordServerSignals } from './serverSignals.ts'
+import {
+  READ_BUDGET_PAUSED_KEY, READ_BUDGET_PAUSED_MESSAGE, isReadBudgetCode, noteReadBudgetShed, observeReadBudgetZone, readBudgetHold,
+  readBudgetSentence, retryAfterSeconds, type ReadBudgetPause,
+} from './readBudgetShed.ts'
 // The disabled-branch redirect and the Khmer refusal restatement load on the refusal path only, so the storefront's
 // catalog closure (which shares this module) does not carry them.
 const BRANCH_REDIRECT_HEADER = 'X-Branch-Redirect'
@@ -534,6 +539,30 @@ async function refuseWriteUnderD1Limit(channel: string): Promise<void> {
   throw error
 }
 
+// A governor refusal (api/readBudgetShed.ts) is a 429 the server chose to send before it read anything. The call fails with
+// a typed error that says when the pause ends; it is not an outage, so no probe, no cache clear and no refresh follows.
+function applyReadBudgetPause(error: ApiRuntimeError, pause: ReadBudgetPause, retryAfter: number): void {
+  error.transientGateway = false
+  error.code = pause.code
+  error.retryAfterSeconds = retryAfter
+  error.pausedUntilText = pause.timeText
+  error.messageKey = READ_BUDGET_PAUSED_KEY
+  error.message = readBudgetSentence(READ_BUDGET_PAUSED_MESSAGE, pause.timeText)
+  error.outcome = 'not_dispatched'
+}
+
+function noteReadBudget(error: ApiRuntimeError, retryHeader: string | null, resetsAt: unknown, method: string, path: string): void {
+  const retryAfter = retryAfterSeconds(retryHeader, error.retryAfterSeconds)
+  applyReadBudgetPause(error, noteReadBudgetShed({ code: error.code, method, path, resetsAt, retryAfter }), retryAfter)
+}
+
+function readBudgetHeldError(held: { pause: ReadBudgetPause; retryAfter: number }): ApiRuntimeError {
+  const error = new Error('') as ApiRuntimeError
+  error.status = 429
+  applyReadBudgetPause(error, held.pause, held.retryAfter)
+  return error
+}
+
 async function restateInKhmer(error: ApiRuntimeError): Promise<void> {
   if (typeof document === 'undefined' || !String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) return
   const language = await import('./branchRefusalLanguage.ts')
@@ -931,8 +960,8 @@ function suspectServerDown(): void {
 }
 
 function noteReadFailure(channel: string, error: any, source: string, startedAt: number): boolean {
-  if (error?.code === D1_DAILY_LIMIT_CODE) {
-    logCall(channel, source || 'd1-daily-limit', Date.now() - startedAt, false)
+  if (error?.code === D1_DAILY_LIMIT_CODE || isReadBudgetCode(error?.code)) {
+    logCall(channel, source || (error.code === D1_DAILY_LIMIT_CODE ? 'd1-daily-limit' : 'read-budget-paused'), Date.now() - startedAt, false)
     return false
   }
   const gateway = isTransientGatewayError(error?.status)
@@ -1077,6 +1106,16 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       throw mismatchError
     }
   }
+  // The identical GET the Worker just refused for the read budget is not sent again before its Retry-After.
+  if (normalizedMethod === 'GET') {
+    const held = readBudgetHold(normalizedMethod, path)
+    if (held) {
+      logCall(path, 'read-budget-held', 0, false)
+      const heldError = readBudgetHeldError(held)
+      await restateInKhmer(heldError)
+      throw heldError
+    }
+  }
   const dedupeKey = options.skipWriteDedupe ? '' : buildApiRequestDedupeKey(normalizedMethod, path, body)
   if (dedupeKey) {
     const existing = _writeInflight.get(dedupeKey)
@@ -1165,6 +1204,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     const requestSequence = ++apiRequestSequence
     const res = await fetch(`${base}${path}`, requestInit)
+    if (path.startsWith('/api/')) observeReadBudgetZone(recordServerSignals(res.headers))
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
     if (readScope) assertActorReadScope(readScope, false, recoveryRead)
@@ -1208,6 +1248,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
       if (apiError.code === D1_DAILY_LIMIT_CODE) noteD1DailyLimit(apiError)
+      else if (res.status === 429 && isReadBudgetCode(apiError.code)) noteReadBudget(apiError, res.headers.get('Retry-After'), parsed?.resetsAt, normalizedMethod, path)
       if (apiError) await restateInKhmer(apiError)
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
