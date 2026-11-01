@@ -1,6 +1,7 @@
 import { buildContactMatchClause, type ContactMatchClause } from './contactSearch'
 import { canonicalizePhone } from './phone'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
+import { FULL_NUMBER_MIN_DIGITS, type PhoneSearchAccess } from './phoneSearchGuard'
 
 function phoneDigitsSql(value: string): string {
   let digits = value
@@ -12,12 +13,14 @@ function phoneDigitsSql(value: string): string {
 // may be unformatted while historical phone FTS contains separated tokens.
 // Keep the ordinary name/phone FTS clause, and union literal phone alternatives
 // without changing the directory search contract or introducing LIKE patterns.
-export function buildSalesCustomerMatchClause(rawSearch: unknown): ContactMatchClause | undefined {
+export function buildSalesCustomerMatchClause(rawSearch: unknown, access: PhoneSearchAccess): ContactMatchClause | undefined {
   const raw = String(rawSearch ?? '').trim()
-  const original = buildContactMatchClause('customers', raw, 'picker')
+  const original = buildContactMatchClause('customers', raw, 'picker', access)
   if (!/^[+\d\s().-]+$/.test(raw)) return original
   const digits = raw.replace(/\D/g, '')
   if (digits.length < 3 || digits.length > 15) return original
+  // Without the full-phone permission a fragment of a number is not a search (lib/phoneSearchGuard.ts); a whole number is.
+  if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original
   const canonical = canonicalizePhone(raw) || digits
   const alternatives = new Set([digits, canonical])
   if (/^0\d{8,9}$/.test(canonical)) alternatives.add(`855${canonical.slice(1)}`)

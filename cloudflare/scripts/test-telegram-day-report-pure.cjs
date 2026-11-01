@@ -163,7 +163,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': dbShim,
   './lowStockSettings': lowStockStub,
   './businessDateWindow': businessDateWindow,
-  './telegramLang': lang,
+  './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,

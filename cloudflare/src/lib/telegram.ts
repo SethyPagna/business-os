@@ -2,6 +2,7 @@ import { getDb } from './db'
 import { stockVisibleProductSql } from './productStockGuard'
 import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
+import { isPhoneShaped, maskPhone } from './phoneMask'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   addCalendarDays, bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
@@ -2721,6 +2722,15 @@ export function telegramMoney(usd: unknown, khr: unknown): string { return money
 // promotionLabel: the promotion's title as captured on the sale line
 // (product_discount_label), printed inside the cut's parentheses so the
 // line names the offer as well as the amount: "(−$0.20 Summer sale)".
+// A Telegram chat has no sign-in, so it never holds the full-phone permission: a number leaves here masked (P2.8, 6.0.1046).
+// A customer saved under their number has that number as their name, so a name that is wholly a number is masked too.
+export function telegramPhone(value: unknown): string {
+  return String(maskPhone(String(value ?? '').trim()) ?? '')
+}
+export function telegramPersonName(value: unknown): string {
+  const text = String(value ?? '').trim()
+  return isPhoneShaped(text) ? telegramPhone(text) : text
+}
 export type TelegramSaleItem = { name: string; quantity: number; unitPriceUsd: number; basePriceUsd?: number | null; lineTotalUsd: number; promotionLabel?: string | null }
 export type TelegramSaleSummary = {
   status: string; createdAt?: string | null; receiptNumber: string; cashier?: string | null
@@ -2911,9 +2921,9 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     {
       key: 'customer',
       rows: [
-        sale.customer ? `Customer: ${sale.customer}` : '',
-        sale.phone ? `Tel: ${sale.phone}` : '',
-        sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
+        sale.customer ? `Customer: ${telegramPersonName(sale.customer)}` : '',
+        sale.phone ? `Tel: ${telegramPhone(sale.phone)}` : '',
+        sale.driver?.name ? `Delivery driver: ${telegramPersonName(sale.driver.name)}${sale.driver.phone ? ` · ${telegramPhone(sale.driver.phone)}` : ''}` : '',
       ],
     },
     // WHAT WAS BOUGHT.
@@ -3017,7 +3027,7 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
   const skipped = Math.round(Number(change.skippedUnits) || 0)
   const lostFeeUsd = Number(change.lostFeeUsd) || 0
   const lostFeeKhr = Number(change.lostFeeKhr) || 0
-  const customer = cleanLine(change.customer, 120)
+  const customer = telegramPersonName(cleanLine(change.customer, 120))
   return [eventTitle('🧾 Invoice', change.receipt), ...eventGroups([
     // The raw English MUST equal LABELS.statusUpdated.en exactly (telegramLang.ts):
     // localizeTelegramLine finds this label by that string before the first ': '.
@@ -3172,7 +3182,7 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
     `Date: ${formatBusinessDateTime(ret.createdAt)}`,
     `${ret.kind === 'supplier' ? 'SRET' : 'RET'}: ${ret.returnNumber}`,
     ret.receiptNumber ? `INV: ${ret.receiptNumber}` : '',
-    ret.party ? `${ret.kind === 'supplier' ? 'Supplier' : 'Customer'}: ${ret.party}` : '',
+    ret.party ? `${ret.kind === 'supplier' ? 'Supplier' : 'Customer'}: ${telegramPersonName(ret.party)}` : '',
     ret.branch ? `Branch: ${ret.branch}` : '',
     ret.reason ? `Reason: ${ret.reason}` : '',
     ret.returnType ? `Type: ${String(ret.returnType).replace(/_/g, ' ')}` : '',
@@ -3275,7 +3285,7 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
     lines.push(
       `${code}: ${ret.returnNumber}`,
       ret.receiptNumber ? `INV: ${ret.receiptNumber}` : '',
-      ret.party ? `${partyLabel}: ${ret.party}` : '',
+      ret.party ? `${partyLabel}: ${telegramPersonName(ret.party)}` : '',
       ret.branch ? `Branch: ${ret.branch}` : '',
       input.kind === 'customer' && hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : '',
     )
@@ -3286,7 +3296,7 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
       const hasMoney = (Number(ret.refundUsd) || 0) !== 0 || (Number(ret.refundKhr) || 0) !== 0
       lines.push(...telegramRowLines(`• ${cleanLine(ret.returnNumber, 40)}`, [
         ret.receiptNumber ? cleanLine(ret.receiptNumber, 40) : '',
-        ret.party ? cleanLine(ret.party, 60) : '',
+        ret.party ? cleanLine(telegramPersonName(ret.party), 60) : '',
         input.kind === 'customer' && hasMoney ? money(ret.refundUsd, ret.refundKhr) : '',
       ].filter(Boolean)))
     }

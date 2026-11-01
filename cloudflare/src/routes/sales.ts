@@ -29,6 +29,8 @@ function canReadSales(user: SessionUser): boolean {
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
+import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
+import { fullContactPhoneClause, fullPhoneColumnClause, isDigitWord, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -164,7 +166,7 @@ import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAf
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { recordStockCrossings, type StockSaleLine } from '../lib/stockCrossingAlert'
-import { contactDisplayAddress } from '../lib/contactOptions'
+import { CONTACT_OPTION_LIMIT, contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { COURIER_COST_KEYS, costViewProfit } from '../lib/reportProfitView'
@@ -4011,17 +4013,25 @@ app.get('/delivery-options', async (c) => {
   }
   const search = String(c.req.query('search') || '').trim().toLowerCase()
   const pattern = `%${search.replace(/[%_]/g, '\\$&')}%`
+  // Without the full-phone permission a number fragment matches neither the phone nor the address (which can hold
+  // Contact Option phones); a whole number finds the contact whose phone is that number (lib/phoneSearchGuard.ts).
+  const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)
+  const whole = probe.kind === 'full' ? fullContactPhoneClause(probe, 'deliveryPhoneDigits', CONTACT_OPTION_LIMIT) : null
+  const phoneBearingMatches = probe.kind === 'none'
+    ? `
+      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'`
+    : whole ? `
+      OR ${whole.sql}` : ''
   const rows = await getDb(c.env).prepare(`
     SELECT id,name,phone,area,address
     FROM delivery_contacts
     WHERE @search=''
       OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'${phoneBearingMatches}
     ORDER BY lower(COALESCE(name,'')) ASC, id ASC
     LIMIT 25
-  `).all<Record<string, unknown>>({ search, pattern })
+  `).all<Record<string, unknown>>({ search, pattern, ...(whole?.params ?? {}) })
   return c.json({ items: rows })
 })
 
@@ -5820,10 +5830,12 @@ function concatBalanced(parts: readonly string[]): string {
   return `(${concatBalanced(parts.slice(0, middle))} || ' ' || ${concatBalanced(parts.slice(middle))})`
 }
 
-function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>): string | undefined {
+function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>, access: PhoneSearchAccess): string | undefined {
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
   if (!groups.length) return undefined
+  // Without the full-phone permission a digit-only word never matches the customer's number (lib/phoneSearchGuard.ts).
+  const probe = access.fullPhone ? ({ kind: 'none' } as const) : phoneProbeOf(raw)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
   // Keep one shallow haystack per row context. Passing every raw column to
@@ -5844,6 +5856,12 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   const flatHaystack = concatBalanced([
     "COALESCE(s.search_normalized, '')", "COALESCE(s.receipt_number, '')", "COALESCE(s.legacy_receipt_number, '')",
     "COALESCE(s.cashier_name, '')", "COALESCE(s.customer_name, '')", "COALESCE(s.customer_phone, '')",
+    "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
+    "COALESCE(c.membership_number, '')",
+  ])
+  const flatHaystackWithoutPhones = concatBalanced([
+    "COALESCE(s.receipt_number, '')", "COALESCE(s.legacy_receipt_number, '')",
+    "COALESCE(s.cashier_name, '')", nameWithoutPhoneSql('s.customer_name'),
     "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
     "COALESCE(c.membership_number, '')",
   ])
@@ -5874,7 +5892,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = boundSearchClause(word, flatHaystack, `${keyBase}_f`)
+      const flatClause = boundSearchClause(word, probe.kind !== 'none' && isDigitWord(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
       const itemClause = boundSearchClause(word, itemHaystack, `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
@@ -5886,7 +5904,11 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
   })
   const joiner = mode === 'OR' ? ' OR ' : ' AND '
-  return groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+  const searched = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+  if (probe.kind !== 'full') return searched
+  const whole = fullPhoneColumnClause("COALESCE(s.customer_phone, '')", probe, 'salesPhoneDigits')
+  Object.assign(params, whole.params)
+  return `(${searched} OR ${whole.sql})`
 }
 
 // GET /api/sales -- the real list/history/receipt-lookup endpoint (there is
@@ -5967,7 +5989,7 @@ app.get('/', async (c) => {
     if (clause) where.push(clause)
   }
 
-  const searchClause = buildSalesSearchWhere(query, params)
+  const searchClause = buildSalesSearchWhere(query, params, phoneSearchAccessOf(user))
   if (searchClause) where.push(searchClause)
 
   const limit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
@@ -6249,7 +6271,7 @@ app.get('/stats', async (c) => {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
   }
-  const searchClause = buildSalesSearchWhere(query, params)
+  const searchClause = buildSalesSearchWhere(query, params, phoneSearchAccessOf(user))
   if (searchClause) where.push(searchClause)
 
   // Preserve the list's complete cohort, but delegate financial policy and

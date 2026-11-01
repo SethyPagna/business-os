@@ -227,6 +227,20 @@ function run(modules) {
     const out = access.projectPhones({ details: '{"phone":"087 654 321", truncated' }, cashier)
     assert.ok(!hasFull(out), JSON.stringify(out))
   })
+  check('a number a message quotes is masked; a receipt number or an amount in running text is not', () => {
+    const duplicate = 'Phone "087 654 321" is already registered to "Fixture Dara". Each phone number can only belong to one customer.'
+    const out = access.projectPhones({ error: duplicate, code: 'phone_conflict' }, cashier)
+    assert.equal(out.error, 'Phone "087 *** 321" is already registered to "Fixture Dara". Each phone number can only belong to one customer.')
+    assert.equal(out.code, 'phone_conflict')
+    const csvCell = access.projectPhones({ message: 'Phone ""087 654 321"" already belongs to a different customer' }, cashier)
+    assert.equal(csvCell.message, 'Phone ""087 *** 321"" already belongs to a different customer')
+    const nested = access.projectPhones({ warnings: [{ kind: 'name_match', message: 'Phone "+855 87 654 321" matches "Dara"' }], errors: ['Phone "087654321" taken'] }, cashier)
+    assert.ok(!hasFull(nested), JSON.stringify(nested))
+    const plain = { message: 'Receipt 20261102-100405 total 1234567.89 for row 12345678', error: 'Row 1234567 is invalid' }
+    assert.equal(access.projectPhones(plain, cashier), plain, 'unquoted digits in a sentence are not a phone and the input comes back as is')
+    assert.equal(access.projectPhones({ error: duplicate }, granted).error, duplicate, 'a holder reads the message as written')
+    assert.equal(mask.maskQuotedPhones('see "Dara" and 5 items'), 'see "Dara" and 5 items')
+  })
   check('depth is bounded and fails closed', () => {
     let deep = { phone: FULL }
     for (let i = 0; i < 80; i += 1) deep = { child: deep }
@@ -265,6 +279,8 @@ const mutants = {
   'other people exempt as own': { phoneAccess: replaceOnce("String(source.id) === actorId", "true") },
   'input mutated': { phoneAccess: replaceOnce('let out: Record<string, unknown> | null = null\n  for (const key in source)', 'let out: Record<string, unknown> | null = source\n  for (const key in source)') },
   'always copies': { phoneAccess: replaceOnce('return out ?? node\n}\n\n/**', 'return { ...source, ...(out ?? {}) }\n}\n\n/**') },
+  'quoted number in a message kept': { phoneAccess: replaceOnce('  if (kind & MESSAGE) return maskQuotedPhones(text)\n', '') },
+  'message arrays kept': { phoneAccess: replaceOnce('if ((kind & MESSAGE) && !exempt && Array.isArray(value))', 'if (false && Array.isArray(value))') },
   'no actor sees full': { phoneAccess: replaceOnce('return !!user && hasPermission', 'return !user || hasPermission') },
 }
 let missed = 0

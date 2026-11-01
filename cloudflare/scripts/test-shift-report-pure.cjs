@@ -77,6 +77,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === './productStockGuard') return productStockGuard
+    if (request === './phoneMask') return require('./harness/phone_real_modules.cjs').phoneModule(request)
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
@@ -142,7 +143,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
-  './telegramLang': lang,
+  './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analytics,
@@ -741,7 +742,7 @@ const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
-  './telegramLang': lang,
+  './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
   './salesAnalytics': analyticsForShift,
@@ -795,7 +796,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
-    './telegramLang': lang,
+    './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => emptyDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision }),
@@ -890,7 +891,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => mappingDb },
     './businessDateWindow': businessDateWindow,
-    './telegramLang': lang,
+    './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
     './saleTotals': saleTotals,
     './nativeSaleChange': nativeSaleChange,
     './salesAnalytics': mappingAnalytics,

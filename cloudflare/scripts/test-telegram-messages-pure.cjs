@@ -40,6 +40,7 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
+const phoneMask = loadReal('lib/phoneMask.ts')
 const telegramLang = loadReal('lib/telegramLang.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -67,7 +68,7 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 
 // The shift drawer arithmetic is shared with the close routes and the app.
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } }, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') })
-const telegram = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+const telegram = loadReal('lib/telegram.ts', { './phoneMask': phoneMask, './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
 
 // --- date: UTC -> business zone, dd/mm/yyyy HH:mm, both timestamp shapes ---
 assert.equal(telegram.formatBusinessDateTime('2026-09-02T17:30:00.000Z'), '03/09/2026 00:30', 'ISO with Z shifts +7h across midnight')
@@ -118,8 +119,9 @@ assert.deepEqual(lines, [
   'Branch: Shop',
   SECTION('customer'),
   'Customer: Sok Dara',
-  'Tel: 012 345 678',
-  'Delivery driver: Tuk Tuk Dara · 099 111 222',
+  // P2.8 (6.0.1046): a Telegram chat has no sign-in and never holds the full-phone permission, so every number leaves masked.
+  'Tel: 012 *** 678',
+  'Delivery driver: Tuk Tuk Dara · 099 *** 222',
   SECTION('items'),
   // P3-L3: the promotion is named inside the cut's parentheses; a label on
   // a line with no cut prints nothing (the offer did not apply).
@@ -688,7 +690,7 @@ assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path
       { key: 'telegram_language', value: shopLanguage },
     ] }) }),
   }
-  const wired = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  const wired = loadReal('lib/telegram.ts', { './phoneMask': phoneMask, './lowStockSettings': lowStockStub, './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
   const sendSale = async (mode, sale) => {
     shopLanguage = mode
     posted.length = 0
@@ -736,5 +738,22 @@ assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path
   } finally {
     globalThis.fetch = realFetch
   }
-  console.log('test-telegram-messages-pure: ok')
+  // ---- P2.8: no full number in any composed line, and a customer saved under a number is masked too ----
+{
+  const everyLine = [
+    ...lines,
+    ...telegram.formatSaleTelegramLines({ status: 'completed', receiptNumber: 'P28-1', cashier: 'Za', customer: '087 654 321', phone: '+855 87 654 321', items: [], exchangeRate: 4100, driver: { name: 'Courier', phone: '0962345678' }, subtotalUsd: 1, discountUsd: 0, totalUsd: 1 }),
+    ...telegram.formatSaleStatusTelegramLines({ receipt: 'P28-1', fromStatus: 'completed', toStatus: 'cancelled', customer: '087 654 321' }),
+    ...telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-1', party: '087 654 321', items: [], createdAt: null }),
+    ...telegram.formatReturnStatusTelegramLines({ kind: 'customer', returns: [{ returnNumber: 'RET-1', party: '087 654 321', status: 'cancelled' }] }),
+  ].join('\n')
+  for (const full of ['012 345 678', '012345678', '099 111 222', '087 654 321', '087654321', '85587654321', '0962345678']) assert.ok(!everyLine.includes(full), `the Telegram composition leaks ${full}`)
+  assert.ok(everyLine.includes('Tel: 087 *** 321'), 'a +855 number is masked in the national form')
+  assert.ok(everyLine.includes('Customer: 087 *** 321'), 'a customer saved under their number is masked')
+  assert.ok(everyLine.includes('Delivery driver: Courier · 096 *** 678'), 'the driver phone is masked')
+  assert.ok(everyLine.includes('Customer: Sok Dara'), 'a customer name that is a name is left alone')
+  assert.equal(telegram.telegramPhone(''), '', 'an empty phone stays empty')
+  assert.equal(telegram.telegramPersonName('Sok Dara 2'), 'Sok Dara 2', 'digits inside a name are not a phone number')
+}
+console.log('test-telegram-messages-pure: ok')
 })().catch((error) => { console.error(error); process.exit(1) })

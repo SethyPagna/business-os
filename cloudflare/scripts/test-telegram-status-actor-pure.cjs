@@ -72,7 +72,7 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': noDb })
 const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
-  './db': noDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
+  './db': noDb, './businessDateWindow': businessDateWindow, './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': telegramLang,
   './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
   './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', { './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
 })
@@ -324,7 +324,7 @@ const OWNER_SAMPLE = [
   }
   const wired = loadReal('lib/telegram.ts', {
     './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
-    './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
+    './db': settingsDb, './businessDateWindow': businessDateWindow, './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': telegramLang,
     './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
     './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', { './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
   })

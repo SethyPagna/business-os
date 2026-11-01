@@ -387,6 +387,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './contactOptions') {
     return contactOptionsModuleObj.exports // real module -- classifyContacts actually calls into it
   }
+  if (request === './phoneWriteGuard') {
+    return require('./harness/phone_real_modules.cjs').phoneModule(request) // real module -- a masked phone in an import row is refused (P2.8)
+  }
   if (request === './contactDuplicates') {
     return contactDuplicatesModuleObj.exports // real module -- canonical phone matching/option formatting
   }

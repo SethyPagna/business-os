@@ -18,7 +18,8 @@
 // and keep showing. This is the second wall: a shared server cache that holds a phone-bearing body is keyed on the grant and
 // stores the masked variant for everyone else (lib/phoneCache.ts), so neither layer depends on the other.
 import { hasPermission, type PermissionUser } from './permissions'
-import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
+import { isPhoneShaped, maskPhone, maskPhonesInText, maskQuotedPhones } from './phoneMask'
+import type { PhoneSearchAccess } from './phoneSearchGuard'
 
 export const FULL_PHONE_PERMISSION = 'contacts_full_phone'
 
@@ -26,6 +27,11 @@ export type PhoneActor = (NonNullable<PermissionUser> & { id?: number | string |
 
 export function canSeeFullPhones(user: PhoneActor): boolean {
   return !!user && hasPermission(user, 'contacts_full_phone')
+}
+
+/** What a search box may match for this account (lib/phoneSearchGuard.ts): every call site names it, none can forget. */
+export function phoneSearchAccessOf(user: PhoneActor): PhoneSearchAccess {
+  return { fullPhone: canSeeFullPhones(user) }
 }
 
 const MAX_DEPTH = 48
@@ -40,12 +46,16 @@ const NAME_KEY = /(^|_)(name|label|title|customer|supplier|contact|driver|recipi
 // Keys that hold serialized JSON (audit details, undo payloads, snapshots). Always decoded, not only when the word phone appears.
 const ENVELOPE_KEY = /(^|_)(details?|old_value|new_value|payload|snapshot|undo_payload|redo_payload|before|after)$/
 
+// Keys that hold a sentence: the duplicate and import checks quote the number they matched.
+const MESSAGE_KEY = /(^|_)(message|messages|error|errors|warning|warnings|reason|hint)$/
+
 const keyClass = new Map<string, number>()
 const PHONE = 1
 const NAME = 2
 const SEARCH_TEXT = 4
 const ENVELOPE = 8
 const BUSINESS = 16
+const MESSAGE = 32
 
 function classify(key: string): number {
   const hit = keyClass.get(key)
@@ -56,6 +66,7 @@ function classify(key: string): number {
   if (NAME_KEY.test(normalized)) kind |= NAME
   if (ENVELOPE_KEY.test(normalized) || normalized.endsWith('_json')) kind |= ENVELOPE
   if (/(^|_)(search|searchable|normalized)(_|$)/.test(normalized)) kind |= SEARCH_TEXT
+  if (MESSAGE_KEY.test(normalized)) kind |= MESSAGE
   if (BUSINESS_PHONE_KEYS.has(normalized) || BUSINESS_PHONE_PREFIXES.some((prefix) => normalized.startsWith(prefix))) kind |= BUSINESS
   if (keyClass.size < 4096) keyClass.set(key, kind)
   return kind
@@ -95,6 +106,7 @@ function projectString(text: string, kind: number, depth: number, actorId: strin
   if (kind & PHONE) return maskPhone(text) as string
   if (kind & SEARCH_TEXT) return maskPhonesInText(text)
   if ((kind & NAME) && isPhoneShaped(text)) return maskPhone(text) as string
+  if (kind & MESSAGE) return maskQuotedPhones(text)
   if (text.length > 2 && text.length <= MAX_ENVELOPE_CHARS) {
     const first = text.charCodeAt(0)
     if (first === 0x7b || first === 0x5b || first === 0x20 || first === 0x0a) {
@@ -131,12 +143,13 @@ function walk(node: unknown, depth: number, actorId: string | null): unknown {
     const exempt = (kind & BUSINESS) !== 0 || (branch && (kind & PHONE) !== 0) || (own && key === 'phone')
     if (typeof value === 'string') {
       if (!exempt) {
-        if (kind & (PHONE | NAME | SEARCH_TEXT | ENVELOPE)) next = projectString(value, kind, depth, actorId)
+        if (kind & (PHONE | NAME | SEARCH_TEXT | ENVELOPE | MESSAGE)) next = projectString(value, kind, depth, actorId)
         else if (value.length > 2) next = projectString(value, 0, depth, actorId)
       }
     } else if (value !== null && typeof value === 'object') {
       next = exempt ? value : walk(value, depth + 1, actorId)
       if ((kind & PHONE) && !exempt && Array.isArray(value)) next = (next as unknown[]).map(maskValue)
+      if ((kind & MESSAGE) && !exempt && Array.isArray(value)) next = (next as unknown[]).map((item) => (typeof item === 'string' ? maskQuotedPhones(item) : item))
     } else if (typeof value === 'number' && !exempt && key === 'phone') {
       next = maskValue(value)
     }

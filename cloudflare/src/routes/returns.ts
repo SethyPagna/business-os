@@ -1,3 +1,5 @@
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { isDigitWord, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -640,7 +642,7 @@ export function returnRangePredicate(query: Record<string, string>, column: 'r.c
  * time predicate (the list's own range, or the export's exact one-year window).
  */
 type ReturnsFilter = { scope: string; where: string[]; params: Record<string, unknown> }
-function returnsFilter(query: Record<string, string>, range: { sql: string; params: Record<string, unknown> }): ReturnsFilter {
+function returnsFilter(query: Record<string, string>, range: { sql: string; params: Record<string, unknown> }, access: PhoneSearchAccess): ReturnsFilter {
   const scope = normalizeScope(query.scope, CUSTOMER_SCOPE)
   const search = String(query.search || query.q || '').trim().toLowerCase()
   const typeValues = String(query.type || query.returnType || '')
@@ -709,13 +711,23 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(rip.barcode, '') || ' ' || COALESCE(rip.brand, '') || ' ' ||
       COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
     )`
+    // A return carries no phone column; the customer name can be a phone number (a customer saved by it), so without the
+    // full-phone permission a digit-only word reads neither that name nor the folded copy of it (lib/phoneSearchGuard.ts).
+    const digitWordHaystack = `(
+      COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' ||
+      COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' ||
+      ${nameWithoutPhoneSql('r.customer_name')} || ' ' || COALESCE(r.supplier_name, '') || ' ' ||
+      COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' ||
+      COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, '')
+    )`
+    const guardDigitWords = !access.fullPhone && phoneProbeOf(search).kind !== 'none'
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
       let wordIndex = 0
       const wordClauses = words.map((word) => {
         const keyBase = `rsrch${groupIndex}_${wordIndex}`
         wordIndex += 1
-        const flatClause = buildLikeAliasClause(word, [flatHaystack], params, `${keyBase}_f`, true)
+        const flatClause = buildLikeAliasClause(word, [guardDigitWords && isDigitWord(word) ? digitWordHaystack : flatHaystack], params, `${keyBase}_f`, true)
         const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
         return `(${flatClause} OR EXISTS (
           SELECT 1 FROM return_items rii
@@ -741,7 +753,7 @@ app.get('/', async (c) => {
 
   let range: ReturnType<typeof returnRangePredicate>
   try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
-  const filter = returnsFilter(query, range)
+  const filter = returnsFilter(query, range, phoneSearchAccessOf(c.get('user')))
   const where = filter.where
   const params: Record<string, unknown> = { limit, ...filter.params }
 
@@ -860,7 +872,7 @@ app.get('/export', async (c) => {
   // the rows that range reads (test-sargable-date-filters-pure carries the allowlist entry); it never drives a scan.
   const seekFrom = seekBound(window.createdFrom, -SEEK_MARGIN_HOURS, ' '), seekTo = seekBound(window.createdTo, SEEK_MARGIN_HOURS, 'T')
   const buildFilter = (upper: string) => {
-    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } })
+    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } }, phoneSearchAccessOf(c.get('user')))
     if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }
     return built
   }

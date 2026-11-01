@@ -71,7 +71,7 @@ const settingsDb = {
 }
 const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
-  './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
+  './db': settingsDb, './businessDateWindow': businessDateWindow, './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': telegramLang,
   './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
   './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', { './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
 })

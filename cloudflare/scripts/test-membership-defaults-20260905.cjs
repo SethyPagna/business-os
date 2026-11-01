@@ -39,6 +39,7 @@ const permissionsModule = load('lib/permissions.ts')
 // Since 6.0.888 points are computed only while the programme is on; the cases below that read balances switch it on.
 let loyaltyOn = true
 const contactDependencies = {
+  ...require('./harness/phone_real_modules.cjs').routePhoneDeps(),
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => {
     const permissions = c.req.header('x-test-permissions')
@@ -71,6 +72,7 @@ const contactsWrite = load('routes/contacts.ts', {
   '../lib/actorSnapshot': { actorSnapshot: () => ({}) },
 }).default
 const imports = load('lib/importEngine.ts', {
+  './phoneWriteGuard': require('./harness/phone_real_modules.cjs').phoneModule('./phoneWriteGuard'),
   './membershipNumber': membership,
   './contactOptions': contactOptions,
   './contactDuplicates': contactDuplicates,

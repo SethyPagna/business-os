@@ -59,6 +59,9 @@ function formatCambodianNational(digits: string): string {
  */
 export function formatPhoneInputValue(value: unknown): string {
   const raw = String(value ?? '')
+  // A number this account may not see arrives as 012 *** 678. Re-grouping its digits would drop the asterisks and hand the
+  // Worker a different, shorter number it could no longer tell from one typed by hand (P2.8, 6.0.1046).
+  if (raw.includes('*')) return raw
   const digits = raw.replace(/\D/g, '')
   const leadingPlus = hasLeadingPlus(raw)
 

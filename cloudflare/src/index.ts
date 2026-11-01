@@ -540,11 +540,11 @@ app.use('/api/*', async (c, next) => {
   try { c.executionCtx.waitUntil(drain) } catch { void drain }
 })
 
+app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
+
 // A full phone number leaves the Worker only for an account holding contacts_full_phone (lib/phoneAccess.ts). Last of
 // the /api/* middleware and ahead of every route, so each c.json below is projected, cache hits and errors included.
 app.use('/api/*', phoneMaskResponses)
-
-app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
 
 // Proxies straight into the BroadcastHub Durable Object -- one shared fan-out
 // point for every connected client, regardless of which isolate/edge

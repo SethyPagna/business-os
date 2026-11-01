@@ -93,10 +93,10 @@ const lang = load('lib/telegramLang.ts')
 const lowStockRule = load('lib/lowStockSettings.ts', { './db': dbModule })
 const telegram = load('lib/telegram.ts', {
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
-  './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
+  './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang,
   './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,
 })
-const menu = load('lib/telegramCommandMenu.ts', { './telegram': telegram, './telegramLang': lang })
+const menu = load('lib/telegramCommandMenu.ts', { './telegram': telegram, './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': lang })
 
 const bumps = []
 let broadcastImpl = async () => {}

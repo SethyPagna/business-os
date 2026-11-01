@@ -126,6 +126,18 @@ async function main() {
       results[account] = out
     }
 
+    // PHONE_DUMP=<file>: write what the accounts that HOLD the grant read, volatile values removed, so the same dump taken on the base
+    // commit can be diffed against this one (scripts/phone-holder-parity.cjs): a holder must read today's output, byte for byte.
+    if (process.env.PHONE_DUMP) {
+      const volatile = (text) => String(text)
+        .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g, '<time>')
+        .replace(/"(created_at|updated_at|last_seen_at|expires_at|generated_at|server_time|now)":"[^"]*"/g, '"$1":"<time>"')
+        .replace(/tok-[a-z_]+-[0-9a-f]{8}/g, '<token>')
+      const dump = {}
+      for (const account of world.accounts.allowed) dump[account] = Object.fromEntries(results[account].map((r) => [r.route, { status: r.status, body: volatile(r.text) }]))
+      require('node:fs').writeFileSync(process.env.PHONE_DUMP, JSON.stringify(dump))
+      console.log(`dump: ${Object.keys(dump).length} holder accounts x ${routes.length} routes -> ${process.env.PHONE_DUMP}`)
+    }
     await check('the crawl reached the surface it claims (a crawl of nothing proves nothing)', async (t) => {
       t.ok(`at least ${only ? 1 : 150} distinct routes requested (got ${routes.length})`, routes.length >= (only ? 1 : 150))
       t.ok('administrator got 200s', results.admin.filter((r) => r.status === 200).length >= (only ? 1 : 100), results.admin.filter((r) => r.status === 200).length)

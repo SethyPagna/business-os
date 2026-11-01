@@ -86,6 +86,18 @@ export function maskPhonesInText(text: string): string {
   })
 }
 
+/**
+ * A number the message itself quotes (`Phone "087 654 321" is already registered to "Dara"`): the duplicate and import checks name
+ * the number they matched. Only a QUOTED number is touched, so a receipt number or an amount in running text is left alone.
+ */
+const QUOTED_PHONE = /(["'“‘]{1,2})((?:\+|00)?[\d០-៩٠-٩۰-۹０-９](?:[\s().-]?[\d០-៩٠-٩۰-۹０-９]){6,})(["'”’]{1,2})/g
+export function maskQuotedPhones(text: string): string {
+  return text.replace(QUOTED_PHONE, (match, open: string, number: string, close: string) => {
+    const masked = maskPhone(number)
+    return typeof masked === 'string' ? `${open}${masked}${close}` : match
+  })
+}
+
 /** A name field that is really a number (a contact saved by its phone): the whole value is a phone. */
 const PHONE_SHAPED = /^[+\d\s().\-០-៩٠-٩۰-۹０-９]{8,24}$/
 export function isPhoneShaped(value: string): boolean {

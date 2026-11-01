@@ -27,6 +27,7 @@ function loadModule(relPath) {
   const moduleObj = { exports: {} }
   const req = (spec) => {
     if (spec === './searchMatch') return loadModule('lib/searchMatch.ts')
+    if (['./contactOptions', './phoneSearchGuard', './phoneMask', './phone'].includes(spec)) return loadModule(`lib/${spec.slice(2)}.ts`)
     throw new Error(`unexpected require in test harness: ${spec}`)
   }
   new Function('exports', 'require', outputText)(moduleObj.exports, req)
@@ -89,7 +90,7 @@ function insertDelivery(db, row) {
 }
 
 function searchIds(db, table, rawSearch) {
-  const clause = buildContactMatchClause(table, rawSearch, 'search')
+  const clause = buildContactMatchClause(table, rawSearch, 'search', { fullPhone: true })
   if (!clause) return null
   const rows = db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params)
   return rows.map((r) => r.id)

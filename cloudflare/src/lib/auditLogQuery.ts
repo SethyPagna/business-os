@@ -24,6 +24,7 @@
 // deliberately not the device-supplied client_time (see businessDateWindow.ts;
 // the created_at prefilter there keeps the index usable).
 
+import { isBareNumberWord } from './phoneSearchGuard'
 import { businessToday, localDateExpr } from './businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
 import {
@@ -79,6 +80,12 @@ export type AuditLogFilterInput = {
    * entity, device and ids.
    */
   hiddenTextPatterns?: readonly string[]
+  /**
+   * Set for a reader without the full-phone permission: a bare number typed in the search box (a fragment of a hidden phone)
+   * is not matched through `details`, `old_value` or `new_value`, where a phone is recorded (lib/phoneSearchGuard.ts).
+   * The row is still found by its user, action, entity, device and ids.
+   */
+  phoneTextBlocked?: boolean
 }
 
 export type AuditLogFilterClause = {
@@ -296,14 +303,15 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     .slice(0, AUDIT_MAX_SEARCH_WORDS)
   const hiddenTextPatterns = searchWords.length ? input.hiddenTextPatterns ?? [] : []
   hiddenTextPatterns.forEach((pattern, index) => { params[`hiddenText${index}`] = pattern })
-  const searchable = (column: string, term: string): string => {
+  const searchable = (column: string, term: string, word: string): string => {
     const match = `${column} LIKE ${term} ESCAPE '\\'`
+    if (input.phoneTextBlocked && REDACTABLE_TEXT_COLUMNS.has(column) && isBareNumberWord(word)) return '0'
     if (!REDACTABLE_TEXT_COLUMNS.has(column) || !hiddenTextPatterns.length) return match
     return `(${match} AND ${hiddenTextPatterns.map((_, index) => `${column} NOT LIKE @hiddenText${index}`).join(' AND ')})`
   }
   searchWords.forEach((word, index) => {
     params[`search${index}`] = `%${word.replace(/([\\%_])/g, '\\$1')}%`
-    clauses.push(`(${SEARCH_COLUMNS.map((column) => searchable(column, `@search${index}`)).join(' OR ')})`)
+    clauses.push(`(${SEARCH_COLUMNS.map((column) => searchable(column, `@search${index}`, word)).join(' OR ')})`)
   })
 
   if (cursor) {

@@ -12,6 +12,7 @@ import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
+import { canSeeFullPhones } from '../lib/phoneAccess'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
@@ -585,6 +586,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
       // The responses below redact these costs after the query, so the search must not be able to find them either.
+      phoneTextBlocked: !canSeeFullPhones(user),
       hiddenTextPatterns: [...(canViewCourierCost(user) ? [] : [COURIER_COST_TEXT_PATTERN]), ...(canViewAcquisitionCosts(user) ? [] : ACQUISITION_COST_TEXT_PATTERNS)],
     })
     // The courier's actual cost leaves here by the same permission as everywhere else.
