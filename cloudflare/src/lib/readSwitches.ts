@@ -201,6 +201,24 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
   }
 }
 
+// The flip is one compare-and-swap on the exact stored text, its audit row tied to the swap (WHERE changes() = 1), and a guard
+// that aborts the batch when the swap matched nothing. Turning something ON also refuses while a restore or cutover holds
+// writes; an OFF flip always may.
+export const SWITCH_FLIP_UPSERT_SQL = `INSERT INTO system_flags (key, value, updated_at)
+  SELECT @key, @value, CURRENT_TIMESTAMP
+  WHERE (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  WHERE system_flags.value = @expected AND (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))`
+export const SWITCH_FLIP_GUARD_SQL = `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('[1]', '$[read_switch_conflict]') END`
+
+export function buildFlipStatements(flip: { record: { sql: string; params: Record<string, unknown> }; value: string; expected: string | null; off: boolean }): Array<{ sql: string; params?: Record<string, unknown> }> {
+  return [
+    { sql: SWITCH_FLIP_UPSERT_SQL, params: { key: READ_SWITCH_KEY, value: flip.value, expected: flip.expected, off: flip.off ? 1 : 0 } },
+    { sql: `${flip.record.sql} WHERE changes() = 1`, params: flip.record.params },
+    { sql: SWITCH_FLIP_GUARD_SQL },
+  ]
+}
+
 const store = createReadSwitchStore()
 
 export const readSwitchState = (env: Env, name: string): Promise<ReadSwitchReading> => store.read(env, name)

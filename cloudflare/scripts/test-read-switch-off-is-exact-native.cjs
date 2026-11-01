@@ -34,10 +34,18 @@ function differing(a, b) {
   return [...new Set([...left.keys(), ...right.keys()])].filter((key) => left.get(key) !== right.get(key))
 }
 
+// Any GET may carry the shift-overview drain (index.ts, one run per 20 s, lib/telegram.ts). It is not part of the shape and it fires on
+// whichever request lands after the window opens, so a measure without it is taken: the drain cannot fire again for 20 s.
+const DRAIN = 'telegram_scheduled_sends'
+const hasDrain = (m) => (m.fingerprints || []).some((f) => String(f.head).includes(DRAIN))
+const withoutDrain = (m) => ({ ...m, fingerprints: (m.fingerprints || []).filter((f) => !String(f.head).includes(DRAIN)) })
+
 async function measure(world, shape, url) {
   const probe = { method: 'GET', url, anon: shape.anon }
-  const first = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
-  const second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
+  const first = withoutDrain(await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true }))
+  let second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
+  for (let attempt = 0; hasDrain(second) && attempt < 3; attempt += 1) second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
+  if (hasDrain(second)) throw new Error(`${shape.id}: the drain was in four measures in a row`)
   return { first, second }
 }
 

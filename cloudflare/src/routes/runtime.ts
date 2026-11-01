@@ -5,7 +5,7 @@ import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getMaintenance } from '../lib/maintenance'
 import {
-  KNOWN_READ_SWITCHES, READ_SWITCH_KEY, READ_SWITCH_MEMO_MS, formatSwitchToken, isKnownReadSwitch, parseFlipState,
+  KNOWN_READ_SWITCHES, READ_SWITCH_MEMO_MS, buildFlipStatements, formatSwitchToken, isKnownReadSwitch, parseFlipState,
   parseReadSwitches, primeReadSwitches, serializeReadSwitches, splitSwitchRows, SWITCH_ROWS_PARAMS, SWITCH_ROWS_SQL, type ReadSwitches,
 } from '../lib/readSwitches'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
@@ -231,15 +231,6 @@ const SWITCH_FLIP_FIELDS = ['name', 'state', 'expectedEpoch']
 async function storedSwitches(db: ReturnType<typeof getDb>): Promise<string | null> {
   return splitSwitchRows(await db.prepare(SWITCH_ROWS_SQL).all<{ key: string; value: string }>(SWITCH_ROWS_PARAMS)).switchesRaw
 }
-// One compare-and-swap on the exact stored text. A flip that turns something ON also refuses to run while a restore or
-// cutover holds writes; an OFF flip always may.
-const SWITCH_UPSERT_SQL = `INSERT INTO system_flags (key, value, updated_at)
-  SELECT @key, @value, CURRENT_TIMESTAMP
-  WHERE (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))
-  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  WHERE system_flags.value = @expected AND (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))`
-const SWITCH_FLIP_GUARD_SQL = `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('[1]', '$[read_switch_conflict]') END`
-
 function switchListing(current: ReadSwitches) {
   return {
     epoch: current.epoch,
@@ -287,11 +278,7 @@ app.put('/read-switches', async (c) => {
   const record = buildAuditStatement(user.id, user.name, 'read_switch_set', 'read_switch', name,
     { name, from, to, epochBefore: current.epoch, epochAfter: epoch }, changedFields({ state: from, epoch: current.epoch }, { state: to, epoch }))
   try {
-    await db.batch([
-      { sql: SWITCH_UPSERT_SQL, params: { key: READ_SWITCH_KEY, value, expected: storedRaw, off: target.state === 'off' ? 1 : 0 } },
-      { sql: `${record.sql} WHERE changes() = 1`, params: record.params },
-      { sql: SWITCH_FLIP_GUARD_SQL },
-    ])
+    await db.batch(buildFlipStatements({ record, value, expected: storedRaw, off: target.state === 'off' }))
   } catch (error) {
     const after = await storedSwitches(db)
     if (after !== value) {
