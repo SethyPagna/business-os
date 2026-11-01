@@ -18,6 +18,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 94120
 WITH sh AS MATERIALIZED (
   SELECT id, user_id, branch_id, scope_mode, business_date,
     COALESCE(datetime(opened_at), opened_at) AS o,

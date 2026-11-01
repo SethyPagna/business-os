@@ -34,6 +34,7 @@
 -- capped by LIMIT 201 against max-rows 200, so a longer list fails the check instead of truncating quietly.
 -- ops:min-rows 0
 -- ops:max-rows 200
+-- ops:max-rows-read 34886
 WITH rr AS MATERIALIZED (
   SELECT sale_id, SUM(COALESCE(owed_reduction_usd, 0)) AS lowered
   FROM returns

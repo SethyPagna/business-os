@@ -7,6 +7,7 @@
 -- estimated as size_after minus the sum below.
 -- Names only (schema is in the public repo), no row data.
 -- ops:min-rows 1
+-- ops:max-rows-read 100000
 SELECT
   d.name AS object,
   COALESCE(m.type, 'internal') AS kind,

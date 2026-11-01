@@ -9,6 +9,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 788451
 SELECT
   (SELECT COUNT(*) FROM sale_items c WHERE NOT EXISTS (SELECT 1 FROM sales p WHERE p.id = c.sale_id)) AS sale_items_orphans,
   (SELECT COUNT(*) FROM return_items c WHERE NOT EXISTS (SELECT 1 FROM returns p WHERE p.id = c.return_id)) AS return_items_orphans,

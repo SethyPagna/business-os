@@ -8,6 +8,7 @@
 -- a user-level 'all' key (any value) wins over the role's; only JSON true counts;
 -- invalid JSON / arrays / scalars count as {}. The trim set is JS String.trim()'s.
 -- Selects no password, hash, token, OTP secret, e-mail, phone or Google field.
+-- ops:max-rows-read 28
 WITH ws(chars) AS (
   SELECT char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)
 ), base AS (

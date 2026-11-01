@@ -8,6 +8,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 81278
 WITH g AS MATERIALIZED (
   SELECT name_key, COUNT(*) AS n FROM products WHERE is_active = 1 AND COALESCE(name_key, '') <> '' GROUP BY name_key
 )

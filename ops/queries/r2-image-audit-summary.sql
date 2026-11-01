@@ -8,6 +8,7 @@
 -- One row of scalar sub-queries, not a UNION ALL (D1 compound limit).
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 20
 SELECT
   (SELECT COUNT(*) FROM image_audit) AS audited_rows,
   (SELECT COALESCE(SUM(byte_size), 0) FROM image_audit) AS audited_bytes,

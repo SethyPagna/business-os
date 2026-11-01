@@ -31,6 +31,7 @@
 --                                  d: anything else (owner review)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 36869
 WITH rv AS (
   SELECT m.id, CAST(substr(CAST(m.reference_id AS TEXT), 8) AS INTEGER) AS original_id, m.product_id, m.branch_id, m.batch_id,
     COALESCE(strftime('%Y-%m-%d %H:%M:%S', m.created_at), m.created_at) AS at,

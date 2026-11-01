@@ -7,6 +7,7 @@
 -- Timestamps only, no counts of business rows. One row, scalar sub-queries.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 3338
 SELECT
   (SELECT value FROM settings WHERE key = 'audit_log_retention_last_run') AS audit_last_run,
   (SELECT value FROM settings WHERE key = 'audit_log_retention_days') AS audit_days_setting,

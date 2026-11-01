@@ -18,6 +18,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 150379
 WITH d AS MATERIALIZED (
   SELECT products.id, products.cost_price_usd, products.purchase_price_usd, products.cost_price_khr, products.purchase_price_khr, COALESCE(
       (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END

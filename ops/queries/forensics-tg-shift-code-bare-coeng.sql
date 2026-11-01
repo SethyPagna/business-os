@@ -8,6 +8,7 @@
 --   suffixed                 1 when a -N suffix follows the cut name
 -- ops:min-rows 0
 -- ops:max-rows 500
+-- ops:max-rows-read 397
 SELECT
   id AS shift_id, shift_code, user_id, user_name, branch_id, business_date, opened_at,
   CASE WHEN substr(shift_code, -1) = char(6098) THEN 0 ELSE 1 END AS suffixed

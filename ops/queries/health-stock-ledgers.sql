@@ -16,6 +16,7 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero active_products_without_branch_row
+-- ops:max-rows-read 488284
 WITH bs AS MATERIALIZED (
   SELECT product_id, SUM(quantity) AS qty FROM branch_stock GROUP BY product_id
 ),

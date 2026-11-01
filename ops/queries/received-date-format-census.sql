@@ -34,6 +34,7 @@
 -- cloudflare/scripts/test-received-date-format-census-query-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 16
+-- ops:max-rows-read 423086
 WITH pos AS MATERIALIZED (
   SELECT batch_id FROM branch_batch_stock WHERE quantity > 0 GROUP BY batch_id
 ), c0 AS MATERIALIZED (

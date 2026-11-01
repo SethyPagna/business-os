@@ -14,6 +14,7 @@
 -- Paired test: cloudflare/scripts/test-branch-cutover-post-checks-native.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 11
 WITH op AS MATERIALIZED (
   -- the newest cutover that was not aborted: at P7 (just begun) and at P10 (completed) it is the same row
   SELECT c.operation_id AS id, c.source_branch_id AS src, c.target_branch_id AS tgt, c.created_at AS began, datetime(c.created_at) AS began_t, c.phase, c.terminal_json,

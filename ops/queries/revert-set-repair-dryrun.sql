@@ -11,6 +11,7 @@
 --   rows             json [table, key, column, current, planned]
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 24
 WITH s AS (
   SELECT
     (SELECT quantity FROM branch_batch_stock WHERE batch_id = 56725 AND branch_id = 2) AS lot_adj,

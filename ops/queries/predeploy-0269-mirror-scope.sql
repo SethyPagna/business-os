@@ -15,6 +15,7 @@
 --                              product_money_state_conflict and need re-approval)
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 50345
 WITH scope AS MATERIALIZED (
   SELECT id,
     NOT (cost_price_usd IS purchase_price_usd OR (cost_price_usd IS NULL AND COALESCE(purchase_price_usd, 0) = 0)) AS usd_off,

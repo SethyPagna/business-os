@@ -11,6 +11,7 @@
 -- and report before deploying 0229. Paired test:
 -- cloudflare/scripts/test-branch-identity-precheck-query-pure.cjs
 -- ops:min-rows 1
+-- ops:max-rows-read 22
 WITH k AS (
   SELECT b.id, b.name, b.is_active, b.is_default, b.role, b.canonical_key, b.successor_branch_id,
     CASE WHEN typeof(b.name) = 'text' THEN lower(trim(b.name, char(9, 10, 11, 12, 13, 32, 160, 5760,

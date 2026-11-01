@@ -17,6 +17,7 @@
 --                            negative fee ids)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 10
 SELECT
   f.id AS fee_id, s.id AS sale_id, s.receipt_number, s.cancelled_at, f.fee_date,
   date(s.cancelled_at, '+7 hours') AS business_date,

@@ -27,6 +27,7 @@
 --                             deducts them (the accrual-0 half is fixed in customerPointsReturnSql)
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 52335
 WITH cfg AS MATERIALIZED (
   SELECT
     CASE WHEN lower(trim(COALESCE((SELECT value FROM settings WHERE key = 'loyalty_points_enabled'), ''))) IN ('1', 'true', 'yes', 'on') THEN 1 ELSE 0 END AS on_flag,

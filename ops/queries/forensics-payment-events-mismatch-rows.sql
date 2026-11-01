@@ -10,6 +10,7 @@
 -- Ids, dates, amounts and code-chosen tokens only. Capped by LIMIT 201 against max-rows 200.
 -- ops:min-rows 0
 -- ops:max-rows 200
+-- ops:max-rows-read 34874
 WITH pe AS MATERIALIZED (
   SELECT x.id, COALESCE(x.amount_paid_usd, 0) AS paid_usd, COALESCE(x.amount_paid_khr, 0) AS paid_khr,
     COALESCE(e.usd, 0) AS ev_usd, COALESCE(e.khr, 0) AS ev_khr

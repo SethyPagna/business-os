@@ -2,6 +2,7 @@
 -- each flag must decide exactly as lib/telegram.ts does, pinned by test-ops-telegram-topic-queries-pure.cjs.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 20
 WITH ws(chars) AS (
   SELECT char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)
 ), t AS (

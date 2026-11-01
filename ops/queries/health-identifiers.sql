@@ -13,6 +13,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 47357
 WITH rd AS MATERIALIZED (
   SELECT receipt_number, COUNT(*) AS n, MAX(created_at) AS last_at
   FROM sales WHERE COALESCE(receipt_number, '') <> '' GROUP BY receipt_number HAVING COUNT(*) > 1

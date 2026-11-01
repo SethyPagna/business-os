@@ -19,6 +19,7 @@
 -- Ids, reasons and lengths only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 1000
+-- ops:max-rows-read 13
 WITH vals AS MATERIALIZED (
   SELECT id, is_active, link_type, 'link_url' AS field, trim(link_url) AS v FROM promotions
   WHERE COALESCE(trim(link_url), '') <> ''

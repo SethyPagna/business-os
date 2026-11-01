@@ -22,6 +22,7 @@
 -- Ids, dates, points and discount amounts only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 17438
 WITH raw AS MATERIALIZED (
   SELECT trim((SELECT value FROM settings WHERE key = 'customer_portal_redeem_points')) AS rp,
     trim((SELECT value FROM settings WHERE key = 'customer_portal_redeem_value_usd')) AS rv

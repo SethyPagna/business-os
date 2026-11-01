@@ -32,6 +32,7 @@
 -- Selects no token hash, IP, user agent, device id or device name.
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:max-rows-read 27287
 WITH live AS (
   SELECT s.id, s.user_id, s.device_id, s.limit_family_id, s.created_at, s.last_seen_at, s.expires_at
   FROM user_sessions s

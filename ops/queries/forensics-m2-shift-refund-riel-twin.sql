@@ -41,6 +41,7 @@
 -- Proof: cloudflare/scripts/test-forensics-m2-shift-refund-twin-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 7614
 WITH ended AS (
   SELECT s.id, s.business_date, s.branch_id, s.user_id, s.closed_at, s.closing_counted_khr,
     s.opening_float_khr_registered,

@@ -12,6 +12,7 @@
 --   next_dated_rows_in_20          dated stock-count rows among the 20 ids after the hole
 -- ops:min-rows 0
 -- ops:max-rows 3000
+-- ops:max-rows-read 147464
 WITH seq AS (
   SELECT id, movement_type, reason, created_at,
     LAG(id) OVER (ORDER BY id) AS prev_id

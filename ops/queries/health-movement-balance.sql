@@ -25,6 +25,7 @@
 -- One pass over inventory_movements, grouped per pair.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 247672
 WITH mv AS MATERIALIZED (
   SELECT COALESCE(product_id, -1) AS pid, COALESCE(branch_id, -1) AS bid,
     SUM(CASE WHEN movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',

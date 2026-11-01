@@ -14,6 +14,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 232116222
 WITH j AS MATERIALIZED (
   SELECT r.id, r.customer_id AS r_customer, COALESCE(r.total_amount_usd, 0) AS r_total,
     COUNT(s.id) AS matches, MIN(s.customer_id) AS s_customer, MIN(COALESCE(s.total_usd, 0)) AS s_total

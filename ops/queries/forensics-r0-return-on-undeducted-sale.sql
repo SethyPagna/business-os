@@ -37,6 +37,7 @@
 --                                  d: anything else (owner review)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 50910
 WITH rl AS MATERIALIZED (
   SELECT r.id AS return_id, r.sale_id, ri.product_id, COALESCE(ri.branch_id, r.branch_id) AS branch_id,
     ri.quantity, COALESCE(ri.total_usd, 0) AS refund_usd, COALESCE(strftime('%Y-%m-%d %H:%M:%S', r.created_at), r.created_at) AS at

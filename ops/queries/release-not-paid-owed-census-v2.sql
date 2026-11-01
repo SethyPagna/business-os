@@ -14,6 +14,7 @@
 --   checked_at_utc            when this ran
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 69740
 WITH np AS (
   SELECT amount_paid_khr, exchange_rate, sale_status
   FROM sales

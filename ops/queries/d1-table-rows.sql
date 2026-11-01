@@ -10,6 +10,7 @@
 -- meta equals the total, so run it once, not on a schedule.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 384440
 SELECT
   json_object(
     'action_history', (SELECT COUNT(*) FROM action_history),

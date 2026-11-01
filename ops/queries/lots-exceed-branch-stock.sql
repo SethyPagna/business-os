@@ -16,6 +16,7 @@
 --   pairs_with_lots               every (product, branch) pair holding lots
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 245767
 WITH lots AS (
   SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, SUM(bbs.quantity) AS lot_quantity
   FROM branch_batch_stock bbs
