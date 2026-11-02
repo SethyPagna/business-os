@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { act } from 'react'
-import { createHarness, installSteppedClock, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
+import { createHarness, installSteppedClock, MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { STORAGE_KEYS } from '../src/constants.ts'
 
 // The real InstallPromptBand, mounted (React DOM + the real standaloneNavigation module + the real
@@ -216,6 +216,7 @@ await check('iOS Safari and iOS Chrome show one Install button that opens the dr
       assert.match(band.text(), /Add it to your Home Screen in 3 steps\./, `${name}: says what the button will show`)
       assert.equal(band.text().includes('Install on iPhone or iPad'), false, `${name}: the steps are not open until the button is pressed`)
       await band.click(buttonWithText(band, 'Install'))
+      await band.waitFor(() => band.text().includes('Install on iPhone or iPad'), 'the steps sheet')
       assert.match(band.text(), /Install on iPhone or iPad/, `${name}: the steps sheet opened from the Install button`)
       assert.match(band.text(), /Keep Open as Web App on/)
     })
@@ -228,6 +229,7 @@ await check('the iOS band and steps are Khmer in Khmer', async () => {
     const band = await s.mountBand('km')
     assert.ok(band.text().includes('ដំឡើង Leang Cosmetics'))
     await band.click(buttonWithText(band, 'ដំឡើង'))
+    await band.waitFor(() => band.text().includes('ដំឡើងនៅលើ iPhone ឬ iPad'), 'the steps sheet')
     assert.ok(band.text().includes('ដំឡើងនៅលើ iPhone ឬ iPad'))
     assert.ok(band.text().includes('ទុក Open as Web App ឱ្យបើក'))
   })
@@ -250,18 +252,25 @@ await check('the installed app (display-mode and navigator.standalone) shows not
   })
 })
 
-await check('a visible band publishes how much screen bottom it covers, and clears it when it goes', async () => {
+await check('a visible band publishes how much screen bottom it covers, none when pinned to the top, and clears it when it goes', async () => {
   const clearance = () => globalThis.document.documentElement.style.getPropertyValue('--install-band-clearance')
-  await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
-    await s.arm()
-    const band = await s.mountBand()
-    assert.equal(clearance(), '', 'nothing shown, nothing reserved')
-    await dispatch(s.win, promptEvent('accepted'))
-    await band.settle()
-    assert.match(clearance(), /^\d+px$/, 'the sign-in screen can now keep its last link above the band')
-    await band.click(closeButton(band))
-    assert.equal(clearance(), '', 'closing the band gives the space back')
-  })
+  const originalRect = MemoryNode.prototype.getBoundingClientRect
+  const innerHeight = 800
+  try {
+    for (const [top, expected, where] of [[innerHeight - 74, '74px', 'a band pinned to the bottom'], [12, '0px', 'a band pinned to the top (the shop)']] as const) {
+      MemoryNode.prototype.getBoundingClientRect = () => ({ x: 0, y: top, top, left: 0, right: 0, bottom: top + 74, width: 0, height: 74 })
+      await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
+        await s.arm()
+        const band = await s.mountBand()
+        assert.equal(clearance(), '', 'nothing shown, nothing reserved')
+        await dispatch(s.win, promptEvent('accepted'))
+        await band.settle()
+        assert.equal(clearance(), expected, where)
+        await band.click(closeButton(band))
+        assert.equal(clearance(), '', 'closing the band gives the space back')
+      })
+    }
+  } finally { MemoryNode.prototype.getBoundingClientRect = originalRect }
 })
 
 await check('appinstalled hides a visible band', async () => {
