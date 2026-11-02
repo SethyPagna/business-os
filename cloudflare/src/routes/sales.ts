@@ -12,7 +12,7 @@ import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePric
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, PACK_ABOVE_BYTES, PACK_RESPONSE_ABOVE_BYTES, packSnapshotField, packsOf, utf8Bytes } from '../lib/saleSnapshotPacking'
+import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, PACK_ABOVE_BYTES, PACK_RESPONSE_ABOVE_BYTES, packSnapshotField, packsOf, utf8Bytes } from '../lib/saleItemPricing'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
@@ -426,7 +426,7 @@ function canonicalSaleItemsSql() {
 }
 
 /** The stored form of a basket's lines. A snapshot embeds the whole pool, so the aggregate of all of them is O(n^2); here each line keeps
- * its own part (line_key, amounts, receipt_allocation) and each pool and the allocation context are written ONCE (saleSnapshotPacking.ts
+ * its own part (line_key, amounts, receipt_allocation) and each pool and the allocation context are written ONCE (saleItemPricing.ts
  * expandStoredSaleResponse rebuilds the wire form byte for byte). Only used when packedItemsCondition proves that is lossless. */
 function packedSaleItemsSql() {
   const keys = CANONICAL_SALE_ITEM_KEYS.filter(key => key !== 'pricing_snapshot_json')
@@ -493,17 +493,30 @@ async function committedMutationResponse(db: ReturnType<typeof getDb>, operation
   return storedMutationResponse(receipt.response_json)
 }
 
-/** The header and every line from one point in time: ONE batch is one transaction, so a later edit cannot mix a header with older lines.
- * The lines are rows (each far below D1's 2,000,000-byte value cap), never one aggregated SQL value: a 62-line sale's snapshots total
- * 2.6 MB and an aggregate of them answered SQLITE_TOOBIG after the sale had already committed. */
+/** The header and every line from one point in time. An ordinary basket is read in the one statement it always was (the lines aggregated by
+ * SQL beside the header). A large one (its snapshots total more than PACK_RESPONSE_ABOVE_BYTES) answers canonical_items NULL and is read as
+ * rows instead: ONE batch is one transaction, so a later edit cannot mix a header with older lines. Never one aggregated SQL value for a
+ * large basket: a 62-line sale's snapshots total 2.6 MB and an aggregate of them answered SQLITE_TOOBIG after the sale had already committed. */
 async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
-  const [saleResult, lineResult] = await db.batch([
-    { sql: 'SELECT s.* FROM sales s WHERE s.id=?', params: [saleId] },
-    { sql: `SELECT ${CANONICAL_SALE_ITEM_KEYS.map(key => `i.${key}`).join(',')} FROM sale_items i WHERE i.sale_id=? ORDER BY i.id`, params: [saleId] },
-  ])
-  const sale = (saleResult.results as Record<string,unknown>[] | undefined)?.[0]
-  if (!sale) return null
-  const snapshot={ ...sale, items: (lineResult.results ?? []) as Record<string,unknown>[] }
+  const row = await db.prepare(`SELECT s.*,CASE WHEN COALESCE((SELECT SUM(length(CAST(pricing_snapshot_json AS BLOB))) FROM sale_items WHERE sale_id=s.id),0)<=${PACK_RESPONSE_ABOVE_BYTES}
+    THEN ${canonicalSaleItemsSql()} END AS canonical_items
+    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
+  if (!row) return null
+  const { canonical_items, ...head } = row
+  let sale: Record<string,unknown> = head
+  let items: Record<string,unknown>[]
+  if (canonical_items != null) items = JSON.parse(String(canonical_items))
+  else {
+    const [saleResult, lineResult] = await db.batch([
+      { sql: 'SELECT s.* FROM sales s WHERE s.id=?', params: [saleId] },
+      { sql: `SELECT ${CANONICAL_SALE_ITEM_KEYS.map(key => `i.${key}`).join(',')} FROM sale_items i WHERE i.sale_id=? ORDER BY i.id`, params: [saleId] },
+    ])
+    const fresh = (saleResult.results as Record<string,unknown>[] | undefined)?.[0]
+    if (!fresh) return null
+    sale = fresh
+    items = (lineResult.results ?? []) as Record<string,unknown>[]
+  }
+  const snapshot={ ...sale, items }
   if(Number(sale.money_precision_version)===1){
     const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
     validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)

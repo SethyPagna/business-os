@@ -309,7 +309,7 @@ async function main() {
       })
     }
 
-    // The thresholds (saleSnapshotPacking.ts): a small basket keeps the stored form it always had in every copy; a large one is packed in every copy. Both must replay
+    // The thresholds (lib/saleItemPricing.ts): a small basket keeps the stored form it always had in every copy; a large one is packed in every copy. Both must replay
     // to the same answer, and the larger one must still pass the till's own check.
     await step('flow', '20 and 44 lines: the stored copies are packed exactly when the basket is large, and a return records in both forms', async () => {
       for (const [n, wantPacked] of [[20, false], [44, true]]) {

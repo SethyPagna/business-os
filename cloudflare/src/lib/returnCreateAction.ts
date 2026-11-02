@@ -1,5 +1,4 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
-import { chunkRowsByJsonBytes } from './saleSnapshotPacking'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
 import { canonicalExchangeExpected, canonicalExchangePayment, ReturnExchangeError, type ExchangeLineIntent } from './returnExchangeIntent'
@@ -547,6 +546,21 @@ export function returnCreatePreconditionSql(input: {
  * 2,000,000 bytes. One guard row per operation and phase is allowed, so each group inserts its row and removes it again; the batch's own
  * precondition follows. Same rows compared, same atomic batch.
  */
+/** Groups rows so the JSON of each group stays within 900,000 bytes. The same function as chunkRowsByJsonBytes in saleItemPricing.ts, kept here
+ * because this module's tests load it with a fixed list of imports. */
+function chunkSnapshotRows<T>(rows: readonly T[], maxBytes = 900_000): T[][] {
+  const encoder = new TextEncoder()
+  const chunks: T[][] = []
+  let current: T[] = [], bytes = 2
+  for (const row of rows) {
+    const size = encoder.encode(JSON.stringify(row)).length + 1
+    if (current.length && bytes + size > maxBytes) { chunks.push(current); current = []; bytes = 2 }
+    current.push(row); bytes += size
+  }
+  if (current.length) chunks.push(current)
+  return chunks
+}
+
 export function customerReturnSnapshotGuardStatements(
   operationId: string,
   saleId: number,
@@ -555,7 +569,7 @@ export function customerReturnSnapshotGuardStatements(
   const predicate = `NOT EXISTS(SELECT 1 FROM json_each(@customerReturnSnapshots) j WHERE NOT EXISTS(
       SELECT 1 FROM sale_items si WHERE si.id=json_extract(j.value,'$.id') AND si.sale_id=@customerReturnSnapshotSale
         AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))`
-  return chunkRowsByJsonBytes(rows).flatMap((group) => [
+  return chunkSnapshotRows(rows).flatMap((group) => [
     returnCreateGuardStatement(operationId, 'precondition', predicate, { customerReturnSnapshots: JSON.stringify(group), customerReturnSnapshotSale: saleId }),
     { sql: `DELETE FROM return_create_guards WHERE operation_id=@returnCreateOperationId AND phase='precondition'`, params: { returnCreateOperationId: operationId } },
   ])

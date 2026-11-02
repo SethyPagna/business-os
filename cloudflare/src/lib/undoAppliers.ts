@@ -30,11 +30,10 @@ import {
   planUnlottedSaleLineGuards,
   planSaleLineRemoval,
   plannedLineFromRecord,
-  saleLineKhrSnapshotStatements,
+  saleLineKhrSnapshotStatement,
   saleMoneyUpdateStatement,
   type SaleAddItemsReversal,
 } from './saleLineAddition'
-import { chunkRowsByJsonBytes, unpackAddItemsReversal } from './saleSnapshotPacking'
 // S4-30: an undo/redo of an addition appends a compensating entry to the sale's
 // amendment ledger, so there is ONE audit trail and the Undo button writes into
 // it rather than around it. Never a rewrite -- migration 0115's triggers refuse
@@ -58,7 +57,7 @@ import { PRODUCT_REMOVE_ACTION_KIND, parseProductRemoveSnapshot, productRemovePl
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 import { resolveProductMergeLineage } from './productMergeLineage'
-import { validateCapturedSaleBasket } from './saleItemPricing'
+import { chunkRowsByJsonBytes, unpackAddItemsReversal, validateCapturedSaleBasket } from './saleItemPricing'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -1636,7 +1635,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...removal.statements,
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
-      ...(reversal.lineMoneyBefore ? saleLineKhrSnapshotStatements(saleId, reversal.lineMoneyBefore) : []),
+      ...(reversal.lineMoneyBefore ? chunkRowsByJsonBytes(reversal.lineMoneyBefore).map((group) => saleLineKhrSnapshotStatement(saleId, group)) : []),
       ...lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
@@ -1674,7 +1673,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...buildOperationAllocationStatements(plan.lines, operationId, stamp),
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
-      ...(reversal.lineMoneyAfter ? saleLineKhrSnapshotStatements(saleId, reversal.lineMoneyAfter) : []),
+      ...(reversal.lineMoneyAfter ? chunkRowsByJsonBytes(reversal.lineMoneyAfter).map((group) => saleLineKhrSnapshotStatement(saleId, group)) : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
@@ -3701,7 +3700,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
           ...(reversal.lineMoneyBefore
-            ? saleLineKhrSnapshotStatements(saleId, reversal.lineMoneyBefore)
+            ? chunkRowsByJsonBytes(reversal.lineMoneyBefore).map((group) => saleLineKhrSnapshotStatement(saleId, group))
             : []),
           ...(reversal.lines || []).map((line) => amendmentEntryStatement({
             ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
@@ -3759,7 +3758,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
-            ? saleLineKhrSnapshotStatements(saleId, reversal.lineMoneyAfter)
+            ? chunkRowsByJsonBytes(reversal.lineMoneyAfter).map((group) => saleLineKhrSnapshotStatement(saleId, group))
             : []),
           ...plan.lines.map((line) => amendmentEntryStatement({
             ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,

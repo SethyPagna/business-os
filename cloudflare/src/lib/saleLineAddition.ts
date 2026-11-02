@@ -59,8 +59,7 @@ import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
 import { financialCalculationValue } from './financialPrecision'
 import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
-import { capturedPricingMetadata, parseSaleItemPricing } from './saleItemPricing'
-import { chunkRowsByJsonBytes } from './saleSnapshotPacking'
+import { capturedPricingMetadata, chunkRowsByJsonBytes, parseSaleItemPricing } from './saleItemPricing'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 

@@ -14,7 +14,7 @@ const { buildSync } = require('esbuild')
 
 const lib = path.resolve(__dirname, '../src/lib')
 const bundle = buildSync({
-  stdin: { contents: "export * from './saleItemPricing'; export * from './saleSnapshotPacking'; export * from './moneyPrecision'", resolveDir: lib, loader: 'ts' },
+  stdin: { contents: "export * from './saleItemPricing'; export * from './moneyPrecision'", resolveDir: lib, loader: 'ts' },
   bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'error',
 }).outputFiles[0].text
 const module_ = { exports: {} }
