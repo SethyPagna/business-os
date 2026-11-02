@@ -106,6 +106,12 @@ async function main() {
       assert.ok(Number.isInteger(s.raised.from) && typeof s.raised.reason === 'string' && s.raised.reason.length > 8, `${s.id}: raised needs from and reason`)
       console.log(`RAISED ${s.id}: ${s.raised.from} -> ${s.rows_max} rows. ${s.raised.reason}`)
     }
+    // A shape whose measured request changed KIND (a refusal lifted by its slice, lines once deferred now carried) is re-measured, not raised:
+    // its ceilings are the new request's, so the ratchet below skips it. The note names the slice and what the request used to be.
+    for (const s of shapes.filter((x) => x.lifted)) {
+      assert.ok(/^P\d\.\d/.test(s.lifted.slice) && typeof s.lifted.was === 'string' && s.lifted.was.length > 8, `${s.id}: lifted needs a slice and a "was"`)
+      console.log(`LIFTED ${s.id} by ${s.lifted.slice}: was ${s.lifted.was}`)
+    }
   })
 
   await check('ratchet: no ceiling went up against the previous budgets without a "raised" note that names the old value', () => {
@@ -115,6 +121,7 @@ async function main() {
     for (const s of shapes) {
       const old = before.get(s.id)
       if (!old) continue
+      if (s.lifted && JSON.stringify(s.lifted) !== JSON.stringify(old.lifted)) continue
       for (const field of RATCHETED) {
         if (!(s[field] > old[field])) continue
         assert.ok(s.raised && (s.raised.field || 'rows_max') === field, `${s.id}: ${field} rose from ${old[field]} to ${s[field]} with no "raised" note for it`)

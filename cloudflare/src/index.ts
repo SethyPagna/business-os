@@ -65,6 +65,7 @@ import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { apiCacheHygiene } from './lib/apiCacheHygiene'
+import { callCountingMiddleware } from './lib/callCounting'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
@@ -214,6 +215,8 @@ app.use('/api/*', requestMetricsMiddleware)
 
 // Right behind the metrics wrapper so its after-next() code runs last for every /api/* response, errors and the maintenance 503 included (lib/apiCacheHygiene.ts).
 app.use('/api/*', apiCacheHygiene)
+// Hangs the lazy call_counting resolver on this request's metrics; nothing is read unless a write route asks (lib/callCounting.ts).
+app.use('/api/*', callCountingMiddleware)
 
 // Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
 app.use('/api/*', async (c, next) => {

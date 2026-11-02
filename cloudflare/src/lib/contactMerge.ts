@@ -83,7 +83,8 @@ export const CONTACT_MERGE_MAX_RECORDS = 6
 // (up to 3), the record, storefront, table and device reads (4), the
 // system-detected cluster check (the sweep's 2 reads, plus 1 receipt read for
 // a stepped merge's later step), failure reconciliation (3), the cache-version
-// bump (up to 9) and the refresh read (1). Each batch statement is one more.
+// bump (up to 9) and the refresh read (1). Each batch statement is one more, unless calls are counted: then the whole
+// batch is one more (D1 counts a db.batch() as a single query).
 export const CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES = 23
 
 const SAFE_COLUMN = /^[a-z][a-z0-9_]*$/
@@ -453,7 +454,10 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
   return { statements, backfilled, finalKeeper, resolved, mergedIds, before, after }
 }
 
-export function contactMergeStatementBudget(queriesPerInvocation: number): number {
+// callCounting: the batch is one call, so a plan whose route overhead plus that one call fits holds the full
+// CONTACT_MERGE_MAX_STATEMENTS (Free merges six records in one request instead of three).
+export function contactMergeStatementBudget(queriesPerInvocation: number, callCounting = false): number {
+  if (callCounting) return Math.floor(queriesPerInvocation) - CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES >= 1 ? CONTACT_MERGE_MAX_STATEMENTS : 1
   return Math.max(1, Math.min(CONTACT_MERGE_MAX_STATEMENTS, Math.floor(queriesPerInvocation) - CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES))
 }
 

@@ -2399,9 +2399,10 @@ app.post('/', async (c) => {
     // same D1 batch as the fold; refused, never silently dropped (lib/createFold.ts).
     if (destination.quantity > 0 && destination.branchId != null) {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined
+      const callCounting = (await metrics?.callCounting?.()) === true
       const folded = await foldCreateWithStockInResponse(c.env, user, duplicate, name, body, { ...destination, branchId: destination.branchId }, {
         waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-        invocation: metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation } : undefined,
+        invocation: metrics?.invocation ? { used: () => callCounting ? metrics.invocation.attemptedCalls : metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation, callCounting } : undefined,
       })
       return c.json(normalProductWriteResponse(folded.body), folded.status as 200 | 400 | 403 | 409 | 503)
     }
@@ -5791,25 +5792,30 @@ export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
 
 type MergeDuplicateInterruptionCode = 'merge_budget_reached' | 'merge_infrastructure_interrupted'
 
-function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
+// statementCount feeds the pacing estimate (statements per product). callCount is what the per-invocation D1 limit counts:
+// a db.batch() is ONE call whatever it holds (D1 limits page). The route compares callCount only when call_counting is ON.
+export function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
   db: ReturnType<typeof getDb>
   statementCount: () => number
+  callCount: () => number
 } {
   let statements = 0
+  let calls = 0
   const counted = Object.create(db) as ReturnType<typeof getDb>
   counted.prepare = ((sql: string) => {
     const prepared = db.prepare(sql)
     return {
-      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; return prepared.get(params) },
-      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; return prepared.all(params) },
-      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; return prepared.run(params) },
+      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; calls += 1; return prepared.get(params) },
+      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; calls += 1; return prepared.all(params) },
+      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; calls += 1; return prepared.run(params) },
     }
   }) as typeof counted.prepare
   counted.batch = (items) => {
     statements += items.length
+    calls += 1
     return db.batch(items)
   }
-  return { db: counted, statementCount: () => statements }
+  return { db: counted, statementCount: () => statements, callCount: () => calls }
 }
 
 export function shouldPauseProductMergeBeforeGroup(input: {
@@ -5846,6 +5852,8 @@ app.post('/merge-duplicates', async (c) => {
   }
   const countedDb = createCountedProductMergeDb(getDb(c.env))
   const db = countedDb.db
+  const mergeMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined
+  const callCounting = (await mergeMetrics?.callCounting?.()) === true
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   const modernCostReview = Object.hasOwn(requestBody, 'cost_review')
   const approvedCostReview = modernCostReview ? await parseBulkCostReview(requestBody.cost_review) : null
@@ -5946,7 +5954,7 @@ app.post('/merge-duplicates', async (c) => {
       group.duplicates.sort((a,b)=>a.id-b.id)
     }
     const members = new Set(groups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
-    if (countedDb.statementCount()+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
+    if ((callCounting ? countedDb.callCount() : countedDb.statementCount())+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
     try {
       const reviews = await readBulkCostReviews(db,groups)
       for (const review of reviews) {

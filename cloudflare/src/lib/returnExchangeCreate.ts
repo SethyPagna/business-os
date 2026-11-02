@@ -65,8 +65,10 @@ export type ExchangeCreateArgs = {
   clientRequestId: string
   movementIdFloor: number
   queryLimit: number
-  /** The invocation's D1 statements so far, counted the way the plain create counts them. */
+  /** The invocation's D1 statements so far, counted the way the plain create counts them (calls, when callCounting). */
   statementsUsed: () => number
+  /** call_counting is ON: the invocation is counted in D1 calls and the atomic batch is one call. */
+  callCounting?: boolean
   /** The atomic batch is about to spend this many statements. */
   addStatements: (count: number) => void
   /** Re-reads the idempotency receipt after an ambiguous commit. */
@@ -612,7 +614,7 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
   // ---- admission: a plan this invocation cannot carry is refused before it writes anything -----------------------------------------
-  const transactionStatementCount = stockTransactionStatementCount(statements.length)
+  const transactionStatementCount = args.callCounting ? 1 : stockTransactionStatementCount(statements.length)
   try {
     assertReturnCreatePlanBounds(statements, args.intent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including retries (six + the replacement alert's two).

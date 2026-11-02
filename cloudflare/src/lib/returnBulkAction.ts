@@ -36,7 +36,8 @@ export const RETURN_BULK_LIMIT = 25
 // invocation. reserveStatements is what the route still needs after the batch. Since 6.0.966 the batch does not grow with the stock lines it moves or the
 // replacement returns it links (set-based writes, merged guards); it grows with the number of returns selected together (a credit move and a sale tag each).
 // An undo or redo is a request of its own and is sized the same way (measured in test-return-exchange-cancel-free-native.cjs).
-export type ReturnBulkQueryBudget = { statementsUsed(): number; reserveStatements: number }
+// callCounting: statementsUsed is in D1 calls and the whole batch is one call (lib/callCounting.ts); absent or false is the statement count.
+export type ReturnBulkQueryBudget = { statementsUsed(): number; reserveStatements: number; callCounting?: boolean }
 const RETURN_BULK_MOVEMENT_LIMIT = 256
 
 type Row = Record<string, unknown>
@@ -274,7 +275,7 @@ function parseRequest(raw: Row): BulkRequest {
   return { client_request_id: raw.client_request_id, field, source, target, items, ...(dryRun ? { dry_run: true as const } : {}) }
 }
 
-function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
+export function assertReturnBulkBudget(env: Env, used: number, planned: number, reserve: number): void {
   if (used + planned + reserve > getPlanLimits(env).d1QueriesPerInvocation) {
     fail('This selection is too large for the current plan. Select fewer returns or replacement items, then try again.', 400, 'return_bulk_over_plan_budget')
   }
@@ -1358,11 +1359,16 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
  * anything is made, a selection that would link more returns than one action may carry.
  */
 const SMALL_PLAN_QUERY_LIMIT = 200
-function takeBackPerLine(env: Env): boolean {
+// Counting calls, one return of up to this many lines fits a Free invocation (measured: a 10-line return is 19 calls), so the take-backs of
+// a replacement of at most this many lines are made as ONE return; a longer replacement keeps one return per line.
+export const TAKE_BACK_ONE_RETURN_MAX_LINES = 10
+function takeBackPerLine(env: Env, callCounting = false, plannedLines = 0): boolean {
+  if (callCounting) return plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES
   return getPlanLimits(env).d1QueriesPerInvocation < SMALL_PLAN_QUERY_LIMIT
 }
-function assertTakeBackFitsPlan(env: Env, request: BulkRequest): void {
-  const perLine = takeBackPerLine(env)
+const longestReplacement = (request: BulkRequest): number => Math.max(0, ...request.items.map((item) => item.replacement?.planned?.length ?? 0))
+function assertTakeBackFitsPlan(env: Env, request: BulkRequest, callCounting = false): void {
+  const perLine = takeBackPerLine(env, callCounting, longestReplacement(request))
   let announced = 0
   for (const item of request.items) {
     const lines = item.replacement?.planned?.length ?? 0
@@ -1394,7 +1400,7 @@ export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null, queryBudget?: ReturnBulkQueryBudget): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
-  if (request.dry_run) assertTakeBackFitsPlan(env, request)
+  if (request.dry_run) assertTakeBackFitsPlan(env, request, queryBudget?.callCounting === true)
   const db = getDb(env)
   const canonical = JSON.stringify(request)
   const previous = request.dry_run ? undefined : await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
@@ -1477,11 +1483,11 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   if (request.dry_run) {
     // A take-back the till announces becomes a linked member of this action: its guard, its split update and its membership row ride in the statements above.
     const announced = request.items.filter((item) => item.replacement?.planned?.length).length
-    if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length + announced) : statements.length + announced, queryBudget.reserveStatements)
+    if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), queryBudget.callCounting ? 1 : members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length + announced) : statements.length + announced, queryBudget.reserveStatements)
     // takeBackPerLine tells the till how to make the take-backs it announced: one return per line on a plan this small, one return for all the lines otherwise.
-    return { receipt: { dryRun: true, ok: true, statements: statements.length + announced, takeBackPerLine: takeBackPerLine(env) }, wrote: false }
+    return { receipt: { dryRun: true, ok: true, statements: statements.length + announced, takeBackPerLine: takeBackPerLine(env, queryBudget?.callCounting === true, longestReplacement(request)) }, wrote: false }
   }
-  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), queryBudget.callCounting ? 1 : members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
     const results = await (members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
     return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
@@ -1550,7 +1556,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   statements.push(auditStatement(user, String(operation.id), `action_${direction}`, snapshot.members.filter((member) => member.changed).length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
-  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
+  if (queryBudget) assertReturnBulkBudget(env, queryBudget.statementsUsed(), queryBudget.callCounting ? 1 : snapshot.members.some(member => member.stock.length > 0) ? stockTransactionStatementCount(statements.length) : statements.length, queryBudget.reserveStatements)
   try {
     await (snapshot.members.some(member => member.stock.length > 0) ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
   } catch (error) {

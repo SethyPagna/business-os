@@ -1528,7 +1528,7 @@ function registerContactRoutes(config: ContactConfig) {
     }
     // Free plan: a merge too large for this request's D1 query budget merges
     // the first records now and returns the request that merges the rest.
-    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation))
+    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation, (await ((c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined)?.callCounting?.()) === true))
     plan = step.plan
 
     let committedKeeper: Record<string, unknown> = plan.finalKeeper
