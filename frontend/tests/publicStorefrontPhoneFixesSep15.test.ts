@@ -26,6 +26,7 @@ const stripComments = (source: string): string => source
 const catalogProductsSection = read('src/components/catalog/CatalogProductsSection.tsx')
 const catalogPreviewSurface = read('src/components/catalog/CatalogPreviewSurface.tsx')
 const publicCatalogPage = read('src/components/catalog/PublicCatalogPage.tsx')
+const portalSocialRow = read('src/components/catalog/PortalSocialRow.tsx').split('\r\n').join('\n')
 const paginationControls = read('src/components/shared/PaginationControls.tsx')
 const catalogPagination = read('src/components/catalog/catalogPagination.tsx')
 const installPromptBand = read('src/components/shared/InstallPromptBand.tsx')
@@ -162,26 +163,20 @@ check('2 the header icon rows never wrap on a phone', () => {
 
 // --- 3. Contact FAB minimize ------------------------------------------------
 
-// P-public-5 (owner, 2026-09-25): "minimized by default as a small icon and
-// expands on click" replaces the Sep 15 per-viewer memory. That memory only
-// ever stored "minimized", which is now the default for every page view, and
-// storing "expanded" would undo the ask on every later visit.
-check('3 the contact FAB starts minimized, expands on tap, and can be minimized again', () => {
-  assert.match(publicCatalogPage, /const \[contactMinimized, setContactMinimized\] = useState\(true\)/, 'every page view starts minimized')
-  assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring the full button back by default')
-  assert.match(publicCatalogPage, /onClick=\{\(\) => \{\s*setContactMinimized\(false\)\s*setContactOpen\(true\)\s*\}\}/, 'one tap on the icon expands it and opens the contact list')
-  assert.match(publicCatalogPage, /flex h-10 w-10 items-center justify-center rounded-full bg-white\/95/, 'the minimized icon is small but still a 40px touch target')
-  // The X control must exist and be reachable on touch (not hover-only),
-  // per the owner's "always reachable on touch" requirement.
-  assert.match(publicCatalogPage, /setContactMinimized\(true\)/, 'there must be a control that minimizes the button')
-  // P11-1 (2026-09-18, owner): "the x button just keep the icon instead of
-  // filling it and bocking the contact us button" -- the hover-gated
-  // opacity-0/group-hover badge overlapping the main button's own corner is
-  // gone. It is now a plain sibling button, always filled, reachable on
-  // touch with no hover trick at all.
-  assert.doesNotMatch(publicCatalogPage, /-right-1\.5 -top-1\.5/, 'the minimize control must not overlap the main button corner')
-  assert.doesNotMatch(publicCatalogPage, /opacity-0.*group-hover:opacity-100/, 'the minimize control must not be hover-gated invisible by default')
-  assert.match(publicCatalogPage, /bg-slate-700 text-white shadow-md/, 'the minimize control is a plain always-filled pill')
+// P-public-5 (owner, 2026-09-25): "minimized by default as a small icon and expands on click" replaced the Sep 15
+// per-viewer memory. 2 Nov 2026 (owner): the Contact us float is a column of brand-colour chat links
+// (PortalContactFloat) shown from the first paint, each opening its chat directly, so there is no stub to expand
+// and no minimize control. What this check still guards: no remembered state, no overlaid or hover-gated control,
+// 44px targets, and the retired pieces staying retired.
+check('3 the contact buttons are always shown, open the chat directly, and have no minimize stub', () => {
+  assert.doesNotMatch(publicCatalogPage, /contactMinimized|setContactMinimized/, 'the page keeps no minimized state')
+  assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring a stub back')
+  assert.match(publicCatalogPage, /<PortalContactFloat channels=\{contactChannels\} copy=\{copy\} \/>/, 'the float is the page contact control')
+  const floatSource = portalSocialRow.slice(portalSocialRow.indexOf('export function PortalContactFloat'), portalSocialRow.indexOf('/** Handles, numbers and domains stay Latin'))
+  assert.match(floatSource, /flex h-11 w-11 shrink-0 items-center justify-center rounded-full/, 'each button is a 44px touch target')
+  assert.doesNotMatch(floatSource, /-right-1\.5 -top-1\.5/, 'no control overlaps a button corner')
+  assert.doesNotMatch(floatSource, /opacity-0.*group-hover:opacity-100/, 'no control is hover-gated invisible by default')
+  assert.doesNotMatch(floatSource, /onClick/, 'a button is a plain link to the chat, not a handler that opens something else')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and

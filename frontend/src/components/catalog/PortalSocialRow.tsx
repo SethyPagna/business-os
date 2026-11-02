@@ -7,7 +7,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { FacebookIcon, InstagramIcon, MessengerIcon, TelegramIcon, TikTokIcon, WhatsAppIcon } from '../shared/BrandIcons.tsx'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '../../utils/socialHandles.ts'
-import type { PortalSocialGroup } from './portalSocialLinks.ts'
+import { PORTAL_CONTACT_BRAND, buildPortalContactFloat, type PortalFlatSocialLink, type PortalSocialGroup } from './portalSocialLinks.ts'
 
 type IconComponent = ComponentType<{ className?: string }>
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -21,6 +21,58 @@ export const PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = {
   whatsapp: WhatsAppIcon,
   tiktok: TikTokIcon,
   phone: PhoneCall,
+}
+
+type ContactFloatPlatform = 'telegram' | 'messenger' | 'instagram' | 'whatsapp' | 'phone'
+
+function contactFloatName(platform: ContactFloatPlatform, copy: CopyFn): string {
+  switch (platform) {
+    case 'messenger': return copy('portal_a11y_contact_messenger', 'Chat on Messenger', 'ជជែកតាម Messenger')
+    case 'telegram': return copy('portal_a11y_contact_telegram', 'Chat on Telegram', 'ជជែកតាម Telegram')
+    case 'instagram': return copy('portal_a11y_contact_instagram', 'Message us on Instagram', 'ផ្ញើសារតាម Instagram')
+    case 'whatsapp': return copy('portal_a11y_contact_whatsapp', 'Chat on WhatsApp', 'ជជែកតាម WhatsApp')
+    case 'phone': return copy('portal_a11y_contact_phone', 'Call us', 'ទូរស័ព្ទមកយើង')
+  }
+}
+
+/**
+ * The floating contact buttons: right side, stacked above the My List button, one round brand-colour button per
+ * configured chat account. Each is a plain link that opens the chat directly; an account that is not configured
+ * has no button. The accessible name and tooltip are translated.
+ */
+export function PortalContactFloat({ channels, copy }: { channels: readonly PortalFlatSocialLink[]; copy: CopyFn }) {
+  const buttons = buildPortalContactFloat(channels)
+  if (!buttons.length) return null
+  return (
+    <div
+      role="group"
+      data-portal-contact-float="true"
+      aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
+      className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex flex-col items-center gap-2"
+    >
+      {buttons.map((button) => {
+        const platform = button.platform as ContactFloatPlatform
+        const Icon = PORTAL_SOCIAL_ICONS[button.platform]
+        const name = contactFloatName(platform, copy)
+        const isCall = platform === 'phone'
+        return (
+          <a
+            key={button.key}
+            href={button.value}
+            target={isCall ? undefined : '_blank'}
+            rel={isCall ? undefined : 'noreferrer noopener'}
+            aria-label={name}
+            title={name}
+            data-portal-contact-platform={platform}
+            style={{ background: PORTAL_CONTACT_BRAND[platform].background }}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-lg ring-2 ring-white/90 transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 dark:ring-neutral-900/90 dark:focus-visible:outline-white"
+          >
+            <Icon className="h-5 w-5" />
+          </a>
+        )
+      })}
+    </div>
+  )
 }
 
 /** Handles, numbers and domains stay Latin and untranslated; an owner label may be Khmer. */

@@ -198,6 +198,64 @@ export function flattenPortalSocialGroups(groups: readonly PortalSocialGroup[]):
   })))
 }
 
+// The floating contact buttons (owner, 2 Nov 2026): one round brand-colour button per chat account, each opening the
+// chat itself (t.me/<name>, m.me/<page>, ig.me/m/<name>, wa.me/<number>), never a profile page. The accounts are the
+// Website Editor's own contact settings (buildPortalContactChannels above); nothing is hard-coded here.
+export const PORTAL_CONTACT_FLOAT = { bottomRem: 4.5, buttonRem: 2.75, gapRem: 0.5, endRem: 0.75, minReserveRem: 7.5 } as const
+
+// Fill behind a white glyph. Every colour is at least 3:1 against white (a graphical object, WCAG 1.4.11); the
+// instagram gradient is checked at every stop. tests/portalContactFloat.test.ts holds the numbers.
+export const PORTAL_CONTACT_BRAND: Readonly<Record<'telegram' | 'messenger' | 'instagram' | 'whatsapp' | 'phone', { background: string; stops: readonly string[] }>> = {
+  telegram: { background: '#1d93d2', stops: ['#1d93d2'] },
+  messenger: { background: '#0084ff', stops: ['#0084ff'] },
+  instagram: { background: 'linear-gradient(135deg, #e1306c 0%, #c13584 50%, #833ab4 100%)', stops: ['#e1306c', '#c13584', '#833ab4'] },
+  whatsapp: { background: '#128c7e', stops: ['#128c7e'] },
+  phone: { background: '#9c7a3c', stops: ['#9c7a3c'] },
+}
+
+const DIRECT_CHAT_HOSTS: Readonly<Partial<Record<SocialPlatform, RegExp>>> = {
+  telegram: /^(?:t\.me|telegram\.me)$/i,
+  messenger: /^m\.me$/i,
+  instagram: /^ig\.me$/i,
+  whatsapp: /^wa\.me$/i,
+}
+
+/**
+ * True only for a link that opens the chat itself: https on the platform's own chat host, or a tel: link for Call.
+ * The derive* helpers already produce nothing else; this is the second check at the point a visitor taps.
+ */
+export function isDirectContactHref(platform: SocialPlatform, href: unknown): boolean {
+  const value = String(href ?? '').trim()
+  if (platform === 'phone') return /^tel:\+?[0-9]{3,20}$/.test(value)
+  const host = DIRECT_CHAT_HOSTS[platform]
+  if (!host) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && host.test(url.hostname) && !url.username && !url.password && url.pathname.length > 1
+  } catch {
+    return false
+  }
+}
+
+const FLOAT_PLATFORMS: readonly SocialPlatform[] = ['messenger', 'telegram', 'instagram', 'whatsapp', 'phone']
+
+/** The first valid account of each chat platform, in the Contact us order. A second account stays in the Contact us list. */
+export function buildPortalContactFloat(channels: readonly PortalFlatSocialLink[]): PortalFlatSocialLink[] {
+  const out: PortalFlatSocialLink[] = []
+  for (const platform of FLOAT_PLATFORMS) {
+    const first = channels.find((channel) => channel.platform === platform && isDirectContactHref(platform, channel.value))
+    if (first) out.push(first)
+  }
+  return out
+}
+
+/** How far above the safe area the page must end so the stack of `count` buttons never covers the footer. */
+export function portalFloatClearanceRem(count: number): number {
+  const { bottomRem, buttonRem, gapRem, endRem, minReserveRem } = PORTAL_CONTACT_FLOAT
+  if (!(count > 0)) return minReserveRem
+  return Math.max(minReserveRem, bottomRem + count * buttonRem + (count - 1) * gapRem + endRem)
+}
+
 type PortalSocialConfig = {
   links?: PortalAccountMap
   linkLabels?: PortalLabelMap

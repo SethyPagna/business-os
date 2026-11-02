@@ -9,8 +9,11 @@ import path from 'node:path'
 
 const CATALOG = path.join(import.meta.dirname, '..', 'src', 'components', 'catalog')
 const read = (file: string) => fs.readFileSync(path.join(CATALOG, file), 'utf8').replace(/\r\n/g, '\n')
+import { PORTAL_CONTACT_FLOAT, portalFloatClearanceRem } from '../src/components/catalog/portalSocialLinks.ts'
+
 const surface = read('CatalogPreviewSurface.tsx')
 const publicPage = read('PublicCatalogPage.tsx')
+const socialRow = read('PortalSocialRow.tsx')
 
 const REM_PER_SPACING_UNIT = 0.25
 const BUCKET_ICON_REM = 1.25
@@ -44,20 +47,31 @@ assert.equal(scrollButtons.length, 2, 'the scroll-to-top and scroll-to-bottom bu
 const scrollHeight = scrollButtons.reduce((sum, classes) => sum + spacingRem(classes, 'h'), 0) + spacingRem(scrollWrapper, 'gap') * (scrollButtons.length - 1)
 
 const bucketClasses = classNames(block(publicPage, 'const bucketFab = (', '\n  )\n'))[0]
-const contact = classNames(block(publicPage, 'const contactFab = contactChannels.length > 0 ?', '\n  ) : null\n'))
-const contactAnchors = contact.filter((classes) => /(?:^|\s)fixed(?=\s)/.test(classes))
-assert.equal(contactAnchors.length, 2, 'the contact button, minimized and full')
-const contactTallest = Math.max(...contact.filter((classes) => /(?:^|\s)h-\d/.test(classes)).map((classes) => spacingRem(classes, 'h')))
+// The contact buttons are a column of 0-5 round links (2 Nov): their height grows with how many are configured,
+// so the page passes the reserve for its own count (portalFloatClearanceRem) and this checks the numbers it uses.
+const contactSource = block(socialRow, 'export function PortalContactFloat', '/** Handles, numbers and domains stay Latin')
+const contactWrapper = classNames(contactSource.slice(contactSource.indexOf('className="')))[0]
+const contactButton = classNames(contactSource.slice(contactSource.indexOf('className="flex h-11')))[0]
+assert.match(contactWrapper, /(?:^|\s)fixed(?=\s)/)
+const contactBottomRem = bottomRem(contactWrapper)
+const contactButtonRem = spacingRem(contactButton, 'h')
+const contactGapRem = spacingRem(contactWrapper, 'gap')
+assert.deepEqual({ bottomRem: contactBottomRem, buttonRem: contactButtonRem, gapRem: contactGapRem }, { bottomRem: PORTAL_CONTACT_FLOAT.bottomRem, buttonRem: PORTAL_CONTACT_FLOAT.buttonRem, gapRem: PORTAL_CONTACT_FLOAT.gapRem }, 'the reserve is computed from the numbers the buttons really use')
+const contactTops = (count: number) => contactBottomRem + count * contactButtonRem + (count - 1) * contactGapRem
+for (let count = 1; count <= 5; count += 1) {
+  assert.ok(portalFloatClearanceRem(count) >= contactTops(count), `${count} contact buttons reach ${contactTops(count)}rem; the page reserves ${portalFloatClearanceRem(count)}rem`)
+}
+assert.match(surface, /style=\{publicView && floatingStackClearanceRem \? \{ paddingBottom: `calc\(\$\{floatingStackClearanceRem\}rem \+ env\(safe-area-inset-bottom\)\)` \} : undefined\}/, 'the surface applies the reserve it is given')
+assert.match(publicPage, /floatingStackClearanceRem=\{portalFloatClearanceRem\(buildPortalContactFloat\(contactChannels\)\.length\)\}/, 'and the page gives it for its own contact buttons')
 
 const floatingTopsRem = {
   scrollButtonsPhone: bottomRem(scrollWrapper) + scrollHeight,
   scrollButtonsWide: bottomRem(scrollWrapper, 'sm:') + scrollHeight,
   myList: bottomRem(bucketClasses) + spacingRem(bucketClasses, 'py') * 2 + BUCKET_ICON_REM,
-  contact: Math.max(...contactAnchors.map((classes) => bottomRem(classes))) + contactTallest,
 }
 const tallestRem = Math.max(...Object.values(floatingTopsRem))
 
-const shellClasses = classNames(block(surface, '<div className={`mx-auto max-w-[1680px]', '\n'))[0]
+const shellClasses = classNames(block(surface, 'className={`mx-auto max-w-[1680px]', '\n'))[0]
 const publicOnly = /\$\{publicView \? '([^']*)'/.exec(shellClasses)
 assert.ok(publicOnly, 'the shell carries publicView-only classes')
 const reserve = (variant: string) => calcRem(publicOnly[1], `${variant}pb`) ?? 0

@@ -1629,7 +1629,7 @@ function CatalogEditorSurfaceContent() {
                     </label>
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-instagram">
                       <span className="text-sm text-slate-700">{copy('showContactInstagram', 'Show Instagram button')}</span>
-                      <input id="portal-show-contact-instagram" name="customer_portal_show_contact_instagram" type="checkbox" checked={!!editorDraft.customer_portal_show_contact_instagram} onChange={(event) => setDraft('customer_portal_show_contact_instagram', event.target.checked)} />
+                      <input id="portal-show-contact-instagram" name="customer_portal_show_contact_instagram" type="checkbox" checked={editorDraft.customer_portal_show_contact_instagram !== false} onChange={(event) => setDraft('customer_portal_show_contact_instagram', event.target.checked)} />
                     </label>
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-whatsapp">
                       <span className="text-sm text-slate-700">{copy('showContactWhatsapp', 'Show WhatsApp button')}</span>

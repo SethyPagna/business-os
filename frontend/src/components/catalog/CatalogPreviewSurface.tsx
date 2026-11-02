@@ -112,6 +112,9 @@ type CatalogPreviewSurfaceProps = {
   // the admin preview show the SAME footer from one place; the caller
   // supplies it so this surface never has to know the business-detail shape.
   footer?: ReactNode
+  // How far above the safe area the public page must end so the floating contact buttons never cover the footer
+  // (portalFloatClearanceRem). Omitted: the fixed reserve below.
+  floatingStackClearanceRem?: number
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -173,6 +176,7 @@ export default function CatalogPreviewSurface({
   catalogSection,
   secondaryTabSection,
   footer,
+  floatingStackClearanceRem,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -331,8 +335,12 @@ export default function CatalogPreviewSurface({
           monitors. Trimmed back so the row (and everything else in this
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
-      {/* The bottom padding is the tallest floating button stack (contact, 7.5rem), so at the page end no button covers the footer. */}
-      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''}`}>
+      {/* The bottom padding clears the tallest floating stack, so at the page end no button covers the footer: 7.5rem by default
+          (My List and the scroll buttons), taller when the contact buttons are shown (floatingStackClearanceRem, portalFloatClearanceRem). */}
+      <div
+        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''}`}
+        style={publicView && floatingStackClearanceRem ? { paddingBottom: `calc(${floatingStackClearanceRem}rem + env(safe-area-inset-bottom))` } : undefined}
+      >
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
             {/* WCAG 2.4.1: the storefront opens with a row of social links,

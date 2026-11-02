@@ -621,7 +621,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showContactTelegram: normalizeBoolean(settings.customer_portal_show_contact_telegram, true),
     showContactWhatsapp: normalizeBoolean(settings.customer_portal_show_contact_whatsapp, false),
     showContactPhone: normalizeBoolean(settings.customer_portal_show_contact_phone, false),
-    showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, false),
+    showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, true),
     title: settings.customer_portal_title || settings.business_name || 'Leang Cosmetics',
     intro: settings.customer_portal_intro || '',
     heroGradientStart: settings.customer_portal_hero_gradient_start || '#0f172a',

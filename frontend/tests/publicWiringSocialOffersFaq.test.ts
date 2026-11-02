@@ -41,6 +41,7 @@ const brand = (() => {
   return mod.exports
 })()
 const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
+const portalSocialLinks = await import('../src/components/catalog/portalSocialLinks.ts') as Record<string, any>
 const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
 const row = compile('PortalSocialRow.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
@@ -50,6 +51,7 @@ const row = compile('PortalSocialRow.tsx', (id) => {
   if (id.endsWith('/BrandIcons.tsx')) return brand
   if (id.endsWith('/scriptTypography.ts')) return scriptTypography
   if (id.endsWith('/socialHandles.ts')) return socialHandles
+  if (id.endsWith('/portalSocialLinks.ts')) return portalSocialLinks
   throw new Error(`PortalSocialRow.tsx imports ${id}, which this harness does not provide`)
 })
 const copy = (_key: string, fallback = '') => fallback
@@ -170,7 +172,7 @@ runCase('FAQ and AI props are wired from the storefront page, and the dead value
   assert.match(page, /onOpenContact=\{contactChannels\.length > 0 \? openContactSheet : undefined\}/)
   assert.match(page, /faqLoading=\{!realConfigInHand\}/)
   assert.match(page, /<CatalogSecondaryTabs[\s\S]*?openProductById=\{openProductById\}/)
-  assert.match(page, /const openContactSheet = \(\) => \{\s*setContactMinimized\(false\)\s*setContactOpen\(true\)/)
+  assert.match(page, /const openContactSheet = \(\) => setContactOpen\(true\)/, 'the FAQ Contact us button opens the list of every channel')
   assert.doesNotMatch(page, /aiUsageSummary|assistantRequestPolicy|assistantExpandedProductId|AssistantExpandedProductId/)
   const tabs = read('CatalogSecondaryTabs.tsx')
   for (const prop of ['aiUsageSummary', 'assistantRequestPolicy', 'assistantExpandedProductId']) assert.ok(!tabs.includes(prop), `${prop} is read by the tabs after all`)
