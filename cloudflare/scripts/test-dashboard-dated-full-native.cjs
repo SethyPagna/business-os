@@ -201,8 +201,13 @@ async function main() {
     { sql: "INSERT INTO returns(id,sale_id,created_at,total_refund_usd,status,return_scope) VALUES(1,10,'2026-09-20 01:00:00',2,'completed','customer')" },
     { sql: "INSERT INTO return_items(id,return_id,sale_item_id,total_usd,cost_price_usd,quantity,stock_action,return_to_stock) VALUES(1,1,100,2,2,.5,'restock',1)" },
   ])
-  async function invoke(mode, label, filters = current, fault) {
+  // The oracle ('full' with the switch OFF) is the old reader, the base two-pass copy; every other selector runs with report_atomic ON, and
+  // 'full-on' is the public full reader with it ON (one atomic batch for a plain dated window).
+  let switchState = 'on'
+  async function invoke(requested, label, filters = current, fault) {
     lastStage = label
+    const mode = requested === 'full-on' ? 'full' : requested, want = requested === 'full' ? 'off' : 'on'
+    if (want !== switchState) { await setup([{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want } })] }]); switchState = want }
     const response = await mf.dispatchFetch('http://dated.test/probe', { method: 'POST', body: JSON.stringify({ mode, filters, ...(fault ? { fault } : {}) }) }), text = await response.text()
     assert.equal(response.status, 200, text)
     const value = JSON.parse(text); assert.equal(value.ok, true, text)
@@ -213,6 +218,7 @@ async function main() {
   }
   const full = await invoke('full', 'current-full-authority'); const currentGolden = authority(full, 'current')
   assert.equal(metrics(full).physical_calls, 23); checks.push('generic full authority: exact dated branch fields, late refund and manual money')
+  const fullOn = await invoke('full-on', 'current-full-on'); native(fullOn); assert.deepEqual(fullOn.snapshot, full.snapshot); assert.deepEqual(fullOn.views, full.views); assert.equal(metrics(fullOn).physical_calls, 11); assert.equal(metrics(fullOn).atomic_mains, 1); checks.push('with report_atomic ON the public full reader reads one atomic batch and equals the old two-pass authority')
   const combined = await invoke('combined', 'current-combined-budget'); native(combined); combinedParity(combined, full)
   assert.equal(metrics(combined).physical_calls, 12, 'Actual dated combined helper must use12 cold native calls; the prior two-pass helper uses24 in this minimal fixture')
   assert.equal(metrics(combined).atomic_mains, 1); assert.equal(combined.calls.filter(call => call.phase === 'removal-loss').length, 1); checks.push('actual current helper12 versus generic full23 plus loss1')
@@ -231,7 +237,7 @@ async function main() {
   const invalidFull = await invoke('full', 'selected-id0-public-refusal'); storageRefusal(invalidFull); native(invalidFull)
   const invalidHelper = await invoke('combined', 'selected-id0-helper-refusal'); storageRefusal(invalidHelper); native(invalidHelper, true)
   const staleBand = await invoke('combined', 'control-stale-invalid-band', current, 'stale-band'); native(staleBand); assert.equal(staleBand.kind, 'combined'); assert.equal(staleBand.mutations.length, 1); assert.equal(staleBand.mutations[0].fault, 'stale-band'); assert.throws(() => storageRefusal(staleBand), assert.AssertionError); combinedParity(staleBand, full); checks.push('selected id0 refusal kills stale/ignored invalid-band control')
-  assert.equal(cases.length, 16)
+  assert.equal(cases.length, 17)
   lastStage = 'cleanup-owned-world'; await setup(['return_items', 'returns', 'sale_items', 'sales'].map(table => ({ sql: 'DELETE FROM ' + table })))
   const empty = await raw.prepare('SELECT (SELECT COUNT(*) FROM sales) AS sales,(SELECT COUNT(*) FROM sale_items) AS items,(SELECT COUNT(*) FROM returns) AS refunds').all(); assert.deepEqual(empty.results[0], { sales: 0, items: 0, refunds: 0 })
   for (const [relative, source] of sources) assert.ok(source.bytes.equals(fs.readFileSync(source.file)), 'Loaded source changed: ' + relative)

@@ -104,6 +104,9 @@ async function run(input: any, env: any) {
       const value = await api.readSalesReportTotals(local, filter, Boolean(input.fees), scope, input.options || {})
       return done({ kind: 'value', value, diagnostic: api.reportMoneyDiagnostic(value.totals) })
     }
+    if (input.mode === 'series') return done({ kind: 'value', value: await api.getSalesPeriodSeries(local, filter, input.granularity || 'day') })
+    if (input.mode === 'product') return done({ kind: 'value', value: await api.getProductSalesReport(local, filter, input.limit || 200) })
+    if (input.mode === 'grouped') return done({ kind: 'value', value: await api.getSalesGroupedReport(local, filter, input.by, input.limit || 300) })
     if (input.mode === 'snapshot') {
       const scope = input.stats ? statsScope(input.stats) : undefined
       return done({ kind: 'value', value: await snapshotView(await api.readSalesReportSnapshot(local, filter, Boolean(input.fees), scope, input.options || {})) })

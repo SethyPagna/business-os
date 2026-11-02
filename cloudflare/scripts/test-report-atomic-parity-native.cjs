@@ -26,6 +26,8 @@ const MUTANTS = {
   'omit-item-cost': text => once(text, "'id', 'sale_id', 'quantity', 'total_usd', 'cost_price_usd', 'product_discount_usd', 'manual_discount_usd',", "'id', 'sale_id', 'quantity', 'total_usd', 'product_discount_usd', 'manual_discount_usd',"),
   'returns-unscoped': text => once(text, "AND (${primary.sql})`, idExpr: 'r.id'", "AND (1=1)`, idExpr: 'r.id'"),
   'drop-void-group': text => once(text, "if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales'", "if (false) groups.push({ kind: 'voidSales'"),
+  // The full-report family reaches the atomic batch only for a bare request; a scoped one that did would read every sale.
+  'snapshot-ignores-scope': text => once(text, 'const bare = !includeDeliveryFees && capturedScope === null &&', 'const bare = !includeDeliveryFees &&'),
 }
 
 async function bundleWorker(mutant) {
@@ -274,6 +276,22 @@ async function main() {
     matrix.push({ label: 'stats-search', mode: 'totals', filter: { startDate: null, endDate: null }, stats: { search: 'Customer 1' } })
     matrix.push({ label: 'all/snapshot-full', mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'all'), null) })
     matrix.push({ label: 'month/snapshot-full', mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'month'), '1') })
+    // The full report family (daily-report, grouped, overview, customer and day reports) reads through readSalesReportSnapshot: one atomic batch
+    // for an undated window or a plain dated one, the two scalar passes (twoPass) for a scope, courier fees, an export cap or any other filter key.
+    const undated = (extra = {}) => ({ kind: 'raw', value: { startDate: null, endDate: null, branchId: null, status: null, paymentMethod: null, startTime: null, endTime: null, tzOffsetMinutes: 0, ...extra } })
+    const monthRange = RANGES.find(r => r.id === 'month')
+    for (const range of RANGES) for (const branch of BRANCHES) matrix.push({ label: `${range.id}/b${branch ?? '*'}/snapshot`, mode: 'snapshot', filter: filterOf(range, branch) })
+    for (const range of RANGES.filter(r => ['today', 'month', 'year', 'all'].includes(r.id))) {
+      matrix.push({ label: `${range.id}/series`, mode: 'series', filter: filterOf(range, null), granularity: 'day' }, { label: `${range.id}/product`, mode: 'product', filter: filterOf(range, null) })
+      for (const by of ['customer', 'payment_method', 'branch', 'cashier', 'hour', 'weekday']) matrix.push({ label: `${range.id}/grouped-${by}`, mode: 'grouped', by, filter: filterOf(range, null) })
+    }
+    matrix.push({ label: 'undated/daily-report', mode: 'series', filter: undated(), granularity: 'day' }, { label: 'undated/cancelled/snapshot', mode: 'snapshot', filter: undated({ status: 'cancelled' }) },
+      { label: 'undated/aba/snapshot', mode: 'snapshot', filter: undated({ paymentMethod: 'ABA' }) }, { label: 'undated/branch1/snapshot', mode: 'snapshot', filter: undated({ branchId: '1' }) },
+      { label: 'undated/awaiting/product', mode: 'product', filter: undated({ status: 'awaiting_payment' }) },
+      { label: 'undated/dated-status/snapshot', mode: 'snapshot', filter: undated({ startDate: monthRange.startDate, endDate: monthRange.endDate, status: 'awaiting_payment' }), twoPass: true },
+      { label: 'undated/dated-clock/snapshot', mode: 'snapshot', filter: undated({ startDate: monthRange.startDate, endDate: monthRange.endDate, startTime: '08:00', endTime: '12:00' }), twoPass: true },
+      { label: 'undated/fees/snapshot', mode: 'snapshot', filter: undated(), fees: true, twoPass: true }, { label: 'undated/scope/snapshot', mode: 'snapshot', filter: undated(), stats: { search: 'Customer 1' }, twoPass: true },
+      { label: 'undated/export-cap/snapshot', mode: 'snapshot', filter: undated(), options: { maxReceipts: 5000 }, twoPass: true })
     const run = async (states, cases, extra = {}) => {
       const results = {}
       for (const state of states) {
@@ -292,15 +310,16 @@ async function main() {
       same(off, on, `${c.label}: OFF and ON differ`)
       assert.ok(!off.calls.some(call => call.atomic), `${c.label}: OFF must never batch atomically`)
       if (on.calls.some(call => call.atomic)) { atomicSeen += 1; if (on.calls.length < off.calls.length) fewerCalls += 1 }
+      if (['series', 'product', 'grouped'].includes(c.mode)) return
       const totals = c.mode === 'combined' ? off.value.totals : c.mode === 'previous' ? off.value : c.mode === 'totals' ? off.value.totals : off.value.totals
       positive.sales += totals.tx_count > 0 ? 1 : 0; positive.notPaid += totals.pending_revenue_usd > 0 ? 1 : 0; positive.cancelled += totals.cancelled_tx_count > 0 ? 1 : 0; positive.refund += totals.refund_usd > 0 ? 1 : 0
     })
-    assert.ok(positive.sales > matrix.length * 0.6 && positive.notPaid > 10 && positive.cancelled > 10 && positive.refund > 10, 'fixture must exercise sales, Not Paid, cancelled and refunded windows: ' + JSON.stringify(positive))
+    assert.ok(positive.sales > matrix.filter(c => !['series', 'product', 'grouped'].includes(c.mode)).length * 0.6 && positive.notPaid > 10 && positive.cancelled > 10 && positive.refund > 10, 'fixture must exercise sales, Not Paid, cancelled and refunded windows: ' + JSON.stringify(positive))
     const notAtomic = matrix.filter((c, i) => !parity.on[i].calls.some(call => call.atomic)).map(c => c.label)
     // By design (the Codex chain): the full-family reader and the Sales stats route with a date window keep the two-pass compare;
     // every other report read (dashboard and analytics totals, previous period, the undated stats) runs the one atomic batch.
-    const twoPass = matrix.filter(c => c.mode === 'snapshot' || (c.mode === 'totals' && c.filter.startDate)).map(c => c.label)
-    assert.deepEqual([...notAtomic].sort(), [...twoPass].sort(), 'exactly the full-family and dated-stats cases may skip the atomic batch')
+    const twoPass = matrix.filter(c => c.twoPass || (c.mode === 'totals' && c.filter.startDate)).map(c => c.label)
+    assert.deepEqual([...notAtomic].sort(), [...twoPass].sort(), 'exactly the scoped, courier-fee, export-cap, other-filter and dated-stats cases may skip the atomic batch')
     assert.ok(atomicSeen >= RANGES.length, `ON must reach the atomic batch (${atomicSeen} of ${matrix.length})`)
     assert.ok(fewerCalls >= RANGES.length, `ON must take fewer D1 calls than OFF (${fewerCalls})`)
     check(`OFF == ON over ${matrix.length} cases: ${RANGES.length} ranges (${presets.STATS_PRESETS.length} picker presets, partial-day, 2-second boundary) x branch all/1/2 x combined/previous/stats (atomic reached ${atomicSeen}x, fewer calls ${fewerCalls}x; sales ${positive.sales}, Not Paid ${positive.notPaid}, cancelled ${positive.cancelled}, refunds ${positive.refund})`)
@@ -318,7 +337,7 @@ async function main() {
 
     // ---- 2. the routes of the mutants: each must break parity -------------------------------------------------------------------
     const caughtBy = {}, valueCaughtBy = {}
-    const killers = matrix.filter(c => /^(today|month|all|7d)\//.test(c.label) || c.label === 'stats-search')
+    const killers = matrix.filter(c => /^(today|month|all|7d|undated)\//.test(c.label) || c.label === 'stats-search')
     for (const mutant of Object.keys(MUTANTS)) {
       const mutated = await bundleWorker(mutant)
       for (const instance of instances.splice(0)) await instance.dispose()
@@ -362,7 +381,9 @@ async function main() {
     const sweep = {}
     for (const state of ['off', 'on']) {
       await setSwitch(state)
-      for (const [name, base] of [['today', todayCase], ['month', monthCase]]) for (const write of Object.keys(WRITES)) {
+      // the Dashboard pair (combined) and the full report family: a month snapshot and the undated daily-report series
+      const snapshotCase = { mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'month'), null) }, dailyCase = { mode: 'series', filter: undated(), granularity: 'day' }
+      for (const [name, base] of [['today', todayCase], ['month', monthCase], ['snapshot', snapshotCase], ['daily', dailyCase]]) for (const write of Object.keys(WRITES)) {
         const pre = await world.invoke({ ...base })
         await exec(WRITES[write]); const post = await world.invoke({ ...base }); await exec(UNDO[write])
         assert.notEqual(stateOf(pre), stateOf(post), `${state}/${name}/${write}: the injected write must change the report, or the sweep proves nothing`)
@@ -385,6 +406,7 @@ async function main() {
 
     // ---- 4. the switch itself ---------------------------------------------------------------------------------------------------
     const probe = { mode: 'combined', filter: filterOf(RANGES.find(r => r.id === 'month'), null), granularity: 'day' }
+    const snapProbe = { mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'month'), null) }
     await setSwitch('off'); const offProbe = await world.invoke(probe)
     assert.equal(offProbe.calls.filter(c => c.sw).length, 1, 'the OFF reader pays the switch read once')
     await setSwitch('on'); const onProbe = await world.invoke(probe)
@@ -410,6 +432,13 @@ async function main() {
     const sampled = await world.invoke({ ...probe, sample: 0 })
     same(offProbe, sampled, 'a sampled shadow serves OFF'); assert.ok(sampled.calls.some(c => c.atomic), 'a sampled shadow also runs the atomic batch')
     assert.deepEqual(sampled.ae.filter(p => p.indexes[0] === 'report_atomic_shadow').map(p => p.blobs), [['totals_and_series', 'match']])
+    {
+      // the full report family is compared too: a sampled shadow serves the old snapshot and records a match against the atomic one
+      await setSwitch('off'); const offSnap = await world.invoke(snapProbe)
+      await setSwitch('shadow:0.1'); const shadowSnap = await world.invoke({ ...snapProbe, sample: 0 })
+      same(offSnap, shadowSnap, 'a sampled shadow serves the OFF snapshot'); assert.ok(shadowSnap.calls.some(c => c.atomic), 'the sampled shadow also reads the atomic batch')
+      assert.deepEqual(shadowSnap.ae.filter(p => p.indexes[0] === 'report_atomic_shadow').map(p => p.blobs), [['snapshot', 'match']])
+    }
     const unsampled = await world.invoke({ ...probe, sample: 0.5 })
     same(offProbe, unsampled, 'an unsampled shadow serves OFF'); assert.ok(!unsampled.calls.some(c => c.atomic)); assert.equal(unsampled.calls.length, offProbe.calls.length); assert.equal(unsampled.ae.length, 0)
     const free = await world.invoke({ ...probe, sample: 0, tier: 'free' })
@@ -426,6 +455,8 @@ async function main() {
       await setSwitch(state)
       const refused = await world.invoke({ ...probe, sample: 0 })
       assert.equal(refused.kind, 'error'); assert.equal(refused.error.code, 'maintenance_restore'); assert.equal(refused.error.status, 409)
+      const refusedSnapshot = await world.invoke({ ...snapProbe, sample: 0 })
+      assert.equal(refusedSnapshot.kind, 'error'); assert.equal(refusedSnapshot.error.code, 'maintenance_restore'); assert.equal(refusedSnapshot.error.status, 409)
       assert.equal(refused.ae.filter(p => p.indexes[0] === 'report_atomic_shadow').length, 0, 'a refusal by the served reader is not a shadow outcome')
     }
     await exec([{ sql: "DELETE FROM system_flags WHERE key='maintenance_mode'" }])
@@ -442,8 +473,10 @@ async function main() {
       ['ISO instants with Z', { startDate: TODAY, endDate: TODAY, createdFrom: `${TODAY}T02:00:00Z`, createdTo: `${TODAY}T05:00:00Z`, branchId: null }], ['numeric dates', { startDate: 20260901, endDate: 20260913, branchId: null }],
       ['inherited properties', { kind: 'inherited', startDate: month.startDate, endDate: month.endDate, branchId: null }], ['null prototype', { kind: 'null-proto', ...filterOf(month, '1') }], ['accessor that changes on read', { kind: 'getter', ...filterOf(month, null), startDate: month.startDate, endDate: TODAY }],
       ['symbol key', { kind: 'symbol', ...filterOf(month, null) }], ['extra status key', { kind: 'extra-key', ...filterOf(month, null) }], ['all-time with a branch', { startDate: '', endDate: '', branchId: '2' }], ['all-time empty', { startDate: '', endDate: '', branchId: null }],
+      ['inherited all-time', { kind: 'inherited', startDate: null, endDate: null, branchId: null }], ['null prototype all-time', { kind: 'null-proto', startDate: '', endDate: '', branchId: null }],
+      ['symbol key all-time', { kind: 'symbol', startDate: '', endDate: '', branchId: null }], ['accessor all-time', { kind: 'getter', startDate: null, endDate: null, branchId: null }],
     ]
-    const craftedCases = crafted.flatMap(([label, filter]) => [{ label: label + '/combined', mode: 'combined', filter, granularity: 'day' }, { label: label + '/previous', mode: 'previous', filter, rawPrevious: true }, { label: label + '/stats', mode: 'totals', filter: { startDate: filter.startDate ?? null, endDate: filter.endDate ?? null }, stats: { startDate: filter.startDate, endDate: filter.endDate, branchId: filter.branchId } }])
+    const craftedCases = crafted.flatMap(([label, filter]) => [{ label: label + '/snapshot', mode: 'snapshot', filter }, { label: label + '/combined', mode: 'combined', filter, granularity: 'day' }, { label: label + '/previous', mode: 'previous', filter, rawPrevious: true }, { label: label + '/stats', mode: 'totals', filter: { startDate: filter.startDate ?? null, endDate: filter.endDate ?? null }, stats: { startDate: filter.startDate, endDate: filter.endDate, branchId: filter.branchId } }])
     const craftedResults = await run(['off', 'on'], craftedCases)
     let refusals = 0
     craftedCases.forEach((c, i) => {
@@ -453,6 +486,9 @@ async function main() {
     const isEmpty = r => r.kind === 'value' && (r.value.totals ?? r.value).tx_count === 0
     const idx = label => craftedCases.findIndex(c => c.label === label)
     for (const label of ['branchId injection/combined', 'branchId statement/combined', 'branchId unknown/combined']) assert.ok(isEmpty(craftedResults.on[idx(label)]), `${label}: an injected or unknown branch must select nothing (the value is bound, never interpolated)`)
+    const reachesAtomic = label => craftedResults.on[idx(label)].calls.some(c => c.atomic)
+    for (const label of ['inherited all-time', 'null prototype all-time', 'symbol key all-time', 'accessor all-time']) assert.ok(!reachesAtomic(label + '/snapshot'), `${label}: a filter that is not a plain data object keeps the two passes`)
+    for (const label of ['all-time empty', 'all-time with a branch']) assert.ok(reachesAtomic(label + '/snapshot'), `${label}: a plain undated filter reads the one atomic batch`)
     assert.equal((await raw.prepare('SELECT COUNT(*) n FROM sales').all()).results[0].n, counts.s, 'no crafted filter touched the data')
     check(`${craftedCases.length} crafted filter cases take the same outcome on OFF and ON (${refusals} refusals, the rest results); injection and unknown branches select nothing`)
     console.log(`done: ${world.count()} requests in the last world, ${Math.round((Date.now() - t0) / 1000)}s`)

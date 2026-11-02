@@ -1963,6 +1963,26 @@ async function routeReportRead<T>(
   return router.routeReportRead(env, route, legacy, atomic, options)
 }
 
+/** A plain data object: nothing inherited, no accessor, no symbol, so every read of a field answers the same. */
+function reportPlainFilters(f: SalesFilters): boolean {
+  if (Object.getPrototypeOf(f) !== Object.prototype || Object.getOwnPropertySymbols(f).length) return false
+  return Object.getOwnPropertyNames(f).every((key) => Object.hasOwn(Object.getOwnPropertyDescriptor(f, key) ?? {}, 'value'))
+}
+
+/** The full report family behind report_atomic: one bounded batch for an undated window or a plain dated Dashboard-style window
+ * (no scope, no courier fees, no export cap); every other request keeps the two scalar passes and their compare. */
+async function readSalesReportSnapshotAtomic(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined, options: SalesReportReadOptions,
+): Promise<SalesReportSnapshot> {
+  validateReportReadOptions(options)
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
+  const bare = !includeDeliveryFees && capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+  if (bare && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+  if (bare && reportDashboardDateFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
+  return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'full')
+}
+
 export async function readSalesReportSnapshot(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
@@ -1972,8 +1992,7 @@ export async function readSalesReportSnapshot(
 ): Promise<SalesReportSnapshot> {
   return routeReportRead(env, 'snapshot',
     () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
-    () => readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'full'),
-    { compare: false })
+    () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options))
 }
 
 export interface SalesReportTotalsResult {

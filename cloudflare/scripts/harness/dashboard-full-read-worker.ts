@@ -10,7 +10,7 @@ const PERMIT_SQL = "SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_tran
 const POISON = '__dashboard_full_detail_poison'
 // The report_atomic switch read is metered apart from the report ledger: it is one cold statement of its own.
 const SWITCH_SQL = /FROM system_flags WHERE key IN \(\?1, \?2\)/
-const modes = ['public-snapshot', 'atomic-full-snapshot', 'combined', 'public-totals']
+const modes = ['public-snapshot', 'public-snapshot-on', 'atomic-full-snapshot', 'combined', 'public-totals']
 const hex = (array: ArrayBuffer) => [...new Uint8Array(array)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 const digest = async (text: string) => hex(await crypto.subtle.digest('SHA-256', encoder.encode(text)))
 function requireValue(value: unknown, message: string): asserts value { if (!value) throw new Error('Full-reader regression harness: ' + message) }

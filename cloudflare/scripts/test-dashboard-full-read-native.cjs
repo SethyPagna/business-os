@@ -168,7 +168,11 @@ async function main() {
   }
   await permit('branch', [{ sql: "INSERT OR IGNORE INTO branches(id,name,is_default,is_active) VALUES(1,'Private legacy fixture',1,1)" }])
   await permit('read-switch', [{ sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on' } })] }])
+  // The oracle (public-snapshot) is the old reader: report_atomic OFF runs the base two-pass copy. Every other selector runs with it ON.
+  let switchState = 'on'
   const invoke = async (input, label) => {
+    const want = input.mode === 'public-snapshot' ? 'off' : 'on'
+    if (want !== switchState) { await permit('read-switch-' + want, [{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want } })] }]); switchState = want }
     life('request-before', { label, input }); const response = await mf.dispatchFetch('http://fixture.test/run', { method: 'POST', body: JSON.stringify(input) }), text = await response.text(), value = JSON.parse(text)
     const record = { input, transport_status: response.status, response_utf8_bytes: Buffer.byteLength(text), metrics: metrics(value.calls ?? []), external_writer_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage === 'write')), external_writer_witness_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage !== 'write')), value }
     sequence++; observationHashes.push({ sequence, label, input, response_status: response.status, body_sha256: sha(text), app: record.metrics, external_writer: record.external_writer_metrics, external_witnesses: record.external_writer_witness_metrics }); life('request-after', { label, transport_status: response.status, kind: value.kind, marker: value.error?.marker ?? null })
@@ -198,6 +202,7 @@ async function main() {
   const sameFull = (record, expected, fixture) => { financial(record.value, fixture); assert.deepEqual(record.value.snapshot, expected.value.snapshot); assert.deepEqual(record.value.views, expected.value.views) }
   const tiny = { name: 'tiny', items: 1, customer: 'Fixture customer', product: 'Fixture item' }
   await seed(tiny); const tinyAuthority = await authority(tiny)
+  const tinyPublicOn = await invoke({ mode: 'public-snapshot-on', reset: true }, 'tiny-public-on'); sameFull(tinyPublicOn, tinyAuthority, tiny); noUnexpectedErrors(tinyPublicOn.value); assert.equal(tinyPublicOn.metrics.atomic_main_batches, 1, 'with report_atomic ON the public full reader reads one atomic main batch'); accept('tiny-public-on', tinyPublicOn)
   const tinyCombined = await invoke({ mode: 'combined' }, 'tiny-combined'); assert.equal(tinyCombined.value.kind, 'combined'); assert.equal(tinyCombined.metrics.atomic_main_batches, 1, 'Eligible combined helper must dispatch exactly one full atomic main'); noUnexpectedErrors(tinyCombined.value); combinedParity(tinyCombined, tinyAuthority)
   const tinyMain = tinyCombined.value.calls.find(call => call.phase === 'atomic-main')
   const omittedSalesFields = ['cashier_id', 'cashier_name', 'customer_phone', 'receipt_number', 'delivery_contact_id', 'delivery_contact_name']
@@ -238,7 +243,7 @@ async function main() {
   const legacyActive = await invoke({ mode: 'public-snapshot', reset: true }, 'legacy-active-prefix'); prefixLedger(legacyActive, false); accept('legacy-active-prefix', legacyActive)
   const optimizedActive = await invoke({ mode: 'atomic-full-snapshot', reset: true }, 'optimized-active-prefix'); prefixLedger(optimizedActive, true); accept('optimized-active-prefix', optimizedActive)
   await permit('final-recognized-flag-cleanup', [{ sql: "DELETE FROM system_flags WHERE key IN ('maintenance','maintenance_mode')" }])
-  assert.equal(sequence, 21); assert.equal(checks.length, 21)
+  assert.equal(sequence, 22); assert.equal(checks.length, 22)
   const triggersAfter = await raw.prepare("SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name").all(); assert.deepEqual(triggersAfter.results, triggersBefore.results)
   const finalFlags = await raw.prepare("SELECT key FROM system_flags WHERE key IN ('maintenance','maintenance_mode','stock_transaction_permit')").all(); assert.equal(finalFlags.results.length, 0); setup.push({ kind: 'final-flags', result: finalFlags })
   for (const [relative, source] of sources) assert.ok(source.bytes.equals(fs.readFileSync(source.file)), 'Loaded source changed during full-reader regression: ' + relative)
