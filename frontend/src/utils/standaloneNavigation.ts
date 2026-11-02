@@ -89,6 +89,8 @@ export function installStandaloneExternalLinkGuard(): () => void {
 }
 
 export type InstallRoute = 'native-prompt' | 'ios-share'
+/** The band adds a hint for browsers that cannot install at all; the account-menu entry never offers it. */
+export type InstallBandRoute = InstallRoute | 'open-elsewhere'
 
 // Device-scoped, not account-scoped: a shared till is installed, or its bar
 // closed, whoever is signed in. Timestamps only, so nothing leaks between accounts.
@@ -96,7 +98,7 @@ const INSTALL_BAND_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:install-offe
 const LEGACY_IOS_HINT_DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`
 const APP_INSTALLED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:app-installed-at-v1`
 /** A closed band comes back after this long, so one stray tap does not hide the offer for good. */
-export const INSTALL_BAND_REOFFER_MS = 30 * 24 * 60 * 60 * 1000
+export const INSTALL_BAND_REOFFER_MS = 14 * 24 * 60 * 60 * 1000
 
 /** clientRuntime.ts spells these out in its logout preserve list; installOffer.test.ts keeps the two in step. */
 export const INSTALL_OFFER_DEVICE_KEYS = [INSTALL_BAND_DISMISSED_KEY, LEGACY_IOS_HINT_DISMISSED_KEY, APP_INSTALLED_KEY] as const
@@ -120,6 +122,14 @@ function canAddToIosHomeScreen(userAgent: string): boolean {
     return major > 16 || (major === 16 && Number(version[2]) >= 4)
   }
   return /Safari/.test(userAgent)
+}
+
+// A WebView or in-app browser has no install menu and fires no beforeinstallprompt.
+const ANDROID_IN_APP_BROWSER = /; wv\)|FBAN|FBAV|Instagram|MicroMessenger|Line\/|TikTok|musical_ly|BytedanceWebview|Snapchat|Twitter|LinkedInApp/
+
+function isBrowserThatCannotInstall(userAgent: string, maxTouchPoints: number): boolean {
+  if (isIosDevice(userAgent, maxTouchPoints)) return !canAddToIosHomeScreen(userAgent)
+  return /Android/i.test(userAgent) && ANDROID_IN_APP_BROWSER.test(userAgent)
 }
 
 function isHandheldInstallTarget(): boolean {
@@ -210,19 +220,32 @@ export function installBeforeInstallPromptCapture(): () => void {
   }
 }
 
+function isInstalledOnThisDevice(): boolean {
+  return isStandaloneDisplayMode() || readDeviceTimestamp(APP_INSTALLED_KEY) > 0
+}
+
 /** The account-menu entry: any device that can install now, desktops included (owner default). */
 export function installMenuRoute(): InstallRoute | null {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null
-  if (isStandaloneDisplayMode() || readDeviceTimestamp(APP_INSTALLED_KEY) > 0) return null
+  if (isInstalledOnThisDevice()) return null
   if (deferredInstallPrompt) return 'native-prompt'
   const userAgent = navigator.userAgent || ''
   return isIosDevice(userAgent, Number(navigator.maxTouchPoints) || 0) && canAddToIosHomeScreen(userAgent) ? 'ios-share' : null
 }
 
-/** The band: phones and tablets only, and not for 30 days after it was closed (owner, 19 Oct 2026; was never again). */
-export function installBandRoute(): InstallRoute | null {
-  if (!isHandheldInstallTarget() || isInstallBandDismissed()) return null
-  return installMenuRoute()
+/**
+ * The band, and not for 14 days after it was closed (owner brief, 2 Nov 2026). Phones and tablets everywhere;
+ * the staff app also offers it on desktops and says where to install from when the browser cannot. Shoppers
+ * keep phones only (a top card on a desktop shop would sit over the header; owner default of 28 Sep 2026).
+ */
+export function installBandRoute(staffApp = false): InstallBandRoute | null {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return null
+  if (isInstallBandDismissed() || isInstalledOnThisDevice()) return null
+  const handheld = isHandheldInstallTarget()
+  const route = installMenuRoute()
+  if (route) return staffApp || handheld ? route : null
+  const userAgent = navigator.userAgent || ''
+  return staffApp && handheld && isBrowserThatCannotInstall(userAgent, Number(navigator.maxTouchPoints) || 0) ? 'open-elsewhere' : null
 }
 
 function isInstallBandDismissed(): boolean {

@@ -14,6 +14,9 @@ const UA = {
   android: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
   iosSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
   iosChrome: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0.6668.46 Mobile/15E148 Safari/604.1',
+  iosInApp: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 Instagram 350.0.0.10.100',
+  androidWebView: 'Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36',
+  desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
 }
 const DISMISSED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:install-offer-dismissed-at-v2`
 const INSTALLED_KEY = `${STORAGE_KEYS.DEVICE_SETTINGS}:app-installed-at-v1`
@@ -176,7 +179,7 @@ await check('dismissed: nothing is recorded as installed, and a later browser of
   })
 })
 
-await check('the X keeps the band closed across a remount and a reload, and brings it back after 30 days', async () => {
+await check('the X keeps the band closed across a remount and a reload, and brings it back after 14 days', async () => {
   const clock = installSteppedClock()
   const phone = { userAgent: UA.android }
   const reloaded = { userAgent: UA.android, sameBrowser: true }
@@ -191,8 +194,8 @@ await check('the X keeps the band closed across a remount and a reload, and brin
       await band.unmount()
       assert.equal((await s.mountBand()).text(), '', 'remounted: still closed')
     })
-    for (const [days, offered] of [[1, false], [29, false], [31, true]] as const) {
-      clock.advance((days === 1 ? 1 : days === 29 ? 28 : 2) * DAY_MS)
+    for (const [days, offered] of [[1, false], [13, false], [15, true]] as const) {
+      clock.advance((days === 1 ? 1 : days === 13 ? 12 : 2) * DAY_MS)
       await scenario(reloaded, async (s) => {
         await s.arm()
         await dispatch(s.win, promptEvent('accepted'))
@@ -204,27 +207,29 @@ await check('the X keeps the band closed across a remount and a reload, and brin
   } finally { clock.restore() }
 })
 
-await check('iOS Safari and iOS Chrome show the steps instruction with no Install button, and tapping it opens the steps', async () => {
+await check('iOS Safari and iOS Chrome show one Install button that opens the drawn steps', async () => {
   for (const [name, userAgent] of [['Safari', UA.iosSafari], ['Chrome', UA.iosChrome]] as const) {
     await scenario({ userAgent }, async (s) => {
       await s.arm()
       const band = await s.mountBand()
-      assert.match(band.text(), /Install Leang Cosmetics: tap/, `${name}: names the shop`)
-      assert.equal(hasButtonWithText(band, 'Install'), false, `${name}: no native Install button on iOS`)
-      await band.click(band.button(/Add to Home Screen/))
-      assert.match(band.text(), /Install on iPhone or iPad/, `${name}: the steps modal opened from the band text`)
+      assert.match(band.text(), /Install Leang Cosmetics/, `${name}: names the shop`)
+      assert.match(band.text(), /Add it to your Home Screen in 3 steps\./, `${name}: says what the button will show`)
+      assert.equal(band.text().includes('Install on iPhone or iPad'), false, `${name}: the steps are not open until the button is pressed`)
+      await band.click(buttonWithText(band, 'Install'))
+      assert.match(band.text(), /Install on iPhone or iPad/, `${name}: the steps sheet opened from the Install button`)
       assert.match(band.text(), /Keep Open as Web App on/)
     })
   }
 })
 
-await check('the iOS band text and steps are Khmer in Khmer', async () => {
+await check('the iOS band and steps are Khmer in Khmer', async () => {
   await scenario({ userAgent: UA.iosSafari }, async (s) => {
     await s.arm()
     const band = await s.mountBand('km')
     assert.ok(band.text().includes('ដំឡើង Leang Cosmetics'))
-    await band.click(band.button(/ចែករំលែក/))
+    await band.click(buttonWithText(band, 'ដំឡើង'))
     assert.ok(band.text().includes('ដំឡើងនៅលើ iPhone ឬ iPad'))
+    assert.ok(band.text().includes('ទុក Open as Web App ឱ្យបើក'))
   })
 })
 
@@ -237,6 +242,25 @@ await check('the installed app (display-mode and navigator.standalone) shows not
   await scenario({ userAgent: UA.iosSafari, iosStandalone: true }, async (s) => {
     await s.arm()
     assert.equal((await s.mountBand()).text(), '')
+  })
+  await scenario({ userAgent: UA.desktop, hostname: ADMIN_HOST, displayModeStandalone: true }, async (s) => {
+    await s.arm()
+    await dispatch(s.win, promptEvent('accepted'))
+    assert.equal((await s.mountBand()).text(), '', 'the installed desktop staff app')
+  })
+})
+
+await check('a visible band publishes how much screen bottom it covers, and clears it when it goes', async () => {
+  const clearance = () => globalThis.document.documentElement.style.getPropertyValue('--install-band-clearance')
+  await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
+    await s.arm()
+    const band = await s.mountBand()
+    assert.equal(clearance(), '', 'nothing shown, nothing reserved')
+    await dispatch(s.win, promptEvent('accepted'))
+    await band.settle()
+    assert.match(clearance(), /^\d+px$/, 'the sign-in screen can now keep its last link above the band')
+    await band.click(closeButton(band))
+    assert.equal(clearance(), '', 'closing the band gives the space back')
   })
 })
 
@@ -256,9 +280,48 @@ await check('the staff host keeps its own wording and never names the shop app',
   await scenario({ userAgent: UA.iosSafari, hostname: ADMIN_HOST }, async (s) => {
     await s.arm()
     const band = await s.mountBand()
-    assert.match(band.text(), /Install: tap/)
+    assert.match(band.text(), /Install app/)
+    assert.match(band.text(), /Add it to your Home Screen in 3 steps\./)
     assert.doesNotMatch(band.text(), /Leang Cosmetics/)
   })
+})
+
+await check('desktop Chrome: the staff app offers one Install button that replays the prompt once; the shop offers nothing', async () => {
+  await scenario({ userAgent: UA.desktop, hostname: ADMIN_HOST }, async (s) => {
+    await s.arm()
+    const event = promptEvent('accepted')
+    await dispatch(s.win, event)
+    const band = await s.mountBand()
+    assert.match(band.text(), /Install app/)
+    assert.doesNotMatch(band.text(), /Leang Cosmetics/)
+    await band.click(buttonWithText(band, 'Install'))
+    assert.equal(event.prompted, 1)
+    assert.equal(band.text(), '')
+    assert.ok(Number(globalThis.localStorage.getItem(INSTALLED_KEY)) > 0)
+  })
+  await scenario({ userAgent: UA.desktop, hostname: SHOP_HOST }, async (s) => {
+    await s.arm()
+    await dispatch(s.win, promptEvent('accepted'))
+    assert.equal((await s.mountBand()).text(), '', 'a desktop shop shows no card over its header')
+  })
+})
+
+await check('a browser that cannot install: the staff app says where to install from; closing it is remembered; the shop stays silent', async () => {
+  for (const userAgent of [UA.iosInApp, UA.androidWebView]) {
+    await scenario({ userAgent, hostname: ADMIN_HOST }, async (s) => {
+      await s.arm()
+      const band = await s.mountBand()
+      assert.match(band.text(), /Open this page in Chrome or Safari to install\./, userAgent)
+      assert.equal(hasButtonWithText(band, 'Install'), false, 'nothing to press')
+      await band.click(closeButton(band))
+      assert.equal(band.text(), '')
+      assert.ok(globalThis.localStorage.getItem(DISMISSED_KEY), 'the choice is remembered on the device')
+    })
+    await scenario({ userAgent, hostname: SHOP_HOST }, async (s) => {
+      await s.arm()
+      assert.equal((await s.mountBand()).text(), '', `${userAgent}: shoppers are never told to switch browser`)
+    })
+  }
 })
 
 if (failed > 0) {

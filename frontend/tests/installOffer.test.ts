@@ -4,9 +4,9 @@ import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { STORAGE_KEYS } from '../src/constants.ts'
 
-// PWA-3a install offer (PWA-FINAL D7). Owner defaults of 28 Sep 2026: a closed
-// install bar never returns on that device, and desktops get the account-menu
-// entry only. Every check runs the real module against window, navigator and
+// Install offer. Owner brief of 2 Nov 2026: a closed band returns after 14 days; the staff app also
+// offers it on desktops and, in a browser that cannot install, says where to install from; shoppers
+// keep phones only (28 Sep default). Every check runs the real module against window, navigator and
 // storage doubles; each case loads a fresh module instance, the way a reload does.
 
 const read = (rel: string): string => fs.readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
@@ -35,6 +35,11 @@ const USER_AGENTS = {
   iphoneFirefox: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15',
   iphoneEdge: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/129.0.2792.84 Version/18.0 Mobile/15E148 Safari/604.1',
   androidChrome: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
+  androidWebView: 'Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36',
+  androidFacebook: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/450.0.0.38.108;]',
+  desktopFirefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0',
+  desktopEdge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0',
+  desktopMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
   iphoneChromeOld: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0.6668.46 Mobile/15E148 Safari/604.1',
   iphoneOpera: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) OPiOS/16.0.15.124050 Mobile/15E148 Safari/9537.53',
   iphoneInstagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 Instagram 350.0.0.10.100',
@@ -130,18 +135,20 @@ await check('the installed app never gets the band or the menu entry', async () 
   assert.equal(installed.installMenuRoute(), null, 'display-mode standalone: no menu entry')
 })
 
-await check('iOS Safari, and Chrome/Firefox/Edge on iOS 16.4+, get the Share route; Opera, old iOS and in-app browsers get nothing', async () => {
+await check('iOS Safari, and Chrome/Firefox/Edge on iOS 16.4+, get the Share route; Opera, old iOS and in-app browsers get the hint instead', async () => {
   for (const userAgent of [USER_AGENTS.iphoneSafari, USER_AGENTS.iphoneChrome, USER_AGENTS.iphoneFirefox, USER_AGENTS.iphoneEdge]) {
     useDevice({ userAgent, maxTouchPoints: 5 })
     const install = await freshInstallModule()
     assert.equal(install.installBandRoute(), 'ios-share', userAgent)
+    assert.equal(install.installBandRoute(true), 'ios-share', userAgent)
     assert.equal(install.installMenuRoute(), 'ios-share', userAgent)
   }
   for (const userAgent of [USER_AGENTS.iphoneChromeOld, USER_AGENTS.iphoneOpera, USER_AGENTS.iphoneInstagram]) {
     useDevice({ userAgent, maxTouchPoints: 5 })
     const other = await freshInstallModule()
-    assert.equal(other.installBandRoute(), null, `${userAgent} cannot Add to Home Screen`)
-    assert.equal(other.installMenuRoute(), null)
+    assert.equal(other.installBandRoute(), null, `${userAgent}: the shop band never tells a shopper to switch browser`)
+    assert.equal(other.installBandRoute(true), 'open-elsewhere', `${userAgent} cannot Add to Home Screen: the staff band says where to install from`)
+    assert.equal(other.installMenuRoute(), null, 'the menu entry would have nothing to run, so it stays hidden')
   }
 })
 
@@ -191,11 +198,12 @@ await check('Android shows the native route only after beforeinstallprompt, and 
   unsubscribe()
 })
 
-await check('a desktop with a captured prompt gets the menu entry, never the band', async () => {
+await check('a desktop with a captured prompt gets the menu entry everywhere and the band in the staff app only', async () => {
   const device = useDevice({ userAgent: USER_AGENTS.desktopChrome })
   const install = await freshInstallModule()
   device.window.dispatchEvent(installPromptEvent())
-  assert.equal(install.installBandRoute(), null, 'owner default: desktops and tills get no bar')
+  assert.equal(install.installBandRoute(), null, 'shoppers keep the 28 Sep default: a desktop shop shows no card over its header')
+  assert.equal(install.installBandRoute(true), 'native-prompt', 'owner brief 2 Nov: desktop Chrome or Edge gets one Install button in the staff app')
   assert.equal(install.installMenuRoute(), 'native-prompt', 'owner default: desktops get the menu button')
 })
 
@@ -243,7 +251,7 @@ await check('an accepted native prompt records the install; a declined one only 
   assert.equal(retry.prompted, 1)
 })
 
-await check('a closed band stays closed for 30 days, then the offer returns; the menu entry never goes', async () => {
+await check('a closed band stays closed for 14 days, then the offer returns; the menu entry never goes', async () => {
   const ios = useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
   const first = await freshInstallModule()
   let notified = 0
@@ -253,12 +261,13 @@ await check('a closed band stays closed for 30 days, then the offer returns; the
   assert.equal(first.installBandRoute(), null)
   assert.equal(first.installMenuRoute(), 'ios-share', 'closing the bar keeps the pull entry')
   assert.ok(ios.storage.getItem(DISMISSED_KEY), 'the choice is stored for the device')
-  await withClockAdvancedBy(29 * DAY_MS, async () => {
-    assert.equal((await freshInstallModule()).installBandRoute(), null, 'day 29: still closed')
+  assert.equal(first.INSTALL_BAND_REOFFER_MS, 14 * DAY_MS, 'owner brief 2 Nov: remembered for 14 days')
+  await withClockAdvancedBy(13 * DAY_MS, async () => {
+    assert.equal((await freshInstallModule()).installBandRoute(), null, 'day 13: still closed')
   })
-  await withClockAdvancedBy(31 * DAY_MS, async () => {
+  await withClockAdvancedBy(15 * DAY_MS, async () => {
     const reloaded = await freshInstallModule()
-    assert.equal(reloaded.installBandRoute(), 'ios-share', 'day 31: the band is offered again')
+    assert.equal(reloaded.installBandRoute(), 'ios-share', 'day 15: the band is offered again')
     reloaded.dismissInstallBand()
     assert.equal(reloaded.installBandRoute(), null, 'closing it again closes it again')
   })
@@ -271,8 +280,8 @@ await check('a closed band stays closed for 30 days, then the offer returns; the
   android.window.dispatchEvent(installPromptEvent())
   assert.equal(afterReload.installBandRoute(), null, 'closed on Android too')
   assert.equal(afterReload.installMenuRoute(), 'native-prompt')
-  await withClockAdvancedBy(31 * DAY_MS, async () => {
-    assert.equal(afterReload.installBandRoute(), 'native-prompt', 'and it returns after 30 days')
+  await withClockAdvancedBy(15 * DAY_MS, async () => {
+    assert.equal(afterReload.installBandRoute(), 'native-prompt', 'and it returns after 14 days')
   })
 })
 
@@ -280,13 +289,13 @@ await check('the old iOS hint dismissal alone keeps the band closed', async () =
   useDevice({
     userAgent: USER_AGENTS.iphoneSafari,
     maxTouchPoints: 5,
-    storage: memoryStorage({ [LEGACY_IOS_DISMISSED_KEY]: String(Date.now() - 20 * DAY_MS) }),
+    storage: memoryStorage({ [LEGACY_IOS_DISMISSED_KEY]: String(Date.now() - 10 * DAY_MS) }),
   })
   const install = await freshInstallModule()
   assert.equal(install.installBandRoute(), null)
   assert.equal(install.installMenuRoute(), 'ios-share')
-  await withClockAdvancedBy(15 * DAY_MS, async () => {
-    assert.equal(install.installBandRoute(), 'ios-share', 'the legacy dismissal also lapses after 30 days')
+  await withClockAdvancedBy(5 * DAY_MS, async () => {
+    assert.equal(install.installBandRoute(), 'ios-share', 'the legacy dismissal also lapses after 14 days')
   })
 })
 
@@ -296,6 +305,57 @@ await check('blocked storage still closes the band for this page, without throwi
   assert.equal(install.installBandRoute(), 'ios-share')
   install.dismissInstallBand()
   assert.equal(install.installBandRoute(), null)
+})
+
+type Route = 'native-prompt' | 'ios-share' | 'open-elsewhere' | null
+const PHONE = 5
+const closedNow = () => memoryStorage({ [DISMISSED_KEY]: String(Date.now()) })
+const installedBefore = () => memoryStorage({ [INSTALLED_KEY]: String(Date.now()) })
+
+// Every platform branch, as [staff band, shop band, account menu] for one device.
+const PLATFORM_MATRIX: Array<{ name: string; device: Device; prompt?: true; expected: [Route, Route, Route] }> = [
+  { name: 'iPhone Safari', device: { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: PHONE }, expected: ['ios-share', 'ios-share', 'ios-share'] },
+  { name: 'iPad (reports as a Mac, has touch)', device: { userAgent: USER_AGENTS.desktopMac, maxTouchPoints: PHONE }, expected: ['ios-share', 'ios-share', 'ios-share'] },
+  { name: 'a real Mac (no touch)', device: { userAgent: USER_AGENTS.desktopMac }, expected: [null, null, null] },
+  { name: 'iPhone home-screen app', device: { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: PHONE, iosStandalone: true }, expected: [null, null, null] },
+  { name: 'iPhone in-app browser inside the home-screen app', device: { userAgent: USER_AGENTS.iphoneInstagram, maxTouchPoints: PHONE, iosStandalone: true }, expected: [null, null, null] },
+  { name: 'iPhone Safari, band closed', device: { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: PHONE, storage: closedNow() }, expected: [null, null, 'ios-share'] },
+  { name: 'iPhone in-app browser', device: { userAgent: USER_AGENTS.iphoneInstagram, maxTouchPoints: PHONE }, expected: ['open-elsewhere', null, null] },
+  { name: 'iPhone in-app browser, hint closed', device: { userAgent: USER_AGENTS.iphoneInstagram, maxTouchPoints: PHONE, storage: closedNow() }, expected: [null, null, null] },
+  { name: 'Android Chrome before beforeinstallprompt', device: { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: PHONE }, expected: [null, null, null] },
+  { name: 'Android Chrome with the prompt', device: { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: PHONE }, prompt: true, expected: ['native-prompt', 'native-prompt', 'native-prompt'] },
+  { name: 'Android Chrome with the prompt, band closed', device: { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: PHONE, storage: closedNow() }, prompt: true, expected: [null, null, 'native-prompt'] },
+  { name: 'Android installed app with a prompt', device: { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: PHONE, displayModeStandalone: true }, prompt: true, expected: [null, null, null] },
+  { name: 'Android with an install already recorded', device: { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: PHONE, storage: installedBefore() }, expected: [null, null, null] },
+  { name: 'Android WebView', device: { userAgent: USER_AGENTS.androidWebView, maxTouchPoints: PHONE }, expected: ['open-elsewhere', null, null] },
+  { name: 'Android Facebook in-app browser', device: { userAgent: USER_AGENTS.androidFacebook, maxTouchPoints: PHONE }, expected: ['open-elsewhere', null, null] },
+  { name: 'Android WebView that does fire the prompt', device: { userAgent: USER_AGENTS.androidWebView, maxTouchPoints: PHONE }, prompt: true, expected: ['native-prompt', 'native-prompt', 'native-prompt'] },
+  { name: 'desktop Chrome with the prompt', device: { userAgent: USER_AGENTS.desktopChrome }, prompt: true, expected: ['native-prompt', null, 'native-prompt'] },
+  { name: 'desktop Edge with the prompt', device: { userAgent: USER_AGENTS.desktopEdge }, prompt: true, expected: ['native-prompt', null, 'native-prompt'] },
+  { name: 'desktop Chrome with the prompt, band closed', device: { userAgent: USER_AGENTS.desktopChrome, storage: closedNow() }, prompt: true, expected: [null, null, 'native-prompt'] },
+  { name: 'desktop Chrome without a prompt (installed, or not installable)', device: { userAgent: USER_AGENTS.desktopChrome }, expected: [null, null, null] },
+  { name: 'installed desktop app', device: { userAgent: USER_AGENTS.desktopChrome, displayModeStandalone: true }, prompt: true, expected: [null, null, null] },
+  { name: 'desktop Firefox', device: { userAgent: USER_AGENTS.desktopFirefox }, expected: [null, null, null] },
+]
+
+await check('band and menu routes for every platform branch, staff app and shop', async () => {
+  for (const { name, device, prompt, expected } of PLATFORM_MATRIX) {
+    const { window: win } = useDevice(device)
+    const install = await freshInstallModule()
+    if (prompt) win.dispatchEvent(installPromptEvent())
+    assert.deepEqual(
+      [install.installBandRoute(true), install.installBandRoute(false), install.installMenuRoute()],
+      expected,
+      `${name}: [staff band, shop band, menu]`,
+    )
+  }
+})
+
+await check('the platform matrix separates every route from every wrong one', () => {
+  const seen = new Set(PLATFORM_MATRIX.flatMap(({ expected }) => expected))
+  for (const route of ['native-prompt', 'ios-share', 'open-elsewhere', null] as const) assert.ok(seen.has(route), `a case expects ${route}`)
+  assert.ok(PLATFORM_MATRIX.some(({ expected }) => expected[0] === 'native-prompt' && expected[1] === null), 'a case where only the staff app shows the band')
+  assert.ok(PLATFORM_MATRIX.some(({ expected }) => expected[0] === 'open-elsewhere' && expected[2] === null), 'a case where only the staff band shows the hint')
 })
 
 type RuntimeModule = { resetClientRuntimeState(options: Record<string, unknown>): Promise<void> }
@@ -343,7 +403,6 @@ const clientSnapshotReact = {
 }
 const iconStub = (request: string) => (props: { className?: string }) =>
   React.createElement('svg', { 'data-icon': request.split('/').pop()?.replace('.js', ''), className: props.className })
-const InfoHintStub = ({ label, text }: { label: string; text: string }) => React.createElement('span', { 'data-info-hint': label }, text)
 
 type ComponentModule = { default: import('react').FunctionComponent<Record<string, unknown>> } & Record<string, unknown>
 function compileComponent(rel: string, deps: Record<string, unknown>): ComponentModule {
@@ -368,7 +427,7 @@ const compileBand = (install: InstallModule): ComponentModule => compileComponen
   '../../utils/standaloneNavigation.ts': install,
   '../../app/pathRouting.ts': pathRouting,
   '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
-  './InfoHint.tsx': InfoHintStub,
+  '../../utils/useInstallBandClearance.ts': { useInstallBandClearance: () => {} },
 })
 
 async function renderBand(device: Device, language: Language, afterLoad?: (win: EventTarget, install: InstallModule) => void): Promise<string> {
@@ -395,14 +454,32 @@ function assertIconOnlyButtonsNamedByTooltip(html: string, expectedLabel: string
 
 const OFFLINE_OR_STAFF_NAMES = /offline|Business OS|admin\.|ក្រៅបណ្ដាញ/i
 
-await check('the iOS band names ••• and Share in both languages, with an icon-only close', async () => {
-  for (const [language, share, close] of [['en', 'Share', 'Dismiss notification'], ['km', 'ចែករំលែក', 'បិទការជូនដំណឹង']] as const) {
+await check('the iOS band is one Download + Install button that opens the drawn steps, with an icon-only close', async () => {
+  for (const [language, install, close] of [['en', 'Install', 'Dismiss notification'], ['km', 'ដំឡើង', 'បិទការជូនដំណឹង']] as const) {
     const html = await renderBand({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 }, language)
     const text = visibleText(html)
-    assert.ok(text.includes('•••'), `${language}: iOS 26 Safari keeps Share behind the ••• menu, so the band must name it`)
-    assert.ok(text.includes(share), `${language}: the band names Share`)
+    assert.ok(text.includes(String(readPack(language).ios_install_hint)), `${language}: the band says what the sheet will show`)
+    assert.doesNotMatch(text, /Share|ចែករំលែក|•••/, `${language}: the long Share/••• sentence moved into the sheet, where it is drawn`)
     assert.doesNotMatch(text, OFFLINE_OR_STAFF_NAMES, `${language}: no offline promise (owner cancelled offline mode)`)
+    const labelled = buttons(html).filter(({ inner }) => visibleText(inner) !== '')
+    assert.equal(labelled.length, 1, `${language}: exactly one labelled button`)
+    assert.match(labelled[0].inner, /data-icon="download"/, 'the main action carries the Download icon')
+    assert.equal(visibleText(labelled[0].inner), install, 'the main action is one word')
     assertIconOnlyButtonsNamedByTooltip(html, close)
+    assert.doesNotMatch(html, /data-info-hint/, 'the info icon is gone: the one line it hid is now visible')
+  }
+})
+
+await check('a browser that cannot install gets a one-line hint and no Install button, in the staff app only', async () => {
+  for (const userAgent of [USER_AGENTS.iphoneInstagram, USER_AGENTS.iphoneOpera, USER_AGENTS.androidWebView]) {
+    for (const [language, close] of [['en', 'Dismiss notification'], ['km', 'បិទការជូនដំណឹង']] as const) {
+      const html = await renderBand({ userAgent, maxTouchPoints: 5 }, language)
+      const hint = String(readPack(language).install_open_elsewhere_hint)
+      assert.ok(visibleText(html).includes(hint), `${language}: ${userAgent} reads the hint`)
+      assert.equal(buttons(html).filter(({ inner }) => visibleText(inner) !== '').length, 0, 'nothing to press: the only button is the icon-only close')
+      assertIconOnlyButtonsNamedByTooltip(html, close)
+    }
+    assert.equal(await renderBand({ userAgent, maxTouchPoints: 5, hostname: 'leangbeauty.com' }, 'en'), '', `${userAgent}: shoppers are never told to switch browser`)
   }
 })
 
@@ -420,11 +497,30 @@ await check('the Android band offers Download + one word, and closes with an ico
   }
 })
 
-await check('the band renders nothing on a desktop, in the installed app, or once closed', async () => {
-  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopChrome }, 'en', (win) => { win.dispatchEvent(installPromptEvent()) }), '')
+await check('the band renders nothing on a desktop shop, in the installed app, or once closed', async () => {
+  const fire = (win: EventTarget) => { win.dispatchEvent(installPromptEvent()) }
+  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopChrome, hostname: 'leangbeauty.com' }, 'en', fire), '', 'a desktop shop shows no card over its header')
   assert.equal(await renderBand({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, iosStandalone: true }, 'en'), '')
+  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopChrome, displayModeStandalone: true }, 'en', fire), '', 'the installed desktop app never offers itself')
   assert.equal(await renderBand({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 }, 'en', (_win, install) => { install.dismissInstallBand() }), '')
   assert.notEqual(await renderBand({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 }, 'en'), '', 'positive control: the same iPhone before closing')
+  assert.notEqual(await renderBand({ userAgent: USER_AGENTS.desktopChrome }, 'en', fire), '', 'positive control: the staff app on the same desktop')
+})
+
+await check('the staff app offers one Install button on desktop Chrome and Edge, and nothing on a browser with no install', async () => {
+  for (const userAgent of [USER_AGENTS.desktopChrome, USER_AGENTS.desktopEdge]) {
+    for (const [language, install, close] of [['en', 'Install', 'Dismiss notification'], ['km', 'ដំឡើង', 'បិទការជូនដំណឹង']] as const) {
+      const html = await renderBand({ userAgent }, language, (win) => { win.dispatchEvent(installPromptEvent()) })
+      const labelled = buttons(html).filter(({ inner }) => visibleText(inner) !== '')
+      assert.equal(labelled.length, 1, `${userAgent} ${language}: one labelled button`)
+      assert.match(labelled[0].inner, /data-icon="download"/)
+      assert.equal(visibleText(labelled[0].inner), install)
+      assertIconOnlyButtonsNamedByTooltip(html, close)
+    }
+  }
+  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopChrome }, 'en'), '', 'no prompt captured yet (or already installed): nothing to offer')
+  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopFirefox }, 'en'), '', 'Firefox on a desktop is not told to switch browser')
+  assert.equal(await renderBand({ userAgent: USER_AGENTS.desktopMac }, 'en'), '', 'a real Mac is never an iOS device')
 })
 
 const INSTALL_PACK_KEYS = [
@@ -432,14 +528,15 @@ const INSTALL_PACK_KEYS = [
   'install_app_short',
   'install_offer_detail',
   'ios_install_hint',
+  'install_open_elsewhere_hint',
   'ios_install_steps_title',
   'ios_install_step_menu',
   'ios_install_step_add',
+  'ios_install_chip_add',
   'ios_install_step_web_app',
   'install_shop_band',
-  'install_shop_ios_hint',
-  'install_shop_detail',
 ]
+const RETIRED_INSTALL_KEYS = ['install_shop_ios_hint', 'install_shop_detail']
 
 await check('both packs carry the install keys once, side by side, with real Khmer', () => {
   const en = readPack('en')
@@ -459,13 +556,17 @@ await check('both packs carry the install keys once, side by side, with real Khm
     assert.match(String(km[key]), /[ក-៿]/, `km.json ${key} is Khmer`)
     assert.notEqual(km[key], en[key], `km.json ${key} is not the English text`)
   }
-  assert.ok(String(en.ios_install_hint).includes('•••') && String(km.ios_install_hint).includes('•••'), 'the pack hint names ••• in both languages')
+  assert.ok(String(en.ios_install_step_menu).includes('•••') && String(km.ios_install_step_menu).includes('•••'), 'the first step names ••• in both languages: iOS 26 Safari can keep Share behind it')
 })
 
-await check('ios_install_hint_detail is retired from both packs', () => {
-  // Its only reader was the band, and it promised the app keeps working offline.
-  assert.equal(readPack('en').ios_install_hint_detail, undefined)
-  assert.equal(readPack('km').ios_install_hint_detail, undefined)
+await check('retired install keys are gone from both packs', () => {
+  // ios_install_hint_detail promised the app keeps working offline; the two shop-only variants
+  // became the one shared line now that the title alone says which app this is.
+  for (const key of ['ios_install_hint_detail', ...RETIRED_INSTALL_KEYS]) {
+    assert.equal(readPack('en')[key], undefined, `en.json no longer carries ${key}`)
+    assert.equal(readPack('km')[key], undefined, `km.json no longer carries ${key}`)
+    assert.doesNotMatch(read('src/components/shared/InstallPromptBand.tsx'), new RegExp(key))
+  }
 })
 
 const KHMER_FALLBACK_CALL = /translate\(\s*'([^']+)',\s*'[^']*',\s*'([^']*)'/g
@@ -536,6 +637,19 @@ await check('the staff sign-in screen carries the band; the spinner and the forc
   assert.doesNotMatch(forced, /IosInstallHint/, 'no band over the forced password change')
 })
 
+await check('the sign-in screen keeps the form clear of the band on phones, and lets desktops be', async () => {
+  const { INSTALL_BAND_CLEARANCE_VAR } = await import('../src/utils/useInstallBandClearance.ts')
+  const login = read('src/components/auth/Login.tsx')
+  const shell = /className="(auth-shell [^"]*)"/.exec(login)?.[1] ?? ''
+  const centred = /className="(mx-auto flex min-h-[^"]*items-center justify-center[^"]*)"/.exec(login)?.[1] ?? ''
+  const reserve = `var(${INSTALL_BAND_CLEARANCE_VAR},0px)`
+  assert.ok(shell.includes(`pb-[calc(1.5rem+${reserve})]`), 'the shell pads its bottom by the band height')
+  assert.ok(shell.includes('md:pb-6'), 'from md the band is a corner card, so the padding goes back')
+  assert.ok(centred.includes(`min-h-[calc(100*var(--app-vh)_-_3rem_-_${reserve})]`), 'the centred form fits above the band, so the page does not scroll for it')
+  assert.ok(centred.includes('md:min-h-[calc(100*var(--app-vh)_-_3rem)]'), 'desktops keep the full-height centring')
+  assert.match(read('src/components/shared/InstallPromptBand.tsx'), /useInstallBandClearance\(bandRef, route !== null\)/, 'the band publishes its height only while it is shown')
+})
+
 await check('the staff loading screens say Leang Cosmetics Admin', () => {
   const titles = [...appSource.matchAll(/<h1 className="business-os-initial-title">([^<]*)<\/h1>/g)].map(([, title]) => title)
   assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
@@ -579,6 +693,11 @@ await check('the iOS steps sheet shows its three steps from first paint, in both
       at = next
     }
     assert.ok(text.includes('•••'), `${language}: the first step names the ••• menu`)
+    const glyphs = html.match(/<svg\b[^>]*aria-hidden="true"/g) || []
+    assert.equal(glyphs.length, 3, `${language}: Share and ••• for step 1 and Add to Home Screen for step 2 are drawn`)
+    assert.ok(!/data-icon=/.test(html), `${language}: the glyphs are inline SVG drawn after iOS, not library icons`)
+    assert.deepEqual([...html.matchAll(/rounded-full[^>]*>(\d)<\/span>/g)].map(([, n]) => n), ['1', '2', '3'], `${language}: numbered 1, 2, 3`)
+    assert.ok(html.includes(`>${String(pack.ios_install_chip_add)}</span>`), `${language}: step 3 draws the Add button in the UI language`)
   }
   assert.doesNotMatch(stripComments(read('src/components/install/IosInstallSteps.tsx')), /collapsed|minimi[sz]ed|expanded/i, 'no stub that expands later')
 })
