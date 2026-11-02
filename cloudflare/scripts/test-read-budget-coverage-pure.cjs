@@ -91,6 +91,17 @@ async function main() {
     }
   })
 
+  await check('a shape measured with a read switch stored names a known switch and state, and the gate says which shapes certify a switched state', () => {
+    const KNOWN = { report_atomic: ['on'] }
+    const switched = shapes.filter((s) => s.switches)
+    for (const s of switched) {
+      assert.strictEqual(s.method, 'GET', `${s.id}: only a GET shape is measured with switches`)
+      for (const [name, state] of Object.entries(s.switches)) assert.ok(KNOWN[name] && KNOWN[name].includes(state), `${s.id}: unknown switch or state ${name}=${state}`)
+    }
+    // The ceilings of these shapes bind the switched path. A deploy without the stored row runs the old path, whose ceilings are not enforced here.
+    console.log(`read-budget: ${switched.length} shapes are measured with a read switch ON (the old path runs until the owner flips it): ${switched.map((s) => s.id).join(', ')}`)
+  })
+
   await check('from the programme date every shape reads at most 100,000 rows', () => {
     const { rows_ceiling: ceiling, by } = budgets.programme
     const over = shapes.filter((s) => Math.max(s.rows_max, s.rows_max_analyze) > ceiling).map((s) => `${s.id} ${Math.max(s.rows_max, s.rows_max_analyze)}`)
