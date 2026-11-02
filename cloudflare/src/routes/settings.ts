@@ -35,7 +35,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
 import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
-import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, portalLanguageSetting, privateTranslationKey, withoutOtherLanguageTranslations } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, PORTAL_ANNOUNCEMENT_KEYS, portalLanguageSetting, privateTranslationKey, validatePortalAnnouncementWrite, withoutOtherLanguageTranslations } from '../lib/portalText'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1151,6 +1151,16 @@ app.post('/', async (c) => {
   }
   if (attemptedKeys.includes('customer_portal_about_image_alt')) {
     body.customer_portal_about_image_alt = normalizePortalImageAlt(body.customer_portal_about_image_alt)
+  }
+  // The announcement bar is shown to every storefront visitor, so its text, link and days are checked here and
+  // stored normalised. A save naming only one end of the day range reads the other end for the range check.
+  if (attemptedKeys.some((key) => key.startsWith('customer_portal_announcement_'))) {
+    const { start, end } = PORTAL_ANNOUNCEMENT_KEYS
+    const missingDay = attemptedKeys.includes(start) === attemptedKeys.includes(end) ? null : (attemptedKeys.includes(start) ? end : start)
+    const otherDay = missingDay ? await loadStoredSettingRows(c.env, [missingDay]) : stored
+    const announcement = validatePortalAnnouncementWrite(body, (key) => stored.get(key)?.value ?? otherDay.get(key)?.value)
+    if (!announcement.ok) return c.json({ error: announcement.error, code: announcement.code }, 400)
+    Object.assign(body, announcement.values)
   }
   if (attemptedKeys.includes(PORTAL_LANGUAGE_KEY)) {
     const language = portalLanguageForWrite(stored.get(PORTAL_LANGUAGE_KEY)?.value, body[PORTAL_LANGUAGE_KEY])

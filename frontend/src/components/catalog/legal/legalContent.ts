@@ -125,6 +125,8 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   // legal/PortalEmbedConsent.tsx -- written only when the visitor asks for
   // the map, so their answer is not asked for again on the next visit.
   { id: 'map-consent', name: 'business-os-portal-map-consent-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_map_consent_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
+  // portalAnnouncement.ts -- written only when the visitor closes the announcement bar, so it stays closed until the shop changes the message.
+  { id: 'announcement', name: 'business-os-portal-announcement-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_announcement_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
 ]
 
 const EN: Record<string, string> = {
@@ -238,6 +240,7 @@ const EN: Record<string, string> = {
   portal_legal_store_device_p: 'Your light or dark theme choice on this device.',
   portal_legal_store_assets_p: 'Where product images are loaded from.',
   portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
+  portal_legal_store_announcement_p: 'Which shop announcement you closed on this device, so it does not come back until the shop changes it.',
   portal_legal_store_until_cleared_l: 'Until you clear site data',
 
   // --- consent + embeds ----------------------------------------------------
@@ -369,6 +372,7 @@ const KM: Record<string, string> = {
   portal_legal_store_device_p: 'ជម្រើសរូបរាងភ្លឺ ឬងងឹតលើឧបករណ៍នេះ។',
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
   portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
+  portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
 
   portal_legal_consent_label: 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។',

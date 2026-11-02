@@ -531,7 +531,7 @@ async function main() {
   }
 
   const PROBES = [
-    'true', 'false', '0', '1', '97', 'khr', 'km', 'contain', 'global', '#123456', 'zz-probe',
+    'true', 'false', '0', '1', '97', 'khr', 'km', 'contain', 'global', '#123456', 'zz-probe', '2026-11-10',
     'https://probe.example/x', '/uploads/probe.webp', 'https://www.google.com/maps/embed?pb=probe',
     JSON.stringify([{ id: 'f', question: 'q', answer: 'a' }]),
     JSON.stringify([{ id: 'a', type: 'text', title: 't', body: 'b', mediaUrl: '' }]),

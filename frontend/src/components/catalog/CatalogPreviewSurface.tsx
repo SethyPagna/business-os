@@ -15,6 +15,8 @@ import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
 import PortalSocialRow from './PortalSocialRow.tsx'
+import PortalAnnouncementStrip from './PortalAnnouncementStrip.tsx'
+import type { PortalAnnouncement } from './portalAnnouncement.ts'
 import type { PortalSocialGroup } from './portalSocialLinks.ts'
 import '../../styles/public-portal.css'
 
@@ -115,6 +117,11 @@ type CatalogPreviewSurfaceProps = {
   // How far above the safe area the public page must end so the floating contact buttons never cover the footer
   // (portalFloatClearanceRem). Omitted: the fixed reserve below.
   floatingStackClearanceRem?: number
+  // The announcement bar (owner, 2 Nov 2026), already resolved for this page and language: none draws nothing. The live page passes a way
+  // to close it; the Website Editor preview does not.
+  announcement?: PortalAnnouncement | null
+  onDismissAnnouncement?: () => void
+  onAnnouncementHeight?: (height: number) => void
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -177,6 +184,9 @@ export default function CatalogPreviewSurface({
   secondaryTabSection,
   footer,
   floatingStackClearanceRem,
+  announcement,
+  onDismissAnnouncement,
+  onAnnouncementHeight,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -335,10 +345,12 @@ export default function CatalogPreviewSurface({
           monitors. Trimmed back so the row (and everything else in this
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
+      {announcement ? <PortalAnnouncementStrip announcement={announcement} copy={copy} onDismiss={onDismissAnnouncement} onHeight={publicView ? onAnnouncementHeight : undefined} /> : null}
       {/* The bottom padding clears the tallest floating stack, so at the page end no button covers the footer: 7.5rem by default
           (My List and the scroll buttons), taller when the contact buttons are shown (floatingStackClearanceRem, portalFloatClearanceRem). */}
       <div
-        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''}`}
+        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
+        data-portal-announcement-shown={announcement ? 'true' : undefined}
         style={publicView && floatingStackClearanceRem ? { paddingBottom: `calc(${floatingStackClearanceRem}rem + env(safe-area-inset-bottom))` } : undefined}
       >
         <div className="space-y-0">

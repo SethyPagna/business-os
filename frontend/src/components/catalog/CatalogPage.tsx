@@ -54,6 +54,7 @@ import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import { normalizePortalLanguage, readStoredPortalLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
+import { resolvePortalAnnouncement } from './portalAnnouncement.ts'
 import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
@@ -167,6 +168,13 @@ type PortalConfig = LegacyCatalogRecord & {
   exchangeRate?: string | number
   faqItems?: FaqItem[]
   gridColumnsAuto?: boolean
+  announcementEnabled?: boolean
+  announcementTextEn?: string
+  announcementTextKm?: string
+  announcementLink?: string
+  announcementStart?: string
+  announcementEnd?: string
+  announcementVersion?: string
   gridColumnsDesktop?: string | number
   gridColumnsMobile?: string | number
   language?: string
@@ -767,6 +775,12 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_low_stock_threshold: String(config.lowStockThreshold ?? 10),
     customer_portal_out_of_stock_threshold: String(config.outOfStockThreshold ?? 0),
     customer_portal_grid_columns_auto: config.gridColumnsAuto !== false,
+    customer_portal_announcement_enabled: !!config.announcementEnabled,
+    customer_portal_announcement_text_en: config.announcementTextEn || '',
+    customer_portal_announcement_text_km: config.announcementTextKm || '',
+    customer_portal_announcement_link: config.announcementLink || '',
+    customer_portal_announcement_start: config.announcementStart || '',
+    customer_portal_announcement_end: config.announcementEnd || '',
     customer_portal_grid_columns_mobile: String(config.gridColumnsMobile ?? 1),
     customer_portal_grid_columns_desktop: String(config.gridColumnsDesktop ?? 4),
     customer_portal_points_basis: config.pointsBasis || 'usd',
@@ -913,6 +927,12 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
     gridColumnsAuto: toBoolean(draft.customer_portal_grid_columns_auto, config.gridColumnsAuto !== false),
+    announcementEnabled: toBoolean(draft.customer_portal_announcement_enabled, !!config.announcementEnabled),
+    announcementTextEn: typeof draft.customer_portal_announcement_text_en === 'string' ? draft.customer_portal_announcement_text_en : config.announcementTextEn,
+    announcementTextKm: typeof draft.customer_portal_announcement_text_km === 'string' ? draft.customer_portal_announcement_text_km : config.announcementTextKm,
+    announcementLink: typeof draft.customer_portal_announcement_link === 'string' ? draft.customer_portal_announcement_link : config.announcementLink,
+    announcementStart: typeof draft.customer_portal_announcement_start === 'string' ? draft.customer_portal_announcement_start : config.announcementStart,
+    announcementEnd: typeof draft.customer_portal_announcement_end === 'string' ? draft.customer_portal_announcement_end : config.announcementEnd,
     gridColumnsMobile: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)), STORED_PHONE_COLUMNS),
     gridColumnsDesktop: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)), PORTAL_GRID_LIMITS.desktop),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
@@ -1122,6 +1142,13 @@ const DEFAULT_CONFIG = {
   lowStockThreshold: 10,
   outOfStockThreshold: 0,
   gridColumnsAuto: true,
+  announcementEnabled: false,
+  announcementTextEn: '',
+  announcementTextKm: '',
+  announcementLink: '',
+  announcementStart: '',
+  announcementEnd: '',
+  announcementVersion: '',
   gridColumnsMobile: 1,
   gridColumnsDesktop: 4,
   pointsBasis: 'usd',
@@ -2706,6 +2733,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
         customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
         customer_portal_grid_columns_auto: editorDraft.customer_portal_grid_columns_auto === false ? 'false' : 'true',
+        customer_portal_announcement_enabled: editorDraft.customer_portal_announcement_enabled ? 'true' : 'false',
+        customer_portal_announcement_text_en: String(editorDraft.customer_portal_announcement_text_en || '').trim(),
+        customer_portal_announcement_text_km: String(editorDraft.customer_portal_announcement_text_km || '').trim(),
+        customer_portal_announcement_link: String(editorDraft.customer_portal_announcement_link || '').trim(),
+        customer_portal_announcement_start: String(editorDraft.customer_portal_announcement_start || ''),
+        customer_portal_announcement_end: String(editorDraft.customer_portal_announcement_end || ''),
         customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
         customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
@@ -3457,6 +3490,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
         productDetailCautionDefault={displayConfig.productCautionDefault || ''}
         productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
+        announcement={resolvePortalAnnouncement(displayConfig, language, '', { ignoreDays: true })}
         publicScrollButtonsVisible={publicScrollButtonsVisible}
         scrollPublicPortal={scrollPublicPortal}
         productGalleryView={productGalleryView}

@@ -870,6 +870,10 @@ function manualChunks(id: string): string | undefined {
       // portalMotion.ts (reduced-motion scroll behaviour) is imported by PublicCatalogPage,
       // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
       || normalized.includes('/src/components/catalog/portalMotion.ts')
+      // portalAnnouncement.ts and PortalAnnouncementStrip.tsx (the announcement bar) are imported by the storefront page and
+      // its surface (catalog-public), the editor preview (catalog) and the editor surface (catalog-editor).
+      || normalized.includes('/src/components/catalog/portalAnnouncement.ts')
+      || normalized.includes('/src/components/catalog/PortalAnnouncementStrip.tsx')
       // PortalSocialRow.tsx (the one social icon map + header row) and
       // portalSocialLinks.ts (its builders) are imported by the storefront page and
       // its surface (catalog-public), the editor preview (catalog), About

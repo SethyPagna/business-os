@@ -29,6 +29,8 @@ import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './publicFirstPaint.ts'
 import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
+import { dismissPortalAnnouncement, readDismissedPortalAnnouncement, resolvePortalAnnouncement } from './portalAnnouncement.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { buildPortalContactFloat, buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl, portalFloatClearanceRem } from './portalSocialLinks.ts'
 import { PORTAL_SOCIAL_ICONS, PortalContactFloat, PortalSocialText } from './PortalSocialRow.tsx'
@@ -122,6 +124,13 @@ type PortalConfig = LooseRecord & {
   faqTitle?: string
   googleMapsEmbed?: string
   gridColumnsAuto?: boolean
+  announcementEnabled?: boolean
+  announcementTextEn?: string
+  announcementTextKm?: string
+  announcementLink?: string
+  announcementStart?: string
+  announcementEnd?: string
+  announcementVersion?: string
   gridColumnsDesktop?: unknown
   gridColumnsMobile?: unknown
   heroGradientEnd?: string
@@ -203,6 +212,13 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   exchangeRate: 4100,
   faqItems: [],
   gridColumnsAuto: true,
+  announcementEnabled: false,
+  announcementTextEn: '',
+  announcementTextKm: '',
+  announcementLink: '',
+  announcementStart: '',
+  announcementEnd: '',
+  announcementVersion: '',
   gridColumnsDesktop: 4,
   gridColumnsMobile: 2,
   heroGradientEnd: '#e7dccb',
@@ -799,6 +815,24 @@ export default function PublicCatalogPage() {
     () => localizeDefaultConfigCopy({ ...DEFAULT_PUBLIC_CONFIG, ...config }, pageLanguage),
     [config, pageLanguage],
   )
+  // The announcement bar (owner, 2 Nov): the Worker publishes the message with the config; whether it is on today and whether this
+  // browser already closed this version is decided here, so the cached payload never depends on the clock.
+  const [dismissedAnnouncement, setDismissedAnnouncement] = useState(readDismissedPortalAnnouncement)
+  const [announcementDay, setAnnouncementDay] = useState(todayStr)
+  const [announcementHeight, setAnnouncementHeight] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setAnnouncementDay(todayStr()), 5 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const announcement = useMemo(() => {
+    const found = resolvePortalAnnouncement(displayConfig, pageLanguage, announcementDay)
+    return found && found.version !== dismissedAnnouncement ? found : null
+  }, [displayConfig, pageLanguage, announcementDay, dismissedAnnouncement])
+  const dismissAnnouncement = useCallback(() => {
+    if (!announcement) return
+    dismissPortalAnnouncement(announcement.version)
+    setDismissedAnnouncement(announcement.version)
+  }, [announcement])
   // A price sort from a stale link or bookmark on a store that now hides its
   // prices: drop back to the default rather than order by a hidden number.
   useEffect(() => {
@@ -1524,7 +1558,10 @@ export default function PublicCatalogPage() {
   // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason);
   // pinned to the top, clear of the bottom-right bucket and contact buttons.
   const installBand = offersShopInstall ? (
-    <div className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end">
+    <div
+      className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end"
+      style={announcementHeight ? { top: `calc(0.75rem + ${announcementHeight}px + env(safe-area-inset-top))` } : undefined}
+    >
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
   ) : null
@@ -1670,6 +1707,9 @@ export default function PublicCatalogPage() {
       productDetailCautionDefault={displayConfig.productCautionDefault || ''}
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
       floatingStackClearanceRem={portalFloatClearanceRem(buildPortalContactFloat(contactChannels).length)}
+      announcement={announcement}
+      onDismissAnnouncement={dismissAnnouncement}
+      onAnnouncementHeight={setAnnouncementHeight}
       publicScrollButtonsVisible={scrollButtonsVisible && !bucketOpen && !contactOpen}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}
