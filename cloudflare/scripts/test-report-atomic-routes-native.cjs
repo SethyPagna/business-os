@@ -8,6 +8,8 @@
 // are compared too. Fields that differ between two OFF runs of the same request are listed and masked, never hidden silently.
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const bcrypt = require('bcryptjs')
+// This is a parity test, not a timing gate: a request on a loaded machine may take longer than the harness's 20 s default, and a status 0 would hide the comparison.
+process.env.READ_BUDGET_DEADLINE_MS ||= '180000'
 const rb = path.join(__dirname, 'read-budget')
 const { bootWorld, runShape, fingerprintOf } = require(path.join(rb, 'world.cjs'))
 const { seedContext, ADMIN } = require(path.join(rb, 'seed.cjs'))
@@ -162,12 +164,18 @@ async function main() {
       assert.ok(committed, 'no committed fingerprint for ' + shapeId)
       await runShape(world, { method: 'GET', url: entry.url }, { cold: true, cacheMiss: true })
       const warm = await runShape(world, { method: 'GET', url: entry.url }, { cold: false, cacheMiss: true, fingerprints: true })
-      // The same statements, the same number of times; the order of statements issued by concurrent branches of one request is not fixed.
+      // Every statement the base ran is still run, the same number of times (the order of statements issued by concurrent branches of one request is not fixed).
+      // The only statements allowed beyond it are the ambient ones that depend on the wall clock and not on the report: the session heartbeat (five-minute
+      // throttle, lib/auth.ts), the Telegram scheduled-send drain of the request path, and this slice's own switch-row read (memoised for 15 s, so at most one).
+      // A loaded machine stretches a test past those intervals, which would otherwise make this comparison depend on how busy the laptop is.
+      const ambient = [/^UPDATE user_sessions SET last_seen_at/, /^SELECT send_key FROM telegram_scheduled_sends/, /^SELECT key, value FROM system_flags WHERE key IN \(\?1, \?2\)$/]
       const count = hashes => hashes.reduce((m, h) => m.set(h, (m.get(h) || 0) + 1), new Map())
       const nowCount = count(warm.fingerprints.map(f => f.h)), baseCount = count(committed.map(f => f[0]))
       const heads = new Map([...warm.fingerprints.map(f => [f.h, f.head]), ...committed.map(f => [f[0], f[1]])])
-      const drift = [...new Set([...nowCount.keys(), ...baseCount.keys()])].filter(h => (nowCount.get(h) || 0) !== (baseCount.get(h) || 0)).map(h => `${heads.get(h)} (now ${nowCount.get(h) || 0}, base ${baseCount.get(h) || 0})`)
+      const isAmbient = h => ambient.some(re => re.test(String(heads.get(h))))
+      const drift = [...new Set([...nowCount.keys(), ...baseCount.keys()])].filter(h => (nowCount.get(h) || 0) !== (baseCount.get(h) || 0) && !(isAmbient(h) && (nowCount.get(h) || 0) > (baseCount.get(h) || 0))).map(h => `${heads.get(h)} (now ${nowCount.get(h) || 0}, base ${baseCount.get(h) || 0})`)
       assert.deepEqual(drift, [], `${shapeId}: OFF runs different statements from the base fingerprints`)
+      assert.ok(warm.fingerprints.filter(f => ambient[2].test(String(f.head))).length <= 1, `${shapeId}: the switch row is read at most once per request`)
       const now = warm.fingerprints
       checked.push(`${shapeId} (${now.length} statements)`)
     }
