@@ -11,7 +11,7 @@ const { getShapes } = require('./shapes.cjs')
 const { writeShapes, measureWrite } = require('./writes.cjs')
 const { registeredRoutes, matchRoute } = require('./routes.cjs')
 const { roundUp, BUDGETS_FILE, FREE_CALL_LIMIT } = require('./budgets.cjs')
-const { measureGet, prepareWorld, codeOf } = require('./runner.cjs')
+const { measureGet, prepareWorld, codeOf, ensureSwitches } = require('./runner.cjs')
 
 const FINGERPRINTS = path.join(__dirname, 'fingerprints')
 const CACHE = path.join(os.tmpdir(), 'read-budget-measure.jsonl')
@@ -32,6 +32,17 @@ const ROUTE_NOTES = {
     '/api/settings/payment-methods/impact': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
     '/api/sales/:id/status': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
   },
+  // Routes measured with a read switch stored, because the Free plan runs them in that state (the old path stays covered by the slice's own OFF-versus-ON tests).
+  switches: {
+    '/api/dashboard/startup': { report_atomic: 'on' },
+    '/api/sales/stats': { report_atomic: 'on' },
+    '/api/analytics': { report_atomic: 'on' },
+    '/api/sales/daily-report': { report_atomic: 'on' },
+    '/api/reports/grouped': { report_atomic: 'on' },
+    '/api/reports/periods': { report_atomic: 'on' },
+    '/api/reports/business-summary/sales': { report_atomic: 'on' },
+    '/api/dashboard/insight-list': { report_atomic: 'on' },
+  },
   reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
 
@@ -40,6 +51,8 @@ const EXEMPTION_REASONS = {
   'write-not-measured': 'a write route with no measured shape yet; the slice that changes it adds one',
   'get-not-in-shapes': 'a GET with no shape yet: OAuth callback, job poll, download, duplicate check',
 }
+
+const switchesOf = (routes, shape) => ROUTE_NOTES.switches[(matchRoute(routes, shape.method, (shape.url || '').split('?')[0]) || {}).route]
 
 const classOf = (entry, longRange) => (Math.max(entry.rows_max, entry.rows_max_analyze) > 50000 || longRange ? 'H' : ROUTE_NOTES.protected.includes(`${entry.method} ${entry.route}`) ? 'P' : 'N')
 
@@ -75,8 +88,11 @@ async function main() {
     try {
       await prepareWorld(world)
       for (const shape of getShapeList.filter((s) => !done.has(`get:${s.id}`))) {
+        await ensureSwitches(world, switchesOf(routes, shape))
         const m = await measureGet(world, shape, { cold: true, statements: true, fingerprints: true })
-        remember('get', shape.id, { url: m.url, cold: { status: m.cold.status, calls: m.cold.calls }, warm: slim(m.warm), pins: pinsOf(m.statements) })
+        // The fingerprints pin the statements of the old path, so a switched shape records them with its switches stored away.
+        const old = switchesOf(routes, shape) ? await (async () => { await ensureSwitches(world, null); return (await measureGet(world, shape, { cold: false, fingerprints: true })).warm })() : m.warm
+        remember('get', shape.id, { url: m.url, cold: { status: m.cold.status, calls: m.cold.calls }, warm: { ...slim(m.warm), fingerprints: slim(old).fingerprints }, pins: pinsOf(m.statements) })
         process.stdout.write(`${shape.id}: cold ${m.cold.calls} calls, warm-miss ${m.warm.rowsRead} rows\n`)
       }
     } finally { await world.dispose() }
@@ -98,6 +114,7 @@ async function main() {
       await world.analyze()
       await world.restart(); await world.login()
       for (const shape of getShapeList.filter((s) => !done.has(`analyze:${s.id}`))) {
+        await ensureSwitches(world, switchesOf(routes, shape))
         const m = await measureGet(world, shape, { cold: false })
         remember('analyze', shape.id, { rowsRead: m.warm.rowsRead })
         process.stdout.write(`${shape.id}: ANALYZE warm-miss ${m.warm.rowsRead} rows\n`)
@@ -127,6 +144,7 @@ async function main() {
       if (!entry.target) throw new Error(`${shape.id}: ${cold} cold calls and no dated target for ${reg.route}`)
     }
     if (isGet && data.pins.length) entry.pins = data.pins
+    if (isGet && ROUTE_NOTES.switches[reg.route]) entry.switches = ROUTE_NOTES.switches[reg.route]
     entries.push(entry)
     ;(prints[reg.route.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')] ||= {})[shape.id] = w.fingerprints
   }
