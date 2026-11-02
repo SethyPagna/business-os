@@ -1,0 +1,12 @@
+{
+ "users": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "fe9306eff9dc",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.emai"
+  ]
+ ]
+}

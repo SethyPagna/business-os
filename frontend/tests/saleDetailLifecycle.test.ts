@@ -228,6 +228,8 @@ const readEnv: any = {
   clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
   window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
   salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
+  // The query generation refs (tests/salesPagedLoad.test.ts drives supersede and refresh with them).
+  latestQueryKeyRef: { current: '' }, loadKeyRef: { current: '' }, salesRef: { current: [] },
   fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
   withLoaderTimeout: (read: () => Promise<unknown>) => read(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
   normalizeSaleRows: (rows: unknown) => rows, setSales: (rows: unknown) => published.push(rows),
@@ -272,7 +274,11 @@ const freshStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecu
 statsRequest.resolve({ total_count: 2 }); await freshStats
 assert.equal((stats[0] as any).total_count, 2)
 listRequest = deferred()
+// This closure is the newest one (no newer commit), so it reads itself instead of handing over to the scope2 closure.
+readEnv.latestLoadRef.current = null
+const readsBeforeRejected = listSignals.length
 const rejectedRead = salesReadCallback('loadSales', { ...readEnv, statusSecurityScope: 'scope3' })(false)
+assert.equal(listSignals.length, readsBeforeRejected + 1, 'the scope3 read really starts')
 readEnv.statusSecurityRef.current = 'scope4'
 const errorCount = errors.length
 listRequest.reject(new Error('old-authority failure')); await rejectedRead

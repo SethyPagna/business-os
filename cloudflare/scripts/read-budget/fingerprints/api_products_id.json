@@ -1,0 +1,84 @@
+{
+ "w-product-price-edit": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "288c80506cd3",
+   "SELECT p.id FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_active IS NOT 1 ORDER BY "
+  ],
+  [
+   "298ef9a10d01",
+   "SELECT id, name, barcode, updated_at FROM products WHERE id = ?1"
+  ],
+  [
+   "3eda4e656868",
+   "SELECT cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_k"
+  ],
+  [
+   "5ee7fd7810c9",
+   "SELECT image_path FROM products WHERE id = ?1"
+  ],
+  [
+   "9fb4699f3d94",
+   "SELECT image_path FROM product_images WHERE product_id = ?1 ORDER BY sort_order ASC, id ASC"
+  ],
+  [
+   "f2eb06f3c234",
+   "SELECT name, barcode FROM products WHERE id = ?1"
+  ],
+  [
+   "ad2ce1a04839",
+   "PRAGMA table_info(products)"
+  ],
+  [
+   "a14fb5825192",
+   "SELECT \"name\", \"sku\", \"barcode\", \"category\", \"unit\", \"description\", \"selling_price_usd\", \"selling_price_khr\", "
+  ],
+  [
+   "288c80506cd3",
+   "SELECT p.id FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_active IS NOT 1 ORDER BY "
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "162be649d15f",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (SELECT value FROM json_each(?)) AND p.is_ac"
+  ],
+  [
+   "128104198fff",
+   "B| UPDATE \"products\" SET \"name\" = ?, \"sku\" = ?, \"barcode\" = ?, \"category\" = ?, \"unit\" = ?, \"description\" = ?, "
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "1c8361e06722",
+   "SELECT * FROM products WHERE id = ?1"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

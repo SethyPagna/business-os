@@ -14,6 +14,7 @@
 --   edited                   1 when the return has edit movements (PATCH)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 9
 WITH li AS (
   SELECT ri.id AS return_item_id, ri.return_id, ri.product_id, ri.quantity,
     ri.applied_price_usd AS refund_unit_usd, ri.applied_price_khr AS refund_unit_khr,

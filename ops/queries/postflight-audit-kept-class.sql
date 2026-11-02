@@ -32,6 +32,7 @@
 --                        products, inventory, returns, contacts
 --   follows_retention    everything else: the sweep deletes these once past the setting
 -- ops:min-rows 1
+-- ops:max-rows-read 25581
 WITH old AS (
   SELECT
     LOWER(TRIM(COALESCE(NULLIF(TRIM(entity), ''), table_name, ''))) AS e,

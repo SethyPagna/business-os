@@ -185,6 +185,7 @@ const FOLD_HANDLED = new Set([
 // is repeated in the comment above MERGE_REPARENT_TABLES so the next reader
 // finds it at the list rather than only here.
 const EXCLUDED = new Map([
+  ['product_conflict_marks.product_id', 'decision bound to the value it confirmed on THAT row ($0 cost / empty barcode); the merge changes the survivor value, so it stays inert on the deactivated loser and undo gets it back'],
   ['stock_row_moves.source_product_id', 'provenance: records what a past move took stock OFF'],
   ['stock_row_moves.destination_product_id', 'provenance: records what a past move put stock ON'],
   ['import_auto_merges.product_id', 'provenance: records which id an import folded'],
@@ -421,6 +422,33 @@ async function main() {
     assert.equal(applies(10, DUP), true, 'the rule applies to the discarded row again once the merge is undone')
     assert.equal(Number(live.db.prepare('SELECT parent_id FROM products WHERE id = 400').get().parent_id), DUP,
       'and the child goes back to its original parent')
+  })
+
+  await check('DISCRIMINATING: conflict marks stay with the row they were made on through merge and undo (not folded, not dropped)', async () => {
+    const live = seed()
+    const { mod: liveMod, adapter: liveAdapter, undoAppliers } = loadProductsRoute(live)
+    seedStockFixture(live.db, () => {
+      live.db.prepare("INSERT INTO product_conflict_marks(product_id, mark, confirmed_cost_usd, confirmed_barcode) VALUES (?, 'zero_cost_confirmed', 6.45, NULL), (?, 'no_barcode', NULL, '03614274226546'), (?, 'no_barcode', NULL, '3614274226546')").run(DUP, DUP, KEEPER)
+    })
+    const marks = () => live.db.prepare("SELECT product_id || ':' || mark AS k FROM product_conflict_marks ORDER BY 1").all().map((r) => r.k)
+    const before = marks()
+    assert.deepEqual(before, [KEEPER + ':no_barcode', DUP + ':no_barcode', DUP + ':zero_cost_confirmed'].sort())
+    const { reversal } = await liveMod.foldDuplicateProductInto(
+      {}, liveAdapter, { id: 1, name: 'tester' },
+      { id: KEEPER, name: 'Zero Twin' },
+      { id: DUP, name: 'Zero Twin', image_path: null },
+      new Map([[1, 'shop'], [2, 'warehouse']]),
+      'fk test merge',
+    )
+    assert.deepEqual(marks(), before, 'a merge neither moves the loser marks onto the survivor (fold) nor deletes them (drop)')
+    assert.equal(live.db.prepare("SELECT COUNT(*) n FROM product_conflict_marks WHERE product_id = ? AND mark = 'zero_cost_confirmed'").get(KEEPER).n, 0,
+      'the survivor does not inherit a confirmed $0 that was true of the other row')
+    assert.equal(Number(live.db.prepare('SELECT is_active FROM products WHERE id = ?').get(DUP).is_active), 0, 'the loser is inactive, so its marks are inert')
+    const { snapshotId } = await undoAppliers.recordMergeUndoSnapshot({}, { id: 1, name: 'tester' }, reversal)
+    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: snapshotId })
+    await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
+    assert.deepEqual(marks(), before, 'undo leaves every mark exactly where it was')
+    assert.equal(Number(live.db.prepare('SELECT is_active FROM products WHERE id = ?').get(DUP).is_active), 1, 'and the loser is live again with its decisions')
   })
 
   await check('a keeper that was itself a child of the discarded row does not become its own parent', async () => {

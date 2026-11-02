@@ -37,6 +37,7 @@
 --                                  d: anything else (owner review)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 90
 WITH ari AS (
   SELECT ri.id, ri.return_id, ri.sale_item_id, ri.product_id, ri.quantity,
     CASE WHEN COALESCE(ri.stock_action, CASE WHEN ri.return_to_stock = 1 THEN 'restock' END) = 'restock' THEN ri.quantity ELSE 0 END AS restocked,

@@ -1,0 +1,16 @@
+{
+ "reports-business-summary-returns": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "ccf3a95e419f",
+   "SELECT MAX(r.id) AS max_id FROM returns r WHERE 1=1 AND date(r.created_at, '+7 hours') >= ?1 AND r.created_at "
+  ],
+  [
+   "cfcbd1354623",
+   "SELECT r.id, r.created_at AS cursor_at, r.created_at AS date, date(r.created_at, '+7 hours') AS business_date,"
+  ]
+ ]
+}

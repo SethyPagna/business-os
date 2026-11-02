@@ -273,6 +273,7 @@ export const PII_COLUMNS = Object.freeze({
   loyalty_point_adjustments: ['created_by_name'],
   pending_actions: ['requested_by_name', 'reviewed_by_name'],
   product_cost_entries: ['user_name'],
+  product_conflict_marks: ['marked_by_name'],
   product_duplicate_dismissals: ['dismissed_by_name'],
   rfid_scan_sessions: ['created_by_name'],
   sale_amendments: ['user_name'],

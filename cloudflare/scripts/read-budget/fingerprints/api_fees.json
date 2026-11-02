@@ -1,0 +1,66 @@
+{
+ "fees-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9889fd196055",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "95121f3ee7aa",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
+ ],
+ "w-fee": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "485944539586",
+   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+  ],
+  [
+   "4855047537f0",
+   "SELECT actor_id,fee_id,request_id,request_digest,request_json,response_json,occurred_at FROM fee_operation_rec"
+  ],
+  [
+   "b77fbf51345b",
+   "SELECT id,name,role,is_active FROM branches WHERE id=?1"
+  ],
+  [
+   "ceb2de77d518",
+   "B| INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, deliv"
+  ],
+  [
+   "37f4d2f92a0b",
+   "B| INSERT INTO fee_operation_receipts( id,actor_id,fee_id,request_id,request_digest,request_json,response_json"
+  ],
+  [
+   "e8446c0ce40e",
+   "B| INSERT INTO audit_logs( user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value ) "
+  ],
+  [
+   "4855047537f0",
+   "SELECT actor_id,fee_id,request_id,request_digest,request_json,response_json,occurred_at FROM fee_operation_rec"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ]
+ ]
+}

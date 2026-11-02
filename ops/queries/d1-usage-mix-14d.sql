@@ -2,6 +2,7 @@
 -- plus one summary row (type '~summary') of devices seen in the last day and
 -- Inventory Check sessions in 14 days. Sizes the Free read budget. Counts only.
 -- ops:min-rows 1
+-- ops:max-rows-read 3094
 SELECT date(created_at, '+7 hours') AS d, movement_type AS kind, COUNT(*) AS n
 FROM inventory_movements
 WHERE created_at >= datetime('now', '-14 days')

@@ -1,0 +1,28 @@
+{
+ "system-sale-not-paid-stock-recovery-20260909-preview": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "94b4d56c492f",
+   "SELECT id,request_digest,response_json FROM sale_not_paid_stock_recovery_receipts WHERE incident_key=?1"
+  ],
+  [
+   "cf33b4f4d7b6",
+   "SELECT s.id,s.receipt_number,s.sale_status,s.stock_skipped,s.updated_at,r.revision, (SELECT COUNT(*) FROM sale"
+  ],
+  [
+   "4a5c97c6ff44",
+   "SELECT si.id AS sale_item_id,si.sale_id,si.product_id,si.product_name,si.quantity, si.cost_price_usd,si.cost_p"
+  ],
+  [
+   "6180f35780c2",
+   "SELECT p.id,p.name,p.is_active,p.stock_quantity,p.cost_price_usd,p.cost_price_khr,p.updated_at, bs.id AS branc"
+  ],
+  [
+   "cdc36f1bd5ab",
+   "SELECT r.id AS receipt_id,r.incident_key,r.request_digest,m.sale_id,m.history_id, h.label AS history_label,h.r"
+  ]
+ ]
+}

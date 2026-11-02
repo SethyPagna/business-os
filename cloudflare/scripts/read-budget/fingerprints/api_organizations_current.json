@@ -1,0 +1,16 @@
+{
+ "organizations-current": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8a4844906794",
+   "SELECT id, name, slug, public_id, is_active, setup_enabled, created_at FROM organizations WHERE lower(trim(slu"
+  ],
+  [
+   "a50331fd180f",
+   "SELECT id, organization_id, name, slug, is_default FROM organization_groups WHERE organization_id = ?1 ORDER B"
+  ]
+ ]
+}

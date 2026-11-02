@@ -3,6 +3,7 @@
 -- customer_portal, Receipt settings = receipt_settings, Promotions loyalty = customer_portal) would newly open for those
 -- that lacked them. A stored Drive grant without Settings Full opened the Settings page and would be removed.
 -- One row of scalar counts: D1 refuses compound SELECTs over 5 terms (sql-compound-too-long).
+-- ops:max-rows-read 38
 SELECT
   (SELECT COUNT(*) FROM roles WHERE lower(trim(COALESCE(code, ''))) <> 'admin' AND json_valid(permissions)
     AND json_type(permissions, '$.settings') = 'true' AND COALESCE(json_type(permissions, '$.all'), '') <> 'true') AS role_settings_full_non_admin,

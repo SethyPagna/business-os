@@ -3,6 +3,7 @@
 -- chunked to fit the Free plan's per-request limits. One row of counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 126513
 SELECT
   (SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM sale_items GROUP BY sale_id)) AS max_lines_per_sale,
   (SELECT ROUND(AVG(n), 2) FROM (SELECT COUNT(*) AS n FROM sale_items GROUP BY sale_id)) AS avg_lines_per_sale,

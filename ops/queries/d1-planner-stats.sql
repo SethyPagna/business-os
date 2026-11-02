@@ -6,6 +6,7 @@
 -- One row of counts only: no names, money or notes.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 198897
 SELECT
   (SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'sqlite_stat%') AS stat_tables,
   (SELECT COUNT(*) FROM action_history) AS action_history_rows,

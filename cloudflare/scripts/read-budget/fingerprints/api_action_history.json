@@ -1,0 +1,12 @@
+{
+ "action-history": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "1fa1042e90bf",
+   "SELECT * FROM action_history WHERE scope = ?1 AND created_by_id = ?2 AND last_error IS NOT ?3 ORDER BY updated"
+  ]
+ ]
+}

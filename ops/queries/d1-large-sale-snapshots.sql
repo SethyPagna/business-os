@@ -3,6 +3,7 @@
 -- above about 58 lines exceeds D1's 2,000,000-byte value limit. Read-only sizing for the large-sale fix.
 -- ops:min-rows 0
 -- ops:max-rows 60
+-- ops:max-rows-read 26073
 SELECT s.id AS sale_id, date(s.created_at, '+7 hours') AS kh_day, s.money_precision_version AS mpv,
   s.sale_status, COUNT(i.id) AS lines, COALESCE(SUM(LENGTH(i.pricing_snapshot_json)), 0) AS snapshot_bytes,
   COALESCE(MAX(LENGTH(i.pricing_snapshot_json)), 0) AS max_line_bytes,

@@ -1,0 +1,86 @@
+{
+ "inventory-products-search-default": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "6e70635dc602",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "580dc2c5bfe4",
+   "B| WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.sell"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "4ebcf6c03532",
+   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>0 "
+  ],
+  [
+   "24062535619b",
+   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<"
+  ],
+  [
+   "266d2eca9fad",
+   "SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count FROM products p WHERE (p.is_active = 1 OR (COALE"
+  ],
+  [
+   "41e0c4fa2292",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "414200600ffa",
+   "WITH requested_ids(product_id) AS ( SELECT DISTINCT CAST(value AS INTEGER) FROM json_each(?1) ), ledger AS ( S"
+  ]
+ ],
+ "inventory-products-search-text": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "a0a7c72a1592",
+   "B| WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_"
+  ],
+  [
+   "006722d67e0c",
+   "B| WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "4ebcf6c03532",
+   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<>0 "
+  ],
+  [
+   "24062535619b",
+   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE (p.is_active = 1 OR (COALESCE(p.stock_quantity,0)<"
+  ],
+  [
+   "266d2eca9fad",
+   "SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count FROM products p WHERE (p.is_active = 1 OR (COALE"
+  ],
+  [
+   "7fc3f09cba50",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "414200600ffa",
+   "WITH requested_ids(product_id) AS ( SELECT DISTINCT CAST(value AS INTEGER) FROM json_each(?1) ), ledger AS ( S"
+  ]
+ ]
+}

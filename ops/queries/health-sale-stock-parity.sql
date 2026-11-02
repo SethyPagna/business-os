@@ -22,6 +22,7 @@
 -- set ops:max-rows 0 so any new row fails in the public log.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 142432
 WITH ss AS MATERIALIZED (
   SELECT id, COALESCE(NULLIF(sale_status, ''), 'completed') AS st, branch_id,
     COALESCE(strftime('%Y-%m-%d %H:%M:%S', created_at), created_at) AS at

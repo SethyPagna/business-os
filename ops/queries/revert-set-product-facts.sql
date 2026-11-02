@@ -16,6 +16,7 @@
 --   cost_entries   manual cost overrides
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 27
 WITH p AS (SELECT product_id AS id FROM inventory_movements WHERE id = 48026),
 setops AS (
   SELECT DISTINCT substr(CAST(m.reference_id AS TEXT), 11, 36) AS id

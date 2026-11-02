@@ -1,0 +1,238 @@
+{
+ "w-fast-stock-in-1-line": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e412f648a145",
+   "INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(?1,?2,?3,?4) ON CONFLICT(act"
+  ],
+  [
+   "7afa9940b558",
+   "SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id ="
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "6269f09fc104",
+   "SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd, COALESCE((SELECT baseline_batc"
+  ],
+  [
+   "872cc5b6b450",
+   "SELECT id,received_cost_usd FROM product_batches WHERE variant_product_id = ?1 AND batch_key = ?2"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "0a0e5b27aa7c",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=?1 AND is_active=1) THEN 1 ELSE json_extract('[1]',"
+  ],
+  [
+   "ffdb31162eab",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=?1 AND is_active IS 1) THEN json_extract('[]','"
+  ],
+  [
+   "6db4490e02df",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN COALESCE((SELECT baseline_batch_id FROM prod"
+  ],
+  [
+   "bc8fdc049ba2",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN ?1 = 1 THEN EXISTS( SELECT 1 FROM product_ba"
+  ],
+  [
+   "92d2d92910f7",
+   "B| INSERT INTO product_batches ( variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active,"
+  ],
+  [
+   "23d36104c525",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES ((SELECT id FROM product_batches WHER"
+  ],
+  [
+   "4b69caa5ee28",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "26f92e981649",
+   "B| UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + ?1, updated_at = CURRENT_TIMESTAMP WHERE"
+  ],
+  [
+   "6b769da1914a",
+   "B| DELETE FROM stock_session_guards"
+  ],
+  [
+   "217860581d48",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,"
+  ],
+  [
+   "e176791c0b9f",
+   "B| UPDATE products SET cost_price_usd = COALESCE(COALESCE( (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * "
+  ],
+  [
+   "30b472dfa330",
+   "B| INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written) VALUES(?1,?2,?3,?4,json_"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "d330a759514e",
+   "SELECT id, batch_number, lot_code FROM product_batches WHERE variant_product_id = ?1 AND ((?2 IS NOT NULL AND "
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "32d5f8303e46",
+   "SELECT stock_quantity, (SELECT quantity FROM branch_stock WHERE product_id=?1 AND branch_id=?2) AS branch_quan"
+  ],
+  [
+   "76e398625e8a",
+   "UPDATE stock_mutation_receipts SET response_status=?1, response_json=?2, completed_at=CURRENT_TIMESTAMP WHERE "
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-fast-stock-in-3-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e412f648a145",
+   "INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(?1,?2,?3,?4) ON CONFLICT(act"
+  ],
+  [
+   "7afa9940b558",
+   "SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id ="
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "6269f09fc104",
+   "SELECT pb.id,pb.batch_key,pb.received_at,pb.unit_cost_usd,pb.received_cost_usd, COALESCE((SELECT baseline_batc"
+  ],
+  [
+   "872cc5b6b450",
+   "SELECT id,received_cost_usd FROM product_batches WHERE variant_product_id = ?1 AND batch_key = ?2"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "0a0e5b27aa7c",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=?1 AND is_active=1) THEN 1 ELSE json_extract('[1]',"
+  ],
+  [
+   "ffdb31162eab",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=?1 AND is_active IS 1) THEN json_extract('[]','"
+  ],
+  [
+   "6db4490e02df",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN COALESCE((SELECT baseline_batch_id FROM prod"
+  ],
+  [
+   "bc8fdc049ba2",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN ?1 = 1 THEN EXISTS( SELECT 1 FROM product_ba"
+  ],
+  [
+   "92d2d92910f7",
+   "B| INSERT INTO product_batches ( variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active,"
+  ],
+  [
+   "23d36104c525",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES ((SELECT id FROM product_batches WHER"
+  ],
+  [
+   "4b69caa5ee28",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "26f92e981649",
+   "B| UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + ?1, updated_at = CURRENT_TIMESTAMP WHERE"
+  ],
+  [
+   "6b769da1914a",
+   "B| DELETE FROM stock_session_guards"
+  ],
+  [
+   "217860581d48",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,"
+  ],
+  [
+   "e176791c0b9f",
+   "B| UPDATE products SET cost_price_usd = COALESCE(COALESCE( (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * "
+  ],
+  [
+   "30b472dfa330",
+   "B| INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written) VALUES(?1,?2,?3,?4,json_"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "d330a759514e",
+   "SELECT id, batch_number, lot_code FROM product_batches WHERE variant_product_id = ?1 AND ((?2 IS NOT NULL AND "
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "32d5f8303e46",
+   "SELECT stock_quantity, (SELECT quantity FROM branch_stock WHERE product_id=?1 AND branch_id=?2) AS branch_quan"
+  ],
+  [
+   "76e398625e8a",
+   "UPDATE stock_mutation_receipts SET response_status=?1, response_json=?2, completed_at=CURRENT_TIMESTAMP WHERE "
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

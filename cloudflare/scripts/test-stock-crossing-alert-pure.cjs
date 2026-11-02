@@ -417,18 +417,23 @@ async function main() {
 
   await check('deploy order: without table 0272 nothing is recorded or sent and nothing throws', async () => {
     seedStockFixture(raw.db, () => raw.db.exec('ALTER TABLE stock_crossing_alerts RENAME TO stock_crossing_alerts_parked'))
-    alert.__resetStockCrossingProbeForTests()
     const n = productRow('No Table', 12)
-    assert.deepEqual(await sell(1301, n, 3), { crossings: 0, claimed: 0, sent: 0 })
+    const errors = []; const realError = console.error; console.error = (...a) => { errors.push(a) }
+    try { assert.deepEqual(await sell(1301, n, 3), { crossings: 0, claimed: 0, sent: 0 }) } finally { console.error = realError }
+    assert.equal(errors.length, 0, 'a missing table is silent')
     assert.equal(sent.length, 0)
+    // cold isolate: no probe memo exists any more, and a repeat call is just as safe
+    assert.deepEqual(await sell(1302, productRow('No Table 2', 12), 3), { crossings: 0, claimed: 0, sent: 0 })
     seedStockFixture(raw.db, () => raw.db.exec('ALTER TABLE stock_crossing_alerts_parked RENAME TO stock_crossing_alerts'))
-    alert.__resetStockCrossingProbeForTests()
   })
 
   await check('the sale can never fail because of an alert: a broken database is swallowed', async () => {
+    const errors = []; const realError = console.error; console.error = (...a) => { errors.push(a) }
     overrides['./db'].getDb = () => { throw new Error('d1 down') }
     const result = await alert.recordStockCrossings(env, { saleId: 1, lines: [line(a, 3)] })
     overrides['./db'].getDb = () => db
+    console.error = realError
+    assert.equal(errors.length, 1, 'any other failure is still logged (only the missing table is silent)')
     assert.deepEqual(result, { crossings: 0, claimed: 0, sent: 0 })
   })
 

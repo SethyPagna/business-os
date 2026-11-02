@@ -237,6 +237,9 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore',
     replayCustomerGenderRestoration: async () => { throw new Error('Use the native gender restoration harness') },
   }
+  // 6.0.992: the conversion replay is covered transactionally in test-return-legacy-convert-native.cjs.
+  if (id === './returnLegacyConvert') return { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }
+  }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable, mergeReplayPermissionEffects, registerProductMergeGroupRedo, productMergeGroupPrefixFingerprint } = undoAppliers
@@ -755,6 +758,13 @@ await check('merge replay image authority is required only for saved cover/galle
   db.prepare('INSERT INTO undo_snapshots(id,kind,payload_json) VALUES(8,?,?)').run('product.merge.group', JSON.stringify({ child_snapshot_ids: [5, 999] }))
   assert.equal((await mergeReplayPermissionEffects({}, { applier: 'product.merge.group', snapshot_id: 8 }, { id: 1, role_code: 'admin' }, 'undo')).changesProductImages, true, 'missing child fails closed')
   sharedDb = null
+})
+
+await check('the product.conflict_mark applier (Confirm $0, no-barcode mark) is registered and gated on the products edit action', () => {
+  assert.ok(registeredUndoAppliers().includes('product.conflict_mark'), 'product.conflict_mark must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'product.conflict_mark', product_id: 1, mark: 'no_barcode', set: true })
+  assert.strictEqual(resolved?.permission, 'products')
+  assert.strictEqual(resolved?.action, 'edit')
 })
 
 await check('the supplier.backfill applier is registered and gated on the products edit action', () => {

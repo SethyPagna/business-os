@@ -28,6 +28,7 @@
 -- Ids, role codes, setting keys, times and counts only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 5696
 WITH actors AS MATERIALIZED (
   SELECT u.id AS user_id, lower(trim(COALESCE(r.code, ''))) AS role_code,
     CASE WHEN json_valid(u.permissions) AND json_type(u.permissions) = 'object' THEN u.permissions ELSE '{}' END AS own,

@@ -1,0 +1,12 @@
+{
+ "import-jobs-id-review": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d8f13bbb5c3f",
+   "SELECT * FROM import_jobs WHERE id = ?1"
+  ]
+ ]
+}

@@ -99,6 +99,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_reopens_paid_sale_debt: 'return_reopens_paid_sale_debt',
   product_supplier_edit_required: 'product_supplier_edit_required',
   idempotency_conflict: 'idempotency_conflict',
+  // Six Worker sites (sales.ts: new sale, added lines, amendment; returns.ts: create twice, edit), four sentences, one meaning: the request or the
+  // stored return is in the older money format and the sale no longer accepts it. The current app always sends v1, so the reader is never on an
+  // old app -- one class sentence: nothing saved, keep the record, a manager or admin can update its money details (6.0.992). EditReturnModal shows the stored-return case before any edit.
+  money_precision_review_needed: 'money_precision_review_needed',
   return_replacement_price_forbidden: 'return_replacement_price_forbidden',
   return_edit_replacement_floor: 'return_edit_replacement_floor',
   return_restore_exchange_credit: 'return_restore_exchange_credit',
@@ -106,6 +110,9 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_export_too_large: 'return_export_too_large',
   return_statement_changed: 'return_statement_changed',
   return_export_maintenance: 'return_export_maintenance',
+  return_export_range_invalid: 'return_export_range_invalid',
+  return_export_ids_invalid: 'return_export_ids_invalid',
+  return_export_cursor_invalid: 'return_export_cursor_invalid',
   return_cancel_exchange_change: 'return_cancel_exchange_change',
   return_exchange_line_no_lot: 'return_exchange_line_no_lot',
   supplier_return_failed: 'supplier_return_failed',
@@ -275,6 +282,10 @@ export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (k
       .replace('{permission}', reviewPermissionName(permission, section, t))
   }
   if (code === 'review_entity_changed') return reviewStaleDecisionText('entity_changed', t)
+  // A queued Conflicts decision ("Confirm $0" / "no barcode") stands on the cost or barcode the requester saw; it changed, nothing was applied.
+  if (code === 'confirmed_value_changed') {
+    return t('conflict_refusal_confirmed_value_changed') || 'Cost or barcode changed; nothing applied. Reject or re-request.'
+  }
   if (code === 'review_already_decided') return reviewStaleDecisionText('already_decided', t)
   if (code === 'reason_too_long') {
     return (t('reason_too_long') || 'The reason is too long. Use {max} characters or fewer.').replace('{max}', String(REVIEW_REASON_MAX_LENGTH))

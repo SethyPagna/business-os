@@ -926,7 +926,22 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.equal(systemMarkFile(chainText(systemMark[0]) + '\nUPDATE inventory_movements SET quantity = 0;'), false, 'control: a business mutation cannot masquerade as mark-only independence')
   assert.equal(systemMarkFile(chainText(systemMark[0]).replaceAll('FROM inventory_movements', 'FROM sale_items')), false, 'control: a mark read from a table the repair writes is a dependency')
   assert.equal(stockGuardOnly(chainText(admissionGuards[0])+'\nUPDATE sale_items SET cost_price_usd=123;'), false, 'a business mutation cannot masquerade as guard-only independence')
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  // 0273 (lane 6.0.988): the Conflicts marks. One NEW table the repair never names, plain indexes (they change no row), read-only
+  // assertions, and ONE system_flags mark read from products. It writes no sale, return, lot, stock or cost row, and the repair writes none of
+  // the tables it reads, so both orders agree. Anything else in the file makes it a dependency.
+  const conflictMarksFile = (text) => {
+    const code = sqlCode(text)
+    const statements = code.split(';').map((v) => v.replace(/\s+/g, ' ').trim()).filter(Boolean)
+    const written = repairWrites(migrationText)
+    if (written.some((table) => new RegExp('\\b' + table + '\\b', 'i').test(code))) return false
+    if (namedIn(migrationText)('system_flags') || namedIn(migrationText)('product_conflict_marks') || written.includes('products')) return false
+    return statements.length > 0 && statements.every((statement) => /^CREATE TABLE product_conflict_marks \(/i.test(statement)
+      || /^CREATE INDEX \w+ ON \w+\([\w, ]+\) WHERE /i.test(statement)
+      || /^INSERT INTO system_flags \(key, value, updated_at\) SELECT 'cost_zero_watermark', CAST\(COALESCE\(MAX\(id\), 0\) AS TEXT\), CURRENT_TIMESTAMP FROM products$/i.test(statement)
+      || (/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]','\$\[\w+\]'\) END$/.test(statement)
+        && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement)))
+  }
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -951,6 +966,18 @@ CREATE TRIGGER sale_items_t AFTER INSERT ON sale_items BEGIN SELECT 1; END;`,
 CREATE TRIGGER sales_t AFTER UPDATE ON sales BEGIN SELECT 1; END;`, `${events}
 ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
       assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  }
+  if (chain.includes('0273_conflict_marks_and_indexes.sql')) {
+    const marks = chainText('0273_conflict_marks_and_indexes.sql')
+    assert.ok(conflictMarksFile(marks), 'control: the schema-and-mark-only 0273 is independent')
+    for (const extra of ['UPDATE sale_items SET cost_price_usd = 0;', 'UPDATE products SET cost_price_usd = 0;',
+      "INSERT INTO product_conflict_marks(product_id, mark) VALUES (1, 'no_barcode');", 'DELETE FROM sales;',
+      'CREATE TRIGGER t AFTER INSERT ON sale_items BEGIN SELECT 1; END;', 'ALTER TABLE products ADD COLUMN z INTEGER;']) {
+      assert.equal(conflictMarksFile(marks + '\n' + extra), false, 'control: still a dependency: ' + extra)
+    }
+    assert.equal(conflictMarksFile(marks.replace('CURRENT_TIMESTAMP FROM products;', 'CURRENT_TIMESTAMP FROM sale_items;')), false, 'control: a mark read from a table the repair writes is a dependency')
+    // A PRE/POST assertion that reads a table the repair writes is a dependency too (this one is only caught by the word-boundary match).
+    assert.equal(conflictMarksFile(marks + '\nSELECT CASE WHEN (SELECT COUNT(*) FROM sale_items) >= 0 THEN 1 ELSE json_extract(\'[]\',\'$[conflict_marks_x]\') END;'), false, 'control: an assertion reading sale_items is a dependency')
   }
   const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
   if (chain.includes(feeIndexes)) {

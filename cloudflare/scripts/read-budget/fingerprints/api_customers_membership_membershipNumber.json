@@ -1,0 +1,12 @@
+{
+ "customers-membership-n": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "1d159867b160",
+   "SELECT id, name, membership_number FROM customers WHERE lower(trim(membership_number)) = lower(?1) AND NOT (CO"
+  ]
+ ]
+}

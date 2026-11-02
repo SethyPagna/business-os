@@ -1,4 +1,5 @@
 -- Aggregate-only reset postflight; raw nonzero balances include negative debt.
+-- ops:max-rows-read 92198
 WITH settings_map AS (
   SELECT
     (SELECT value FROM system_flags WHERE key = 'loyalty_points_reset') AS since,

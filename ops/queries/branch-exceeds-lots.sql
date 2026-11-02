@@ -67,6 +67,7 @@
 -- encrypted artifact.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 803329
 WITH lots AS (
   SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, SUM(bbs.quantity) AS lot_quantity,
     MAX(CASE WHEN pb.is_active = 1 OR bbs.quantity > 0 THEN 1 ELSE 0 END) AS has_lots

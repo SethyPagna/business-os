@@ -54,6 +54,7 @@
 --                                  d: anything else (owner review)
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 68
 WITH ops AS MATERIALIZED (
   SELECT o.id AS op_id, s.payload_json
   FROM return_bulk_operations o

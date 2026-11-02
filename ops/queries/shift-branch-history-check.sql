@@ -15,6 +15,7 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero blank_branch_label
+-- ops:max-rows-read 1608
 SELECT
   (SELECT COUNT(*) FROM shift_sessions
     WHERE branch_id IS NOT NULL AND trim(coalesce(branch_name, '')) = '') AS blank_branch_label,

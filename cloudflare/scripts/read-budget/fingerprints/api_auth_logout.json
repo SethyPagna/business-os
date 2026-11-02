@@ -1,0 +1,16 @@
+{
+ "w-logout": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "66625e36ca2e",
+   "UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?"
+  ]
+ ]
+}

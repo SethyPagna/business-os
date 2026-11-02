@@ -1,0 +1,28 @@
+{
+ "portal-catalog-meta": [
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "d12fb0f758f1",
+   "SELECT key, value FROM settings"
+  ],
+  [
+   "710869c2f44a",
+   "SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'"
+  ],
+  [
+   "db037dbffe31",
+   "SELECT MIN(trim(p.category)) AS name FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, '')) "
+  ],
+  [
+   "518f44a75004",
+   "SELECT MIN(trim(p.brand)) AS name FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <> '' "
+  ],
+  [
+   "80225ea4e345",
+   "SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, lower(name) ASC"
+  ]
+ ]
+}

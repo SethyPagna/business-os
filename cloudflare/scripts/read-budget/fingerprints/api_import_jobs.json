@@ -1,0 +1,16 @@
+{
+ "import-jobs": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "2449081e3134",
+   "SELECT EXISTS( SELECT 1 FROM import_jobs WHERE status IN ('queued', 'analyzing', 'running', 'applying', 'appro"
+  ],
+  [
+   "5fa168f8a5dd",
+   "SELECT j.*, ( SELECT original_name FROM import_job_files WHERE job_id = j.id AND kind = 'csv' ORDER BY id ASC "
+  ]
+ ]
+}

@@ -56,6 +56,8 @@ const expectedConsumers = [
   'src/components/inventory/InventoryMovementsSurface.tsx',
   'src/components/inventory/InventoryProductsSurface.tsx',
   'src/components/pos/POS.tsx',
+  // Conflicts -> unknown cost / no barcode / barcode 0: Previous/Next over a keyset cursor stack (utils/productDataGapsPager.ts).
+  'src/components/products/ProductDataGapsSection.tsx',
   'src/components/products/Products.tsx',
   'src/components/products/ProductsImageOnlyView.tsx',
   'src/components/products/SelectedConflictMergeReviewModal.tsx',

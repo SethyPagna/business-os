@@ -192,6 +192,8 @@ const productsRoute = loadReal('routes/products.ts', {
     isAdminControlUser: () => true,
   },
   '../lib/audit': { audit: async () => {} },
+  // lib/productDataGaps.ts (Conflicts decisions) builds its audit row with the sibling './audit'; this test never makes a decision.
+  './audit': { buildAuditStatement: () => { throw new Error('this test makes no Conflicts decision') } },
   // Product edit / merge alerts (owner, 5 Oct 2026): the Telegram transport is a no-op here, the formatter is real.
   '../lib/telegram': { sendTelegramEvent: async () => false },
   '../lib/productEditAlert': loadReal('lib/productEditAlert.ts'),

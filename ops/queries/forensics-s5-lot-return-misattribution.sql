@@ -15,6 +15,7 @@
 -- Read-only. Ids, dates and quantities only.
 -- ops:min-rows 0
 -- ops:max-rows 3000
+-- ops:max-rows-read 62344
 WITH sold AS (
   SELECT sale_item_id, batch_id, SUM(quantity) AS drawn, SUM(COALESCE(released_quantity, 0)) AS released, MAX(branch_id) AS branch_id
   FROM sale_item_batch_allocations GROUP BY sale_item_id, batch_id

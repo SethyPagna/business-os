@@ -27,6 +27,7 @@ function runTest(name: string, fn: () => void) {
 // Surfaces that draw the icon in JSX, and the two that hand it on as a component.
 const DRAWN = [
   'components/products/ProductDuplicatesTab.tsx',
+  'components/products/ProductDataGapsSection.tsx',
   'components/contacts/DuplicatesTab.tsx',
   'components/contacts/SaleLinkConflictsSection.tsx',
   'components/contacts/ContactImportConflictsModal.tsx',

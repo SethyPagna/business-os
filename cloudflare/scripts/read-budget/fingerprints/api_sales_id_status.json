@@ -1,0 +1,1826 @@
+{
+ "w-pay-not-paid": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "0bb255a77304",
+   "SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=?1 AND mutation_kind='settlemen"
+  ],
+  [
+   "af87c57484f9",
+   "SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM "
+  ],
+  [
+   "436691206205",
+   "SELECT (CASE WHEN returns.refund_currency IS NULL THEN CASE WHEN EXISTS(SELECT 1 FROM sales debt_sale WHERE de"
+  ],
+  [
+   "d15a7b5bac96",
+   "SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lo"
+  ],
+  [
+   "245691dea593",
+   "SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity FROM return_"
+  ],
+  [
+   "11cf5d3ce8e6",
+   "SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_ite"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "f0025f9be1c8",
+   "SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods')"
+  ],
+  [
+   "38e41dbae996",
+   "SELECT sale_status,status_before_return,return_state,delivery_pending,exchange_rate,subtotal_khr,discount_khr,"
+  ],
+  [
+   "69177f902cd7",
+   "SELECT id,applied_price_khr,total_khr,product_discount_khr, base_price_khr,manual_discount_khr FROM sale_items"
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "8d6e8e3d8bfc",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 1,CASE WHEN COALESCE((SELECT value FROM settings WH"
+  ],
+  [
+   "9d8fbe8cb7fc",
+   "B| INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (NOT EXISTS(SELECT 1 FROM system_flags WHERE key"
+  ],
+  [
+   "c799da766fd0",
+   "B| UPDATE sales SET sale_status = ?1, return_state = ?2, delivery_pending = ?3, updated_at = ?4, exchange_rate"
+  ],
+  [
+   "d2f4fa099b9d",
+   "B| UPDATE sale_items SET applied_price_khr=?1,total_khr=?2, product_discount_khr=?3,base_price_khr=?4, manual_"
+  ],
+  [
+   "d2f4fa099b9d",
+   "B| UPDATE sale_items SET applied_price_khr=?1,total_khr=?2, product_discount_khr=?3,base_price_khr=?4, manual_"
+  ],
+  [
+   "d2f4fa099b9d",
+   "B| UPDATE sale_items SET applied_price_khr=?1,total_khr=?2, product_discount_khr=?3,base_price_khr=?4, manual_"
+  ],
+  [
+   "04ff13d2da16",
+   "B| INSERT INTO action_history( scope,entity,entity_id,label,undo_label,redo_label,reversible,status, undo_payl"
+  ],
+  [
+   "e21e04eb132d",
+   "B| INSERT INTO sale_mutation_receipts( id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_jso"
+  ],
+  [
+   "09d3f281ef65",
+   "B| INSERT INTO sale_record_events( id,sale_id,source_kind,source_id,generation,kind,via,subject, actor_id,acto"
+  ],
+  [
+   "e126e101bf3c",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VA"
+  ],
+  [
+   "5f68a94e6321",
+   "B| DELETE FROM sale_bulk_guards"
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "01ddaad3df73",
+   "B| SELECT CASE WHEN NOT EXISTS ( SELECT 1 FROM system_flags WHERE key = 'maintenance' ) THEN 1 ELSE json_extra"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "9f24834dfa37",
+   "SELECT id, sale_status, updated_at FROM sales WHERE id = ?"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-cancel-3-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a83f9a051c54",
+   "SELECT request_digest,response_json FROM sale_record_events WHERE source_kind='sale_status' AND source_id=?1 A"
+  ],
+  [
+   "af87c57484f9",
+   "SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM "
+  ],
+  [
+   "d15a7b5bac96",
+   "SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lo"
+  ],
+  [
+   "245691dea593",
+   "SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity FROM return_"
+  ],
+  [
+   "11cf5d3ce8e6",
+   "SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_ite"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "9d8fbe8cb7fc",
+   "B| INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (NOT EXISTS(SELECT 1 FROM system_flags WHERE key"
+  ],
+  [
+   "bba001aa8057",
+   "B| UPDATE sales SET sale_status = ?1, return_state = ?2, delivery_pending = ?3, updated_at = ?4, cancel_reason"
+  ],
+  [
+   "09d3f281ef65",
+   "B| INSERT INTO sale_record_events( id,sale_id,source_kind,source_id,generation,kind,via,subject, actor_id,acto"
+  ],
+  [
+   "c12a59f1b505",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_a"
+  ],
+  [
+   "c12a59f1b505",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_a"
+  ],
+  [
+   "c12a59f1b505",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_a"
+  ],
+  [
+   "c62c08d091d5",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "8aa1b36f9b72",
+   "B| UPDATE products SET stock_quantity = stock_quantity + ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2"
+  ],
+  [
+   "3eabe9c52715",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHER"
+  ],
+  [
+   "3b4ffca30a3d",
+   "B| UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = ?1 AND is_active IS NOT 1"
+  ],
+  [
+   "133544770a25",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(batch_id, br"
+  ],
+  [
+   "52f09196c40a",
+   "B| UPDATE sale_item_batch_allocations SET released_quantity = released_quantity + ?1, released_at = CASE WHEN "
+  ],
+  [
+   "8f9a625e23b8",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "c62c08d091d5",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "8aa1b36f9b72",
+   "B| UPDATE products SET stock_quantity = stock_quantity + ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2"
+  ],
+  [
+   "3eabe9c52715",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHER"
+  ],
+  [
+   "3b4ffca30a3d",
+   "B| UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = ?1 AND is_active IS NOT 1"
+  ],
+  [
+   "133544770a25",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(batch_id, br"
+  ],
+  [
+   "52f09196c40a",
+   "B| UPDATE sale_item_batch_allocations SET released_quantity = released_quantity + ?1, released_at = CASE WHEN "
+  ],
+  [
+   "8f9a625e23b8",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "c62c08d091d5",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "8aa1b36f9b72",
+   "B| UPDATE products SET stock_quantity = stock_quantity + ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2"
+  ],
+  [
+   "3eabe9c52715",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHER"
+  ],
+  [
+   "3b4ffca30a3d",
+   "B| UPDATE product_batches SET is_active = 1, updated_at = datetime('now') WHERE id = ?1 AND is_active IS NOT 1"
+  ],
+  [
+   "133544770a25",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(batch_id, br"
+  ],
+  [
+   "52f09196c40a",
+   "B| UPDATE sale_item_batch_allocations SET released_quantity = released_quantity + ?1, released_at = CASE WHEN "
+  ],
+  [
+   "8f9a625e23b8",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "5f68a94e6321",
+   "B| DELETE FROM sale_bulk_guards"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "9f24834dfa37",
+   "SELECT id, sale_status, updated_at FROM sales WHERE id = ?"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-sale-86-cancel": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a83f9a051c54",
+   "SELECT request_digest,response_json FROM sale_record_events WHERE source_kind='sale_status' AND source_id=?1 A"
+  ],
+  [
+   "af87c57484f9",
+   "SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM "
+  ],
+  [
+   "d15a7b5bac96",
+   "SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lo"
+  ],
+  [
+   "245691dea593",
+   "SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity FROM return_"
+  ],
+  [
+   "82c56537ad7f",
+   "SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_ite"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ]
+ ],
+ "w-sale-86-uncancel": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "a83f9a051c54",
+   "SELECT request_digest,response_json FROM sale_record_events WHERE source_kind='sale_status' AND source_id=?1 A"
+  ],
+  [
+   "af87c57484f9",
+   "SELECT s.*, COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM "
+  ],
+  [
+   "d15a7b5bac96",
+   "SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lo"
+  ],
+  [
+   "245691dea593",
+   "SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity FROM return_"
+  ],
+  [
+   "82c56537ad7f",
+   "SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_ite"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "843601d3d1c0",
+   "SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "9d8fbe8cb7fc",
+   "B| INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (NOT EXISTS(SELECT 1 FROM system_flags WHERE key"
+  ],
+  [
+   "f1a93e6bbba2",
+   "B| UPDATE sales SET sale_status = ?1, return_state = ?2, delivery_pending = ?3, updated_at = ?4, cancel_reason"
+  ],
+  [
+   "09d3f281ef65",
+   "B| INSERT INTO sale_record_events( id,sale_id,source_kind,source_id,generation,kind,via,subject, actor_id,acto"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "117800d0cd4f",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "5f68a94e6321",
+   "B| DELETE FROM sale_bulk_guards"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "9f24834dfa37",
+   "SELECT id, sale_status, updated_at FROM sales WHERE id = ?"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

@@ -1,0 +1,28 @@
+{
+ "suppliers-reports-stock-in-invoices": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "992b99a19abb",
+   "SELECT t.supplier_key, MAX(t.supplier_display) AS supplier_name, t.received_day, COUNT(*) AS line_count, SUM(C"
+  ],
+  [
+   "91bbce0c633b",
+   "SELECT COUNT(*) AS total FROM ( SELECT 1 FROM ( SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_c"
+  ],
+  [
+   "f3f2933ecff6",
+   "SELECT COUNT(*) AS line_count, SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 E"
+  ],
+  [
+   "5cfe4048f18b",
+   "SELECT id, name, is_active FROM branches ORDER BY is_active DESC, id ASC"
+  ],
+  [
+   "191ac96eff64",
+   "SELECT t.supplier_key AS key, MAX(t.supplier_display) AS name FROM ( SELECT pb.id, pb.variant_product_id, pb.b"
+  ]
+ ]
+}

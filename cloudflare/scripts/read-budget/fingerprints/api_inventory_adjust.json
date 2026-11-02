@@ -1,0 +1,96 @@
+{
+ "w-adjust": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e412f648a145",
+   "INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(?1,?2,?3,?4) ON CONFLICT(act"
+  ],
+  [
+   "7afa9940b558",
+   "SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id ="
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "b4dc7aec263b",
+   "SELECT quantity FROM branch_stock WHERE product_id = ?1 AND branch_id = ?2"
+  ],
+  [
+   "9c924a467f18",
+   "SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available FROM product_batches pb JOIN branch_batch_stock bbs "
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "a403974a6110",
+   "B| SELECT CASE WHEN EXISTS( SELECT 1 FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id"
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "e8d096a53ad3",
+   "B| SELECT CASE WHEN EXISTS( SELECT 1 FROM branch_stock WHERE product_id=?1 AND branch_id=?2 AND quantity>=?3 )"
+  ],
+  [
+   "665ba69415ff",
+   "B| UPDATE branch_stock SET quantity = quantity - ?1 WHERE product_id = ?2 AND branch_id = ?3"
+  ],
+  [
+   "352e3a9ed296",
+   "B| UPDATE products SET stock_quantity = ( SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id="
+  ],
+  [
+   "bf6649ed1ceb",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,"
+  ],
+  [
+   "27e968591416",
+   "B| INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "32d5f8303e46",
+   "SELECT stock_quantity, (SELECT quantity FROM branch_stock WHERE product_id=?1 AND branch_id=?2) AS branch_quan"
+  ],
+  [
+   "76e398625e8a",
+   "UPDATE stock_mutation_receipts SET response_status=?1, response_json=?2, completed_at=CURRENT_TIMESTAMP WHERE "
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

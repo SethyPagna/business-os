@@ -10,6 +10,7 @@
 -- meta equals the total, so run it once, not on a schedule.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 384440
 SELECT
   json_object(
     'action_history', (SELECT COUNT(*) FROM action_history),
@@ -183,5 +184,6 @@ SELECT
     'permission_extras_0270_state', (SELECT COUNT(*) FROM permission_extras_0270_state),
     'permission_extras_0270_fix', (SELECT COUNT(*) FROM permission_extras_0270_fix),
     'sale_payment_events', (SELECT COUNT(*) FROM sale_payment_events),
-    'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts)
+    'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts),
+    'product_conflict_marks', (SELECT COUNT(*) FROM product_conflict_marks)
   ) AS rows_10;

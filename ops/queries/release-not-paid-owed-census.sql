@@ -10,6 +10,7 @@
 --   checked_at_utc                         when this ran
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 5236
 SELECT
   (SELECT COUNT(*) FROM sales WHERE sale_status = 'awaiting_payment') AS not_paid_sales,
   (SELECT COUNT(*) FROM sales WHERE sale_status = 'awaiting_payment'

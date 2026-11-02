@@ -18,6 +18,7 @@
 -- Ids, dates, rates and the riel tender only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 125207
 WITH cfg AS MATERIALIZED (
   SELECT COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key = 'exchange_rate' AND CAST(value AS REAL) > 0), 4100) AS rate_now
 ),

@@ -10,6 +10,7 @@
 --   branches       id + name of every branch
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 36890
 SELECT
   (SELECT json_group_array(json_array(m.id, m.product_id, m.product_name, m.movement_type, m.quantity, m.batch_id, m.created_at,
      (SELECT r.id FROM inventory_movements r WHERE r.reference_id = 'revert:' || CAST(m.id AS TEXT))))

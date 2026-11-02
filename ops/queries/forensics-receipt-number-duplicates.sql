@@ -13,6 +13,7 @@
 --   returns_linked         returns whose sale_id is this sale
 -- ops:min-rows 0
 -- ops:max-rows 3000
+-- ops:max-rows-read 17440
 WITH d AS (
   SELECT receipt_number, ROW_NUMBER() OVER (ORDER BY MIN(id)) AS receipt_group
   FROM sales WHERE receipt_number IS NOT NULL AND receipt_number <> ''

@@ -1,0 +1,22 @@
+{
+ "system-audit-logs-records": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "04abb66c5200",
+   "SELECT id, user_id, user_name, user_name AS username, action, entity, entity_id, table_name, record_id, detail"
+  ]
+ ],
+ "system-audit-logs-entity-filter": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "6717e5b5dc3f",
+   "SELECT id, user_id, user_name, user_name AS username, action, entity, entity_id, table_name, record_id, detail"
+  ]
+ ]
+}

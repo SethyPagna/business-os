@@ -111,6 +111,7 @@ Masked by default (kept with `--include-pii`):
 | action_history, bulk_delete_jobs, fees, file_assets, import_jobs, loyalty_point_adjustments, rfid_scan_sessions, undo_snapshots | created_by_name |
 | damaged_stock_lots | created_by_user_name |
 | pending_actions | requested_by_name, reviewed_by_name |
+| product_conflict_marks | marked_by_name |
 | product_duplicate_dismissals | dismissed_by_name |
 | inventory_movements, product_cost_entries, sale_amendments, stock_row_moves, stock_transfers | user_name |
 | settings | value of `pos_address_presets_v1` |

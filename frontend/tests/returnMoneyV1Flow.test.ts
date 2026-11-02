@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import ts from 'typescript'
 import { beginSingleAction, finishSingleAction } from '../src/utils/actionGuards.ts'
 import { subtractDecimalSum } from '../src/utils/moneyPrecision.ts'
+import { returnEditLock } from '../src/components/returns/helpers/returnEditLock.ts'
 
 // Execute shipping callback ASTs, not reimplementations/source regex claims.
 function callback(file: string, name: string, bindings: Record<string, unknown>): (...args: any[]) => Promise<void> {
@@ -173,8 +174,11 @@ for (const outcome of ['success', 'error', 'unmount']) {
   assert.deepEqual(notices, ['SHORT'], 'the operator is told the payment is short, in the language pack words')
 }
 {
-  const guard = callback('../src/components/returns/EditReturnModal.tsx', 'handleSubmit', { ret: { money_precision_version: 1 } })
-  await guard() // Any fallthrough references missing bindings and fails the test.
+  // A v1 return, and (6.0.990) a v0 return on a v1 sale, which the Worker's edit route refuses as well.
+  for (const ret of [{ money_precision_version: 1 }, { money_precision_version: 0, sale_money_precision_version: 1 }]) {
+    const guard = callback('../src/components/returns/EditReturnModal.tsx', 'handleSubmit', { ret, returnEditLock })
+    await guard() // Any fallthrough references missing bindings and fails the test.
+  }
 }
 for (const bindings of [{ pendingLoaded: false, pendingError: '' }, { pendingLoaded: true, pendingError: 'unreadable' }]) {
   await callback('../src/components/returns/NewReturnModal.tsx', 'handleSubmit', bindings)()

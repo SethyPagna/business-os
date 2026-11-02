@@ -1,0 +1,80 @@
+{
+ "sales-customer-report": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "60b31bae6064",
+   "SELECT COUNT(*) AS tx_count, COALESCE(SUM(discount_usd), 0) AS discount_usd, COALESCE(SUM(membership_discount_"
+  ],
+  [
+   "ca3dade0e34e",
+   "SELECT COUNT(*) AS total FROM sales s WHERE date(s.created_at, '+7 hours') >= ?1 AND s.created_at >= date(?1, "
+  ],
+  [
+   "6b9cb793385a",
+   "SELECT s.id, s.receipt_number, s.created_at, s.branch_name, COALESCE(NULLIF(s.sale_status, ''), 'completed') A"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4a21e8983963",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "ba42fdddec69",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "ccf82c475a4a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "f2326a0d77d3",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "565dcbd1d43d",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4a21e8983963",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "ba42fdddec69",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "1abaf455da13",
+   "SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si WHERE si.sale_id IN (SELECT s.id FROM sales s WHE"
+  ],
+  [
+   "ccf82c475a4a",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "f2326a0d77d3",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "565dcbd1d43d",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ]
+ ]
+}

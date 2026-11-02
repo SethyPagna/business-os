@@ -531,6 +531,8 @@ app.post('/reset-data', async (c) => {
         // Clear case children before parent runs and before either target.
         { sql: 'DELETE FROM product_conflict_merge_run_cases' },
         { sql: 'DELETE FROM product_conflict_merge_runs' },
+        // Conflicts decisions (0273) name products by id; leave none for an id a new product could reuse.
+        { sql: 'DELETE FROM product_conflict_marks' },
         { sql: 'DELETE FROM product_batches' },
         { sql: 'DELETE FROM products' },
         { sql: 'DELETE FROM branch_stock' },

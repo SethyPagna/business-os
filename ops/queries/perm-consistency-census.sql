@@ -20,6 +20,7 @@
 -- Expected: dormant_grant = 0 everywhere is the quiet case; any row with dormant_grant = 1 is a stored grant that never worked and is set to false.
 -- ops:min-rows 1
 -- ops:max-rows 400
+-- ops:max-rows-read 46
 WITH p AS MATERIALIZED (
   SELECT 'role' AS kind, r.id AS pid, lower(trim(COALESCE(r.code, ''))) AS rc,
     (CASE WHEN json_valid(r.permissions) AND json_type(r.permissions) = 'object' THEN r.permissions ELSE '{}' END) AS rb, '{}' AS ub

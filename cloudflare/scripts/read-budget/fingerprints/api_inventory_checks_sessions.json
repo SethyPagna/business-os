@@ -1,0 +1,122 @@
+{
+ "inventory-checks-sessions": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "bff3f777230d",
+   "B| SELECT COUNT(*) AS total FROM inventory_check_sessions WHERE organization_id IS ?1 AND (?2 IS NULL OR branc"
+  ],
+  [
+   "69c6031b6866",
+   "B| WITH page AS (SELECT * FROM inventory_check_sessions WHERE organization_id IS ?1 AND (?2 IS NULL OR branch_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "w-inventory-check-session-20": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "a1bae9cbf78a",
+   "SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ( 'inventory_check_sessions','inventory_check_items','in"
+  ],
+  [
+   "b9c940983876",
+   "SELECT * FROM inventory_check_events WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "246b86f7f167",
+   "SELECT key,value FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_threshold_mode','low_stock_t"
+  ],
+  [
+   "a69164efabab",
+   "WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_at,"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "49a5cf5f2030",
+   "B| SELECT json_object('epoch',(SELECT value FROM system_flags WHERE key='stock_schema_epoch'), 'epoch_present'"
+  ],
+  [
+   "0e261aeb505b",
+   "SELECT id,name,image_path,unit,parent_id,is_group FROM products WHERE id IN (SELECT value FROM json_each(?1)) "
+  ],
+  [
+   "144f554bef20",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=?1 AND u.is_ac"
+  ],
+  [
+   "3edf92bcc179",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=?1 AND is_active=1) AND (SELECT json_object('epoch'"
+  ],
+  [
+   "d3805e6900b2",
+   "B| SELECT CASE WHEN (SELECT COUNT(*) FROM (WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p"
+  ],
+  [
+   "f590a0632483",
+   "B| WITH actual AS (WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_"
+  ],
+  [
+   "598d6df494e5",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(?1) e LEFT JOIN products p ON p.id=json_extract(e.value"
+  ],
+  [
+   "bb50464d8329",
+   "B| INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_js"
+  ],
+  [
+   "c37a282874bc",
+   "B| INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,b"
+  ],
+  [
+   "adb75dd3242f",
+   "B| INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash"
+  ],
+  [
+   "b9c940983876",
+   "SELECT * FROM inventory_check_events WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "53a9954da045",
+   "B| WITH current_actor AS (SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,"
+  ]
+ ]
+}

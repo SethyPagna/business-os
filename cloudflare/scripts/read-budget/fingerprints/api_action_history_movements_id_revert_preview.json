@@ -1,0 +1,28 @@
+{
+ "action-history-movements-id-revert-preview": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "f8508de3142a",
+   "SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id FROM inventory_movements WHERE id="
+  ],
+  [
+   "10845a8b0a12",
+   "SELECT o.id,o.history_id FROM stock_session_members m JOIN stock_session_operations o ON o.id=m.operation_id W"
+  ],
+  [
+   "66e941edc9e2",
+   "SELECT id,history_id,generation FROM stock_session_operations WHERE rowid=?1"
+  ],
+  [
+   "f19007ecf147",
+   "SELECT m.movement_type, m.quantity, m.batch_id, m.branch_id, b.received_at, b.lot_code, (SELECT name FROM bran"
+  ],
+  [
+   "ba281145ff43",
+   "SELECT m.id AS origin_id, s.id, s.movement_type, s.quantity, s.batch_id, s.created_at, b.received_at FROM json"
+  ]
+ ]
+}

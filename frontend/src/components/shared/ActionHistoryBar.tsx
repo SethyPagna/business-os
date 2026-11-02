@@ -48,6 +48,7 @@ function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
     .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
     .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
   if (p?.applier === 'sale.fields.bulk' || p?.applier === 'sale.customer.bulk') return item.label || ''
+  if (p?.applier === 'return.legacy_convert') return legacyConvertHistoryLabel(item, T)
   if (p?.applier === 'return.fields.bulk') {
     const noun = T('returns', 'returns')
     const field = T(String(p.field || p.action || ''), String(p.field || p.action || '').replaceAll('_', ' '))
@@ -58,6 +59,21 @@ function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
       .replace('{noun}', noun).replace('{field}', field).replace('{source}', source).replace('{target}', target)
   }
   return item.label || ''
+}
+
+// 6.0.992: the Worker stores English for a return money-details update; show it in the reader's language from the payload
+// (count / return_number). Rows without those fields keep the stored text.
+function legacyConvertHistoryLabel(item: HistoryItem, T: Translate): string {
+  const p = item.undo_payload
+  if (p?.return_number != null && p.return_number !== '') return T('return_convert_history_one', 'Update money details of return {number}').replace('{number}', String(p.return_number))
+  if (Number(p?.count) > 1) return T('return_convert_history_many', 'Update money details of {count} returns').replace('{count}', String(p?.count))
+  return item.label || ''
+}
+function serverDoneLabel(item: HistoryItem, direction: 'undo' | 'redo', T: Translate): string {
+  if (item.undo_payload?.applier === 'return.legacy_convert') {
+    return direction === 'redo' ? T('return_convert_history_redo', 'Redo update of money details') : T('return_convert_history_undo', 'Undo update of money details')
+  }
+  return (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
 }
 
 const isGroupedHistory = (item: HistoryItem): boolean => ['sale.status.bulk', 'sale.fields.bulk', 'sale.customer.bulk', 'return.fields.bulk'].includes(String(item.undo_payload?.applier || ''))
@@ -389,7 +405,7 @@ export default function ActionHistoryBar({
                 && typeof runServer === 'function'
                 && item?.id != null
               if (serverActionable) {
-                const doneLabel = (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
+                const doneLabel = serverDoneLabel(item, direction, T)
                 return (
                   <div key={`recorded-${item.id || item.label}`}>
                   <button

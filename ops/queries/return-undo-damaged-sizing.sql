@@ -5,6 +5,7 @@
 -- Returns no customer data, only return ids, numbers and counts.
 -- ops:min-rows 0
 -- ops:max-rows 500
+-- ops:max-rows-read 331846
 SELECT r.id, r.return_number, r.status, r.updated_at,
   CASE WHEN r.notes IN ('Undo return edit','Redo return edit') THEN 1 ELSE 0 END AS replay_note,
   (SELECT COUNT(*) FROM inventory_movements m WHERE CAST(m.reference_id AS TEXT)=CAST(r.id AS TEXT) AND m.movement_type='damage_reversal') AS damage_reversals,

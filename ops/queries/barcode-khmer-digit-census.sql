@@ -19,6 +19,7 @@
 -- Paired test: cloudflare/scripts/test-barcode-write-fold-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 9525
 WITH k AS MATERIALIZED (
   SELECT id, name_key, is_active, barcode,
     replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(barcode,

@@ -46,6 +46,7 @@
 -- Audit first, back up, and record each id pair used.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 36913
 WITH cr AS (
   SELECT a.id AS first_id, b.id AS second_id, a.created_at AS a_at, b.created_at AS b_at,
     a.sale_id AS subject_id, b.branch_id, b.cashier_id AS actor_id, b.total_refund_usd AS amount,

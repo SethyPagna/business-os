@@ -23,6 +23,7 @@
 -- Ids, dates, counts and line totals only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 93860
 WITH rule_days AS MATERIALIZED (
   SELECT id AS rule_id, trim(ends_at) AS last_day, rule_type, scope_type, is_active,
     CASE WHEN json_valid(product_ids) THEN product_ids ELSE '[]' END AS ids_json,

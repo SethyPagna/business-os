@@ -1,0 +1,12 @@
+{
+ "promotions": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "0f47877d73a8",
+   "SELECT * FROM promotions ORDER BY sort_order ASC, id ASC"
+  ]
+ ]
+}

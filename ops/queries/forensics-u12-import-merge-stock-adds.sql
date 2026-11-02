@@ -25,6 +25,7 @@
 -- Ids, dates and quantities only. Read-only.
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:max-rows-read 36871
 WITH adds AS MATERIALIZED (
   SELECT m.id AS movement_id, m.product_id, m.branch_id, m.batch_id, m.quantity, m.created_at AS received_at,
     substr(m.reason, 16, instr(m.reason, ', row ') - 16) AS job_id,

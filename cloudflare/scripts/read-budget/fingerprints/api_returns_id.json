@@ -1,0 +1,20 @@
+{
+ "returns-id": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8b496e41b03e",
+   "SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is"
+  ],
+  [
+   "189f432e305f",
+   "SELECT * FROM return_items WHERE return_id = ?"
+  ],
+  [
+   "988c1a23c1e4",
+   "SELECT * FROM return_replacement_items WHERE return_id = ?"
+  ]
+ ]
+}

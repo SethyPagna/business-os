@@ -1,0 +1,16 @@
+{
+ "system-legacy-subtotal-repair-preview": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8ab2fc491e2d",
+   "SELECT 1 AS active FROM system_flags WHERE key='maintenance'"
+  ],
+  [
+   "9359e4b27b45",
+   "SELECT s.id, substr(s.receipt_number,1,161) AS receipt_number, substr(s.created_at,1,25) AS created_at, substr"
+  ]
+ ]
+}

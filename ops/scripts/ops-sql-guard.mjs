@@ -26,6 +26,9 @@
 //   -- ops:max-rows N          fail if more than N rows
 //   -- ops:expect-zero *       every column of every row must be 0
 //   -- ops:expect-zero a,b     the named columns must be 0 in every row
+//   -- ops:max-rows-read N     REQUIRED: the D1 rows the query may read on the CI seed, with and without
+//                              ANALYZE (test-ops-query-budget-native.cjs measures it; the Free day is 5M)
+//   -- ops:refused-on-free     stands in for max-rows-read on a query too costly for the Free plan
 // There is no directive that prints a row count: a row count is a table size,
 // which the public log must not show, so every query's count stays in the
 // encrypted file.
@@ -116,7 +119,7 @@ export function scanSql(input) {
   return parts
 }
 
-function parseDirective(body, rules, seen) {
+function parseDirective(body, rules, seen, budget) {
   const m = /^ops:([a-z-]+)(?:\s+(.*))?$/.exec(body)
   if (!m) reject('sql-bad-directive', 'A malformed ops: directive.')
   const [, name, rawArg = ''] = m
@@ -128,6 +131,11 @@ function parseDirective(body, rules, seen) {
     return Number(arg)
   }
   switch (name) {
+    case 'max-rows-read': budget.maxRowsRead = integer(); break
+    case 'refused-on-free':
+      if (arg) reject('sql-bad-directive', 'refused-on-free takes no argument.')
+      budget.refusedOnFree = true
+      break
     case 'min-rows': rules.minRows = integer(); break
     case 'max-rows': rules.maxRows = integer(); break
     case 'expect-zero':
@@ -147,21 +155,34 @@ function parseDirective(body, rules, seen) {
 
 // Returns { sql, rules } for a file that passes, or throws OpsError.
 export function guardSql(input) {
+  const { sql, rules } = checkSql(input, false)
+  return { sql, rules }
+}
+
+// A query FILE must also state what it reads (-- ops:max-rows-read N, or -- ops:refused-on-free).
+export function guardQuery(input) {
+  const { sql, rules, budget } = checkSql(input, true)
+  return { sql, rules, ...budget }
+}
+
+function checkSql(input, requireReadBudget) {
   const raw = String(input)
   if (Buffer.byteLength(raw, 'utf8') > MAX_FILE_BYTES) reject('sql-too-long', 'The query file is too large.')
   const parts = scanSql(raw)
   const rules = { minRows: 1, maxRows: null, expectZero: null }
   const seen = new Set()
+  const budget = { maxRowsRead: null, refusedOnFree: false }
   for (const part of parts) {
     if (part.type === 'line-comment' || part.type === 'block-comment') {
       const body = part.text.trim()
       if (/^ops:/i.test(body)) {
         if (part.type === 'block-comment') reject('sql-bad-directive', 'Directives must be -- line comments.')
-        parseDirective(body, rules, seen)
+        parseDirective(body, rules, seen, budget)
       }
     }
   }
   if (rules.maxRows !== null && rules.maxRows < rules.minRows) reject('sql-bad-directive', 'max-rows is below min-rows.')
+  if (budget.maxRowsRead !== null && budget.refusedOnFree) reject('sql-bad-directive', 'max-rows-read and refused-on-free exclude each other.')
 
   // Canonical text: literals verbatim, comments -> one space, whitespace
   // outside literals collapsed.
@@ -214,7 +235,10 @@ export function guardSql(input) {
   if (compound > MAX_COMPOUND_OPERATORS) {
     reject('sql-compound-too-long', 'Too many UNION/INTERSECT/EXCEPT terms for D1; use scalar sub-queries.')
   }
-  return { sql, rules }
+  if (requireReadBudget && budget.maxRowsRead === null && !budget.refusedOnFree) {
+    reject('sql-missing-read-budget', 'The query states no -- ops:max-rows-read N (or -- ops:refused-on-free).')
+  }
+  return { sql, rules, budget }
 }
 
 export function listQueries(dir = QUERIES_DIR) {
@@ -233,5 +257,5 @@ export function loadQuery(name, dir = QUERIES_DIR) {
   const file = path.join(dir, `${name}.sql`)
   const real = fs.realpathSync(file)
   if (path.dirname(real).toLowerCase() !== fs.realpathSync(dir).toLowerCase()) reject('query-not-found', 'The query file escapes ops/queries/.')
-  return { name, file, ...guardSql(fs.readFileSync(real, 'utf8')) }
+  return { name, file, ...guardQuery(fs.readFileSync(real, 'utf8')) }
 }

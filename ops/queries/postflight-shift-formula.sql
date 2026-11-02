@@ -15,6 +15,7 @@
 --             with the count of closes in closes_n
 -- After release 2e, every since_2e row must be formula 2.
 -- ops:min-rows 1
+-- ops:max-rows-read 11
 SELECT
   'recent' AS kind,
   shift_session_id,

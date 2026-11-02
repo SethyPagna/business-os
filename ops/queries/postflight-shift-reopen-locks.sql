@@ -14,6 +14,7 @@
 --   parents_with_two_children  must be 0 (unique index idx_shift_sessions_parent)
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 17
 SELECT
   (SELECT COUNT(*) FROM shift_sessions WHERE parent_shift_id IS NOT NULL) AS reopened_total,
   (SELECT COUNT(*) FROM shift_sessions

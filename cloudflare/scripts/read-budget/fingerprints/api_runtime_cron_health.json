@@ -1,0 +1,16 @@
+{
+ "runtime-cron-health": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5c02824cec9",
+   "SELECT value FROM settings WHERE key = ?1"
+  ],
+  [
+   "d5c02824cec9",
+   "SELECT value FROM settings WHERE key = ?1"
+  ]
+ ]
+}

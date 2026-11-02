@@ -1349,6 +1349,8 @@ export default function Settings() {
               />
             </div>
           </div>
+          {/* FX-forward-only#264 / Currency-forward-only#388: a neutral note only; a changed rate is stamped on the sales recorded after it and never restates past ones. */}
+          <p data-testid="exchange-rate-forward-only-note" className="mt-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{t('exchange_rate_forward_only_note')}</p>
           {/* The owner's tax switch (S4-30, 2026-09-04): "tax can turn on off
               in settings which will show based on that, if off, doesn't show."
               With the key absent it reads as ON only when a rate is set, which

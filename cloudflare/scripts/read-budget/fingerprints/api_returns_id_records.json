@@ -1,0 +1,28 @@
+{
+ "returns-id-records": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "fe258517f6ee",
+   "SELECT id, return_number FROM returns WHERE id = ?1"
+  ],
+  [
+   "2ee86e764111",
+   "SELECT id, action, details, old_value, new_value, user_name, created_at FROM audit_logs WHERE (entity = 'retur"
+  ],
+  [
+   "e2235148b88a",
+   "SELECT a.id, a.action, a.details, a.old_value, a.new_value, a.user_name, a.created_at FROM return_bulk_members"
+  ],
+  [
+   "724ae15d59a0",
+   "SELECT e.id, e.sale_id, e.source_kind, e.kind, e.via, e.subject, e.actor_username, e.occurred_at, e.changes_js"
+  ],
+  [
+   "a1c5d02e5509",
+   "SELECT o.id AS operation_id, o.request_json, o.receipt_json, o.generation, h.created_at AS created_at, h.creat"
+  ]
+ ]
+}

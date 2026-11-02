@@ -431,6 +431,65 @@ export function getPossiblySameProducts(options: { fresh?: boolean } = {}): Prom
   )
 }
 
+// Conflicts' other two sections (cloudflare/src/lib/productDataGaps.ts): products whose cost was never recorded and
+// products with no barcode. Always read fresh: the list shrinks the moment a row is fixed.
+export type ProductDataGapKind = 'unknown_cost' | 'empty_barcode' | 'placeholder_barcode'
+export type ProductConflictMark = 'zero_cost_confirmed' | 'no_barcode'
+export type ProductDataGapRow = {
+  id: number
+  name: string | null
+  barcode: string | null
+  sku: string | null
+  brand: string | null
+  category: string | null
+  stock_quantity: number
+  image_path: string | null
+  /** unknown_cost only. */
+  reasons?: Array<'catalog_unknown' | 'lots_unknown' | 'held_unknown' | 'zero_unconfirmed'>
+  unknown_lot_count?: number
+  unknown_units?: number
+  held_unknown_count?: number
+  held_unknown_units?: number
+}
+export type ProductDataGapPage = { items: ProductDataGapRow[]; has_more: boolean; next_after: number | null }
+/** unknown_cost is absent for a role without product_cost_view. */
+export type ProductDataGapCounts = { unknown_cost?: number; empty_barcode: number; placeholder_barcode: number }
+
+export const PRODUCT_DATA_GAP_PAGE_SIZE = 20
+
+export function getProductDataGaps(kind: ProductDataGapKind, after: number | null): Promise<ProductDataGapPage> {
+  const query = `kind=${kind}&limit=${PRODUCT_DATA_GAP_PAGE_SIZE}${after ? `&after=${after}` : ''}`
+  return route(
+    `products:dataGaps:${query}`,
+    (signal?: AbortSignal) => apiFetch('GET', `/api/products/data-gaps?${query}`, undefined, undefined, signal ? { signal } : undefined),
+    null,
+    { raceLocalFallback: false, bypassCache: true },
+  ) as Promise<ProductDataGapPage>
+}
+
+export function getProductDataGapCounts(): Promise<ProductDataGapCounts> {
+  return route(
+    'products:dataGapCounts',
+    (signal?: AbortSignal) => apiFetch('GET', '/api/products/data-gaps/counts', undefined, undefined, signal ? { signal } : undefined),
+    null,
+    { raceLocalFallback: false, bypassCache: true },
+  ).then((payload) => (payload as { counts: ProductDataGapCounts }).counts)
+}
+
+// "Confirm $0" and "This product has no barcode" (set: false takes the decision back). The Worker audits each change and records
+// an undo entry; neither touches cost, stock or sales.
+// A Review-tier account's decision is queued for an admin instead (202 { pending: true, pendingActionId }): nothing is applied yet.
+// The caller refreshes the "waiting for review" tags (noteQueuedForReview); the transport must not import that store, which would pull
+// it into the shared API chunk's closure (tests/performanceBudgets.test.ts). Asking again returns the same open request.
+export function setProductConflictMark(productId: number, mark: ProductConflictMark, set: boolean): Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }> {
+  return route(
+    'products:conflictMark',
+    () => apiFetch('POST', '/api/products/data-gaps/marks', { product_id: productId, mark, set }),
+    null,
+    true,
+  ) as Promise<{ changed?: boolean; pending?: boolean; pendingActionId?: number }>
+}
+
 export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' | 'name' | 'similar', value: string): Promise<unknown> {
   return route(
     'products:dismissDuplicateCluster',

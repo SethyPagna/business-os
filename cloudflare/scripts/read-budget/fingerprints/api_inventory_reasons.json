@@ -1,0 +1,12 @@
+{
+ "inventory-reasons": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "df9160f9f834",
+   "SELECT value FROM settings WHERE key = 'inventory_saved_reasons' LIMIT 1"
+  ]
+ ]
+}

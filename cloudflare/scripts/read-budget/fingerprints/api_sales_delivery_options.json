@@ -1,0 +1,12 @@
+{
+ "sales-delivery-options": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "de33ac0e654c",
+   "SELECT id,name,phone,area,address FROM delivery_contacts WHERE ?1='' OR lower(COALESCE(name,'')) LIKE ?2 ESCAP"
+  ]
+ ]
+}

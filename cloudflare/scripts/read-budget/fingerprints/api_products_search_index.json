@@ -1,0 +1,20 @@
+{
+ "products-search-index": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "82ba6326317c",
+   "WITH RECURSIVE bucket(n) AS ( SELECT CAST((SELECT MIN(id) FROM products WHERE id >= 0) / ?1 AS INTEGER) UNION "
+  ],
+  [
+   "f47748666ebe",
+   "SELECT id, name, brand, category, barcode, sku FROM products WHERE id >= ?1 AND id < ?2 AND +products.is_activ"
+  ]
+ ]
+}

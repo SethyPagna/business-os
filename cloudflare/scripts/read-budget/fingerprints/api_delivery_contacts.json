@@ -1,0 +1,24 @@
+{
+ "delivery-contacts-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "322b92762332",
+   "SELECT COUNT(*) AS count FROM delivery_contacts"
+  ],
+  [
+   "18f07747c0f4",
+   "SELECT * FROM delivery_contacts ORDER BY lower(name) ASC, id ASC LIMIT ?1 OFFSET ?2"
+  ],
+  [
+   "e38ab7cc9512",
+   "SELECT DISTINCT substr(date(created_at, '+7 hours'), 1, 4) AS year FROM delivery_contacts ORDER BY year DESC"
+  ]
+ ]
+}

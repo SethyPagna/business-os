@@ -1,0 +1,16 @@
+{
+ "shifts-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3b5c720e247b",
+   "SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')"
+  ],
+  [
+   "c94edded340f",
+   "WITH matched AS ( SELECT id, business_date, opened_at, CASE WHEN closed_at IS NULL AND cancelled_at IS NULL TH"
+  ]
+ ]
+}

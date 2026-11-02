@@ -7,6 +7,7 @@ import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
+import { ReturnLegacyLockTag } from './ReturnLegacyConvert.tsx'
 
 // Optional (toggleable) large-screen columns for the returns list. Stable
 // module-level identity so useColumnPreferences doesn't churn; labels are
@@ -52,6 +53,9 @@ interface ReturnRecord {
   // so a damaged line is visible on the row -- the list shows one row per
   // return and never its items, so this used to require opening the return.
   damaged_item_count?: number
+  // 6.0.992: the old-format lock (a v0 return on a v1 sale) -- GET /api/returns carries the sale's version.
+  money_precision_version?: number | string | null
+  sale_money_precision_version?: number | string | null
 }
 
 interface ReturnGroup {
@@ -95,6 +99,8 @@ interface ReturnsListSurfaceProps {
   selectionModeActive: boolean
   getReturnLongPressState: (rowId: number) => LongPressState
   setDetailRet: (ret: ReturnRecord) => void
+  /** 6.0.992: full Returns access updates a locked return's money details from its row (ReturnLegacyLockTag); absent = reason only. */
+  onConvertLegacy?: (id: number) => void
   showReturnActionGroups: boolean
   SUPPLIER_SCOPE: string
   t: BasicTranslateFn
@@ -165,6 +171,7 @@ export default function ReturnsListSurface({
   selectionModeActive,
   getReturnLongPressState,
   setDetailRet,
+  onConvertLegacy,
   showReturnActionGroups,
   SUPPLIER_SCOPE,
   t,
@@ -349,6 +356,7 @@ export default function ReturnsListSurface({
                                     {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
                                   </span>
                                 ) : null}
+                                <ReturnLegacyLockTag ret={ret} onConvert={onConvertLegacy} />
                               </td>
                               <td className="whitespace-nowrap text-gray-500">{fmtTime(ret.created_at)}</td>
                               <td>
@@ -499,6 +507,7 @@ export default function ReturnsListSurface({
                                   {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
                                 </span>
                               ) : null}
+                              <ReturnLegacyLockTag ret={ret} onConvert={onConvertLegacy} />
                             {renderAmount(ret)}
                           </div>
                         </div>

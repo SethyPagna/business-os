@@ -193,7 +193,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
 const ALL_RESET_CANDIDATE_TABLES = [
   'product_conflict_action_group_members', 'product_remove_operations',
   'product_conflict_action_groups', 'product_conflict_action_reviews',
-  'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
+  'product_conflict_merge_run_cases', 'product_conflict_merge_runs', 'product_conflict_marks',
   'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
   'inventory_movements', 'stock_row_moves', 'stock_transfers',
   'sale_record_events', 'return_mutation_receipts', 'return_create_receipts', 'return_create_guards', 'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
@@ -251,7 +251,7 @@ function seed() {
   const wipe = [
     'product_conflict_action_group_members', 'product_remove_operations',
     'product_conflict_action_groups', 'product_conflict_action_reviews',
-    'product_conflict_merge_run_cases', 'product_conflict_merge_runs',
+    'product_conflict_merge_run_cases', 'product_conflict_merge_runs', 'product_conflict_marks',
     'stock_lot_adjustment_operations', 'stock_session_members', 'stock_session_operations', 'stock_session_guards',
     'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns',
     'sale_items', 'sales', 'inventory_movements', 'stock_transfers', 'stock_row_moves',
@@ -272,6 +272,8 @@ function seed() {
   rawDbHandle.prepare('INSERT INTO branch_batch_stock (id, batch_id, branch_id, quantity) VALUES (1, 1, 1, 10)').run()
   rawDbHandle.prepare("INSERT INTO damaged_stock_lots(product_id,product_name,branch_id,quantity,quantity_remaining,reason,condition_tag,source) VALUES(1,'Eye Shadow Palette',1,3,3,'test','damaged','return')").run()
   rawDbHandle.prepare("INSERT INTO rfid_tags (id, epc_id, product_id, branch_id, status) VALUES (1, 'EPC-1', 1, 1, 'active')").run()
+  // Conflicts decisions (0273) name products by id: a reset must clear them (no orphan marks for a reused id); cost_zero_watermark stays durable.
+  rawDbHandle.prepare("INSERT INTO product_conflict_marks(product_id,mark) VALUES(1,'no_barcode')").run()
   rawDbHandle.prepare(`INSERT INTO product_conflict_merge_runs(
     id,actor_id,request_id,request_digest,manifest_version,manifest_digest,request_json,status
   ) VALUES('reset-conflict-run',1,'reset-conflict-request','request-digest',1,'manifest-digest','{}','interrupted')`).run()
@@ -644,6 +646,7 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(count('product_conflict_merge_run_cases'), 0)
     assert.strictEqual(count('product_conflict_merge_runs'), 0)
+    assert.strictEqual(count('product_conflict_marks'), 0)
     assert.strictEqual(count('product_conflict_action_group_members'), 0)
     assert.strictEqual(count('product_remove_operations'), 0)
     assert.strictEqual(count('product_conflict_action_groups'), 0)
@@ -700,7 +703,8 @@ async function main() {
     const ownerEnv = { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' }
     const durableFlagsBefore = rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all()
     assert.deepStrictEqual(durableFlagsBefore.map(flag => flag.key), [
-      'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+      // cost_zero_watermark (0273, Conflicts): a durable boundary like the others; a reset must not move it.
+      'cost_zero_watermark', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
     ])
     assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
 
@@ -734,7 +738,7 @@ async function main() {
       'product_conflict_action_group_members',
       'product_remove_operations',
       'product_conflict_action_groups',
-      'product_conflict_action_reviews',
+      'product_conflict_action_reviews', 'product_conflict_marks',
     ]) assert.strictEqual(count(table), 0, `${table} should be empty after factory reset`)
     assert.strictEqual(count('return_mutation_receipts'), 0)
     assert.strictEqual(count('return_create_receipts'), 0)
@@ -743,7 +747,7 @@ async function main() {
       'sale_not_paid_stock_recovery_reset_guard','stock_transaction_permit'
     )`).n, 0, 'short-lived reset authority and stock permit cannot survive the atomic batch')
     assert.deepStrictEqual(rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all(), durableFlagsBefore,
-      'all four durable boundaries, including the exact stock epoch, survive factory reset unchanged')
+      'all five durable boundaries, including the exact stock epoch, survive factory reset unchanged')
   })
 
   await check('mode=products clears current scoped Set operations and supports the optional-table-absent schema', async () => {

@@ -2,7 +2,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import { getActionTier } from './permissions'
-import { hasCatalogCostWrite } from './acquisitionCostAccess'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts, hasCatalogCostWrite } from './acquisitionCostAccess'
 import { getDb } from './db'
 import { roundMoney4, subtractDecimalSum } from './moneyPrecision'
 import { readProductMoneyPlan } from './productWrites'
@@ -23,6 +23,7 @@ const REVIEW_ACTIONS: Readonly<Record<string, string>> = {
   'products:create:product': 'add',
   'products:update:product': 'edit',
   'products:delete:product': 'delete',
+  'products:conflict_mark:product': 'edit',
   'inventory:update:inventory_reason': 'edit_reasons',
   'branches:create:branch': 'add',
   'branches:update:branch': 'edit',
@@ -61,6 +62,12 @@ export async function reviewApprovalPermissionError(env: Env, user: SessionUser,
   const action = REVIEW_ACTIONS[`${row.section}:${row.action_type}:${row.entity_type}`]
   if (!action) return UNMAPPED
   if (getActionTier(user, row.section, action) !== 'full') return refusal(`${row.section}:${action}`)
+  if (row.action_type === 'conflict_mark') {
+    // A $0 confirmation is cost data: the reviewer needs the same cost grants the direct route asks for.
+    let mark: unknown
+    try { mark = (JSON.parse(row.payload_json || '{}') as Record<string, unknown>).mark } catch { mark = null }
+    return mark === 'zero_cost_confirmed' && !(canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)) ? refusal('product_cost_edit') : null
+  }
   if (row.section !== 'products' || (row.action_type !== 'create' && row.action_type !== 'update')) return null
 
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>

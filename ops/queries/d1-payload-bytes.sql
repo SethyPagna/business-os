@@ -3,6 +3,7 @@
 -- Byte totals only, no content.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 20544
 SELECT
   (SELECT COALESCE(SUM(length(CAST(request_json AS BLOB)) + length(CAST(before_json AS BLOB))
      + length(CAST(after_json AS BLOB)) + length(CAST(response_json AS BLOB))), 0) FROM sale_mutation_receipts) AS sale_mutation_receipt_bytes,

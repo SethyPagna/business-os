@@ -1,0 +1,198 @@
+{
+ "sales-id-amendments": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "1363582e125c",
+   "SELECT id, kind, group_id, sale_item_id, product_id, product_name, quantity_before, quantity_after, quantity_d"
+  ]
+ ],
+ "w-sale-86-amend": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "be8151d39dff",
+   "SELECT request_digest,response_json FROM sale_mutation_receipts WHERE actor_id=?1 AND mutation_kind='amendment"
+  ],
+  [
+   "ee5c279b378f",
+   "PRAGMA table_info(sales)"
+  ],
+  [
+   "5e03ed490345",
+   "PRAGMA table_info(returns)"
+  ],
+  [
+   "5093525f7c41",
+   "PRAGMA table_info(sale_items)"
+  ],
+  [
+   "60b78f3c2593",
+   "SELECT s.*,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AS write_revision FROM s"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "e3830381bbd0",
+   "SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)"
+  ],
+  [
+   "9b1075124199",
+   "SELECT 1 AS found WHERE EXISTS(SELECT 1 FROM return_items ri JOIN returns r ON r.id = ri.return_id WHERE r.sal"
+  ],
+  [
+   "8a8705739282",
+   "SELECT value FROM settings WHERE key = ?"
+  ],
+  [
+   "bf78b2863b2c",
+   "SELECT * FROM sale_items WHERE sale_id=? ORDER BY id"
+  ],
+  [
+   "b59b5fba9120",
+   "SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'"
+  ],
+  [
+   "72bf646e934f",
+   "SELECT id,applied_price_usd,applied_price_khr,total_usd,total_khr, product_discount_usd,product_discount_khr,b"
+  ],
+  [
+   "81a2198d583e",
+   "SELECT id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_pric"
+  ],
+  [
+   "b9ae0c879d08",
+   "SELECT id, batch_id, branch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_i"
+  ],
+  [
+   "392e641f07bc",
+   "SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id, pb.id AS batch_id, pb.lot_code, pb.rec"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "5f68a94e6321",
+   "B| DELETE FROM sale_bulk_guards"
+  ],
+  [
+   "baadc71d49a0",
+   "B| INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN EXISTS( SELECT 1 FROM branches b WHERE b.id=?1 A"
+  ],
+  [
+   "deb8cf904d86",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 1,CASE WHEN COALESCE((SELECT value FROM settings WH"
+  ],
+  [
+   "9d8fbe8cb7fc",
+   "B| INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (NOT EXISTS(SELECT 1 FROM system_flags WHERE key"
+  ],
+  [
+   "e9df199967bf",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 2,CASE WHEN EXISTS(SELECT 1 FROM sales s WHERE s.id"
+  ],
+  [
+   "2fe84e0f0653",
+   "B| INSERT INTO sale_mutation_receipts( id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_jso"
+  ],
+  [
+   "39f77ec1001c",
+   "B| UPDATE sale_items SET quantity = ?1, total_usd = ?2, total_khr = ?3 WHERE id = ?4"
+  ],
+  [
+   "5c816e1701ca",
+   "B| UPDATE branch_batch_stock SET quantity = quantity - ?1, updated_at = datetime('now') WHERE batch_id = ?2 AN"
+  ],
+  [
+   "a71bf713af80",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, 0) ON CONFLICT(product_id, branc"
+  ],
+  [
+   "294eec56c8d3",
+   "B| UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?1), updated_at = CURRENT_TIMESTAMP WHERE id ="
+  ],
+  [
+   "e059b2fd54dc",
+   "B| INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_us"
+  ],
+  [
+   "095b0b8b411e",
+   "B| UPDATE sale_item_batch_allocations SET quantity = quantity + ?1 WHERE id = ?2"
+  ],
+  [
+   "3416e450cb83",
+   "B| UPDATE sale_items SET quantity=?1,total_usd=?2,total_khr=?3 WHERE id=?4 AND sale_id=?5"
+  ],
+  [
+   "22a92c5cb57f",
+   "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 3,CASE WHEN (SELECT COUNT(*) FROM sale_items WHERE "
+  ],
+  [
+   "fc539a8fb622",
+   "B| UPDATE sales SET exchange_rate = CASE WHEN ?1=1 THEN ?2 ELSE exchange_rate END, subtotal_usd = ?3, subtotal"
+  ],
+  [
+   "af2d1b4ffa31",
+   "B| INSERT INTO sale_amendments ( sale_id, group_id, kind, sale_item_id, product_id, product_name, quantity_bef"
+  ],
+  [
+   "5ee1527d365c",
+   "B| UPDATE sale_mutation_receipts SET sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE s"
+  ],
+  [
+   "ebdbb9079908",
+   "B| DELETE FROM sale_mutation_guards"
+  ],
+  [
+   "5f68a94e6321",
+   "B| DELETE FROM sale_bulk_guards"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "7288ea8445a7",
+   "SELECT (SELECT json_group_object(key, value) FROM settings WHERE key IN ('low_stock_alert_enabled','low_stock_"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "ee224a24fb59",
+   "SELECT response_json FROM sale_mutation_receipts WHERE id=?"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ]
+}

@@ -23,6 +23,7 @@
 --                                 the owner's SK-II pattern), else ''
 -- ops:min-rows 0
 -- ops:max-rows 5000
+-- ops:max-rows-read 10
 WITH rv AS (
   SELECT m.id, m.product_id, m.product_name, m.branch_id, m.batch_id, m.movement_type, m.quantity, m.reason, m.user_name,
     m.created_at, m.total_cost_usd, CAST(substr(m.reference_id, 8) AS INTEGER) AS original_id

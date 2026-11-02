@@ -1,0 +1,260 @@
+{
+ "sales-daily-report": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "37eb38c24075",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "1e78f3de42e9",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "23284133534f",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "4b8ba1c10357",
+   "SELECT s.id,s.created_at,s.sale_status,s.status_before_return,s.branch_id,s.branch_name, s.cashier_id,s.cashie"
+  ],
+  [
+   "37eb38c24075",
+   "SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name, s.cashier_id,s.cashier_name,s.customer_id,s."
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "894e70528f28",
+   "SELECT si.id,si.sale_id,si.product_id,si.product_name,si.quantity, si.total_usd,si.cost_price_usd,si.product_d"
+  ],
+  [
+   "1e78f3de42e9",
+   "SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope,r.owed_reduction_usd,r.refund_currency,r.mone"
+  ],
+  [
+   "23284133534f",
+   "SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock,ri.sale_item_id,ri."
+  ],
+  [
+   "51360b2bda23",
+   "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
+  ]
+ ]
+}

@@ -1,0 +1,20 @@
+{
+ "products-data-gaps-counts-conflicts-badges": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "988cb8520fe1",
+   "SELECT (SELECT COUNT(*) FROM products p WHERE +p.is_active = 1 AND NOT (COALESCE(p.is_group, 0) = 1 AND COALES"
+  ]
+ ]
+}

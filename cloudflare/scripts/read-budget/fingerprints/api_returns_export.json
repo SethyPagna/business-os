@@ -1,0 +1,20 @@
+{
+ "returns-export": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c422788a36ab",
+   "SELECT 1 AS present FROM system_flags WHERE key='maintenance'"
+  ],
+  [
+   "a4d26dda9a40",
+   "SELECT COUNT(*) AS total, COALESCE(SUM(r.id), 0) AS id_sum, COALESCE(SUM(COALESCE(v.revision, 0)), 0) AS revis"
+  ],
+  [
+   "6f86080a17c8",
+   "SELECT r.*, r.created_at AS export_sort_at, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND i"
+  ]
+ ]
+}

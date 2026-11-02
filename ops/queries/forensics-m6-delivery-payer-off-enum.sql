@@ -19,6 +19,7 @@
 --   money_precision_version
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 17435
 SELECT
   s.id AS sale_id, s.receipt_number, s.created_at, s.sale_status, s.is_delivery,
   s.delivery_fee_paid_by,

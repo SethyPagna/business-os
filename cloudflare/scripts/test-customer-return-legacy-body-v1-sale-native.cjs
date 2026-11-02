@@ -321,6 +321,14 @@ async function main() {
     const afterEdit = await db.prepare('SELECT updated_at,total_refund_usd FROM returns WHERE id=900').first()
     assert.equal(Number(afterEdit.total_refund_usd), Number(poisonedRow.total_refund_usd), 'the refused edit rewrote no money')
     assert.equal(afterEdit.updated_at, poisonedRow.updated_at, 'the refused edit rewrote no row')
+    // The Edit Return form shows this refusal before any edit (frontend returnEditLock), reading the sale's version from GET /:id.
+    const poisonedDetail = await send('GET', '/api/returns/900')
+    assert.equal(poisonedDetail.status, 200, JSON.stringify(poisonedDetail.body))
+    assert.equal(Number(poisonedDetail.body.money_precision_version), 0)
+    assert.equal(poisonedDetail.body.sale_money_precision_version, 1, 'GET /:id carries the linked sale version')
+    const legacyDetail = await send('GET', `/api/returns/${Number(legacyOnV0.body.id)}`)
+    assert.equal(legacyDetail.status, 200, JSON.stringify(legacyDetail.body))
+    assert.equal(legacyDetail.body.sale_money_precision_version, 0, 'a legacy return on a legacy sale stays editable')
 
     console.log('PASS native return money version: the SALE decides -- a legacy or version-0 body is refused on a v1 sale without writing anything, the sale still takes an exact v1 return under its payout cap, a legacy body on a legacy sale still pays exactly today\'s figures, a v1 body on a legacy sale keeps today\'s refusal, and the edit route refuses to re-price a legacy row that sits on a v1 sale')
   } finally {

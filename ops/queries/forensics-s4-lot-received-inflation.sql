@@ -21,6 +21,7 @@
 -- Read-only. Ids, dates and quantities only.
 -- ops:min-rows 0
 -- ops:max-rows 3000
+-- ops:max-rows-read 77651
 WITH ret AS (
   SELECT rba.batch_id, SUM(rba.quantity) AS alloc_qty, COUNT(DISTINCT ri.return_id) AS return_count,
     MIN(COALESCE(strftime('%Y-%m-%d %H:%M:%S', r.created_at), r.created_at)) AS first_at, MAX(COALESCE(strftime('%Y-%m-%d %H:%M:%S', r.created_at), r.created_at)) AS last_at,

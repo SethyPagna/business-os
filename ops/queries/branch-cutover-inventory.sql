@@ -1,4 +1,5 @@
 -- ops:min-rows 0
+-- ops:max-rows-read 898090
 WITH lots AS (
   SELECT pb.variant_product_id AS product_id, s.branch_id, SUM(s.quantity) AS quantity
   FROM branch_batch_stock s

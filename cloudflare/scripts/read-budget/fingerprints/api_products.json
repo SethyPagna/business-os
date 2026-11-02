@@ -1,0 +1,52 @@
+{
+ "products-legacy-list": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "7348907ebb1f",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "667e6479e642",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "ccee4c14d7b3",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "df590ccbdddd",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "38eebb9a0641",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "190e7ce97ca2",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "5f8b73d55a92",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ]
+ ]
+}

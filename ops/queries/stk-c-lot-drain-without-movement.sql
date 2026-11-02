@@ -68,6 +68,7 @@
 -- their movement row is missing.
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:refused-on-free
 WITH receipt_fields AS (
   SELECT
     r.id AS receipt_id,

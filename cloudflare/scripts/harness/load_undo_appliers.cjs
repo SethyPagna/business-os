@@ -101,6 +101,8 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
       productRemovePlanDigest: async () => '',
       productRemoveReplayStatements: () => [],
     },
+    // 6.0.992: the return money-format conversion applier; its replay is driven by test-return-legacy-convert-native.cjs.
+    './returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', replayLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') } },
     ...extraStubs,
   }
   const loaded = new Map()

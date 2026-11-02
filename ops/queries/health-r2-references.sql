@@ -10,6 +10,7 @@
 -- Counts and timestamps only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 30093
 SELECT
   (SELECT COUNT(*) FROM products WHERE instr(lower(image_path), 'uploads') > 0) AS products_image_rows,
   (SELECT COUNT(*) FROM products WHERE is_active = 1 AND instr(lower(image_path), 'uploads') > 0) AS products_image_rows_active,

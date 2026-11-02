@@ -199,14 +199,16 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   if (options.customerRanking && !access.canViewCustomerDetails) denied('customerRanking')
   const saleWhere = [recognizedExpr('s.'), ...plan.saleClauses, plan.branchId ? 'si.branch_id=@branchId' : ''].filter(Boolean).join(' AND ')
   const identity = identifiedCustomerExpr('s.')
-  const rankCtes = (withStock: boolean) => `${plan.ctes(withStock)}, ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped: !!plan.branchId, saleClauses: plan.saleClauses })}),
+  const financialCtes = `ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped: !!plan.branchId, saleClauses: plan.saleClauses })}),
     buyers AS (SELECT DISTINCT si.product_id,${identity} AS customer_id,s.id AS sale_id
       FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN requested_ids wanted ON wanted.product_id=si.product_id
-      WHERE ${saleWhere} AND ${identity} IS NOT NULL),
+      WHERE ${saleWhere} AND ${identity} IS NOT NULL)`
+  const customerCountsSql = 'SELECT product_id,COUNT(DISTINCT customer_id) AS customer_count FROM buyers GROUP BY product_id'
+  const rankCtes = (withStock: boolean) => `${plan.ctes(withStock)}, ${financialCtes},
     product_metrics AS (SELECT c.*,COALESCE(l.qty_sold,0) AS qty_sold,
       COALESCE(bc.customer_count,0) AS customer_count
       FROM cohort c LEFT JOIN ledger l ON l.product_id=c.id
-      LEFT JOIN (SELECT product_id,COUNT(DISTINCT customer_id) AS customer_count FROM buyers GROUP BY product_id) bc ON bc.product_id=c.id),
+      LEFT JOIN (${customerCountsSql}) bc ON bc.product_id=c.id),
     family_buyers AS (SELECT c.family_key,COUNT(DISTINCT buyer.customer_id) AS customer_count FROM cohort c
       LEFT JOIN buyers buyer ON buyer.product_id=c.id GROUP BY c.family_key),
     family_metrics AS (SELECT c.family_key,MIN(COALESCE(c.parent_name,c.name)) AS name,SUM(c.qty_sold) AS qty_sold,MAX(fb.customer_count) AS customer_count,
@@ -247,6 +249,9 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
   const familyOrder = (name: string, number: string) => numeric ? `(${number} IS NULL) ASC,${number} ${direction},${name} ASC` : `${name} ${direction}`
   // Ranking by name, price, cost, date or sales needs no stock: rank stock-free, then read stock for the page rows only.
   const rankWithStock = plan.stockFiltered || sort === 'stock'
+  const namePage = sort === 'name' && !plan.stockFiltered
+  const namePageCtes = () => `${plan.ctes(false)}, product_metrics AS (SELECT * FROM cohort),
+    family_metrics AS (SELECT DISTINCT family_key FROM cohort)`
   const pageStock = access.fields.stock && !rankWithStock ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
   // A dated lot with stock shows stock exists, so the expiry follows the stock field as well as the received field.
   const showNextExpiry = access.fields.received && access.fields.stock
@@ -256,9 +261,11 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
       const pageSql = `${statements[1].sql}\nLIMIT 501`
       // Same snapshot, same order: a page family is complete on its page, so its window aggregates equal the ranking's
       // family aggregates, and family_root_id then id are the helper's own terminal keys.
-      const wrappedPageSql = (pageStock || showNextExpiry) && `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : ''}
-        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}
-        FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}
+      const wrappedPageSql = (pageStock || showNextExpiry || namePage) && `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : ''}${namePage ? `,
+        requested_ids(product_id) AS (SELECT DISTINCT id FROM __page), ${financialCtes}` : ''}
+        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${namePage ? ',COALESCE(l.qty_sold,0) AS qty_sold,COALESCE(bc.customer_count,0) AS customer_count' : ''}
+        FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${namePage ? ` LEFT JOIN ledger l ON l.product_id=__page.id
+        LEFT JOIN (${customerCountsSql}) bc ON bc.product_id=__page.id` : ''}
         WINDOW family AS (PARTITION BY __page.__family_root_id)
         ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
       const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql || pageSql },
@@ -269,7 +276,7 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
       }
       return result.slice(0, 2)
     } } as D1Compat,
-    rankCteSql: rankCtes(rankWithStock), selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
+    rankCteSql: namePage ? namePageCtes() : rankCtes(rankWithStock), selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
     params: plan.params, page: plan.page, pageSize: plan.pageSize,
     familyOrderSql: familyOrder('family_name', 'family_num_sort'),
     familyNumericSortSql: numeric ? `f.${numeric}` : undefined, intraFamilyOrderSql: 'id ASC',

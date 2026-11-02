@@ -174,7 +174,7 @@ test('branch Undo record and operate use the current granular edit grant', () =>
   const tier = evaluate(functionSource(undoTree, 'applierPermissionTier'), { ...permissions, applierAlsoActionDenied: alsoDenied }, 'applierPermissionTier')
   const route = sourceTree('routes/actionHistory.ts')
   const deps = { ...permissions, resolveUndoApplier: () => applier, applierPermissionTier: tier, applierAlsoActionDenied: alsoDenied, PRODUCT_SUPPLIER_REFUSAL: { code: 'product_supplier_edit_required' },
-    TRANSFER_OPERATION_KIND: 'transfer', STOCK_SESSION_KIND: 'stock', CUSTOMER_GENDER_RESTORATION_KIND: 'gender',
+    TRANSFER_OPERATION_KIND: 'transfer', STOCK_SESSION_KIND: 'stock', CUSTOMER_GENDER_RESTORATION_KIND: 'gender', RETURN_LEGACY_CONVERT_KIND: 'return-legacy-convert',
     hasAcquisitionCostInput: () => false, historyPayloadObject: value => value, isServerManagedPayload: () => false }
   const canRecord = evaluate(`${functionSource(route, 'canUseNamedAppliers')}\n${functionSource(route, 'canRecordHistory')}`, deps, 'canRecordHistory')
   let gate

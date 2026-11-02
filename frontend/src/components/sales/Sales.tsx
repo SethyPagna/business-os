@@ -408,6 +408,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // same one routes/returns.ts enforces on POST /api/returns.
   const canAddReturn = can('returns', 'add')
   const { syncChannel } = useSync()
+  // The event already present when Sales mounts is covered by the first load.
+  const handledSyncRef = useRef(syncChannel?.channel ? `${syncChannel.channel}:${String(syncChannel.ts ?? '')}` : '')
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
   const salesRef = useRef<SaleRecord[]>([])
@@ -613,6 +615,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const salesSortDirection: SortDirection = salesSortSpec.field === 'date' ? salesSortSpec.direction : 'desc'
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
+  // The query the newest loadSales call asked for (filters, sort, page). A load whose query is no longer this publishes nothing.
+  const latestQueryKeyRef = useRef('')
+  const loadKeyRef = useRef('')
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   const selectAllRef = useRef<HTMLInputElement>(null)
@@ -737,6 +742,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const loadSales = useCallback(async (silent = false): Promise<void> => {
     const requestSecurity = statusSecurityScope
     if (requestSecurity !== statusSecurityRef.current) return
+    // A closure an async handler kept from before a filter change reads with the newest filters, never its own old ones.
+    const newestLoad = latestLoadRef.current
+    if (newestLoad && newestLoad !== loadSales) return newestLoad(silent)
     if (loadSecurityRef.current !== requestSecurity) {
       // Detach the prior authority's read before coalescing. Its finally must
       // not consume this scope's queue or clear its watchdog.
@@ -749,16 +757,42 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       clearLoadWatchdog()
     }
     if (!authReady || !canViewSales) { setLoading(false); return }
+    const params = {
+      ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
+      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+      ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      ...salesDateRange,
+      page: salesPage,
+      limit: salesPageSize,
+      sortBy: salesSortSpec.field,
+      sortDir: salesSortSpec.direction,
+    }
+    // The query generation: viewer authority, every filter, the sort and the page.
+    const queryKey = JSON.stringify([requestSecurity, params])
+    latestQueryKeyRef.current = queryKey
+    // A different query supersedes the read in flight: stop its request now. It publishes nothing; the queued load reads this query.
     if (loadPromiseRef.current) {
+      if (loadKeyRef.current !== queryKey) loadAbortRef.current?.abort()
       const pending = pendingLoadRef.current || { silent: true }
       pending.silent = pending.silent && silent
       pendingLoadRef.current = pending
       return loadPromiseRef.current
     }
+    loadKeyRef.current = queryKey
     const requestId = beginTrackedRequest(loadRequestRef)
     const controller = new AbortController()
     loadAbortRef.current = controller
     let completedSuccessfully = false
+    let superseded = false
+    const isLatestQuery = () => latestQueryKeyRef.current === queryKey
+    const isOwnRequest = () => aliveRef.current && requestSecurity === statusSecurityRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)
+    const isCurrent = () => isOwnRequest() && isLatestQuery()
+    // The rows, and the ref the row-patch handlers read, change in the same step.
+    const publishRows = (rows: SaleRecord[]) => {
+      salesRef.current = rows
+      setSales(rows)
+      loadedOnceRef.current = true
+    }
     const promise = (async () => {
       if (!silent && aliveRef.current) {
         setLoading(true)
@@ -772,31 +806,25 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
       }
       try {
-        const params = {
-          ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
-          ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-          ...(debouncedSearch ? { search: debouncedSearch } : {}),
-          ...salesDateRange,
-          page: salesPage,
-          limit: salesPageSize,
-          sortBy: salesSortSpec.field,
-          sortDir: salesSortSpec.direction,
-        }
         const result = await withLoaderTimeout(
           () => fetchSales(params, { signal: controller.signal }),
           'Sales',
           SALES_LIST_REQUEST_TIMEOUT_MS,
         )
-        if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (!isCurrent()) { superseded = isOwnRequest(); return }
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
-          setSales(rows)
-          loadedOnceRef.current = true
+          // The page read replaces the page shown, never merges into it: a refresh equals a fresh load of this page, so a
+          // sale that left the filter goes and the order is the server's for the active sort.
+          publishRows(rows)
           setLoadError(null)
           completedSuccessfully = true
         }
       } catch (error) {
-        if (!aliveRef.current || requestSecurity !== statusSecurityRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        // This read was aborted because a newer query superseded it. That holds even when the user has since come back to
+        // this same query (A -> B -> A): the abort is a hand-over, never a failure, and the queued load reads the query now.
+        if (controller.signal.aborted) { superseded = isOwnRequest(); return }
+        if (!isCurrent()) { superseded = isOwnRequest() && !isLatestQuery(); return }
         console.error('[Sales] load failed:', getErrorMessage(error, 'Unknown sales load error'))
         if (!silent && !loadedOnceRef.current) {
           setLoadError(getErrorMessage(error, translateOr('sales_load_failed', 'Failed to load sales')))
@@ -812,7 +840,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           loadAbortRef.current = null
           clearLoadWatchdog()
         }
-        if (!silent && aliveRef.current && requestSecurity === statusSecurityRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
+        // A superseded read leaves the spinner to the load that replaces it.
+        if (!silent && !superseded && aliveRef.current && requestSecurity === statusSecurityRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
           setLoading(false)
         }
       }
@@ -820,7 +849,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current !== wrappedPromise) return
       loadPromiseRef.current = null
-      const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully)
+      // A superseded read always hands over to the query that replaced it, and a foreground read hands its spinner over too.
+      const pending = resolvePendingSalesLoad(pendingLoadRef.current, completedSuccessfully || superseded)
+      if (pending && superseded && !silent) pending.silent = false
       // Always consume a queued automatic load. On failure, the visible Retry
       // action starts one deliberate request with the latest filters instead.
       pendingLoadRef.current = null
@@ -994,6 +1025,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [isActive, loading])
 
   useEffect(() => {
+    // React to each sync event once. This effect also re-runs whenever loadSales changes (every filter, date, sort or
+    // page change); without this guard each of those re-sent the LAST event as a second, silent read right behind the
+    // foreground one. An event that lands while Sales is hidden is covered by the read that runs when it is shown again.
+    const syncKey = syncChannel?.channel ? `${syncChannel.channel}:${String(syncChannel.ts ?? '')}` : ''
+    if (!syncKey || handledSyncRef.current === syncKey) return
+    handledSyncRef.current = syncKey
     if (!isActive || !syncChannel?.channel) return
     // Sales rows/reports expose current linked customer, courier, cashier and
     // product metadata in addition to immutable receipt snapshots. Those

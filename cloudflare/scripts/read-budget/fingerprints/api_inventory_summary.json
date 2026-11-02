@@ -1,0 +1,12 @@
+{
+ "inventory-summary": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d45dc9025b8f",
+   "SELECT p.*, p.stock_quantity AS display_quantity, CASE WHEN CASE WHEN p.purchase_price_usd > 0 THEN p.purchase"
+  ]
+ ]
+}

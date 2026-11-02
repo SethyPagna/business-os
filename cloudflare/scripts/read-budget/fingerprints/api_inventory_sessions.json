@@ -1,0 +1,340 @@
+{
+ "w-stock-session-1-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c627e2d668fd",
+   "SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ],
+  [
+   "4737d2a2a1e3",
+   "SELECT t.value table_name,p.name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid"
+  ],
+  [
+   "2b6a8953fd15",
+   "SELECT 'products' kind,json_set(json_set(json_set(json_set(json('{}'),'$.id',t.\"id\",'$.name',t.\"name\",'$.sku',"
+  ],
+  [
+   "9b7bee5823c7",
+   "SELECT * FROM branch_stock WHERE product_id IN (?1) AND branch_id IN (?2)"
+  ],
+  [
+   "7b41416905d7",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "c12a59f1b505",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.is_a"
+  ],
+  [
+   "4e371703eeb9",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN (NOT EXISTS(SELECT 1 FROM system_flags WHERE"
+  ],
+  [
+   "f0767439366e",
+   "B| INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json) VALUES(?1,?2,?3,'stock_in',?"
+  ],
+  [
+   "a413123e3cde",
+   "B| INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(?1,?2,?3,?4)"
+  ],
+  [
+   "d679ff37a2e7",
+   "B| UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=?1"
+  ],
+  [
+   "db363a3748c9",
+   "B| INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created"
+  ],
+  [
+   "bf260820a3a1",
+   "B| UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=?1"
+  ],
+  [
+   "ffdb31162eab",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM products WHERE id=?1 AND is_active IS 1) THEN json_extract('[]','"
+  ],
+  [
+   "c946d1f627f8",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN COALESCE((SELECT baseline_batch_id FROM prod"
+  ],
+  [
+   "92d2d92910f7",
+   "B| INSERT INTO product_batches ( variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active,"
+  ],
+  [
+   "23d36104c525",
+   "B| INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES ((SELECT id FROM product_batches WHER"
+  ],
+  [
+   "4b69caa5ee28",
+   "B| INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?1, ?2, ?3) ON CONFLICT(product_id, bran"
+  ],
+  [
+   "26f92e981649",
+   "B| UPDATE products SET stock_quantity = COALESCE(stock_quantity, 0) + ?1, updated_at = CURRENT_TIMESTAMP WHERE"
+  ],
+  [
+   "ccd2f777a89f",
+   "B| INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,br"
+  ],
+  [
+   "a2d96f41ddba",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_c"
+  ],
+  [
+   "366152a7f9f2",
+   "B| UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=?1 AND line_id=?2"
+  ],
+  [
+   "7cc079180405",
+   "B| UPDATE products SET cost_price_usd = COALESCE(COALESCE( (SELECT CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * "
+  ],
+  [
+   "1d6b65d148d0",
+   "B| UPDATE stock_session_operations SET receipt_json=json_object( 'success',json('true'),'operationId',id,'clie"
+  ],
+  [
+   "fdc4bdcc8ffa",
+   "B| INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) SE"
+  ],
+  [
+   "6b769da1914a",
+   "B| DELETE FROM stock_session_guards"
+  ],
+  [
+   "8c80615e3189",
+   "B| UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.after',json((WITH m AS (SELECT * FROM stock"
+  ],
+  [
+   "11c0acd304a3",
+   "B| UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.expected',json_extract(payload_json,'$.afte"
+  ],
+  [
+   "7704dc30b1c8",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN (EXISTS(SELECT 1 FROM undo_snapshots WHERE i"
+  ],
+  [
+   "6b769da1914a",
+   "B| DELETE FROM stock_session_guards"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "a06c360fa4fd",
+   "SELECT receipt_json FROM stock_session_operations WHERE id=?1"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
+ ],
+ "w-stock-session-5-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c627e2d668fd",
+   "SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ],
+  [
+   "4737d2a2a1e3",
+   "SELECT t.value table_name,p.name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid"
+  ],
+  [
+   "2b6a8953fd15",
+   "SELECT 'products' kind,json_set(json_set(json_set(json_set(json('{}'),'$.id',t.\"id\",'$.name',t.\"name\",'$.sku',"
+  ],
+  [
+   "2eadf25d6b79",
+   "SELECT * FROM branch_stock WHERE product_id IN (?1, ?2, ?3, ?4, ?5) AND branch_id IN (?6)"
+  ],
+  [
+   "da7a1b56379b",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ]
+ ],
+ "w-stock-session-20-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c627e2d668fd",
+   "SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ],
+  [
+   "4737d2a2a1e3",
+   "SELECT t.value table_name,p.name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid"
+  ],
+  [
+   "2b6a8953fd15",
+   "SELECT 'products' kind,json_set(json_set(json_set(json_set(json('{}'),'$.id',t.\"id\",'$.name',t.\"name\",'$.sku',"
+  ],
+  [
+   "889b178cb0a2",
+   "SELECT * FROM branch_stock WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?"
+  ],
+  [
+   "078252174163",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "da7a1b56379b",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ]
+ ],
+ "w-stock-session-25-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "c627e2d668fd",
+   "SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ],
+  [
+   "4737d2a2a1e3",
+   "SELECT t.value table_name,p.name FROM json_each(?1) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid"
+  ],
+  [
+   "2b6a8953fd15",
+   "SELECT 'products' kind,json_set(json_set(json_set(json_set(json('{}'),'$.id',t.\"id\",'$.name',t.\"name\",'$.sku',"
+  ],
+  [
+   "0b1e956a6bda",
+   "SELECT * FROM branch_stock WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?"
+  ],
+  [
+   "078252174163",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "4506e020c853",
+   "SELECT entity_type,entity_key,revision FROM stock_session_revisions WHERE (entity_type=? AND entity_key=?) OR "
+  ],
+  [
+   "f2e8e4243dbd",
+   "WITH targets AS ( SELECT json_extract(value,'$.product') product, json_extract(value,'$.branch') branch, json_"
+  ]
+ ],
+ "w-stock-session-60-lines": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ]
+ ]
+}

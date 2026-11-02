@@ -224,12 +224,19 @@ app.post('/', async (c) => {
         throw error
       }
       let restore: Awaited<ReturnType<typeof restoreCloudflareBackup>>
+      // restoreCloudflareBackup reports progress only from the deletion phase on, after every refusal it can make has been
+      // checked, so "no progress reported" means no row was touched.
+      let destructiveStarted = false
       try {
         restore = await restoreCloudflareBackup(c.env, sourceDir, async (progress) => {
+          destructiveStarted = true
           await updateMaintenance(c.env, maintenance.token, progress)
         }, maintenance.token)
       } catch (error) {
-        // Leave maintenance SET -- the database is half-restored and must
+        // A restore refused before it deleted anything changed nothing, so it must not leave the app write-blocked:
+        // release the hold it took and report the refusal. If the release itself fails, the hold stays and says why.
+        if (!destructiveStarted && await endMaintenance(c.env, maintenance.token)) throw error
+        // Otherwise leave maintenance SET -- the database is half-restored and must
         // not quietly serve writes. Record where it died; the admin either
         // restarts the restore (safe: full delete+reinsert) or force-clears.
         const message = error instanceof Error ? error.message : 'Restore failed'

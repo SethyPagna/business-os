@@ -15,6 +15,7 @@
 --   later_branch_edits           PUT edits of the branch after the replay
 -- ops:min-rows 0
 -- ops:max-rows 2000
+-- ops:max-rows-read 9
 WITH replays AS (
   SELECT a.id AS replay_audit_id, COALESCE(strftime('%Y-%m-%d %H:%M:%S', a.created_at), a.created_at) AS replay_at,
     CASE WHEN a.action = 'action_undo' THEN 'undo' ELSE 'redo' END AS direction,

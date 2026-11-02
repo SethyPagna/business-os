@@ -1,0 +1,24 @@
+{
+ "customers-link-conflicts": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8f48a69de90e",
+   "SELECT g.*, (SELECT COUNT(*) FROM customers c2 WHERE ltrim(replace(replace(replace(replace(trim(COALESCE(c2.ph"
+  ],
+  [
+   "436eeea31cb9",
+   "SELECT g.*, (SELECT COUNT(*) FROM customers c2 WHERE g.phone_key <> '' AND ltrim(replace(replace(replace(repla"
+  ],
+  [
+   "24de257c7d52",
+   "SELECT COUNT(*) AS total FROM ( SELECT s.customer_id, ltrim(replace(replace(replace(replace(trim(COALESCE(s.cu"
+  ],
+  [
+   "52d39f278023",
+   "SELECT COUNT(*) AS total FROM ( SELECT lower(trim(COALESCE(s.customer_name,''))) AS name_key, ltrim(replace(re"
+  ]
+ ]
+}

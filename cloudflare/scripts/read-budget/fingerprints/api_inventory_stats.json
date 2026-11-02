@@ -1,0 +1,20 @@
+{
+ "inventory-stats": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "91403a0dd406",
+   "WITH matched AS ( SELECT COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent."
+  ],
+  [
+   "6d22c2052e61",
+   "SELECT COALESCE(SUM(COALESCE(fin.qty_sold, 0)), 0) AS net_sold_qty, COALESCE(SUM(COALESCE(fin.store_discount_u"
+  ]
+ ]
+}

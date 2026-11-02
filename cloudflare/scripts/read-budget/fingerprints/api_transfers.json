@@ -1,0 +1,16 @@
+{
+ "transfers": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e4b569f43519",
+   "SELECT COUNT(*) AS count FROM stock_transfers st WHERE 1=1 AND NOT EXISTS (SELECT 1 FROM transfer_operation_re"
+  ],
+  [
+   "5addc05daca6",
+   "SELECT st.*, st.notes AS note, CASE WHEN trim(COALESCE(st.from_branch_name,''),char(9,10,11,12,13,32,160,5760,"
+  ]
+ ]
+}

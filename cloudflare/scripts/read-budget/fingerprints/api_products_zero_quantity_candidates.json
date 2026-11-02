@@ -1,0 +1,16 @@
+{
+ "products-zero-quantity-candidates": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "7b3117d1d576",
+   "SELECT value FROM settings WHERE key = 'product_zero_qty_delete_threshold_days'"
+  ],
+  [
+   "753da9d13c89",
+   "SELECT p.id, p.name, p.barcode, p.sku, p.created_at, p.stock_quantity AS cachedQuantity, COALESCE(SUM(bs.quant"
+  ]
+ ]
+}

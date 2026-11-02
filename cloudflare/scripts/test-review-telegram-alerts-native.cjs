@@ -593,7 +593,7 @@ async function main() {
     t.ok('found the appliers', appliers.length >= 8, appliers)
     for (const applier of appliers) t.ok('applier ' + applier + ' has a request phrase or is never approvable', lib.REVIEW_ALERT_REQUEST_KEYS.includes(applier) || NEVER_APPROVABLE.includes(applier), applier)
     for (const mapped of lib.REVIEW_ALERT_REQUEST_KEYS) t.ok('phrase key ' + mapped + ' is a real applier', appliers.includes(mapped), mapped)
-    t.eq('six request phrases', lib.REVIEW_ALERT_REQUEST_KEYS.length, 6)
+    t.eq('seven request phrases', lib.REVIEW_ALERT_REQUEST_KEYS.length, 7)
   })
 
   // ---- the Worker --------------------------------------------------------------------------

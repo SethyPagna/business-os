@@ -15,6 +15,7 @@
 -- in several of them is read several times.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 48637
 SELECT
   (SELECT COUNT(*) FROM action_history) AS action_history_rows,
   (SELECT COALESCE(SUM(length(CAST(undo_payload AS BLOB)) + length(CAST(redo_payload AS BLOB))), 0) FROM action_history) AS action_history_payload_bytes,

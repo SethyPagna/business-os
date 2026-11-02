@@ -1,0 +1,16 @@
+{
+ "delivery-contacts-duplicates": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "0e36d5aefb1e",
+   "SELECT id, name, phone, address, updated_at FROM delivery_contacts ORDER BY id ASC"
+  ],
+  [
+   "b56d705f0b06",
+   "SELECT cluster_type, cluster_value FROM contact_duplicate_dismissals WHERE contact_table = ?1"
+  ]
+ ]
+}

@@ -80,6 +80,7 @@ async function checkEnvelopeRoutes(api) {
     '../lib/customerGenderRestoration': { CUSTOMER_GENDER_RESTORATION_KIND: 'customer.gender_restore' },
     '../lib/saleBulkStatus': { BULK_STATUS_KIND: 'sale.status.bulk' }, '../lib/saleBulkUpdate': { SALE_BULK_UPDATE_KINDS: new Set() },
     '../lib/saleCustomerAssignmentGuard': {}, '../lib/returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk' },
+    '../lib/returnLegacyConvert': { RETURN_LEGACY_CONVERT_KIND: 'return.legacy_convert', canConvertLegacyReturns: () => false, notifyLegacyReturnConversion: async () => {}, planLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, applyLegacyReturnConversion: async () => { throw new Error('covered by test-return-legacy-convert-native.cjs') }, ReturnLegacyConvertError: class ReturnLegacyConvertError extends Error {} },
     '../lib/telegram': {}, '../lib/saleSettlementAction': { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement' },
     '../lib/stockSession': { STOCK_SESSION_KIND: 'stock.session' }, '../lib/transferOperation': { TRANSFER_OPERATION_KIND: 'stock.transfer' },
     '../lib/stockLotAdjustment': { STOCK_LOT_SET_KIND: 'stock.quantity_set' }, '../lib/stockInLineEdit': { STOCK_IN_LINE_EDIT_KIND: 'stock.session_line_edit' },

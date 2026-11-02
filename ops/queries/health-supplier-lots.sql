@@ -12,6 +12,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
+-- ops:max-rows-read 168773
 WITH rc AS MATERIALIZED (
   SELECT batch_id, SUM(COALESCE(total_cost_usd, 0)) AS cost, SUM(ABS(COALESCE(quantity, 0))) AS qty
   FROM inventory_movements
