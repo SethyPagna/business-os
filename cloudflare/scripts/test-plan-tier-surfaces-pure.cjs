@@ -164,6 +164,10 @@ function loadRuntimeRoute(products, extra = {}) {
     '../lib/buildStamp': { getBuildStamp: () => ({ revision: 'test', sourceHash: 'test', builtAt: extra.builtAt || '2026-09-14T00:00:00Z' }) },
     '../lib/cronRotation': load('lib/cronRotation.ts'),
     '../lib/cronStepIds': load('lib/cronStepIds.ts'),
+    // 6.0.1041: the read-switch routes added three imports. The plan-tier routes under test never reach them; the switch module is the real one.
+    '../lib/audit': { buildAuditStatement: () => ({ sql: 'SELECT 1', params: {} }), changedFields: () => null },
+    '../lib/maintenance': { getMaintenance: async () => null },
+    '../lib/readSwitches': load('lib/readSwitches.ts', { './db': { getDb: () => db }, './analytics': { recordAnalytics: () => {} } }),
     '../index': {},
   })
   const app = new Hono()
