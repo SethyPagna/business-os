@@ -5586,6 +5586,7 @@
   "read_switch_confirm_note": "Other devices follow within {n} seconds.",
   "read_switch_confirm_off": "Turn off {name}?",
   "read_switch_confirm_on": "Turn on {name}?",
+  "read_switch_epoch_label": "Switch version",
   "read_switch_failed": "Could not change the switch.",
   "read_switch_load_failed": "Could not load the switches.",
   "read_switch_maintenance": "Only Off is allowed while writes are held.",

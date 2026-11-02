@@ -64,6 +64,8 @@ export const AUDIT_ACTION_LABELS: Record<string, [string, string]> = {
   step_up_refused: ['step_up_refused', 'Protected action refused'],
   // 6.0.992: a locked return's money details were updated (never "format" on screen, owner 27 Oct 2026).
   return_money_convert: ['return_convert_title', 'Update money details'],
+  // 6.0.1041: a read-switch flip (PUT /api/runtime/read-switches) writes this action under the 'read_switch' entity.
+  read_switch_set: ['read_switch_changed', 'Switch updated'],
 }
 
 /**
@@ -107,6 +109,7 @@ export const AUDIT_ENTITY_LABELS: Record<string, [string, string]> = {
   inventory: ['inventory', 'Inventory'],
   inventory_reason: ['reason', 'Reason'],
   backup: ['backup', 'Backup'],
+  read_switch: ['read_switches_title', 'Read switches'],
   note: ['note', 'Note'],
   file: ['files', 'Library'],
   audit_log: ['audit_log', 'Audit Log'],
