@@ -6,7 +6,7 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 2 Nov 2026 (Cambodia, UTC+7)
+## Status snapshot — 2 Nov 2026, 19:45 (Cambodia, UTC+7)
 
 - **Live:** `05ef61b73` = 6.0.1035, which makes Inventory Check name pages read sales only for the page rows (−55% rows). Deployed 1 Nov 15:24Z (run 41309455223), tier paid, no migration, health pack clean. The previous release was 6.0.1033 `165f9f000` (Codex, 30 Oct). Production migrations run through 0273.
 - **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
@@ -19,28 +19,41 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
   - the governor enforcing, and every optimization behind a read switch.
 
   Production read about 34–39M rows per day before 1035.
-- **Next:** RC `rc/20261102a` (`cbff55c8e`) = 6.0.1040 leak stop + `/api` no-store + 6.0.1039 CI read-budget gate. Its exact gate and Opus review are running, for the 07:00 2 Nov slot.
+- **Ready to deploy tonight (after 20:00, open_today = 0):** RC `rc/20261102b` `736929e91` = 6.0.1039 CI read-budget gate + 6.0.1040 leak stop (`/api` is `private, no-store` + `Vary: Cookie`, logout clears the HTTP cache, bootstrap settings follow Settings visibility). Exact gate run 41420972939 green (cloudflare 1102/1102, frontend 986/986), Opus release review GO, gitleaks clean. The 2 Nov 07:00 slot was skipped because the first RC's gate went red on two test harnesses (fixed in `24918e6b2`; production code was right).
+- **Next RC (07:00 3 Nov at the earliest):** P0.6 (review GO) plus whichever of P0.3/P0.4, P2.8 and the UX lanes clear review and the exact gate.
+- **Urgent finding (P1.1, 2 Nov):** a sale above about 58 lines saves, then its read-back fails (D1 `SQLITE_TOOBIG`: every line's stored pricing snapshot copies the whole basket), and cancelling a sale above about 58 lines is refused by the 500-statement bound. Both are plan-independent and present since 13 Sep. Read-only sizing query `d1-large-sale-snapshots` (6.0.1055) is running in production; the fix becomes its own lane.
 
 ### Free-plan programme board
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on the owner. The slice ids are the private plan's (MASTER-PLAN, 1 Nov).
 
 - [x] 6.0.1035 Inventory Check name-page reads (live)
-- [x] 6.0.1036–1038 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
-- [~] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config)
-- [~] P0.2 6.0.1040 leak stop: bootstrap settings follow Settings visibility; `/api` is `private, no-store`; logout clears the HTTP cache
-- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling
+- [x] 6.0.1036–1038, 1055 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
+- [~] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config): in RC 20261102b, deploys tonight
+- [~] P0.2 6.0.1040 leak stop: in RC 20261102b, deploys tonight
+- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling: committed (`6a8cbbb54`, `94e5d010a`), Opus review running
 - [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
-- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), cheap release-kit counts, storage alarm at 400 MB
-- [~] P1.6a 6.0.1044 Inventory Check simplified to the owner's design (Products-style list + check status as a note, no sales stats) · P1.7 6.0.1045 Fix stock (count minus damaged → Set session)
-- [ ] P1.1 call counting · P1.2 1008 operations · P1.3 sole-branch read · P1.4–P1.5 report calls · P1.8 bell + 5-minute overview with its time beside the date
+- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: Opus re-review GO (`ab6d239cc`); joins the next RC
+- [~] P0.7 6.0.1048 cache lifecycle: one cache-key builder (deployment + data epoch + grants), `X-BOS-Build`/`X-BOS-Epoch`, the Restart bar as the only update path, versioned local records: building
+- [~] P1.1 6.0.1049 call counting: building (found the large-sale failures above)
+- [~] P1.4 6.0.1050 report chain in one call: committed (`4b99640ec`), sweep and review next. Deadline 11 Nov, when the read-budget coverage test starts failing every deploy without P1.2 and P1.4
+- [~] P1.6a 6.0.1044 Inventory Check, the owner's 2 Nov design (check box before the image, direct counts, date and time, no refresh, Products-style rows on phones) · P1.7 6.0.1045 submitted counts wait for admin approval (new permissions): building
+- [ ] P1.2 1008 operations · P1.3 sole-branch read · P1.5 long reports · P1.8 bell + 5-minute overview with its time beside the date
 - [ ] P2.1 sale-money CPU (86 lines) · P2.2 merges · P2.3 paged integrity scan · P2.5 fast stock-in · P2.6 imports on Free
 - [!] P2.4 off-site backups: waits on the owner's backup token
-- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov)
+- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov): built, leak crawl over 5 accounts finds zero full numbers, full sweep running
 - [ ] P2.7 tills keep only the search index · P2.9 documents off public `/uploads` · P2.10 push hub closes on revoke · P2.11 isolation tests
 - [ ] P3 per-sale report facts + day rollups + sales search + 10 ms CPU rehearsal · P4 catalog SQL, customers, tracked ids, hidden-tab hold, client fixes
 - [ ] Switch gate: Free-config rehearsal from about 22 Nov + 7 measured days; switch on or before 30 Nov
 - [ ] After the switch: D1 version vector, ETag/304, live push, KV retirement, storage (the DB is 253.7 MB; the 500 MB Free cap lands between Mar and Dec 2027), design
+
+### Owner UX asks (2 Nov afternoon)
+
+- [~] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: committed (`201f56eb8`); one browser test still collides with the shift-history modal
+- [~] U2 6.0.1052 leangbeauty.com: About page with the full cover photo (`80a06bba3`) and 2–6 product columns with search joined to the tabs (`3d089b80a`) committed; colour chat buttons with Instagram DM and the announcement strip building
+- [~] E1 6.0.1053 Expenses: labels and types added and edited in their own section, sale-linked expenses such as delivery listed, no cost of goods, totals equal to the reports: building
+- [~] R1 6.0.1054 one shared option button without the extra arrow, and one shared preset/option scroll row on every page: built, test chain running
+- [!] Round 2 owner questions (database space, release rules on Free, which expiry date counts, sign-in after a rewind): asked 2 Nov
 
 ## Status snapshot — 27 Oct 2026 (superseded; kept for the lanes below)
 
