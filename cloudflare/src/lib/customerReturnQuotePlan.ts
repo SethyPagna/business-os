@@ -26,7 +26,10 @@ export type CustomerReturnQuoteAuthority = {
 export type CustomerReturnQuotePlan = {
   quote: CustomerReturnQuoteV1
   authority: CustomerReturnQuoteAuthority
+  /** The authority as the batch's guard parameter. Each sale line's pricing snapshot is NOT in it (a snapshot embeds the whole pool, so a
+   * large sale's snapshots total megabytes against D1's 2,000,000-byte cap); snapshot_rows carries them, to be proven in groups. */
   authority_json: string
+  snapshot_rows: Array<{ id: number; pricing_snapshot_json: string | null }>
   lineage: Awaited<ReturnType<typeof resolveProductMergeLineage>>
 }
 /** The rows a quote is computed from. */
@@ -152,11 +155,12 @@ export async function customerReturnQuotePlanFromRows(
   const authority: CustomerReturnQuoteAuthority = {
     sale, sale_items: saleLines, prior_returns: [...priorReturns.values()], prior_items: priorItems,
   }
-  const authorityJson = JSON.stringify(authority)
+  const authorityJson = JSON.stringify({ ...authority, sale_items: saleLines.map(({ pricing_snapshot_json: _snapshot, ...line }) => line) })
   if (new TextEncoder().encode(authorityJson).byteLength > CUSTOMER_RETURN_AUTHORITY_MAX_BYTES) {
     throw new SaleMoneyContractError('customer_return_authority_too_large')
   }
-  return { quote, authority, authority_json: authorityJson, lineage }
+  const snapshotRows = saleLines.map((line) => ({ id: Number(line.id), pricing_snapshot_json: line.pricing_snapshot_json == null ? null : String(line.pricing_snapshot_json) }))
+  return { quote, authority, authority_json: authorityJson, snapshot_rows: snapshotRows, lineage }
 }
 
 export async function customerReturnQuotePlanFromDb(
@@ -211,7 +215,7 @@ export function customerReturnAuthorityPredicate(param = '@customerReturnAuthori
         AND si.product_discount_label IS json_extract(j.value,'$.product_discount_label')
         AND si.manual_discount_usd IS json_extract(j.value,'$.manual_discount_usd') AND si.manual_discount_khr IS json_extract(j.value,'$.manual_discount_khr')
         AND si.manual_discount_type IS json_extract(j.value,'$.manual_discount_type') AND si.manual_discount_value IS json_extract(j.value,'$.manual_discount_value')
-        AND si.price_mode IS json_extract(j.value,'$.price_mode') AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))
+        AND si.price_mode IS json_extract(j.value,'$.price_mode')))
     AND (SELECT COUNT(*) FROM returns r WHERE r.sale_id=json_extract(${param},'$.sale.id')
       AND COALESCE(r.return_scope,'customer')='customer' AND COALESCE(r.status,'completed')<>'cancelled')
       =json_array_length(${param},'$.prior_returns')

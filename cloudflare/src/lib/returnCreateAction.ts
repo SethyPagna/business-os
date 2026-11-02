@@ -1,4 +1,5 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
+import { chunkRowsByJsonBytes } from './saleSnapshotPacking'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
 import { canonicalExchangeExpected, canonicalExchangePayment, ReturnExchangeError, type ExchangeLineIntent } from './returnExchangeIntent'
@@ -538,6 +539,26 @@ export function returnCreatePreconditionSql(input: {
     AND (@customerReturnAuthorityJson IS NULL OR ((${input.authorityPredicate})
       AND (${input.lineageCondition})))${input.effectGuardPredicate ? ` AND ${input.effectGuardPredicate}` : ''}
   `
+}
+
+/**
+ * The pricing snapshots of the sale lines a customer return was quoted from, proven unchanged in groups. They are left out of the
+ * authority parameter (customerReturnAuthorityPredicate) because a large sale's snapshots total megabytes and D1 refuses any value above
+ * 2,000,000 bytes. One guard row per operation and phase is allowed, so each group inserts its row and removes it again; the batch's own
+ * precondition follows. Same rows compared, same atomic batch.
+ */
+export function customerReturnSnapshotGuardStatements(
+  operationId: string,
+  saleId: number,
+  rows: ReadonlyArray<{ id: number; pricing_snapshot_json: string | null }>,
+): ReturnCreateStatement[] {
+  const predicate = `NOT EXISTS(SELECT 1 FROM json_each(@customerReturnSnapshots) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items si WHERE si.id=json_extract(j.value,'$.id') AND si.sale_id=@customerReturnSnapshotSale
+        AND si.pricing_snapshot_json IS json_extract(j.value,'$.pricing_snapshot_json')))`
+  return chunkRowsByJsonBytes(rows).flatMap((group) => [
+    returnCreateGuardStatement(operationId, 'precondition', predicate, { customerReturnSnapshots: JSON.stringify(group), customerReturnSnapshotSale: saleId }),
+    { sql: `DELETE FROM return_create_guards WHERE operation_id=@returnCreateOperationId AND phase='precondition'`, params: { returnCreateOperationId: operationId } },
+  ])
 }
 
 export function returnCreateGuardStatement(

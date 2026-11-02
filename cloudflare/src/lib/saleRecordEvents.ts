@@ -359,9 +359,16 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
   }
 }
 
-export function assertSaleRecordBatchBounds(statementCount: number, snapshot: unknown, eventsBytes: number): void {
+/** Statements one atomic Sales Records action may carry (the multi-sale bulk actions). The number is the app's own choice (commit 6a762977c), not a D1 limit. */
+export const SALE_RECORD_BATCH_MAX_STATEMENTS = 500
+/** A SINGLE sale's status change is one atomic batch: cancelling restores every line's lots, stock and movements (about 19 + 8 per line), so a
+ * 62-line sale needs about 515 and a 200-line sale (MAX_PRICING_LINES) about 1,620. Cloudflare counts a batch as ONE call and documents a
+ * 2,000-statement batch as a single Worker invocation (Records/Incidents/2026-11-01/FREE-LIMITS.md section 0); the batch stays atomic. */
+export const SALE_STATUS_BATCH_MAX_STATEMENTS = 2000
+
+export function assertSaleRecordBatchBounds(statementCount: number, snapshot: unknown, eventsBytes: number, maxStatements: number = SALE_RECORD_BATCH_MAX_STATEMENTS): void {
   const snapshotBytes = bytes(JSON.stringify(snapshot))
-  if (statementCount > 500 || eventsBytes > SALE_RECORD_EVENTS_JSON_BYTES || snapshotBytes + eventsBytes > SALE_RECORD_COMBINED_SNAPSHOT_BYTES) {
+  if (statementCount > maxStatements || eventsBytes > SALE_RECORD_EVENTS_JSON_BYTES || snapshotBytes + eventsBytes > SALE_RECORD_COMBINED_SNAPSHOT_BYTES) {
     fail('Selection is too large for one atomic action. Select fewer records.')
   }
 }

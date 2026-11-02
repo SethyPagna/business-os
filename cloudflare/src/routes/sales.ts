@@ -7,11 +7,12 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
-import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, classifyPricingSourceConflict, SALE_STOCK_CHANGED_CODE, SALE_STOCK_CHANGED_ERROR, serializeSaleItemPricing, validateCapturedSaleBasket, SaleDiscountRefusedError, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatements, pricingSourceGuard, classifyPricingSourceConflict, SALE_STOCK_CHANGED_CODE, SALE_STOCK_CHANGED_ERROR, serializeSaleItemPricing, validateCapturedSaleBasket, SaleDiscountRefusedError, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
+import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, packSnapshotField, packsOf } from '../lib/saleSnapshotPacking'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
@@ -54,7 +55,7 @@ import {
   saleSettlementStateStatements,
   type SaleSettlementSnapshot,
 } from '../lib/saleSettlementAction'
-import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
+import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SALE_STATUS_BATCH_MAX_STATEMENTS } from '../lib/saleRecordEvents'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
 import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
@@ -70,7 +71,7 @@ import {
   guardSaleLineAddition,
   planSaleLineAddition,
   captureSaleLineKhrSnapshot,
-  saleLineKhrSnapshotStatement,
+  saleLineKhrSnapshotStatements,
   resolveExplicitSaleLineBatches,
   saleMoneyUpdateStatement,
   saleStatusDeductsStock,
@@ -412,13 +413,45 @@ async function saleMoneySchemaReady(db: ReturnType<typeof getDb>): Promise<boole
     && items.has('pricing_snapshot_json')
 }
 
+const CANONICAL_SALE_ITEM_KEYS = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
+  'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
+  'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
+  'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json'] as const
+
+/** Every line, snapshot included, as ONE SQL value. Only a small basket fits D1's 2,000,000-byte cap (62 lines of a real sale do not);
+ * canonicalMutationResponseSql uses it only when the packed form below cannot be proven lossless. */
 function canonicalSaleItemsSql() {
-  const keys = ['id','sale_id','product_id','product_name','sku','quantity','unit','applied_price_usd','applied_price_khr',
-    'cost_price_usd','cost_price_khr','total_usd','total_khr','branch_id','price_mode','product_discount_type',
-    'product_discount_label','product_discount_usd','product_discount_khr','base_price_usd','base_price_khr',
-    'manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','batch_id','batch_label','batch_expiry_date','damaged_lot_id','returned_quantity','pricing_snapshot_json']
-  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')}))
+  return `(SELECT json_group_array(json_object(${CANONICAL_SALE_ITEM_KEYS.map(key => `'${key}',i.${key}`).join(',')}))
     FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+/** The stored form of a basket's lines. A snapshot embeds the whole pool, so the aggregate of all of them is O(n^2); here each line keeps
+ * its own part (line_key, amounts, receipt_allocation) and each pool and the allocation context are written ONCE (saleSnapshotPacking.ts
+ * expandStoredSaleResponse rebuilds the wire form byte for byte). Only used when packedItemsCondition proves that is lossless. */
+function packedSaleItemsSql() {
+  const keys = CANONICAL_SALE_ITEM_KEYS.filter(key => key !== 'pricing_snapshot_json')
+  return `(SELECT json_group_array(json_object(${keys.map(key => `'${key}',i.${key}`).join(',')},
+      'pricing_snapshot_packed',json_object('line_key',json_extract(i.pricing_snapshot_json,'$.line_key'),'pool_key',json_extract(i.pricing_snapshot_json,'$.pool.pool_key'),
+        'amounts',json_extract(i.pricing_snapshot_json,'$.amounts'),'receipt_allocation',json_extract(i.pricing_snapshot_json,'$.receipt_allocation'))))
+    FROM (SELECT * FROM sale_items WHERE sale_id=s.id ORDER BY id) i)`
+}
+
+function pricingPacksSql() {
+  return `json_object('allocation_context',json((SELECT json_extract(pricing_snapshot_json,'$.allocation_context') FROM sale_items WHERE sale_id=s.id ORDER BY id LIMIT 1)),
+    'pools',json((SELECT json_group_object(pool_key,json_object('pool',json(pool),'quantities',json(quantities)))
+      FROM (SELECT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS pool_key,json_extract(pricing_snapshot_json,'$.pool') AS pool,
+        json_extract(pricing_snapshot_json,'$.quantities') AS quantities FROM sale_items WHERE sale_id=s.id GROUP BY 1))))`
+}
+
+/** True only when every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names ONE pool and
+ * quantity map. Then the packed form loses nothing; otherwise the response keeps the full per-line text exactly as before. */
+function packedItemsCondition() {
+  return `NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
+        OR json_extract(pricing_snapshot_json,'$.pool.pool_key') IS NULL OR json_extract(pricing_snapshot_json,'$.allocation_context') IS NULL))
+    AND (SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.allocation_context')) FROM sale_items WHERE sale_id=s.id)=1
+    AND (SELECT COUNT(*) FROM (SELECT DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS k,json_extract(pricing_snapshot_json,'$.pool') AS p,
+        json_extract(pricing_snapshot_json,'$.quantities') AS q FROM sale_items WHERE sale_id=s.id))
+      =(SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key')) FROM sale_items WHERE sale_id=s.id)`
 }
 
 function canonicalSaleIdentityBindingsSql(){
@@ -437,25 +470,37 @@ function canonicalMutationResponseSql(responseSql: string): string {
     'total_usd','total_khr','amount_paid_usd','amount_paid_khr','change_usd','change_khr','change_is_actual',
     'change_exchange_rate','payment_method','payment_details','payment_currency','money_precision_version',
     'calculated_total_usd','rounding_adjustment_usd']
-  return `(SELECT json_set(${responseSql},'$.sale',json_object(${fields.map(key => `'${key}',s.${key}`).join(',')},
-    'items',json(${canonicalSaleItemsSql()}),'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})), '$.moneyPrecisionVersion',s.money_precision_version,
+  const header = fields.map(key => `'${key}',s.${key}`).join(',')
+  const bindings = `'pricing_identity_bindings',json(${canonicalSaleIdentityBindingsSql()})`
+  return `(SELECT json_set(${responseSql},'$.sale',json(CASE WHEN ${packedItemsCondition()}
+      THEN json_object(${header},'items',json(${packedSaleItemsSql()}),'pricing_packs',${pricingPacksSql()},${bindings})
+      ELSE json_object(${header},'items',json(${canonicalSaleItemsSql()}),${bindings}) END), '$.moneyPrecisionVersion',s.money_precision_version,
     '$.calculatedTotalUsd',s.calculated_total_usd,'$.roundingAdjustmentUsd',s.rounding_adjustment_usd)
     FROM sales s WHERE s.id=@saleId)`
+}
+
+/** A stored mutation response read back for a replay: the packed items are expanded to the wire form the client always received. */
+function storedMutationResponse(json: string): Record<string,unknown> {
+  return expandStoredSaleResponse(JSON.parse(json) as Record<string,unknown>)
 }
 
 async function committedMutationResponse(db: ReturnType<typeof getDb>, operationId: string) {
   const receipt = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?').get<{response_json:string}>([operationId])
   if (!receipt) throw new Error('Committed mutation receipt is unavailable; recover using the same request identity.')
-  return JSON.parse(receipt.response_json) as Record<string,unknown>
+  return storedMutationResponse(receipt.response_json)
 }
 
-/** A single SQL snapshot prevents a later edit mixing a header with older lines. */
+/** The header and every line from one point in time: ONE batch is one transaction, so a later edit cannot mix a header with older lines.
+ * The lines are rows (each far below D1's 2,000,000-byte value cap), never one aggregated SQL value: a 62-line sale's snapshots total
+ * 2.6 MB and an aggregate of them answered SQLITE_TOOBIG after the sale had already committed. */
 async function authoritativeSaleSnapshot(db: ReturnType<typeof getDb>, saleId: number): Promise<(Record<string,unknown> & { items: Record<string,unknown>[] }) | null> {
-  const row = await db.prepare(`SELECT s.*,${canonicalSaleItemsSql()} AS canonical_items
-    FROM sales s WHERE s.id=?`).get<Record<string,unknown>>([saleId])
-  if (!row) return null
-  const { canonical_items, ...sale } = row
-  const snapshot={ ...sale, items: JSON.parse(String(canonical_items || '[]')) }
+  const [saleResult, lineResult] = await db.batch([
+    { sql: 'SELECT s.* FROM sales s WHERE s.id=?', params: [saleId] },
+    { sql: `SELECT ${CANONICAL_SALE_ITEM_KEYS.map(key => `i.${key}`).join(',')} FROM sale_items i WHERE i.sale_id=? ORDER BY i.id`, params: [saleId] },
+  ])
+  const sale = (saleResult.results as Record<string,unknown>[] | undefined)?.[0]
+  if (!sale) return null
+  const snapshot={ ...sale, items: (lineResult.results ?? []) as Record<string,unknown>[] }
   if(Number(sale.money_precision_version)===1){
     const lineage=await resolveProductMergeLineage(db,saleId,snapshot.items)
     validateCapturedSaleBasket(snapshot.items,sale,lineage.bindings)
@@ -2158,7 +2203,7 @@ app.post('/:id/line-receipt/:kind', async (c) => {
   c.header('Cache-Control', 'no-store')
   if (!receipt) return c.json({ committed: false })
   if (receipt.request_digest !== digest) return c.json({ error: 'Request identity was used for different sale data.', code: 'idempotency_conflict' }, 409)
-  return c.json({ committed: true, response: JSON.parse(receipt.response_json || '{}') })
+  return c.json({ committed: true, response: storedMutationResponse(receipt.response_json || '{}') })
 })
 
 // The list's status filter, on the two-status model: Not Paid and Completed
@@ -2944,7 +2989,7 @@ app.patch('/:id/status', async (c) => {
   if (settlementSnapshot || directStatusResponse) {
     assertSaleRecordBatchBounds(writesStock ? stockTransactionStatementCount(statements.length) : statements.length, settlementSnapshot || {
       saleId: Number(id), before: oldStatus, after: writtenStatus, response: directStatusResponse,
-    }, settlementEventBytes + statusEventBytes)
+    }, settlementEventBytes + statusEventBytes, SALE_STATUS_BATCH_MAX_STATEMENTS)
   }
   try {
     const results = await (writesStock ? executeStockTransaction(db, statements, 'retry') : db.batch(statements))
@@ -3413,7 +3458,7 @@ app.post('/:id/items', async (c) => {
     .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: addItemsRequestId })
   if (priorAddition) {
     if (priorAddition.request_digest !== addItemsDigest) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
-    return c.json(JSON.parse(priorAddition.response_json) as Record<string, unknown>)
+    return c.json(storedMutationResponse(priorAddition.response_json))
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this basket with the current app.', code: 'money_precision_review_needed' },409)
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
@@ -3866,7 +3911,7 @@ app.post('/:id/items', async (c) => {
       ...(additionEffect ? [sellingBranchGuardStatement(additionEffect.effectBranchId), effectGuardStatement(additionResolver!.guards())!] : [sellingBranchGuardStatement(saleHeaderBranchId)]),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
-      precisionBasket.guard,
+      ...precisionBasket.guards,
       addSourceGuard,
       saleMutationReceiptStatement({
         operationId: addItemsOperationId, actorId: Number(user.id), saleId, kind: 'add_items',
@@ -3880,14 +3925,14 @@ app.post('/:id/items', async (c) => {
       ...statementsForPlan,
       ...buildOperationAllocationStatements(plan.lines, addItemsOperationId, addItemsStamp),
       ...taxPlan.statements,
-      saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
+      ...saleLineKhrSnapshotStatements(saleId,lineMoneyAfter),
       canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
       saleMoneyUpdateStatement(saleId, moneyAfter),
       ...ledgerStatements,
       {
         sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
               VALUES('sale.add_items','applied',${snapshotExpression},@byId,@byName)`,
-        params: { payload: JSON.stringify(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user) },
+        params: { payload: packedAddItemsReversalJson(reversal), operation: addItemsOperationId, saleId, byId: user.id, byName: actorSnapshot(user) },
       },
       {
         sql: `INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal)
@@ -3936,7 +3981,7 @@ app.post('/:id/items', async (c) => {
     if (retry?.request_digest === addItemsDigest) {
       // The additions committed and only the answer was lost: the hook may never have run, and its claim keys make a second run safe.
       c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: plan.deductions.map((entry) => ({ productId: entry.product_id, branchId: entry.branch_id, quantity: entry.quantity })) }))
-      return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      return c.json(storedMutationResponse(retry.response_json))
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different added items.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
@@ -3966,7 +4011,7 @@ app.post('/:id/items', async (c) => {
   const committed = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?')
     .get<{ response_json: string }>([addItemsOperationId])
   if (!committed) return c.json({ error: 'The added items committed without a durable receipt.', code: 'receipt_missing' }, 500)
-  const response = JSON.parse(committed.response_json) as Record<string, unknown>
+  const response = storedMutationResponse(committed.response_json)
   const historyId = Number(batchResults[historyStatementIndex]?.meta?.last_row_id || 0)
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
@@ -4300,7 +4345,7 @@ app.post('/:id/amendments', async (c) => {
   `).get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
   if (priorAmendment) {
     if (priorAmendment.request_digest !== amendmentDigest) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
-    return c.json(JSON.parse(priorAmendment.response_json) as Record<string, unknown>)
+    return c.json(storedMutationResponse(priorAmendment.response_json))
   }
   if (body.money_precision_version !== 1) return c.json({ error: 'Preserve the pending request and review this amendment with the current app.', code: 'money_precision_review_needed' },409)
   if (!await saleMoneySchemaReady(db)) return c.json({ error: 'Sale precision schema is not ready.', code: 'money_precision_schema_not_ready' },503)
@@ -4514,7 +4559,7 @@ app.post('/:id/amendments', async (c) => {
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
-        precisionBasket!.guard,
+        ...precisionBasket!.guards,
         ...deliveryPlan.statements,
         ...taxPlan.statements,
         canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
@@ -4556,7 +4601,7 @@ app.post('/:id/amendments', async (c) => {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
-      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry?.request_digest === amendmentDigest) return c.json(storedMutationResponse(retry.response_json))
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
       if (/constraint/i.test(String(error))) {
         return c.json({ error: 'The sale, driver, or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
@@ -4626,7 +4671,7 @@ app.post('/:id/amendments', async (c) => {
         headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
-        ...(precisionBasket?[precisionBasket.guard]:[]),
+        ...(precisionBasket?precisionBasket.guards:[]),
         ...costPlan.statements,
         amendmentEntryStatement({
           moneyPrecisionVersion: 1,
@@ -4665,7 +4710,7 @@ app.post('/:id/amendments', async (c) => {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
-      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry?.request_digest === amendmentDigest) return c.json(storedMutationResponse(retry.response_json))
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the actual delivery cost.', 'sale_delivery_cost_failed'), 500)
@@ -4759,7 +4804,7 @@ app.post('/:id/amendments', async (c) => {
         headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
-        precisionBasket!.guard,
+        ...precisionBasket!.guards,
         ...feePlan.statements,
         ...feeTaxPlan.statements,
         canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
@@ -4802,7 +4847,7 @@ app.post('/:id/amendments', async (c) => {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
         WHERE actor_id=@actor AND mutation_kind='amendment' AND request_id=@request`)
         .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
-      if (retry?.request_digest === amendmentDigest) return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      if (retry?.request_digest === amendmentDigest) return c.json(storedMutationResponse(retry.response_json))
       if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
       if (/constraint/i.test(String(error))) return c.json({ error: 'The sale or monetary settings changed. Refresh and review this amendment again.', code: 'write_conflict' }, 409)
       return c.json(unexpectedFailureBody('sales', error, 'Failed to amend the delivery fee.', 'sale_delivery_fee_failed'), 500)
@@ -5256,7 +5301,7 @@ app.post('/:id/amendments', async (c) => {
     })
     validateCapturedSaleBasket(pricingRowsAfter,{...sale,...moneyAfterSnapshot,tax_usd:taxPlan.outcome.taxUsd},precisionBasket!.identityBindings)
     const existingPricingRows=pricingRowsAfter.filter(row=>Number(row.id)>0)
-    if (existingPricingRows.length) statements.push(pricingRowsStatement(saleId,existingPricingRows))
+    if (existingPricingRows.length) statements.push(...pricingRowsStatements(saleId,existingPricingRows))
     }
     if (replacementLines) {
       replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
@@ -5296,7 +5341,7 @@ app.post('/:id/amendments', async (c) => {
       ...(lineEffect ? [effectGuardStatement(branchResolver.guards())!] : []),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
-      precisionBasket!.guard,
+      ...precisionBasket!.guards,
       // Replacement members reference this receipt through an immediate foreign key.
       saleMutationReceiptStatement({
         operationId: mutationOperationId,
@@ -5339,7 +5384,7 @@ app.post('/:id/amendments', async (c) => {
       .get<{ request_digest: string; response_json: string }>({ actor: user.id, request: amendmentRequestId })
     if (retry?.request_digest === amendmentDigest) {
       c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: amendCrossingLines }))
-      return c.json(JSON.parse(retry.response_json) as Record<string, unknown>)
+      return c.json(storedMutationResponse(retry.response_json))
     }
     if (retry) return c.json({ error: 'client_request_id was already used with different amendment data.', code: 'idempotency_conflict' }, 409)
     const message = (error as Error).message || ''
@@ -5419,9 +5464,7 @@ async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record
     throw new SaleMoneyContractError('historical_sale_schema_not_ready')
   }
   const header = { ...sale }; delete header.write_revision
-  const headerJson = JSON.stringify(header), lineJson = JSON.stringify(lines)
-  if (new TextEncoder().encode(headerJson + lineJson).byteLength > 500_000)
-    throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  const headerJson = JSON.stringify(header)
   const keys = (row: Record<string,unknown>) => Object.keys(row).map(key => {
     if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
     return key
@@ -5432,12 +5475,20 @@ async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record
     const middle=Math.floor(terms.length/2)
     return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
   }
+  // The header, the line COUNT and the lineage in one statement; the lines themselves in groups. Every group's lines must each equal a
+  // current row of the sale (all columns), and the count must equal the number read, so together they prove the same set as the single
+  // all-lines parameter did. Each group's JSON stays under STORED_COPY_CHUNK_BYTES: a 62-line sale carries 2.6 MB of snapshots, and one
+  // parameter above D1's 2,000,000-byte cap fails the whole mutation.
   const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${all(keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`))})
-    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
-    AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
-      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${all(keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`))})) AND (${lineage.condition})`,
-    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson,...lineage.params }, 2)
-  return { lines, guard,identityBindings:lineage.bindings }
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=@precisionLineCount AND (${lineage.condition})`,
+    { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLineCount: lines.length,...lineage.params }, 2)
+  const lineMatch = all(keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`))
+  const groupGuards = chunkRowsByJsonBytes(lines).flatMap(group => [
+    { sql: 'DELETE FROM sale_mutation_guards WHERE id=2', params: {} },
+    saleMutationGuard(`NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${lineMatch}))`, { precisionSale: Number(sale.id), precisionLines: JSON.stringify(group) }, 2),
+  ])
+  return { lines, guard, guards: [guard, ...groupGuards], identityBindings:lineage.bindings }
 }
 
 function precisionRecordMoney(value: Record<string,unknown>): Record<string,unknown> {
@@ -5521,6 +5572,29 @@ function amendmentMoneyAfter(
   }
 }
 
+/** A receipt's before/after image. Its `lines` carry every line's pricing snapshot, each embedding the whole pool, so the image is packed
+ * (pools written once) to stay far below D1's 2,000,000-byte value cap. Nothing reads these columns back as lines, and the pack is lossless. */
+function packedReceiptImageJson(image: unknown): string {
+  const lines = (image as { lines?: unknown } | null)?.lines
+  if (!Array.isArray(lines)) return JSON.stringify(image)
+  const packed = packSnapshotField(lines as Record<string, unknown>[], 'pricing_snapshot_json', newPackTable())
+  const packs = packsOf(packed.table)
+  return JSON.stringify(packs ? { ...(image as object), lines: packed.rows, pricing_packs: packs } : image)
+}
+
+/** The undo payload of an added-items action: the line images before and after (every snapshot of the basket) and the added lines. */
+function packedAddItemsReversalJson(reversal: { lineMoneyBefore?: Record<string, unknown>[]; lineMoneyAfter?: Record<string, unknown>[]; lines: Record<string, unknown>[] } & Record<string, unknown>): string {
+  const table = newPackTable()
+  const packed = {
+    ...reversal,
+    ...(reversal.lineMoneyBefore ? { lineMoneyBefore: packSnapshotField(reversal.lineMoneyBefore, 'pricing_snapshot_json', table).rows } : {}),
+    ...(reversal.lineMoneyAfter ? { lineMoneyAfter: packSnapshotField(reversal.lineMoneyAfter, 'pricing_snapshot_json', table).rows } : {}),
+    lines: packSnapshotField(reversal.lines, 'pricingSnapshotJson', table).rows,
+  }
+  const packs = packsOf(table)
+  return JSON.stringify(packs ? { ...packed, pricing_packs: packs } : packed)
+}
+
 function saleMutationReceiptStatement(input: {
   operationId: string
   actorId: number
@@ -5553,8 +5627,8 @@ function saleMutationReceiptStatement(input: {
       request: input.requestId,
       digest: input.requestDigest,
       requestJson: input.requestJson,
-      beforeJson: JSON.stringify(input.before),
-      afterJson: JSON.stringify(input.after),
+      beforeJson: packedReceiptImageJson(input.before),
+      afterJson: packedReceiptImageJson(input.after),
       responseJson: JSON.stringify(input.response),
       validatedIdentityBindings:JSON.stringify(input.identityBindings),
       stamp: input.stamp,

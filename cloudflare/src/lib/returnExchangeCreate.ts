@@ -20,7 +20,7 @@ import { businessDateTimeId } from './receiptNumber'
 import { fillOmittedReturnCosts } from './returnCostAccess'
 import {
   assertReturnCreatePlanBounds, assertReturnCreateQueryBudget, projectedReturnStateForReturnCreateV1, replacementSaleIdSql,
-  returnCreateGuardStatement, returnCreateIdSql, returnCreateOwnMovementCountSql, returnCreatePreconditionSql, ReturnCreateBudgetError,
+  customerReturnSnapshotGuardStatements, returnCreateGuardStatement, returnCreateIdSql, returnCreateOwnMovementCountSql, returnCreatePreconditionSql, ReturnCreateBudgetError,
   RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse, type ReturnCreateStatement,
 } from './returnCreateAction'
 import { ReturnExchangeError, settleExchange, type ExchangeLineIntent, type ExchangePaymentIntent } from './returnExchange'
@@ -118,7 +118,7 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   })
   let ctx: ExchangeContext
   try {
-    ctx = parseExchangeContext(await db.prepare(query.sql).get<ExchangeContextRow>(query.params))
+    ctx = parseExchangeContext(await db.prepare(query.sql).all<ExchangeContextRow>(query.params))
   } catch (error) {
     if (error instanceof ReturnCreateBudgetError) throw error
     if (error instanceof ExchangeContextTooLargeError) return reply(400, { error: error.message, code: 'return_exchange_too_large' })
@@ -423,7 +423,10 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   ]
 
   // ---- the statements -------------------------------------------------------------------------------------------------------------
-  const statements: ReturnCreateStatement[] = [returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams)]
+  const statements: ReturnCreateStatement[] = [
+    ...customerReturnSnapshotGuardStatements(operationId, Number(plan.authority.sale.id), plan.snapshot_rows),
+    returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
+  ]
   const push = (statement: ReturnCreateStatement | null) => { if (statement) statements.push(statement) }
   statements.push({
     sql: `INSERT INTO returns(
