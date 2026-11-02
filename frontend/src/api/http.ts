@@ -1781,11 +1781,8 @@ async function routeOnce<T = any>(
   options: boolean | RouteOptions = false,
 ): Promise<T | null> {
   const t0 = Date.now()
-  const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
-  const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
-  const writeIdentity = typeof options === 'boolean' ? undefined : options.writeIdentity
   // An authenticated read must observe the server's permission decision before
   // considering offline data; a fast mirror must not beat a later 401/403.
   // Cookie-authenticated cold starts may not have recreated their JS session

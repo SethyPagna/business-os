@@ -151,7 +151,7 @@ await runTest('the identical GET is not sent again before Retry-After; another U
 await runTest('selling is untouched: a POS sale goes out while reads are paused, and a write is never held', () => onPage(async (page) => {
   reply(page, 429, SHED, { 'Retry-After': '90' })
   await apiFetch('GET', '/api/reports/profit', undefined, 2000).catch(() => {})
-  page.answer = (where, method) => method === 'POST' ? { status: 200, body: { id: 7 } } : { status: 429, body: SHED, headers: { 'Retry-After': '90' } }
+  page.answer = (_where, method) => method === 'POST' ? { status: 200, body: { id: 7 } } : { status: 429, body: SHED, headers: { 'Retry-After': '90' } }
   assert.deepEqual(await route('sales:create', () => apiFetch('POST', '/api/sales', { total: 5, client_request_id: 'a' }, 2000), null, true), { id: 7 })
   assert.deepEqual(await apiFetch('POST', '/api/sales', { total: 6, client_request_id: 'b' }, 2000), { id: 7 })
   assert.deepEqual(page.sent.filter((line) => line.startsWith('POST')), ['POST /api/sales', 'POST /api/sales'])
