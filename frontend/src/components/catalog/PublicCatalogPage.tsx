@@ -35,7 +35,7 @@ import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
-import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
+import { getPortalProductGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
@@ -121,6 +121,7 @@ type PortalConfig = LooseRecord & {
   faqItems?: Array<{ id: string | number; question: string; answer: string }>
   faqTitle?: string
   googleMapsEmbed?: string
+  gridColumnsAuto?: boolean
   gridColumnsDesktop?: unknown
   gridColumnsMobile?: unknown
   heroGradientEnd?: string
@@ -201,6 +202,7 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   contactLinks: { messenger: '', telegram: '', whatsapp: '', phone: '', instagram: '' },
   exchangeRate: 4100,
   faqItems: [],
+  gridColumnsAuto: true,
   gridColumnsDesktop: 4,
   gridColumnsMobile: 2,
   heroGradientEnd: '#e7dccb',
@@ -816,11 +818,8 @@ export default function PublicCatalogPage() {
   const portalTabs = getPortalTabs(displayConfig, copy)
   const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
   const compactTwoColumnMobile = mobileGridColumns >= 2
-  // NOTE: getPortalGridClass only returns lg:/xl: classes (desktop). Without the
-  // mobile class combined in, the grid falls back to a bare `grid` with no
-  // column count below the `lg` breakpoint, which collapses to a single
-  // column on phones and tablets. Combine both, same as the admin preview.
-  const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(displayConfig.gridColumnsDesktop)}`
+  // One class string for every width (automatic by default), the same builder as the Website Editor preview.
+  const productGridClass = getPortalProductGridClass(displayConfig)
   const businessLogoUrl = String(displayConfig.businessLogo || '').trim()
   const businessCoverUrl = String(displayConfig.businessCover || '').trim()
   const selectedStockBranch = branchFilter[0] || 'all'

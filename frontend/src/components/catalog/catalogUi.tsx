@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { containsKhmerScript } from '../../utils/scriptTypography.ts'
 
@@ -49,6 +50,17 @@ export function microLabelProps(
 ): { lang?: 'km'; className: string } {
   if (!containsKhmerScript(text)) return { className: [latin, className].filter(Boolean).join(' ') }
   return { lang: 'km', className: ['text-xs normal-case tracking-normal khmer-text', className].filter(Boolean).join(' ') }
+}
+
+/**
+ * Where the products section draws its search and Filters. The storefront's tab bar lends a slot (the tab row on a
+ * desktop, directly under the tabs on a phone); `expected` is true when there is one, `element` is null until it has
+ * mounted. The default is "no slot": the Website Editor preview keeps the search in the section's own card.
+ */
+export type PortalNavSearchSlot = { expected: boolean; element: HTMLElement | null }
+export const PortalNavSearchSlotContext = createContext<PortalNavSearchSlot>({ expected: false, element: null })
+export function usePortalNavSearchSlot(): PortalNavSearchSlot {
+  return useContext(PortalNavSearchSlotContext)
 }
 
 /** Shared shell block for portal sections. */

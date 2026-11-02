@@ -41,8 +41,7 @@ import {
 import { portalScrollBehavior } from './portalMotion.ts'
 import {
   clampToRange,
-  getPortalGridClass,
-  getPortalMobileGridClass,
+  getPortalProductGridClass,
   PORTAL_GRID_LIMITS,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
@@ -167,6 +166,7 @@ type PortalConfig = LegacyCatalogRecord & {
   contactLinks?: Record<string, string>
   exchangeRate?: string | number
   faqItems?: FaqItem[]
+  gridColumnsAuto?: boolean
   gridColumnsDesktop?: string | number
   gridColumnsMobile?: string | number
   language?: string
@@ -766,6 +766,7 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_stock_threshold_mode: config.stockThresholdMode || 'product',
     customer_portal_low_stock_threshold: String(config.lowStockThreshold ?? 10),
     customer_portal_out_of_stock_threshold: String(config.outOfStockThreshold ?? 0),
+    customer_portal_grid_columns_auto: config.gridColumnsAuto !== false,
     customer_portal_grid_columns_mobile: String(config.gridColumnsMobile ?? 1),
     customer_portal_grid_columns_desktop: String(config.gridColumnsDesktop ?? 4),
     customer_portal_points_basis: config.pointsBasis || 'usd',
@@ -911,6 +912,7 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
+    gridColumnsAuto: toBoolean(draft.customer_portal_grid_columns_auto, config.gridColumnsAuto !== false),
     gridColumnsMobile: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)), STORED_PHONE_COLUMNS),
     gridColumnsDesktop: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)), PORTAL_GRID_LIMITS.desktop),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
@@ -1119,6 +1121,7 @@ const DEFAULT_CONFIG = {
   stockThresholdMode: 'product',
   lowStockThreshold: 10,
   outOfStockThreshold: 0,
+  gridColumnsAuto: true,
   gridColumnsMobile: 1,
   gridColumnsDesktop: 4,
   pointsBasis: 'usd',
@@ -2702,6 +2705,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
         customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
+        customer_portal_grid_columns_auto: editorDraft.customer_portal_grid_columns_auto === false ? 'false' : 'true',
         customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
         customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
@@ -2977,8 +2981,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const mobileGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsMobile, 1)), STORED_PHONE_COLUMNS)
   const desktopGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsDesktop, 4)), PORTAL_GRID_LIMITS.desktop)
   const compactTwoColumnMobile = mobileGridColumns === 2
-  const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
-  const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
+  const productGridClass = getPortalProductGridClass({ ...displayConfig, gridColumnsMobile: mobileGridColumns, gridColumnsDesktop: desktopGridColumns })
+  const compactCatalogCards = displayConfig.gridColumnsAuto !== false || desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {

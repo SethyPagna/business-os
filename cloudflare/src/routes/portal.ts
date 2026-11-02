@@ -630,6 +630,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     exchangeRate: toNumber(settings.exchange_rate, 4100),
     priceDisplay: settings.customer_portal_price_display || settings.display_currency || 'USD',
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(settings.customer_portal_refresh_seconds, 20)))),
+    gridColumnsAuto: normalizeBoolean(settings.customer_portal_grid_columns_auto, true),
     gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(settings.customer_portal_grid_columns_mobile, 1)))),
     gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
     googleMapsEmbed: normalizeGoogleMapsEmbed(settings.customer_portal_google_maps_embed),

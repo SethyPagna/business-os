@@ -1,4 +1,4 @@
-import { Suspense, cloneElement, isValidElement } from 'react'
+import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -10,6 +10,7 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
+import { PortalNavSearchSlotContext } from './catalogUi'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
@@ -195,6 +196,9 @@ export default function CatalogPreviewSurface({
   pageLanguage,
   changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
+  // The tab bar's search slot (public storefront only): the products section draws its search and Filters into it.
+  const [searchSlotElement, setSearchSlotElement] = useState<HTMLElement | null>(null)
+  const searchSlot = useMemo(() => ({ expected: publicView, element: searchSlotElement }), [publicView, searchSlotElement])
 
   // P-public-9: the footer's quick links are the nav's own tabs. This
   // surface owns the tabs, so it hands them to whichever footer the caller
@@ -526,7 +530,10 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
+                {/* 2 Nov (owner): the search joins the tabs. The tabs scroll sideways on their own line on a phone,
+                    with the search directly under them (no gap); from lg up the search shares the tab row. */}
+                <div className="flex flex-wrap items-center gap-x-4 lg:flex-nowrap">
+                <div className="portal-nav-scroll w-full min-w-0 overflow-x-auto overflow-y-hidden lg:w-auto lg:flex-1">
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
@@ -550,6 +557,14 @@ export default function CatalogPreviewSurface({
                     })}
                   </div>
                 </div>
+                {publicView ? (
+                  <div
+                    ref={setSearchSlotElement}
+                    data-portal-nav-search-slot="true"
+                    className="relative w-full min-w-0 shrink-0 pb-2 empty:hidden lg:w-[min(34rem,52%)] lg:pb-0"
+                  />
+                ) : null}
+                </div>
               </div>
             </nav>
 
@@ -562,7 +577,7 @@ export default function CatalogPreviewSurface({
                 fields are still named to the owner inside the editor
                 (CatalogEditorSurface.tsx's publication summary). */}
             <main id="portal-main-content" tabIndex={-1}>
-              {catalogSection}
+              <PortalNavSearchSlotContext.Provider value={searchSlot}>{catalogSection}</PortalNavSearchSlotContext.Provider>
               {secondaryTabSection}
             </main>
             {footerWithQuickLinks}

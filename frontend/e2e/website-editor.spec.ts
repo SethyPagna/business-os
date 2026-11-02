@@ -289,13 +289,13 @@ test.describe('Website Editor fixes (ED-0)', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test('E2E-11: computer columns stop at 8 in the input, the preview and the Save; a stored 1 phone column shows 2 and is sent back as 1', async ({ page, context }, testInfo) => {
+  test('E2E-11: with automatic columns off, computer columns stop at 8 in the input, the preview and the Save; a stored 1 phone column shows 2 and is sent back as 1', async ({ page, context }, testInfo) => {
     // CATCHES: max="10" -- the preview showed 9 or 10 columns the shop never
     // shows -- and the phone input offering 1, which the shop renders as 2.
     const desktop = testInfo.project.name === DESKTOP_PROJECT
     if (desktop) await page.setViewportSize(PREVIEW_GRID_WIDTH)
     const health = collectPageHealth(page)
-    await openEditor(page, context, { seed: { customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '4' } })
+    await openEditor(page, context, { seed: { customer_portal_grid_columns_auto: 'false', customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '4' } })
     await openSection(page, 'Display settings')
     const computerColumns = page.locator('#portal-grid-desktop')
     await computerColumns.fill('10')
@@ -308,6 +308,35 @@ test.describe('Website Editor fixes (ED-0)', () => {
     const saved = await saveAndCapture(page)
     expect(saved.customer_portal_grid_columns_desktop).toBe('8')
     expect(saved.customer_portal_grid_columns_mobile, 'the untouched stored value round-trips').toBe('1')
+    expect(saved.customer_portal_grid_columns_auto, 'the switch stays off').toBe('false')
+    expectNoRuntimeErrors(health)
+  })
+
+  test('E2E-11b: automatic columns are on by default, grey out the fixed counts, drive the preview, and turning them off frees the inputs', async ({ page, context }, testInfo) => {
+    // CATCHES: a column input that still looks editable while it does nothing (the old "looks wired but is not"
+    // gap), an unset switch read as off (a stored 2 would keep the old grid), and a Save that drops the switch.
+    const desktop = testInfo.project.name === DESKTOP_PROJECT
+    if (desktop) await page.setViewportSize(PREVIEW_GRID_WIDTH)
+    const health = collectPageHealth(page)
+    await openEditor(page, context, { seed: { customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '2' } })
+    await openSection(page, 'Display settings')
+    const automatic = page.locator('#portal-grid-auto')
+    await expect(automatic).toBeChecked()
+    await expect(page.locator('#portal-grid-desktop')).toBeDisabled()
+    await expect(page.locator('#portal-grid-mobile')).toBeDisabled()
+    if (desktop) {
+      const grid = page.locator('article[data-product-card="true"]').first().locator('xpath=..')
+      await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length), { message: 'the preview grid at 1280 px follows the screen, not the stored 2' }).toBe(5)
+    }
+    await automatic.uncheck()
+    await expect(page.locator('#portal-grid-desktop')).toBeEnabled()
+    await expect(page.locator('#portal-grid-mobile')).toBeEnabled()
+    if (desktop) {
+      const grid = page.locator('article[data-product-card="true"]').first().locator('xpath=..')
+      await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length), { message: 'off: the stored 2 applies again' }).toBe(2)
+    }
+    const saved = await saveAndCapture(page)
+    expect(saved.customer_portal_grid_columns_auto).toBe('false')
     expectNoRuntimeErrors(health)
   })
 

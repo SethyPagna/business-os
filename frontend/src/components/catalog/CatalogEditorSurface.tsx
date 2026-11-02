@@ -79,6 +79,7 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   customer_portal_faq_title?: string
   customer_portal_favicon_image?: string | null
   customer_portal_google_maps_embed?: string
+  customer_portal_grid_columns_auto?: boolean
   customer_portal_grid_columns_desktop?: string | number
   customer_portal_grid_columns_mobile?: string | number
   customer_portal_hero_gradient_end?: string
@@ -554,12 +555,20 @@ function CatalogEditorSurfaceContent() {
                   <label htmlFor="portal-refresh-seconds" className="block text-sm font-medium text-slate-700">{copy('refreshSeconds', 'Public refresh interval (seconds)', 'ចន្លោះពេលស្រស់ថ្មីសាធារណៈ (វិនាទី)')}</label>
                 <input id="portal-refresh-seconds" name="customer_portal_refresh_seconds" className="input" type="number" min="5" max="120" step="1" value={editorDraft.customer_portal_refresh_seconds || '20'} onChange={(event) => setDraft('customer_portal_refresh_seconds', event.target.value)} />
               </div>
+              <label htmlFor="portal-grid-auto" className="col-span-full flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-700">{copy('gridColumnsAuto', 'Automatic columns')}</span>
+                  <span className="block text-xs text-slate-500">{copy('gridColumnsAutoHint', 'On: 2 on phones, 3 on tablets, then 4, 5 and 6 as the screen gets wider. Off: set the columns yourself.')}</span>
+                </span>
+                <input id="portal-grid-auto" name="customer_portal_grid_columns_auto" type="checkbox" checked={editorDraft.customer_portal_grid_columns_auto !== false} onChange={(event) => setDraft('customer_portal_grid_columns_auto', event.target.checked)} />
+              </label>
               <div>
                 <label htmlFor="portal-grid-mobile" className="block text-sm font-medium text-slate-700">{copy('gridColumnsMobile', 'Mobile grid columns')}</label>
                 <input
                   id="portal-grid-mobile"
                   name="customer_portal_grid_columns_mobile"
                   className="input"
+                  disabled={editorDraft.customer_portal_grid_columns_auto !== false}
                   type="number"
                   min={editorLimits.phone[0]}
                   max={editorLimits.phone[1]}
@@ -574,6 +583,7 @@ function CatalogEditorSurfaceContent() {
                   id="portal-grid-desktop"
                   name="customer_portal_grid_columns_desktop"
                   className="input"
+                  disabled={editorDraft.customer_portal_grid_columns_auto !== false}
                   type="number"
                   min={editorLimits.desktop[0]}
                   max={editorLimits.desktop[1]}
