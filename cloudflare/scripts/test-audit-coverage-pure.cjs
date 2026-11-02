@@ -57,9 +57,19 @@ for (const file of files) {
 // POS has the same stronger same-batch contract for its sole mutation and is
 // likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
-  if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts' || file === 'productCost.ts' || file === 'inventoryChecks.ts') continue
+  if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts' || file === 'productCost.ts' || file === 'inventoryChecks.ts' || file === 'runtime.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
+
+// runtime.ts: its one mutation, PUT /read-switches (a kill-switch flip), writes its audit row in the same D1 batch as the swap and
+// the batch aborts unless the swap happened (lib/readSwitches.ts buildFlipStatements), so it is checked as a contract rather than as an
+// after-the-fact audit( call.
+const runtimeRoute = fs.readFileSync(path.join(routesDir, 'runtime.ts'), 'utf8')
+assert.deepEqual([...runtimeRoute.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [['put', '/read-switches']])
+ok(runtimeRoute.includes("buildAuditStatement(user.id, user.name, 'read_switch_set', 'read_switch', name,")
+  && runtimeRoute.includes('await db.batch(buildFlipStatements({ record, value, expected: storedRaw,'), 'runtime.ts flips a read switch and writes its audit row in the same batch')
+const readSwitchesLib = fs.readFileSync(path.join(routesDir, '../lib/readSwitches.ts'), 'utf8')
+ok(readSwitchesLib.includes('{ sql: `${flip.record.sql} WHERE changes() = 1`') && readSwitchesLib.includes("json_extract('[1]', '$[read_switch_conflict]')"), 'the audit row is tied to the swap and the batch aborts without it')
 
 const inventoryChecks = fs.readFileSync(path.join(routesDir, 'inventoryChecks.ts'), 'utf8')
 assert.deepEqual([...inventoryChecks.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [
@@ -179,7 +189,9 @@ ok(/INSERT INTO audit_logs[\s\S]*WHERE changes\(\) = 1/.test(receiptLib), 'audit
 // catalog.ts left this list when 0efd04bc deleted the route file outright
 // (the dead, ungated storefront endpoint) -- the strongest form of staying
 // read-only.
-const EXPECTED_READ_ONLY = ['notifications.ts', 'organizations.ts', 'runtime.ts']
+// runtime.ts left this list when PUT /read-switches (a kill-switch flip) was added: its audit row is written in the same batch as the
+// swap and is checked above as a contract.
+const EXPECTED_READ_ONLY = ['notifications.ts', 'organizations.ts']
 for (const file of EXPECTED_READ_ONLY) {
   const src = fs.readFileSync(path.join(routesDir, file), 'utf8')
   ok(!MUTATION_RE.test(src), `${file} stays read-only (no mutation handlers)`)
