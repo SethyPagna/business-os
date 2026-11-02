@@ -45,10 +45,15 @@ async function main() {
   const results = []
   await Promise.all(Array.from({ length: PARALLEL }, async () => {
     while (queue.length) {
-      const result = await run(queue.shift())
+      const job = queue.shift()
+      let result = await run(job)
+      // A world that died before it ran one check (a failed process start on a busy machine) says nothing about the mutant: run it once more.
+      const crashed = (r) => r.code !== 0 && r.red === 0 && !r.anchor
+      const retried = crashed(result)
+      if (retried) result = await run(job)
       results.push(result)
       const killed = result.code !== 0 && result.red > 0 && !result.anchor
-      console.log(`${killed ? 'killed  ' : 'SURVIVED'} ${result.kind}: ${result.name}${result.anchor ? ' (the mutant\'s anchor text is gone: update the mutant)' : ` (${result.red} red case${result.red === 1 ? '' : 's'})`}`)
+      console.log(`${killed ? 'killed  ' : 'SURVIVED'} ${result.kind}: ${result.name}${result.anchor ? ' (the mutant\'s anchor text is gone: update the mutant)' : ` (${result.red} red case${result.red === 1 ? '' : 's'}${retried ? ', after one restart of a crashed world' : ''})`}`)
     }
   }))
   const survivors = results.filter((result) => !(result.code !== 0 && result.red > 0 && !result.anchor))
