@@ -1535,7 +1535,9 @@ async function replayAtomicSaleAddItems(
       lineage=resolved
     }catch{throw new UndoConflictError('Recorded product merge evidence changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)}
   }
-  const currentHeaderJson=JSON.stringify(currentSale)
+  const currentHeaderJson=JSON.stringify(currentSale),currentLinesJson=JSON.stringify(currentLines)
+  // An ordinary basket (header + lines up to 500,000 bytes, the size the old code accepted) keeps the single one-parameter guard it always had.
+  const inlineBasket=new TextEncoder().encode(currentHeaderJson+currentLinesJson).byteLength<=500_000
   const stateKeys=(row:Record<string,unknown>)=>Object.keys(row).map(key=>{
     if(!/^[a-z][a-z0-9_]*$/.test(key))throw new UndoConflictError('The recorded sale basket shape is invalid.')
     return key
@@ -1546,13 +1548,18 @@ async function replayAtomicSaleAddItems(
     const middle=Math.floor(terms.length/2)
     return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
   }
-  // The header and the line COUNT in the main guard; the lines in groups (each group's JSON stays under STORED_COPY_CHUNK_BYTES, because a
-  // 62-line sale's snapshots are 2.6 MB and one parameter above D1's 2,000,000-byte cap fails the whole replay). Every line read must equal
-  // a current row and the counts must match, which together prove the same set the single all-lines parameter did.
-  const basketCondition=`EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
-    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=@replayLineCount`
   const basketLineMatch=all(stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`))
-  const basketLineGuards=chunkRowsByJsonBytes(currentLines).flatMap(group=>[
+  // A larger basket: the header and the line COUNT in the main guard; the lines in groups (each group's JSON stays under STORED_COPY_CHUNK_BYTES,
+  // because a 62-line sale's snapshots are 2.6 MB and one parameter above D1's 2,000,000-byte cap fails the whole replay). Every line read
+  // must equal a current row and the counts must match, which together prove the same set the single all-lines parameter did.
+  const basketCondition=inlineBasket
+    ? `EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@replayLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
+      AND ${basketLineMatch}))`
+    : `EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=@replayLineCount`
+  const basketLineGuards=inlineBasket?[]:chunkRowsByJsonBytes(currentLines).flatMap(group=>[
     { sql: 'DELETE FROM sale_mutation_guards WHERE id=1', params: {} },
     saleMutationGuard(`NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
       AND ${basketLineMatch}))`, { saleId, replayLines: JSON.stringify(group) }),
@@ -1570,7 +1577,7 @@ async function replayAtomicSaleAddItems(
     snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
     historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
     saleStatus: reversal.saleStatus,
-    replaySale:currentHeaderJson,replayLineCount:currentLines.length,...lineage.params,
+    replaySale:currentHeaderJson,...(inlineBasket?{replayLines:currentLinesJson}:{replayLineCount:currentLines.length}),...lineage.params,
   }
   const memberGuards: string[] = []
   const lineGuards: string[] = []

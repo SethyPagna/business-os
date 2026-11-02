@@ -5478,14 +5478,24 @@ async function capturePrecisionBasket(db: ReturnType<typeof getDb>, sale: Record
     const middle=Math.floor(terms.length/2)
     return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
   }
-  // The header, the line COUNT and the lineage in one statement; the lines themselves in groups. Every group's lines must each equal a
-  // current row of the sale (all columns), and the count must equal the number read, so together they prove the same set as the single
-  // all-lines parameter did. Each group's JSON stays under STORED_COPY_CHUNK_BYTES: a 62-line sale carries 2.6 MB of snapshots, and one
-  // parameter above D1's 2,000,000-byte cap fails the whole mutation.
+  const lineMatch = all(keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`))
+  // An ordinary basket (header + lines up to 500,000 bytes, the size the old code accepted) keeps the single guard it always had.
+  const lineJson = JSON.stringify(lines)
+  if (new TextEncoder().encode(headerJson + lineJson).byteLength <= 500_000) {
+    const single = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${all(keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`))})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=json_array_length(@precisionLines)
+    AND NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(
+      SELECT 1 FROM sale_items i WHERE i.sale_id=@precisionSale AND ${lineMatch})) AND (${lineage.condition})`,
+      { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLines: lineJson,...lineage.params }, 2)
+    return { lines, guard: single, guards: [single], identityBindings:lineage.bindings }
+  }
+  // A larger basket: the header, the line COUNT and the lineage in one statement; the lines themselves in groups. Every group's lines must
+  // each equal a current row of the sale (all columns), and the count must equal the number read, so together they prove the same set as the
+  // single all-lines parameter did. Each group's JSON stays under STORED_COPY_CHUNK_BYTES: a 62-line sale carries 2.6 MB of snapshots, and
+  // one parameter above D1's 2,000,000-byte cap fails the whole mutation.
   const guard = saleMutationGuard(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@precisionSale AND ${all(keys(header).map(key => `s.${key} IS json_extract(@precisionHeader,'$.${key}')`))})
     AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@precisionSale)=@precisionLineCount AND (${lineage.condition})`,
     { precisionSale: Number(sale.id), precisionHeader: headerJson, precisionLineCount: lines.length,...lineage.params }, 2)
-  const lineMatch = all(keys(lines[0]).map(key => `i.${key} IS json_extract(j.value,'$.${key}')`))
   const groupGuards = chunkRowsByJsonBytes(lines).flatMap(group => [
     { sql: 'DELETE FROM sale_mutation_guards WHERE id=2', params: {} },
     saleMutationGuard(`NOT EXISTS(SELECT 1 FROM json_each(@precisionLines) j WHERE NOT EXISTS(

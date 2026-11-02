@@ -311,7 +311,7 @@ async function main() {
 
     // The thresholds (saleSnapshotPacking.ts): a small basket keeps the stored form it always had in every copy; a large one is packed in every copy. Both must replay
     // to the same answer, and the larger one must still pass the till's own check.
-    await step('flow', '20 and 44 lines: the stored copies are packed exactly when the basket is large', async () => {
+    await step('flow', '20 and 44 lines: the stored copies are packed exactly when the basket is large, and a return records in both forms', async () => {
       for (const [n, wantPacked] of [[20, false], [44, true]]) {
         const rows = await take(n)
         await heavyCatalogue(world, rows)
@@ -332,6 +332,18 @@ async function main() {
         for (const r of sz.receipts) { assert.equal(Boolean(r.packed), wantPacked, `${n} lines: stored response packed=${Boolean(r.packed)}`); assert.equal(Boolean(r.packedImage), wantPacked, `${n} lines: stored image packed=${Boolean(r.packedImage)}`) }
         assert.equal(Boolean(sz.undo[0].packed), wantPacked, `${n} lines: undo payload packed=${Boolean(sz.undo[0].packed)}`)
         log(`      ${n} lines: snapshots ${sz.total} bytes, stored copies packed=${wantPacked}`)
+        // A customer return on the same sale: the 20-line sale proves its snapshots inside the one authority parameter (as always), the 44-line one
+        // in groups of their own. Both must record, for exactly the quoted refund.
+        const first = (await world.all('SELECT id, product_id FROM sale_items WHERE sale_id = ? ORDER BY id LIMIT 1', made.saleId))[0]
+        const quote = await world.send('POST', '/api/returns/quote', { sale_id: made.saleId, items: [{ sale_item_id: first.id, quantity: 1 }] }, SEND)
+        assert.equal(quote.status, 200, `${n} lines: return quote answered ${quote.status} ${quote.json?.code || ''}`)
+        const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = quote.json
+        const ret = await world.send('POST', '/api/returns', { client_request_id: `${made.requestId}-return`, money_precision_version: 1, sale_id: made.saleId, reason: 'ls1', expected_quote: expected,
+          items: [{ sale_item_id: first.id, product_id: first.product_id, quantity: 1, stock_action: 'restock', branch_id: 1 }] }, SEND)
+        assert.equal(ret.status, 200, `${n} lines: return create answered ${ret.status} ${ret.json?.code || ''} ${ret.text.slice(0, 200)}`)
+        const refunded = await world.all('SELECT total_refund_usd t FROM returns WHERE sale_id = ?', made.saleId)
+        assert.equal(refunded.length, 1)
+        assert.equal(money4(refunded[0].t), money4(expected.total_refund_usd), `${n} lines: the refund is the quoted refund`)
       }
     })
 
