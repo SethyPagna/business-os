@@ -6,9 +6,9 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 2 Nov 2026, 19:45 (Cambodia, UTC+7)
+## Status snapshot — 3 Nov 2026, 00:15 (Cambodia, UTC+7)
 
-- **Live:** `05ef61b73` = 6.0.1035, which makes Inventory Check name pages read sales only for the page rows (−55% rows). Deployed 1 Nov 15:24Z (run 41309455223), tier paid, no migration, health pack clean. The previous release was 6.0.1033 `165f9f000` (Codex, 30 Oct). Production migrations run through 0273.
+- **Live:** `736929e91` = 6.0.1039 CI read-budget gate + 6.0.1040 leak stop (`/api` answers `private, no-store` + `Vary: Cookie`, logout clears the HTTP cache, bootstrap settings follow Settings visibility). Deployed 2 Nov 15:46Z (run 41451080414, Worker `bd5e9d4d-d6d7-4a05-86e9-7bc249195999`), tier paid, no migration, no shift open. Postflight headers confirmed; health pack 13/13 with no new drift against 1 Nov. Main `4f0bcb89f` carries the same code tree. Production migrations run through 0273. Rollback: redeploy `05ef61b73` (6.0.1035).
 - **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
 - **Plan:** the account is back on Workers Paid until 30 Nov after the 30 Oct Free outage. The owner's goal is the FREE plan permanently.
 - **Goal:** by 30 Nov, production runs on Free with every function intact. Measured as:
@@ -19,9 +19,12 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
   - the governor enforcing, and every optimization behind a read switch.
 
   Production read about 34–39M rows per day before 1035.
-- **Ready to deploy tonight (after 20:00, open_today = 0):** RC `rc/20261102b` `736929e91` = 6.0.1039 CI read-budget gate + 6.0.1040 leak stop (`/api` is `private, no-store` + `Vary: Cookie`, logout clears the HTTP cache, bootstrap settings follow Settings visibility). Exact gate run 41420972939 green (cloudflare 1102/1102, frontend 986/986), Opus release review GO, gitleaks clean. The 2 Nov 07:00 slot was skipped because the first RC's gate went red on two test harnesses (fixed in `24918e6b2`; production code was right).
-- **Next RC (07:00 3 Nov at the earliest):** P0.6 (review GO) plus whichever of P0.3/P0.4, P2.8 and the UX lanes clear review and the exact gate.
-- **Urgent finding (P1.1, 2 Nov):** a sale above about 58 lines saves, then its read-back fails (D1 `SQLITE_TOOBIG`: every line's stored pricing snapshot copies the whole basket), and cancelling a sale above about 58 lines is refused by the 500-statement bound. Both are plan-independent and present since 13 Sep. Read-only sizing query `d1-large-sale-snapshots` (6.0.1055) is running in production; the fix becomes its own lane.
+- **Next RC (07:00 3 Nov, open_today = 0):** `rc/20261103a` `c551d4e5f` = the live release + P0.6 health tiers (6.0.1043, Opus re-review GO). Query budget 119 measured, 0 red; gitleaks clean; the exact gate (run 41485495612) and the Opus release review are running.
+- **Large sales (LS1, 6.0.1057, urgent):** one production sale is over the limit, a 62-line Not Paid sale from 27 Oct: 2.6 MB of stored pricing snapshots against D1's 2 MB value cap, so it likely cannot be paid or edited. No other sale is near it; the next largest has 32 lines. Since 13 Sep every line's snapshot copies the whole basket.
+  - The fix reads a sale's lines as rows, stores responses without repeating the basket per line, lets cancel above 58 lines fit, and makes the basket check linear (a 200-line sale took 47 s to open).
+  - It is code only and changes no stored data.
+  - It is building and gets its own RC after review: 07:00 if in time, otherwise the evening slot.
+  - Storing the basket once per sale, which also shrinks the database, needs the owner's ruling on rewriting saved rows.
 
 ### Free-plan programme board
 
@@ -29,13 +32,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on
 
 - [x] 6.0.1035 Inventory Check name-page reads (live)
 - [x] 6.0.1036–1038, 1055 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
-- [~] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config): in RC 20261102b, deploys tonight
-- [~] P0.2 6.0.1040 leak stop: in RC 20261102b, deploys tonight
-- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling: committed (`6a8cbbb54`, `94e5d010a`), Opus review running
+- [x] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config): live
+- [x] P0.2 6.0.1040 leak stop: live 2 Nov 15:46Z, health pack clean
+- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling: committed (`6a8cbbb54`, `94e5d010a`). Opus review NO-GO: the code is right, but four test harnesses would fail the gate; fixes in progress
 - [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
-- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: Opus re-review GO (`ab6d239cc`); joins the next RC
+- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: Opus re-review GO (`ab6d239cc`); in RC 20261103a
 - [~] P0.7 6.0.1048 cache lifecycle: one cache-key builder (deployment + data epoch + grants), `X-BOS-Build`/`X-BOS-Epoch`, the Restart bar as the only update path, versioned local records: building
-- [~] P1.1 6.0.1049 call counting: building (found the large-sale failures above)
+- [~] P1.1 6.0.1049 call counting: committed (`7cdee15e5`). On Free, behind the `call_counting` switch, a batch counts as one D1 call, so stock sessions and returns fit; exact gate and Opus review running. It found the large-sale failures above, and that a stock session reads about 8.5k rows per line
 - [~] P1.4 6.0.1050 report chain in one call: committed (`4b99640ec`), sweep and review next. Deadline 11 Nov, when the read-budget coverage test starts failing every deploy without P1.2 and P1.4
 - [~] P1.6a 6.0.1044 Inventory Check, the owner's 2 Nov design (check box before the image, direct counts, date and time, no refresh, Products-style rows on phones) · P1.7 6.0.1045 submitted counts wait for admin approval (new permissions): building
 - [ ] P1.2 1008 operations · P1.3 sole-branch read · P1.5 long reports · P1.8 bell + 5-minute overview with its time beside the date
@@ -49,7 +52,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on
 
 ### Owner UX asks (2 Nov afternoon)
 
-- [~] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: committed (`201f56eb8`); one browser test still collides with the shift-history modal
+- [~] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: committed (`201f56eb8`, `a40add57a`); exact gate and Opus review running; one browser test still collides with the shift-history modal
 - [~] U2 6.0.1052 leangbeauty.com: About page with the full cover photo (`80a06bba3`) and 2–6 product columns with search joined to the tabs (`3d089b80a`) committed; colour chat buttons with Instagram DM and the announcement strip building
 - [~] E1 6.0.1053 Expenses: labels and types added and edited in their own section, sale-linked expenses such as delivery listed, no cost of goods, totals equal to the reports: building
 - [~] R1 6.0.1054 one shared option button without the extra arrow, and one shared preset/option scroll row on every page: built, test chain running
