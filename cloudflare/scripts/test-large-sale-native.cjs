@@ -163,8 +163,8 @@ function assertResponseMatchesStore(till, sale, st, label) {
 
 async function sizes(world, saleId, requestIds) {
   const r = (await world.all('SELECT COUNT(*) n, SUM(length(pricing_snapshot_json)) total, MAX(length(pricing_snapshot_json)) mx FROM sale_items WHERE sale_id = ?', saleId))[0]
-  const receipts = await world.all("SELECT mutation_kind k, length(response_json) resp, length(before_json) bef, length(after_json) aft FROM sale_mutation_receipts WHERE sale_id = ?", saleId)
-  const undo = await world.all("SELECT length(payload_json) n FROM undo_snapshots WHERE kind = 'sale.add_items' ORDER BY id DESC LIMIT 3")
+  const receipts = await world.all("SELECT mutation_kind k, length(response_json) resp, length(before_json) bef, length(after_json) aft, instr(response_json, '\"pricing_packs\"') > 0 packed, instr(after_json, '\"pricing_packs\"') > 0 packedImage FROM sale_mutation_receipts WHERE sale_id = ?", saleId)
+  const undo = await world.all("SELECT length(payload_json) n, instr(payload_json, '\"pricing_packs\"') > 0 packed FROM undo_snapshots WHERE kind = 'sale.add_items' ORDER BY id DESC LIMIT 3")
   return { lines: r.n, total: r.total, max: r.mx, receipts, undo }
 }
 
@@ -266,6 +266,10 @@ async function main() {
         for (const r of sz.receipts) for (const v of [r.resp, r.bef, r.aft]) assert.ok(v < 1_000_000, `${label}: a stored receipt copy is ${v} bytes (${r.k})`)
         for (const row of sz.undo) assert.ok(row.n < 1_500_000, `${label}: the undo payload is ${row.n} bytes`)
         log(`      ${label}: stored copies ${JSON.stringify(sz.receipts)} undo payloads ${JSON.stringify(sz.undo)}`)
+        // A small basket is stored exactly as it always was (legacy form, readable by the previous Worker); a large one is packed.
+        const wantPacked = f.n >= 62
+        for (const r of sz.receipts) { assert.equal(Boolean(r.packed), wantPacked, `${label}: the stored response is ${r.packed ? 'packed' : 'in the legacy form'}`); assert.equal(Boolean(r.packedImage), wantPacked, `${label}: the stored image is ${r.packedImage ? 'packed' : 'in the legacy form'}`) }
+        assert.equal(Boolean(sz.undo[0].packed), wantPacked, `${label}: the undo payload is ${sz.undo[0].packed ? 'packed' : 'in the legacy form'}`)
       })
       await step('flow', `${label}: amend one line, replay`, async () => {
         assert.ok(f && f.saleId, 'fixture missing')
@@ -304,6 +308,32 @@ async function main() {
         assert.equal(cur.sale.sale_status, 'cancelled')
       })
     }
+
+    // The thresholds (saleSnapshotPacking.ts): a small basket keeps the stored form it always had in every copy; a large one is packed in every copy. Both must replay
+    // to the same answer, and the larger one must still pass the till's own check.
+    await step('flow', '20 and 44 lines: the stored copies are packed exactly when the basket is large', async () => {
+      for (const [n, wantPacked] of [[20, false], [44, true]]) {
+        const rows = await take(n)
+        await heavyCatalogue(world, rows)
+        const made = await createSale(world, `t${n}`, rows, { paid: true, pos: true })
+        assert.ok(made.saleId, `${n} lines: no sale was recorded`)
+        const extra = await take(2)
+        const addBody = { client_request_id: `${made.requestId}-add`, money_precision_version: 1, expected_exchange_rate: 4000,
+          items: [{ product_id: extra[0].pid, quantity: 1, branch_id: 1, batch_id: extra[0].batch, client_line_key: `${made.requestId}-extra`, pricing_source: 'selling', pricing_quote: { ...ZERO_QUOTE } }] }
+        const add = await mutate(world, 'POST', `/api/sales/${made.saleId}/items`, addBody, addFix)
+        assert.equal(add.status, 200, `${n} lines: add items answered ${add.status} ${add.json?.code || ''} ${add.text.slice(0, 200)}`)
+        const st = await state(world, made.saleId)
+        assertResponseMatchesStore(till, add.json.sale, st, `${n} lines add items response`)
+        const replay = await world.send('POST', `/api/sales/${made.saleId}/items`, addBody, SEND)
+        assert.equal(replay.status, 200)
+        assert.deepEqual(replay.json, add.json, `${n} lines: the replay answers differently from the first answer`)
+        const sz = await sizes(world, made.saleId)
+        assert.equal(wantPacked ? sz.total > 1_000_000 : sz.total < 450_000, true, `${n} lines: the snapshots total ${sz.total} bytes, the fixture no longer sits clear of the packing thresholds`)
+        for (const r of sz.receipts) { assert.equal(Boolean(r.packed), wantPacked, `${n} lines: stored response packed=${Boolean(r.packed)}`); assert.equal(Boolean(r.packedImage), wantPacked, `${n} lines: stored image packed=${Boolean(r.packedImage)}`) }
+        assert.equal(Boolean(sz.undo[0].packed), wantPacked, `${n} lines: undo payload packed=${Boolean(sz.undo[0].packed)}`)
+        log(`      ${n} lines: snapshots ${sz.total} bytes, stored copies packed=${wantPacked}`)
+      }
+    })
 
     // undo / redo of added items, on its own sale: both directions must restore every snapshot byte for byte
     for (const [key, n] of [['u10', 10], ['u62', 62]]) {

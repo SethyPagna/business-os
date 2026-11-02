@@ -18,6 +18,22 @@
 
 export const STORED_COPY_CHUNK_BYTES = 900_000
 
+/**
+ * A copy is packed only when it has to be. Below the thresholds (every ordinary sale) the stored text is exactly what it was before this
+ * module existed: the common case does not change shape, a receipt written now still reads under the previous Worker version, and the
+ * packed paths run only where the raw copy would approach D1's 2,000,000-byte value cap.
+ *   - PACK_ABOVE_BYTES: a copy built in JS (a receipt's before/after image, an undo payload) is packed when its raw text is larger than this.
+ *   - PACK_RESPONSE_ABOVE_BYTES: the stored response is aggregated in SQL, so its raw size is not known up front; it is packed when the
+ *     basket's snapshots total more than this. The unpacked aggregate is the snapshots with their quotes escaped plus about 800 bytes a
+ *     line, so a basket under the threshold aggregates to at most about 1.4 MB (nearer 0.8 MB in practice), under the cap.
+ */
+export const PACK_ABOVE_BYTES = 1_000_000
+export const PACK_RESPONSE_ABOVE_BYTES = 600_000
+
+export function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
 export type PricingPacks = { version: 1; pools: Array<{ pool: unknown; quantities: unknown }>; contexts: unknown[] }
 export type PackedPricingSnapshot = { packed_snapshot: 1; line_key: string; pool: number; context: number; amounts: unknown; receipt_allocation: unknown }
 

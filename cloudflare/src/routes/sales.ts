@@ -12,7 +12,7 @@ import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePric
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, packSnapshotField, packsOf } from '../lib/saleSnapshotPacking'
+import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, PACK_ABOVE_BYTES, PACK_RESPONSE_ABOVE_BYTES, packSnapshotField, packsOf, utf8Bytes } from '../lib/saleSnapshotPacking'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
@@ -443,10 +443,13 @@ function pricingPacksSql() {
         json_extract(pricing_snapshot_json,'$.quantities') AS quantities FROM sale_items WHERE sale_id=s.id GROUP BY 1))))`
 }
 
-/** True only when every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names ONE pool and
- * quantity map. Then the packed form loses nothing; otherwise the response keeps the full per-line text exactly as before. */
+/** True only for a LARGE basket (its snapshots total more than PACK_RESPONSE_ABOVE_BYTES; a smaller one keeps the full per-line text exactly as
+ * before, byte for byte) in which every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names
+ * ONE pool and quantity map. Then the packed form loses nothing; otherwise the response keeps the full per-line text. The size test comes
+ * first so an ordinary sale pays nothing for the checks after it. */
 function packedItemsCondition() {
-  return `NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
+  return `(SELECT COALESCE(SUM(length(CAST(pricing_snapshot_json AS BLOB))),0) FROM sale_items WHERE sale_id=s.id)>${PACK_RESPONSE_ABOVE_BYTES}
+    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
         OR json_extract(pricing_snapshot_json,'$.pool.pool_key') IS NULL OR json_extract(pricing_snapshot_json,'$.allocation_context') IS NULL))
     AND (SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.allocation_context')) FROM sale_items WHERE sale_id=s.id)=1
     AND (SELECT COUNT(*) FROM (SELECT DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS k,json_extract(pricing_snapshot_json,'$.pool') AS p,
@@ -5575,15 +5578,18 @@ function amendmentMoneyAfter(
 /** A receipt's before/after image. Its `lines` carry every line's pricing snapshot, each embedding the whole pool, so the image is packed
  * (pools written once) to stay far below D1's 2,000,000-byte value cap. Nothing reads these columns back as lines, and the pack is lossless. */
 function packedReceiptImageJson(image: unknown): string {
+  const plain = JSON.stringify(image)
   const lines = (image as { lines?: unknown } | null)?.lines
-  if (!Array.isArray(lines)) return JSON.stringify(image)
+  if (!Array.isArray(lines) || utf8Bytes(plain) <= PACK_ABOVE_BYTES) return plain
   const packed = packSnapshotField(lines as Record<string, unknown>[], 'pricing_snapshot_json', newPackTable())
   const packs = packsOf(packed.table)
-  return JSON.stringify(packs ? { ...(image as object), lines: packed.rows, pricing_packs: packs } : image)
+  return packs ? JSON.stringify({ ...(image as object), lines: packed.rows, pricing_packs: packs }) : plain
 }
 
 /** The undo payload of an added-items action: the line images before and after (every snapshot of the basket) and the added lines. */
 function packedAddItemsReversalJson(reversal: { lineMoneyBefore?: Record<string, unknown>[]; lineMoneyAfter?: Record<string, unknown>[]; lines: Record<string, unknown>[] } & Record<string, unknown>): string {
+  const plain = JSON.stringify(reversal)
+  if (utf8Bytes(plain) <= PACK_ABOVE_BYTES) return plain
   const table = newPackTable()
   const packed = {
     ...reversal,
@@ -5592,7 +5598,7 @@ function packedAddItemsReversalJson(reversal: { lineMoneyBefore?: Record<string,
     lines: packSnapshotField(reversal.lines, 'pricingSnapshotJson', table).rows,
   }
   const packs = packsOf(table)
-  return JSON.stringify(packs ? { ...packed, pricing_packs: packs } : packed)
+  return packs ? JSON.stringify({ ...packed, pricing_packs: packs }) : plain
 }
 
 function saleMutationReceiptStatement(input: {
