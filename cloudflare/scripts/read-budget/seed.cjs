@@ -170,6 +170,10 @@ function seedSql({ variant = 'base' } = {}) {
       FROM sales s WHERE s.id=(SELECT MAX(id) FROM sales WHERE sale_status='awaiting_payment' AND id<200000 AND created_at<=datetime(${A},'-30 days'))`,
     "DELETE FROM system_flags WHERE key='stock_transaction_permit'",
     "DELETE FROM system_flags WHERE key='maintenance'",
+    // Courier cost recorded on 1 sale in 25 (USD) and 1 in 25 (KHR, offset), so the Expenses sale-delivery rows have something to read; the read switch is ON for the shapes that send source=all.
+    `UPDATE sales SET delivery_actual_cost_usd = 1 + (id % 4) * 0.5 WHERE id >= ${FIRST_SALE} AND id % 25 = 0`,
+    `UPDATE sales SET delivery_actual_cost_khr = 4000 + (id % 3) * 2000 WHERE id >= ${FIRST_SALE} AND id % 25 = 5`,
+    `INSERT INTO system_flags(key,value) VALUES('read_switches','{"switches":{"expenses_sale_rows":"on"}}') ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
     "INSERT INTO settings(key,value) VALUES('exchange_rate','4000'),('change_exchange_rate','4000'),('pos_payment_methods','[\"Cash\",\"ABA\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value",
   ]
 }

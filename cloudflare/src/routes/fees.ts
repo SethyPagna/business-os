@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 
 // Positive answers only: a missing schema is re-probed on the next call, a
@@ -19,7 +19,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
   }
 }
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, buildAuditStatement, changedFields } from '../lib/audit'
+import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpectedUpdatedAt, hasExpectedUpdatedAtField, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -70,6 +70,7 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 const FEE_BRANCH_INVALID_BODY = { error: 'Every expense must use an active selling branch.', code: 'fee_branch_invalid' } as const
 const FEE_SALE_INVALID_BODY = { error: 'Choose an existing sale recorded at a selling branch.', code: 'fee_sale_invalid' } as const
 const FEE_SALE_BRANCH_MISMATCH_BODY = { error: 'The linked sale and expense must use the same branch.', code: 'fee_sale_branch_mismatch' } as const
+const FEE_TYPE_ARCHIVED_BODY = { error: 'That expense type is archived. Choose an active type.', code: 'fee_type_archived' } as const
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -84,8 +85,8 @@ const FEE_AUDIT_COLUMNS = [
   'fee_type', 'label', 'amount_usd', 'amount_khr', 'fee_date',
   'sale_id', 'branch_id', 'delivery_contact_id', 'notes',
 ] as const
-app.use('*', requireAuth)
-app.use('*', async (c, next) => {
+// The gate every expense route sits behind. routes/feesCatalog.ts (mounted ahead of this file) applies the same function.
+export async function feesAccess(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: () => Promise<void>) {
   const user = c.get('user')
   // Tier-aware, not the plain hasPermission() boolean check: 'fees' is a
   // REVIEW_TIER_KEYS section (permissions.ts), and a Review Required user
@@ -98,7 +99,9 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'Forbidden' }, 403)
   }
   await next()
-})
+}
+app.use('*', requireAuth)
+app.use('*', feesAccess)
 
 // 'expense' joined with the old-system expense migration (Part 379): 4,240
 // historical entries carry it, and manual entry offers it. Without it here,
@@ -157,6 +160,59 @@ function feeMoney(body: Record<string, unknown>, currency: 'usd' | 'khr', versio
 function normalizeFeeType(value: unknown): FeeType {
   const normalized = String(value || '').trim().toLowerCase()
   return FEE_TYPES.includes(normalized) ? (normalized as FeeType) : 'other'
+}
+
+// The catalog key of a label or a type name: trimmed, single-spaced, lower-cased in ASCII only. SQLite's lower() folds
+// ASCII alone, so this key is byte-equal to `lower(trim(column))` for any text, which is how the labels already
+// match expense rows.
+export function feeNameKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
+export const FEE_TYPE_NAME_MAX_CHARS = 40
+
+/** A custom type name: one to FEE_TYPE_NAME_MAX_CHARS characters, single-spaced, no control characters. */
+export function normalizeFeeTypeName(value: unknown): string | null {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+  // eslint-disable-next-line no-control-regex
+  if (!text || /[\u0000-\u001f\u007f]/.test(text)) return null
+  return [...text].length > FEE_TYPE_NAME_MAX_CHARS ? null : text
+}
+
+type CatalogTypeRow = { name: string; archived_at: string | null }
+
+/** The custom type row a name belongs to, or null (also null when the catalog table is not migrated yet). */
+export async function findCustomFeeType(db: ReturnType<typeof getDb>, name: string): Promise<CatalogTypeRow | null> {
+  try {
+    return (await db.prepare('SELECT name, archived_at FROM fee_types WHERE name_key = @key').get<CatalogTypeRow>({ key: feeNameKey(name) })) ?? null
+  } catch {
+    return null
+  }
+}
+
+export type FeeTypeResolution = { ok: true; type: FeeType } | { ok: false; code: 'fee_type_archived' }
+
+/**
+ * The type an expense is saved with. A built-in name saves as itself; an ACTIVE custom type saves under its catalog
+ * spelling; an archived custom type is refused for a new choice but kept when the expense already has it (history stays
+ * editable); anything else is 'other', as before.
+ */
+export async function resolveFeeType(db: ReturnType<typeof getDb>, value: unknown, current: string | null = null): Promise<FeeTypeResolution> {
+  const builtin = normalizeFeeType(value)
+  const text = String(value ?? '').trim()
+  if (builtin !== 'other' || !text || text.toLowerCase() === 'other') return { ok: true, type: builtin }
+  const custom = await findCustomFeeType(db, text)
+  if (!custom) return { ok: true, type: 'other' }
+  if (!custom.archived_at || (current != null && feeNameKey(current) === feeNameKey(custom.name))) return { ok: true, type: custom.name }
+  return { ok: false, code: 'fee_type_archived' }
+}
+
+/** The type a list filter names: built-in, any custom spelling (archived included, so its expenses stay findable), else 'other'. */
+export async function resolveFeeTypeFilter(db: ReturnType<typeof getDb>, value: unknown): Promise<FeeType> {
+  const builtin = normalizeFeeType(value)
+  const text = String(value ?? '').trim()
+  if (builtin !== 'other' || !text || text.toLowerCase() === 'other') return builtin
+  return (await findCustomFeeType(db, text))?.name ?? 'other'
 }
 
 function normalizeText(value: unknown, maxLength = 500): string | null {
@@ -318,17 +374,22 @@ export function feeRangePredicate(query: Record<string, string>): { sql: string;
   return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
 }
 
-// GET /api/fees -- list, newest fee_date first, with optional filters.
-// Search matches label/notes/fee_type, same "one field, several columns"
-// pattern sales.ts's list endpoint already uses rather than a bespoke
-// per-page search implementation.
-app.get('/', async (c) => {
-  const db = getDb(c.env)
-  const query = c.req.query()
-  const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId, limit: limitParam, offset: offsetParam } = query
+export type FeeListPage = {
+  fees: Array<Record<string, unknown>>
+  total: number
+  summary: Array<{ fee_type: string; count: number; total_usd: number; total_khr: number }>
+}
 
-  let range: ReturnType<typeof feeRangePredicate>
-  try { range = feeRangePredicate(query) } catch (error) { return c.json({ error: (error as Error).message }, 400) }
+/**
+ * The filtered expense rows (newest fee_date first, then id; `limit` and `offset` as given) and the filtered totals.
+ * Search matches label/notes/fee_type, the same "one field, several columns" pattern sales.ts's list endpoint already uses
+ * rather than a bespoke per-page search implementation. Throws RangeError for a bad date parameter.
+ * routes/feesCatalog.ts calls this for the expense half of the merged list, so the two lists filter identically.
+ */
+export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number): Promise<FeeListPage> {
+  const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId } = query
+
+  const range = feeRangePredicate(query)
   const conditions: string[] = [range.sql]
   const params: Record<string, unknown> = { ...range.params }
 
@@ -338,7 +399,7 @@ app.get('/', async (c) => {
   }
   if (feeType && feeType.trim() && feeType !== 'all') {
     conditions.push('f.fee_type = @feeType')
-    params.feeType = normalizeFeeType(feeType)
+    params.feeType = await resolveFeeTypeFilter(db, feeType)
   }
   if (saleId && saleId.trim()) {
     conditions.push('f.sale_id = @saleId')
@@ -359,8 +420,6 @@ app.get('/', async (c) => {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-  const limit = Math.min(Math.max(toNumber(limitParam, 100), 1), 500)
-  const offset = Math.max(toNumber(offsetParam, 0), 0)
 
   const rows = await db.prepare(`
     SELECT f.*, s.receipt_number AS sale_receipt_number, ${FEE_BRANCH_NAME_SQL} AS branch_name,
@@ -372,24 +431,38 @@ app.get('/', async (c) => {
     ${where}
     ORDER BY f.fee_date DESC, f.id DESC
     LIMIT @limit OFFSET @offset
-  `).all({ ...params, limit, offset })
+  `).all<Record<string, unknown>>({ ...params, limit, offset })
 
   const summaryRows = await db.prepare(`
     SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as total_khr
     FROM fees f
     ${where}
     GROUP BY fee_type
-  `).all<{ count: number }>(params)
+  `).all<{ fee_type: string; count: number; total_usd: number; total_khr: number }>(params)
   // Every filtered row falls in exactly one fee_type group (NULL included),
   // so the grouped counts add up to COUNT(*) without a second scan.
   const total = (summaryRows || []).reduce((sum, row) => sum + (Number(row.count) || 0), 0)
+  return { fees: rows || [], total, summary: summaryRows || [] }
+}
 
+// GET /api/fees -- list, newest fee_date first, with optional filters.
+app.get('/', async (c) => {
+  const query = c.req.query()
+  const limit = Math.min(Math.max(toNumber(query.limit, 100), 1), 500)
+  const offset = Math.max(toNumber(query.offset, 0), 0)
+  let page: FeeListPage
+  try {
+    page = await queryFeeList(getDb(c.env), query, limit, offset)
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   return c.json({
-    fees: rows || [],
-    total,
+    fees: page.fees,
+    total: page.total,
     limit,
     offset,
-    summary: summaryRows || [],
+    summary: page.summary,
   })
 })
 
@@ -439,110 +512,6 @@ app.get('/report', async (c) => {
   })
 })
 
-// GET /api/fees/labels -- every distinct saved label with its usage count
-// and dominant fee type, most-used first. Feeds FeeForm's label suggestions
-// so a recurring expense ("Grab", "ទឹកភ្លើង") is picked, not retyped -- and
-// the dominant type lets the form auto-select the right fee type when a
-// known label is chosen (six real rows were saved as 'expense' while
-// carrying delivery-company labels before this existed). Registered before
-// /:id so 'labels' is not eaten by the id param route.
-app.get('/labels', async (c) => {
-  const db = getDb(c.env)
-  const rows = await db.prepare(`
-    SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses
-    FROM fees f
-    WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
-    GROUP BY lower(trim(f.label)), f.fee_type
-    ORDER BY lower(trim(f.label)), uses DESC, f.fee_type
-  `).all<{ label: string; uses: number; fee_type: string }>()
-  const catalog = new Map<string, { label: string; uses: number; type_counts: Array<{ fee_type: FeeType; uses: number }> }>()
-  for (const row of rows || []) {
-    const label = String(row.label || '').trim()
-    if (!label) continue
-    const key = label.toLowerCase()
-    const entry = catalog.get(key) || { label, uses: 0, type_counts: [] }
-    const uses = Number(row.uses) || 0
-    entry.uses += uses
-    entry.type_counts.push({ fee_type: normalizeFeeType(row.fee_type), uses })
-    catalog.set(key, entry)
-  }
-  return c.json({
-    labels: [...catalog.values()]
-      .map((entry) => ({
-        ...entry,
-        fee_type: [...entry.type_counts].sort((a, b) => b.uses - a.uses || a.fee_type.localeCompare(b.fee_type))[0]?.fee_type || 'other',
-      }))
-      .sort((a, b) => b.uses - a.uses || a.label.localeCompare(b.label)),
-  })
-})
-
-app.get('/labels/impact', async (c) => {
-  const from = normalizeFeeLabel(c.req.query('from'))
-  const to = normalizeFeeLabel(c.req.query('to'))
-  if (!from || !to) return c.json({ error: 'Source and target labels are required' }, 400)
-  const db = getDb(c.env)
-  const rows = Number((await db.prepare("SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @from").get<{ n: number }>({ from: from.toLowerCase() }))?.n || 0)
-  const target = Number((await db.prepare("SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @to").get<{ n: number }>({ to: to.toLowerCase() }))?.n || 0)
-  const typeCounts = await db.prepare(`
-    SELECT fee_type, COUNT(*) AS uses FROM fees
-    WHERE lower(trim(COALESCE(label,''))) = @from
-    GROUP BY fee_type ORDER BY uses DESC, fee_type
-  `).all<{ fee_type: string; uses: number }>({ from: from.toLowerCase() })
-  return c.json({ from, to, linked_records: rows, target_exists: target > 0, type_counts: (typeCounts || []).map((row) => ({ fee_type: normalizeFeeType(row.fee_type), uses: Number(row.uses) || 0 })), live_snapshots: { fees: rows }, historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
-})
-
-app.post('/labels/replace', async (c) => {
-  const user = c.get('user')
-  if (getActionTier(user, 'fees', 'edit') === 'none') return c.json({ error: 'No permission' }, 403)
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const from = normalizeFeeLabel(body.from)
-  const to = normalizeFeeLabel(body.to)
-  if (!from || !to) return c.json({ error: 'Source and target labels are required' }, 400)
-  const result = await getDb(c.env).prepare(`
-    UPDATE fees SET label = @to, updated_at = CURRENT_TIMESTAMP
-    WHERE lower(trim(COALESCE(label,''))) = @from
-  `).run({ from: from.toLowerCase(), to })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'fee_label', null, { from, to, changed: result.changes })
-  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_replace', from, to }))
-  return c.json({ success: true, changed: result.changes })
-})
-
-// Reclassify one exact saved label through the same catalog that feeds the
-// Expense form and label manager. This deliberately does not contain a
-// hardcoded carrier list: Grab, J&T, Capital Express, Virak Buntam and every
-// evidenced spelling remain source labels. Operators can preview and assign
-// any one of them to Delivery (or another existing expense type) here, and
-// every live exact match follows while audit/action history stays immutable.
-app.get('/labels/type-impact', async (c) => {
-  const label = normalizeFeeLabel(c.req.query('label'))
-  if (!label) return c.json({ error: 'Label is required' }, 400)
-  const rows = await getDb(c.env).prepare(`
-    SELECT fee_type, COUNT(*) AS uses FROM fees
-    WHERE lower(trim(COALESCE(label,''))) = @label
-    GROUP BY fee_type ORDER BY uses DESC, fee_type
-  `).all<{ fee_type: string; uses: number }>({ label: label.toLowerCase() })
-  const typeCounts = (rows || []).map((row) => ({ fee_type: normalizeFeeType(row.fee_type), uses: Number(row.uses) || 0 }))
-  return c.json({ label, linked_records: typeCounts.reduce((sum, row) => sum + row.uses, 0), type_counts: typeCounts, historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
-})
-
-app.post('/labels/classify', async (c) => {
-  const user = c.get('user')
-  if (getActionTier(user, 'fees', 'edit') === 'none') return c.json({ error: 'No permission' }, 403)
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const label = normalizeFeeLabel(body.label)
-  const requestedType = String(body.fee_type ?? body.feeType ?? '').trim().toLowerCase()
-  if (!label) return c.json({ error: 'Label is required' }, 400)
-  if (!FEE_TYPES.includes(requestedType)) return c.json({ error: 'Invalid expense type' }, 400)
-  const feeType = requestedType as FeeType
-  const result = await getDb(c.env).prepare(`
-    UPDATE fees SET fee_type = @feeType, updated_at = CURRENT_TIMESTAMP
-    WHERE lower(trim(COALESCE(label,''))) = @label AND fee_type <> @feeType
-  `).run({ label: label.toLowerCase(), feeType })
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'classify', 'fee_label', null, { label, fee_type: feeType, changed: result.changes })
-  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label, fee_type: feeType }))
-  return c.json({ success: true, changed: result.changes, label, fee_type: feeType })
-})
-
 // GET /api/fees/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
@@ -583,7 +552,9 @@ app.post('/', async (c) => {
   }
   if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
 
-  const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
+  const typeResolution = await resolveFeeType(db, body.fee_type ?? body.feeType)
+  if (!typeResolution.ok) return c.json(FEE_TYPE_ARCHIVED_BODY, 400)
+  const feeType = typeResolution.type
   const label = normalizeFeeLabel(body.label)
   let version: 1 | undefined, amountUsd: number, amountKhr: number
   try {
@@ -753,7 +724,12 @@ app.put('/:id', async (c) => {
     throw err
   }
 
-  const feeType = body.fee_type !== undefined || body.feeType !== undefined ? normalizeFeeType(body.fee_type ?? body.feeType) : existing.fee_type
+  let feeType: FeeType = existing.fee_type
+  if (body.fee_type !== undefined || body.feeType !== undefined) {
+    const typeResolution = await resolveFeeType(db, body.fee_type ?? body.feeType, existing.fee_type)
+    if (!typeResolution.ok) return c.json(FEE_TYPE_ARCHIVED_BODY, 400)
+    feeType = typeResolution.type
+  }
   const label = body.label !== undefined ? normalizeFeeLabel(body.label) : existing.label
   let amountUsd: number, amountKhr: number
   try {

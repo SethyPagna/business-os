@@ -5,8 +5,26 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "690b16cebb11",
-   "SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses FROM fees f WHERE f.label IS NOT "
+   "08186c9b10c6",
+   "B| SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses FROM fees f WHERE f.label IS N"
+  ],
+  [
+   "4d0573c1dc7a",
+   "B| SELECT l.id, l.name, l.name_key, l.fee_type, l.archived_at, (SELECT t.archived_at FROM fee_types t WHERE t."
+  ]
+ ],
+ "fees-labels-with-archived-manager": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "08186c9b10c6",
+   "B| SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses FROM fees f WHERE f.label IS N"
+  ],
+  [
+   "4d0573c1dc7a",
+   "B| SELECT l.id, l.name, l.name_key, l.fee_type, l.archived_at, (SELECT t.archived_at FROM fee_types t WHERE t."
   ]
  ]
 }

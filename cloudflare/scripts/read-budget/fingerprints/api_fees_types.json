@@ -1,0 +1,26 @@
+{
+ "fees-types": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "bdefb7189f58",
+   "SELECT id, name, name_key, archived_at FROM fee_types ORDER BY id"
+  ]
+ ],
+ "fees-types-with-uses-and-archived-manager": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "bdefb7189f58",
+   "SELECT id, name, name_key, archived_at FROM fee_types ORDER BY id"
+  ],
+  [
+   "2b77715a16a8",
+   "SELECT fee_type, COUNT(*) AS uses FROM fees GROUP BY fee_type"
+  ]
+ ]
+}

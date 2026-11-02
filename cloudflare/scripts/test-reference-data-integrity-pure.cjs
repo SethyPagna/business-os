@@ -62,7 +62,8 @@ check('payment method replacement previews then updates exact summaries/details 
 
 check('inventory reasons and expense labels use preview + exact normalized replacement', () => {
   const inventory = read('src/routes/inventory.ts')
-  const fees = read('src/routes/fees.ts')
+  // The label routes live in routes/feesCatalog.ts (6.0.1053); routes/fees.ts keeps the expenses themselves.
+  const fees = read('src/routes/feesCatalog.ts')
   assert.match(inventory, /reasons\/impact/)
   assert.match(inventory, /reasons\/replace/)
   assert.match(inventory, /lower\(trim\(COALESCE\(reason,''\)\)\) = @from/)

@@ -43,7 +43,7 @@ export const AUDIT_RETENTION_KEPT_STOCK_ENTITIES = [
   'inventory_reason', 'product_batch', 'product_batches', 'branch_stock_integrity', 'branch_cutover',
 ] as const
 export const AUDIT_RETENTION_KEPT_PERMISSION_ENTITIES = ['role', 'roles'] as const
-export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label'] as const
+export const AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES = ['fee', 'fee_label', 'fee_type'] as const
 export const AUDIT_RETENTION_KEPT_CASH_ENTITIES = ['shift_session'] as const
 // Entities kept only for some actions. An account row is kept when it creates or changes the account (role,
 // permissions, active flag); its sign-ins, password resets and device approvals follow the retention setting.

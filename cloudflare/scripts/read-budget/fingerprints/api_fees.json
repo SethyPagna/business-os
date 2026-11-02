@@ -62,5 +62,27 @@
    "e64bb7daf2f1",
    "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ]
+ ],
+ "fees-list-with-sale-delivery-rows-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9889fd196055",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "d28bf616a82c",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "64392c392419",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "95121f3ee7aa",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
  ]
 }

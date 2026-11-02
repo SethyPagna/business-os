@@ -36,12 +36,14 @@ import {
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
 import { cacheInvalidate, isWriteConflictError } from '../../api/http.ts'
 import {
+  BUILTIN_FEE_TYPES,
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
   feeDeleteStaleKind,
   getFee as getFeeRequest,
   getAllFeesForExport,
   getFees as getFeesRequest,
+  getFeeTypes,
   getFeesReport,
   feeRangeParams,
   updateFee as updateFeeRequest,
@@ -49,8 +51,11 @@ import {
   type FeePayload,
   type FeeRecord,
   type FeeType,
+  type FeeTypeEntry,
 } from '../../api/feesTransport.ts'
-import FeeForm, { FEE_TYPE_OPTIONS, feeFormDraftBaseKey, feeFormWorkKey } from './FeeForm.tsx'
+import FeeForm, { feeFormDraftBaseKey, feeFormWorkKey, feeTypeDisplayName } from './FeeForm.tsx'
+import EntityLink from '../shared/EntityLink.tsx'
+import { catalogRefusalText } from './expenseCatalogErrors.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
@@ -94,6 +99,7 @@ interface FeesAppContextValue {
   usdToKhr: (value: unknown) => number
   displayCurrency: string
   user?: { id?: number | string | null } | null
+  navigateTo?: (pageId: string, anchor?: string) => void
 }
 
 interface FeesSyncContextValue {
@@ -196,7 +202,9 @@ export function feeTypeToneClass(type: string): string {
 
 const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SIZE, offset: 0, summary: [] }
 
-export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: string) => string): Array<Record<string, unknown>> {
+// Rows that carry a courier cost recorded on a sale add a `source` column (every row then says where it comes from); a list of stored expenses only keeps the original columns.
+export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: string) => string, sourceLabels?: { recorded: string; sale: string }): Array<Record<string, unknown>> {
+  const withSource = Boolean(sourceLabels) && rows.some((fee) => fee.kind === 'sale_delivery')
   return rows.map((fee) => ({
     date: fee.fee_date || '',
     type: feeTypeLabel(fee.fee_type),
@@ -208,11 +216,15 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
     notes: fee.notes || '',
     created_by: fee.created_by_name || '',
     created_at: fee.created_at || '',
+    ...(withSource ? { source: fee.kind === 'sale_delivery' ? sourceLabels!.sale : sourceLabels!.recorded } : {}),
   }))
 }
 
+// An expense id and a sale id are different numbers: a list row is keyed by both.
+export const feeRowKey = (fee: Pick<FeeRecord, 'id' | 'kind'>): string => `${fee.kind === 'sale_delivery' ? 's' : 'e'}${fee.id}`
+
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
-  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user } = useApp()
+  const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user, navigateTo } = useApp()
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
@@ -234,6 +246,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const canEditFee = can('fees', 'edit')
   const canDeleteFee = can('fees', 'delete')
   const canExportFee = can('fees', 'export')
+  const canViewSales = can('sales', 'view')
   const canEditFeeRef = useRef(canEditFee)
   const canDeleteFeeRef = useRef(canDeleteFee)
   const canExportFeeRef = useRef(canExportFee)
@@ -291,6 +304,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       const response = await withLoaderTimeout(
         () => getFeesRequest({
           search: search.trim() || undefined,
+          source: 'all',
           fee_type: typeFilter !== 'all' ? typeFilter : undefined,
           ...feeRangeParams(stripRange),
           branch_id: branchFilter || undefined,
@@ -350,6 +364,18 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     return () => { cancelled = true }
   }, [])
 
+  // The expense types (built-in and custom, archived ones too: old expenses still carry them) for the Type filter. A failure keeps the built-in five.
+  const [feeTypes, setFeeTypes] = useState<FeeTypeEntry[]>([])
+  const loadFeeTypes = useCallback(async (): Promise<void> => {
+    try {
+      const response = await getFeeTypes({ includeArchived: true })
+      if (Array.isArray(response?.types)) setFeeTypes(response.types)
+    } catch {
+      setFeeTypes([])
+    }
+  }, [])
+  useEffect(() => { if (isActive) void loadFeeTypes() }, [isActive, loadFeeTypes])
+
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     if (syncChannel.channel === 'fees') void load(true)
@@ -363,6 +389,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     days?: Array<{ date?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_category?: Array<{ label?: string; fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
+    // The courier cost recorded on sales in the same range; null when the caller may not read it, absent while the Worker's switch is off.
+    sale_delivery?: { count?: number; usd?: number; khr?: number } | null
   }
   const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
@@ -375,6 +403,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       const result = await getFeesReport({
         ...feeRangeParams(stripRange),
         ...(branchFilter ? { branchId: branchFilter } : {}),
+        include: 'sales',
       })
       if (stripRequestRef.current !== requestId) return
       setStripData((result || {}) as FeesStripPayload)
@@ -399,20 +428,25 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     const count = Number(totals.count) || 0
     const amountUsd = Number(totals.amount_usd) || 0
     const amountKhr = Number(totals.amount_khr) || 0
+    // The courier cost recorded on sales rides with the expenses (the same figure the Reports expense total adds).
+    const sale = stripData?.sale_delivery || null
+    const saleCount = Number(sale?.count) || 0
+    const saleUsd = Number(sale?.usd) || 0
+    const saleKhr = Number(sale?.khr) || 0
+    const saleLine = sale ? [{ label: tr('expense_sale_delivery_stat', 'Courier cost on sales'), value: `${saleCount} · ${fmtMoney(saleUsd, saleKhr)}` }] : []
     return [
       {
         key: 'fees',
         label: tr('fees', 'Expenses'),
-        value: String(count),
+        value: String(count + saleCount),
         hint: tr('stats_fees_hint', 'Expense records dated inside the range. The breakdown shows how many of each type.'),
-        details: byType.map((row) => {
+        details: [...byType.map((row) => {
           const type = String(row.fee_type || '')
-          const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === type)
           return {
-            label: option ? (t(option.labelKey) || option.fallback) : (type || '—'),
+            label: type ? feeTypeDisplayName(type, t) : '—',
             value: `${Number(row.count) || 0} · ${fmtMoney(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
           }
-        }),
+        }), ...saleLine],
       },
       {
         key: 'categories',
@@ -427,16 +461,18 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       {
         key: 'total',
         label: tr('total', 'Total'),
-        value: fmtMoney(amountUsd, amountKhr),
+        value: fmtMoney(Math.round((amountUsd + saleUsd) * 100) / 100, amountKhr + saleKhr),
         tone: 'accent',
-        hint: tr('stats_fees_total_hint', 'Sum of expense amounts in the range. Expenses are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most spend.'),
-        details: days.slice(0, 8).map((day) => {
+        hint: sale
+          ? tr('stats_fees_total_with_sales_hint', 'Recorded expenses plus the courier cost recorded on sales in the range. Cost of goods is not included. The breakdown lists the days with the most spend.')
+          : tr('stats_fees_total_hint', 'Sum of expense amounts in the range. Expenses are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most spend.'),
+        details: [...(sale ? [{ label: tr('expense_recorded_stat', 'Recorded expenses'), value: fmtMoney(amountUsd, amountKhr) }, ...saleLine] : []), ...days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
             label: m ? `${m[3]}/${m[2]}/${m[1]}` : String(day.date || ''),
             value: `${Number(day.count) || 0} · ${fmtMoney(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
           }
-        }),
+        })],
       },
     ]
   }, [fmtMoney, stripData, t, tr])
@@ -445,13 +481,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
-  const fees = result.fees || []
+  // A courier cost on a sale is named by its courier; with no courier it says what it is. Its id is the SALE's, so it is negated here:
+  // no expense id (and no pending-review tag, which looks rows up by expense id) can ever match it. The sale itself is `sale_id`.
+  const fees = useMemo(() => (result.fees || []).map((row) => (
+    row.kind === 'sale_delivery' ? { ...row, id: -Math.abs(row.id), label: row.label || tr('expense_courier_cost', 'Courier cost') } : row
+  )), [result.fees, tr])
   const feeDayGroups = useMemo(() => groupFeesByDate(fees), [fees])
 
-  const feeTypeLabel = useCallback((type: string): string => {
-    const option = FEE_TYPE_OPTIONS.find((opt) => opt.value === type)
-    return option ? (t(option.labelKey) || option.fallback) : type
-  }, [t])
+  const feeTypeLabel = useCallback((type: string): string => feeTypeDisplayName(type, t), [t])
 
   const openFeeExport = useCallback(async (
     scope: 'visible' | 'filtered' | 'all',
@@ -462,11 +499,12 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       const sourceRows = scope === 'visible'
         ? fees
         : await getAllFeesForExport(scope === 'filtered' ? {
+          source: 'all',
           search: search.trim() || undefined,
           fee_type: typeFilter !== 'all' ? typeFilter : undefined,
           ...feeRangeParams(stripRange),
           branch_id: branchFilter || undefined,
-        } : {})
+        } : { source: 'all' })
       // A fetch begun while allowed must not open an export result after the
       // permission is revoked. The live ref also protects a stale menu callback.
       if (!canExportFeeRef.current) return
@@ -475,7 +513,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         return
       }
       setExportDialog({
-        rows: buildFeeExportRows(sourceRows, feeTypeLabel),
+        rows: buildFeeExportRows(sourceRows, feeTypeLabel, { recorded: tr('expense', 'Expense'), sale: tr('expense_courier_cost', 'Courier cost') }),
         baseName: scope === 'all' ? 'expenses-all' : scope === 'filtered' ? 'expenses-filtered' : 'expenses-visible',
       })
     } catch (error) {
@@ -497,6 +535,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const openLabelManager = useCallback(() => {
     if (canEditFeeRef.current) setShowLabelManager(true)
   }, [])
+  // A label or type changed in the manager: the list, the totals and the Type filter follow.
+  const refreshAfterCatalogChange = useCallback(async (): Promise<void> => {
+    await Promise.all([load(true), loadStatsStrip(), loadFeeTypes()])
+  }, [load, loadFeeTypes, loadStatsStrip])
   const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null); setFeeConflictId(null) }
 
   const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
@@ -603,7 +645,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         if (selected && isWriteConflictError(error)) setFeeConflictId(selected.id)
         await load(true)
       } else {
-        notify(error instanceof Error ? error.message : String(error || ''), 'error')
+        notify(catalogRefusalText(error, tr) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
       }
       throw error
     }
@@ -710,17 +752,25 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     [typeFilter, branchFilter],
   )
 
+  // The five built-in types, then the custom ones (archived included), then a filter value the list no longer knows.
+  const typeFilterValues = useMemo(() => {
+    const values: string[] = [...BUILTIN_FEE_TYPES]
+    for (const entry of feeTypes) if (!entry.builtin && !values.some((value) => value.toLowerCase() === entry.value.toLowerCase())) values.push(entry.value)
+    if (typeFilter !== 'all' && !values.includes(typeFilter)) values.push(typeFilter)
+    return values
+  }, [feeTypes, typeFilter])
+
   const filterSections = useMemo(() => ([
     {
       id: 'type',
       label: tr('fee_type', 'Type'),
       options: [
         { id: 'all', label: tr('all_types', 'All Types'), active: typeFilter === 'all', onClick: () => setTypeFilter('all') },
-        ...FEE_TYPE_OPTIONS.map((opt): FilterOption => ({
-          id: opt.value,
-          label: t(opt.labelKey) || opt.fallback,
-          active: typeFilter === opt.value,
-          onClick: () => setTypeFilter(opt.value),
+        ...typeFilterValues.map((value): FilterOption => ({
+          id: value,
+          label: feeTypeDisplayName(value, t),
+          active: typeFilter === value,
+          onClick: () => setTypeFilter(value),
         })),
       ],
     },
@@ -742,7 +792,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         })),
       ],
     }] : []),
-  ]), [tr, t, typeFilter, branchFilter, branches])
+  ]), [tr, t, typeFilter, typeFilterValues, branchFilter, branches])
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
@@ -908,10 +958,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                     <td colSpan={5} className="!py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200">{formatFeeDate(group.date)}</td>
                   </tr>
                   {group.rows.map((fee) => (
-                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openDetail(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(fee) } }}>
+                  <tr key={feeRowKey(fee)} data-clickable="true" tabIndex={0} onClick={() => openDetail(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(fee) } }}>
                     <td className="relative whitespace-nowrap text-slate-500 dark:text-slate-400"><PendingReviewTag section="fees" entityType="fee" ids={[fee.id]} className="-left-px top-1" />{fmtClock24(fee.created_at)}</td>
                     <td className="whitespace-nowrap">
-                      <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`} title={fee.kind === 'sale_delivery' ? tr('expense_from_sale', 'From a sale') : undefined}>
+                        {fee.kind === 'sale_delivery' ? <Receipt className="h-3 w-3" aria-label={tr('expense_from_sale', 'From a sale')} /> : null}
                         {feeTypeLabel(fee.fee_type)}
                       </span>
                     </td>
@@ -955,11 +1006,12 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   {formatFeeDate(group.date)}
                 </div>
                 {group.rows.map((fee) => (
-              <button type="button" key={fee.id} data-expense-card="" onClick={() => openDetail(fee)} className="relative block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
+              <button type="button" key={feeRowKey(fee)} data-expense-card="" onClick={() => openDetail(fee)} className="relative block w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
                 <PendingReviewTag section="fees" entityType="fee" ids={[fee.id]} className="left-0 top-1" />
                 <div data-expense-line="primary" className="flex min-w-0 items-center gap-1.5">
                   <span className="shrink-0 text-xs text-slate-400">{fmtClock24(fee.created_at)}</span>
-                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`} title={fee.kind === 'sale_delivery' ? tr('expense_from_sale', 'From a sale') : undefined}>
+                    {fee.kind === 'sale_delivery' ? <Receipt className="h-3 w-3" aria-label={tr('expense_from_sale', 'From a sale')} /> : null}
                     {feeTypeLabel(fee.fee_type)}
                   </span>
                   <span className="min-w-0 flex-1 detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
@@ -994,7 +1046,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         </>
       )}
 
-      {modal === 'detail' && selected ? (
+      {modal === 'detail' && selected && selected.kind !== 'sale_delivery' ? (
         <Modal
           title={tr('details', 'Details')}
           onClose={closeModal}
@@ -1070,11 +1122,49 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             conflicted={!!selected && feeConflictId === selected.id}
             onReloadLatest={() => { void reloadConflictedFee() }}
             actorId={user?.id}
-            labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
+            labelSuggestions={[...new Set(fees.filter((row) => row.kind !== 'sale_delivery').map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
             onSave={handleSave}
             onClose={closeModal}
             onInteractionLockChange={setFeeFormLocked}
           />
+        </Modal>
+      ) : null}
+
+      {/* A courier cost recorded on a sale opens its own read-only surface: nothing there can be edited or deleted. */}
+      {selected?.kind === 'sale_delivery' && modal === 'detail' ? (
+        <Modal title={tr('details', 'Details')} onClose={closeModal} size="sm" unsavedChanges="read-only">
+          <div data-expense-sale-detail="" className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(selected.fee_type)}`}>
+                      <Receipt className="h-3 w-3" aria-hidden="true" />
+                      {tr('expense_from_sale', 'From a sale')}
+                    </span>
+                    <span className="min-w-0 break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{selected.label || tr('expense_courier_cost', 'Courier cost')}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatFeeDate(selected.fee_date)}</p>
+                </div>
+                <span className="shrink-0 text-base font-bold text-emerald-700 dark:text-emerald-300">
+                  {fmtMoney(Number(selected.amount_usd) || 0, Number(selected.amount_khr) || 0)}
+                </span>
+              </div>
+            </div>
+            <DetailRowGroup>
+              <DetailRow label={tr('receipt', 'Receipt')} mono valueClassName="break-all" value={expenseSaleLabel(selected.sale_receipt_number, selected.sale_id, tr('sale', 'Sale'))} />
+              <DetailRow label={tr('courier', 'Courier')} value={selected.delivery_contact_name} />
+              <DetailRow label={tr('branch', 'Branch')} value={selected.branch_name} />
+            </DetailRowGroup>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{tr('expense_sale_delivery_note', 'This is the courier cost recorded on the sale. Change it on the sale.')}</p>
+            {canViewSales && navigateTo ? (
+              <div className="flex justify-end border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+                <EntityLink page="sales" anchor="hub:sales:sales" search={selected.sale_receipt_number || String(selected.sale_id ?? '')} navigate={navigateTo}>
+                  {tr('open_sale', 'Open sale')}
+                </EntityLink>
+              </div>
+            ) : null}
+          </div>
         </Modal>
       ) : null}
 
@@ -1083,7 +1173,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           <ExpenseLabelManagerModal
             canEdit={() => canEditFeeRef.current}
             onClose={() => setShowLabelManager(false)}
-            onChanged={() => load(true)}
+            onChanged={refreshAfterCatalogChange}
             notify={notify}
             t={t}
           />

@@ -19,6 +19,8 @@ export type ReasonListItem = {
   label: string
   /** Small second line under the label (usage count, mixed categories). */
   meta?: ReactNode
+  /** Drawn faded: an entry kept for history but no longer offered (an archived label). */
+  muted?: boolean
 }
 
 type Translate = (key: string, fallback: string) => string
@@ -36,6 +38,8 @@ export type ReasonListEditorProps<T extends ReasonListItem> = {
   addPlaceholder?: string
   /** Resolves true when the rename landed, so the row leaves edit mode. */
   onRename?: (item: T, to: string) => boolean | void | Promise<boolean | void>
+  /** Hides the rename control on rows that cannot be renamed (a built-in expense type). Every row by default. */
+  canRename?: (item: T) => boolean
   onDelete?: (item: T) => void | Promise<void>
   /** The confirm shown before onDelete; defaults to a Delete review of the label. */
   deleteConfirm?: (item: T) => ConfirmRequest
@@ -100,7 +104,7 @@ export function useAskConfirm(tr: Translate) {
 }
 export default function ReasonListEditor<T extends ReasonListItem>({
   items, tr, loading = false, busy = false, draft = '', onDraftChange, onAdd, addPlaceholder,
-  onRename, onDelete, deleteConfirm, renderExtra, emptyText, onDirtyChange,
+  onRename, canRename, onDelete, deleteConfirm, renderExtra, emptyText, onDirtyChange,
 }: ReasonListEditorProps<T>) {
   const { askToConfirm, confirmDialog } = useAskConfirm(tr)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -166,7 +170,7 @@ export default function ReasonListEditor<T extends ReasonListItem>({
         {loading ? (
           <div className="py-6 text-center text-sm text-slate-400">{tr('loading', 'Loading…')}</div>
         ) : items.length ? items.map((item) => (
-          <div key={item.id} data-reason-row="" className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 py-1 pl-2.5 pr-1 dark:border-slate-700">
+          <div key={item.id} data-reason-row="" className={`flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 py-1 pl-2.5 pr-1 dark:border-slate-700${item.muted ? ' opacity-60' : ''}`}>
             {editingId === item.id ? (
               <>
                 <input
@@ -195,7 +199,7 @@ export default function ReasonListEditor<T extends ReasonListItem>({
                   {item.meta ? <div className="detail-scroll-text text-[11px] leading-relaxed text-slate-400">{item.meta}</div> : null}
                 </div>
                 {renderExtra?.(item)}
-                {onRename ? (
+                {onRename && (canRename ? canRename(item) : true) ? (
                   <button type="button" className={`${iconButton} text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950`} onClick={() => startRename(item)} disabled={busy || editingId !== null} aria-label={`${renameLabel} ${item.label}`} title={renameLabel}>
                     <Pencil className="h-3.5 w-3.5" />
                   </button>

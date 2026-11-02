@@ -19,13 +19,18 @@ import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
 import {
+  FEE_TYPE_NAME_MAX_CHARS,
   discardPendingFeeCreate,
+  feeTypeChoices,
+  feeTypeIsChoosable,
   getFeeLabels,
+  getFeeTypes,
   getPendingFeeCreate,
   type FeeCreateBody,
   type FeeLabelSuggestion,
   type FeeRecord,
   type FeeType,
+  type FeeTypeEntry,
   type PendingFeeCreate,
 } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -78,6 +83,12 @@ export const FEE_TYPE_OPTIONS: { value: FeeType; labelKey: string; fallback: str
   { value: 'expense', labelKey: 'fee_type_expense', fallback: 'Expense' },
   { value: 'other', labelKey: 'fee_type_other', fallback: 'Other' },
 ]
+
+/** A built-in type reads in the operator's language; a custom type is shown exactly as it was named. */
+export function feeTypeDisplayName(value: string, t: (key: string) => string | undefined): string {
+  const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === value)
+  return option ? (t(option.labelKey) || option.fallback) : value
+}
 
 export type FeeBranchOption = {
   id: number | string
@@ -218,9 +229,9 @@ export function feeFormDraftBaseKey(feeId?: string | number | null): string {
 
 function restoreFeeForm(base: FeeFormState, draft?: Partial<FeeFormState> | null): FeeFormState {
   if (!draft || typeof draft !== 'object') return base
-  const feeType = FEE_TYPE_OPTIONS.some((option) => option.value === draft.fee_type)
-    ? draft.fee_type as FeeType
-    : base.fee_type
+  // A custom type is any short name an administrator added; the Worker decides on save whether it is still a choice.
+  const draftType = typeof draft.fee_type === 'string' ? draft.fee_type.trim() : ''
+  const feeType = draftType && draftType.length <= FEE_TYPE_NAME_MAX_CHARS ? draftType as FeeType : base.fee_type
   const text = <K extends keyof FeeFormState>(key: K): FeeFormState[K] => (
     typeof draft[key] === 'string' ? draft[key] : base[key]
   ) as FeeFormState[K]
@@ -312,12 +323,17 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   // dominant fee type) -- the page-derived `labelSuggestions` prop stays as
   // the instant seed / offline fallback until this arrives.
   const [savedLabels, setSavedLabels] = useState<FeeLabelSuggestion[] | null>(null)
+  // The type choices: the five built-in ones plus the custom types an administrator added (archived ones are left out).
+  const [feeTypes, setFeeTypes] = useState<FeeTypeEntry[] | null>(null)
 
   useEffect(() => {
     let cancelled = false
     getFeeLabels()
       .then((result) => { if (!cancelled && Array.isArray(result?.labels)) setSavedLabels(result.labels) })
       .catch(() => { /* datalist just keeps the page-derived seed */ })
+    getFeeTypes()
+      .then((result) => { if (!cancelled && Array.isArray(result?.types)) setFeeTypes(result.types) })
+      .catch(() => { /* the picker keeps the built-in types */ })
     return () => { cancelled = true }
   }, [])
 
@@ -542,7 +558,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
             value={form.fee_type}
             buttonClassName="w-full"
             ariaLabel={t('fee_type') || 'Type'}
-            options={FEE_TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) || opt.fallback }))}
+            options={feeTypeChoices(feeTypes, form.fee_type).map((opt) => ({ value: opt.value, label: feeTypeDisplayName(opt.value, t) }))}
             onChange={(value) => set('fee_type', value as FeeType)}
           />
         </div>
@@ -563,7 +579,8 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
               // were saved as 'expense' with delivery-company labels).
               const next = clampFeeLabel(event.target.value)
               const match = savedLabels?.find((s) => s.label.toLowerCase() === next.trim().toLowerCase())
-              setForm((prev) => ({ ...prev, label: next, fee_type: match ? match.fee_type : prev.fee_type }))
+              const adopted = match && feeTypeIsChoosable(feeTypes, match.fee_type) ? match.fee_type : null
+              setForm((prev) => ({ ...prev, label: next, fee_type: adopted ?? prev.fee_type }))
             }}
             placeholder={t('fee_label_placeholder') || 'e.g. Delivery charge, Staff salary'}
             maxLength={FEE_LABEL_MAX_CHARS}

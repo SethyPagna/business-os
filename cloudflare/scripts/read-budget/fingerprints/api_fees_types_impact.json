@@ -1,0 +1,16 @@
+{
+ "fees-types-impact": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "356ad5fa9c23",
+   "SELECT id, name, name_key, archived_at FROM fee_types WHERE name_key = ?1"
+  ],
+  [
+   "ada6477fdbe8",
+   "SELECT COUNT(*) AS n FROM fees WHERE fee_type = ?1"
+  ]
+ ]
+}

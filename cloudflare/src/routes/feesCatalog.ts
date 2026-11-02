@@ -1,0 +1,740 @@
+import { Hono, type Context } from 'hono'
+import { getDb } from '../lib/db'
+import { requireAuth, type SessionUser } from '../lib/auth'
+import { buildAuditStatement } from '../lib/audit'
+import { getActionTier } from '../lib/permissions'
+import { broadcast } from '../durable-objects/broadcastHub'
+import { readSwitch } from '../lib/readSwitches'
+import { canViewCourierCost } from '../lib/courierCostAccess'
+import { whereActiveSales, type SalesFilters } from '../lib/salesAnalytics'
+import { courierPayoutExpressions } from '../lib/shiftReconciliation'
+import { localDateExpr } from '../lib/businessDateWindow'
+import { actorSnapshot } from '../lib/actorSnapshot'
+import {
+  FEE_TYPES,
+  feeNameKey,
+  feeRangePredicate,
+  feesAccess,
+  normalizeFeeLabel,
+  normalizeFeeTypeName,
+  queryFeeList,
+  resolveFeeType,
+  resolveFeeTypeFilter,
+  type FeeListPage,
+} from './fees'
+import type { Env } from '../index'
+
+// The Expenses page's second half (6.0.1053): the label and type catalogs an operator can add to, rename and archive, and the
+// list that also shows the courier cost recorded on sales. Mounted before routes/fees.ts at /api/fees; a request this file does
+// not own falls through to that file untouched (requireAuth skips a request that is already authenticated).
+//
+// Expenses keep storing the type and label as TEXT. The catalogs (migration 0292) supply the choices and the archive state; a
+// rename rewrites the exact matching expenses and writes one audit row per expense, in the same commit as the catalog change.
+// Nothing here deletes a label, a type or an expense: the strongest act is an archive, which only hides the name from pickers.
+
+type Ctx = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+type Db = ReturnType<typeof getDb>
+type Statement = { sql: string; params: Record<string, unknown> }
+
+const SALE_ROWS_SWITCH = 'expenses_sale_rows' as const
+const NO_PERMISSION = { error: 'You do not have permission to perform this action' } as const
+
+const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+app.use('*', requireAuth)
+app.use('*', feesAccess)
+
+const fail = (c: Ctx, status: 400 | 404 | 409, code: string, error: string) => c.json({ error, code }, status)
+const canManage = (user: SessionUser): boolean => getActionTier(user, 'fees', 'edit') !== 'none'
+const flag = (value: string | undefined): boolean => value === '1' || value === 'true'
+
+async function readBody(c: Ctx): Promise<Record<string, unknown>> {
+  return c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Catalog reads. A missing table (the migration not applied yet) reads as an empty catalog, so this Worker still serves the
+// five built-in types and the labels found on expenses.
+// ---------------------------------------------------------------------------------------------------------------------
+type TypeCatalogRow = { id: number; name: string; name_key: string; archived_at: string | null }
+type LabelCatalogRow = { id: number; name: string; name_key: string; fee_type: string | null; archived_at: string | null }
+
+async function typeCatalog(db: Db): Promise<TypeCatalogRow[]> {
+  try {
+    return (await db.prepare('SELECT id, name, name_key, archived_at FROM fee_types ORDER BY id').all<TypeCatalogRow>()) || []
+  } catch {
+    return []
+  }
+}
+
+async function labelCatalog(db: Db): Promise<LabelCatalogRow[]> {
+  try {
+    return (await db.prepare('SELECT id, name, name_key, fee_type, archived_at FROM fee_labels ORDER BY id').all<LabelCatalogRow>()) || []
+  } catch {
+    return []
+  }
+}
+
+async function catalogTypeByKey(db: Db, key: string): Promise<TypeCatalogRow | null> {
+  try {
+    return (await db.prepare('SELECT id, name, name_key, archived_at FROM fee_types WHERE name_key = @key').get<TypeCatalogRow>({ key })) ?? null
+  } catch {
+    return null
+  }
+}
+
+async function catalogLabelByKey(db: Db, key: string): Promise<LabelCatalogRow | null> {
+  try {
+    return (await db.prepare('SELECT id, name, name_key, fee_type, archived_at FROM fee_labels WHERE name_key = @key').get<LabelCatalogRow>({ key })) ?? null
+  } catch {
+    return null
+  }
+}
+
+const countRows = async (db: Db, sql: string, params: Record<string, unknown>): Promise<number> =>
+  Number((await db.prepare(sql).get<{ n: number }>(params))?.n || 0)
+
+/** The spelling the expenses of a label already use (the most common one), or null when none carries it. */
+async function rowsSpelling(db: Db, key: string): Promise<string | null> {
+  const row = await db.prepare(`SELECT TRIM(label) AS label FROM fees WHERE lower(trim(COALESCE(label,''))) = @key
+    GROUP BY TRIM(label) ORDER BY COUNT(*) DESC, TRIM(label) LIMIT 1`).get<{ label: string }>({ key })
+  return row?.label || null
+}
+
+const labelRowCount = (db: Db, key: string) =>
+  countRows(db, "SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @key", { key })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Statements that ride in the same batch as the change they record.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * One audit row per expense about to change, written BEFORE the update so it holds the old value. It is the same
+ * (entity 'fee', action 'update') row an edit of the expense writes, so the expense's own Records shows the rename.
+ */
+function feeRowsAuditStatement(user: SessionUser, field: 'label' | 'fee_type', via: string, to: string, where: string, whereParams: Record<string, unknown>): Statement {
+  return {
+    sql: `
+      INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
+      SELECT
+        @a_user_id,
+        COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@a_user_name), '')),
+        'update', 'fee', f.id,
+        json_object('via', @a_via, 'before', json_object('${field}', f.${field}), 'after', json_object('${field}', @a_to)),
+        'fee', f.id,
+        json_object('${field}', f.${field}), json_object('${field}', @a_to),
+        s.device_name, s.device_tz
+      FROM fees f
+      LEFT JOIN users u ON u.id = @a_user_id
+      LEFT JOIN (
+        SELECT device_name, device_tz FROM user_sessions
+        WHERE user_id = @a_user_id AND revoked_at IS NULL
+        ORDER BY last_seen_at DESC, id DESC LIMIT 1
+      ) AS s ON 1 = 1
+      WHERE ${where}`,
+    params: { ...whereParams, a_user_id: user.id, a_user_name: actorSnapshot(user), a_via: via, a_to: to },
+  }
+}
+
+/** Registers a label found only on expenses, so it can carry an archive flag or a default type. Does nothing when it is already registered. */
+const ensureLabelStatement = (user: SessionUser, name: string, key: string, feeType: string | null, now: string): Statement => ({
+  sql: `INSERT OR IGNORE INTO fee_labels (name, name_key, fee_type, created_by, created_by_name, created_at, updated_at)
+        VALUES (@name, @key, @feeType, @by, @byName, @now, @now)`,
+  params: { name, key, feeType, by: user.id, byName: actorSnapshot(user), now },
+})
+
+const isUniqueViolation = (error: unknown): boolean => /UNIQUE|constraint/i.test(String((error as Error)?.message || ''))
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------------------------------------------------
+type TypeEntry = { value: string; name: string; builtin: boolean; id: number | null; registered: boolean; archived: boolean; uses?: number }
+
+/** GET /api/fees/types -- the five built-in types, then the custom ones. `?uses=1` adds expense counts (and lists legacy unregistered types); `?include_archived=1` keeps the archived. */
+app.get('/types', async (c) => {
+  const db = getDb(c.env)
+  const withUses = flag(c.req.query('uses'))
+  const includeArchived = flag(c.req.query('include_archived'))
+  const [custom, usage] = await Promise.all([
+    typeCatalog(db),
+    withUses
+      ? db.prepare('SELECT fee_type, COUNT(*) AS uses FROM fees GROUP BY fee_type').all<{ fee_type: string; uses: number }>()
+      : Promise.resolve(null),
+  ])
+  const uses = new Map<string, number>()
+  for (const row of usage || []) uses.set(String(row.fee_type ?? ''), Number(row.uses) || 0)
+  const entries: TypeEntry[] = FEE_TYPES.map((value) => ({
+    value, name: value, builtin: true, id: null, registered: true, archived: false, ...(withUses ? { uses: uses.get(value) ?? 0 } : {}),
+  }))
+  const known = new Set<string>(FEE_TYPES)
+  for (const row of custom) {
+    known.add(row.name_key)
+    if (row.archived_at && !includeArchived) continue
+    entries.push({ value: row.name, name: row.name, builtin: false, id: row.id, registered: true, archived: Boolean(row.archived_at), ...(withUses ? { uses: uses.get(row.name) ?? 0 } : {}) })
+  }
+  if (withUses) {
+    for (const [value, count] of uses) {
+      const text = String(value || '').trim()
+      if (!text || known.has(feeNameKey(text))) continue
+      known.add(feeNameKey(text))
+      entries.push({ value: text, name: text, builtin: false, id: null, registered: false, archived: false, uses: count })
+    }
+  }
+  return c.json({ types: entries })
+})
+
+app.get('/types/impact', async (c) => {
+  const name = normalizeFeeTypeName(c.req.query('name'))
+  if (!name) return fail(c, 400, 'type_name_invalid', 'A type name is required')
+  const row = await catalogTypeByKey(getDb(c.env), feeNameKey(name))
+  const linked = await countRows(getDb(c.env), 'SELECT COUNT(*) AS n FROM fees WHERE fee_type = @name', { name: row?.name ?? name })
+  return c.json({ name: row?.name ?? name, linked_records: linked, registered: Boolean(row), archived: Boolean(row?.archived_at), historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
+})
+
+app.post('/types', async (c) => {
+  const user = c.get('user')
+  if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+  const db = getDb(c.env)
+  const body = await readBody(c)
+  const name = normalizeFeeTypeName(body.name)
+  if (!name) return fail(c, 400, 'type_name_invalid', `A type name is 1 to 40 characters.`)
+  const key = feeNameKey(name)
+  if ((FEE_TYPES as readonly string[]).includes(key)) return fail(c, 409, 'type_exists', 'That is a built-in expense type.')
+  const existing = await catalogTypeByKey(db, key)
+  if (existing) return fail(c, 409, existing.archived_at ? 'type_archived' : 'type_exists', existing.archived_at ? 'That type is archived. Restore it instead.' : 'That type already exists.')
+  const now = new Date().toISOString()
+  try {
+    await db.batch([
+      {
+        sql: `INSERT INTO fee_types (name, name_key, created_by, created_by_name, created_at, updated_at) VALUES (@name, @key, @by, @byName, @now, @now)`,
+        params: { name, key, by: user.id, byName: actorSnapshot(user), now },
+      },
+      buildAuditStatement(user.id, user.username || null, 'create', 'fee_type', null, { name }, undefined, { entityIdFromLastInsert: true }),
+    ])
+  } catch (error) {
+    if (isUniqueViolation(error)) return fail(c, 409, 'type_exists', 'That type already exists.')
+    throw error
+  }
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'type_create', name }))
+  return c.json({ success: true, name }, 201)
+})
+
+app.post('/types/rename', async (c) => {
+  const user = c.get('user')
+  if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+  const db = getDb(c.env)
+  const body = await readBody(c)
+  const fromText = typeof body.from === 'string' ? body.from.trim() : ''
+  const to = normalizeFeeTypeName(body.to)
+  if (!fromText || !to) return fail(c, 400, 'type_name_invalid', 'Source and target type names are required')
+  const fromKey = feeNameKey(fromText)
+  if ((FEE_TYPES as readonly string[]).includes(fromKey)) return fail(c, 400, 'type_builtin', 'Built-in expense types cannot be renamed.')
+  const source = await catalogTypeByKey(db, fromKey)
+  if (!source) return fail(c, 404, 'type_not_found', 'That type is not in the catalog. Add it first.')
+  const toKey = feeNameKey(to)
+  if ((FEE_TYPES as readonly string[]).includes(toKey)) return fail(c, 409, 'type_exists', 'That is a built-in expense type.')
+  if (to === source.name) return c.json({ success: true, changed: 0, name: to })
+  if (toKey !== fromKey) {
+    const clash = await catalogTypeByKey(db, toKey)
+    if (clash) return fail(c, 409, 'type_exists', 'That type already exists.')
+    if (await countRows(db, 'SELECT COUNT(*) AS n FROM fees WHERE lower(trim(fee_type)) = @key', { key: toKey }) > 0) {
+      return fail(c, 409, 'type_exists', 'Expenses already use that name. Add it as a type first.')
+    }
+  }
+  const linked = await countRows(db, 'SELECT COUNT(*) AS n FROM fees WHERE fee_type = @from', { from: source.name })
+  const now = new Date().toISOString()
+  try {
+    await db.batch([
+      feeRowsAuditStatement(user, 'fee_type', 'type_rename', to, 'f.fee_type = @from', { from: source.name }),
+      { sql: 'UPDATE fees SET fee_type = @to, updated_at = @now WHERE fee_type = @from', params: { to, from: source.name, now } },
+      { sql: 'UPDATE fee_labels SET fee_type = @to, updated_at = @now WHERE fee_type = @from', params: { to, from: source.name, now } },
+      { sql: 'UPDATE fee_types SET name = @to, name_key = @toKey, updated_at = @now WHERE id = @id', params: { to, toKey, now, id: source.id } },
+      buildAuditStatement(user.id, user.username || null, 'rename', 'fee_type', source.id, { from: source.name, to, changed: linked }),
+    ])
+  } catch (error) {
+    if (isUniqueViolation(error)) return fail(c, 409, 'type_exists', 'That type already exists.')
+    throw error
+  }
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'type_rename', from: source.name, to }))
+  return c.json({ success: true, changed: linked, name: to })
+})
+
+for (const action of ['archive', 'restore'] as const) {
+  app.post(`/types/${action}`, async (c) => {
+    const user = c.get('user')
+    if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+    const db = getDb(c.env)
+    const body = await readBody(c)
+    const text = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!text) return fail(c, 400, 'type_name_invalid', 'A type name is required')
+    const key = feeNameKey(text)
+    if ((FEE_TYPES as readonly string[]).includes(key)) return fail(c, 400, 'type_builtin', 'Built-in expense types cannot be archived.')
+    const row = await catalogTypeByKey(db, key)
+    if (!row) return fail(c, 404, 'type_not_found', 'That type is not in the catalog.')
+    const archiving = action === 'archive'
+    if (archiving === Boolean(row.archived_at)) return c.json({ success: true, name: row.name, archived: archiving, changed: 0 })
+    const now = new Date().toISOString()
+    await db.batch([
+      { sql: 'UPDATE fee_types SET archived_at = @archivedAt, updated_at = @now WHERE id = @id', params: { archivedAt: archiving ? now : null, now, id: row.id } },
+      buildAuditStatement(user.id, user.username || null, archiving ? 'archive' : 'restore', 'fee_type', row.id, { name: row.name, linked_records: await countRows(db, 'SELECT COUNT(*) AS n FROM fees WHERE fee_type = @name', { name: row.name }) }),
+    ])
+    c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: `type_${action}`, name: row.name }))
+    return c.json({ success: true, name: row.name, archived: archiving, changed: 1 })
+  })
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------------------------------------------------
+type LabelEntry = {
+  label: string
+  uses: number
+  fee_type: string
+  type_counts: Array<{ fee_type: string; uses: number }>
+  id: number | null
+  registered: boolean
+  archived: boolean
+}
+
+const LABELS_ON_EXPENSES_SQL = `
+  SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses
+  FROM fees f
+  WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
+  GROUP BY lower(trim(f.label)), f.fee_type
+  ORDER BY lower(trim(f.label)), uses DESC, f.fee_type
+`
+const LABEL_CATALOG_SQL = `
+  SELECT l.id, l.name, l.name_key, l.fee_type, l.archived_at,
+    (SELECT t.archived_at FROM fee_types t WHERE t.name = l.fee_type) AS type_archived_at
+  FROM fee_labels l ORDER BY l.id
+`
+
+/** GET /api/fees/labels -- every label with its use count, most used first. A registered label with no expense is listed with 0 uses; archived ones only with `?include_archived=1`. */
+app.get('/labels', async (c) => {
+  const db = getDb(c.env)
+  const includeArchived = flag(c.req.query('include_archived'))
+  // The labels found on expenses and the registered ones (with the archive state of the type each defaults to) in ONE round trip.
+  // Before migration 0292 the catalog statement fails with "no such table": the expenses' labels alone are the answer then.
+  let rows: Array<{ label: string; uses: number; fee_type: string }>
+  let registered: Array<LabelCatalogRow & { type_archived_at: string | null }> = []
+  try {
+    const [found, catalog] = await db.batch([
+      { sql: LABELS_ON_EXPENSES_SQL, params: {} },
+      { sql: LABEL_CATALOG_SQL, params: {} },
+    ])
+    rows = (found.results || []) as typeof rows
+    registered = (catalog.results || []) as typeof registered
+  } catch (error) {
+    if (!/no such table/i.test(String((error as Error)?.message || ''))) throw error
+    rows = (await db.prepare(LABELS_ON_EXPENSES_SQL).all<{ label: string; uses: number; fee_type: string }>()) || []
+  }
+  const catalog = new Map<string, LabelEntry>()
+  for (const row of rows || []) {
+    const label = String(row.label || '').trim()
+    if (!label) continue
+    const key = feeNameKey(label)
+    const entry = catalog.get(key) || { label, uses: 0, fee_type: 'other', type_counts: [], id: null, registered: false, archived: false }
+    const uses = Number(row.uses) || 0
+    entry.uses += uses
+    entry.type_counts.push({ fee_type: String(row.fee_type || 'other'), uses })
+    catalog.set(key, entry)
+  }
+  for (const entry of catalog.values()) {
+    entry.fee_type = [...entry.type_counts].sort((a, b) => b.uses - a.uses || a.fee_type.localeCompare(b.fee_type))[0]?.fee_type || 'other'
+  }
+  for (const row of registered) {
+    const entry = catalog.get(row.name_key) || { label: row.name, uses: 0, fee_type: 'other', type_counts: [], id: null, registered: false, archived: false }
+    entry.label = row.name
+    entry.id = row.id
+    entry.registered = true
+    entry.archived = Boolean(row.archived_at)
+    // A default type the operator chose wins over the dominant one, unless that type has since been archived.
+    if (row.fee_type && !row.type_archived_at) entry.fee_type = row.fee_type
+    catalog.set(row.name_key, entry)
+  }
+  return c.json({
+    labels: [...catalog.values()]
+      .filter((entry) => includeArchived || !entry.archived)
+      .sort((a, b) => b.uses - a.uses || a.label.localeCompare(b.label)),
+  })
+})
+
+app.get('/labels/impact', async (c) => {
+  const from = normalizeFeeLabel(c.req.query('from'))
+  const to = normalizeFeeLabel(c.req.query('to'))
+  if (!from || !to) return c.json({ error: 'Source and target labels are required' }, 400)
+  const db = getDb(c.env)
+  const rows = await labelRowCount(db, feeNameKey(from))
+  const target = await labelRowCount(db, feeNameKey(to))
+  const targetRegistered = await catalogLabelByKey(db, feeNameKey(to))
+  const typeCounts = await db.prepare(`
+    SELECT fee_type, COUNT(*) AS uses FROM fees
+    WHERE lower(trim(COALESCE(label,''))) = @from
+    GROUP BY fee_type ORDER BY uses DESC, fee_type
+  `).all<{ fee_type: string; uses: number }>({ from: feeNameKey(from) })
+  return c.json({
+    from, to, linked_records: rows, target_exists: target > 0 || Boolean(targetRegistered), target_archived: Boolean(targetRegistered?.archived_at),
+    type_counts: (typeCounts || []).map((row) => ({ fee_type: String(row.fee_type || 'other'), uses: Number(row.uses) || 0 })),
+    live_snapshots: { fees: rows }, historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
+  })
+})
+
+app.get('/labels/type-impact', async (c) => {
+  const label = normalizeFeeLabel(c.req.query('label'))
+  if (!label) return c.json({ error: 'Label is required' }, 400)
+  const rows = await getDb(c.env).prepare(`
+    SELECT fee_type, COUNT(*) AS uses FROM fees
+    WHERE lower(trim(COALESCE(label,''))) = @label
+    GROUP BY fee_type ORDER BY uses DESC, fee_type
+  `).all<{ fee_type: string; uses: number }>({ label: feeNameKey(label) })
+  const typeCounts = (rows || []).map((row) => ({ fee_type: String(row.fee_type || 'other'), uses: Number(row.uses) || 0 }))
+  return c.json({ label, linked_records: typeCounts.reduce((sum, row) => sum + row.uses, 0), type_counts: typeCounts, historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
+})
+
+/** A typed label exactly as the operator wrote it, or a refusal: nothing is shortened silently. */
+function typedLabel(value: unknown): { label: string } | { code: string; error: string } {
+  const typed = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+  if (!typed) return { code: 'label_required', error: 'A label is required.' }
+  const label = normalizeFeeLabel(typed)
+  if (!label || label !== typed) return { code: 'label_too_long', error: 'A label is a short tag: up to 6 words and 60 characters.' }
+  return { label }
+}
+
+/** An existing type chosen for a label or an expense: built-in or ACTIVE custom. The spelling to store, or null. */
+async function chosenType(db: Db, value: unknown): Promise<string | null> {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) return null
+  const resolved = await resolveFeeType(db, text)
+  if (!resolved.ok) return null
+  const key = feeNameKey(text)
+  return resolved.type === 'other' && key !== 'other' ? null : resolved.type
+}
+
+app.post('/labels', async (c) => {
+  const user = c.get('user')
+  if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+  const db = getDb(c.env)
+  const body = await readBody(c)
+  const typed = typedLabel(body.label)
+  if ('code' in typed) return fail(c, 400, typed.code, typed.error)
+  const key = feeNameKey(typed.label)
+  let feeType: string | null = null
+  if (body.fee_type !== undefined && body.fee_type !== null && body.fee_type !== '') {
+    feeType = await chosenType(db, body.fee_type)
+    if (!feeType) return fail(c, 400, 'fee_type_invalid', 'Invalid expense type')
+  }
+  const existing = await catalogLabelByKey(db, key)
+  if (existing) return fail(c, 409, existing.archived_at ? 'label_archived' : 'label_exists', existing.archived_at ? 'That label is archived. Restore it instead.' : 'That label already exists.')
+  const now = new Date().toISOString()
+  const used = await labelRowCount(db, key)
+  try {
+    await db.batch([
+      {
+        sql: `INSERT INTO fee_labels (name, name_key, fee_type, created_by, created_by_name, created_at, updated_at)
+              VALUES (@name, @key, @feeType, @by, @byName, @now, @now)`,
+        params: { name: typed.label, key, feeType, by: user.id, byName: actorSnapshot(user), now },
+      },
+      buildAuditStatement(user.id, user.username || null, 'create', 'fee_label', null, { label: typed.label, fee_type: feeType, already_on_expenses: used }, undefined, { entityIdFromLastInsert: true }),
+    ])
+  } catch (error) {
+    if (isUniqueViolation(error)) return fail(c, 409, 'label_exists', 'That label already exists.')
+    throw error
+  }
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_create', label: typed.label }))
+  return c.json({ success: true, label: typed.label, fee_type: feeType, uses: used }, 201)
+})
+
+app.post('/labels/replace', async (c) => {
+  const user = c.get('user')
+  if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+  const db = getDb(c.env)
+  const body = await readBody(c)
+  const from = normalizeFeeLabel(body.from)
+  if (!from || !normalizeFeeLabel(body.to)) return c.json({ error: 'Source and target labels are required' }, 400)
+  const typed = typedLabel(body.to)
+  if ('code' in typed) return fail(c, 400, typed.code, typed.error)
+  const fromKey = feeNameKey(from)
+  const toKey = feeNameKey(typed.label)
+  const sameKey = toKey === fromKey
+  const [sourceRow, targetRow, sourceUses, targetUses] = await Promise.all([
+    catalogLabelByKey(db, fromKey),
+    sameKey ? Promise.resolve(null) : catalogLabelByKey(db, toKey),
+    labelRowCount(db, fromKey),
+    sameKey ? Promise.resolve(0) : labelRowCount(db, toKey),
+  ])
+  if (!sourceRow && sourceUses === 0) return fail(c, 404, 'label_not_found', 'That label no longer exists.')
+  if (targetRow?.archived_at) return fail(c, 409, 'label_archived', 'That label is archived. Restore it first.')
+  // A target that already exists (registered, or used by any expense) makes this a merge into it, in the spelling it already has.
+  const merge = !sameKey && Boolean(targetRow || targetUses > 0)
+  let toName = targetRow ? targetRow.name : typed.label
+  // A target only the expenses know keeps the spelling they already use, not the one typed.
+  if (merge && !targetRow) toName = (await rowsSpelling(db, toKey)) ?? toName
+  const sourceName = sourceRow ? sourceRow.name : ((await rowsSpelling(db, fromKey)) ?? from)
+  if (sameKey && toName === sourceName && sourceRow) return c.json({ success: true, changed: 0, merged: false, label: toName })
+  const now = new Date().toISOString()
+  const rows = { where: "lower(trim(COALESCE(label,''))) = @fromKey AND COALESCE(label,'') <> @toName", auditWhere: "lower(trim(COALESCE(f.label,''))) = @fromKey AND COALESCE(f.label,'') <> @toName" }
+  const statements: Statement[] = []
+  if (!sourceRow) statements.push(ensureLabelStatement(user, sourceName, fromKey, null, now))
+  if (merge && !targetRow) statements.push(ensureLabelStatement(user, toName, toKey, null, now))
+  statements.push(
+    feeRowsAuditStatement(user, 'label', merge ? 'label_merge' : 'label_rename', toName, rows.auditWhere, { fromKey, toName }),
+    { sql: `UPDATE fees SET label = @toName, updated_at = @now WHERE ${rows.where}`, params: { fromKey, toName, now } },
+    merge
+      ? { sql: 'UPDATE fee_labels SET archived_at = @now, updated_at = @now WHERE name_key = @fromKey', params: { now, fromKey } }
+      : { sql: 'UPDATE fee_labels SET name = @toName, name_key = @toKey, updated_at = @now WHERE name_key = @fromKey', params: { toName, toKey, now, fromKey } },
+    buildAuditStatement(user.id, user.username || null, 'replace', 'fee_label', sourceRow?.id ?? null, { from: sourceName, to: toName, merged: merge, changed: sourceUses }),
+  )
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    if (isUniqueViolation(error)) return fail(c, 409, 'label_exists', 'That label already exists.')
+    throw error
+  }
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_replace', from: sourceName, to: toName }))
+  return c.json({ success: true, changed: sourceUses, merged: merge, label: toName })
+})
+
+app.post('/labels/classify', async (c) => {
+  const user = c.get('user')
+  if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+  const db = getDb(c.env)
+  const body = await readBody(c)
+  const typed = typedLabel(body.label)
+  if ('code' in typed) return c.json({ error: 'Label is required' }, 400)
+  const feeType = await chosenType(db, body.fee_type ?? body.feeType)
+  if (!feeType) return c.json({ error: 'Invalid expense type' }, 400)
+  const key = feeNameKey(typed.label)
+  const [row, uses] = await Promise.all([catalogLabelByKey(db, key), labelRowCount(db, key)])
+  if (!row && uses === 0) return fail(c, 404, 'label_not_found', 'That label no longer exists.')
+  const now = new Date().toISOString()
+  const name = row ? row.name : ((await rowsSpelling(db, key)) ?? typed.label)
+  const changing = await countRows(db, "SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @key AND fee_type <> @feeType", { key, feeType })
+  const where = "lower(trim(COALESCE(f.label,''))) = @key AND f.fee_type <> @feeType"
+  await db.batch([
+    ensureLabelStatement(user, name, key, feeType, now),
+    feeRowsAuditStatement(user, 'fee_type', 'label_classify', feeType, where, { key, feeType }),
+    { sql: "UPDATE fees SET fee_type = @feeType, updated_at = @now WHERE lower(trim(COALESCE(label,''))) = @key AND fee_type <> @feeType", params: { key, feeType, now } },
+    { sql: 'UPDATE fee_labels SET fee_type = @feeType, updated_at = @now WHERE name_key = @key', params: { feeType, now, key } },
+    buildAuditStatement(user.id, user.username || null, 'classify', 'fee_label', row?.id ?? null, { label: name, fee_type: feeType, changed: changing }),
+  ])
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label: name, fee_type: feeType }))
+  return c.json({ success: true, changed: changing, label: name, fee_type: feeType })
+})
+
+for (const action of ['archive', 'restore'] as const) {
+  app.post(`/labels/${action}`, async (c) => {
+    const user = c.get('user')
+    if (!canManage(user)) return c.json(NO_PERMISSION, 403)
+    const db = getDb(c.env)
+    const body = await readBody(c)
+    const typed = typedLabel(body.label)
+    if ('code' in typed) return fail(c, 400, typed.code, typed.error)
+    const key = feeNameKey(typed.label)
+    const [row, uses] = await Promise.all([catalogLabelByKey(db, key), labelRowCount(db, key)])
+    if (!row && uses === 0) return fail(c, 404, 'label_not_found', 'That label no longer exists.')
+    const archiving = action === 'archive'
+    if (row && archiving === Boolean(row.archived_at)) return c.json({ success: true, label: row.name, archived: archiving, changed: 0 })
+    if (!row && !archiving) return c.json({ success: true, label: typed.label, archived: false, changed: 0 })
+    const now = new Date().toISOString()
+    const name = row ? row.name : ((await rowsSpelling(db, key)) ?? typed.label)
+    await db.batch([
+      ensureLabelStatement(user, name, key, null, now),
+      { sql: 'UPDATE fee_labels SET archived_at = @archivedAt, updated_at = @now WHERE name_key = @key', params: { archivedAt: archiving ? now : null, now, key } },
+      buildAuditStatement(user.id, user.username || null, archiving ? 'archive' : 'restore', 'fee_label', row?.id ?? null, { label: name, linked_records: uses }),
+    ])
+    c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: `label_${action}`, label: name }))
+    return c.json({ success: true, label: name, archived: archiving, changed: 1 })
+  })
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Courier cost recorded on sales, shown beside the expenses
+// ---------------------------------------------------------------------------------------------------------------------
+// The canonical Expenses definition (Telegram shift report, day summary and post-close overview; shift reconciliation) is every
+// `fees` row plus the courier payouts read off the day's non-cancelled sales by courierPayoutsWhere. This list shows that second
+// half row by row, using the SAME expressions (courierPayoutExpressions), so its sum is courierPayoutsWhere's answer for the same
+// window by construction. It never reads sale lines: cost of goods is not an expense, and neither is the shop-paid delivery FEE
+// (the waived fee cancels against the shop's payment of it; only the courier cost counts).
+type SaleDeliveryRow = {
+  id: number
+  receipt_number: string | null
+  created_at: string
+  d: string
+  branch_id: number | null
+  branch_name: string | null
+  delivery_contact_id: number | null
+  delivery_contact_name: string | null
+  amount_usd: number
+  amount_khr: number
+}
+
+type SaleScope = { sql: string; params: Record<string, unknown> }
+
+const toNumber = (value: unknown, fallback: number): number => {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+const round2 = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100
+const roundKhr = (value: number): number => Math.round(value / 100) * 100
+
+/**
+ * The sales whose recorded courier cost counts, for the window and filters of an expense request. Window, branch and
+ * cancelled-sale rules are whereActiveSales' own (the clause every kernel report reads). Null when the filters exclude every
+ * sale row (a type filter other than delivery).
+ */
+async function saleScope(db: Db, query: Record<string, string>, narrow: boolean): Promise<SaleScope | null> {
+  const range = feeRangePredicate(query)
+  const filters: SalesFilters = {
+    startDate: String(query.from || query.startDate || '').trim() || null,
+    endDate: String(query.to || query.endDate || '').trim() || null,
+    createdFrom: (range.params.createdFrom as string | undefined) ?? null,
+    createdTo: (range.params.createdTo as string | undefined) ?? null,
+    branchId: String(query.branch_id || query.branchId || '').trim() || null,
+  }
+  const active = whereActiveSales('sales', filters)
+  const expressions = courierPayoutExpressions()
+  const clauses = [
+    active.sql,
+    // Same text as the partial index idx_sales_courier_cost (0292): only sales that carry a courier cost are read.
+    '(sales.delivery_actual_cost_usd IS NOT NULL OR sales.delivery_actual_cost_khr IS NOT NULL)',
+    `(${expressions.usd} <> 0 OR ${expressions.khr} <> 0)`,
+  ]
+  const params: Record<string, unknown> = { ...active.params }
+  if (narrow) {
+    const type = String(query.fee_type || '').trim()
+    if (type && type !== 'all' && await resolveFeeTypeFilter(db, type) !== 'delivery') return null
+    const search = String(query.search || '').trim()
+    if (search) {
+      clauses.push("(sales.receipt_number LIKE @saleSearch OR sales.delivery_contact_name LIKE @saleSearch OR 'delivery' LIKE @saleSearch)")
+      params.saleSearch = `%${search}%`
+    }
+    const saleId = String(query.sale_id || '').trim()
+    if (saleId) { clauses.push('sales.id = @saleFilterId'); params.saleFilterId = Number(saleId) }
+    const contact = String(query.delivery_contact_id || '').trim()
+    if (contact) { clauses.push('sales.delivery_contact_id = @saleFilterContact'); params.saleFilterContact = Number(contact) }
+  }
+  return { sql: clauses.join(' AND '), params }
+}
+
+async function saleDeliveryTotals(db: Db, scope: SaleScope): Promise<{ count: number; usd: number; khr: number }> {
+  const expressions = courierPayoutExpressions()
+  const row = await db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${expressions.usd}), 0) AS usd, COALESCE(SUM(${expressions.khr}), 0) AS khr
+    FROM sales WHERE ${scope.sql}`).get<{ count: number; usd: number; khr: number }>(scope.params)
+  return { count: Number(row?.count || 0), usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
+}
+
+async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number): Promise<SaleDeliveryRow[]> {
+  const expressions = courierPayoutExpressions()
+  return (await db.prepare(`
+    SELECT sales.id, sales.receipt_number, sales.created_at, ${localDateExpr('sales.created_at')} AS d, sales.branch_id,
+      COALESCE(NULLIF(TRIM(sales.branch_name), ''), b.name) AS branch_name,
+      sales.delivery_contact_id, NULLIF(TRIM(sales.delivery_contact_name), '') AS delivery_contact_name,
+      ${expressions.usd} AS amount_usd, ${expressions.khr} AS amount_khr
+    FROM sales
+    LEFT JOIN branches b ON b.id = sales.branch_id
+    WHERE ${scope.sql}
+    ORDER BY d DESC, datetime(sales.created_at) DESC, sales.id DESC
+    LIMIT @saleLimit
+  `).all<SaleDeliveryRow>({ ...scope.params, saleLimit: limit })) || []
+}
+
+const saleRowOut = (row: SaleDeliveryRow) => ({
+  kind: 'sale_delivery' as const,
+  id: row.id,
+  fee_type: 'delivery',
+  label: row.delivery_contact_name,
+  amount_usd: Number(row.amount_usd) || 0,
+  amount_khr: Number(row.amount_khr) || 0,
+  fee_date: row.d,
+  sale_id: row.id,
+  sale_receipt_number: row.receipt_number,
+  branch_id: row.branch_id,
+  branch_name: row.branch_name,
+  delivery_contact_id: row.delivery_contact_id,
+  delivery_contact_name: row.delivery_contact_name,
+  notes: null,
+  created_by: null,
+  created_by_name: null,
+  created_at: row.created_at,
+  updated_at: row.created_at,
+})
+
+type MergeRow = Record<string, unknown> & { kind: 'expense' | 'sale_delivery' }
+
+/**
+ * Two lists, each already newest-first, merged into one. A stored expense sorts by its booked date, a sale row by the sale's
+ * business day; on one date the later entry time comes first, and an expense wins a tie. The first k merged rows depend only on
+ * the first k of each list, so any page can be rebuilt from the top (offset + limit) rows of both.
+ */
+export function mergeExpenseRows(expenses: MergeRow[], sales: MergeRow[]): MergeRow[] {
+  const stamp = (row: MergeRow) => String(row.created_at || '').replace('T', ' ').slice(0, 19)
+  const out: MergeRow[] = []
+  let i = 0
+  let j = 0
+  while (i < expenses.length || j < sales.length) {
+    if (j >= sales.length) { out.push(expenses[i++]); continue }
+    if (i >= expenses.length) { out.push(sales[j++]); continue }
+    const a = expenses[i]
+    const b = sales[j]
+    const dateA = String(a.fee_date || '')
+    const dateB = String(b.fee_date || '')
+    const saleFirst = dateB > dateA || (dateB === dateA && stamp(b) > stamp(a))
+    out.push(saleFirst ? sales[j++] : expenses[i++])
+  }
+  return out
+}
+
+app.get('/', async (c, next) => {
+  const source = c.req.query('source')
+  if (source !== 'all' && source !== 'sale') return next()
+  if (!(await readSwitch(c.env, SALE_ROWS_SWITCH))) return next()
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const limit = Math.min(Math.max(toNumber(query.limit, 100), 1), 500)
+  const offset = Math.max(toNumber(query.offset, 0), 0)
+  const need = offset + limit
+  const showSales = canViewCourierCost(c.get('user'))
+  try {
+    const scope = showSales ? await saleScope(db, query, true) : null
+    const [fees, saleTotals, saleRows] = await Promise.all([
+      source === 'all' ? queryFeeList(db, query, need, 0) : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),
+      scope ? saleDeliveryTotals(db, scope) : Promise.resolve({ count: 0, usd: 0, khr: 0 }),
+      scope ? saleDeliveryRows(db, scope, need) : Promise.resolve<SaleDeliveryRow[]>([]),
+    ])
+    const merged = mergeExpenseRows(
+      fees.fees.map((row) => ({ ...row, kind: 'expense' as const })),
+      saleRows.map(saleRowOut),
+    )
+    return c.json({
+      fees: merged.slice(offset, offset + limit),
+      total: fees.total + saleTotals.count,
+      limit,
+      offset,
+      summary: fees.summary,
+      // null = the caller may not read courier cost: no sale row, no count, no amount.
+      sale_delivery: showSales ? saleTotals : null,
+    })
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+})
+
+// GET /api/fees/report?include=sales: the unchanged fees report (fees.ts answers it first) plus the sale courier-cost block for the same range and branch.
+app.get('/report', async (c, next) => {
+  if (c.req.query('include') !== 'sales') return next()
+  if (!(await readSwitch(c.env, SALE_ROWS_SWITCH))) return next()
+  await next()
+  if (c.res.status !== 200) return
+  const body = await c.res.clone().json<Record<string, unknown>>().catch(() => null)
+  if (!body) return
+  const showSales = canViewCourierCost(c.get('user'))
+  let saleDelivery: { count: number; usd: number; khr: number } | null = null
+  if (showSales) {
+    const query = c.req.query()
+    const scope = await saleScope(getDb(c.env), { ...query, branch_id: query.branchId || '' }, false)
+    saleDelivery = scope ? await saleDeliveryTotals(getDb(c.env), scope) : { count: 0, usd: 0, khr: 0 }
+  }
+  c.res = c.json({ ...body, sale_delivery: saleDelivery })
+})
+
+export default app
