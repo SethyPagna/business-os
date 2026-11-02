@@ -32,7 +32,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
--- ops:max-rows-read 321138
+-- ops:max-rows-read 146789
 WITH li AS MATERIALIZED (
   SELECT sale_id, SUM(COALESCE(total_usd, 0)) AS lines_usd, COUNT(*) AS n FROM sale_items GROUP BY sale_id
 ),
@@ -69,20 +69,31 @@ pe AS MATERIALIZED (
   WHERE x.payments_version = 1
 )
 SELECT
-  (SELECT COUNT(*) FROM s WHERE mpv = 1) AS v1_sales,
-  (SELECT COUNT(*) FROM s WHERE mpv = 1 AND ABS(subtotal - lines_usd) > 0.00005) AS v1_subtotal_ne_lines,
-  (SELECT COUNT(*) FROM s WHERE mpv = 1 AND (calc IS NULL
-     OR ABS(calc - (subtotal - disc - mdisc + tax + cust_fee)) > 0.00005)) AS v1_calc_ne_components,
-  (SELECT COUNT(*) FROM s WHERE mpv = 1 AND (calc IS NULL OR ABS(total - calc - adj) > 0.00005 OR ABS(adj) > 0.00505
-     OR ABS(total * 100 - ROUND(total * 100)) > 0.00005)) AS v1_payable_equation,
-  (SELECT COUNT(*) FROM s WHERE mpv = 1 AND rate > 0 AND ABS(total_khr - total * rate) > 0.00005) AS v1_khr_twin,
-  (SELECT COUNT(*) FROM s WHERE mpv = 0 AND pay <> 'cancelled' AND n_lines > 0
-     AND ABS(total - (lines_usd - disc - mdisc + tax + cust_fee)) > 0.01) AS v0_header_drift,
-  (SELECT COUNT(*) FROM s WHERE pay = 'completed' AND imported = 0 AND rate > 0
-     AND total - lowered - paid_usd - paid_khr / rate > 0.005000001) AS completed_short,
-  (SELECT COUNT(*) FROM s WHERE pay = 'awaiting_payment' AND rate > 0
-     AND total - paid_usd - paid_khr / rate <= 0.005000001) AS not_paid_but_covered,
-  (SELECT COUNT(*) FROM s WHERE imported = 0 AND n_lines = 0 AND pay <> 'cancelled') AS system_sales_without_lines,
-  (SELECT COUNT(*) FROM s WHERE total < 0 OR subtotal < 0) AS negative_totals,
-  (SELECT COUNT(*) FROM s WHERE rate IS NULL OR rate <= 0) AS bad_rate,
-  (SELECT COUNT(*) FROM pe WHERE ABS(ev_usd - paid_usd) > 0.00005 OR ABS(ev_khr - paid_khr) > 0.5) AS payment_events_mismatch
+  g0.v1_sales,
+  g0.v1_subtotal_ne_lines,
+  g0.v1_calc_ne_components,
+  g0.v1_payable_equation,
+  g0.v1_khr_twin,
+  g0.v0_header_drift,
+  g0.completed_short,
+  g0.not_paid_but_covered,
+  g0.system_sales_without_lines,
+  g0.negative_totals,
+  g0.bad_rate,
+  g1.payment_events_mismatch
+FROM (SELECT
+    COALESCE(SUM(mpv = 1), 0) AS v1_sales,
+    COALESCE(SUM(mpv = 1 AND ABS(subtotal - lines_usd) > 0.00005), 0) AS v1_subtotal_ne_lines,
+    COALESCE(SUM(mpv = 1 AND (calc IS NULL OR ABS(calc - (subtotal - disc - mdisc + tax + cust_fee)) > 0.00005)), 0) AS v1_calc_ne_components,
+    COALESCE(SUM(mpv = 1 AND (calc IS NULL OR ABS(total - calc - adj) > 0.00005 OR ABS(adj) > 0.00505 OR ABS(total * 100 - ROUND(total * 100)) > 0.00005)), 0) AS v1_payable_equation,
+    COALESCE(SUM(mpv = 1 AND rate > 0 AND ABS(total_khr - total * rate) > 0.00005), 0) AS v1_khr_twin,
+    COALESCE(SUM(mpv = 0 AND pay <> 'cancelled' AND n_lines > 0 AND ABS(total - (lines_usd - disc - mdisc + tax + cust_fee)) > 0.01), 0) AS v0_header_drift,
+    COALESCE(SUM(pay = 'completed' AND imported = 0 AND rate > 0 AND total - lowered - paid_usd - paid_khr / rate > 0.005000001), 0) AS completed_short,
+    COALESCE(SUM(pay = 'awaiting_payment' AND rate > 0 AND total - paid_usd - paid_khr / rate <= 0.005000001), 0) AS not_paid_but_covered,
+    COALESCE(SUM(imported = 0 AND n_lines = 0 AND pay <> 'cancelled'), 0) AS system_sales_without_lines,
+    COALESCE(SUM(total < 0 OR subtotal < 0), 0) AS negative_totals,
+    COALESCE(SUM(rate IS NULL OR rate <= 0), 0) AS bad_rate
+  FROM s) g0,
+  (SELECT
+    COALESCE(SUM(ABS(ev_usd - paid_usd) > 0.00005 OR ABS(ev_khr - paid_khr) > 0.5), 0) AS payment_events_mismatch
+  FROM pe) g1

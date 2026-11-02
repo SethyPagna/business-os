@@ -10,9 +10,10 @@ const { bootWorld } = require('./read-budget/world.cjs')
 const { roundUp } = require('./read-budget/budgets.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-// health-movement-balance-rows.sql read 349,382,402 rows on the seed (140 s) and stk-c-lot-drain-without-movement.sql
-// 209,756,641 (224 s), against 5,000,000 reads a day on Free. Rewrite one to a ceiling before it leaves this list.
-const REFUSED_ON_FREE = ['health-movement-balance-rows', 'stk-c-lot-drain-without-movement']
+// Empty since 6.0.1043: health-movement-balance-rows.sql (349,382,402 rows read on the seed) and stk-c-lot-drain-without-movement.sql
+// (209,756,641) were rewritten to a few hundred thousand and left this list. A query too costly for the 5,000,000 reads a day on Free
+// goes back here with -- ops:refused-on-free and a rewrite plan in its header.
+const REFUSED_ON_FREE = []
 // The local runtime has no dbstat table, so this query cannot be measured here. It reads about one row per database page
 // (~22,000 pages at 85 MB), so its directive must stay at or under the ceiling below.
 const UNMEASURABLE = { 'd1-dbstat-probe': 100000 }
@@ -51,6 +52,15 @@ async function main() {
       }
     }
   } finally { await world.dispose() }
+  // Tier A (recent-*) ceilings leave room for a busy day or the day after a large import (6.0.1043): at least 3 x the seed day, never under
+  // the floor, never over the plan's 20,000 for one file. A ceiling is there to catch a plan that flips to a table scan, not to bound growth.
+  const TIER_A = { cap: 20000, floor: 2000, headroom: 3 }
+  for (const q of runnable.filter((x) => x.name.startsWith('recent-'))) {
+    const seen = rows.get(q.name) || 0
+    const want = Math.min(TIER_A.cap, Math.max(TIER_A.floor, TIER_A.headroom * seen))
+    if (q.maxRowsRead > TIER_A.cap) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is over the plan's ${TIER_A.cap} for one Tier A file`)
+    if (q.maxRowsRead < want) reds.push(`${q.name}: ceiling ${q.maxRowsRead} is under ${TIER_A.headroom} x the seed day (${seen} rows): a busy day would fail with read-ceiling-exceeded (want at least ${want})`)
+  }
   console.log(`test-ops-query-budget: ${runnable.length} queries measured, ${Object.keys(UNMEASURABLE).length} unmeasurable here, ${REFUSED_ON_FREE.length} refused on Free, ${reds.length} red`)
   for (const line of reds) console.error('RED ' + line)
   if (reds.length) process.exitCode = 1
