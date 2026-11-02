@@ -5,6 +5,8 @@ export interface PermissionDefinition {
   tKey: string
   label: string
   sensitivity: PermissionSensitivity
+  // No longer offered as a switch, but still stored on roles and users: reviews and summaries keep naming and counting it, and its value is never touched.
+  retired?: boolean
   section?: string
   // True only for a permission key with a real, end-to-end-wired Review
   // Required tier: getPermissionTier()/isReviewRequired() (cloudflare/src/
@@ -308,6 +310,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewDescription: 'Under Review, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
       { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal', lead: true, subRow: true },
+      // Price, cost, units sold and customer counts left the Inventory check list (owner, 1 Nov 2026): no chip offers them, their stored grants stay untouched.
       ...[
         ['price', 'Show selling prices'], ['barcode', 'Show barcodes and SKUs'],
         ['category', 'Show categories'], ['brand', 'Show brands'], ['stock', 'Show recorded stock'],
@@ -316,6 +319,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       ].map(([field, label]) => ({
         key: `inventory_check_show_${field}`, tKey: `perm_inventory_check_show_${field}`, label,
         sensitivity: 'normal' as const,
+        ...(['price', 'sales', 'customers', 'cost'].includes(field) ? { retired: true } : {}),
       })),
     ],
   },

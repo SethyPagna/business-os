@@ -24,6 +24,7 @@ window.history.replaceState = (_state, _unused, url) => applyLocation(String(url
 const goTo = (section: string) => applyLocation(`https://admin.example.test/inventory#hub:inventory:${section}`)
 
 const packs = Object.fromEntries(['en', 'km'].map(language => [language, JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>]))
+// qty_sold and selling_price_usd are wire residue an older server may send: no surface draws them.
 const product = (id: number, name: string, extra: Record<string, unknown> = {}) => ({ id, name, quantity: 10, qty_sold: 4, selling_price_usd: 2.5, ...extra })
 let products = [product(12, 'Row twelve', { barcode: '885000111', brand: 'Brand B' }), product(13, 'Row thirteen')]
 let branches = [{ id: 1, name: 'Main' }]
@@ -39,6 +40,7 @@ let members: InventoryCheckSessionItem[] = [{ product_id: 12, state: 'issue', re
 const productReads: Array<Record<string, unknown>> = []
 const sessionReads: Array<Record<string, unknown>> = []
 const creates: unknown[][] = []
+const submissions: Array<{ scope: unknown; input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> } }> = []
 // A held gate keeps a read pending so the loading shape can be inspected, then lets it through.
 let productGate: Promise<void> | null = null
 let releaseProducts: () => void = () => {}
@@ -46,10 +48,11 @@ let historyGate: Promise<void> | null = null
 let releaseHistory: () => void = () => {}
 let failHistory = false
 let historyBody: { items: unknown[]; total: number; page: number; pageSize: number } = { items: [], total: 0, page: 1, pageSize: 20 }
-const productsBody = () => ({ items: products, total: products.length, page: 1, pageSize: 20, branches, stats: { total_products: products.length, stock_quantity: 20 }, rankings: { products: [] }, facets: { brands: ['Brand B'], categories: [], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, issues })
+// The ic_simple answer: the Issues tab is this list with checkState=issue, so its rows carry the check facts.
+const productsBody = (params: Record<string, unknown> = {}) => { const rows = params.checkState === 'issue' ? issues : products; return { items: rows, total: rows.length, page: 1, pageSize: 20, simple: true, branches, summary: { not_checked: 18, in_check: 1, ok: 0, issue: 1, total: 20 }, facets: { brands: ['Brand B'], categories: [] }, facetsLimited: { brands: false, categories: false } } }
 const app = {
   user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } as Record<string, boolean> },
-  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied',
+  page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => key, settings: { navigation_mode: 'sections' }, language: 'en', AccessDenied: () => 'Access denied', notify: () => {},
   navigateTo: (page: string, anchor?: string) => {
     window.history.pushState(null, '', `/inventory#${anchor || ''}`)
     window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { page, path: '/inventory', anchor } }))
@@ -68,7 +71,7 @@ const doubles = {
     readInventoryCheckProducts: async (params: Record<string, unknown>) => {
       productReads.push(params)
       if (productGate) await productGate
-      return productsBody()
+      return productsBody(params)
     },
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: sessionList, total: sessionTotal || sessionList.length, page: Number(params.page) || 1, pageSize: 20 } },
     readInventoryCheckSession: async () => ({ item: selected, items: members }),
@@ -78,6 +81,7 @@ const doubles = {
       return historyBody
     },
     createInventoryCheckSession: async (...args: unknown[]) => { creates.push(args); return { item: selected, receipt: {} } },
+    submitInventoryCheckCounts: async (scope: unknown, input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> }) => { submissions.push({ scope, input }); return { item: { ...selected, id: 'submitted', status: 'closed' }, receipt: {}, created: true } },
     saveInventoryCheckObservation: async () => { throw new Error('not used') },
     changeInventoryCheckSession: async () => ({ item: selected, receipt: {} }),
   },
@@ -89,8 +93,6 @@ const exact = (surface: Surface, text: string) => surface.findAll(node => node.t
 const byLabel = (surface: Surface, label: string) => surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === label, `button ${label}`)
 // The empty state's own button: a short ✕ + "Clear", told apart from the Filters menu's Clear link by where it sits.
 const emptyClear = (surface: Surface, word: string) => surface.findAll(node => node.tagName === 'BUTTON' && node.textContent === word && surface.findAll(box => box.getAttribute('data-inventory-check-empty') !== null && box.contains(node)).length === 1)
-// The page's own Count button (in the context bar), named "Count (n)" after the products it would count.
-const pageCount = (surface: Surface, word: string) => surface.find(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${word} (`), 'page Count button')
 const sessionRow = (surface: Surface, id: string) => surface.find(node => node.getAttribute('data-inventory-check-session') === id, `session ${id}`)
 const chooseFilter = async (surface: Surface, filtersLabel: string, section: string, option: string) => {
   if (!surface.findAll(node => node.getAttribute('data-filter-menu-section') !== null).length) await surface.click(byLabel(surface, filtersLabel))
@@ -113,11 +115,11 @@ try {
     ]
     sessionTotal = 45
     const list = await mount()
-    // Lane 6.0.933: the Sessions tab pins ONE row -- Filters, the dates and presets, then Refresh -- instead of a date row plus a row for one icon.
+    // Lane 6.0.933: the Sessions tab pins ONE row -- Filters, then the dates and presets; no Refresh (1 Nov) -- instead of a date row plus a row for one icon.
     const rangeRows = list.findAll(node => node.getAttribute('data-stats-range-controls') !== null)
     assert.equal(rangeRows.length, 1, `${language}: the Sessions tab has a single pinned row`)
     const rowButtons = rangeRows[0].querySelectorAll('button').map(node => node.getAttribute('aria-label'))
-    assert.ok(rowButtons.indexOf(pack.filters) === 0 && rowButtons.at(-1) === pack.refresh, `${language}: Filters leads that row and Refresh ends it: ${rowButtons.join(' | ')}`)
+    assert.ok(rowButtons.indexOf(pack.filters) === 0 && !rowButtons.includes(pack.refresh), `${language}: Filters leads that row and there is no Refresh: ${rowButtons.join(' | ')}`)
     const first = visibleText(sessionRow(list, 's-1')), second = visibleText(sessionRow(list, 's-2'))
     assert.ok(first.includes('19/10/2026 09:30') && second.includes('19/10/2026 09:31'), `${language}: sessions a minute apart show different date and time (${first} | ${second})`)
     assert.notEqual(first, second)
@@ -151,7 +153,7 @@ try {
     // The sessions date row is its own: it must not filter the Products tab.
     const productsBefore = productReads.length
     await list.click(list.button(pack.products))
-    assert.ok(productReads.length > productsBefore && productReads.at(-1)?.startDate === undefined, `${language}: the Products tab keeps its own, unfiltered date range`)
+    assert.ok(productReads.length > productsBefore && productReads.at(-1)?.startDate === undefined && productReads.at(-1)?.endDate === undefined, `${language}: the Products tab has no sales date range at all`)
     await list.unmount()
 
     // Empty states carry the right action per tab.
@@ -184,17 +186,18 @@ try {
     products = [product(12, 'Row twelve', { barcode: '885000111', brand: 'Brand B' }), product(13, 'Row thirteen')]
 
     // Issues: the product row, the session chip and the reason.
-    issues = [{ product_id: 12, branch_id: 1, session_id: 's-1', session_title: 'Stored fixed title', created_by: 7, reason: 'Shelf short', revision: 1, state: 'issue', counted_quantity: 8 }]
+    issues = [{ ...product(12, 'Row twelve', { barcode: '885000111', brand: 'Brand B' }), check_status: 'issue', check_counted_quantity: 8, check_note: 'Shelf short', check_by: 'alice', check_at: '2026-10-19 02:35:00', check_session_id: 's-1', check_branch_id: 1 }]
     goTo('issues')
     const issueTab = await mount()
     const issueRow = issueTab.find(node => node.getAttribute('data-inventory-check-row') === '12', 'issue row')
     assert.ok(issueRow.textContent.includes('Row twelve') && issueRow.textContent.includes('Shelf short') && issueRow.textContent.includes(`${pack.inventory_check_counted} 8`), `${language}: issue row shows the product, its reason and its count`)
     const chip = issueTab.button(pack.inventory_check_open_session, issueRow)
     assert.ok(chip.textContent.includes('Main') && chip.getAttribute('aria-label')?.includes(pack.inventory_check_open_session), `${language}: a session chip names the branch and opens the session`)
-    assert.equal(issueTab.findAll(node => node.getAttribute('data-check-action') !== null).length, 0, `${language}: Issues rows are read-only`)
+    assert.equal(issueTab.findAll(node => node.getAttribute('data-check-action') === 'done' || node.getAttribute('data-check-action') === 'issue').length, 0, `${language}: Issues rows write nothing into a session; they are the list's rows, counted by Submit`)
     assert.ok(!issueTab.text().includes(pack.inventory_check_state), `${language}: the Issues tab has no Check status choice`)
     await issueTab.click(chip)
     assert.equal(productReads.at(-1)?.sessionId, 's-1', `${language}: the chip opens its session`)
+    assert.equal(productReads.some(read => read.checkState === 'issue' && read.state === undefined), true, `${language}: the Issues tab asks with checkState=issue`)
     await issueTab.unmount()
     issues = []
   }
@@ -216,34 +219,40 @@ try {
     await loading.unmount()
   }
 
-  // Count: a review first, and a disabled Count says why.
+  // Submit: a review first, and a Submit that is not ready says why. (There is no Count (n) button: the rows count themselves.)
   for (const language of ['en', 'km']) {
     const pack = useLanguage(language)
     goTo('products')
     branches = [{ id: 1, name: 'Main' }, { id: 2, name: 'Second' }]
-    creates.length = 0
+    submissions.length = 0
     const counting = await mount()
-    const count = pageCount(counting, pack.inventory_check_start_page)
-    assert.equal(count.getAttribute('aria-label'), `${pack.inventory_check_start_page} (2)`, `${language}: Count is named after the 2 products it would count`)
-    assert.equal(count.querySelector('[data-count-pill]')?.textContent, '2', `${language}: and shows that figure in a small pill`)
-    assert.equal(count.getAttribute('aria-disabled'), 'true', `${language}: Count waits for a branch`)
-    assert.equal(count.getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
-    assert.ok(counting.button(pack.inventory_check_count_blocked_branch), `${language}: the reason is also behind an InfoHint for touch`)
+    const rowOf = (id: number) => counting.find(node => node.getAttribute('data-inventory-check-row') === String(id), `row ${id}`)
+    const countOf = (id: number) => counting.find(node => node.getAttribute('data-check-count') !== null && rowOf(id).contains(node), `count of ${id}`)
+    const submitButton = () => counting.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit')
+    assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && (node.getAttribute('aria-label') ?? '').startsWith(`${pack.inventory_check_start_page} (`)).length, 0, `${language}: no Count (n) button on the list`)
+    assert.equal(counting.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.refresh).length, 0, `${language}: and no Refresh button`)
+    await counting.call(counting.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
+    assert.equal(submitButton().getAttribute('aria-disabled'), 'true', `${language}: Submit waits for a branch`)
+    assert.equal(submitButton().getAttribute('title'), pack.inventory_check_count_blocked_branch, `${language}: and its tooltip says why`)
     const before = counting.findAll(node => node.tagName === 'DL').length
-    await counting.click(count)
-    assert.equal(counting.findAll(node => node.tagName === 'DL').length, before, `${language}: a blocked Count does nothing`)
+    await counting.click(submitButton())
+    assert.equal(counting.findAll(node => node.tagName === 'DL').length, before, `${language}: a blocked Submit does nothing`)
     await chooseFilter(counting, pack.filters, 'branchId', 'Second')
-    await chooseFilter(counting, pack.filters, 'brand', 'Brand B')
-    const enabled = pageCount(counting, pack.inventory_check_start_page)
-    assert.equal(enabled.getAttribute('aria-disabled'), null, `${language}: Count is live once a branch is chosen`)
-    assert.equal(enabled.getAttribute('title'), pack.inventory_check_count_tooltip)
-    await counting.click(enabled)
-    const review = counting.find(node => node.tagName === 'DL', 'count review').textContent
-    assert.ok(review.includes(pack.products), `${language}: the review lists the product count`)
-    assert.ok(review.includes('2') && review.includes('Second') && review.includes(`${pack.brand}: Brand B`), `${language}: it shows 2 products, the branch and the chosen filter: ${review}`)
-    assert.equal(creates.length, 0, `${language}: nothing is created before Confirm`)
-    await counting.click(exact(counting, pack.inventory_check_start_page).at(-1)!)
-    assert.equal((creates.at(-1)?.[1] as { productIds: number[] }).productIds.length, 2, `${language}: Confirm creates exactly the reviewed products`)
+    assert.equal(counting.find(node => node.getAttribute('data-selected-count') !== null, 'selected count').textContent, '', `${language}: a counted stock belongs to one branch, so choosing another starts the picks over`)
+    await counting.call(counting.find(node => node.getAttribute('data-check-select-all') !== null, 'select all'), 'onChange', [{ target: { checked: true } }])
+    assert.equal(submitButton().getAttribute('title'), pack.inventory_check_submit_need_counts, `${language}: then it asks for a count in every picked row`)
+    await counting.type(countOf(12), '10')
+    await counting.type(countOf(13), '7')
+    assert.equal(submitButton().getAttribute('aria-disabled'), null, `${language}: Submit is live once every picked row has a count`)
+    assert.equal(submitButton().getAttribute('title'), pack.inventory_check_submit)
+    await counting.click(submitButton())
+    const review = counting.find(node => node.tagName === 'DL', 'submit review').textContent
+    assert.ok(review.includes(pack.products) && review.includes('2') && review.includes('Second') && review.includes(pack.inventory_check_differences + '1'), `${language}: the review shows 2 products, the branch and how many differ: ${review}`)
+    assert.equal(submissions.length, 0, `${language}: nothing is sent before Confirm`)
+    await counting.click(exact(counting, pack.inventory_check_submit).at(-1)!)
+    assert.equal(submissions.at(-1)?.input.lines.length, 2, `${language}: Confirm sends exactly the reviewed products`)
+    assert.equal(submissions.at(-1)?.input.branchId, 2)
+    assert.equal(creates.length, 0, `${language}: no session is created from the list`)
     await counting.unmount()
     branches = [{ id: 1, name: 'Main' }]
   }
@@ -264,7 +273,7 @@ try {
     assert.equal(bar.findAll(node => node.getAttribute('role') === 'img' && node.getAttribute('aria-label') === pack.view_only).length, 0, `${language}: an editable session has no read-only marker`)
     const actions = bar.find(node => node.getAttribute('data-inventory-check-actions') !== null, 'action row')
     const barButtons = bar.findAll(node => node.tagName === 'BUTTON' && actions.contains(node))
-    assert.deepEqual(barButtons.map(node => node.getAttribute('aria-label')), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session, pack.refresh], `${language}: back, the session-details hint, History, Close and Refresh, in that order`)
+    assert.deepEqual(barButtons.map(node => node.getAttribute('aria-label')), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session], `${language}: back, the session-details hint, History and Close, in that order; no Refresh`)
     for (const button of barButtons) assert.ok(button.textContent === '' && (button.getAttribute('title') === button.getAttribute('aria-label') || button.getAttribute('aria-label') === pack.inventory_check_session_details), `${language}: ${button.getAttribute('aria-label')} is icon-only with a matching tooltip (the hint opens its own panel)`)
     // Every pinned control is an icon with a translated name -- except the date chips and the Sort select, whose words are their value.
     for (const button of bar.findAll(node => node.tagName === 'BUTTON' && pinned(bar).contains(node))) {
@@ -331,7 +340,7 @@ try {
     selected = session('s-1', '2026-10-19 02:30:00')
   }
 
-  // The pinned order: dates, then search / scan / Filters, then the context bar (branch, Count, Refresh); sort and chosen filters live only in the Filters menu.
+  // The pinned order: dates, then search / scan / Filters, then the context bar (branch, Count); sort and chosen filters live only in the Filters menu.
   {
     const pack = useLanguage('en')
     goTo('products')
@@ -339,12 +348,13 @@ try {
     const root = pinned(order)
     const walk = (node: MemoryNode): MemoryNode[] => node.childNodes.flatMap(child => child.nodeType === 1 ? [child, ...walk(child)] : [])
     const position = (needle: (node: MemoryNode) => boolean) => walk(root).findIndex(needle)
-    const dates = position(node => node.getAttribute('data-stats-range-controls') !== null)
+    const stats = position(node => node.tagName === 'BUTTON' && node.textContent === pack.stats)
     const search = position(node => node.getAttribute('id') === 'inventory-check-search')
     const scan = position(node => node.getAttribute('aria-label') === pack.scan_barcode)
     const filtersAt = position(node => node.getAttribute('aria-label') === pack.filters)
     const context = position(node => node.getAttribute('data-inventory-check-context') !== null)
-    assert.ok(dates >= 0 && dates < search && search < scan && scan < filtersAt && filtersAt < context, `dates ${dates} < search ${search} < scan ${scan} < filters ${filtersAt} < context ${context}`)
+    assert.ok(stats >= 0 && stats < search && search < scan && scan < filtersAt && filtersAt < context, `stats ${stats} < search ${search} < scan ${scan} < filters ${filtersAt} < context ${context}`)
+    assert.equal(order.findAll(node => node.getAttribute('data-stats-range-controls') !== null).length, 0, 'the Products tab has no date row: the sales range is gone')
     assert.equal(order.findAll(node => node.getAttribute('aria-label') === pack.sort_by || node.getAttribute('data-inventory-check-filters') !== null).length, 0, 'there is no Sort row any more: Sort is a section of the Filters menu')
     const contextBar = order.find(node => node.getAttribute('data-inventory-check-context') !== null, 'context bar')
     assert.ok(contextBar.querySelector('[data-sole-branch]')?.textContent?.includes('Main'), 'the one active branch is shown as a label, not a picker, in the context bar')
@@ -356,14 +366,6 @@ try {
     // A scan only fills Search.
     assert.ok(order.find(node => node.getAttribute('data-sole-branch') !== null, 'branch label'))
     await order.unmount()
-    // Received dates hidden: the date row is inert and says why.
-    app.user = { ...app.user, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_received: false } }
-    const hidden = await mount()
-    const rangeButtons = hidden.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.date_time_range)
-    assert.ok(rangeButtons.length === 1 && propsOf(rangeButtons[0]).disabled === true, 'the date trigger is disabled without received-date access')
-    assert.ok(hidden.button(pack.inventory_check_date_hidden_hint), 'and an InfoHint explains it')
-    assert.equal(propsOf(hidden.button(pack.stats)).disabled ?? false, false, 'the Stats chip stays live')
-    await hidden.unmount()
   }
-  console.log('PASS inventoryChecksSurfaces: sessions list, filters, Count review, session bar, history float, states and icon-only buttons in EN and KM')
+  console.log('PASS inventoryChecksSurfaces: sessions list, filters, Submit review, session bar, history float, states and icon-only buttons in EN and KM')
 } finally { await harness.close() }

@@ -14,18 +14,23 @@ export type InventoryCheckProduct = {
   brand?: string | null
   category?: string | null
   damaged_quantity?: number | null
-  qty_sold?: number | null
-  customer_count?: number | null
-  selling_price_usd?: number | null
-  cost_price_usd?: number | null
-  cost_needs_review?: boolean
   stock_consistent?: boolean
   stock_diagnostics?: string | null
   unit?: string | null
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null
+  /** The latest check of this product in the chosen branch scope (ic_simple list rows only). Counts and names arrive only for viewers who may see them. */
+  check_status?: InventoryCheckListStatus
+  check_counted_quantity?: number | null
+  check_note?: string | null
+  check_by?: string
+  check_at?: string | null
+  check_session_id?: string | null
+  check_branch_id?: number | null
 }
+
+export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'
 
 export type InventoryCheckTranslator = (key: string) => string | null | undefined
 

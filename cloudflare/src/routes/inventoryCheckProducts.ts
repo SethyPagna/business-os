@@ -4,8 +4,9 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryCheckAccess } from '../lib/inventoryCheckAccess'
-import { readInventoryCheckProducts, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
-import { currentInventoryCheckActor, getInventoryCheckSession, inventoryCheckDigest, InventoryCheckSessionError } from '../lib/inventoryCheckSessions'
+import { readInventoryCheckProducts, readInventoryCheckProductsSimple, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
+import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError } from '../lib/inventoryCheckSessions'
+import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -22,6 +23,23 @@ app.get('/', async c => {
   const principal = { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
   const actor = await currentInventoryCheckActor(db, principal), raw = c.req.queries()
   for (const [key, values] of Object.entries(raw)) if (values.length !== 1) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', key)
+  if (await readSwitch(c.env, 'ic_simple')) {
+    // The owner's list (ic_simple): a closed query (state, reason, customerRanking, dates and sales sorts are refused as 400 by the validator), no sales stats.
+    const { sessionId: rawSimpleSession, ...simpleQuery } = c.req.query()
+    const simpleSession = rawSimpleSession?.trim() || undefined
+    validateInventoryCheckQuery(simpleQuery, getInventoryCheckAccess(actor), true)
+    if (simpleSession) {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(simpleSession)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'sessionId')
+      const detail = await getInventoryCheckSessionBranch(db, principal, simpleSession)
+      for (const value of [simpleQuery.branchId, simpleQuery.branch_id]) if (value && value !== String(detail.branch_id)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'branchId')
+      simpleQuery.branchId = String(detail.branch_id)
+    }
+    const simple = await readInventoryCheckProductsSimple(db, actor, simpleQuery, { lowStock: await loadLowStockConfig(c.env),
+      check: { organizationId: actor.organization_id ?? null, viewerId: actor.id, sessionId: simpleSession, canSeeStaffIdentity: accountId => canSeeStaffIdentity(actor, accountId) } })
+    const after = await currentInventoryCheckActor(db, principal)
+    if (JSON.stringify(after) !== JSON.stringify(actor)) throw new InventoryCheckSessionError(403, 'inventory_check_authority_changed')
+    return c.json(simple)
+  }
   const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, ...query } = c.req.query()
   const sessionId = rawSession?.trim() || undefined, state = rawState?.trim() === 'all' ? undefined : rawState?.trim() || undefined
   const reason = rawReason?.trim() || undefined

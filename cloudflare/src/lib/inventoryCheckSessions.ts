@@ -21,9 +21,9 @@ type EventRow = { id: number; session_id: string; product_id: number | null; act
 type Statement = { sql: string; params?: Record<string, unknown> }
 
 export class InventoryCheckSessionError extends Error {
-  constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string) { super(code); this.name = 'InventoryCheckSessionError' }
+  constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string, readonly details?: Record<string, unknown>) { super(code); this.name = 'InventoryCheckSessionError' }
 }
-const fail = (status: InventoryCheckSessionError['status'], code: string): never => { throw new InventoryCheckSessionError(status, code) }
+const fail = (status: InventoryCheckSessionError['status'], code: string, details?: Record<string, unknown>): never => { throw new InventoryCheckSessionError(status, code, details) }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : fail(400, 'inventory_check_invalid_request')
 const revision = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : fail(400, 'inventory_check_revision_required')
 const positive = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : fail(400, 'inventory_check_invalid_id')
@@ -59,7 +59,7 @@ async function schemaReady(db: D1Compat): Promise<void> {
   if (ready?.n !== 9) fail(503, 'inventory_check_schema_unavailable')
   checkSchemaReady = true
 }
-const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
+export const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
 function authorityGuard(actor: Actor): Statement {
   return guard(`EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actorId
     AND u.is_active=1 AND u.deleted_at IS NULL AND COALESCE(u.must_change_password,0)=0
@@ -90,7 +90,12 @@ async function progress(db: D1Compat, id: string) {
   return { total: Number(row?.total || 0), unstarted: Number(row?.unstarted || 0), done: Number(row?.done || 0), issue: Number(row?.issue || 0) }
 }
 // One rule for who may see a staff member's name on any Inventory check surface (history actor_name, session creator_name).
-const canSeeStaffIdentity = (actor: Actor, accountId: number): boolean => isAdminControlUser(actor) || hasPermission(actor,'audit_log') || accountId === actor.id
+export const canSeeStaffIdentity = (actor: Actor, accountId: number): boolean => isAdminControlUser(actor) || hasPermission(actor,'audit_log') || accountId === actor.id
+/** The branch of one session, for a session view of the products list: same actor and organization fence as reading the session, without its items or stock. */
+export async function getInventoryCheckSessionBranch(db: D1Compat, principal: InventoryCheckPrincipal, id: string): Promise<{ branch_id: number }> {
+  const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
+  return { branch_id: (await sessionRow(db, actor, id)).branch_id }
+}
 async function projectSession(db: D1Compat, actor: Actor, row: SessionRow, counts?: InventoryCheckSession['progress']): Promise<InventoryCheckSession> {
   const scope = parse(row.scope_json), access = getInventoryCheckAccess(actor)
   if (!access.fields.brand) delete scope.brand
@@ -278,7 +283,8 @@ const LOW_STOCK_SIGNATURE_SQL = `SELECT json_group_array(json_object('key',key,'
 const CHECKABLE_SQL = `(NOT(COALESCE(p.is_group,0)=1 AND EXISTS(SELECT 1 FROM products child WHERE child.id<>p.id
   AND (child.parent_id=p.id OR child.name_key=p.name_key) AND ${stockVisibleProductSql('child')})))`
 const CURRENT_PRODUCT_CHECKABLE_SQL = `p.id IS NOT NULL AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL}`
-export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig) {
+/** `simple` (ic_simple): the scope is the owner's closed query and its membership is the simplified cohort. Absent, the old validation and cohort apply unchanged. */
+export async function createInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { simple?: boolean } = {}) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   const branchId = positive(body.branchId), key = requestId(body.requestId)
   const productValues = body.productIds
@@ -290,11 +296,11 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const rawScope = { ...object(body.scope || {}) }, marker = rawScope.membership
   delete rawScope.membership
   if (marker !== undefined && marker !== 'visible_page') fail(400,'inventory_check_invalid_scope')
-  for (const key of ['state','reason','sessionId']) {
+  for (const key of options.simple ? ['state','reason','sessionId','summary'] : ['state','reason','sessionId']) {
     if (rawScope[key] !== undefined && rawScope[key] !== '') fail(400,'inventory_check_invalid_scope')
     delete rawScope[key]
   }
-  const query = validateInventoryCheckQuery({...rawScope,branchId:String(branchId)},getInventoryCheckAccess(actor))
+  const query = validateInventoryCheckQuery({...rawScope,branchId:String(branchId)},getInventoryCheckAccess(actor),options.simple === true)
   const normalizedScope:Record<string,unknown> = {...query,...(marker ? {membership:marker} : {})}
   const scope = Object.fromEntries(Object.keys(normalizedScope).sort().map(key=>[key,normalizedScope[key]]))
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'create', branchId, productIds, title, scope }))
@@ -303,7 +309,7 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
   const settingsSignature = JSON.stringify(settings.map(row=>({key:row.key,value:row.value})))
   lowStock = resolveLowStockConfig(Object.fromEntries(settings.map(row=>[row.key,row.value])))
-  const membership = buildInventoryCheckProductMembershipQuery(query, productIds, getInventoryCheckAccess(actor), lowStock)
+  const membership = buildInventoryCheckProductMembershipQuery(query, productIds, getInventoryCheckAccess(actor), lowStock, options.simple ? { organizationId: actor.organization_id ?? null } : undefined)
   const eligible = await db.prepare(membership.rowsSql).all<{ id: number }>(membership.params)
   if (eligible.length !== productIds.length) fail(400, 'inventory_check_product_not_eligible')
   const snapshot = await validatedStockSnapshot(db, branchId, productIds)
@@ -334,6 +340,99 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json)
       SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),json_extract(value,'$.baseline.quantity'),json_extract(value,'$.baseline') FROM json_each(@members)`, params },
     eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'open', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),
+  ]
+  const saved = await commit(db, principal, actor, statements, key, hash)
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+}
+/** A differing count with no typed note carries this sentence; the page shows its own translation in its place. */
+export const DEFAULT_COUNT_NOTE = 'Count differs from stock'
+const COUNT_EPSILON = 0.000000001
+const SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
+type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
+function submissionQuantity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : fail(400, 'inventory_check_invalid_quantity')
+}
+function submissionLine(value: unknown): SubmissionLine {
+  const line = object(value)
+  if (Object.keys(line).some(key => !SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
+  if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
+  const note = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
+  if (note !== null && note.length > 500) fail(400, 'inventory_check_invalid_note')
+  return { productId: positive(line.productId), counted: submissionQuantity(line.countedQuantity), seen: line.seenQuantity == null ? null : submissionQuantity(line.seenQuantity), checked: line.checked === true, note }
+}
+/**
+ * The owner's way to count (ic_simple): products picked on the list, a count typed in each row, one Submit. The whole submission is recorded
+ * at once as a closed count session: a matching count is Done, a differing one an Issue with its note. Stock is never written here.
+ * A viewer without the stock field cannot compare, so every line of theirs is recorded Done (as marking Done has always been for them).
+ */
+export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig) {
+  const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
+  const access = getInventoryCheckAccess(actor)
+  const branchId = positive(body.branchId), key = requestId(body.requestId)
+  if (!Array.isArray(body.lines) || body.lines.length < 1 || body.lines.length > 500) return fail(400, 'inventory_check_product_ids_required')
+  const lines = body.lines.map(submissionLine).sort((a, b) => a.productId - b.productId)
+  const productIds = lines.map(line => line.productId)
+  if (new Set(productIds).size !== productIds.length) fail(400, 'inventory_check_invalid_id')
+  const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
+  if (title.length > 120) fail(400, 'inventory_check_invalid_title')
+  if (!access.fields.stock && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit', branchId, title, lines }))
+  const existing = await receipt(db, actor, key, hash)
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
+  const settingsSignature = JSON.stringify(settings.map(row=>({key:row.key,value:row.value})))
+  lowStock = resolveLowStockConfig(Object.fromEntries(settings.map(row=>[row.key,row.value])))
+  const membership = buildInventoryCheckProductMembershipQuery({ branchId: String(branchId) }, productIds, access, lowStock, { organizationId: actor.organization_id ?? null })
+  const eligible = await db.prepare(membership.rowsSql).all<{ id: number }>(membership.params)
+  if (eligible.length !== productIds.length) fail(400, 'inventory_check_product_not_eligible')
+  const snapshot = await validatedStockSnapshot(db, branchId, productIds)
+  const baselines = snapshot.rows
+  if (baselines.length !== productIds.length) fail(409, 'inventory_check_baseline_changed')
+  const byId = new Map(baselines.map(row => [row.product_id, row]))
+  const products = await db.prepare('SELECT id,name,image_path,unit,parent_id,is_group FROM products WHERE id IN (SELECT value FROM json_each(@ids)) ORDER BY id').all<Record<string, unknown>>({ ids: JSON.stringify(productIds) })
+  const productById = new Map(products.map(product => [Number(product.id), product]))
+  // "Marked checked" means the count the person saw equalled stock. If stock moved since, the mark is stale and the whole submission is refused, never recorded as a difference.
+  const resolved = lines.map(line => {
+    const baseline = byId.get(line.productId), quantity = baseline?.quantity ?? null
+    const matched = access.fields.stock && quantity !== null && Math.abs(quantity - line.counted) <= COUNT_EPSILON
+    const state: 'done' | 'issue' = !access.fields.stock || matched ? 'done' : 'issue'
+    return { line, baseline, matched, state, reason: state === 'issue' ? line.note ?? DEFAULT_COUNT_NOTE : null }
+  })
+  const stale = resolved.filter(item => item.line.checked && !item.matched).map(item => item.line.productId)
+  if (stale.length) fail(409, 'inventory_check_stock_changed', { productIds: stale })
+  const now = new Date().toISOString(), id = crypto.randomUUID()
+  const members = await Promise.all(resolved.map(async item => ({ product_id: item.line.productId, product: productById.get(item.line.productId), baseline: item.baseline,
+    state: item.state, counted: item.line.counted, reason: item.reason,
+    event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
+  if (members.some(member => !member.product || !member.baseline)) fail(409, 'inventory_check_baseline_changed')
+  const scope = { membership: 'submission' }
+  const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify(scope), now,
+    members: JSON.stringify(members), baseline: JSON.stringify(baselines), count: productIds.length, signature: snapshot.signature }
+  const stock = buildInventoryCheckStockQuery({ branchId, productIds })
+  const comparisons = [...STOCK_COLUMNS, 'consistent'].map(column => `a.${column} IS json_extract(e.value,'$.${column}')`).join(' AND ')
+  const statements: Statement[] = [
+    guard(`EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)
+      AND (${PHYSICAL_SCHEMA_SQL}) IS @signature AND (${LOW_STOCK_SIGNATURE_SQL}) IS @settingsSignature`, 'inventory_check_baseline_changed', { ...params, settingsSignature }),
+    guard(`(SELECT COUNT(*) FROM (${membership.rowsSql}))=@count`, 'inventory_check_baseline_changed', { ...membership.params, count: productIds.length }),
+    { sql: `WITH actual AS (${stock.rowsSql}) SELECT CASE WHEN (SELECT COUNT(*) FROM actual)=@count AND NOT EXISTS(
+      SELECT 1 FROM json_each(@baseline) e LEFT JOIN actual a ON a.product_id=json_extract(e.value,'$.product_id')
+      WHERE a.product_id IS NULL OR NOT(${comparisons})) THEN 1 ELSE json_extract('[]','$[inventory_check_baseline_changed]') END`,
+      params: { ...stock.params, baseline: params.baseline, count: productIds.length } },
+    guard(`NOT EXISTS(SELECT 1 FROM json_each(@members) e LEFT JOIN products p ON p.id=json_extract(e.value,'$.product_id')
+      WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
+      OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
+      OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
+    { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
+      VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
+    { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
+      SELECT @id,json_extract(value,'$.product_id'),@branchId,json_extract(value,'$.product'),json_extract(value,'$.baseline.quantity'),json_extract(value,'$.baseline'),
+        json_extract(value,'$.state'),json_extract(value,'$.counted'),json_extract(value,'$.reason'),1,@actorId,@now FROM json_each(@members)`, params },
+    eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'closed', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),
+    { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      SELECT @id,json_extract(value,'$.product_id'),@actorId,@actorName,'observe',json_extract(value,'$.event_request_id'),json_extract(value,'$.event_hash'),
+        json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',0),
+        json_object('state',json_extract(value,'$.state'),'counted_quantity',json_extract(value,'$.counted'),'reason',json_extract(value,'$.reason'),'revision',1),
+        json_object('sessionRevision',0,'itemRevision',1),@now FROM json_each(@members)`, params },
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
@@ -388,6 +487,8 @@ export async function patchInventoryCheckSession(db: D1Compat, principal: Invent
   if (!canEdit(actor, session)) fail(403, 'inventory_check_owner_required')
   const expected = revision(body.expectedRevision), key = requestId(body.requestId), action = body.action
   if (action !== 'close' && action !== 'resume') return fail(400, 'inventory_check_invalid_action')
+  // A submitted count is final: it was recorded closed, and reopening it would let its saved lines be edited after the fact.
+  if (action === 'resume' && parse(session.scope_json).membership === 'submission') fail(409, 'inventory_check_session_final')
   const hash = await inventoryCheckDigest(JSON.stringify({ action, id, expected })), previous = await receipt(db, actor, key, hash)
   if (previous) return { item: (await committedSessionProjection(db, principal, id)).item, receipt: receiptResponse(previous, true) }
   const status = action === 'close' ? 'closed' : 'open', now = new Date().toISOString()

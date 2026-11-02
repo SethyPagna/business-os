@@ -69,6 +69,7 @@ import {
 import type { DrillPatch, ReportViewProps } from './reports/reportTypes.ts'
 import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
 import { useBranchRows } from '../../utils/useBranchRows.ts'
+import { peekReportsFocus, takeReportsFocus, REPORTS_FOCUS_EVENT, type ReportsFocus } from './reports/reportsFocus.ts'
 
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
@@ -153,7 +154,11 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   // ---- persisted choices (view, style, calculation options) ----
   const storage = typeof window !== 'undefined' ? window.localStorage : null
-  const [viewId, setViewId] = useState<ReportViewId | null>(() => resolveReportView(readStoredJson(storage, REPORT_STORAGE_KEYS.view, (raw) => raw), perms, reportScope))
+  // A link from another page (Inventory check's Sales) names the view, the search and the dates this report opens with; it is read once here
+  // (peeked while rendering, so a second render sees the same answer, and consumed after mount).
+  const arrival = useRef<ReportsFocus | null | undefined>(undefined)
+  if (arrival.current === undefined) arrival.current = peekReportsFocus()
+  const [viewId, setViewId] = useState<ReportViewId | null>(() => resolveReportView(arrival.current ? arrival.current.view : readStoredJson(storage, REPORT_STORAGE_KEYS.view, (raw) => raw), perms, reportScope))
   const [styleChoice, setStyleChoice] = useState<ReportStyle | null>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle))
   const [options, setOptions] = useState<ReportOptions>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions))
   const style: ReportStyle = styleChoice ?? defaultReportStyle(compact)
@@ -177,12 +182,25 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // ---- filters ----
   // An empty range left the Expenses report without an actionable initial
   // request. Today gives every report a concrete, business-time scope.
-  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  const [range, setRange] = useState<DateTimeRange>(() => arrival.current ? { ...todayDateTimeRange(), startDate: arrival.current.startDate, endDate: arrival.current.endDate } : todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('')
-  const [searchText, setSearchText] = useState('')
-  const [search, setSearch] = useState('')
+  const [searchText, setSearchText] = useState(() => arrival.current?.search ?? '')
+  const [search, setSearch] = useState(() => arrival.current?.search ?? '')
+  useEffect(() => { if (arrival.current) takeReportsFocus() }, [])
+  // The page can already be open when the link is followed.
+  useEffect(() => {
+    const follow = () => {
+      const focus = takeReportsFocus()
+      if (!focus) return
+      setViewId((current) => resolveReportView(focus.view, permsRef.current, reportScope) ?? current)
+      setRange((current) => ({ ...current, startDate: focus.startDate, endDate: focus.endDate }))
+      setSearchText(focus.search); setSearch(focus.search)
+    }
+    window.addEventListener(REPORTS_FOCUS_EVENT, follow)
+    return () => window.removeEventListener(REPORTS_FOCUS_EVENT, follow)
+  }, [reportScope])
   useEffect(() => {
     const handle = window.setTimeout(() => setSearch(searchText.trim()), SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(handle)

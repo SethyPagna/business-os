@@ -3,11 +3,13 @@ import { createHarness, type MountedSurface, type MemoryNode } from './mountedCo
 import { PERMISSION_SECTIONS } from '../src/components/users/permissionDefinitions.ts'
 import { getInventoryCheckAccess } from '../src/utils/inventoryCheckAccess.ts'
 
-// Counting is its own grant (owner, 21 Oct 2026: Full = main access only). The nine field switches are plain on/off grants on the
+// Counting is its own grant (owner, 21 Oct 2026: Full = main access only). The field switches are plain on/off grants on the
 // Inventory check sessions row: absent is off, nothing is inherited from Inventory, and toggling one writes only that key.
+// Price, cost, units sold and customer counts left the list (owner, 1 Nov 2026): the editor no longer offers them, and their stored values are never touched.
 const inventory = PERMISSION_SECTIONS.find(section => section.key === 'inventory')!
 const fields = inventory.permissions.filter(permission => permission.key.startsWith('inventory_check_show_'))
-assert.equal(fields.length, 9)
+assert.deepEqual(fields.filter(permission => !permission.retired).map(permission => permission.key), ['barcode', 'category', 'brand', 'stock', 'received'].map(field => `inventory_check_show_${field}`), 'the five fields the list still shows')
+assert.deepEqual(fields.filter(permission => permission.retired).map(permission => permission.key), ['price', 'sales', 'customers', 'cost'].map(field => `inventory_check_show_${field}`), 'the four retired ones stay defined, so reviews and summaries still name and count the stored grants')
 for (const permission of fields) assert.equal(Object.hasOwn(permission, 'defaultFromFull'), false, `${permission.key} inherits nothing from Inventory`)
 
 const harness = await createHarness()
@@ -28,6 +30,13 @@ try {
   assert.deepEqual(changed, { inventory_checks: true, inventory_check_show_stock: true })
   assert.equal(getInventoryCheckAccess({ permissions: JSON.stringify(changed) }).fields.stock, true)
   assert.equal(Object.hasOwn(changed, 'inventory_check_show_price'), false, 'editing one field does not materialize unrelated defaults')
+  // A retired grant stored on a role has no chip, and editing a live field leaves it exactly as stored.
+  await surface.render({ ...props, permissions: { inventory_checks: true, inventory_check_show_sales: true, inventory_check_show_cost: false, inventory_check_show_price: true } })
+  await openSessions()
+  for (const word of [/Show units sold/, /Show customer counts/, /Show selling prices/, /Show costs when permitted/]) assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && word.test(node.getAttribute('aria-label') ?? '')).length, 0, `${word} is retired from the editor`)
+  await surface.click(surface.button(/Show recorded stock/, section()))
+  assert.deepEqual(changed, { inventory_checks: true, inventory_check_show_sales: true, inventory_check_show_cost: false, inventory_check_show_price: true, inventory_check_show_stock: true }, 'stored retired grants survive an edit')
+  changed = { inventory_checks: true, inventory_check_show_stock: true }
   // Turning it off again removes the key: absent and false mean the same.
   await surface.render({ ...props, permissions: changed })
   await surface.click(surface.button(/Show recorded stock/, section()))
@@ -44,7 +53,7 @@ try {
   await openSessions()
   await surface.click(surface.button(/Show recorded stock/, section()))
   assert.equal((changed as Record<string, unknown>).inventory, 'review', 'a field toggle preserves Review')
-  assert.equal(changed.inventory_check_show_stock, true)
+  assert.equal((changed as Record<string, unknown>).inventory_check_show_stock, true)
   const access = getInventoryCheckAccess({ permissions: JSON.stringify(changed) })
   assert.equal(access.fields.stock, true)
   assert.equal(access.fields.cost, false, 'field controls never grant acquisition cost access')

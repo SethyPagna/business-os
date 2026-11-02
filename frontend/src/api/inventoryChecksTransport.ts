@@ -131,6 +131,18 @@ export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, p
   return write(scope, `${sessionPath(scope.context.sessionId)}/items/${productId}`, 'PATCH', { ...patch, expectedRevision, expectedSessionRevision, requestId })
 }
 
+/** The owner's way to count: every picked product with its count in one request, recorded whole as a closed session. Nothing about stock changes. */
+export type InventoryCheckSubmission = {
+  branchId: number
+  requestId: string
+  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }>
+}
+export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
+  if (scope.context.sessionId) throw new Error('Counts are submitted from the list, not from inside a session.')
+  if (!Number.isSafeInteger(input.branchId) || input.branchId < 1) throw new Error('Choose a branch before submitting counts.')
+  return write(scope, `${base}/submissions`, 'POST', input)
+}
+
 export function changeInventoryCheckSession(scope: InventoryCheckWriteScope, action: 'close' | 'resume', expectedRevision: number, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt }> {
   if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
   return write(scope, sessionPath(scope.context.sessionId), 'PATCH', { action, expectedRevision, requestId })

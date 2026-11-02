@@ -1,37 +1,40 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import Play from 'lucide-react/dist/esm/icons/play.js'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
-import Users from 'lucide-react/dist/esm/icons/users.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
-import { isAdminControlUser } from '../../utils/permissions.ts'
-import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
-import { getDirtyWork } from '../../utils/dirtyWork.ts'
-import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
+import { effectivePermissions, isAdminControlUser } from '../../utils/permissions.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { getDirtyWork, registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { isExactBarcodeHit } from '../../utils/scanExactHit.ts'
 import { foldNativeDigits } from '../../utils/searchMatch.ts'
 import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
-import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
+import type { InventoryCheckListStatus, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
+import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
+import { countMatchesStock, finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
+import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
+import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
 import HubSectionNav from '../shared/HubSectionNav.tsx'
-import { useHubSection } from '../shared/hubNavigation.ts'
+import { hubAnchor, useHubSection } from '../shared/hubNavigation.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import SoleBranchLabel from '../shared/SoleBranchLabel.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
@@ -42,19 +45,25 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { statsPresetRange, type DateTimeRange } from '../shared/statsStripPresets.ts'
 
+const FastStockInModal = lazyRetry(() => import('./FastStockInModal.tsx'), 'inventory-check-fix-stock')
+
+type CheckSummary = Record<InventoryCheckListStatus, number> & { total: number }
 type ProductsResult = {
   items: InventoryCheckProduct[]; total: number; page: number; pageSize: number; totalPages?: number
   branches: Array<{ id: number; name: string }>
-  stats?: Record<string, number | null | undefined>
-  facets?: { brands?: string[]; categories?: string[]; reasons: string[] }
-  facetsLimited?: { brands: boolean; categories: boolean; reasons: boolean }
-  rankings?: { products?: Array<{ family_key: string; name: string; qty_sold: number }>; customers?: Array<{ customer_id: number; name: string; sale_count: number }> }
-  issues?: Array<{ product_id: number; branch_id: number; session_id: string; session_title: string; created_by: number; reason: string | null; revision: number; state: 'issue'; counted_quantity?: number | null }>
+  /** Set when the server speaks the check-status contract (ic_simple): rows carry their check facts and the status filter exists. */
+  simple?: boolean
+  /** Check counts and filter options come with page 1 and with a filter change, never with a page step (the page keeps the last ones). */
+  summary?: CheckSummary
+  facets?: { brands?: string[]; categories?: string[] }
+  facetsLimited?: { brands: boolean; categories: boolean }
+  /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
+  capabilities?: { fixStock?: boolean }
 }
 /** creatorName rides along from the Sessions list: the single-session read does not send it. */
 type Selection = { branchId: string; sessionId: string; creatorName?: string | null; bootstrapIntent?: ControlIntent }
 type Section = 'products' | 'sessions' | 'issues'
-type ControlIntent = { range: DateTimeRange; query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; showCustomerRanking: boolean }
+type ControlIntent = { query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
 /** A search that came from Enter, the camera or a scanner gun. Nothing is ever saved by it: it narrows the list and points at the one exact row. */
 type Scan = { token: number; query: string; target: InventoryCheckFocusRequest['target'] }
@@ -65,6 +74,8 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_baseline_changed: { key: 'inventory_check_error_baseline_changed', fallback: 'Stock or products changed. Reload and try again.' },
   inventory_check_owner_required: { key: 'inventory_check_error_owner_required', fallback: 'Only the session creator or an administrator can change this check.' },
   inventory_check_product_not_eligible: { key: 'inventory_check_error_product_not_eligible', fallback: 'A product on this page cannot be checked. Reload and try again.' },
+  inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you marked a product checked. The list was reloaded: mark those products again.' },
+  inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
 }
 function knownRefusal(cause: unknown) {
   const code = (cause as { code?: unknown } | null)?.code
@@ -74,7 +85,11 @@ function isStaleConflict(cause: unknown) {
   const { status, code } = (cause ?? {}) as { status?: unknown; code?: unknown }
   return status === 409 && code !== 'inventory_check_owner_required'
 }
-const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', state: '', reason: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
+/** What the list holds for one picked or counted product until Submit: the row's own fields plus the name and the stock the person saw. */
+type DraftEntry = ListDraft & { name: string; seen: number | null }
+const COUNTS_WORK_KEY = 'inventory-check:counts'
+const MAX_SUBMISSION = 500
+const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
 /** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
 const SEARCH_PAUSE_MS = 300
 
@@ -92,29 +107,31 @@ function scanHitOf(products: readonly InventoryCheckProduct[], query: string, ba
   return hits.length === 1 ? hits[0] : null
 }
 
+/** The product as the Set session lists it: ordinary stock in the counted branch (a count includes damaged units, Set does not). */
+function fixStockCandidate(opening: FixStockOpening, branchName: string | null) {
+  const { product } = opening
+  const ordinary = Math.max(0, (Number(product.quantity) || 0) - (Number(product.damaged_quantity) || 0))
+  return { id: product.id, name: product.name, barcode: product.barcode ?? null, brand: product.brand ?? null, unit: product.unit ?? null, image_path: product.image_path ?? null,
+    stock_quantity: ordinary, branch_stock: [{ branch_id: opening.branchId, branch_name: branchName, quantity: ordinary }] }
+}
+
 function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAccess['fields']): InventoryCheckProduct {
   const visible = { ...product }
   if (!fields.stock) { delete visible.quantity; delete visible.damaged_quantity }
-  if (!fields.price) delete visible.selling_price_usd
-  if (!fields.cost) { delete visible.cost_price_usd; delete visible.cost_needs_review }
-  if (!fields.sales) delete visible.qty_sold
-  if (!fields.customers) delete visible.customer_count
   if (!fields.brand) delete visible.brand
   if (!fields.category) delete visible.category
   if (!fields.barcode) { delete visible.barcode; delete visible.sku }
   return visible
 }
 
-/** What a new count session will be taken from, in words: search, dates and every chosen filter. */
-function describeCountScope(t: (key: string) => string, args: { query: string; range: DateTimeRange; filters: InventoryCheckFilters; stateApplies: boolean }): string {
-  const { query, range, filters } = args
-  const stateText: Record<string, string> = { unstarted: t('inventory_check_unstarted'), done: t('done'), issue: t('issues') }
+/** What a new count session will be taken from, in words: search and every chosen filter. */
+function describeCountScope(t: (key: string) => string, args: { query: string; filters: InventoryCheckFilters; stateApplies: boolean }): string {
+  const { query, filters } = args
+  const stateText: Record<string, string> = { not_checked: t('inventory_check_status_not_checked'), in_check: t('inventory_check_status_in_check'), ok: t('inventory_check_status_ok'), issue: t('issues') }
   const stockText: Record<string, string> = { in_stock: t('in_stock'), low_stock: t('low_stock'), out_of_stock: t('out_of_stock') }
   const parts = [
     query.trim() && `${t('search')}: ${query.trim()}`,
-    (range.startDate || range.endDate) && [range.startDate, range.endDate].map(day => day ? fmtDateOnly(day) : '…').join(' → '),
-    args.stateApplies && filters.state && `${t('inventory_check_state')}: ${stateText[filters.state] ?? filters.state}`,
-    filters.reason && `${t('reason')}: ${filters.reason}`,
+    args.stateApplies && filters.checkState && `${t('inventory_check_state')}: ${stateText[filters.checkState] ?? filters.checkState}`,
     filters.stockState && `${t('stock_status')}: ${stockText[filters.stockState] ?? filters.stockState}`,
     filters.brand && `${t('brand')}: ${filters.brand}`,
     filters.category && `${t('category')}: ${filters.category}`,
@@ -175,7 +192,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   const compact = useIsCompactViewport()
   const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
-  const [range, setRange] = useState<DateTimeRange>(() => bootstrapIntent?.range ?? statsPresetRange('all'))
   const [sessionRange, setSessionRange] = useState<DateTimeRange>(() => statsPresetRange('all'))
   const [sessionFilters, setSessionFilters] = useState<SessionListFilters>(initialSessionFilters)
   // `query` is what the box shows; `appliedQuery` is what the server was asked. Typing moves the first and the list follows after a pause.
@@ -186,7 +202,6 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [searchFocus, setSearchFocus] = useState(0)
   const [gunScan, setGunScan] = useState<{ code: string; token: number; origin: ScanOrigin } | null>(null)
-  const [showCustomerRanking, setShowCustomerRanking] = useState(bootstrapIntent?.showCustomerRanking ?? false)
   const [filters, setFilters] = useState<InventoryCheckFilters>({ ...(bootstrapIntent?.filters ?? initialFilters), branchId })
   const [pagination, setPagination] = useState<{ section: Section; page: number }>(bootstrapIntent?.pagination ?? { section, page: 1 })
   const page = pagination.section === section ? pagination.page : 1
@@ -195,6 +210,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [refresh, setRefresh] = useState(0)
   const [sessionReload, setSessionReload] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
+  // The scope (everything but the page) whose check counts and filter options `data` holds: a page step inside it asks the server to skip them.
+  const summaryScope = useRef('')
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [sessions, setSessions] = useState<{ items: InventoryCheckSession[]; total: number } | null>(null)
@@ -215,6 +232,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     })
   }, [])
   const [detail, setDetail] = useState<InventoryCheckProduct | null>(null)
+  const [fixStock, setFixStock] = useState<FixStockOpening | null>(null)
   const [historyPage, setHistoryPage] = useState<number | null>(null)
   const [historyReload, setHistoryReload] = useState(0)
   const [history, setHistory] = useState<InventoryCheckHistoryResult | null>(null)
@@ -224,10 +242,16 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const attempts = useRef(new Map<number, Attempt>())
   const createAttempt = useRef<{ title: string; productIds: number[]; scope: QueryParams; requestId: string } | null>(null)
   const lifecycleAttempt = useRef<{ action: 'close' | 'resume'; revision: number; requestId: string } | null>(null)
+  // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
+  // so it survives paging and filtering; the snapshot (name, stock seen) is what the review and the server's "marked checked" test read.
+  const [drafts, setDrafts] = useState<Record<string, DraftEntry>>({})
+  const draftsRef = useRef(drafts)
+  draftsRef.current = drafts
+  const submitAttempt = useRef<{ requestId: string; lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }> } | null>(null)
   const [writeScope] = useState(() => captureInventoryCheckWriteScope({ branchId, sessionId, epoch: 0 }, () => mounted.current && isCurrent()))
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-  const params: QueryParams = { ...filters, ...continuousRangeParams(range), query: appliedQuery, page, pageSize, sessionId, state: section === 'issues' ? 'issue' : filters.state, ...(showCustomerRanking && access.canViewCustomerDetails ? { customerRanking: '1' } : {}) }
+  const params: QueryParams = { ...filters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
   const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
   // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
   // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (the Refresh button,
@@ -247,6 +271,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const savedReasons = useSavedStockReasons('adjust')
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const hasDrafts = Object.keys(drafts).length > 0
+  useEffect(() => {
+    if (!hasDrafts) return
+    return registerDirtyWork({ key: COUNTS_WORK_KEY, pageId: 'inventory', label: tr('inventory_check_counts_in_progress', 'Counts not submitted'),
+      isDirty: () => Object.keys(draftsRef.current).length > 0,
+      discard: () => { submitAttempt.current = null; setDrafts({}) } })
+  }, [hasDrafts])
   useEffect(() => {
     if (historyPage === null || !sessionId) return
     const abort = new AbortController()
@@ -270,13 +301,15 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           const result = await readInventoryCheckSessions(sessionParams, abort.signal)
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
-          const products = await readInventoryCheckProducts<ProductsResult>(params, abort.signal)
+          const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
+          const products = await readInventoryCheckProducts<ProductsResult>(summaryScope.current === stepScope ? { ...params, summary: 0 } : params, abort.signal)
           if (publish()) {
             if (!branchId && !sessionId && products.branches?.length === 1) {
-              onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { range: { ...range }, query, filters: { ...filters }, pagination: { ...pagination }, pageSize, showCustomerRanking } })
+              onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
               return
             }
-            setData(showCustomerRanking && access.canViewCustomerDetails ? products : { ...products, rankings: { products: products.rankings?.products } })
+            if (products.facets) summaryScope.current = stepScope
+            setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
             setLoadedKey(scopeKey)
           }
         }
@@ -325,7 +358,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   useEffect(() => {
     if (!gunScan) return
     setGunScan(null)
-    if (busy || createAttempt.current || getDirtyWork().some(work => work.pageId === 'inventory')) { setWriteError(tr('inventory_check_count_blocked_busy', 'Finish or cancel the open check first.')); return }
+    if (busy || createAttempt.current || getDirtyWork().some(work => work.pageId === 'inventory' && work.key !== COUNTS_WORK_KEY)) { setWriteError(tr('inventory_check_count_blocked_busy', 'Finish or cancel the open check first.')); return }
     setWriteError('')
     applyQuery(gunScan.code, true)
     if (gunScan.origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
@@ -346,7 +379,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     if (branchId && branches.length > 1) { onSelect({ branchId: '', sessionId: '' }); return }
     if (section === 'sessions') { setSessionFilters(initialSessionFilters); setSessionRange(statsPresetRange('all')) } else {
       setFilters(previous => ({ ...initialFilters, branchId: previous.branchId }))
-      setQuery(''); setAppliedQuery(''); setScan(null); setRange(statsPresetRange('all'))
+      setQuery(''); setAppliedQuery(''); setScan(null)
     }
     setPage(1)
   }
@@ -393,14 +426,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const productIds = countableIds
       if (!productIds.length || productIds.length > 500) return
       // The review shows exactly the ids that will be created; a retry after an unknown outcome reuses the frozen request below.
-      const scopeText = describeCountScope(t, { query: appliedQuery, range, filters, stateApplies: section !== 'issues' })
+      const scopeText = describeCountScope(t, { query: appliedQuery, filters, stateApplies: section !== 'issues' })
       const confirmed = await askToConfirm({
         title: tr('inventory_check_count_review_title', 'Start a count session?'),
         items: [{ label: t('products'), value: productIds.length }, { label: t('branch'), value: branchName ?? '—' }, { label: t('filters'), value: scopeText || t('none') }],
         confirmLabel: tr('inventory_check_start_page', 'Count'),
       })
       if (!confirmed || !current() || inFlight.current) return
-      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...params, customerRanking: undefined, membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
+      createAttempt.current = { title: tr('inventory_check_page_session', 'Visible page check'), productIds, scope: { ...Object.fromEntries(Object.entries(params).filter(([, value]) => value !== '' && value != null)), membership: 'visible_page' }, requestId: createClientRequestId('inventory_check') }
     }
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
@@ -447,7 +480,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const unavailableIds = new Set(unavailableMembers.map(item => String(item.product_id)))
   const renamedMembers = new Map(fresh && sessionId ? items.filter(item => item.current_product_available === true && item.current_product_name && item.current_product_name !== item.product_snapshot.name).map(item => [String(item.product_id), item]) : [])
   const visibleProducts = fresh ? (data?.items ?? []).filter(product => !unavailableIds.has(String(product.id))).map(product => projectProduct(product, access.fields)) : []
-  const unavailableProducts = unavailableMembers.map(item => ({ ...projectProduct(item.product_snapshot, access.fields), id: item.product_id, quantity: null, damaged_quantity: null, qty_sold: null, customer_count: null, selling_price_usd: null, cost_price_usd: null, checkable: false }))
+  const unavailableProducts = unavailableMembers.map(item => ({ ...projectProduct(item.product_snapshot, access.fields), id: item.product_id, quantity: null, damaged_quantity: null, checkable: false }))
   const observations: Record<string, InventoryCheckObservation> = {}
   if (fresh) for (const item of items) observations[String(item.product_id)] = { product_id: item.product_id, state: item.state, counted_quantity: canViewCounts ? item.counted_quantity : null, reason: item.reason, revision: item.revision, ...(access.fields.stock ? { baseline_quantity: item.baseline_quantity, current_quantity: item.current_quantity, stock_changed: item.stock_changed } : {}) }
   // Row badges: renamed originals keep their current row (the starting name is behind the hint); unavailable originals sit read-only below.
@@ -455,21 +488,108 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   for (const [id, item] of renamedMembers) adornments[id] = <RowBadge text={tr('inventory_check_renamed_badge', 'Renamed')} hint={`${tr('inventory_check_original_name', 'Starting name')}: ${item.product_snapshot.name} · ${tr('inventory_check_current_name', 'Current name')}: ${item.current_product_name}`} />
   const unavailableAdornments = Object.fromEntries(unavailableMembers.map(item => [String(item.product_id), <RowBadge key="unavailable" text={tr('inventory_check_unavailable_badge', 'Unavailable')} hint={tr('inventory_check_unavailable_member_hint', 'This original product is unavailable. Its saved check remains read-only.')} />]))
   const frozen = Object.fromEntries([...attempts.current.values()].map(attempt => [String(attempt.productId), { patch: attempt.patch, revision: attempt.revision }]))
-  const cards: StatCardDef[] = []
-  const stat = (key: string, label: string, allowed = true) => {
-    const value = fresh ? data?.stats?.[key] : undefined
-    if (allowed) cards.push({ key, label, value: value == null ? '—' : value })
+
+  // ---- The list counts by itself: pick products, type a count in each row, Submit once ----
+  const listMode = fresh && !sessionId && section !== 'sessions' && !!data?.simple
+  const selecting = listMode && access.canCheck
+  const selectedIds = Object.keys(drafts).filter(id => drafts[id].selected)
+  const selectable = listMode ? visibleProducts.filter(product => !product.is_group && product.checkable !== false) : []
+  const selectedOnPage = selectable.filter(product => drafts[String(product.id)]?.selected).length
+  const pageState: 'all' | 'some' | 'none' = selectedOnPage === 0 ? 'none' : selectedOnPage === selectable.length ? 'all' : 'some'
+  function patchDraft(product: InventoryCheckProduct, change: (current: DraftEntry) => Partial<ListDraft>) {
+    if (submitAttempt.current) return
+    setDrafts(previous => {
+      const id = String(product.id)
+      const seen = finiteQuantity(product.quantity) ? product.quantity : null
+      const current = previous[id] ?? { selected: false, count: '', checked: false, note: '', name: product.name, seen }
+      const next = { ...current, ...change(current), name: product.name, seen }
+      if (!next.selected && next.count === '' && next.note === '') { const rest = { ...previous }; delete rest[id]; return rest }
+      return { ...previous, [id]: next }
+    })
   }
-  stat('total_products', t('products'))
-  stat('stock_quantity', tr('inventory_check_current_stock', 'Current stock'), access.fields.stock)
-  stat('low_stock', t('low_stock'), access.fields.stock)
-  stat('out_of_stock', t('out_of_stock'), access.fields.stock)
-  stat('qty_sold', tr('inventory_check_period_sales', 'Period sales'), access.fields.sales)
-  stat('unique_customer_count', tr('inventory_check_period_customers', 'Period customers'), access.fields.customers)
-  const productRanking = fresh && access.fields.sales ? data?.rankings?.products ?? [] : []
-  if (access.fields.sales) cards.push({ key: 'top_products', label: t('top_products'), value: <span className="block truncate text-xs">{productRanking[0]?.name || '—'}</span>, hint: tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.'), details: productRanking.map(product => ({ label: product.name, value: product.qty_sold })) })
-  const customerRanking = fresh && showCustomerRanking && access.canViewCustomerDetails ? data?.rankings?.customers ?? [] : []
-  if (showCustomerRanking && access.canViewCustomerDetails) cards.push({ key: 'top_customers', label: t('top_customers'), value: <span className="block truncate text-xs">{customerRanking[0]?.name || '—'}</span>, hint: tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.'), details: customerRanking.map(customer => ({ label: customer.name, value: customer.sale_count })) })
+  const draftHandlers = {
+    onToggle: (product: InventoryCheckProduct, selected: boolean) => patchDraft(product, () => ({ selected })),
+    onCount: (product: InventoryCheckProduct, value: string) => patchDraft(product, current => ({ count: value, checked: false, selected: value.trim() !== '' ? true : current.selected })),
+    onChecked: (product: InventoryCheckProduct) => { if (finiteQuantity(product.quantity)) patchDraft(product, () => ({ count: String(product.quantity), checked: true, selected: true })) },
+    onNote: (product: InventoryCheckProduct, value: string) => patchDraft(product, () => ({ note: value })),
+  }
+  function togglePage() {
+    if (submitAttempt.current) return
+    const next = pageState !== 'all'
+    setDrafts(previous => {
+      const result = { ...previous }
+      for (const product of selectable) {
+        const id = String(product.id)
+        const seen = finiteQuantity(product.quantity) ? product.quantity : null
+        const entry = result[id] ?? { selected: false, count: '', checked: false, note: '', name: product.name, seen }
+        const updated = { ...entry, selected: next, seen }
+        if (!updated.selected && updated.count === '' && updated.note === '') delete result[id]
+        else result[id] = updated
+      }
+      return result
+    })
+  }
+  // "Mark checked" fills the stock figure the person looked at into every picked row that has no count yet.
+  function markSelectedChecked() {
+    if (submitAttempt.current) return
+    setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id,
+      entry.selected && entry.count.trim() === '' && entry.seen !== null ? { ...entry, count: String(entry.seen), checked: true } : entry])))
+  }
+  function clearSelection() {
+    if (submitAttempt.current) return
+    setDrafts({})
+  }
+  const submitBlocked = !selecting ? '' : !canWriteToServer ? tr('inventory_check_count_blocked_offline', 'Saving is unavailable while offline.')
+    : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
+    : selectedIds.length > MAX_SUBMISSION ? tr('inventory_check_submit_too_many', 'Submit at most 500 products at a time.')
+    : selectedIds.some(id => parseCount(drafts[id].count).kind !== 'valid') ? tr('inventory_check_submit_need_counts', 'Enter a count for every selected product.') : ''
+
+  async function submit() {
+    if (!current() || !selecting || submitBlocked || inFlight.current || selectedIds.length === 0) return
+    if (!submitAttempt.current) {
+      const lines = selectedIds.map(Number).sort((a, b) => a - b).map(productId => {
+        const entry = drafts[String(productId)], count = parseCount(entry.count), note = entry.note.trim()
+        const countedQuantity = count.kind === 'valid' ? count.value : 0
+        const differs = access.fields.stock && entry.seen !== null && countedQuantity !== entry.seen
+        return { productId, countedQuantity, seenQuantity: entry.seen, checked: access.fields.stock && entry.checked && !differs, ...(differs && note ? { note } : {}) }
+      })
+      const differing = lines.filter(line => access.fields.stock && line.seenQuantity !== null && line.countedQuantity !== line.seenQuantity).length
+      const confirmed = await askToConfirm({
+        title: tr('inventory_check_submit_review_title', 'Submit these counts?'),
+        items: [{ label: t('products'), value: lines.length }, { label: t('branch'), value: branchName ?? '—' }, ...access.fields.stock ? [{ label: tr('inventory_check_differences', 'Differences'), value: differing }] : []],
+        confirmLabel: tr('inventory_check_submit', 'Submit'),
+      })
+      if (!confirmed || !current() || inFlight.current) return
+      submitAttempt.current = { requestId: createClientRequestId('inventory_check'), lines }
+    }
+    const attempt = submitAttempt.current
+    inFlight.current = true; setBusy(true); setWriteError('')
+    try {
+      await submitInventoryCheckCounts(writeScope, { branchId: Number(branchId), requestId: attempt.requestId, lines: attempt.lines })
+      if (current()) {
+        const sent = new Set(attempt.lines.map(line => String(line.productId)))
+        submitAttempt.current = null
+        setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !sent.has(id))))
+        notify(tr('inventory_check_submitted', 'Counts submitted'), 'success')
+        reloadAll()
+      }
+    } catch (cause) {
+      const unknown = (cause as { outcome?: string })?.outcome === 'unknown'
+      const refusal = unknown ? undefined : knownRefusal(cause)
+      if (!unknown) submitAttempt.current = null
+      if (current() && (cause as { code?: unknown })?.code === 'inventory_check_stock_changed') {
+        setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id, entry.checked ? { ...entry, count: '', checked: false } : entry])))
+      }
+      if (current() && !unknown && isStaleConflict(cause)) reloadAll()
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+    } finally { inFlight.current = false; if (current()) setBusy(false) }
+  }
+  // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
+  const checkInfo = !sessionId && !!data?.simple
+  const summary = fresh && checkInfo ? data?.summary : undefined
+  const cards: StatCardDef[] = summary ? (['not_checked', 'in_check', 'ok', 'issue'] as const).map(key => ({
+    key, label: tr(key === 'issue' ? 'issues' : `inventory_check_status_${key}`, key === 'not_checked' ? 'Not checked' : key === 'in_check' ? 'In check' : key === 'ok' ? 'Checked OK' : 'Issues'), value: summary[key],
+  })) : []
   const rowEditing = Object.values(editingRows).some(Boolean)
   const controlsLocked = busy || !!createAttempt.current || rowEditing
   // Typing is read after a pause. A row being edited holds the list still (the controls are disabled), so the pause restarts once it is done.
@@ -493,12 +613,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
     : !countableIds.length ? tr('inventory_check_count_blocked_empty', 'No products on this page to count.') : ''
   const countLabel = createAttempt.current ? t('retry') : tr('inventory_check_start_page', 'Count')
-  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: section !== 'issues' }) > 0 || !!query.trim() || !!(range.startDate || range.endDate)
+  const statusFilter = section !== 'issues' && (!!sessionId || !!data?.simple)
+  const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter }) > 0 || !!query.trim()
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
-  const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : section === 'issues' && !sessionId ? data?.issues?.length : visibleProducts.length)
+  const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length)
 
   // A scan points at the one exact row of the list on screen (product rows only: the all-sessions Issues list has none).
-  const showsProductRows = section === 'products' || (section === 'issues' && !!sessionId)
+  const showsProductRows = section !== 'sessions'
   const scanHit = scan && fresh && showsProductRows ? scanHitOf(visibleProducts, scan.query, access.fields.barcode) : null
   const focusRequest: InventoryCheckFocusRequest | undefined = scan && scanHit ? { id: scanHit.id, token: scan.token, target: scan.target } : undefined
   const scanMissed = !!scan && loadedNothing && showsProductRows
@@ -525,32 +646,36 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     searchRef.current?.select()
   }, [scanMissed, scan?.token])
 
-  const rangeNotes = <span className="flex shrink-0 items-center">
-    <InfoHint text={tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')} label={tr('inventory_check_cohort_hint', 'Received dates select products; sales and customers use the same period. Stock is current.')} />
-    {access.fields.received ? null : <InfoHint text={tr('inventory_check_date_hidden_hint', 'Received dates are hidden for your role.')} label={tr('inventory_check_date_hidden_hint', 'Received dates are hidden for your role.')} />}
-  </span>
-  const customerToggle = access.canViewCustomerDetails ? <button type="button" className={`${toolbarIconButtonClassName} shrink-0 border border-slate-200 disabled:opacity-50 dark:border-slate-700 ${showCustomerRanking ? '!bg-slate-800 !text-white dark:!bg-slate-200 dark:!text-slate-900' : ''}`} aria-pressed={showCustomerRanking} aria-label={t('top_customers')} title={t('top_customers')} disabled={controlsLocked} onClick={() => {
-    setShowCustomerRanking(value => !value)
-    setData(previous => previous ? { ...previous, rankings: { products: previous.rankings?.products } } : previous)
-  }}><Users className="h-4 w-4" aria-hidden="true" /></button> : null
   const facetsLimited = fresh ? data?.facetsLimited : undefined
-  const refreshAction = <IconAction label={t('refresh')} disabled={controlsLocked} onClick={reloadAll}><RefreshCw className="h-5 w-5" aria-hidden="true" /></IconAction>
 
-  const issueRows = section === 'issues' && !sessionId && fresh ? (data?.issues ?? []).map(issue => {
-    const product = visibleProducts.find(candidate => Number(candidate.id) === issue.product_id) ?? { id: issue.product_id, name: `#${issue.product_id}` }
-    const showCount = (access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity)
-    const issueBranch = branches.find(branch => branch.id === issue.branch_id)?.name
-    const open = tr('inventory_check_open_session', 'Open session')
-    return { key: `${issue.session_id}:${issue.product_id}`, product, observation: { product_id: issue.product_id, state: 'issue' as const, counted_quantity: showCount ? issue.counted_quantity ?? null : null, reason: issue.reason, revision: issue.revision },
-      chip: <button type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button> }
-  }) : []
-  const rowProps = { canViewStock: access.fields.stock, canViewCounts, canViewPrice: access.fields.price, canViewCost: access.fields.cost, canViewSales: access.fields.sales, canViewCustomers: access.fields.customers, t, onOpenProduct: setDetail } as const
+  // Issues is the same list with the status preset to Issue; each row can open the session that recorded it.
+  const open = tr('inventory_check_open_session', 'Open session')
+  const issueChips = section === 'issues' && !sessionId && fresh ? Object.fromEntries(visibleProducts.filter(product => product.check_session_id && product.check_branch_id != null).map(product => {
+    const issueBranch = branches.find(branch => branch.id === product.check_branch_id)?.name
+    return [String(product.id), <button key="open" type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(product.check_branch_id), sessionId: String(product.check_session_id) })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button>]
+  })) : {}
+  const rowProps = { canViewStock: access.fields.stock, canViewCounts, t, onOpenProduct: setDetail } as const
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
   // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
-  const sheetHeader = showsProductRows && fresh && visibleProducts.length ? <InventoryCheckSheetHeader canCheck={canCheckRows} inSession={!!sessionId} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
-    canViewPrice={access.fields.price} canViewCost={access.fields.cost} canViewSales={access.fields.sales} canViewCustomers={access.fields.customers} t={t} /> : null
+  const sheetHeader = fresh && visibleProducts.length && section !== 'sessions'
+    ? listMode ? <InventoryCheckListHeader selecting={selecting} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} />
+      : <InventoryCheckSheetHeader canCheck={canCheckRows} inSession={!!sessionId} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} /> : null
 
-  const countAction = section !== 'sessions' && access.canCheck ? <>
+  // Fix stock and the Sales link (ic_fix_stock) sit in the product's detail: Fix stock for someone who may adjust stock, the link for someone who may read sales.
+  const rights = effectivePermissions(user)
+  const offered = fresh && !!detail && data?.capabilities?.fixStock === true
+  const fixOpening = offered && detail && canWriteToServer && rights.can('inventory', 'adjust')
+    ? fixStockOpening(detail, { session: sessionId && session ? { branchId: Number(session.branch_id) } : null, observation: observations[String(detail.id)], listBranchId: filters.branchId,
+      canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
+    : null
+  function openFixStock(opening: FixStockOpening) {
+    // The Set session resumes an unfinished stock session of this person instead of opening a new one: say so rather than open something else.
+    const unfinished = readWorkDraft<{ lines?: unknown }>(scopedWorkDraftKey('fast_stockin'))?.data?.lines
+    if (Array.isArray(unfinished) && unfinished.length) { notify(tr('inventory_check_fix_stock_open_draft', 'Finish or discard your open stock session first.'), 'warning'); return }
+    setDetail(null)
+    setFixStock(opening)
+  }
+  const countAction = section !== 'sessions' && access.canCheck && !data?.simple ? <>
     {countBlocked ? <InfoHint text={countBlocked} label={countBlocked} /> : null}
     <button type="button" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs aria-disabled:cursor-not-allowed aria-disabled:opacity-60" aria-disabled={countBlocked ? true : undefined}
       aria-label={countableIds.length ? `${countLabel} (${countableIds.length})` : countLabel} title={countBlocked || tr('inventory_check_count_tooltip', 'Count the products listed on this page')}
@@ -575,18 +700,16 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       </div>
     </div> : <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-gray-200 dark:bg-zinc-700" aria-hidden="true" />}
     <IconAction label={t('history')} onClick={() => setHistoryPage(1)}><History className="h-5 w-5" aria-hidden="true" /></IconAction>
-    {canEdit && fresh ? <IconAction label={lifecycleAttempt.current ? t('retry') : session?.status === 'open' ? tr('inventory_check_close_session', 'Close session') : tr('inventory_check_resume_session', 'Resume session')}
+    {canEdit && fresh && session?.scope?.membership !== 'submission' ? <IconAction label={lifecycleAttempt.current ? t('retry') : session?.status === 'open' ? tr('inventory_check_close_session', 'Close session') : tr('inventory_check_resume_session', 'Resume session')}
       disabled={controlsLocked || !canWriteToServer || attempts.current.size > 0} onClick={() => { void lifecycle() }}>
       {lifecycleAttempt.current ? <RotateCcw className="h-5 w-5" aria-hidden="true" /> : session?.status === 'open' ? <Lock className="h-5 w-5" aria-hidden="true" /> : <Unlock className="h-5 w-5" aria-hidden="true" />}
     </IconAction> : null}
-    {refreshAction}
   </div>
   // The context bar: where the person is (the one branch, or the open session) and what they can do from here.
   const contextBar = <div className="flex min-w-0 flex-1 items-center gap-1" data-inventory-check-context>
     {sessionId ? sessionBar : <>
       {soleBranch ? <SoleBranchLabel name={soleBranch.name} label={t('branch')} className="min-w-0 flex-1 text-xs" /> : <span className="flex-1" />}
       {countAction}
-      {refreshAction}
     </>}
   </div>
 
@@ -601,19 +724,20 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }}
               leading={<fieldset disabled={controlsLocked} className="min-w-0 shrink-0" data-inventory-check-query-lock>
                 <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
-              </fieldset>} actions={refreshAction} />
+              </fieldset>} />
             : <>
-              <StatsStrip layout="scroll" compactRange cards={cards} t={t} loading={loading} range={range} rangeDisabled={!access.fields.received || controlsLocked} rangeActions={<>{rangeNotes}{customerToggle}</>}
-                onRangeChange={value => { if (!controlsLocked) { setRange(value); setPage(1); setScan(null) } }} />
+              {checkInfo ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}
               <div className="flex min-w-0 flex-col gap-1 lg:flex-row lg:items-center lg:gap-2">
                 <fieldset disabled={controlsLocked} className="min-w-0 lg:w-[26rem] lg:shrink-0" data-inventory-check-query-lock>
                   <InventoryCheckControls query={query} onQueryChange={typeQuery} onQuerySubmit={submitQuery} searchRef={searchRef} scanLabelled={compact && !!sessionId && canCheckRows}
                     filters={filters} onFiltersChange={changeFilters} onClear={clearFilters} fields={access.fields}
-                    showSessionStates={!!sessionId} showStateFilter={section !== 'issues'} limited={facetsLimited}
-                    branches={branches} brands={data?.facets?.brands} categories={data?.facets?.categories} reasons={data?.facets?.reasons} t={t} />
+                    inSession={!!sessionId} showStateFilter={statusFilter} limited={facetsLimited}
+                    branches={branches} brands={data?.facets?.brands} categories={data?.facets?.categories} t={t} />
                 </fieldset>
                 {contextBar}
               </div>
+              {selecting ? <InventoryCheckSelectionBar pageState={pageState} selectedCount={selectedIds.length} blocked={submitBlocked} busy={busy} canMarkChecked={access.fields.stock}
+                submitLabel={submitAttempt.current ? t('retry') : undefined} onTogglePage={togglePage} onMarkChecked={markSelectedChecked} onClear={clearSelection} onSubmit={() => { void submit() }} t={t} /> : null}
               {sheetHeader}
             </>}
         </div>
@@ -624,24 +748,29 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         </div> : null}
         {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
-          : section === 'issues' && !sessionId ? <div className="min-w-0 divide-y" aria-label={t('issues')}>
-            {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
-          </div>
-            : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={adornments} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
-              canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={[...savedReasons.map(reason => reason.label), ...(data?.facets?.reasons ?? [])]} focusRequest={focusRequest} onCommitted={onCommitted}
-              {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
-        {section !== 'sessions' && unavailableProducts.length ? <InventoryCheckRows products={unavailableProducts} observations={observations} adornments={unavailableAdornments} canCheck={false} inSession={!!sessionId} {...rowProps} canViewPrice={false} canViewCost={false} onSave={() => { throw new Error('This original session product is unavailable.') }} /> : null}
+          : listMode ? <InventoryCheckListRows products={visibleProducts} drafts={drafts} selecting={selecting} locked={busy || !!submitAttempt.current} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
+            adornments={issueChips} focusRequest={focusRequest} onCountEntered={onCommitted} t={t} onOpenProduct={setDetail} {...draftHandlers} />
+          : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
+            canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={savedReasons.map(reason => reason.label)} focusRequest={focusRequest} onCommitted={onCommitted}
+            {...rowProps} onEditingChange={onEditingChange} onSave={save} />}
+        {section !== 'sessions' && unavailableProducts.length ? <InventoryCheckRows products={unavailableProducts} observations={observations} adornments={unavailableAdornments} canCheck={false} inSession={!!sessionId} {...rowProps} onSave={() => { throw new Error('This original session product is unavailable.') }} /> : null}
         {loadedNothing ? <div className="flex min-w-0 flex-col items-center gap-2 py-6 text-center text-xs text-gray-500" data-inventory-check-empty={section}>
           <p className="break-words leading-relaxed">{section === 'sessions' ? (sessionFiltersActive ? tr('inventory_check_sessions_no_match', 'No count sessions match these filters.') : tr('inventory_check_sessions_empty', 'No count sessions yet.'))
-            : section === 'issues' ? tr('inventory_check_issues_empty', 'No issues found.')
+            : section === 'issues' && !filtersActive ? tr('inventory_check_issues_empty', 'No issues found.')
               : scanMissed ? (sessionId ? tr('inventory_check_scan_not_in_session', 'Not in this session.') : tr('inventory_check_scan_no_match', 'No product with this code.'))
                 : tr('inventory_check_empty', 'No matching products.')}</p>
           {(section === 'sessions' ? sessionFiltersActive : filtersActive) ? <button type="button" className="btn-secondary inline-flex min-h-10 items-center gap-1 px-3 text-xs" disabled={controlsLocked} onClick={clearFilters}><X className="h-4 w-4" aria-hidden="true" />{t('clear')}</button>
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
         {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null}
-        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} t={t} onClose={() => setDetail(null)} /> : null}
+        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} t={t} onClose={() => setDetail(null)}
+          onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
+          onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /> : null}
         {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}
+        {fixStock ? <Suspense fallback={null}><FastStockInModal
+          branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}
+          initialLines={[{ mode: 'set', quantity: fixStock.quantity, reason: fixStock.reason, product: fixStockCandidate(fixStock, branches.find(branch => branch.id === fixStock.branchId)?.name ?? null) }]}
+          tr={(key: string, fallback?: string) => tr(key, fallback ?? key)} notify={notify} onClose={() => setFixStock(null)} onDone={reloadAll} /></Suspense> : null}
         {confirmDialog}
       </div>
     </HubSectionNav>

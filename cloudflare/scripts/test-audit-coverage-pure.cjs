@@ -63,20 +63,20 @@ for (const { file, src } of withMutations) {
 
 const inventoryChecks = fs.readFileSync(path.join(routesDir, 'inventoryChecks.ts'), 'utf8')
 assert.deepEqual([...inventoryChecks.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [
-  ['post', '/sessions'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
+  ['post', '/sessions'], ['post', '/submissions'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
 ])
-for (const writer of ['createInventoryCheckSession', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
+for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
   ok(inventoryChecks.includes(`await ${writer}(getDb(c.env), await principal(c),`), `Inventory mutation delegates to authenticated ${writer}`)
 }
 const inventoryWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckSessions.ts'), 'utf8')
-for (const writer of ['createInventoryCheckSession', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
+for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
   const body = inventoryWriter.split(`export async function ${writer}(`)[1]?.split('export async function ')[0] || ''
   ok(body.includes('eventStatement(actor, {') && body.includes('await commit(db, principal, actor,'), `${writer} commits its own immutable event with its mutation`)
 }
 ok(/INSERT INTO inventory_check_events\(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at\)/.test(inventoryWriter),
   'Inventory audit stores actor, request identity, before/after and result in its dedicated event ledger')
-ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 3 && (inventoryWriter.match(/await commit\(db, principal, actor,/g) || []).length === 3,
-  'all three Inventory mutation writers include their event in the atomic commit')
+ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 4 && (inventoryWriter.match(/await commit\(db, principal, actor,/g) || []).length === 4,
+  'all four Inventory mutation writers include their event in the atomic commit')
 ok(inventoryWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'Inventory event and mutation share the authority-guarded transaction')
 const inventoryMigration = fs.readFileSync(path.join(routesDir, '../../migrations/0259_inventory_check_sessions.sql'), 'utf8')
 ok(/UNIQUE\(actor_id,request_id\)/.test(inventoryMigration) && /inventory_check_events_no_update BEFORE UPDATE/.test(inventoryMigration)

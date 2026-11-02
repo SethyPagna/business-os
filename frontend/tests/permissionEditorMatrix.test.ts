@@ -330,20 +330,14 @@ await test('A10: nothing in the editor or its chips is smaller than 12px', async
   }
 })
 
-await test('A11: the Costs field warns while View product costs is off, and not once it is held', async () => {
-  const lacking = await mountEditor({ inventory_checks: true })
-  await openModule(lacking.surface, 'inventory_checks')
-  const cost = lacking.surface.button(/Show costs when permitted/)
-  assert.equal(cost.getAttribute('data-needs'), 'true')
-  assert.ok(lacking.surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true' && within(node, cost)).length === 1, 'the warning mark is drawn')
-  assert.ok((cost.getAttribute('title') ?? '').includes(en.perm_product_cost_view))
-  assert.equal(lacking.surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true').length, 1, 'only the Costs field warns')
-  await lacking.surface.unmount()
-  const held = await mountEditor({ inventory_checks: true, product_cost_view: true })
-  await openModule(held.surface, 'inventory_checks')
-  assert.equal(held.surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true').length, 0)
-  assert.equal(held.surface.button(/Show costs when permitted/).getAttribute('data-needs'), null)
-  await held.surface.unmount()
+await test('A11: the retired Costs field is gone, so no field chip warns about View product costs', async () => {
+  for (const permissions of [{ inventory_checks: true }, { inventory_checks: true, product_cost_view: true }]) {
+    const { surface } = await mountEditor(permissions)
+    await openModule(surface, 'inventory_checks')
+    assert.equal(surface.findAll((node) => node.tagName === 'BUTTON' && /Show costs when permitted|Show selling prices|Show units sold|Show customer counts/.test(node.getAttribute('aria-label') ?? '')).length, 0, 'price, cost, sold and customers are not offered')
+    assert.equal(surface.findAll((node) => node.getAttribute('data-perm-needs') === 'true').length, 0, 'and no field chip carries a warning')
+    await surface.unmount()
+  }
 })
 
 await test('A12: against a saved role, only the changed row carries the gold dot and the Changed filter shows only it', async () => {

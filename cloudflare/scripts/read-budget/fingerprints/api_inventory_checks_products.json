@@ -474,5 +474,377 @@
    "3d0de332b3d9",
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ]
+ ],
+ "inventory-checks-products-ic-simple-name-page": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "a568150547bf",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "007f3011852e",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "b7574e3bb50a",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-page-step": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "a568150547bf",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "007f3011852e",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-search": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "44b463049bb9",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "690956ef82c4",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "4f2a73683c24",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-stock-sort": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "f9993ca0246a",
+   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+  ],
+  [
+   "23154d47687e",
+   "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "b7574e3bb50a",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-low-stock": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "5afa45c3bf8a",
+   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+  ],
+  [
+   "422314b559cf",
+   "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "0defd22b84a5",
+   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-issues": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "1efa2957a9f1",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "7d8458de4671",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "012710d8f1cd",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-not-checked": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "d9a2740352aa",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "586479ffcb8f",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "5fa1167eb6db",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
+ ],
+ "inventory-checks-products-ic-simple-in-session": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "52307de3fd48",
+   "SELECT value FROM system_flags WHERE key = ?1"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "7e2e3b5e03a5",
+   "SELECT * FROM inventory_check_sessions WHERE id=?1 AND organization_id IS ?2"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "d5316e2ce4ea",
+   "B| SELECT flags.*,CASE WHEN ?1=1 AND flags.epoch_present=1 AND flags.epoch IS ?2 AND flags.maintenance_present"
+  ],
+  [
+   "77653a3cb555",
+   "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
+  ],
+  [
+   "2ac1522e80e3",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "60143694121b",
+   "B| WITH __page AS MATERIALIZED ( WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,"
+  ],
+  [
+   "97b980db705a",
+   "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
+  ],
+  [
+   "f141ee370c63",
+   "B| WITH base AS ( SELECT p.id,p.name,p.image_path,p.unit,p.parent_id,p.is_group,p.is_grouped_cached,p.created_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ]
  ]
 }

@@ -153,6 +153,16 @@ function writeShapes() {
     { id: 'w-inventory-check-session-20', label: 'POST /api/inventory-checks/sessions 20 products', method: 'POST', url: '/api/inventory-checks/sessions',
       prepare: async (world) => (await world.all('SELECT id FROM products WHERE is_active=1 ORDER BY id LIMIT 20 OFFSET 40')).map((r) => r.id),
       run: async (world, send, ids) => send('POST', '/api/inventory-checks/sessions', { branchId: 1, title: 'Budget count 2', productIds: ids, scope: {}, requestId: key('check') }) },
+    // The owner's way to count (ic_simple): 20 picked products with their counts, recorded whole as one closed session. Counted 0 against stock differs, so every line is an issue.
+    { id: 'w-inventory-check-submission-20', label: 'POST /api/inventory-checks/submissions 20 products (ic_simple)', method: 'POST', url: '/api/inventory-checks/submissions',
+      prepare: async (world) => {
+        world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: 'on' } } })).run()
+        return (await world.all('SELECT id FROM products WHERE is_active=1 ORDER BY id LIMIT 20 OFFSET 80')).map((r) => r.id)
+      },
+      run: async (world, send, ids) => {
+        try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission'), lines: ids.map((productId) => ({ productId, countedQuantity: 0, seenQuantity: null, checked: false })) }) }
+        finally { world.db.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run() }
+      } },
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',

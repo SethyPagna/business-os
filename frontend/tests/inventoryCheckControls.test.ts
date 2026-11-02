@@ -21,12 +21,12 @@ const fixture = String.raw`
   function Harness() {
     const [query, setQuery] = useState('')
     const [submitted, setSubmitted] = useState([])
-    const [filters, setFilters] = useState({ branchId: '1', stockState: '', state: '', reason: '', brand: 'Synthetic long brand', category: '', sortBy: 'name', sortDirection: 'asc' })
-    const fields = Object.fromEntries(['stock','brand','category','sales','customers','received','price','cost'].map(field => [field, !restricted]))
+    const [filters, setFilters] = useState({ branchId: '1', stockState: '', checkState: '', brand: 'Synthetic long brand', category: '', sortBy: 'name', sortDirection: 'asc' })
+    const fields = Object.fromEntries(['stock','brand','category'].map(field => [field, !restricted]))
     return <main style={{ width: '100%', padding: 12 }}><InventoryCheckControls
       query={query} onQueryChange={setQuery} onQuerySubmit={value => setSubmitted(old => [...old, value])} filters={filters} onFiltersChange={patch => setFilters(old => ({ ...old, ...patch }))} onClear={() => setFilters(old => ({ ...old, brand: '' }))}
       fields={fields} branches={[{id:1,name:'Synthetic sole active branch'}]} brands={['Synthetic long brand']}
-      categories={['Synthetic long category']} reasons={['Shelf mismatch']} showSessionStates={params.get('session') !== 'false'} limited={{ brands: true }} t={t} />
+      categories={['Synthetic long category']} inSession={params.get('session') === 'true'} limited={{ brands: true }} t={t} />
       <output hidden>{JSON.stringify({query, filters, submitted})}</output></main>
   }
   createRoot(document.getElementById('root')).render(<AppContext.Provider value={{...FALLBACK_APP_CONTEXT,t,language}}><Harness /></AppContext.Provider>)
@@ -64,20 +64,14 @@ await browser.run('PASS Inventory pinned controls: [Search][Scan][Filters] only,
     await browser.mouseClick('[data-inventory-check-search-row] button[title$="(1)"]')
     await browser.waitFor('filter menu', async () => await browser.evaluate(`document.querySelector('[data-filter-menu-section]') !== null`) ? true : null)
     const sections = await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-filter-menu-section]'), node => node.getAttribute('data-filter-menu-section'))`)
-    assert.deepEqual(sections, restricted ? ['sort', 'state', 'reason'] : ['sort', 'state', 'reason', 'stockState', 'brand', 'category'], `${lang} ${width}: Sort leads; sections follow permissions; no Branch for a sole branch`)
+    assert.deepEqual(sections, restricted ? ['sort', 'checkState'] : ['sort', 'checkState', 'stockState', 'brand', 'category'], `${lang} ${width}: Sort leads; sections follow permissions; no Branch for a sole branch`)
     assert.equal(await browser.evaluate(`document.documentElement.scrollWidth > innerWidth`), false, 'the open menu adds no page scroll')
     // Sort choices are limited by permission; each reads "{field}: high → low" in the viewer's language.
     await openSection('sort')
     const named = (key: string, field: string) => pack[key].replace('{field}', field)
-    const full = [pack.sort_name_az, pack.sort_name_za,
-      named('sort_field_high_low', pack.stock), named('sort_field_low_high', pack.stock),
-      named('sort_field_high_low', pack.qty_sold), named('sort_field_low_high', pack.qty_sold),
-      named('sort_field_high_low', pack.customers),
-      named('sort_field_newest', pack.received_date), named('sort_field_oldest', pack.received_date),
-      named('sort_field_high_low', pack.selling_price), named('sort_field_low_high', pack.selling_price),
-      named('sort_field_high_low', pack.cost_price), named('sort_field_low_high', pack.cost_price)]
+    const full = [pack.sort_name_az, pack.sort_name_za, named('sort_field_high_low', pack.stock), named('sort_field_low_high', pack.stock)]
     const options = await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-filter-menu-section="sort"] [role="option"]'), node => node.textContent)`)
-    assert.deepEqual(options, restricted ? full.slice(0, 2) : full, `${lang} ${width}: Sort offers only what this viewer may see`)
+    assert.deepEqual(options, restricted ? full.slice(0, 2) : full, `${lang} ${width}: Sort offers the owner's two orders (name, stock) and stock only to a viewer who may see it`)
     const filtersTitle = `document.querySelector('[data-inventory-check-search-row] button[aria-label=' + JSON.stringify(${JSON.stringify(pack.filters)}) + ']').title`
     if (!restricted) {
       await browser.mouseClick('[data-filter-menu-section="sort"] [role="option"]:nth-of-type(3)')
@@ -103,17 +97,17 @@ await browser.run('PASS Inventory pinned controls: [Search][Scan][Filters] only,
     await browser.waitFor('Enter submits', async () => await browser.evaluate(`${output}.submitted.length === 1`) ? true : null)
     assert.deepEqual(await browser.evaluate(`${output}.submitted`), ['Synthetic query'], 'Enter hands the box text to the page as a scan')
   }
-  for (const [session, expected] of [['false', 1], ['true', 3]] as const) {
+  for (const [session, expected] of [['false', 4], ['true', 3]] as const) {
     await browser.open(390, `lang=en&session=${session}`, `document.querySelector('#inventory-check-search')`, 480)
     await browser.mouseClick('[data-inventory-check-search-row] button[title$="(1)"]')
-    await browser.waitFor('filter menu', async () => await browser.evaluate(`document.querySelector('[data-filter-menu-section="state"]') !== null`) ? true : null)
+    await browser.waitFor('filter menu', async () => await browser.evaluate(`document.querySelector('[data-filter-menu-section="checkState"]') !== null`) ? true : null)
     // The section holding a chosen filter opens with the menu; open Check status only if it is not already open.
     await browser.waitFor('check status options', async () => {
-      if (await browser.evaluate(`document.querySelector('[data-filter-menu-section="state"] [role="option"]') !== null`)) return true
-      await browser.mouseClick('[data-filter-menu-section="state"] > button')
+      if (await browser.evaluate(`document.querySelector('[data-filter-menu-section="checkState"] [role="option"]') !== null`)) return true
+      await browser.mouseClick('[data-filter-menu-section="checkState"] > button')
       await browser.pause(300)
       return null
     })
-    assert.equal(await browser.evaluate(`document.querySelectorAll('[data-filter-menu-section="state"] [role="option"]').length`), expected, 'Done and Not started require a selected count session; global Issues remains available')
+    assert.equal(await browser.evaluate(`document.querySelectorAll('[data-filter-menu-section="checkState"] [role="option"]').length`), expected, 'Done and Not started require a selected count session; global Issues remains available')
   }
 })

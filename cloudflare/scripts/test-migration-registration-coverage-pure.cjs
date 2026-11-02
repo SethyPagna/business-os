@@ -57,6 +57,8 @@ const NAMED_COMPANIONS = {
   // the real chain and drives detection, claim, restock, race, undo/redo, out-of-stock and the bell.
   272: 'test-stock-crossing-alert-pure.cjs',
   273: 'test-migration-0273-conflict-marks-native.cjs',
+  // 0285 is the index the simplified Inventory Check (ic_simple) reads each product's latest observation through; schema only.
+  285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',

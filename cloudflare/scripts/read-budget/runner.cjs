@@ -45,9 +45,15 @@ async function resolveUrl(world, url) {
   return out
 }
 
+// A shape that names read switches has them set around its one measured request and cleared afterwards, so no other shape ever runs with one on.
+const setSwitches = (world, names) => world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)")
+  .bind(JSON.stringify({ epoch: 1, switches: Object.fromEntries(names.map((name) => [name, { state: 'on' }])) })).run()
+const clearSwitches = (world) => world.db.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run()
+const withSwitches = (names, url) => ({ prepare: (world) => setSwitches(world, names), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
+
 async function measureGet(world, shape, { cold = true, statements = false, fingerprints = false } = {}) {
   const url = await resolveUrl(world, shape.url)
-  const probe = { method: 'GET', url, anon: shape.anon }
+  const probe = { method: 'GET', url, anon: shape.anon, ...(shape.switches ? withSwitches(shape.switches, url) : {}) }
   const out = { url }
   if (cold) out.cold = await runShape(world, probe, { cold: true })
   out.warm = await runShape(world, probe, { cold: false, fingerprints })
@@ -148,4 +154,4 @@ async function runWritePass({ label }) {
   return reds
 }
 
-module.exports = { prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
+module.exports = { setSwitches, clearSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
