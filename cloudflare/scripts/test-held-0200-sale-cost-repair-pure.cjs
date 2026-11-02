@@ -420,6 +420,8 @@ const mixedAdditiveUnread = (text, repairText) => {
 // never names, indexes, new tables the repair never names, and read-only
 // SELECT CASE ... json_extract assertions. It changes no row and no column the
 // repair reads or writes, so both orders agree. Any other statement fails it.
+// 0292 (lane 6.0.1053): a file that only creates NEW tables the repair never names (plus indexes and the read-only assertions) is the same
+// shape without a column; it inserts no row, so nothing in it can interact with the repair in either order.
 const schemaOnlyUnread = (text, repairText) => {
   const named = namedIn(repairText)
   // 0271 (lane 6.0.972): a NEW ledger table also carries guard triggers (append-only, revision bump). They are inert in both
@@ -444,7 +446,7 @@ const schemaOnlyUnread = (text, repairText) => {
       && !(/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
         && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement.replace(/pragma_table_info/gi, '')))) return false
   }
-  return added > 0
+  return added > 0 || created.size > 0
 }
 
 // ---- RET-B 0235 rule (begin) ------------------------------------------------
@@ -965,6 +967,14 @@ CREATE TRIGGER sale_items_t AFTER INSERT ON sale_items BEGIN SELECT 1; END;`,
       `${events}
 CREATE TRIGGER sales_t AFTER UPDATE ON sales BEGIN SELECT 1; END;`, `${events}
 ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
+      assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  }
+  if (chain.includes('0292_expense_label_type_catalogs.sql')) {
+    const catalogs = chainText('0292_expense_label_type_catalogs.sql')
+    assert.ok(schemaOnlyUnread(catalogs, migrationText), 'control: the new-tables-and-index 0292 (expense label and type catalogs) is independent')
+    for (const wrong of [`${catalogs}\nINSERT INTO fee_types (name, name_key) VALUES ('x', 'x');`, `${catalogs}\nUPDATE sales SET delivery_actual_cost_usd = 0;`,
+      `${catalogs}\nCREATE TABLE IF NOT EXISTS sale_items (id INTEGER);`, `${catalogs}\nCREATE TRIGGER sales_t AFTER UPDATE ON sales BEGIN SELECT 1; END;`,
+      `${catalogs}\nALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`, 'CREATE INDEX i ON sale_items(id);'])
       assert.equal(schemaOnlyUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
   }
   if (chain.includes('0273_conflict_marks_and_indexes.sql')) {
