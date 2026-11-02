@@ -42,6 +42,14 @@ export function phoneProbeOf(rawSearch: unknown): PhoneProbe {
   return { kind: 'full', digits, forms: [...forms] }
 }
 
+/**
+ * A money figure typed as such: ASCII digits, one decimal point, one to four decimals ("8.27", "3.1415"). A phone written with
+ * dots has two or more of them; the audit search lets this shape through only as a whole figure (see auditLogQuery.ts).
+ */
+export function isMoneyShapedWord(word: string): boolean {
+  return /^[0-9]{1,9}[.][0-9]{1,4}$/.test(word)
+}
+
 /** True when the audit, import-review or any other free-text search word is a bare digit/phone-separator run. */
 export function isBareNumberWord(word: string): boolean {
   const ascii = toAsciiDigits(String(word).normalize('NFKC'))

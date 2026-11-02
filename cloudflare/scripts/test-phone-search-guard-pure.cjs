@@ -207,6 +207,30 @@ function run(load, { baseLoad }) {
     assert.ok(/details LIKE/.test(sqlOf('RCP-1234', true)), 'a receipt label still searches details')
     assert.ok(!/details LIKE/.test(sqlOf('087-654-321', true)))
   })
+  check('audit log: an account without the grant still finds a money figure, as that whole figure, and no part of a dotted phone', () => {
+    const audit = new Database(':memory:')
+    audit.exec(`CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, user_name TEXT, action TEXT, entity TEXT, table_name TEXT, details TEXT, old_value TEXT, new_value TEXT, device_name TEXT, entity_id TEXT, record_id TEXT, created_at TEXT)`)
+    const insert = audit.prepare('INSERT INTO audit_logs (id, user_name, action, details, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)')
+    insert.run(1, 'fixture', 'sale_amend', '{"actual_cost_before":7.13,"actual_cost_after":8.27}', null, null)
+    insert.run(2, 'fixture', 'sale_amend', '{"actual_cost_after":18.27}', null, null)
+    insert.run(3, 'fixture', 'sale_amend', '{"actual_cost_after":8.271}', null, null)
+    insert.run(4, 'fixture', 'contact_edit', '{"phone":"12.345.678"}', '12.345.678', '87.654.321')
+    insert.run(5, 'fixture', 'contact_edit', '{"phone":"087 654 321"}', '087 654 321', '087654321')
+    insert.run(6, 'fixture', 'sale_amend', 'note 8.27.', null, null)
+    const found = (search, phoneTextBlocked) => {
+      const { where, params } = buildAuditLogFilters({ search, phoneTextBlocked })
+      return audit.prepare(`SELECT id FROM audit_logs ${where} ORDER BY id`).all(params).map((row) => row.id)
+    }
+    assert.deepEqual(found('8.27', true), [1, 6], 'the whole figure, wherever it stands as a figure')
+    assert.deepEqual(found('7.13', true), [1])
+    assert.deepEqual(found('8.27', false), [1, 2, 3, 6], 'a holder keeps the substring search')
+    for (const probe of ['12.345', '12.3', '2.34', '345.678', '45.67', '5.678', '87.654', '7.654', '54.32', '87.6']) {
+      assert.deepEqual(found(probe, true), [], `blocked probe ${probe}`)
+    }
+    assert.deepEqual(found('12.345', false), [4], 'a holder still finds the dotted phone')
+    for (const probe of ['654', '087', '087 654', '321', '12.345.678', '87.654.321']) assert.deepEqual(found(probe, true), [], `blocked ${probe}`)
+    assert.deepEqual(found('contact_edit', true), [4, 5], 'words are untouched')
+  })
   check('import review: a number never matches the phone or the identifier without the grant', () => {
     const where = (query, phoneTextBlocked) => buildImportReviewWhere({ jobId: 'job', query, phoneTextBlocked }).sql
     assert.ok(/\$\.data\.phone/.test(where('654', false)) && /identifier, ''\)\) LIKE @query/.test(where('654', false)))
@@ -238,7 +262,10 @@ const mutants = [
   ['digit comparison drops the Contact Option phones', { phoneSearchGuard: replaceOnce('return { sql: `(${primary.sql} OR ${options})`', 'return { sql: `(${primary.sql})`') }],
   ['a number saved as a name is readable through a digit word', { contactSearch: replaceOnce("`(${wordMatch} AND NOT ${phoneShapedSql('name')})`", 'wordMatch') }],
   ['picker keeps the fragment alternatives', { salesCustomerSearch: replaceOnce('if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original', '') }],
-  ['audit log keeps matching phone text', { auditLogQuery: replaceOnce("if (input.phoneTextBlocked && REDACTABLE_TEXT_COLUMNS.has(column) && isBareNumberWord(word)) return '0'", '') }],
+  ['audit log keeps matching phone text', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", '') }],
+  ['audit log blocks money figures too', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", "if (figureOnly) return '0'") }],
+  ['audit log money figure matches inside a longer number', { auditLogQuery: replaceOnce('...(figureOnly ? [wholeFigure(column, `@searchFigure${index}`)] : []),', '') }],
+  ['audit log money figure not bounded on the dotted side', { auditLogQuery: replaceOnce("`'*' || ${figure} || '.[0-9]*'`, `'*[0-9].' || ${figure} || '*'`,", '') }],
   ['import review keeps matching the phone', { importReviewQuery: replaceOnce('!!filter.phoneTextBlocked && /\\d/.test(query)', 'false && /\\d/.test(query)') }],
 ]
 let survivors = 0

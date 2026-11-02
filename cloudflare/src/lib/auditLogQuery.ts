@@ -24,7 +24,7 @@
 // deliberately not the device-supplied client_time (see businessDateWindow.ts;
 // the created_at prefilter there keeps the index usable).
 
-import { isBareNumberWord } from './phoneSearchGuard'
+import { isBareNumberWord, isMoneyShapedWord } from './phoneSearchGuard'
 import { businessToday, localDateExpr } from './businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
 import {
@@ -303,15 +303,26 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     .slice(0, AUDIT_MAX_SEARCH_WORDS)
   const hiddenTextPatterns = searchWords.length ? input.hiddenTextPatterns ?? [] : []
   hiddenTextPatterns.forEach((pattern, index) => { params[`hiddenText${index}`] = pattern })
-  const searchable = (column: string, term: string, word: string): string => {
-    const match = `${column} LIKE ${term} ESCAPE '\\'`
-    if (input.phoneTextBlocked && REDACTABLE_TEXT_COLUMNS.has(column) && isBareNumberWord(word)) return '0'
-    if (!REDACTABLE_TEXT_COLUMNS.has(column) || !hiddenTextPatterns.length) return match
-    return `(${match} AND ${hiddenTextPatterns.map((_, index) => `${column} NOT LIKE @hiddenText${index}`).join(' AND ')})`
+  // A reader without the full-phone permission may still search the text columns for a money figure ("8.27"), but only as that
+  // whole figure: never inside a longer digit run or dotted number, so no part of a phone written "12.345.678" is a probe.
+  const wholeFigure = (column: string, figure: string): string => [
+    `'*' || ${figure} || '[0-9]*'`, `'*[0-9]' || ${figure} || '*'`, `'*' || ${figure} || '.[0-9]*'`, `'*[0-9].' || ${figure} || '*'`,
+  ].map((pattern) => `${column} NOT GLOB (${pattern})`).join(' AND ')
+  const searchable = (column: string, index: number, word: string): string => {
+    const redactable = REDACTABLE_TEXT_COLUMNS.has(column)
+    const figureOnly = !!input.phoneTextBlocked && redactable && isBareNumberWord(word)
+    if (figureOnly && !isMoneyShapedWord(word)) return '0'
+    const guards = [
+      ...(figureOnly ? [wholeFigure(column, `@searchFigure${index}`)] : []),
+      ...(redactable ? hiddenTextPatterns.map((_, at) => `${column} NOT LIKE @hiddenText${at}`) : []),
+    ]
+    const match = `${column} LIKE @search${index} ESCAPE '\\'`
+    return guards.length ? `(${match} AND ${guards.join(' AND ')})` : match
   }
   searchWords.forEach((word, index) => {
     params[`search${index}`] = `%${word.replace(/([\\%_])/g, '\\$1')}%`
-    clauses.push(`(${SEARCH_COLUMNS.map((column) => searchable(column, `@search${index}`, word)).join(' OR ')})`)
+    if (input.phoneTextBlocked && isMoneyShapedWord(word)) params[`searchFigure${index}`] = word
+    clauses.push(`(${SEARCH_COLUMNS.map((column) => searchable(column, index, word)).join(' OR ')})`)
   })
 
   if (cursor) {
