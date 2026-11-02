@@ -19,7 +19,7 @@ const RUNS = [
   ['crawl', 'cache-stores-full-body', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ['crawl', 'cache-variant-ignores-grant', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ...['sales digit words read the phone', 'sales whole number not compared', 'sales number saved as a name readable', 'delivery picker matches phone fragments',
-    'returns digit words read the name', 'audit search reads phone text', 'contacts search ignores the grant'].map((name) => ['oracle', name, {}]),
+    'returns digit words read the name', 'audit search reads phone text', 'contacts search ignores the grant', 'sales stats cache shared across grants'].map((name) => ['oracle', name, {}]),
   ...['edit saves the mask it was shown', 'edit saves masked Contact Options', 'create accepts a mask', 'resolver accepts a mask of another number',
     'merge accepts a masked custom phone'].map((name) => ['write', name, {}]),
 ]

@@ -65,6 +65,13 @@ for (const file of Object.keys(PHONE_KEYED)) {
   }
 }
 
+// /stats carries totals only, but which sales a typed number matches depends on the grant, so its key carries the variant too.
+{
+  const sales = read('routes/sales.ts')
+  const stats = sales.slice(sales.indexOf("app.get('/stats',"), sales.indexOf("app.get('/stats-strip',"))
+  if (!stats.includes('}, phoneCacheVariant(user))')) fail('sales.ts: /stats no longer keys its cache on the full-phone variant')
+}
+
 // The dashboard rankings (top customers carry a phone) fold the variant into the key and store the projected rows.
 const rankings = read('lib/dashboardRankingsCache.ts')
 if (!/\['phone', phoneCacheVariant\(ctx\.user\)\]/.test(rankings)) fail('dashboardRankingsCache.ts: the key no longer carries the phone variant')

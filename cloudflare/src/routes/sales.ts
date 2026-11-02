@@ -28,7 +28,7 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { cachedPhoneJson } from '../lib/phoneCache'
+import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
 import { fullContactPhoneClause, fullPhoneColumnClause, isDigitWord, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
@@ -6299,7 +6299,8 @@ app.get('/stats', async (c) => {
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
-  })
+    // The totals do not carry a phone, but WHICH sales match a typed number depends on the grant (lib/phoneSearchGuard.ts): the key does too.
+  }, phoneCacheVariant(user))
   return c.json(payload)
 })
 

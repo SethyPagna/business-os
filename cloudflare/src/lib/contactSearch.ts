@@ -63,7 +63,8 @@ export function buildContactMatchClause(
   if (probe.kind === 'none') return open
   // The account cannot see numbers: digit-only words search the non-phone columns only; a whole number also finds the
   // contact whose phone IS that number (the open match narrows the rows, the digit comparison confirms one string).
-  const restricted = buildOpenContactMatchClause(table, rawSearch, paramPrefix, true)
+  // Its own parameter names: the two matches carry different MATCH texts and must not overwrite each other.
+  const restricted = buildOpenContactMatchClause(table, rawSearch, `${paramPrefix}_restricted`, true)
   if (probe.kind === 'partial' || !open || !restricted) return restricted
   const exact = fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT)
   return { sql: `((${open.sql} AND ${exact.sql}) OR ${restricted.sql})`, params: { ...open.params, ...exact.params, ...restricted.params } }

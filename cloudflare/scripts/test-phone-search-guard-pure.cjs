@@ -57,6 +57,7 @@ function freshDb() {
   customer.run(1, 'Fixture Dara', '087 654 321', 'dara@example.test', option('Work', '098 111 222', 'Street 9'), null, 'LC-P28-1', '087654321')
   customer.run(2, 'Fixture Sophea', '089100200', null, null, null, 'LC-P28-2', '089100200')
   customer.run(3, '010 222 333', '010 222 333', null, null, null, 'LC-P28-3', '010222333')
+  customer.run(5, 'Fixture Pairs', '12 34 56 78', null, null, null, 'LC-P28-5', '12345678')
   customer.run(4, 'Fixture Visal', '+855 12 777 888', null, null, 'Visal Trading', 'LC-P28-4', '012777888')
   const supplier = db.prepare('INSERT INTO suppliers (id, name, phone, address, company, contact_person) VALUES (?, ?, ?, ?, ?, ?)')
   supplier.run(1, 'Fixture Supplies', '077 333 444', option('Office', '078 444 555', 'Street 3'), 'Fixture Co', 'Vanna')
@@ -129,7 +130,7 @@ function run(load, { baseLoad }) {
 
   // ---- 3. an account without the grant: no oracle, still finds the customer by the whole number -----------------------
   check('no grant: a digit fragment finds nothing through a phone column', () => {
-    const fragments = ['087', '0876', '087 654', '654', '321', '654321', '98 111', '111', '222', '111 111 111 111', '654 654 654', '0123 0123 0123', '345 345 345', '1 2 3 4 5 6 7 8']
+    const fragments = ['087', '0876', '087 654', '654', '321', '654321', '98 111', '111', '222', '111 111 111 111', '654 654 654', '0123 0123 0123', '345 345 345', '1 2 3 4 5 6 7']
     for (const q of fragments) {
       for (const table of TABLES) assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${JSON.stringify(q)}`)
       assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${JSON.stringify(q)}`)
@@ -150,6 +151,11 @@ function run(load, { baseLoad }) {
     assert.deepEqual(ids('suppliers', '078 444 555', CLOSED), ids('suppliers', '078 444 555', OPEN))
     assert.deepEqual(ids('delivery_contacts', '096 555 666', CLOSED), [1])
     assert.deepEqual(ids('delivery_contacts', '095-666-777', CLOSED), [1])
+  })
+  check('no grant: a whole number written in short groups finds its customer (the open word match is kept)', () => {
+    assert.deepEqual(ids('customers', '12 34 56 78', OPEN), [5])
+    assert.deepEqual(ids('customers', '12 34 56 78', CLOSED), [5])
+    assert.deepEqual(ids('customers', '12 34 56', CLOSED), [], 'a fragment of it is still a probe')
   })
   check('no grant: a near-miss whole number finds nobody (compared as one string)', () => {
     for (const q of ['087 654 322', '087 654 320', '087 655 321', '187 654 321']) {
@@ -222,6 +228,7 @@ console.log('PASS phone search guard: classification, holder parity, no-oracle, 
 
 // ---- 4. mutants ------------------------------------------------------------------------------------------------------
 const mutants = [
+  ['the two matches share parameter names', { contactSearch: replaceOnce('`${paramPrefix}_restricted`', 'paramPrefix') }],
   ['guard ignored (every account searches open)', { contactSearch: replaceOnce("access.fullPhone ? ({ kind: 'none' } as const) : phoneProbeOf(rawSearch)", "({ kind: 'none' } as const)") }],
   ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && isDigitWord(word))', 'if (false && isDigitWord(word))') }],
   ['trigram table kept for digit words', { contactSearch: replaceOnce('&& !(digitWordsAvoidPhones && words.some(isDigitWord))', '') }],

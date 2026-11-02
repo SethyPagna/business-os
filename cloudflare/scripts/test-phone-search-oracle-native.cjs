@@ -22,6 +22,7 @@ const MUTANTS = {
   'delivery picker matches phone fragments': ['routes/sales.ts', sub("const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)", "const probe = ({ kind: 'none' } as const)")],
   'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && isDigitWord(word) ? digitWordHaystack : flatHaystack", 'flatHaystack')],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
+  'sales stats cache shared across grants': ['routes/sales.ts', sub('}, phoneCacheVariant(user))', '})')],
   'contacts search ignores the grant': ['lib/contactSearch.ts', sub("access.fullPhone ? ({ kind: 'none' } as const) : phoneProbeOf(rawSearch)", "({ kind: 'none' } as const)")],
 }
 
@@ -84,6 +85,17 @@ async function main() {
       t.eq(`sales ${q}`, receiptsIn(r.text), [])
       t.eq(`sales ${q} leaks`, leaksIn(r.text), [])
     }
+  })
+  await check('no grant: the cached Sales totals do not say how many sales a number fragment matches (holder warms first, then the other way)', async (t) => {
+    const count = (response) => (response.json && response.json.total_count)
+    const holderFirst = await get(`/api/sales/stats?search=${enc('654321')}`, 'admin')
+    t.ok('positive control: the holder counts the sale by a fragment of its number', count(holderFirst) >= 1, holderFirst.text.slice(0, 200))
+    const denied = await get(`/api/sales/stats?search=${enc('654321')}`, 'sales_only')
+    t.eq('the account without the grant counts nothing for the same URL', count(denied), 0)
+    const deniedFirst = await get(`/api/sales/stats?search=${enc('999000')}`, 'sales_only')
+    t.eq('warmed by the account without the grant: nothing', count(deniedFirst), 0)
+    const holderAfter = await get(`/api/sales/stats?search=${enc('999000')}`, 'admin')
+    t.ok('and the holder still counts the sale (its own entry)', count(holderAfter) >= 1, holderAfter.text.slice(0, 200))
   })
   await check('no grant: Returns search does not read a customer name that is a number', async (t) => {
     for (const q of ['222', '010', '010222333', '222 333']) {
