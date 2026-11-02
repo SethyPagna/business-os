@@ -11,18 +11,11 @@ const { BUDGETS_FILE, FREE_CALL_LIMIT, loadBudgets, today, roundUp, callsLimit }
 // READ_BUDGET_ONLY=<regex> narrows a local run to the shape ids it matches (diagnosis only; the gate runs them all).
 const only = (id) => !process.env.READ_BUDGET_ONLY || new RegExp(process.env.READ_BUDGET_ONLY).test(id)
 
-// A shape that lists "switches" is measured with those read switches stored (lib/readSwitches.ts reads them from system_flags), because that is the
-// state the Free plan runs in; every other shape is measured with no switch row. READ_BUDGET_SWITCHES=off measures every shape with none (the old
-// paths), for a before/after comparison. A change of state restarts the isolate, so a memoised switch from the previous shape cannot leak.
-async function ensureSwitches(world, switches) {
-  const wanted = process.env.READ_BUDGET_SWITCHES === 'off' || !switches || !Object.keys(switches).length ? null : JSON.stringify({ epoch: 1, switches })
-  if ((world.switchRow || null) === wanted) return
-  if (wanted) await world.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(wanted).run()
-  else await world.db.prepare("DELETE FROM system_flags WHERE key='read_switches'").run()
-  world.switchRow = wanted
-  await world.restart()
-  await world.login()
-}
+// The GET shapes are measured with the read switches budgets.json lists stored (lib/readSwitches.ts reads them from system_flags), because that is the
+// state the Free plan is meant to run in; the write shapes are measured with none. READ_BUDGET_SWITCHES=off measures the GET shapes with none (the old
+// paths), for a before/after comparison. One state for the whole pass: flipping it between shapes would restart the isolate and move the rows of the
+// shapes that follow (a cold isolate reads more, a second login adds a session row every request reads).
+const getSwitches = (budgets) => (process.env.READ_BUDGET_SWITCHES === 'off' ? undefined : budgets.switches)
 
 // A shape's file is fixed by its id, so adding a shape never moves another one.
 const PARTS = 3
@@ -101,7 +94,7 @@ async function pinProblems(world, entry, statements) {
 async function runGetPass({ partIndex, analyze = false, label }) {
   const budgets = loadBudgets()
   const byId = new Map(budgets.shapes.map((e) => [e.id, e]))
-  const world = await bootWorld({ tier: 'free' })
+  const world = await bootWorld({ tier: 'free', switches: getSwitches(budgets) })
   const reds = []
   let n = 0
   try {
@@ -112,7 +105,7 @@ async function runGetPass({ partIndex, analyze = false, label }) {
       const entry = byId.get(shape.id)
       if (!entry) { reds.push(`${shape.id}: no budget in budgets.json`); continue }
       let m
-      try { await ensureSwitches(world, entry.switches); m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) }) } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
+      try { m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) }) } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
       const problems = [...getProblems(entry, m, { analyze }), ...(m.warm.overDeadline || !entry.pins ? [] : await pinProblems(world, entry, m.statements))]
       n += 1
       if (problems.length) reds.push(`${shape.id} (${entry.route}): ${problems.join('; ')}`)
@@ -161,4 +154,4 @@ async function runWritePass({ label }) {
   return reds
 }
 
-module.exports = { ensureSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
+module.exports = { getSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }

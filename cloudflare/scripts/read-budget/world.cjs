@@ -2,7 +2,7 @@
 // Read-budget world: the REAL Worker (src/index.ts, bundled in memory) under Miniflare with a counting D1 proxy that
 // sums meta.rows_read / rows_written per request and counts physical calls (a db.batch is one call). Seeded once per
 // (migrations + seed + bundle) under RUNNER_TEMP with an atomic mkdir lock; every caller works on its own copy.
-//   bootWorld({ tier, seedVariant, persistDir }) -> world
+//   bootWorld({ tier, seedVariant, persistDir, switches }) -> world   (switches: read switches stored for the whole run, e.g. { report_atomic: 'on' })
 //   runShape(world, shape, { cold, cacheMiss })  -> { status, code, rowsRead, rowsWritten, calls, statements, fingerprints }
 const crypto = require('node:crypto')
 const fs = require('node:fs')
@@ -219,7 +219,7 @@ async function ensureSeed({ seedVariant, tier, script }) {
   }
 }
 
-async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir } = {}) {
+async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, switches } = {}) {
   const script = await bundleWorker()
   const seeded = await ensureSeed({ seedVariant, tier, script })
   const persist = persistDir || fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'read-budget-work-'))
@@ -261,6 +261,9 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir } = {
     world.cookie = r.setCookie.split(';')[0]
   }
   world.analyze = async () => { await world.db.prepare('ANALYZE').run() }
+  // Stored once, before the first request of the run, through the raw binding: the isolate reads it like production does and no later flip,
+  // restart or login can move the rows another shape reads.
+  if (switches && Object.keys(switches).length) await world.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(JSON.stringify({ epoch: 1, switches })).run()
   world.dispose = async () => { await mf.dispose(); fs.rmSync(persist, { recursive: true, force: true }) }
   await world.restart()
   await world.login()
