@@ -95,7 +95,7 @@ test.describe('Search joined to the section tabs', () => {
   test('the tab bar with the search stays pinned while the products scroll', async ({ page }) => {
     // CATCHES: a docked search that scrolls away with the page (the card used to be sticky on its own).
     await openProducts(page, 1280)
-    await page.mouse.wheel(0, 1600)
+    await page.evaluate(() => window.scrollTo(0, 1600))
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000)
     const bar = await nav(page).boundingBox()
     expect(bar!.y).toBeLessThanOrEqual(12)
