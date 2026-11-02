@@ -33,8 +33,8 @@ const productRowParts = readFileSync(new URL('../src/components/products/surface
 // aside in compact "pages" mode where the home sheet owns section switching.
 assert.match(products, /getHubDestinations\('products'/, 'the section list must come from the shared hub table, not a second hand-rolled one')
 assert.match(products, /useHubSection<'products' \| 'stock_changes' \| 'stock_in_sessions' \| 'duplicates'>/, "the active section must ride the app's guarded section navigation like every other hub")
-assert.match(products, /hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto/, 'the Products section switcher must scroll inside the viewport, never widen the page')
-assert.match(products, /hub-section-pill inline-flex min-h-11/, 'section chips must meet the 44px compact touch target')
+assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills">/, 'the Products section switcher is the shared ChipRail: it scrolls inside the viewport (max-width 100%, overflow-x auto, no wrap in main.css), never widening the page')
+assert.match(products, /<RailChip selected=\{isActive\}/, 'section chips are RailChips (36px, 40px on touch, owner R1 2 Nov 2026)')
 assert.match(products, /layeredSectionNav \|\| productSectionTabs\.length <= 1 \? null :/, 'the page must not draw a second section row when the compact home sheet owns it')
 assert.doesNotMatch(products, /overflow-x-auto pb-1 \[scrollbar-width:thin\]/, 'the hand-rolled section scroller must be gone')
 assert.doesNotMatch(products, /scrollProductSectionsWithWheel/, 'the scroller-only wheel handler must not survive as dead code')
@@ -42,8 +42,8 @@ assert.doesNotMatch(products, /scrollProductSectionsWithWheel/, 'the scroller-on
 // itself is still present in this file (the header-actions row), so their
 // absence is a real signal and not a search that stopped working.
 assert.match(products, /overflow-x-auto/, 'positive control: overflow-x-auto is still findable in Products.tsx')
-assert.match(products, /role="group"[\s\S]*aria-label=\{tr\('product_sections'/, 'the section switcher must have an accessible group label')
-assert.match(products, /aria-pressed=\{isActive\}/, 'each section chip must expose its selected state')
+assert.match(products, /<ChipRail label=\{tr\('product_sections'/, 'the section switcher must have an accessible group label (ChipRail renders role="group" with it)')
+assert.match(products, /<RailChip selected=\{isActive\}/, 'each section chip must expose its selected state (RailChip renders aria-pressed from it)')
 
 // No product row may be unreachable by default: hiding a group's out-of-stock
 // child rows is an explicit FilterMenu choice, off unless the operator turns

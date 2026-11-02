@@ -564,37 +564,6 @@
   min-height: 44px;
 }
 
-.reports-mobile-presets {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.reports-mobile-presets::-webkit-scrollbar { display: none; }
-
-.reports-mobile-preset {
-  min-height: 36px;
-  flex: 0 0 auto;
-  border: 1px solid var(--ui-line-2);
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: var(--ui-surface);
-  color: var(--ui-ink-2);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.reports-mobile-preset[aria-pressed='true'] {
-  border-color: #2f3945;
-  background: #2f3945;
-  color: #fff;
-}
-
 .reports-mobile-actions {
   display: flex;
   justify-content: flex-end;
@@ -608,8 +577,6 @@
 .reports-desktop-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .reports-desktop-primary { flex-direction: row; flex-wrap: wrap; max-width: 100%; }
 .reports-desktop-primary > :first-child { flex: 0 1 auto; }
-.reports-desktop-controls .reports-mobile-presets { flex: 0 1 auto; }
-.reports-desktop-controls .reports-mobile-preset { flex: 0 0 auto; font-size: 13px; }
 
 @media (max-width: 359px) {
   .reports-mobile-range { font-size: 12px; gap: 4px; padding-inline: 8px; }

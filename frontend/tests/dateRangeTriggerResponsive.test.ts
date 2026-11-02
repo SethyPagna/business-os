@@ -79,6 +79,7 @@ const rowModule = { exports: {} as { default?: (props: Record<string, unknown>) 
 const rowCode = transformSync(rowSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
 new Function('require', 'module', 'exports', rowCode)((id: string) => {
   if (id.includes('DateTimeRangePicker')) return () => null
+  if (id.includes('ChipRail')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
   if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
   return require(id)
 }, rowModule, rowModule.exports)
@@ -88,9 +89,9 @@ const renderRow = (layout?: 'wrap' | 'scroll') => rowModule.exports.default!({
 })
 
 runTest('StatsRangeRow default action row wraps and retains a readable picker floor', () => {
-  const row = renderRow(), controls = row.props.children[0], picker = controls.props.children[1]
-  assert.match(controls.props.className, /(?:^| )flex-wrap(?: |$)/)
-  assert.doesNotMatch(controls.props.className, /flex-nowrap/)
+  const row = renderRow(), wrapper = row.props.children[0], controls = wrapper.props.children, picker = controls.props.children[1]
+  assert.match(wrapper.props.className, /(?:^| )flex-wrap(?: |$)/)
+  assert.doesNotMatch(wrapper.props.className, /flex-nowrap/)
   assert.match(picker.props.className, /min-w-\[10\.5rem\]/)
   assert.match(picker.props.className, /flex-1/)
   assert.equal(controls.props.children[2], null, 'default presets stay below the action row')
@@ -98,9 +99,9 @@ runTest('StatsRangeRow default action row wraps and retains a readable picker fl
 })
 
 runTest('StatsRangeRow opt-in scroll rail keeps picker and presets on one local row', () => {
-  const row = renderRow('scroll'), controls = row.props.children[0], picker = controls.props.children[1]
-  assert.match(controls.props.className, /flex-nowrap/)
-  assert.match(controls.props.className, /overflow-x-auto/)
+  const row = renderRow('scroll'), wrapper = row.props.children[0], controls = wrapper.props.children, picker = controls.props.children[1]
+  assert.equal(wrapper.type, 'ChipRail', 'the whole control row is the shared ChipRail (nowrap, overflow-x auto, hidden scrollbar: chipRail.test.ts)')
+  assert.ok('data-stats-range-controls' in wrapper.props)
   assert.match(picker.props.className, /min-w-\[14rem\]/)
   assert.match(picker.props.className, /shrink-0/)
   assert.ok(controls.props.children[2], 'scroll presets share the picker rail')

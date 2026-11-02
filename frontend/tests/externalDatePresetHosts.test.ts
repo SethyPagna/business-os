@@ -13,7 +13,7 @@ const evaluate = (source: string, scope: Record<string, unknown> = {}) => {
   new Function('require', 'module', 'exports', ...Object.keys(scope), code)(require, module, module.exports, ...Object.values(scope))
   return module.exports
 }
-const StatsRangeRow = evaluate(read('shared/StatsRangeRow.tsx').replace(/import DateTimeRangePicker[^\n]+/, 'const DateTimeRangePicker = "test-picker"').replace(/import \{ activeStatsPreset[^\n]+/, 'const { activeStatsPreset, statsPresetRange, STATS_PRESETS } = require("../src/components/shared/statsStripPresets.ts")')).default
+const StatsRangeRow = evaluate(read('shared/StatsRangeRow.tsx').replace(/import DateTimeRangePicker[^\n]+/, 'const DateTimeRangePicker = "test-picker"').replace(/import \{ activeStatsPreset[^\n]+/, 'const { activeStatsPreset, statsPresetRange, STATS_PRESETS } = require("../src/components/shared/statsStripPresets.ts")').replace(/import ChipRail[^\n]+/, 'const ChipRail = "ChipRail", RailChip = "RailChip"')).default
 const initial = { startDate: '2026-09-18', endDate: '2026-09-19', startTime: '09:30', endTime: '17:15' }
 
 for (const file of [
@@ -56,10 +56,12 @@ for (const file of [
     assert.equal(element.props.showPresets, true, `${file}: explicitly requests external presets`)
     assert.equal(element.props.showTime, showTime, `${file}: preserves time capability`)
     const row = StatsRangeRow(element.props)
-    const picker = row.props.children[0].props.children[1]
+    const picker = row.props.children[0].props.children.props.children[1]
     assert.equal(picker.props.showQuickRanges, false, `${file}: shared picker explicitly disables internal presets`)
     const rail = row.props.children[1]
-    assert.match(rail.props.className, /stats-date-presets.*flex-nowrap.*overflow-x-auto/)
+    assert.equal(rail.type, 'ChipRail', `${file}: the presets are the shared ChipRail, not a hand-rolled scroller`)
+    assert.ok('data-date-presets' in rail.props)
+    assert.ok(rail.props.children.every((chip: { type: string }) => chip.type === 'RailChip'), `${file}: every preset is a RailChip`)
     assert.deepEqual(rail.props.children.map((preset: { key: string }) => preset.key), STATS_PRESETS.map(({ id }) => id), `${file}: one complete shared preset row in the standard order`)
     for (const preset of rail.props.children) {
       preset.props.onClick()

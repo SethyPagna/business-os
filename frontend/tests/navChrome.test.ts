@@ -425,17 +425,18 @@ const HUB_PAGES: Array<[string, string]> = [
 ]
 
 const hubNav = read('components/shared/HubSectionNav.tsx')
+const mainCss = read('styles/main.css')
 const products = read('components/products/Products.tsx')
 
 runTest('every hub reaches the chip row through the one shared component', () => {
   for (const [label, rel] of HUB_PAGES) {
     assert.match(read(rel), /<HubSectionNav/, `${label} renders the shared row`)
   }
-  // Two implementations of one row is the standing exception, and it is
-  // styled by the same rules rather than forked: both carry the same classes.
-  assert.match(products, /bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap/,
-    'the Products copy is the same row, and a chrome surface')
-  assert.match(hubNav, /bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap/,
+  // Two call sites of one row is the standing exception, and both are the shared ChipRail (kit/ChipRail.tsx):
+  // the chips, the scrolling and the selected state come from one rule set, not a fork.
+  assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills">/,
+    'the Products copy is the same row')
+  assert.match(hubNav, /<ChipRail label=\{[^\n]*\} className="hub-section-pills">/,
     'so is the shared one')
 })
 
@@ -447,7 +448,7 @@ runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', (
     assert.doesNotMatch(source, /hub-section-pill[^"'`]*bg-white/, `${label}: the white active chip is gone`)
     // The state is carried by aria-pressed alone, which the stylesheet reads,
     // so the accessible state and the visible state cannot come apart.
-    assert.match(source, /aria-pressed=\{isActive\}/, `${label}: state is announced`)
+    assert.match(source, /<RailChip\s+selected=\{isActive\}|<RailChip selected=\{isActive\}/, `${label}: state is announced (RailChip renders aria-pressed from it)`)
   }
   assert.doesNotMatch(hubNav, /section\.tone/, 'the per-hub active ink is gone from the row')
   assert.doesNotMatch(hubNav, /tone\?: string/, 'and from HubSectionDef')
@@ -479,7 +480,7 @@ runTest('the chip row wears the chrome, not grey-on-white with a per-hub hue', (
   // for Review's long "Deleted sales (old system)" label. The shared row wraps
   // instead (the standing "no horizontal overflow at 375" rule), so there is
   // nothing left to preserve; the case below re-asserts it never scrolls.
-  assert.match(css, /\.hub-section-pill\[aria-pressed='true'\] \{[\s\S]*?box-shadow: inset 0 -2px 0 0 var\(--nav-accent\)/,
+  assert.match(mainCss, /\.chip-rail-item\[aria-pressed='true'\],\s*\.chip-rail-item\[aria-selected='true'\] \{[\s\S]*?box-shadow: inset 0 -2px 0 0 var\(--chip-open-rule/,
     'the open chip carries the gold underline')
   assert.match(css, /\.hub-section-rule \{[\s\S]*?border-bottom: 2px solid var\(--nav-line\)/,
     'and the rule under the row is the chrome line, not gray-200')
@@ -505,22 +506,35 @@ runTest('the chip row is legible in both themes, resting and open', () => {
     // dark a 1.07:1 step -- a state you cannot see -- which is why the open
     // chip's ground is its own token rather than the bar's.
     assert.ok(contrast(chip, well) >= 1.15, `${name}: the open chip's ground lifts off the well (${contrast(chip, well).toFixed(3)}:1)`)
-    assert.match(css, /\.hub-section-pill\[aria-pressed='true'\] \{[\s\S]*?background-color: var\(--nav-chip-open\)/,
-      'the open chip paints that token')
+    assert.match(mainCss, /\.chip-rail-item\[aria-pressed='true'\],\s*\.chip-rail-item\[aria-selected='true'\] \{[\s\S]*?background-color: var\(--chip-open-ground/,
+      'the open chip paints its own ground token')
   }
+  // The shared chip re-declares the chrome palette (main.css cannot read --nav-*, which only exists under
+  // .bos-nav-chrome), so the two declarations are held to ONE palette: a drift in either is a red here.
+  const chipLight = mainCss.slice(mainCss.indexOf(':where(.chip-rail) {'), mainCss.indexOf('.dark .chip-rail {'))
+  const chipDark = mainCss.slice(mainCss.indexOf('.dark .chip-rail {'), mainCss.indexOf('.chip-rail::-webkit-scrollbar'))
+  for (const [name, navBlock, chipBlock] of [['light', light, chipLight], ['dark', dark, chipDark]] as Array<[string, string, string]>) {
+    assert.equal(token(chipBlock, 'chip-ground'), token(navBlock, 'nav-panel'), `${name}: a resting chip is the old well's tint`)
+    assert.equal(token(chipBlock, 'chip-open-ground'), token(navBlock, 'nav-chip-open'), `${name}: the open chip's ground`)
+    assert.equal(token(chipBlock, 'chip-open-ink'), token(navBlock, 'nav-accent-strong'), `${name}: the open chip's ink`)
+    assert.equal(token(chipBlock, 'chip-open-line'), token(navBlock, 'nav-accent-line'), `${name}: the open chip's border`)
+  }
+  assert.equal(token(chipLight, 'chip-ink'), token(light, 'nav-ink-2'), 'light: resting ink')
 })
 
 runTest('the chip row stays compact and touch-safe on every screen it appears on', () => {
+  // R1 (2 Nov 2026): the row is the shared ChipRail -- one chip height for every row of choices (36px, 40px on
+  // touch; it was 44px here and 40px / 36px on the date presets), 12px type, one row scrolling inside its own box.
+  // Owner choice (5 Oct 2026) stands: the page never gains a horizontal scrollbar, and Khmer keeps a >=1.6
+  // leading inside the clipped scroller.
   for (const [label, source] of [['HubSectionNav', hubNav], ['Products', products]] as Array<[string, string]>) {
-    assert.match(source, /hub-section-pill inline-flex min-h-11/, `${label}: 44px touch target`)
-    assert.match(source, /text-\[13px\] font-semibold/, `${label}: 13px compact type`)
-    assert.match(source, /md:h-8 md:min-h-0/, `${label}: 32px compact row at md+`)
-    // Owner choice (5 Oct 2026): one row, scrolling inside its own box. The page never gains a
-    // horizontal scrollbar, and Khmer keeps a >=1.6 leading inside the clipped scroller.
-    assert.match(source, /hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto/, `${label}: one row that scrolls inside the viewport`)
-    assert.match(source, /hub-section-pill inline-flex[^"'`]*shrink-0[^"'`]*leading-relaxed/, `${label}: chips keep their width and Khmer-safe leading`)
-    assert.doesNotMatch(source, /hub-section-pill inline-flex[^"'`]*leading-snug/, `${label}: no tight leading in a clipped scroller`)
+    assert.match(source, /<ChipRail [^\n]*className="hub-section-pills">/, `${label}: the shared one-row scroller`)
+    assert.doesNotMatch(source, /hub-section-pill inline-flex|text-\[13px\] font-semibold|md:h-8 md:min-h-0/, `${label}: no private chip geometry left`)
   }
+  assert.match(mainCss, /--chip-rail-h:\s*2\.25rem/)
+  assert.match(mainCss, /@media \(pointer: coarse\)\s*\{\s*:where\(\.chip-rail\)\s*\{\s*--chip-rail-h:\s*2\.5rem/, 'a 40px target on touch')
+  assert.match(mainCss, /\.chip-rail-item \{[^}]*min-height:\s*var\(--chip-rail-h[^}]*white-space:\s*nowrap/, 'chips keep their width, never wrap')
+  assert.match(mainCss, /body\.lang-km \.chip-rail-item\s*\{\s*line-height:\s*var\(--km-line-height/, 'Khmer-safe leading inside the clipped scroller')
 })
 
 runTest('mobile page titles scroll locally rather than losing their ending', () => {

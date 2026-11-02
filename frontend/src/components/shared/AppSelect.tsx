@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 
 export type AppSelectOption = {
   value: string | number
@@ -21,9 +20,6 @@ type AppSelectProps = {
   menuClassName?: string
   optionClassName?: string
   disabled?: boolean
-  // Ultra-compact hosts (e.g. DateTimeRangePicker's per-endpoint month/year
-  // selects) drop the ▾ chevron entirely -- the label alone is the control.
-  showChevron?: boolean
   // A short label shown inside the control, before the chosen value ("From",
   // "To"): the field's name without a caption row above it. Not part of the menu.
   prefix?: ReactNode
@@ -45,7 +41,6 @@ export default function AppSelect({
   menuClassName = '',
   optionClassName = '',
   disabled = false,
-  showChevron = true,
   prefix,
 }: AppSelectProps) {
   const [open, setOpen] = useState(false)
@@ -192,7 +187,7 @@ export default function AppSelect({
       <button
         id={id}
         type="button"
-        className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 ${buttonClassName}`.trim()}
+        className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 aria-expanded:border-blue-300 aria-expanded:ring-2 aria-expanded:ring-blue-100 dark:aria-expanded:border-blue-500 dark:aria-expanded:ring-blue-950 ${buttonClassName}`.trim()}
         data-app-select-button="true"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
@@ -209,7 +204,6 @@ export default function AppSelect({
       >
         {prefix ? <span className="shrink-0 text-xs font-normal leading-relaxed text-slate-400" data-app-select-prefix="true">{prefix}</span> : null}
         <span className="min-w-0 flex-1 detail-scroll-text" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
-        {showChevron ? <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" /> : null}
       </button>
 
       {open && createPortal(

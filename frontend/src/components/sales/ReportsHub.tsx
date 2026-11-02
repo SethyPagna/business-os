@@ -28,6 +28,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { statsPresetRange, STATS_PRESETS, type StatsPresetKey } from '../shared/statsStripPresets.ts'
 import { Button, ControlRow, EmptyState, IconButton } from '../shared/kit'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 // Declares the `--ui-*` tokens the kit primitives read (they were ported onto
 // this line without styles/tokens.css, so every one of them was undefined)
@@ -298,7 +299,6 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
         onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
         ariaLabel={`${trh('view', 'View')}: ${selectedViewLabel}`}
         buttonClassName="h-10 w-full min-w-0 py-0 px-2 text-[12px]"
-        showChevron
       />
     </span>
   )
@@ -306,9 +306,9 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   const filterSelects = (
     <>
-      {showsBranchHistoryFilter(branchRows) ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
-      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
+      {showsBranchHistoryFilter(branchRows) ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" /> : null}
+      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" /> : null}
+      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" /> : null}
     </>
   )
   const hasFilterControls = showsBranchHistoryFilter(branchRows) || supportsSaleFilters
@@ -384,15 +384,14 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   )
 
   const presetControls = (
-    <div className="reports-mobile-presets" aria-label={trh('quick_range', 'Quick range')}>
+    <ChipRail label={trh('quick_range', 'Quick range')}>
       {mobilePresets.map((preset) => (
-        <button key={preset.id} type="button" className="reports-mobile-preset"
-          aria-pressed={selectedMobilePreset === preset.id}
+        <RailChip key={preset.id} selected={selectedMobilePreset === preset.id}
           onClick={() => setRange(mobilePresetRange(preset.id))}>
           {preset.label}
-        </button>
+        </RailChip>
       ))}
-    </div>
+    </ChipRail>
   )
 
   const body = !viewProps || !view ? (

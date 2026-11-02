@@ -4,6 +4,7 @@
 export { default as Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button'
 export { default as IconButton, type IconButtonProps } from './IconButton'
 export { default as Chip, type ChipProps } from './Chip'
+export { default as ChipRail, RailChip, type ChipRailProps, type RailChipProps } from './ChipRail'
 export { default as SectionHeader, type SectionHeaderProps } from './SectionHeader'
 export { default as ControlRow, type ControlRowProps } from './ControlRow'
 export { default as OverflowMenu, type OverflowMenuProps, type OverflowMenuItem } from './OverflowMenu'

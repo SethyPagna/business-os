@@ -13,6 +13,7 @@ import { auditActionLabel, auditEntityLabel, type LabelFn } from '../../utils/au
 import { AUDIT_ACTION_LABELS } from '../../utils/auditVocabulary.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -856,27 +857,25 @@ export default function AuditLog() {
         ) : null}
 
         {view.scope !== 'all' ? (
-          <div className="flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-audit-scope-chips>
+          <ChipRail label={t('filters') || 'Filters'} data-audit-scope-chips>
             {chipStrip.length === 0 ? (
               <span className="px-1 py-1.5 text-xs text-gray-400">{loading ? (t('loading') || 'Loading...') : (t('no_data') || 'No data')}</span>
             ) : chipStrip.map((chip) => {
               const picked = isMultiActive(view[chipField], chip.id)
               return (
-                <button
+                <RailChip
                   key={`${view.scope}-${chip.id || 'none'}`}
-                  type="button"
-                  aria-pressed={picked}
+                  selected={picked}
                   disabled={!chip.id}
                   title={chip.id ? undefined : copy('audit_system_chip_hint', 'Entries with no signed-in user are listed under All', 'កំណត់ត្រាដែលគ្មានអ្នកប្រើចូលប្រព័ន្ធ បង្ហាញក្នុង «ទាំងអស់»')}
                   onClick={() => toggleChip(chipField, chip.id)}
-                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium disabled:opacity-60 ${picked ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
                 >
                   <span className="max-w-[9rem] detail-scroll-text">{chip.label}</span>
-                  <span className={`rounded-full px-1.5 text-[10px] font-semibold ${picked ? 'bg-white/20' : 'bg-white text-slate-500 dark:bg-slate-900/80 dark:text-slate-300'}`}>{chip.count}</span>
-                </button>
+                  <span className="rounded-full bg-black/10 px-1.5 text-[10px] font-semibold dark:bg-white/10">{chip.count}</span>
+                </RailChip>
               )
             })}
-          </div>
+          </ChipRail>
         ) : null}
       </div>
 

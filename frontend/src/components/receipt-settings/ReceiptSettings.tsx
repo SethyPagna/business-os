@@ -26,6 +26,7 @@ import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
@@ -560,20 +561,16 @@ export default function ReceiptSettings() {
           className="sticky top-0 z-20 mb-4 flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 pb-1 pt-4 dark:border-gray-800 dark:bg-zinc-950 sm:px-6 sm:pt-6"
           title={t('rs_auto_save_hint') || 'Toggle any field on/off. All changes auto-save and apply instantly to the live preview and to receipts printed from POS & Sales.'}
         >
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-3 sm:flex-wrap sm:overflow-visible">
+          <ChipRail label={t('sections') || 'Sections'} className="flex-1 pb-3 sm:flex-wrap sm:overflow-visible">
             {SECTIONS.map((section) => {
               const Icon = section.icon
               return (
-                <button key={section.id} onClick={() => setActiveSection(section.id)}
-                  className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:px-3 ${activeSection === section.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Icon className="h-3.5 w-3.5" />
-                    {section.label}
-                  </span>
-                </button>
+                <RailChip key={section.id} selected={activeSection === section.id} onClick={() => setActiveSection(section.id)} icon={<Icon className="h-3.5 w-3.5" />}>
+                  {section.label}
+                </RailChip>
               )
             })}
-          </div>
+          </ChipRail>
           <div className="flex flex-shrink-0 items-center gap-1.5 pb-3">
             <button
               onClick={() => setPreviewOpen(true)}

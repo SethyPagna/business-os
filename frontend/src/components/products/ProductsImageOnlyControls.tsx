@@ -11,6 +11,7 @@ import Tag from 'lucide-react/dist/esm/icons/tag.js'
 import ArrowDownWideNarrow from 'lucide-react/dist/esm/icons/arrow-down-wide-narrow.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import ChipRail from '../shared/kit/ChipRail.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
@@ -79,7 +80,7 @@ export default function ProductsImageOnlyControls({
           ariaLabel={t('search')} placeholder={t('search')} className="block min-w-0 flex-1" inputClassName="h-11" />
         <ScanSearchButton onDetected={onScan} t={t} />
       </div>
-      <div className="stats-date-presets flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-1" data-products-image-only-filters>
+      <ChipRail label={t('filters') || 'Filters'} data-products-image-only-filters>
         {showStock ? select('stockState', t('stock_status'), Boxes, scope.stockState, [
           all,
           { value: 'in_stock', label: t('in_stock') },
@@ -97,7 +98,7 @@ export default function ProductsImageOnlyControls({
           { value: 'name_asc', label: t('name_a_z') },
           { value: 'name_desc', label: t('name_z_a') },
         ], (value) => onScopeChange({ sort: value === 'name_desc' ? 'name_desc' : 'name_asc' }))}
-      </div>
+      </ChipRail>
     </div>
   )
 }

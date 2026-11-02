@@ -29,7 +29,7 @@
 // the list scrolling wherever the pointer happens to rest on one.
 import { LONG_PRESS_MOVE_TOLERANCE_PX } from '../utils/longPress.ts'
 
-export const DRAG_SCROLL_SELECTOR = '.detail-scroll-text, .scroll-x-clean'
+export const DRAG_SCROLL_SELECTOR = '.detail-scroll-text, .scroll-x-clean, .chip-rail'
 
 export interface ScrollerLike {
   scrollLeft: number

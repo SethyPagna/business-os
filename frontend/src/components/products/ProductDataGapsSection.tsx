@@ -4,6 +4,7 @@ import { useApp, useSync } from '../../AppContext'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
@@ -112,23 +113,21 @@ export default function ProductDataGapsSection({ t, notify, onPreviewProduct, re
     <section data-product-data-gaps className="space-y-2 border-t border-gray-100 pt-3 dark:border-zinc-800">
       <div className="flex min-w-0 items-center gap-1.5">
         <ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} />
-        <div role="group" aria-label={t('type') || 'Type'} className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto [scrollbar-width:none]">
+        <ChipRail label={t('type') || 'Type'} className="flex-1">
           {kinds.map((item) => {
             const count = state.counts ? state.counts[item.kind] : undefined
             return (
-              <button
+              <RailChip
                 key={item.kind}
-                type="button"
                 data-product-data-gap-kind={item.kind}
-                aria-pressed={state.kind === item.kind}
+                selected={state.kind === item.kind}
                 onClick={() => void pagerRef.current?.setKind(item.kind)}
-                className={`inline-flex min-h-10 shrink-0 items-center whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] font-semibold leading-relaxed transition-colors ${state.kind === item.kind ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200' : 'text-gray-600 hover:bg-black/5 dark:text-gray-300 dark:hover:bg-white/10'}`}
               >
                 {t(item.labelKey) || item.labelFallback}{typeof count === 'number' && count > 0 ? ` · ${count}` : ''}
-              </button>
+              </RailChip>
             )
           })}
-        </div>
+        </ChipRail>
       </div>
 
       {state.status === 'error' ? (
