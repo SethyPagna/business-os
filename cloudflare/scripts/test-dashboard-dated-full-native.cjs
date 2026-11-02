@@ -19,7 +19,7 @@ function shown(relative) {
   return sources.get(relative).text
 }
 const plugin = { name: 'current-dated-dashboard-exports-only', setup(builder) {
-  builder.onResolve({ filter: /^current:(analytics|money|schema)$/ }, item => ({ path: { 'current:analytics': 'src/lib/salesAnalytics', 'current:money': 'src/lib/reportMoneyPrecision', 'current:schema': 'src/lib/schemaProbe' }[item.path], namespace: 'checkout' }))
+  builder.onResolve({ filter: /^current:(analytics|money|schema|switches)$/ }, item => ({ path: { 'current:analytics': 'src/lib/salesAnalytics', 'current:money': 'src/lib/reportMoneyPrecision', 'current:schema': 'src/lib/schemaProbe', 'current:switches': 'src/lib/readSwitches' }[item.path], namespace: 'checkout' }))
   builder.onResolve({ filter: /^\.\.?\//, namespace: 'checkout' }, item => ({ path: path.posix.normalize(path.posix.join(path.posix.dirname(item.importer), item.path)), namespace: 'checkout' }))
   builder.onLoad({ filter: /.*/, namespace: 'checkout' }, item => {
     for (const suffix of ['.ts', '/index.ts', '.json', '']) {
@@ -33,7 +33,9 @@ const worker = String.raw`
 import * as api from 'current:analytics'
 import * as money from 'current:money'
 import { __resetSchemaProbeCacheForTests as resetSchema } from 'current:schema'
+import { resetReadSwitchMemo as resetSwitches } from 'current:switches'
 function phase(sqls: string[]) {
+  if (sqls.length === 1 && /FROM system_flags WHERE key IN \(\?1, \?2\)/.test(sqls[0])) return 'switch'
   if (sqls.some(sql => sql.includes('report_restore_state_changed'))) return 'atomic-main'
   if (sqls.some(sql => sql.includes('report_flags_bytes'))) return sqls.length === 3 ? 'flags-prefetch' : 'flags-post'
   if (sqls.some(sql => /MIN\(si\.id\) AS lo,\s*MAX\(si\.id\) AS hi/.test(sql))) return 'item-band'
@@ -97,7 +99,7 @@ function views(snapshot: any) {
 }
 async function run(input: any, env: any) {
   if (!['full', 'combined', 'previous', 'context', 'default', 'explicit-false', 'totals'].includes(input.mode) || !input.filters || ![undefined, 'cohort', 'money', 'stale-band'].includes(input.fault)) throw new Error('Invalid test selector')
-  resetSchema()
+  resetSchema(); resetSwitches()
   const measured = meter(env.DB, input.fault), local = { ...env, DB: measured.db, PLAN_TIER: 'paid' }
   let filters = input.mode === 'previous' ? api.previousPeriodFilters(input.filters) : input.filters
   if (input.fault === 'cohort') filters = { ...filters, branchId: 3 }
@@ -140,7 +142,8 @@ const current = { startDate: '2026-09-10', endDate: '2026-09-10', branchId: 1 },
 let mf, final, bundleSha256, lastStage = 'start'
 function metrics(value) {
   const failed = value.calls.filter(call => call.error), unknown = value.calls.reduce((sum, call) => sum + (call.unknown_metadata ?? 0), 0)
-  return { physical_calls: value.calls.length, statements: value.calls.reduce((sum, call) => sum + call.arity, 0), failed_calls: failed.length, unknown_statement_metadata: unknown, atomic_mains: value.calls.filter(call => call.phase === 'atomic-main').length }
+  const read = value.calls.filter(call => call.phase !== 'switch')
+  return { switch_calls: value.calls.length - read.length, physical_calls: read.length, statements: read.reduce((sum, call) => sum + call.arity, 0), failed_calls: failed.length, unknown_statement_metadata: unknown, atomic_mains: value.calls.filter(call => call.phase === 'atomic-main').length }
 }
 function native(value, expectedStorageFailure = false) {
   const failures = value.calls.filter(call => call.error)
@@ -192,6 +195,7 @@ async function main() {
   const item = (id, parent, name, quantity, total, cost) => ({ sql: 'INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd,cost_price_usd) VALUES(?,?,?, ?,?,?,?)', values: [id, parent, parent, name, quantity, total, cost] })
   lastStage = 'owned-fixture'
   await setup([
+    { sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on' } })] },
     sale(10, '2026-09-10', 1, 10), sale(20, '2026-09-10', 1, 7, 'cancelled'), sale(30, '2026-09-09', 1, 6), sale(40, '2026-09-10', 2, 50), sale(50, '2026-09-11', 1, 30), sale(60, '2026-09-10', 3, 50),
     item(100, 10, 'Current recorded item', 2, 10, 2), item(200, 20, 'Cancelled item', 1, 7, 1), item(300, 30, 'Previous recorded item', 1, 6, 2), item(0, 40, 'Excluded invalid zero', 1, 0, 0), item(-7, 40, 'Excluded invalid negative', 1, 0, 0), item(400, 40, 'Other branch item', 1, 50, 10), item(500, 50, 'Other date item', 1, 30, 10), item(600, 60, 'Nonempty wrong branch', 1, 50, 10),
     { sql: "INSERT INTO returns(id,sale_id,created_at,total_refund_usd,status,return_scope) VALUES(1,10,'2026-09-20 01:00:00',2,'completed','customer')" },
@@ -202,6 +206,8 @@ async function main() {
     const response = await mf.dispatchFetch('http://dated.test/probe', { method: 'POST', body: JSON.stringify({ mode, filters, ...(fault ? { fault } : {}) }) }), text = await response.text()
     assert.equal(response.status, 200, text)
     const value = JSON.parse(text); assert.equal(value.ok, true, text)
+    // The report_atomic switch is read once per cold isolate by the public readers, and not at all by the direct atomic entry.
+    assert.equal(metrics(value).switch_calls, ['context', 'default', 'explicit-false'].includes(mode) ? 0 : 1, label + ': switch reads')
     cases.push({ label, mode, fault: fault ?? null, filters: value.filters, metrics: metrics(value), kind: value.kind, error: value.error ?? null, response_sha256: sha(text) })
     return value
   }

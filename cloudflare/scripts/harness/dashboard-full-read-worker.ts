@@ -1,12 +1,15 @@
 import * as api from 'current:analytics'
 import * as money from 'current:money'
 import { __resetSchemaProbeCacheForTests as resetSchema } from 'current:schema'
+import { resetReadSwitchMemo as resetSwitches } from 'current:switches'
 
 const encoder = new TextEncoder(), bytes = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength
 const FLAG_SQL = "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
 const FLAG_WITNESS = "SELECT key,typeof(value) AS storage_type,length(CAST(value AS BLOB)) AS byte_length,CAST(value AS BLOB) IS CAST(? AS BLOB) AS matches FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
 const PERMIT_SQL = "SELECT COUNT(*) AS n FROM system_flags WHERE key='stock_transaction_permit'"
 const POISON = '__dashboard_full_detail_poison'
+// The report_atomic switch read is metered apart from the report ledger: it is one cold statement of its own.
+const SWITCH_SQL = /FROM system_flags WHERE key IN \(\?1, \?2\)/
 const modes = ['public-snapshot', 'atomic-full-snapshot', 'combined', 'public-totals']
 const hex = (array: ArrayBuffer) => [...new Uint8Array(array)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 const digest = async (text: string) => hex(await crypto.subtle.digest('SHA-256', encoder.encode(text)))
@@ -25,7 +28,7 @@ function phaseFor(sqls: string[]) {
   return 'ordinary'
 }
 function meter(raw: D1Database, input: any) {
-  const calls: any[] = [], writerCalls: any[] = [], timeline: any[] = [], pending = new Set<Promise<unknown>>()
+  const calls: any[] = [], writerCalls: any[] = [], timeline: any[] = [], switchReads: string[] = [], pending = new Set<Promise<unknown>>()
   let order = 0, writers = 0
   const event = (stage: string, detail: any = {}) => { const value = { order: ++order, stage, ...detail }; timeline.push(value); return value.order }
   const tracked = async (job: () => Promise<any>) => { const promise = job(); pending.add(promise); try { return await promise } finally { pending.delete(promise) } }
@@ -62,6 +65,7 @@ function meter(raw: D1Database, input: any) {
     if (key === '__sql') return sql
     if (key === '__values') return values
     if (key === 'bind') return (...next: unknown[]) => statement(target.bind(...next), sql, next)
+    if ((key === 'all' || key === 'run') && SWITCH_SQL.test(sql)) return (...args: unknown[]) => { switchReads.push(sql); return tracked(async () => target[key](...args)) }
     if (key === 'all' || key === 'run') return (...args: unknown[]) => tracked(async () => {
       const item: any = { sequence: calls.length + 1, operation: key, phase: phaseFor([sql]), arity: 1, sqls: [sql], bindings: [values.map(bindView)] }
       item.started_order = event('app-native-before', { sequence: item.sequence, phase: item.phase }); calls.push(item)
@@ -108,7 +112,7 @@ function meter(raw: D1Database, input: any) {
     if (key === 'exec' || key === 'withSession' || key === 'dump') return () => { throw new Error('Unmeasured native operation ' + String(key)) }
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value
   } })
-  return { db, calls, writerCalls, timeline, writerCount: () => writers,
+  return { db, calls, writerCalls, timeline, switchReads, writerCount: () => writers,
     async drain() { let stable = 0; while (stable < 2) { const jobs = [...pending]; if (jobs.length) { stable = 0; await Promise.allSettled(jobs) } else { stable++; await Promise.resolve() } } } }
 }
 function views(api: any, snapshot: any) {
@@ -127,9 +131,10 @@ async function run(input: any, env: any) {
   requireValue(modes.includes(input.mode), 'valid selector')
   requireValue(input.postWriter === undefined || (['inactive', 'active'].includes(input.postWriter) && ['atomic-full-snapshot', 'combined'].includes(input.mode) && !input.poison), 'explicit post writer')
   requireValue(input.poison === undefined || (input.poison === true && input.mode === 'atomic-full-snapshot'), 'explicit poison follower')
+  resetSwitches()
   if (input.reset) resetSchema()
   const measured = meter(env.DB, input), local = { ...env, DB: measured.db, PLAN_TIER: 'paid' }
-  const evidence = { calls: measured.calls, writer_calls: measured.writerCalls, timeline: measured.timeline }
+  const evidence = { calls: measured.calls, writer_calls: measured.writerCalls, timeline: measured.timeline, switch_reads: measured.switchReads }
   try {
     if (input.mode === 'combined') { const value = await api.getSalesTotalsAndPeriodSeries(local, {}, 'day', 20); return { ok: true, kind: 'combined', value, diagnostic: api.reportMoneyDiagnostic(value.totals), ...evidence } }
     if (input.mode === 'public-totals') { const value = await api.readSalesReportTotals(local, {}); return { ok: true, kind: 'totals', value, diagnostic: api.reportMoneyDiagnostic(value.totals), ...evidence } }

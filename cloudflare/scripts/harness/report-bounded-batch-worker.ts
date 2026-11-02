@@ -1,6 +1,7 @@
 import * as api from 'guard:analytics'
 import {getDb} from 'guard:db'
 import * as money from 'guard:money'
+import {resetReadSwitchMemo} from 'guard:switches'
 const encoder=new TextEncoder(),bytes=value=>encoder.encode(JSON.stringify(value)).byteLength
 const POISON='__report_guard_detail_poison'
 const poison={sql:"SELECT json_extract('[1]','$[__report_guard_detail_poison]') AS poisoned"}
@@ -45,6 +46,7 @@ function meter(raw,input){
 function stateView(state){if(!state)return null;const {flags,...rest}=state;return {...rest,flags:flags.map(flag=>({key:flag.key,kind:flag.kind,bytes:flag.bytes.byteLength}))}}
 function nativeError(error,calls){const text=String(error?.message||error),nativeMessage=[...calls].reverse().find(call=>call.phase==='guard'&&call.error)?.error||'';const found=[POISON,'report_totals_receipts','report_totals_rows','report_totals_bytes','report_totals_storage','report_flags_rows','report_flags_bytes','report_restore_state_changed'].find(marker=>text.includes(marker)||nativeMessage.includes(marker))||null;return {name:error?.name,code:error?.code??null,message:text,native_message:nativeMessage,marker:found,mapped_status:error instanceof money.ReportMoneyPrecisionError?money.reportMoneyHttpError(error).status:null,native_guard_attempts:calls.filter(call=>call.phase==='guard').length}}
 async function run(input,env){
+ resetReadSwitchMemo()
  const raw=input.flagsDb?env.FLAGS:env.DB,measured=meter(raw,input),local={...env,DB:measured.db,PLAN_TIER:'paid'},db=getDb(local)
  const policy={...api.__guardPolicy,...(input.policy||{})}
  let state=null,plan=null,batch=null

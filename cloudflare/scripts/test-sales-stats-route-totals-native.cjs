@@ -3,13 +3,14 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {execFileSync}=require('node:child_process')
 const options=Object.fromEntries(process.argv.slice(2).map(value=>{const m=/^--([a-z-]+)=(.*)$/.exec(value);assert.ok(m,'Use --name=value');return[m[1],m[2]]}))
 const root=path.resolve(options.root||path.join(__dirname,'..'))
-const BASE='d776e26a45504584b872fd235edc1ae01d1767ee'
+// The old route is the one at the slice base: /stats reads the full snapshot through readSalesReportSnapshot.
+const BASE='cbff55c8e4a9fffe722f2be30618f7dbe64ee623'
 const candidate=path.resolve(options.candidate||path.join(root,'src/routes/sales.ts'))
 const local=Module.createRequire(path.join(root,'package.json'))
 const {seedStockFixture}=local('./scripts/harness/seed-stock-fixture.cjs')
 const lf=text=>text.replace(/\r\n/g,'\n'),sha=text=>crypto.createHash('sha256').update(text).digest('hex')
 const baseline=lf(execFileSync('git',['show',BASE+':cloudflare/src/routes/sales.ts'],{cwd:root,encoding:'utf8',maxBuffer:4*1024*1024,env:{...process.env,GIT_NO_LAZY_FETCH:'1'}}))
-assert.equal(sha(baseline),'1c919cd0ef1b0b61bbe46893ccc3f1931ac83cbe40d3b68ad8ab8bbeb5c82b86','Pinned full-reader route source')
+assert.equal(sha(baseline),'d79a544a051cd70738a10a5b1bfdc3096ba50feb8db7aa99b7a3b680305c3ee3','Pinned full-reader route source')
 const candidateSource=lf(fs.readFileSync(candidate,'utf8'))
 if(options.candidate)assert.equal(sha(candidateSource),'d9dc349a67f241c807918abe6b5dd4ac28e2ef68022fb39bd76ab80f6dd977c8','Frozen private candidate overlay')
 const once=(text,before,after)=>{assert.equal(text.split(before).length,2,'Unique existing fixture seam: '+before.slice(0,70));return text.replace(before,()=>after)}
@@ -123,7 +124,9 @@ function meter(db,raw,config={}){
   return {db:api,log}
 }
 
+// The old pair member runs with report_atomic OFF (the legacy reader), the new one with it ON.
 async function call(h,f,url='/stats',user=ADMIN,config={},cache=state()){
+  f.raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run([JSON.stringify({epoch:1,switches:{report_atomic:h===after?'on':'off'}})])
   h.setUser(user);const measured=meter(f.route,f.raw.db,config)
   const semantic={fullReads:0,totalsReads:0,counts:null,diagnostic:null}
   active={cache,semantic}

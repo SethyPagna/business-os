@@ -7,7 +7,7 @@ const root=path.resolve(__dirname,'../..'),cf=path.join(root,'cloudflare')
 const workerFile=path.join(__dirname,'harness/report-bounded-batch-worker.ts')
 const sha=value=>createHash('sha256').update(value).digest('hex')
 const worker=fs.readFileSync(workerFile,'utf8').replace(/\r\n/g,'\n')
-assert.equal(sha(worker),'df7817be3ec3012764ccc87ba6bbbdd777cec59e6017b145e97ea0af502cd35d','Update the reviewed worker binding when changing its instrumentation')
+assert.equal(sha(worker),'6e79580e7adb48f1c0ab2fd23427c8a3fa270137448187e99614d7721a21d135','Update the reviewed worker binding when changing its instrumentation')
 const testExports='\nexport {buildSalesReportReadPlan as __guardPlan,reportTotalsBatchStatements as __guardBatch,readBoundedReportRestoreState as __guardState,reportRestoreStatements as __guardFlags,REPORT_TOTALS_POLICY as __guardPolicy};\n'
 const sources=new Map(),sourceHashes={},testSourceHashes={}
 let lastStage={stage:'start'}
@@ -21,7 +21,7 @@ const analytics=readSource('cloudflare/src/lib/salesAnalytics.ts')
 assert.notEqual(analytics,null,'Current salesAnalytics source is required')
 const local=createRequire(path.join(cf,'package.json')),{build}=local('esbuild'),{Miniflare,Log,LogLevel}=local('miniflare'),{unstable_splitSqlQuery:splitSql}=local('wrangler')
 const plugin={name:'current-checkout-guard-builders',setup(build){
- build.onResolve({filter:/^guard:(analytics|db|money)$/},args=>({path:args.path==='guard:analytics'?'src/lib/salesAnalytics':args.path==='guard:db'?'src/lib/db':'src/lib/reportMoneyPrecision',namespace:'checkout'}))
+ build.onResolve({filter:/^guard:(analytics|db|money|switches)$/},args=>({path:args.path==='guard:analytics'?'src/lib/salesAnalytics':args.path==='guard:db'?'src/lib/db':args.path==='guard:switches'?'src/lib/readSwitches':'src/lib/reportMoneyPrecision',namespace:'checkout'}))
  build.onResolve({filter:/^\.\.?\//,namespace:'checkout'},args=>({path:path.posix.normalize(path.posix.join(path.posix.dirname(args.importer),args.path)),namespace:'checkout'}))
  build.onLoad({filter:/.*/,namespace:'checkout'},args=>{for(const suffix of ['.ts','/index.ts','']){const relative='cloudflare/'+args.path+suffix,original=readSource(relative);if(original===null)continue;const contents=relative==='cloudflare/src/lib/salesAnalytics.ts'?original+testExports:original;testSourceHashes[relative]=sha(contents);return {contents,loader:relative.endsWith('.json')?'json':'ts',resolveDir:cf}}throw new Error('Missing current source '+args.path)})
 }}
@@ -48,7 +48,10 @@ async function main(){
   for(const table of ['sales','sale_items','returns','return_items']){const found=await raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger'AND tbl_name=?").bind(table).all();recordHash('dropped-trigger-inventory-'+table+'.json',found.results);for(const row of found.results){assert.match(row.name,/^[A-Za-z0-9_]+$/);await exec('DROP TRIGGER "'+row.name+'"')}}
   await raw.batch([raw.prepare("INSERT INTO system_flags(key,value)SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'"),raw.prepare("INSERT INTO branches(id,name,is_default,is_active)VALUES(1,'Guard fixture',1,1)"),raw.prepare("INSERT INTO products(id,name,stock_quantity,is_active)VALUES(10,'Guard fixture',0,1)"),raw.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'")])
   await exec('CREATE TABLE system_flags(key TEXT,value)',[],flags)
-  const invoke=async(input,label)=>{life('request-before',{label,input:{...input,policy:input.policy}});const response=await mf.dispatchFetch('http://fixture.test/run',{method:'POST',body:JSON.stringify(input)}),value=await response.json();recordHash('calls/'+String(++sequence).padStart(3,'0')+'-'+label+'.json',value);life('request-after',{label,status:response.status,kind:value.kind,marker:value.error?.marker});assert.equal(response.status,200,JSON.stringify(value));assert.equal(value.ok,true,JSON.stringify(value));return value}
+  // The helper under test is the report_atomic reader, so the switch is ON in both databases; the full-reader oracle flips it OFF (the legacy reader) around its call.
+  const switchRow=state=>JSON.stringify({epoch:1,switches:{report_atomic:state}})
+  await exec("INSERT INTO system_flags(key,value)VALUES('read_switches',?)",[switchRow('on')],raw);await exec("INSERT INTO system_flags(key,value)VALUES('read_switches',?)",[switchRow('on')],flags)
+  const invoke=async(input,label)=>{life('request-before',{label,input:{...input,policy:input.policy}});if(input.mode==='full-oracle')await exec("UPDATE system_flags SET value=? WHERE key='read_switches'",[switchRow('off')],raw);const response=await mf.dispatchFetch('http://fixture.test/run',{method:'POST',body:JSON.stringify(input)}),value=await response.json();if(input.mode==='full-oracle')await exec("UPDATE system_flags SET value=? WHERE key='read_switches'",[switchRow('on')],raw);recordHash('calls/'+String(++sequence).padStart(3,'0')+'-'+label+'.json',value);life('request-after',{label,status:response.status,kind:value.kind,marker:value.error?.marker});assert.equal(response.status,200,JSON.stringify(value));assert.equal(value.ok,true,JSON.stringify(value));return value}
   const test=async(name,run)=>{await run();checks.push({name,passed:true});recordHash('checks.json',checks);console.log('PASS '+name)}
   async function seed({headers=1,items=1,returns=0,returnItems=0,cost=null}={}){
    for(const table of ['return_items','returns','sale_items','sales'])await exec('DELETE FROM '+table)

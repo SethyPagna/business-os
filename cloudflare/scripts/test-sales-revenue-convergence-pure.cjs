@@ -20,6 +20,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const { installSwitchSiblings, switchRowSql } = require('./harness/report_atomic_switch.cjs')
 
 // ---- 1. Transpile the real kernel, injecting a getDb() that returns our DB ---
 const srcPath = path.join(__dirname, '..', 'src', 'lib', 'salesAnalytics.ts')
@@ -42,8 +43,10 @@ const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
 for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
+// The atomic report reader is behind the report_atomic switch; this test is about that reader, so the switch is ON.
+const switchFiles = installSwitchSiblings(tmpDir)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')} ${switchFiles.join(' ')}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
@@ -66,6 +69,7 @@ db.batch = (statements) => {
 }
 db.exec(`
   CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+  ${switchRowSql('on')};
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY,
     created_at TEXT,

@@ -84,8 +84,10 @@ function fixtureParams(params = {}) {
   const value = item => item instanceof ArrayBuffer ? Buffer.from(item) : ArrayBuffer.isView(item) ? Buffer.from(item.buffer, item.byteOffset, item.byteLength) : item
   return Array.isArray(params) ? params.map(value) : Object.fromEntries(Object.entries(params).map(([key, item]) => [key, value(item)]))
 }
-function kernel(sql, hooks = {}) {
+// state is the report_atomic switch for this kernel: the oracle runs 'off' (the legacy reader, today's code) and the projection 'on'.
+function kernel(sql, hooks = {}, state = 'on') {
   cache.clear()
+  sql.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, switches: { report_atomic: state } }))
   const metrics = { calls: 0, statements: 0, batches: 0, atomicBatches: 0, rowsReturned: 0, resultBytes: 0, scalarRowsReturned: 0, groups: { sales: [], voidSales: [], items: [], returns: [], returnItems: [], deliveryFees: [] } }
   function record(query, result, one) {
     const rows = one ? (result ? [result] : []) : result
@@ -137,7 +139,7 @@ function cohortRows(rows) {
 }
 
 async function oracle(sql, f = filters, includeFees = false, scope, options = {}, hooks) {
-  const { lib, metrics } = kernel(sql, hooks)
+  const { lib, metrics } = kernel(sql, hooks, 'off')
   const snapshot = await lib.readSalesReportSnapshot({}, f, includeFees, scope, options)
   const totals = lib.salesTotalsFromSnapshot(snapshot)
   return { result: { totals, sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length, precision_mode: snapshot.precision_mode, row_count: snapshot.row_count }, diagnostic: lib.reportMoneyDiagnostic(totals), snapshot, metrics }
@@ -176,10 +178,13 @@ async function check(name, run) {
 }
 
 
+// This loader runs the code in new Function(), where a native import() cannot see its siblings; the switch module is wanted here.
 function mutateSource(file, text) {
-  if (path.resolve(file) !== path.resolve(root, 'src/lib/salesAnalytics.ts') || !process.env.MUTANT) return text
+  if (path.resolve(file) !== path.resolve(root, 'src/lib/salesAnalytics.ts')) return text
+  text = text.replace("await import('./reportAtomicSwitch')", "require('./reportAtomicSwitch')")
+  if (!process.env.MUTANT) return text
   if (process.env.MUTANT === 'force-full') {
-    const from = "purpose === 'full' || totalsFields.has(key)"
+    const from = "purpose !== 'totals' || totalsFields.has(key)"
     assert.equal(text.split(from).length, 2, 'MUTANT_SEAM_MISSING: actual shared projection selector must be unique')
     return text.replace(from, 'true')
   }

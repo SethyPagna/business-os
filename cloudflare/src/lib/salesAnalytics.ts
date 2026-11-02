@@ -1816,6 +1816,153 @@ async function readSalesReportCapturedSnapshot(
   throw new ReportMoneyPrecisionError('snapshot_changed')
 }
 
+async function readSalesReportPassLegacy(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions,
+): Promise<SalesReportSnapshot> {
+  const db = getDb(env)
+  const salesColumns = await reportTableColumns(db, 'sales')
+  const itemColumns = await reportTableColumns(db, 'sale_items')
+  const returnColumns = await reportTableColumns(db, 'returns')
+  const returnItemColumns = await reportTableColumns(db, 'return_items')
+  const feeColumns = await reportTableColumns(db, 'fees')
+  const customerColumns = await reportTableColumns(db, 'customers')
+  const contactColumns = await reportTableColumns(db, 'delivery_contacts')
+  const preciseSales = salesColumns.has('money_precision_version')
+    && salesColumns.has('calculated_total_usd') && salesColumns.has('rounding_adjustment_usd')
+  const preciseReturns = returnColumns.has('money_precision_version')
+    && returnColumns.has('calculated_refund_usd') && returnColumns.has('rounding_adjustment_usd')
+  // Never name 0158 columns in SQL prepared against a pre-0158 database.
+  // Missing properties naturally select the version-0 exact-recorded path.
+  const salePrecision = preciseSales
+    ? ',s.money_precision_version,s.calculated_total_usd,s.rounding_adjustment_usd'
+    : ''
+  const returnPrecision = preciseReturns
+    ? ',r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd'
+    : ''
+  const customerAnonymous = customerColumns.has('is_anonymous')
+    ? 'COALESCE((SELECT is_anonymous FROM customers WHERE customers.id=s.customer_id),0)'
+    : '0'
+  const itemColumn = (name: string, fallback: string) => itemColumns.has(name) ? `si.${name}` : `${fallback} AS ${name}`
+  const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
+  const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
+    ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const rowBudget = { count: 0 }
+  const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,${saleColumn('status_before_return','NULL')},s.branch_id,s.branch_name,
+      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
+      ${customerAnonymous} AS customer_is_anonymous,
+      s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
+      s.delivery_fee_usd,s.delivery_fee_paid_by,s.delivery_actual_cost_usd,s.is_delivery,
+      s.source_return_id,s.amount_paid_usd,${saleColumn('amount_paid_khr','0')},${saleColumn('exchange_rate','NULL')}${salePrecision},
+      ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
+      ${linkedDeliveryFee} AS delivery_has_linked_fee
+    FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget, options.maxReceipts)
+  const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
+      s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
+      ${customerAnonymous} AS customer_is_anonymous
+    FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
+  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
+      ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
+    FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
+  // The debt half of a refund (0260); absent columns read as a pre-0260 row.
+  const returnDebt = returnColumns.has('owed_reduction_usd') && returnColumns.has('refund_currency') ? ',r.owed_reduction_usd,r.refund_currency' : ''
+  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}
+    FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
+      AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
+      AND (${primary.sql})`, 'r.id', primary.params, rowBudget)
+  const returnItemPrecision = returnItemColumns.has('refund_snapshot_json')
+    ? ',ri.sale_item_id,ri.total_usd,ri.refund_snapshot_json'
+    : ''
+  const returnItems = await reportKeysetRows(db, `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock${returnItemPrecision}
+    FROM return_items ri NOT INDEXED CROSS JOIN returns r ON r.id=ri.return_id CROSS JOIN sales s ON s.id=r.sale_id
+      WHERE COALESCE(r.status,'completed')<>'cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer' AND (${primary.sql})`, 'ri.id', primary.params, rowBudget)
+  let deliveryFees: ReportScalarRow[] = []
+  const deliveryFeeColumns = ['id', 'delivery_contact_id', 'amount_usd', 'amount_khr', 'created_at']
+  if (includeDeliveryFees && deliveryFeeColumns.every((name) => feeColumns.has(name))) {
+    const feeClauses = ['f.delivery_contact_id IS NOT NULL']
+    const feeParams: Record<string, unknown> = {}
+    const feeCreatedFrom = shiftWindowBound(f.createdFrom)
+    const feeCreatedTo = shiftWindowBound(f.createdTo)
+    if (feeCreatedFrom && feeCreatedTo) {
+      feeClauses.push('datetime(f.created_at) >= @feeCreatedFrom', 'datetime(f.created_at) < @feeCreatedTo')
+      feeParams.feeCreatedFrom = feeCreatedFrom
+      feeParams.feeCreatedTo = feeCreatedTo
+    } else {
+      if (f.startDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
+      if (f.endDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+    }
+    if (f.branchId && feeColumns.has('branch_id')) { feeClauses.push('f.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
+
+    if (!feeCreatedFrom && !feeCreatedTo && isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
+      feeClauses.push(localTimeRangeClause('f.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
+      feeParams.feeStartTime = String(f.startTime || '').trim()
+      feeParams.feeEndTime = String(f.endTime || '').trim()
+    }
+    if (f.contactId != null && f.contactId !== '') {
+      feeClauses.push('f.delivery_contact_id = @feeContactId')
+      feeParams.feeContactId = f.contactId
+    }
+    const contactName = feeColumns.has('delivery_contact_name')
+      ? "COALESCE(NULLIF(TRIM(f.delivery_contact_name),''),'')"
+      : contactColumns.has('id') && contactColumns.has('name') ? "COALESCE(NULLIF(TRIM(dc.name),''),'')" : "''"
+    const joinContacts = contactName.includes('dc.') ? 'LEFT JOIN delivery_contacts dc ON dc.id=f.delivery_contact_id' : ''
+    deliveryFees = await reportKeysetRows(db, `SELECT f.id,f.delivery_contact_id,${contactName} AS delivery_contact_name,
+        f.amount_usd,f.amount_khr,f.created_at
+      FROM fees f ${joinContacts} WHERE ${feeClauses.join(' AND ')}`, 'f.id', feeParams, rowBudget)
+  }
+  const legacy = !preciseSales || !preciseReturns
+    || sales.some((row) => Number(row.money_precision_version) === 0)
+    || returns.some((row) => Number(row.money_precision_version) === 0)
+  return {
+    sales, voidSales, items, returns, returnItems, deliveryFees,
+    precision_mode: legacy ? 'exact_recorded' : 'canonical_v1',
+    row_count: rowBudget.count,
+  }
+}
+
+/** Two complete ordered scalar passes are compared directly. A changed pass
+ * is discarded in full, retried once, and never leaks a partial aggregate. */
+async function readSalesReportSnapshotLegacy(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
+): Promise<SalesReportSnapshot> {
+  if (options.maxReceipts !== undefined && (!Number.isSafeInteger(options.maxReceipts)
+    || options.maxReceipts < 1 || options.maxReceipts > 10_000)) throw new SalesReportExportTooLargeError()
+  const db = getDb(env)
+  // Capture a code-generated scope exactly once. Both passes and every child
+  // EXISTS consume the same immutable SQL/params, so a stateful callback
+  // cannot silently change the cohort between reads.
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assertReportReadable(db)
+    const first = await readSalesReportPassLegacy(env, f, includeDeliveryFees, capturedScope, options)
+    await assertReportReadable(db)
+    const second = await readSalesReportPassLegacy(env, f, includeDeliveryFees, capturedScope, options)
+    await assertReportReadable(db)
+    if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+// Imported on demand: dozens of pure harnesses transpile this file alone and have no such sibling. Without the module every
+// reader runs the legacy path, which is what those harnesses were written against; in the Worker the import always succeeds.
+async function routeReportRead<T>(
+  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean } = {},
+): Promise<T> {
+  let router: typeof import('./reportAtomicSwitch')
+  try { router = await import('./reportAtomicSwitch') } catch { return legacy() }
+  return router.routeReportRead(env, route, legacy, atomic, options)
+}
+
 export async function readSalesReportSnapshot(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
@@ -1823,7 +1970,10 @@ export async function readSalesReportSnapshot(
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
 ): Promise<SalesReportSnapshot> {
-  return readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'full')
+  return routeReportRead(env, 'snapshot',
+    () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
+    () => readSalesReportSnapshotForPurpose(env, f, includeDeliveryFees, scalarScope, options, 'full'),
+    { compare: false })
 }
 
 export interface SalesReportTotalsResult {
@@ -1840,6 +1990,22 @@ export async function readSalesReportTotals(
   includeDeliveryFees = false,
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
+): Promise<SalesReportTotalsResult> {
+  return routeReportRead(env, 'totals',
+    async () => {
+      const snapshot = await readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options)
+      return { totals: salesTotalsFromSnapshot(snapshot), sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length,
+        precision_mode: snapshot.precision_mode, row_count: snapshot.row_count }
+    },
+    () => readSalesReportTotalsAtomic(env, f, includeDeliveryFees, scalarScope, options))
+}
+
+async function readSalesReportTotalsAtomic(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined,
+  options: SalesReportReadOptions,
 ): Promise<SalesReportTotalsResult> {
   validateReportReadOptions(options)
   const capturedScope = captureSalesReportScalarScope(scalarScope)
@@ -2580,10 +2746,14 @@ const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_us
 
 /** The totals of one verified window without the removal-loss block, for a comparison that reads revenue and sale count only. */
 export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const snapshot = reportDashboardDateFiltersEligible(f)
-    ? await readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
-    : await readSalesReportSnapshot(env, f)
-  return salesTotalsFromSnapshot(snapshot)
+  return routeReportRead(env, 'totals_without_losses',
+    async () => salesTotalsFromSnapshot(await readSalesReportSnapshotLegacy(env, f)),
+    async () => {
+      const snapshot = reportDashboardDateFiltersEligible(f)
+        ? await readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
+        : await readSalesReportSnapshotForPurpose(env, f, false, undefined, {}, 'full')
+      return salesTotalsFromSnapshot(snapshot)
+    })
 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
@@ -2648,20 +2818,28 @@ export async function getSalesTotalsAndPeriodSeries(
   granularity: 'day' | 'week' | 'month',
   rankingLimit = DASHBOARD_TOP_ROWS,
 ): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
-  const [snapshot, loss] = await Promise.all([
-    reportAtomicFiltersEligible(f)
-      ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, reportDashboardAllTimeProjectionEligible(f) ? 'dashboard' : 'full')
-      : reportDashboardDateFiltersEligible(f)
-        ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
-        : readSalesReportSnapshot(env, f),
-    removalLossesFor(env, f),
-  ])
-  return {
+  const fromSnapshot = (snapshot: SalesReportSnapshot, loss: RemovalLossSummary | null) => ({
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
     ...dashboardSplitsFromSnapshot(snapshot),
     ...dashboardRankingsFromSnapshot(snapshot, rankingLimit),
-  }
+  })
+  return routeReportRead(env, 'totals_and_series',
+    async () => {
+      const [snapshot, loss] = await Promise.all([readSalesReportSnapshotLegacy(env, f), removalLossesFor(env, f)])
+      return fromSnapshot(snapshot, loss)
+    },
+    async () => {
+      const [snapshot, loss] = await Promise.all([
+        reportAtomicFiltersEligible(f)
+          ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, reportDashboardAllTimeProjectionEligible(f) ? 'dashboard' : 'full')
+          : reportDashboardDateFiltersEligible(f)
+            ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
+            : readSalesReportSnapshotForPurpose(env, f, false, undefined, {}, 'full'),
+        removalLossesFor(env, f),
+      ])
+      return fromSnapshot(snapshot, loss)
+    })
 }
 
 // The Dashboard's payment-method and branch cards read the SAME snapshot and the SAME grouped buckets as

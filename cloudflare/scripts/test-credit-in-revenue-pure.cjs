@@ -40,6 +40,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const { installSwitchSiblings, switchRowSql } = require('./harness/report_atomic_switch.cjs')
 
 // ---- 1. Transpile the real kernel + the real frontend mirror ----------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'credit-in-revenue-'))
@@ -68,6 +69,8 @@ const kernelDependencies = [
 for (const file of kernelDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 }
+// The atomic report reader is behind the report_atomic switch; this test is about that reader, so the switch is ON.
+const switchFiles = installSwitchSiblings(tmpDir)
 fs.writeFileSync(path.join(tmpDir, 'statsFormulas.ts'), '// @ts-nocheck\n'
   + fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts'), 'utf8'))
 execSync([
@@ -75,6 +78,7 @@ execSync([
   path.join(tmpDir, 'salesAnalytics.ts'),
   path.join(tmpDir, 'businessDateWindow.ts'),
   ...kernelDependencies.map((file) => path.join(tmpDir, file)),
+  ...switchFiles.map((file) => path.join(tmpDir, file)),
   path.join(tmpDir, 'statsFormulas.ts'),
 ].join(' '), { cwd: tmpDir, stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
@@ -97,6 +101,7 @@ db.batch = (statements) => {
 }
 db.exec(`
   CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+  ${switchRowSql('on')};
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT,
     subtotal_usd REAL, discount_usd REAL, membership_discount_usd REAL,

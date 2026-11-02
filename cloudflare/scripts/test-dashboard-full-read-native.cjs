@@ -19,7 +19,7 @@ function shown(relative) {
   return sources.get(relative).text
 }
 const plugin = { name: 'one-current-checkout-graph-exports-only', setup(builder) {
-  builder.onResolve({ filter: /^current:(analytics|money|schema)$/ }, args => ({ path: { 'current:analytics': 'src/lib/salesAnalytics', 'current:money': 'src/lib/reportMoneyPrecision', 'current:schema': 'src/lib/schemaProbe' }[args.path], namespace: 'checkout' }))
+  builder.onResolve({ filter: /^current:(analytics|money|schema|switches)$/ }, args => ({ path: { 'current:analytics': 'src/lib/salesAnalytics', 'current:money': 'src/lib/reportMoneyPrecision', 'current:schema': 'src/lib/schemaProbe', 'current:switches': 'src/lib/readSwitches' }[args.path], namespace: 'checkout' }))
   builder.onResolve({ filter: /^\.\.?\//, namespace: 'checkout' }, args => ({ path: path.posix.normalize(path.posix.join(path.posix.dirname(args.importer), args.path)), namespace: 'checkout' }))
   builder.onLoad({ filter: /.*/, namespace: 'checkout' }, args => {
     for (const suffix of ['.ts', '/index.ts', '.json', '']) {
@@ -167,11 +167,15 @@ async function main() {
     setup.push({ label, before, queries: queries.map(query => ({ sql: query.sql, bindings: (query.values ?? []).map(value => typeof value === 'string' ? { type: 'string', bytes: Buffer.byteLength(value), sha256: sha(value) } : value) })), result, after }); life('owned-write-after', { label })
   }
   await permit('branch', [{ sql: "INSERT OR IGNORE INTO branches(id,name,is_default,is_active) VALUES(1,'Private legacy fixture',1,1)" }])
+  await permit('read-switch', [{ sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on' } })] }])
   const invoke = async (input, label) => {
     life('request-before', { label, input }); const response = await mf.dispatchFetch('http://fixture.test/run', { method: 'POST', body: JSON.stringify(input) }), text = await response.text(), value = JSON.parse(text)
     const record = { input, transport_status: response.status, response_utf8_bytes: Buffer.byteLength(text), metrics: metrics(value.calls ?? []), external_writer_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage === 'write')), external_writer_witness_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage !== 'write')), value }
     sequence++; observationHashes.push({ sequence, label, input, response_status: response.status, body_sha256: sha(text), app: record.metrics, external_writer: record.external_writer_metrics, external_witnesses: record.external_writer_witness_metrics }); life('request-after', { label, transport_status: response.status, kind: value.kind, marker: value.error?.marker ?? null })
-    assert.equal(response.status, 200, text); assert.equal(value.ok, true, text); return record
+    assert.equal(response.status, 200, text); assert.equal(value.ok, true, text)
+    // Every public reader pays the report_atomic switch read once on a cold isolate (in-flight readers share it); the direct atomic entry pays none.
+    assert.equal(value.switch_reads.length, input.mode === 'atomic-full-snapshot' ? 0 : 1, label + ': switch reads')
+    return record
   }
   const setFlags = async (label, primary, secondary = primary) => {
     await permit('flags-' + label, [{ sql: "UPDATE system_flags SET value=CASE key WHEN 'maintenance' THEN ? ELSE ? END WHERE key IN ('maintenance','maintenance_mode')", values: [primary, secondary] }])
