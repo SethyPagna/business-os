@@ -319,7 +319,8 @@ check('the products reset refuses the image option on free instead of half-delet
   // English body: api/http.ts copies `code` onto the thrown error, and
   // ResetData resolves it through t() before falling back to the message.
   const http = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', 'http.ts'), 'utf8')
-  assert.match(http, /error\.code = parsed\?\.code \|\| null/)
+  // 6.0.1042: createApiError prefers the stable key of a foreign (non-JSON) body and otherwise copies the JSON refusal's own code.
+  assert.match(http, /error\.code = foreignBody \? foreignBody\.key : \(parsed\?\.code \|\| null\)/)
   const resetData = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'utils-settings', 'ResetData.tsx'), 'utf8')
   assert.match(resetData, /function describeError\(error: unknown, T: \(key: string, fallback: string\) => string\): string/)
   assert.match(resetData, /const localized = T\(code, message\)\s*\n\s*return localized === code \? message : localized/)
