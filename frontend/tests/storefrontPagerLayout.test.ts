@@ -171,8 +171,11 @@ runTest('an empty result renders no pager at all, and a real multi-page result p
 })
 
 runTest('the shared control takes arrow state from the kernel, with no per-page-only exception left in centered', () => {
-  assert.match(pagination, /import \{ clampPageNumber, pagerState \} from '\.\.\/\.\.\/utils\/pagerState\.ts'/, 'one kernel, not a second copy of the arithmetic')
-  assert.match(pagination, /const state = pagerState\(page, totalItems, pageSize, DEFAULT_PAGE_SIZE\)/)
+  // 6.0.1021 adds unknownTotalPagerState to the same import (the Sales pager with an unavailable total); the arithmetic still lives in the one kernel file.
+  assert.match(pagination, /import \{ clampPageNumber, pagerState(?:, unknownTotalPagerState)? \} from '\.\.\/\.\.\/utils\/pagerState\.ts'/, 'one kernel, not a second copy of the arithmetic')
+  // The known-total state is still the one kernel call; 6.0.1021 picks the unknown-total state beside it only for the compact Sales pager without a total.
+  assert.match(pagination, /const knownState = pagerState\(page, totalItems, pageSize, DEFAULT_PAGE_SIZE\)/)
+  assert.match(pagination, /const state = unknownTotal\s*\?\s*unknownTotalPagerState\(page, pageSize, pageItems, DEFAULT_PAGE_SIZE\) : knownState/)
   assert.match(pagination, /if \(!state\.visible\) return null/, 'the render gate and the storefront gate must be the same fact')
   assert.doesNotMatch(pagination, /disabled=\{safePage <= 1\}/, 'the back arrow must read backDisabled')
   assert.doesNotMatch(pagination, /disabled=\{safePage >= totalPages\}/, 'the next arrow must read nextDisabled')

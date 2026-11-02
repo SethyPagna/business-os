@@ -91,7 +91,8 @@ await runTest('Sales only replays a queued filter refresh after the active reque
 
   assert.match(source, /let completedSuccessfully = false[\s\S]*publishRows\(rows\)[\s\S]{0,180}completedSuccessfully = true/)
   // publishRows is the one place loadSales shows rows (6.0.990): the rows and the ref the row-patch handlers read change together.
-  assert.match(source, /const publishRows = \(rows: SaleRecord\[\]\) => \{\s*salesRef\.current = rows\s*setSales\(rows\)/)
+  // 6.0.1021 records which page the rows belong to (salesPageRowsRef) between the ref and the state; the ref and the state still change in the same step.
+  assert.match(source, /const publishRows = \(rows: SaleRecord\[\]\) => \{\s*salesRef\.current = rows\s*(?:salesPageRowsRef\.current = [^\n]*\s*)?setSales\(rows\)/)
   const settlement = source.slice(source.indexOf('const wrappedPromise = promise.finally'), source.indexOf('loadPromiseRef.current = wrappedPromise'))
   assert.ok(settlement.includes('if (loadPromiseRef.current !== wrappedPromise) return'), 'only the active request may consume this scope\'s queued load')
   // A read superseded by a newer query (6.0.990) also hands over to the queued load, which reads that query.
@@ -99,7 +100,9 @@ await runTest('Sales only replays a queued filter refresh after the active reque
   assert.ok(resolveAt >= 0 && resolveAt < settlement.indexOf('pendingLoadRef.current = null'), 'settlement resolves the queued intent before consuming its slot')
   assert.ok(settlement.includes('if (pending && requestSecurity === statusSecurityRef.current)'), 'a queued replay is limited to the request security scope that created it')
   assert.match(settlement, /queueMicrotask\(\(\) => \{\s*if \(requestSecurity !== statusSecurityRef\.current\) return\s*const nextLoad = latestLoadRef\.current \|\| loadSales\s*nextLoad\(Boolean\(pending\.silent\)\)/, 'the deferred replay rechecks scope immediately before invoking the latest loader')
-  assert.match(source, /\{loadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{\(\) => loadSales\(false\)\}/, 'a failed refresh with retained rows must expose the manual Retry action')
+  // 6.0.1021: the banner covers a failed rows read or a failed totals read, and its Retry runs both reads again.
+  assert.match(source, /\{salesReadError && !loading \? \([\s\S]{0,500}role="alert"[\s\S]{0,500}onClick=\{retrySalesReads\}/, 'a failed refresh with retained rows must expose the manual Retry action')
+  assert.match(source, /const retrySalesReads = useCallback\(\(\) => \{\s*void loadSales\(false\)\s*void loadSalesStats\(\)/, 'the manual Retry runs the rows read and the totals read')
 })
 
 await runTest('Sales retries an immediate network failure and accepts the successful retry', async () => {
