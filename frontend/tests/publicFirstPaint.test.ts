@@ -380,9 +380,11 @@ await runTest('the footer commits with the tab content, never under the skeleton
 })
 
 await runTest('the landing cover is fetched first and fades in; the PublicCatalogRoot fallback is the same skeleton', () => {
-  const about = between(secondaryTabs(), 'function CatalogAboutSection(', '\nfunction CatalogFaqSection(')
+  const about = secondaryTabs()
+  assert.ok(about.indexOf('data-portal-cover="true"') > -1, 'the cover image is still marked')
   const cover = about.slice(about.indexOf('data-portal-cover="true"') - 300, about.indexOf('data-portal-cover="true"') + 300)
   assert.match(cover, /fetchPriority=\{imageFetchPriority\}/)
+  assert.match(about, /<AboutCover src=\{versionedBusinessCover \|\| ''\} imageFetchPriority=\{imageFetchPriority\}/, 'the section hands its fetch priority to the cover')
   assert.match(cover, /onLoad=/, 'the cover fades in once decoded')
   assert.match(publicPage(), /imageFetchPriority="high"/)
   const css = read('../src/styles/public-portal.css')

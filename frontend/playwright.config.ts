@@ -36,7 +36,9 @@ export const E2E_PORT = Number(process.env.E2E_PORT || 4318)
 /** The admin shell: an "admin hostname" per src/app/pathRouting.ts. */
 export const ADMIN_ORIGIN = `http://127.0.0.1:${E2E_PORT}`
 /** The customer storefront: a non-admin hostname, so "/" mounts PublicCatalogRoot. */
-export const STOREFRONT_ORIGIN = `http://127.0.0.2:${E2E_PORT}`
+// E2E_STOREFRONT_ORIGIN lets one spec run against a dev server that proxies /api to this fixture server
+// (for example http://shop.localhost:5391); the default is the built app on this server.
+export const STOREFRONT_ORIGIN = process.env.E2E_STOREFRONT_ORIGIN || `http://127.0.0.2:${E2E_PORT}`
 
 const isSystemTier = process.env.E2E_SYSTEM === '1'
 

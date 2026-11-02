@@ -227,6 +227,36 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   )
 }
 
+// The owner's photo, shown whole: it keeps its own proportions at every width and only a
+// very wide screen caps its height, so nothing is cropped or stretched (object-contain).
+// The frame holds a minimum height until the picture is decoded, so the page below it
+// does not jump when it arrives.
+function AboutCover({ src, imageFetchPriority, onFailed }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void }) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <div
+      data-portal-about-hero="true"
+      data-portal-cover-frame="true"
+      className={`relative w-full bg-stone-100 dark:bg-neutral-800 ${loaded ? '' : 'min-h-36 sm:min-h-56'}`}
+    >
+      <img
+        ref={(node) => { if (node && node.complete && node.naturalWidth > 0) setLoaded(true) }}
+        src={src}
+        alt=""
+        aria-hidden="true"
+        data-portal-cover="true"
+        fetchPriority={imageFetchPriority}
+        onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; setLoaded(true) }}
+        onError={onFailed}
+        className="portal-cover-image pointer-events-none mx-auto block h-auto max-h-[min(72vh,680px)] w-full object-contain"
+      />
+    </div>
+  )
+}
+
+// A long story reads better in two columns on a wide screen; a short one stays one block.
+const ABOUT_STORY_TWO_COLUMN_FROM = 700
+
 function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const {
     copy,
@@ -267,14 +297,19 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   // surface below rather than layered on top of the image/gradient --
   // avoids the old full-bleed hero's white-text-on-photo legibility fight,
   // and reads closer to a modern profile page than a dashboard splash.
-  // 6.1 (user): with a cover set, the IMAGE stands alone -- no colour
-  // gradient laid over it -- and it backs the WHOLE about card, not just
-  // the top strip (the content below sits on a translucent surface for
-  // legibility). Without a cover, the brand gradient banner stays.
-  const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover)
+  // 2 Nov (owner): the cover photo shows IN FULL, at its own proportions, on top of the
+  // card (AboutCover); the logo and name sit below it on a plain surface, never over the
+  // photo. Without a cover, the brand gradient banner stays. A photo that fails to load
+  // falls back to the banner instead of leaving a hole.
+  const [failedCover, setFailedCover] = useState('')
+  const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover && failedCover !== versionedBusinessCover)
   const bannerBackground = `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
-  const hasContactInfo = Boolean(businessFacts?.length || socialLinks?.length)
+  const hasFacts = Boolean(businessFacts?.length)
+  const hasSocial = Boolean(socialLinks?.length)
+  const hasContactInfo = hasFacts || hasSocial
+  const hasMap = Boolean(mapEmbedUrl)
+  const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
 
   return (
     <section
@@ -289,29 +324,22 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     >
       <div className="relative isolate overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88">
         {hasCover ? (
-          <img
-            src={versionedBusinessCover}
-            alt=""
-            aria-hidden="true"
-            data-portal-cover="true"
-            fetchPriority={imageFetchPriority}
-            onLoad={(event) => { event.currentTarget.dataset.loaded = 'true' }}
-            className="portal-cover-image pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+          <AboutCover src={versionedBusinessCover || ''} imageFetchPriority={imageFetchPriority} onFailed={() => setFailedCover(versionedBusinessCover || '')} />
+        ) : (
+          <div
+            data-portal-about-hero="true"
+            className="relative h-20 sm:h-28"
+            style={{
+              backgroundColor: heroGradientStart,
+              backgroundImage: bannerBackground,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
           />
-        ) : null}
-        <div
-          data-portal-about-hero="true"
-          className="relative h-20 sm:h-28"
-          style={hasCover ? undefined : {
-            backgroundColor: heroGradientStart,
-            backgroundImage: bannerBackground,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-          }}
-        />
+        )}
 
-        <div className={`relative px-5 pb-5 sm:px-8 sm:pb-8 ${hasCover ? 'bg-white/90 backdrop-blur-sm dark:bg-neutral-900/85' : ''}`}>
-          <div className="-mt-7 flex flex-wrap items-end gap-3 sm:-mt-9 sm:gap-4">
+        <div className="relative px-5 pb-5 sm:px-8 sm:pb-8">
+          <div className={`flex flex-wrap items-end gap-3 sm:gap-4 ${hasCover ? 'pt-4 sm:pt-5' : '-mt-7 sm:-mt-9'}`}>
             <div
               className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)] dark:border-neutral-900"
               style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}
@@ -381,105 +409,103 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         </figure>
       ) : null}
 
-      {/* Quick-info card (facts + socials, moved out of the hero banner so
-          it doesn't compete with the name/tagline for space) on the left,
-          the business story/description on the right per the requested
-          layout. The map is intentionally NOT in this row -- it gets its
-          own full-width section below instead of sitting beside either
-          column, so a long story never squeezes it down to a sliver. */}
-      <div className="grid gap-4 lg:grid-cols-[1fr,1.4fr] lg:items-start">
-        {/* Story first in the DOM (P-public-9) so a phone, which stacks this
-            row, reads the story before the contact details; lg:order keeps
-            the requested desktop layout. */}
-        {storyText ? (
-          <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
-            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
-              <OwnerText text={storyText} />
-            </p>
-          </div>
-        ) : null}
-        {hasContactInfo ? (
-          <div data-portal-contact-tray="true" className={`space-y-3 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90 lg:order-1 ${storyText ? '' : 'lg:col-span-2'}`}>
-            {businessFacts?.length ? (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                {businessFacts.map((item) => {
-                  const Icon = item.icon || (item.key === 'phone'
-                    ? Phone
-                    : item.key === 'email'
-                      ? Mail
-                      : MapPin)
-                  const body = (
-                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 transition hover:border-slate-300 hover:bg-slate-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:hover:bg-neutral-800">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm dark:bg-neutral-900 dark:text-neutral-300">
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        {/* The field name ("Phone", "Address", ...) is the
-                            only thing that says what the value beside it is,
-                            so it is real copy, not decoration: slate-400 is
-                            2.56:1 on this card and neutral-500 is 3.29:1 on
-                            the dark one. slate-500/neutral-400 is the muted
-                            pair the rest of the storefront settled on. */}
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
-                        <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
-                      </div>
-                    </div>
-                  )
-                  // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
-                  const href = item.key === 'phone' ? derivePhoneCallLink(item.value || '') || item.href : item.href
-                  return href ? <a key={item.key} href={href} target={href.startsWith('tel:') ? undefined : '_blank'} rel={href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
-                })}
-              </div>
-            ) : null}
-            {socialLinks?.length ? (
-              <div className="flex flex-wrap gap-2">
-                {socialLinks.map((item) => {
-                  const Icon = PORTAL_SOCIAL_ICONS[(item.platform ?? item.key) as SocialPlatform] || Globe
-                  return (
-                    <a
-                      key={item.key}
-                      href={item.value}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                      aria-label={item.accessibleName || item.label}
-                      title={item.accessibleName || item.label}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <PortalSocialText text={item.label} latin={item.latin ?? true} />
-                    </a>
-                  )
-                })}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      {/* 2 Nov (owner): no empty space. The story takes the full width (two columns on a
+          wide screen when it is long). Under it, contacts and socials sit BESIDE the map
+          on a large screen and stack on a phone; both cards stretch to the same height.
+          The map keeps its consent gate. */}
+      {storyText ? (
+        <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800">
+          <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
+          <p className={`mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300 ${storyInColumns ? 'xl:columns-2 xl:gap-10' : ''}`}>
+            <OwnerText text={storyText} />
+          </p>
+        </div>
+      ) : null}
 
-      {/* Map now sits full-width below the facts/description row instead
-          of squeezed beside the story text. */}
-      {mapEmbedUrl ? (
-        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
-          <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-              <MapPin className="h-4 w-4" />
-            </span>
-            <div>
-              <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('mapCard', 'Store map')}</div>
-              {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
+      {hasContactInfo || hasMap ? (
+        <div data-portal-about-details="true" className={`grid gap-4 ${hasContactInfo && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
+          {hasContactInfo ? (
+            <div data-portal-contact-tray="true" className="flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
+              {businessFacts?.length ? (
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]">
+                  {businessFacts.map((item) => {
+                    const Icon = item.icon || (item.key === 'phone'
+                      ? Phone
+                      : item.key === 'email'
+                        ? Mail
+                        : MapPin)
+                    const body = (
+                      <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 transition hover:border-slate-300 hover:bg-slate-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:hover:bg-neutral-800">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm dark:bg-neutral-900 dark:text-neutral-300">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          {/* The field name ("Phone", "Address", ...) is the
+                              only thing that says what the value beside it is,
+                              so it is real copy, not decoration: slate-400 is
+                              2.56:1 on this card and neutral-500 is 3.29:1 on
+                              the dark one. slate-500/neutral-400 is the muted
+                              pair the rest of the storefront settled on. */}
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">{item.label}</div>
+                          <div className={`portal-contact-value text-sm font-medium text-slate-800 dark:text-neutral-100 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>{item.value}</div>
+                        </div>
+                      </div>
+                    )
+                    // The dialer link is rebuilt from the number so spaces and dashes in the saved value never reach the tel: URI.
+                    const href = item.key === 'phone' ? derivePhoneCallLink(item.value || '') || item.href : item.href
+                    return href ? <a key={item.key} href={href} target={href.startsWith('tel:') ? undefined : '_blank'} rel={href.startsWith('tel:') ? undefined : 'noreferrer'} className="block">{body}</a> : <div key={item.key}>{body}</div>
+                  })}
+                </div>
+              ) : null}
+              {socialLinks?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {socialLinks.map((item) => {
+                    const Icon = PORTAL_SOCIAL_ICONS[(item.platform ?? item.key) as SocialPlatform] || Globe
+                    return (
+                      <a
+                        key={item.key}
+                        href={item.value}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                        aria-label={item.accessibleName || item.label}
+                        title={item.accessibleName || item.label}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <PortalSocialText text={item.label} latin={item.latin ?? true} />
+                      </a>
+                    )
+                  })}
+                </div>
+              ) : null}
             </div>
-          </div>
-          {/* N45: the map is the storefront's only automatically-loading
-              third party, so it waits for a click instead of fetching Google
-              the moment this tab renders. Declining is a plain link, not a
-              dead end. */}
-          <PortalEmbedConsent
-            copy={copy}
-            src={mapEmbedUrl}
-            title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
-            address={addressFact?.value || ''}
-          />
+          ) : null}
+
+          {hasMap ? (
+            <div data-portal-map-card="true" className="flex flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
+              <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
+                  <MapPin className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('mapCard', 'Store map')}</div>
+                  {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-neutral-400">{addressFact.value}</div> : null}
+                </div>
+              </div>
+              {/* N45: the map is the storefront's only automatically-loading
+                  third party, so it waits for a click instead of fetching Google
+                  the moment this tab renders. Declining is a plain link, not a
+                  dead end. */}
+              <PortalEmbedConsent
+                className="flex-1"
+                frameClassName="h-72 w-full border-0 lg:h-auto lg:min-h-64 lg:flex-1"
+                copy={copy}
+                src={mapEmbedUrl || ''}
+                title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
+                address={addressFact?.value || ''}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {!storyText && !mapEmbedUrl && !aboutBlocks.length ? (
