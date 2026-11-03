@@ -783,6 +783,7 @@ assert.doesNotMatch(auditLog, /deleteAuditLogsRetention/, 'Audit Log route shoul
 assert.doesNotMatch(auditLog, /window\.api|getAuditApi\(\)|\.getAuditLogs\(/, 'Audit Log route should not wake app-api-methods for reads')
 assert.doesNotMatch(apiMethods, /auditLogTransport\.ts|loadAuditLogTransport|export const getAuditLogs/, 'legacy API registry should not retain audit-log wrappers after the route owns the focused transport')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/auditLogTransport\.ts'\)\) return 'audit-log-api'/, 'Audit Log transport should own a tiny chunk instead of falling through to app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/feesTransport\.ts'\)\) return 'fees-api'/, 'the Expenses transport should own a chunk instead of riding the /src/api/ catch-all into the storefront catalog closure (E1-F)')
 assert.doesNotMatch(auditLogTransport, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'|import \{ mirrorTable \} from '\.\/localMirrors\.ts'/, 'Audit Log transport should not statically load local DB or mirror helpers during online startup')
 assert.match(auditLogTransport, /const AUDIT_LOG_MIRROR_IDLE_DELAY_MS = 10_000[\s\S]*getLocalMirrorsModule\(\)[\s\S]*window\.setTimeout\(run, AUDIT_LOG_MIRROR_IDLE_DELAY_MS\)/, 'Audit Log mirroring should run after startup instead of blocking the first read')
 assert.match(auditLogTransport, /const \{ getLocalDb \} = await getLocalDbModule\(\)[\s\S]*db\.table\('audit_logs'\)/, 'Audit Log local DB should load only for offline fallback reads')

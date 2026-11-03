@@ -748,6 +748,10 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/components/dashboard/dashboardExport.ts')) return 'dashboard-export'
     if (normalized.endsWith('/src/api/returnsReadTransport.ts')) return 'returns-read-api'
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
+    // The Expenses transport (list, report, export, label catalog) is imported by the Expenses page, the Expenses report and the Sales hub only.
+    // Left to the /src/api/ catch-all it rode in app-api-methods, which the storefront catalog closure loads at boot, and 114 bytes of export
+    // cursor code pushed catalog-products past its performanceBudgets ceiling (E1-F, gate 41667595202).
+    if (normalized.endsWith('/src/api/feesTransport.ts')) return 'fees-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
