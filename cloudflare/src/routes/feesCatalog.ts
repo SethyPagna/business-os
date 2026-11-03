@@ -578,7 +578,7 @@ type SaleDeliveryRow = {
   amount_khr: number
 }
 
-type SaleScope = { sql: string; params: Record<string, unknown> }
+export type SaleScope = { sql: string; params: Record<string, unknown> }
 
 const toNumber = (value: unknown, fallback: number): number => {
   const n = Number(value)
@@ -592,14 +592,13 @@ const roundKhr = (value: number): number => Math.round(value / 100) * 100
  * cancelled-sale rules are whereActiveSales' own (the clause every kernel report reads). Null when the filters exclude every
  * sale row (a type filter other than delivery).
  */
-async function saleScope(db: Db, query: Record<string, string>, narrow: boolean): Promise<SaleScope | null> {
+export async function saleScope(db: Db, query: Record<string, string>, narrow: boolean): Promise<SaleScope | null> {
   const range = feeRangePredicate(query)
   const filters: SalesFilters = {
     startDate: String(query.from || query.startDate || '').trim() || null,
     endDate: String(query.to || query.endDate || '').trim() || null,
     createdFrom: (range.params.createdFrom as string | undefined) ?? null,
     createdTo: (range.params.createdTo as string | undefined) ?? null,
-    branchId: String(query.branch_id || query.branchId || '').trim() || null,
   }
   const active = whereActiveSales('sales', filters)
   const expressions = courierPayoutExpressions()
@@ -610,6 +609,21 @@ async function saleScope(db: Db, query: Record<string, string>, narrow: boolean)
     `(${expressions.usd} <> 0 OR ${expressions.khr} <> 0)`,
   ]
   const params: Record<string, unknown> = { ...active.params }
+  // The branch is NOT passed through whereActiveSales: `sales.branch_id = ?` makes the planner walk idx_sales_branch_created, which visits every sale
+  // of the branch (after the consolidation, nearly all of them) to find the ~2% that carry a courier cost. The unary plus keeps the equality out of
+  // index selection, so idx_sales_courier_cost leads and the branch is checked on those few rows. The plus also drops the column's integer
+  // affinity, so the id is bound as a NUMBER (a text '1' would never equal the integer 1 without it). A value that is not a positive whole number
+  // matches no sale, as `branch_id = 'abc'` always did.
+  const branchText = String(query.branch_id || query.branchId || '').trim()
+  if (branchText) {
+    const branchId = Number(branchText)
+    if (Number.isSafeInteger(branchId) && branchId > 0) {
+      clauses.push('+sales.branch_id = @saleBranchId')
+      params.saleBranchId = branchId
+    } else {
+      clauses.push('1 = 0')
+    }
+  }
   if (narrow) {
     const type = String(query.fee_type || '').trim()
     if (type && type !== 'all' && await resolveFeeTypeFilter(db, type) !== 'delivery') return null
@@ -626,16 +640,20 @@ async function saleScope(db: Db, query: Record<string, string>, narrow: boolean)
   return { sql: clauses.join(' AND '), params }
 }
 
-async function saleDeliveryTotals(db: Db, scope: SaleScope): Promise<{ count: number; usd: number; khr: number }> {
+export function saleDeliveryTotalsSql(scope: SaleScope): string {
   const expressions = courierPayoutExpressions()
-  const row = await db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${expressions.usd}), 0) AS usd, COALESCE(SUM(${expressions.khr}), 0) AS khr
-    FROM sales WHERE ${scope.sql}`).get<{ count: number; usd: number; khr: number }>(scope.params)
+  return `SELECT COUNT(*) AS count, COALESCE(SUM(${expressions.usd}), 0) AS usd, COALESCE(SUM(${expressions.khr}), 0) AS khr
+    FROM sales WHERE ${scope.sql}`
+}
+
+async function saleDeliveryTotals(db: Db, scope: SaleScope): Promise<{ count: number; usd: number; khr: number }> {
+  const row = await db.prepare(saleDeliveryTotalsSql(scope)).get<{ count: number; usd: number; khr: number }>(scope.params)
   return { count: Number(row?.count || 0), usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
 }
 
-async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number): Promise<SaleDeliveryRow[]> {
+export function saleDeliveryRowsSql(scope: SaleScope): string {
   const expressions = courierPayoutExpressions()
-  return (await db.prepare(`
+  return `
     SELECT sales.id, sales.receipt_number, sales.created_at, ${localDateExpr('sales.created_at')} AS d, sales.branch_id,
       COALESCE(NULLIF(TRIM(sales.branch_name), ''), b.name) AS branch_name,
       sales.delivery_contact_id, NULLIF(TRIM(sales.delivery_contact_name), '') AS delivery_contact_name,
@@ -645,7 +663,11 @@ async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number): Promis
     WHERE ${scope.sql}
     ORDER BY d DESC, datetime(sales.created_at) DESC, sales.id DESC
     LIMIT @saleLimit
-  `).all<SaleDeliveryRow>({ ...scope.params, saleLimit: limit })) || []
+  `
+}
+
+async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number): Promise<SaleDeliveryRow[]> {
+  return (await db.prepare(saleDeliveryRowsSql(scope)).all<SaleDeliveryRow>({ ...scope.params, saleLimit: limit })) || []
 }
 
 const saleRowOut = (row: SaleDeliveryRow) => ({

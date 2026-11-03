@@ -433,7 +433,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     const saleCount = Number(sale?.count) || 0
     const saleUsd = Number(sale?.usd) || 0
     const saleKhr = Number(sale?.khr) || 0
-    const courierName = tr('expense_sale_delivery_stat', 'Courier cost (shop-paid delivery)')
+    const courierName = tr('expense_sale_delivery_stat', 'Courier cost')
     // Dollars and riel kept apart: a courier is paid in either, and the two are never one converted number here.
     const courierText = `${fmtUSD(saleUsd)} + ${fmtKHR(saleKhr)}`
     const saleLine = sale ? [{ label: courierName, value: `${saleCount} · ${courierText}` }] : []
@@ -476,7 +476,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           key: 'courier',
           label: courierName,
           value: courierText,
-          hint: tr('expense_courier_hint', 'Courier cost recorded on the sales in the range (delivery the shop paid for), dollars and riel apart. Cost of goods is not included.'),
+          hint: tr('expense_courier_hint', 'Courier cost recorded on the sales in the range, dollars and riel apart. Cost of goods is not included.'),
           details: [{ label: tr('sales', 'Sales'), value: String(saleCount) }],
         },
       ] : []),

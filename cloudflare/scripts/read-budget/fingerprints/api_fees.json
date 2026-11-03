@@ -84,5 +84,49 @@
    "95121f3ee7aa",
    "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
   ]
+ ],
+ "fees-list-with-sale-delivery-rows-all-time-branch-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "61dfce604ca6",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "4a1eefd1618b",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "713a7d3f0c8f",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "26b2255f0cea",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
+ ],
+ "fees-list-with-sale-delivery-rows-month-branch-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "199e68124135",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "dde3c2145ab9",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "5bbaa2b3edd5",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "2538c2b44f83",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
  ]
 }

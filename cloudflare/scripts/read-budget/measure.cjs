@@ -48,11 +48,17 @@ function expectOf(status, code) {
   return { refused: code || 'http_' + status, until: ROUTE_NOTES.until[code] ?? null }
 }
 
+// 6.0.1053: the sale half of the Expenses list (routes/feesCatalog.ts) must start from idx_sales_courier_cost, the partial index of the few sales that
+// carry a courier cost, whatever the filter. With a branch filter the planner once chose idx_sales_branch_created and read every sale of the branch.
+const SALE_COST_STATEMENTS = ['FROM sales WHERE', 'SELECT sales.id, sales.receipt_number']
 const pinsOf = (statements) => {
   const pins = []
   for (const s of statements || []) {
     const found = /INDEXED BY (\w+)/.exec(s.sql)
     if (found && !pins.some((p) => p.index === found[1])) pins.push({ match: `INDEXED BY ${found[1]}`, index: found[1] })
+  }
+  for (const start of SALE_COST_STATEMENTS) {
+    if ((statements || []).some((s) => s.sql.includes(start) && s.sql.includes('delivery_actual_cost_usd IS NOT NULL'))) pins.push({ match: start, index: 'idx_sales_courier_cost' })
   }
   return pins
 }

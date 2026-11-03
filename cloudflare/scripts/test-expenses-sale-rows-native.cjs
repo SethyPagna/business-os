@@ -16,6 +16,8 @@
 //     cost (USD and riel apart) = courierPayoutsWhere, Total = Telegram "Expenses";
 //   - no courier cost for a caller without `sales:view_courier_cost`: no row, no count, no amount anywhere in the body;
 //   - paging by the merge keeps the true total and every row exactly once;
+//   - the QUERY PLAN of the sale half uses the partial index idx_sales_courier_cost for every filter shape, with and without ANALYZE: with a branch
+//     filter the planner picked idx_sales_branch_created (branch_id = ?) and visited every sale of the branch to find the few that carry a cost;
 //   - mutation controls: each plausible wrong implementation turns a check red.
 //
 // Run (from cloudflare/): node scripts/test-expenses-sale-rows-native.cjs
@@ -300,10 +302,61 @@ async function scenario(w) {
   })
 }
 
+// The sale half runs on every page view. Its plan must start from the partial index that holds only the sales carrying a courier cost (about 2% of
+// sales), whatever the filter: after the branch consolidation nearly every sale sits in ONE branch, so a plan that walks the branch index reads
+// every sale of the branch (19,000 of 20,000) to find 200.
+async function scenarioPlan(patches = []) {
+  const w = createFeesWorld({ patches })
+  w.sql.exec("INSERT INTO branches (id, name, role, is_active) VALUES (1, 'Store', 'shop', 1), (2, 'Second', 'shop', 1)")
+  const insert = w.sql.prepare("INSERT INTO sales (id, created_at, sale_status, branch_id, total_usd, subtotal_usd, delivery_actual_cost_usd) VALUES (?, ?, 'completed', ?, 10, 10, ?)")
+  w.sql.exec('BEGIN')
+  for (let i = 1; i <= 20000; i += 1) {
+    const day = new Date(Date.UTC(2025, 0, 1) + Math.floor(i / 30) * 86400000).toISOString().slice(0, 10)
+    insert.run(100000 + i, `${day} 03:00:00`, i % 20 === 0 ? 2 : 1, i % 50 === 0 ? 1.5 : null)
+  }
+  w.sql.exec('COMMIT')
+  const { saleScope, saleDeliveryTotalsSql, saleDeliveryRowsSql } = w.load('routes/feesCatalog.ts')
+  const cases = [
+    ['all time, no branch', {}],
+    ['all time + branch', { branch_id: '1' }],
+    ['month + branch', { from: '2026-01-01', to: '2026-01-31', branch_id: '1' }],
+    ['month, no branch', { from: '2026-01-01', to: '2026-01-31' }],
+    ['exact window + branch', { createdFrom: '2026-01-01T00:00:00Z', createdTo: '2026-01-31T00:00:00Z', branch_id: '1' }],
+  ]
+  for (const phase of ['without statistics', 'after ANALYZE']) {
+    if (phase === 'after ANALYZE') w.sql.exec('ANALYZE')
+    await check(`PLAN ${phase}: the sale half starts from idx_sales_courier_cost for every filter shape, and never walks the branch index`, async () => {
+      for (const [label, query] of cases) {
+        const scope = await saleScope(w.raw, query, true)
+        for (const [name, statement, extra] of [['totals', saleDeliveryTotalsSql(scope), {}], ['rows', saleDeliveryRowsSql(scope), { saleLimit: 20 }]]) {
+          const plan = w.sql.prepare(`EXPLAIN QUERY PLAN ${statement}`).all({ ...scope.params, ...extra }).map((row) => row.detail).join(' | ')
+          assert.match(plan, /idx_sales_courier_cost/, `${label} (${name}): ${plan}`)
+          assert.doesNotMatch(plan, /idx_sales_branch_created|idx_sales_(?!courier_cost)\w+/, `${label} (${name}) walks another sales index: ${plan}`)
+          assert.doesNotMatch(plan, /SCAN sales(?! USING)/, `${label} (${name}) scans every sale: ${plan}`)
+        }
+      }
+    })
+  }
+  await check('PLAN answers are unchanged: the branch filter still narrows by the branch id (a text id, an absent branch and a non-numeric one included)', async () => {
+    const count = async (query) => {
+      const scope = await saleScope(w.raw, query, true)
+      return w.sql.prepare(saleDeliveryTotalsSql(scope)).get(scope.params)
+    }
+    const direct = (branch) => w.get("SELECT COUNT(*) n FROM sales WHERE branch_id = ? AND delivery_actual_cost_usd IS NOT NULL AND sale_status <> 'cancelled'", branch).n
+    assert.equal((await count({ branch_id: '1' })).count, direct(1), 'branch 1 (sent as text, as the query string does)')
+    assert.equal((await count({ branch_id: '2' })).count, direct(2), 'branch 2')
+    assert.equal((await count({})).count, direct(1) + direct(2), 'no branch filter: every branch')
+    assert.equal((await count({ branchId: '2' })).count, direct(2), 'the camelCase spelling')
+    for (const bad of ['abc', '1abc', '0', '-1', '1.5', '99']) assert.equal((await count({ branch_id: bad })).count, 0, `branch_id=${bad} matches no sale`)
+    assert.ok(direct(1) > 0 && direct(2) > 0, 'control: both branches carry courier costs, so a filter that does nothing is visible (each count is below the all-branch count)')
+  })
+}
+
 (async () => {
   const w = createFeesWorld()
   seed(w)
   await scenario(w)
+  await scenarioPlan()
 
   // ---- mutation controls ---------------------------------------------------------------------------------------------
   const mutants = [
@@ -312,6 +365,9 @@ async function scenario(w) {
     ['cancelled sales are included in the sale half', { file: 'src/lib/salesAnalytics.ts', from: "clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)", to: "clauses.push('1=1')" }],
     ['the permission check is dropped from the list', { file: 'src/routes/feesCatalog.ts', from: "  const showSales = canViewCourierCost(c.get('user'))\n  try {", to: "  const showSales = true\n  try {" }],
     ['the permission check is dropped from the report block', { file: 'src/routes/feesCatalog.ts', from: "  const showSales = canViewCourierCost(c.get('user'))\n  let saleDelivery", to: "  const showSales = true\n  let saleDelivery" }],
+    ['the branch goes back through whereActiveSales as a plain equality (the planner walks the branch index again)', { file: 'src/routes/feesCatalog.ts', from: "clauses.push('+sales.branch_id = @saleBranchId')", to: "clauses.push('sales.branch_id = @saleBranchId')" }],
+    ['the branch id is bound as text, which the unary plus no longer coerces', { file: 'src/routes/feesCatalog.ts', from: 'params.saleBranchId = branchId', to: 'params.saleBranchId = String(branchId)' }],
+    ['a non-numeric branch matches every sale', { file: 'src/routes/feesCatalog.ts', from: "      clauses.push('1 = 0')\n", to: '' }],
     ['a request without source also gets the sale rows (an older client would meet one)', { file: 'src/routes/feesCatalog.ts', from: "  if (source !== 'all' && source !== 'sale') return next()\n", to: '' }],
     ['the report block is added to every report, not only include=sales', { file: 'src/routes/feesCatalog.ts', from: "  if (c.req.query('include') !== 'sales') return next()\n", to: '' }],
     ['the merge drops the offset (page 2 repeats page 1)', { file: 'src/routes/feesCatalog.ts', from: "      fees: merged.slice(offset, offset + limit),", to: "      fees: merged.slice(0, limit)," }],
@@ -329,6 +385,7 @@ async function scenario(w) {
       const m = createFeesWorld({ patches: [].concat(patch) })
       seed(m)
       await scenario(m)
+      await scenarioPlan([].concat(patch))
     } catch {
       red = true
     }
