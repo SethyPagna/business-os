@@ -64,7 +64,7 @@ import { isAnonymousCustomer } from '../lib/anonymousCustomer'
 import {
   assertReturnCreateCapacity, assertReturnCreatePlanBounds, canonicalReturnCreateIntent,
   projectedReturnStateForReturnCreate, projectedReturnStateForReturnCreateV1, replacementSaleIdSql, returnCreateGuardStatement,
-  returnCreateIdSql, returnCreateOwnMovementCountSql, returnCreatePreconditionSql, returnQuantityExceeds, returnQuantityRemaining, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
+  customerReturnSnapshotGuardStatements, returnCreateIdSql, returnCreateOwnMovementCountSql, returnCreatePreconditionSql, returnQuantityExceeds, returnQuantityRemaining, RETURN_CREATE_REQUEST_BYTES, type ReturnCreateResponse,
 } from '../lib/returnCreateAction'
 // RET-B F4: units an imported sale's row says already came back
 // (sale_items.returned_quantity) count as returned in every capacity read.
@@ -2211,6 +2211,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     effectGuardPredicate: effectGuards.length ? branchEffectGuardPredicate('@effectsJson') : null,
   })
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+    ...(customerReturnV1Plan ? customerReturnSnapshotGuardStatements(operationId, Number(customerReturnV1Plan.authority.sale.id), customerReturnV1Plan.snapshot_rows) : []),
     returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
   ]
   const returnIdExpression = returnCreateIdSql()

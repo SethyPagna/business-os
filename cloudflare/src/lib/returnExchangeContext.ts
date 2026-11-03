@@ -41,6 +41,10 @@ function returnMoneyExpression(): string {
 /** The one-key object that carries a lossless REAL through json_object (see exchangeContextQuery). */
 const REAL_MARKER = '$real'
 
+// A line's pricing snapshot embeds the whole basket pool, so the snapshots of a large sale total megabytes: aggregated into the sale_lines JSON
+// they passed D1's 2,000,000-byte cap at 58 lines. They come back as their own rows of the same statement instead (one call, as before).
+const LINE_COLUMNS_WITHOUT_SNAPSHOT = CUSTOMER_RETURN_QUOTE_LINE_COLUMNS.filter((column) => column !== 'pricing_snapshot_json')
+
 const PRIOR_COLUMNS = [
   'return_id', 'money_precision_version', 'calculated_refund_usd', 'rounding_adjustment_usd', 'total_refund_usd', 'return_status',
   'return_updated_at', 'return_item_id', 'sale_item_id', 'quantity', 'total_usd', 'refund_snapshot_json',
@@ -71,7 +75,7 @@ export function exchangeContextQuery(input: ExchangeContextInput): { sql: string
       (SELECT json_object(${CUSTOMER_RETURN_QUOTE_SALE_COLUMNS.map((column) => `'${column}',${exact(`s.${column}`)}`).join(',')},
         'return_money_json',('' || ${returnMoneyExpression()}),'sale_revision',COALESCE(v.revision,0))
         FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=@saleId) AS sale,
-      ${list(pairs(CUSTOMER_RETURN_QUOTE_LINE_COLUMNS), `SELECT * FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT ${CUSTOMER_RETURN_MAX_SALE_LINES + 1}`)} AS sale_lines,
+      ${list(pairs(LINE_COLUMNS_WITHOUT_SNAPSHOT), `SELECT * FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT ${CUSTOMER_RETURN_MAX_SALE_LINES + 1}`)} AS sale_lines,
       ${list(pairs(PRIOR_COLUMNS), `SELECT r.id AS return_id,r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd,r.total_refund_usd,
           r.status AS return_status,r.updated_at AS return_updated_at,ri.id AS return_item_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
           FROM returns r LEFT JOIN return_items ri ON ri.return_id=r.id
@@ -93,7 +97,11 @@ export function exchangeContextQuery(input: ExchangeContextInput): { sql: string
         `SELECT batch_id,branch_id,quantity FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM wanted) LIMIT ${EXCHANGE_CONTEXT_LIMITS.lotStock + 1}`)} AS lot_stock,
       ${list(pairs(['id', 'membership_number', 'is_anonymous']),
         'SELECT id,membership_number,is_anonymous FROM customers WHERE id=COALESCE(@customerId,(SELECT customer_id FROM sales WHERE id=@saleId))')} AS customer,
-      ${list(pairs(['key', 'value']), `SELECT key,value FROM settings WHERE key IN (${EXCHANGE_SETTING_KEYS.map((key) => `'${key}'`).join(',')})`)} AS settings`
+      ${list(pairs(['key', 'value']), `SELECT key,value FROM settings WHERE key IN (${EXCHANGE_SETTING_KEYS.map((key) => `'${key}'`).join(',')})`)} AS settings,
+      NULL AS snapshot_id, NULL AS snapshot_text
+    UNION ALL
+    SELECT ${Array.from({ length: 13 }, () => 'NULL').join(',')}, s.id, s.pricing_snapshot_json
+      FROM (SELECT id,pricing_snapshot_json FROM sale_items WHERE sale_id=@saleId ORDER BY id LIMIT ${CUSTOMER_RETURN_MAX_SALE_LINES + 1}) s`
   return {
     sql,
     params: {
@@ -138,9 +146,9 @@ export class ExchangeContextTooLargeError extends Error {
   }
 }
 
-/** The one row exchangeContextQuery answers: every column a JSON text. */
+/** The rows exchangeContextQuery answers. The row with no snapshot_id carries every column as a JSON text; each other row is one sale line's snapshot. */
 export type ExchangeContextRow = Record<'sale' | 'sale_lines' | 'prior' | 'taken_returns' | 'taken_receipts' | 'branches' | 'products' | 'branch_stock'
-  | 'allocations' | 'lots' | 'lot_stock' | 'customer' | 'settings', string | null>
+  | 'allocations' | 'lots' | 'lot_stock' | 'customer' | 'settings', string | null> & { snapshot_id?: number | null; snapshot_text?: string | null }
 
 // return_money_json is TEXT on the plain read; a JSON-aware driver could hand a nested array back, so keep it the text it always was.
 function asPlainSale(sale: Record<string, unknown> | null): Record<string, unknown> | null {
@@ -148,7 +156,10 @@ function asPlainSale(sale: Record<string, unknown> | null): Record<string, unkno
   return sale
 }
 
-export function parseExchangeContext(row: ExchangeContextRow | undefined | null): ExchangeContext {
+export function parseExchangeContext(rows: ExchangeContextRow | readonly ExchangeContextRow[] | undefined | null): ExchangeContext {
+  const list = rows == null ? [] : Array.isArray(rows) ? rows as readonly ExchangeContextRow[] : [rows as ExchangeContextRow]
+  const row = list.find((entry) => entry.snapshot_id == null) ?? null
+  const snapshots = new Map(list.filter((entry) => entry.snapshot_id != null).map((entry) => [Number(entry.snapshot_id), entry.snapshot_text ?? null]))
   const revive = (_key: string, value: unknown): unknown => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const keys = Object.keys(value as object)
@@ -157,7 +168,7 @@ export function parseExchangeContext(row: ExchangeContextRow | undefined | null)
     return value
   }
   const json = <T,>(value: string | null | undefined, fallback: T): T => value == null ? fallback : JSON.parse(value, revive) as T
-  const array = (key: keyof ExchangeContextRow, limit?: number): Array<Record<string, unknown>> => {
+  const array = (key: Exclude<keyof ExchangeContextRow, 'snapshot_id' | 'snapshot_text'>, limit?: number): Array<Record<string, unknown>> => {
     const list = json<Array<Record<string, unknown>>>(row?.[key], [])
     if (limit != null && list.length > limit) throw new ExchangeContextTooLargeError(String(key))
     return list
@@ -185,7 +196,7 @@ export function parseExchangeContext(row: ExchangeContextRow | undefined | null)
   const customerRow = array('customer')[0]
   return {
     sale: asPlainSale(json<Record<string, unknown> | null>(row?.sale, null)),
-    saleLines: array('sale_lines').sort((a, b) => Number(a.id) - Number(b.id)),
+    saleLines: array('sale_lines').sort((a, b) => Number(a.id) - Number(b.id)).map((line) => ({ ...line, pricing_snapshot_json: snapshots.get(Number(line.id)) ?? null })),
     previousRows,
     takenReturnNumbers: new Set(json<string[]>(row?.taken_returns, []).map(String)),
     takenReceiptNumbers: new Set(json<string[]>(row?.taken_receipts, []).map(String)),

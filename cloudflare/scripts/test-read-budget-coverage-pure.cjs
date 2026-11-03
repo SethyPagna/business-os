@@ -22,6 +22,8 @@ const HEAVY_ROWS = 50000
 const budgets = loadBudgets()
 const on = today()
 const key = (x) => `${x.method} ${x.route}`
+// A shape's "raised" is one note, or an array of notes when several of its fields rose.
+const notesOf = (s) => [].concat(s.raised || [])
 
 // The budgets before this change: HEAD while the file has uncommitted edits, else its parent commit. Null when git cannot say
 // (a shallow checkout, the commit that introduced the file).
@@ -102,9 +104,10 @@ async function main() {
     const refused = shapes.filter((s) => s.expect !== 'ok' && s.method !== 'GET')
     for (const s of refused) assert.ok(s.expect.until === null || /^P\d\.\d/.test(s.expect.until), `${s.id}: until`)
     console.log(`read-budget: ${refused.filter((s) => s.expect.until).length} write shapes refused on the Free config until a named slice: ${refused.filter((s) => s.expect.until).map((s) => `${s.id}->${s.expect.until}`).join(', ') || 'none'}`)
-    for (const s of shapes.filter((x) => x.raised)) {
-      assert.ok(Number.isInteger(s.raised.from) && typeof s.raised.reason === 'string' && s.raised.reason.length > 8, `${s.id}: raised needs from and reason`)
-      console.log(`RAISED ${s.id}: ${s.raised.from} -> ${s.rows_max} rows. ${s.raised.reason}`)
+    for (const s of shapes.filter((x) => x.raised)) for (const note of notesOf(s)) {
+      assert.ok(Number.isInteger(note.from) && typeof note.reason === 'string' && note.reason.length > 8, `${s.id}: raised needs from and reason`)
+      const field = note.field || 'rows_max'
+      console.log(`RAISED ${s.id} ${field}: ${note.from} -> ${s[field]}. ${note.reason}`)
     }
   })
 
@@ -117,8 +120,9 @@ async function main() {
       if (!old) continue
       for (const field of RATCHETED) {
         if (!(s[field] > old[field])) continue
-        assert.ok(s.raised && (s.raised.field || 'rows_max') === field, `${s.id}: ${field} rose from ${old[field]} to ${s[field]} with no "raised" note for it`)
-        assert.strictEqual(s.raised.from, old[field], `${s.id}: raised.from ${s.raised.from} is not the previous ${field} ${old[field]}`)
+        const note = notesOf(s).find((n) => (n.field || 'rows_max') === field)
+        assert.ok(note, `${s.id}: ${field} rose from ${old[field]} to ${s[field]} with no "raised" note for it`)
+        assert.strictEqual(note.from, old[field], `${s.id}: raised.from ${note.from} is not the previous ${field} ${old[field]}`)
       }
     }
   })

@@ -57,7 +57,7 @@ import { PRODUCT_REMOVE_ACTION_KIND, parseProductRemoveSnapshot, productRemovePl
 
 export const SALE_ADD_ITEMS_ACTION_KIND = 'sale.add_items'
 import { resolveProductMergeLineage } from './productMergeLineage'
-import { validateCapturedSaleBasket } from './saleItemPricing'
+import { chunkRowsByJsonBytes, unpackAddItemsReversal, validateCapturedSaleBasket } from './saleItemPricing'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -1535,7 +1535,8 @@ async function replayAtomicSaleAddItems(
     }catch{throw new UndoConflictError('Recorded product merge evidence changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)}
   }
   const currentHeaderJson=JSON.stringify(currentSale),currentLinesJson=JSON.stringify(currentLines)
-  if(new TextEncoder().encode(currentHeaderJson+currentLinesJson).byteLength>500_000)throw new UndoConflictError('The recorded sale basket is too large to replay safely.')
+  // An ordinary basket (header + lines up to 500,000 bytes, the size the old code accepted) keeps the single one-parameter guard it always had.
+  const inlineBasket=new TextEncoder().encode(currentHeaderJson+currentLinesJson).byteLength<=500_000
   const stateKeys=(row:Record<string,unknown>)=>Object.keys(row).map(key=>{
     if(!/^[a-z][a-z0-9_]*$/.test(key))throw new UndoConflictError('The recorded sale basket shape is invalid.')
     return key
@@ -1546,10 +1547,22 @@ async function replayAtomicSaleAddItems(
     const middle=Math.floor(terms.length/2)
     return `(${all(terms.slice(0,middle))} AND ${all(terms.slice(middle))})`
   }
-  const basketCondition=`EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
+  const basketLineMatch=all(stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`))
+  // A larger basket: the header and the line COUNT in the main guard; the lines in groups (each group's JSON stays under STORED_COPY_CHUNK_BYTES,
+  // because a 62-line sale's snapshots are 2.6 MB and one parameter above D1's 2,000,000-byte cap fails the whole replay). Every line read
+  // must equal a current row and the counts must match, which together prove the same set the single all-lines parameter did.
+  const basketCondition=inlineBasket
+    ? `EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
     AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=json_array_length(@replayLines)
     AND NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
-      AND ${all(stateKeys(currentLines[0]).map(key=>`current.${key} IS json_extract(expected.value,'$.${key}')`))}))`
+      AND ${basketLineMatch}))`
+    : `EXISTS(SELECT 1 FROM sales current WHERE current.id=@saleId AND ${all(stateKeys(currentSale).map(key=>`current.${key} IS json_extract(@replaySale,'$.${key}')`))})
+    AND (SELECT COUNT(*) FROM sale_items WHERE sale_id=@saleId)=@replayLineCount`
+  const basketLineGuards=inlineBasket?[]:chunkRowsByJsonBytes(currentLines).flatMap(group=>[
+    { sql: 'DELETE FROM sale_mutation_guards WHERE id=1', params: {} },
+    saleMutationGuard(`NOT EXISTS(SELECT 1 FROM json_each(@replayLines) expected WHERE NOT EXISTS(SELECT 1 FROM sale_items current WHERE current.sale_id=@saleId
+      AND ${basketLineMatch}))`, { saleId, replayLines: JSON.stringify(group) }),
+  ])
 
   const lines = reversal.lines || []
   if (!lines.length || lines.length > 25) throw new UndoConflictError('The saved added-items line set is invalid.')
@@ -1563,7 +1576,7 @@ async function replayAtomicSaleAddItems(
     snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
     historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
     saleStatus: reversal.saleStatus,
-    replaySale:currentHeaderJson,replayLines:currentLinesJson,...lineage.params,
+    replaySale:currentHeaderJson,...(inlineBasket?{replayLines:currentLinesJson}:{replayLineCount:currentLines.length}),...lineage.params,
   }
   const memberGuards: string[] = []
   const lineGuards: string[] = []
@@ -1607,6 +1620,7 @@ async function replayAtomicSaleAddItems(
     { sql: 'DELETE FROM sale_mutation_guards', params: {} },
     { sql: 'DELETE FROM sale_bulk_guards', params: {} },
     guard,
+    ...basketLineGuards,
   ]
 
   if (ctx.direction === 'undo') {
@@ -1621,7 +1635,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...removal.statements,
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
-      ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
+      ...(reversal.lineMoneyBefore ? chunkRowsByJsonBytes(reversal.lineMoneyBefore).map((group) => saleLineKhrSnapshotStatement(saleId, group)) : []),
       ...lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyAfter),after:salePrecisionLedgerFields(reversal.moneyBefore)} : {}),
@@ -1659,7 +1673,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...buildOperationAllocationStatements(plan.lines, operationId, stamp),
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
-      ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
+      ...(reversal.lineMoneyAfter ? chunkRowsByJsonBytes(reversal.lineMoneyAfter).map((group) => saleLineKhrSnapshotStatement(saleId, group)) : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
           before:salePrecisionLedgerFields(reversal.moneyBefore),after:salePrecisionLedgerFields(reversal.moneyAfter)} : {}),
@@ -3635,7 +3649,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (!snap) throw new Error('The saved details for these added items are no longer available, so they cannot be reversed.')
       let reversal: SaleAddItemsReversal
       try {
-        reversal = JSON.parse(snap.payload_json) as SaleAddItemsReversal
+        reversal = unpackAddItemsReversal(JSON.parse(snap.payload_json)) as SaleAddItemsReversal
       } catch (_) {
         throw new Error('The saved details for these added items are unreadable, so they cannot be reversed.')
       }
@@ -3686,7 +3700,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
           ...(reversal.lineMoneyBefore
-            ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)]
+            ? chunkRowsByJsonBytes(reversal.lineMoneyBefore).map((group) => saleLineKhrSnapshotStatement(saleId, group))
             : []),
           ...(reversal.lines || []).map((line) => amendmentEntryStatement({
             ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
@@ -3744,7 +3758,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
-            ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)]
+            ? chunkRowsByJsonBytes(reversal.lineMoneyAfter).map((group) => saleLineKhrSnapshotStatement(saleId, group))
             : []),
           ...plan.lines.map((line) => amendmentEntryStatement({
             ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,

@@ -201,6 +201,20 @@ export function serializeSaleItemPricing(pool: CapturedPricingPool, quantities: 
   return json
 }
 
+// A basket of n lines stores n snapshots that all embed the SAME pool, and parsing each one re-evaluates that pool and re-allocates the same
+// receipt context (about 30 ms per line at 200 lines, so seconds for one validation). Both are pure functions of their JSON text, so the
+// results are kept by that text for the next few snapshots. A parsed snapshot is still a fresh object every call; only these two
+// results, which parseSaleItemPricing reads and never returns, are shared.
+const parseMemo = { evaluations: new Map<string, Map<string, ExactLinePricing>>(), allocations: new Map<string, Map<string, ReceiptLineAllocation>>() }
+function memoized<T>(memo: Map<string, T>, key: string, compute: () => T): T {
+  const hit = memo.get(key)
+  if (hit !== undefined) { memo.delete(key); memo.set(key, hit); return hit }
+  const value = compute()
+  memo.set(key, value)
+  if (memo.size > 4) memo.delete(memo.keys().next().value as string)
+  return value
+}
+
 /** Call only for trusted persisted snapshots, never client-provided authority. */
 export function parseSaleItemPricing(json: string | null | undefined): SaleItemPricingSnapshot | null {
   if (json == null) return null
@@ -208,9 +222,9 @@ export function parseSaleItemPricing(json: string | null | undefined): SaleItemP
   let value: SaleItemPricingSnapshot
   try { value = JSON.parse(json) } catch { return invalid() }
   if (value?.version !== 1) invalid()
-  const evaluated = evaluateCapturedPricingPool(value.pool,value.quantities).get(value.line_key)
+  const evaluated = memoized(parseMemo.evaluations,JSON.stringify([value.pool,value.quantities]),()=>evaluateCapturedPricingPool(value.pool,value.quantities)).get(value.line_key)
   if (!evaluated || !value.amounts || Object.keys(evaluated).some(k => evaluated[k as keyof ExactLinePricing] !== value.amounts[k as keyof ExactLinePricing])) invalid()
-  const allocated=allocateReceiptLines(value.allocation_context).get(value.line_key)
+  const allocated=memoized(parseMemo.allocations,JSON.stringify(value.allocation_context),()=>allocateReceiptLines(value.allocation_context)).get(value.line_key)
   if (!allocated || !value.receipt_allocation || value.allocation_context.lines.find(line=>line.line_key===value.line_key)?.amount!==evaluated.total_usd
     || Object.keys(allocated).some(k=>allocated[k as keyof ReceiptLineAllocation]!==value.receipt_allocation[k as keyof ReceiptLineAllocation])) invalid()
   return value
@@ -304,15 +318,22 @@ export function validateCapturedSaleBasket(lines: readonly Record<string,unknown
   if (allocation.discount_usd!==header.discount_usd || allocation.membership_discount_usd!==header.membership_discount_usd || allocation.tax_usd!==header.tax_usd
     || allocation.lines.length!==lines.length) invalid()
   for (const entry of allocation.lines) if (byKey.get(entry.line_key)?.amounts.total_usd!==entry.amount) invalid()
+  // Every snapshot embeds its whole pool, so comparing them pairwise by re-serializing is O(n^3) bytes (a 62-line sale: ~240 MB).
+  // Each distinct text is serialized once and interned to a number; equal text is equal number.
+  const interned=new Map<string,number>()
+  const intern=(text:string)=>{let id=interned.get(text);if(id===undefined){id=interned.size;interned.set(text,id)}return id}
+  const texts=new Map(snapshots.map(snapshot=>[snapshot,{pool:intern(JSON.stringify(snapshot.pool)),quantities:intern(JSON.stringify(snapshot.quantities)),
+    allocation:intern(JSON.stringify(snapshot.allocation_context))}]))
   const poolContexts=new Map<string,string>()
   for (const snapshot of snapshots) {
-    const context=JSON.stringify({pool:snapshot.pool,quantities:snapshot.quantities})
+    const text=texts.get(snapshot)!
+    const context=`${text.pool}:${text.quantities}`
     if (poolContexts.has(snapshot.pool.pool_key) && poolContexts.get(snapshot.pool.pool_key)!==context) invalid()
     poolContexts.set(snapshot.pool.pool_key,context)
-    if (JSON.stringify(snapshot.allocation_context)!==JSON.stringify(allocation)) invalid()
+    if (text.allocation!==texts.get(snapshots[0])!.allocation) invalid()
     for (const member of snapshot.pool.lines) {
       const other=byKey.get(member.line_key)
-      if (!other || JSON.stringify(other.pool)!==JSON.stringify(snapshot.pool) || JSON.stringify(other.quantities)!==JSON.stringify(snapshot.quantities)) invalid()
+      if (!other || texts.get(other)!.pool!==text.pool || texts.get(other)!.quantities!==text.quantities) invalid()
     }
   }
   if (sumMoney4(snapshots.map(snapshot=>snapshot.amounts.total_usd))!==header.subtotal_usd) invalid()

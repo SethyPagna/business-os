@@ -219,9 +219,19 @@ async function ensureSeed({ seedVariant, tier, script }) {
   }
 }
 
+// READ_BUDGET_SEED_SCRIPT_FILE pins the bundle that BUILDS the seed (written on first use, then reused), so editing the Worker no
+// longer re-seeds for ~4 minutes. The run itself always uses the fresh bundle: the seed is then data made by an older build, which is
+// what production is. Unset = the seed is keyed by the fresh bundle, exactly as before.
+function seedScriptFor(script) {
+  const pinned = process.env.READ_BUDGET_SEED_SCRIPT_FILE
+  if (!pinned) return script
+  if (!fs.existsSync(pinned)) { fs.mkdirSync(path.dirname(pinned), { recursive: true }); fs.writeFileSync(pinned, script) }
+  return fs.readFileSync(pinned, 'utf8')
+}
+
 async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir } = {}) {
   const script = await bundleWorker()
-  const seeded = await ensureSeed({ seedVariant, tier, script })
+  const seeded = await ensureSeed({ seedVariant, tier, script: seedScriptFor(script) })
   const persist = persistDir || fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'read-budget-work-'))
   fs.rmSync(persist, { recursive: true, force: true })
   fs.cpSync(seeded, persist, { recursive: true })

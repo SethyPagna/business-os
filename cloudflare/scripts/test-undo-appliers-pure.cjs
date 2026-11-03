@@ -929,8 +929,10 @@ await check('source lock: sale settlement history is server-managed and never ta
 
 await check('source lock: add-items replay restores optional exact KHR snapshots and preserves legacy snapshots', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
-  assert.ok(/reversal\.lineMoneyBefore\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyBefore\)\]\s*:\s*\[\]/.test(source), 'undo must restore the optional before-line snapshot')
-  assert.ok(/reversal\.lineMoneyAfter\s*\?\s*\[saleLineKhrSnapshotStatement\(saleId, reversal\.lineMoneyAfter\)\]\s*:\s*\[\]/.test(source), 'redo must restore the optional after-line snapshot')
+  // The restore is one statement, or one per group of lines (a large basket's snapshots pass D1's 2,000,000-byte value cap in one parameter).
+  const restores = (field) => new RegExp(`reversal\\.${field}\\s*\\?\\s*(\\[saleLineKhrSnapshotStatement\\(saleId, reversal\\.${field}\\)\\]|chunkRowsByJsonBytes\\(reversal\\.${field}\\)\\.map\\(\\(group\\) => saleLineKhrSnapshotStatement\\(saleId, group\\)\\))\\s*:\\s*\\[\\]`)
+  assert.ok(restores('lineMoneyBefore').test(source), 'undo must restore the optional before-line snapshot')
+  assert.ok(restores('lineMoneyAfter').test(source), 'redo must restore the optional after-line snapshot')
   assert.ok(/Number\(reversal\.moneyAfter\.exchange_rate \?\? reversal\.exchangeRate\) \|\| 4100/.test(source), 'redo must prefer the frozen after-snapshot rate and retain the legacy fallback')
   assert.ok(/saleStateRevision[\s\S]*replayAtomicSaleAddItems/.test(source), 'new snapshots must enter the revision-guarded atomic replay path')
   assert.ok(/buildOperationAllocationStatements\(plan\.lines, operationId, stamp\)/.test(source), 'redo allocations must be statements in the operation batch')
