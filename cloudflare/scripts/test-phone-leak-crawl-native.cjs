@@ -118,7 +118,7 @@ async function main() {
       `/api/customers?search=${enc(q)}&page=1&pageSize=50`, `/api/customers?fields=sales_picker&search=${enc(q)}`, `/api/sales?search=${enc(q)}`,
       `/api/reports/business-summary/sales?${WINDOW}&q=${enc(q)}`,
     ])
-    const fragments = ['654', '0876', '321', 'o8765', '654\u0301', '087 654', '98 111', '999', '222', '010', '333']
+    const fragments = ['654', '0876', '321', 'o8765', '654\u0301', '654\ufe0f', '6\u20e3' + '54', 'tel0994', '087 654', '98 111', '999', '222', '010', '333']
     const fragmentShapes = fragments.flatMap((q) => [
       `/api/customers?search=${enc(q)}&page=1&pageSize=50`, `/api/customers?fields=sales_picker&search=${enc(q)}`, `/api/suppliers?search=${enc(q)}&page=1&pageSize=50`,
       `/api/delivery-contacts?search=${enc(q)}&page=1&pageSize=50`, `/api/sales?search=${enc(q)}`, `/api/sales/stats?search=${enc(q)}`, `/api/returns?search=${enc(q)}`,

@@ -19,12 +19,13 @@ const sub = (needle, replacement) => (source) => {
 // letter o, a joiner) escaped it although the matcher reads those words as digits.
 const RAW_DIGITS = '/^[\\d\\s+().-]+$/'
 const MUTANTS = {
-  'sales digit words read the phone': ['routes/sales.ts', sub("!access.fullPhone && isDigitWord(word) ? flatHaystackWithoutPhones : flatHaystack", 'flatHaystack')],
-  'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('!access.fullPhone && isDigitWord(word) ?', `!access.fullPhone && ${RAW_DIGITS}.test(raw) && isDigitWord(word) ?`)],
+  'sales digit words read the phone': ['routes/sales.ts', sub("!access.fullPhone && hasDigit(word) ? flatHaystackWithoutPhones : flatHaystack", 'flatHaystack')],
+  'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('!access.fullPhone && hasDigit(word) ?', `!access.fullPhone && ${RAW_DIGITS}.test(raw) && hasDigit(word) ?`)],
   'sales whole number not compared': ['routes/sales.ts', sub("if (probe.kind !== 'full') return searched", 'return searched')],
   'sales number saved as a name readable': ['routes/sales.ts', sub("nameWithoutPhoneSql('s.customer_name')", "\"COALESCE(s.customer_name, '')\"")],
   'delivery picker matches phone fragments': ['routes/sales.ts', sub("const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)", "const probe = ({ kind: 'none' } as const)")],
-  'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && isDigitWord(word) ? digitWordHaystack : flatHaystack", 'flatHaystack')],
+  'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && hasDigit(word) ? digitWordHaystack : flatHaystack", 'flatHaystack')],
+  'contacts only an all-digit word is guarded': ['lib/contactSearch.ts', sub('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))')],
   'returns digit words guarded only for a raw all-digit search': ['routes/returns.ts', sub('const guardDigitWords = !access.fullPhone', `const guardDigitWords = !access.fullPhone && ${RAW_DIGITS}.test(search)`)],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
   'sales stats cache shared across grants': ['routes/sales.ts', sub('}, phoneCacheVariant(user))', '})')],
@@ -54,6 +55,9 @@ async function main() {
      VALUES ('P28-RET-2', ?, ?, ?, 'customer', 'completed', 2, 8000, 'P28-0003', 'p28-ret-2 010222333', datetime('now'))`,
     world.ids.customerPhoneName, PHONES.phoneAsName, world.ids.sale2,
   )
+
+  // A customer whose phone was saved glued to letters (a legacy import): the digits are still a phone.
+  await world.run("INSERT INTO customers (id, name, phone, phone_normalized, membership_number) VALUES (9301, 'Fixture Legacy', 'Tel099456789', '099456789', 'LC-P28-9301')")
 
   // A courier saved under its own number (its name is a number, its area is the only readable word).
   await world.run("INSERT INTO delivery_contacts (id, name, phone, area) VALUES (9201, ?, '', 'South Zone')", '014 333 777')
@@ -242,6 +246,49 @@ async function main() {
         t.ok(`sales ${JSON.stringify(q)} as ${as}`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, as)).text).includes('P28-0001'))
         t.ok(`reports sales ${JSON.stringify(q)} as ${as}`, receiptsIn((await get(`/api/reports/business-summary/sales?startDate=2000-01-01&endDate=2100-01-01&q=${enc(q)}`, as)).text).includes('P28-0001'))
       }
+    }
+  })
+
+  // ---- re-review R1: a digit fragment glued to a mark the FTS tokenizer drops, or to letters ----------------------------------------------
+  const MARKS = [0xfe0f, 0xfe00, 0x1dc0, 0x20d0, 0xfe20, 0xe31, 0x17c9, 0x20e3, 0x483, 0x5b0, 0x610, 0x93c, 0x301, 0x34f, 0x1ab0].map((cp) => String.fromCodePoint(cp))
+  await check('positive control: the holder finds the same rows by the plain fragment, and the legacy phone glued to letters', async (t) => {
+    t.ok('customers 654', has((await get(`/api/customers?search=${enc('654')}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Dara'))
+    t.ok('suppliers 333', has((await get(`/api/suppliers?search=${enc('333')}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Supplies'))
+    t.ok('delivery 555', has((await get(`/api/delivery-contacts?search=${enc('555')}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Courier'))
+    t.ok('customers tel0994 (a phone saved as Tel099456789)', has((await get(`/api/customers?search=${enc('tel0994')}&page=1&pageSize=50`, 'manager_granted')).text, 'Fixture Legacy'))
+    t.ok('picker tel0994', has((await get(`/api/customers?fields=sales_picker&search=${enc('tel0994')}`, 'manager_granted')).text, 'Fixture Legacy'))
+  })
+  await check('no grant: a digit fragment glued to a combining mark, a variation selector or an enclosing mark finds nothing on Customers, the picker, Suppliers and Delivery contacts', async (t) => {
+    for (const mark of MARKS) {
+      const label = 'U+' + mark.codePointAt(0).toString(16)
+      for (const frag of ['654', '0876', '6' + mark + '54']) {
+        const q = frag.includes(mark) ? frag : frag + mark
+        const list = await get(`/api/customers?search=${enc(q)}&page=1&pageSize=50`, 'manager')
+        t.ok(`customers ${label} ${frag}`, list.status === 200 && !has(list.text, 'Fixture Dara'), snippetOf(list.text))
+        const picker = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
+        t.ok(`picker ${label} ${frag}`, !has(picker.text, 'Fixture Dara'), snippetOf(picker.text))
+      }
+      const supplier = await get(`/api/suppliers?search=${enc('333' + mark)}&page=1&pageSize=50`, 'manager')
+      t.ok(`suppliers ${label}`, supplier.status === 200 && !has(supplier.text, 'Fixture Supplies'), snippetOf(supplier.text))
+      const delivery = await get(`/api/delivery-contacts?search=${enc('555' + mark)}&page=1&pageSize=50`, 'manager')
+      t.ok(`delivery contacts ${label}`, delivery.status === 200 && !has(delivery.text, 'Fixture Courier'), snippetOf(delivery.text))
+      t.eq(`delivery picker ${label}`, has((await get(`/api/sales/delivery-options?search=${enc('555' + mark)}`, 'manager')).text, 'Fixture Courier'), false)
+    }
+  })
+  await check('no grant: a mark glued to a digit fragment finds nothing in Sales, Returns and the totals either', async (t) => {
+    for (const mark of MARKS) {
+      const label = 'U+' + mark.codePointAt(0).toString(16)
+      t.eq(`sales ${label}`, receiptsIn((await get(`/api/sales?search=${enc('654' + mark)}`, 'sales_only')).text), [])
+      t.eq(`sales totals ${label}`, (await get(`/api/sales/stats?search=${enc('654' + mark)}`, 'sales_only')).json?.total_count, 0)
+      t.ok(`returns ${label}`, !has((await get(`/api/returns?search=${enc('222' + mark)}`, 'sales_only')).text, 'P28-RET-2'))
+    }
+  })
+  await check('no grant: a legacy phone saved glued to letters is not found by a fragment of its digits', async (t) => {
+    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'TEL0994', 'dara tel0994']) {
+      const list = await get(`/api/customers?search=${enc(q)}&page=1&pageSize=50`, 'manager')
+      t.ok(`customers ${q}`, list.status === 200 && !has(list.text, 'Fixture Legacy'), list.text.slice(0, 160))
+      const picker = await get(`/api/customers?fields=sales_picker&search=${enc(q)}`, 'manager')
+      t.ok(`picker ${q}`, !has(picker.text, 'Fixture Legacy'), picker.text.slice(0, 160))
     }
   })
 

@@ -59,6 +59,7 @@ function freshDb() {
   customer.run(3, '010 222 333', '010 222 333', null, null, null, 'LC-P28-3', '010222333')
   customer.run(5, 'Fixture Pairs', '12 34 56 78', null, null, null, 'LC-P28-5', '12345678')
   customer.run(6, 'Fixture Short', '1234567', null, null, null, 'LC-P28-6', '1234567')
+  customer.run(7, 'Fixture Legacy', 'Tel099456789', null, null, null, 'LC-P28-7', '099456789')
   customer.run(4, 'Fixture Visal', '+855 12 777 888', null, null, 'Visal Trading', 'LC-P28-4', '012777888')
   const supplier = db.prepare('INSERT INTO suppliers (id, name, phone, address, company, contact_person) VALUES (?, ?, ?, ?, ?, ?)')
   supplier.run(1, 'Fixture Supplies', '077 333 444', option('Office', '078 444 555', 'Street 3'), 'Fixture Co', 'Vanna')
@@ -99,7 +100,8 @@ function run(load, { baseLoad }) {
   // ---- 1. what a typed search does to a hidden number ---------------------------------------------------------------
   check('probe classification', () => {
     const kind = (q) => guard.phoneProbeOf(q).kind
-    for (const q of ['dara', 'LC-P28-1', 'a1', '', 'visal trading', 'dara@example']) assert.equal(kind(q), q === 'LC-P28-1' ? 'partial' : 'none', `kind(${q})`)
+    for (const q of ['dara', '', 'visal trading', 'dara@example']) assert.equal(kind(q), 'none', `kind(${q})`)
+    for (const q of ['LC-P28-1', 'a1', 'tel0876', 'tel087612345']) assert.equal(kind(q), 'partial', `a word that holds a digit is at least a partial probe: kind(${q})`)
     for (const q of ['087', '0876', '087 654', '654321', '1234567', '12345', '0', 'dara 087', 'dara 087 654 321', '087 *** 321']) assert.equal(kind(q), 'partial', `kind(${q})`)
     for (const q of ['087654321', '087 654 321', '087-654-321', '(087) 654 321', '+855 87 654 321', '12345678', '0123 0123 0123', '345 345 345', '០៨៧ ៦៥៤ ៣២១', '０８７６５４３２１']) assert.equal(kind(q), 'full', `kind(${q})`)
     assert.equal(kind('1234567890123456'), 'partial', '16 digits is not a phone number')
@@ -218,6 +220,29 @@ function run(load, { baseLoad }) {
       assert.deepEqual(ids('customers', disguise, OPEN), ids('customers', plain, OPEN), `a holder reads ${JSON.stringify(disguise)} as the plain digits`)
     }
   })
+  check('no grant: a digit fragment glued to a combining mark, a variation selector, an enclosing mark or a letter is still a fragment', () => {
+    // The FTS tokenizer (unicode61) drops these marks, so "654" + U+FE0F finds what "654" finds; each is a word that holds a digit.
+    const MARKS = [0xfe0f, 0xfe00, 0x1dc0, 0x20d0, 0xfe20, 0xe31, 0x17c9, 0x20e3, 0x483, 0x5b0, 0x610, 0x93c, 0x301, 0x34f, 0x1ab0].map((cp) => String.fromCodePoint(cp))
+    const FRAGMENTS = [['customers', '654'], ['customers', '0891'], ['customers', '098 111'], ['suppliers', '333'], ['suppliers', '077'], ['delivery_contacts', '555'], ['delivery_contacts', '096']]
+    for (const [table, plain] of FRAGMENTS) {
+      assert.ok(ids(table, plain, OPEN).length >= 1, `positive control: a holder finds ${table} by ${plain}`)
+      for (const mark of MARKS) {
+        for (const q of [plain + mark, plain.slice(0, 1) + mark + plain.slice(1), 'x ' + plain + mark]) {
+          assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${JSON.stringify(q)}`)
+        }
+      }
+    }
+    for (const mark of MARKS) {
+      assert.deepEqual(pickerIds('654' + mark, CLOSED), [], `picker 654 + U+${mark.codePointAt(0).toString(16)}`)
+      assert.deepEqual(pickerIds('0891' + mark, CLOSED), [])
+    }
+    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'tel 0994', 'TEL0994', 'dara tel0994']) {
+      assert.deepEqual(ids('customers', q, CLOSED), [], `legacy phone glued to letters: ${q}`)
+      assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${q}`)
+    }
+    assert.deepEqual(ids('customers', 'tel0994', OPEN), [7], 'positive control: a holder finds the legacy "Tel099456789" by the prefix')
+    assert.deepEqual(ids('customers', 'tel099456789', OPEN), [7])
+  })
   check('no grant: the whole number is EQUAL to the phone, never contained in it (an 8-digit tail names nobody)', () => {
     for (const q of ['87654321', '+87654321', '08765432', '(87654321)']) {
       assert.deepEqual(ids('customers', q, CLOSED), [], `customers ${q}`)
@@ -322,8 +347,9 @@ const mutants = [
   ['Reports > Sales search reads a numeric customer name', { phoneSearchGuard: replaceOnce('!(key === \'customer\' && customerIsNumber) && ', '') }],
   ['Reports > Sales search compares the whole number by containment', { phoneSearchGuard: replaceOnce('probe.forms.includes(typed) || probe.forms.includes(phoneDigitsOf(text))', 'probe.forms.some((form) => typed.includes(form))') }],
   ['audit word guard ignores punctuation around digits', { phoneSearchGuard: replaceOnce('return !/\\p{L}/u.test(ascii) || /["{}[\\]:,\\\\]/.test(ascii)', 'return !/\\p{L}/u.test(ascii) && /^[+\\d().-]+$/.test(ascii)') }],
-  ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && isDigitWord(word))', 'if (false && isDigitWord(word))') }],
-  ['trigram table kept for digit words', { contactSearch: replaceOnce('&& !(digitWordsAvoidPhones && words.some(isDigitWord))', '') }],
+  ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (false && hasDigit(word))') }],
+  ['only an all-digit word is restricted (a mark or a letter glued to the digits escapes)', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))') }],
+  ['trigram table kept for digit words', { contactSearch: replaceOnce('&& !(digitWordsAvoidPhones && words.some(hasDigit))', '') }],
   ['whole-number branch without the digit comparison', { contactSearch: replaceOnce('(${open.sql} AND ${exact.sql})', '(${open.sql})') }],
   ['whole number threshold 8 -> 3 digits', { phoneSearchGuard: replaceOnce('export const FULL_NUMBER_MIN_DIGITS = 8', 'export const FULL_NUMBER_MIN_DIGITS = 3') }],
   ['mixed text and digits counts as a whole number', { phoneSearchGuard: (source) => replaceOnce("const digits = toAsciiDigits(words.join(''))", "const digits = toAsciiDigits(words.join('')).replace(/\\D/g, '')")(replaceOnce('if (!words.every(isDigitWord)) return PARTIAL_PROBE', '')(source)) }],

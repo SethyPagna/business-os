@@ -18,8 +18,10 @@ const sub = (needle, replacement) => (source) => {
 const MUTANTS = {
   'edit saves the mask it was shown': ['routes/contacts.ts', sub('if (Object.prototype.hasOwnProperty.call(payload, \'phone\')) payload.phone = resolvePhoneInput(payload.phone, storedPhones, current?.phone)', '')],
   'edit saves masked Contact Options': ['routes/contacts.ts', sub('payload.address = resolveAddressInput(payload.address, current, config.optionMode)', 'payload.address = payload.address')],
-  'mask matched against any stored number, first hit wins': ['lib/phoneMask.ts', (source) => sub("if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }", '')(sub('if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }', '')(source))],
-  'option mask resolved against all stored options': ['lib/phoneWriteGuard.ts', sub('resolvePhoneInput(option.phone, [], storedCounterpart(option, index, storedOptions)?.phone)', 'resolvePhoneInput(option.phone, storedOptions.map((stored) => stored.phone))')],
+  'mask matched against any stored number, first hit wins': ['lib/phoneMask.ts', (source) => sub("if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }", '')(sub('if (preferred != null && isMaskOf(text, preferred)) {', 'if (false) {')(source))],
+  'option mask resolved against all stored options': ['lib/phoneWriteGuard.ts', sub('resolvePhoneInput(option.phone, counterpart?.byPosition ? everyStored : [], counterpart?.phone, counterpart?.byPosition === true)', 'resolvePhoneInput(option.phone, storedOptions.map((stored) => stored.phone))')],
+  'position match trusted without a uniqueness check': ['lib/phoneWriteGuard.ts', sub('counterpart?.phone, counterpart?.byPosition === true)', 'counterpart?.phone, false)')],
+  'duplicate dismissal accepts a mask': ['routes/contacts.ts', (source) => source.replace(/(a dismissal no list ever shows\)\.\r?\n)\s*if \(isMaskedPhone\(value\)\) return [^\n]*\n/g, '$1')],
   'asterisk phone that is not a mask saved as typed': ['lib/phoneMask.ts', sub("if (!text.includes('*')) return { ok: true, phone: text }", 'if (!isMaskedPhone(text)) return { ok: true, phone: text }')],
   'create accepts a mask': ['routes/contacts.ts', sub('if (bodyHasMaskedPhone(payload)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)', '')],
   'resolver accepts a mask of another number': ['lib/phoneMask.ts', sub('export function isMaskOf(incoming: unknown, stored: unknown): boolean {', 'export function isMaskOf(incoming: unknown, stored: unknown): boolean {\n  return true')],
@@ -38,8 +40,9 @@ async function main() {
   const stored = () => world.first('SELECT name, phone, phone_normalized, address, notes FROM customers WHERE id = ?', ids.customer)
   const original = await stored()
   const originalPhones = phonesOfAddress(original.address)
+  let reads = 0
   const listRow = async (as) => {
-    const response = await world.api('GET', '/api/customers?search=Fixture%20Dara&page=1&pageSize=50', undefined, { as })
+    const response = await world.api('GET', `/api/customers?search=Fixture%20Dara&page=1&pageSize=50&cb=${++reads}`, undefined, { as })
     const rows = (response.json && (response.json.items || response.json.customers || response.json.data)) || []
     return rows.find((row) => Number(row.id) === ids.customer)
   }
@@ -88,28 +91,74 @@ async function main() {
     t.ok(`fixture created (status ${made.status})`, made.status === 201 || made.status === 200, made.text.slice(0, 200))
     const id = made.json.id
     const triplet = () => world.first('SELECT phone, address FROM customers WHERE id = ?', id)
-    const read = async () => ((await world.api('GET', '/api/customers?search=Triplet&page=1&pageSize=50', undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === id)
+    const read = async () => ((await world.api('GET', `/api/customers?search=Triplet&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === id)
     const row = await read()
     t.eq('all three numbers show the same mask', [row.phone, ...JSON.parse(row.address).map((option) => option.phone)], ['087 *** 321', '087 *** 321', '087 *** 321'])
-    const saved = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', notes: 'saved unchanged' }, { as: 'manager' })
+    const saved = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Triplet', notes: 'saved unchanged' }, { as: 'manager' })
     t.ok(`unchanged form: status ${saved.status}`, saved.status === 200, saved.text.slice(0, 300))
     const after = await triplet()
     t.eq('primary phone kept', digitsOf(after.phone), '087999321')
     t.eq('each option keeps its own number', phonesOfAddress(after.address), ['087111321', '087222321'])
     const options = JSON.parse(row.address)
-    const swapped = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([options[1], options[0]]) }, { as: 'manager' })
+    const swapped = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Triplet', address: JSON.stringify([options[1], options[0]]) }, { as: 'manager' })
     t.ok(`options sent in the other order: status ${swapped.status}`, swapped.status === 200, swapped.text.slice(0, 300))
     t.eq('a label follows its own number', JSON.parse((await triplet()).address).map((option) => [option.label, digitsOf(option.phone)]), [['Work', '087222321'], ['Home', '087111321']])
     const fresh = await triplet()
-    const extra = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([...options, { label: 'New', name: 'x', phone: '087 *** 321', email: null, address: null, area: null }]) }, { as: 'manager' })
+    const extra = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Triplet', address: JSON.stringify([...options, { label: 'New', name: 'x', phone: '087 *** 321', email: null, address: null, area: null }]) }, { as: 'manager' })
     t.eq('a new option whose mask fits two stored numbers is refused', extra.status, 400)
     t.eq('refusal code', extra.json && extra.json.code, 'masked_phone_input')
     t.eq('nothing written', await triplet(), fresh)
-    const typed = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([options[0], options[1], { label: 'New', name: 'x', phone: '087 333 321', email: null, address: null, area: null }]) }, { as: 'manager' })
+    const typed = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Triplet', address: JSON.stringify([options[0], options[1], { label: 'New', name: 'x', phone: '087 333 321', email: null, address: null, area: null }]) }, { as: 'manager' })
     t.ok(`a new option typed in full is saved (status ${typed.status})`, typed.status === 200, typed.text.slice(0, 200))
     t.eq('typed number kept beside the others', phonesOfAddress((await triplet()).address).slice().sort(), ['087111321', '087222321', '087333321'])
-    const hand = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([{ ...options[0], phone: '087 ** 321' }]) }, { as: 'manager' })
+    const hand = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Triplet', address: JSON.stringify([{ ...options[0], phone: '087 ** 321' }]) }, { as: 'manager' })
     t.eq('a hand-edited option mask is refused', hand.status, 400)
+  })
+
+  await check("edit: delete the first option and rename the survivor: the first option's number never moves onto it", async (t) => {
+    const options = (home, work) => optionJson([
+      { label: 'Home', name: 'Pair H', phone: home, email: null, address: 'Street 1', area: null },
+      { label: 'Work', name: 'Pair W', phone: work, email: null, address: 'Street 2', area: null },
+    ])
+    const made = await world.api('POST', '/api/customers', { name: 'Fixture Pair', phone: '090 123 456', address: options('012 345 678', '012 999 678') }, { as: 'admin' })
+    t.ok(`fixture created (status ${made.status})`, made.status === 200 || made.status === 201, made.text.slice(0, 200))
+    const id = made.json.id
+    const pair = () => world.first('SELECT phone, address FROM customers WHERE id = ?', id)
+    const read = async () => ((await world.api('GET', `/api/customers?search=Fixture%20Pair&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === id)
+    const shown = JSON.parse((await read()).address)
+    t.eq('both options show the same mask', shown.map((option) => option.phone), ['012 *** 678', '012 *** 678'])
+    const before = await pair()
+    const renamed = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Pair', address: JSON.stringify([{ ...shown[1], label: 'Cell' }]) }, { as: 'manager' })
+    t.eq('Home deleted, Work renamed Cell: refused (position 0 is Home, the mask fits two numbers)', renamed.status, 400)
+    t.eq('refusal code', renamed.json && renamed.json.code, 'masked_phone_input')
+    t.eq('nothing written', await pair(), before)
+    const kept = await world.api('PUT', `/api/customers/${id}`, { ...(await read()), name: 'Fixture Pair', address: JSON.stringify([shown[1]]) }, { as: 'manager' })
+    t.ok(`Home deleted, Work kept under its label: saved (status ${kept.status})`, kept.status === 200, kept.text.slice(0, 200))
+    t.eq('the survivor keeps its own number', JSON.parse((await pair()).address).map((option) => [option.label, digitsOf(option.phone)]), [['Work', '012999678']])
+    const solo = await world.api('POST', '/api/customers', { name: 'Fixture Solo', phone: '090 765 432', address: optionJson([{ label: 'Home', name: 'Solo', phone: '012 345 000', email: null, address: 'Street 3', area: null }]) }, { as: 'admin' })
+    const soloId = solo.json.id
+    const soloRow = ((await world.api('GET', `/api/customers?search=Fixture%20Solo&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === soloId)
+    const relabelled = await world.api('PUT', `/api/customers/${soloId}`, { ...soloRow, name: 'Fixture Solo', address: JSON.stringify([{ ...JSON.parse(soloRow.address)[0], label: 'Cell' }]) }, { as: 'manager' })
+    t.ok(`a rename whose mask no other stored number shares is saved (status ${relabelled.status})`, relabelled.status === 200, relabelled.text.slice(0, 200))
+    t.eq('and keeps the number', JSON.parse((await world.first('SELECT address FROM customers WHERE id = ?', soloId)).address).map((option) => [option.label, digitsOf(option.phone)]), [['Cell', '012345000']])
+  })
+
+  await check('duplicates: dismissing or undismissing a group by a masked value is refused and writes nothing', async (t) => {
+    const count = async () => (await world.first('SELECT COUNT(*) AS n FROM contact_duplicate_dismissals')).n
+    const before = await count()
+    for (const route of ['customers', 'suppliers', 'delivery-contacts']) {
+      for (const action of ['dismiss', 'undismiss']) {
+        for (const value of ['087 *** 321', '***']) {
+          const response = await world.api('POST', `/api/${route}/duplicates/${action}`, { type: 'phone', value }, { as: 'admin' })
+          t.eq(`${route} ${action} ${value}`, response.status, 400)
+          t.eq(`${route} ${action} ${value} code`, response.json && response.json.code, 'masked_phone_input')
+        }
+      }
+    }
+    t.eq('no dismissal row written', await count(), before)
+    const real = await world.api('POST', '/api/customers/duplicates/dismiss', { type: 'name', value: 'fixture twin' }, { as: 'admin' })
+    t.ok(`a real value still dismisses (status ${real.status})`, real.status === 200, real.text.slice(0, 160))
+    t.eq('one row for the real value', await count(), before + 1)
   })
 
   await check('edit: a number the person types is saved as typed (the mask guard only stops masks)', async (t) => {
@@ -137,12 +186,12 @@ async function main() {
 
   await check('edit: supplier and delivery contact masks resolve against their own record too', async (t) => {
     const supplierBefore = await world.first('SELECT phone FROM suppliers WHERE id = ?', ids.supplier)
-    const supplierRow = ((await world.api('GET', '/api/suppliers?search=Fixture&page=1&pageSize=50', undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === ids.supplier)
+    const supplierRow = ((await world.api('GET', `/api/suppliers?search=Fixture&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === ids.supplier)
     const supplier = await world.api('PUT', `/api/suppliers/${ids.supplier}`, { ...supplierRow, name: 'Fixture Supplies', notes: 'edited' }, { as: 'manager' })
     t.ok(`supplier status ${supplier.status}`, supplier.status === 200, supplier.text.slice(0, 200))
     t.eq('supplier phone unchanged', (await world.first('SELECT phone FROM suppliers WHERE id = ?', ids.supplier)).phone, supplierBefore.phone)
     const deliveryBefore = await world.first('SELECT phone FROM delivery_contacts WHERE id = ?', ids.delivery)
-    const deliveryRow = ((await world.api('GET', '/api/delivery-contacts?search=Fixture&page=1&pageSize=50', undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === ids.delivery)
+    const deliveryRow = ((await world.api('GET', `/api/delivery-contacts?search=Fixture&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === ids.delivery)
     const delivery = await world.api('PUT', `/api/delivery-contacts/${ids.delivery}`, { ...deliveryRow, name: 'Fixture Courier' }, { as: 'manager' })
     t.ok(`delivery status ${delivery.status}`, delivery.status === 200, delivery.text.slice(0, 200))
     t.eq('delivery phone unchanged', (await world.first('SELECT phone FROM delivery_contacts WHERE id = ?', ids.delivery)).phone, deliveryBefore.phone)

@@ -32,13 +32,21 @@ export function isDigitWord(word: string): boolean {
 }
 
 /**
+ * A search word that holds a decimal digit anywhere: "654", "654" + a combining mark the FTS tokenizer drops, "tel0876". An account
+ * without the grant never lets such a word reach a phone column; testing "all digits" instead left every word glued to a mark or a letter open.
+ */
+export function hasDigit(word: string): boolean {
+  return /\d/.test(toAsciiDigits(String(word)))
+}
+
+/**
  * What the typed search does to a hidden number: nothing, probes a fragment of it, or names a whole number. Decided on the
  * words the matcher searches. `plain` is a local-format number typed in ASCII digits: the contact FTS already finds it, so
  * the exact comparison only needs to run on the rows the FTS narrows to (a +855, 00855 or non-ASCII form has no such FTS hit).
  */
 export function phoneProbeOf(rawSearch: unknown): PhoneProbe {
   const words = tokenizeSearchWords(rawSearch)
-  if (!words.some(isDigitWord)) return NO_PROBE
+  if (!words.some(hasDigit)) return NO_PROBE
   if (!words.every(isDigitWord)) return PARTIAL_PROBE
   const digits = toAsciiDigits(words.join(''))
   if (digits.length < FULL_NUMBER_MIN_DIGITS || digits.length > FULL_NUMBER_MAX_DIGITS) return PARTIAL_PROBE

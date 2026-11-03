@@ -83,6 +83,8 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
   product_import_stock_adjust_required: ['lib/importEngine.ts', 'product_import_stock_adjust_required', 403],
   // 6.0.951: a changed default price without products:price. The Khmer is short on purpose (owner, 22 Oct): the essence, not a translation.
   product_price_edit_required: ['lib/productDiscountGate.ts', 'product_price_edit_required', 403],
+  // 6.0.1046: a phone that came back masked (the Worker's MASKED_PHONE_MESSAGE, word for word).
+  masked_phone_input: ['lib/phoneWriteGuard.ts', 'masked_phone_input', 400],
 }
 // idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
 // transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).

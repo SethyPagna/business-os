@@ -37,9 +37,9 @@ export function storedPhonesOf(record: PhoneBearingRecord, mode: ContactOptionMo
 }
 
 /** A phone field from a client: real values pass, a mask resolves to the stored number it hides, anything else throws. */
-export function resolvePhoneInput(incoming: unknown, stored: ReadonlyArray<unknown>, preferred?: unknown): string | null {
+export function resolvePhoneInput(incoming: unknown, stored: ReadonlyArray<unknown>, preferred?: unknown, requireUnique = false): string | null {
   if (incoming == null) return null
-  const resolved = resolveIncomingPhone(incoming, stored, preferred)
+  const resolved = resolveIncomingPhone(incoming, stored, preferred, requireUnique)
   if (!resolved.ok) throw new MaskedPhoneInputError()
   return resolved.phone
 }
@@ -49,10 +49,16 @@ const sameLabel = (left: unknown, right: unknown): boolean => {
   return a !== '' && a === String(right ?? '').trim().toLowerCase()
 }
 
-/** The stored option an incoming option edits: the one with its label when exactly one has it, else the one at its position. */
+/**
+ * The stored option an incoming option edits: the one with its label when exactly one has it, else the one at its position. A label
+ * identifies the option; a position does not (delete the first option and rename the survivor, and it now sits at position 0), so a
+ * position match is only trusted when the mask fits exactly one distinct stored number.
+ */
 function storedCounterpart(option: Record<string, unknown>, index: number, storedOptions: ReadonlyArray<{ label: string | null; phone: string | null }>) {
   const byLabel = storedOptions.filter((candidate) => sameLabel(candidate.label, option.label))
-  return byLabel.length === 1 ? byLabel[0] : storedOptions[index]
+  if (byLabel.length === 1) return { phone: byLabel[0].phone, byPosition: false }
+  const positional = storedOptions[index]
+  return positional ? { phone: positional.phone, byPosition: true } : null
 }
 
 /**
@@ -69,12 +75,14 @@ export function resolveAddressInput(incoming: unknown, stored: PhoneBearingRecor
   if (!Array.isArray(parsed)) return incoming
   let changed = false
   const storedOptions = parseStoredContactOptions(stored?.address, mode)
+  const everyStored = storedPhonesOf(stored, mode)
   const options = parsed.map((entry, index) => {
     if (!entry || typeof entry !== 'object') return entry
     const option = entry as Record<string, unknown>
     if (typeof option.phone !== 'string' || !option.phone.includes('*')) return entry
     changed = true
-    return { ...option, phone: resolvePhoneInput(option.phone, [], storedCounterpart(option, index, storedOptions)?.phone) }
+    const counterpart = storedCounterpart(option, index, storedOptions)
+    return { ...option, phone: resolvePhoneInput(option.phone, counterpart?.byPosition ? everyStored : [], counterpart?.phone, counterpart?.byPosition === true) }
   })
   if (!changed) return incoming
   return serializeContactOptions(options as Array<Record<string, unknown>>, mode) ?? incoming

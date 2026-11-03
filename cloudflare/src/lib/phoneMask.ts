@@ -122,9 +122,10 @@ export type MaskedPhoneResolution = { ok: true; phone: string | null } | { ok: f
  * refused so a mask can never be written over a real number. `preferred` is the stored number at the same place (the
  * primary phone, or the Contact Option with the same label or position): a mask that fits it is that number, even when
  * another stored number has the same first and last three digits. Without a preferred match the mask must fit exactly
- * ONE distinct stored number; two different numbers behind one mask are refused, never guessed.
+ * ONE distinct stored number; two different numbers behind one mask are refused, never guessed. `requireUnique` is for a `preferred`
+ * that was chosen only by position (its label did not identify it): the mask must then fit exactly one distinct stored number too.
  */
-export function resolveIncomingPhone(incoming: unknown, stored: ReadonlyArray<unknown>, preferred?: unknown): MaskedPhoneResolution {
+export function resolveIncomingPhone(incoming: unknown, stored: ReadonlyArray<unknown>, preferred?: unknown, requireUnique = false): MaskedPhoneResolution {
   if (incoming == null) return { ok: true, phone: null }
   const text = String(incoming)
   if (!text.includes('*')) return { ok: true, phone: text }
@@ -134,7 +135,12 @@ export function resolveIncomingPhone(incoming: unknown, stored: ReadonlyArray<un
     const unchanged = [preferred, ...stored].some((candidate) => candidate != null && String(candidate) === text)
     return unchanged ? { ok: true, phone: text } : { ok: false, reason: 'masked_no_match' }
   }
-  if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }
+  if (preferred != null && isMaskOf(text, preferred)) {
+    if (!requireUnique) return { ok: true, phone: String(preferred) }
+    const fitting = new Set(stored.filter((candidate) => isMaskOf(text, candidate)).map(phoneDigitsOf))
+    fitting.add(phoneDigitsOf(preferred))
+    return fitting.size === 1 ? { ok: true, phone: String(preferred) } : { ok: false, reason: 'masked_ambiguous' }
+  }
   const hits = new Map<string, string>()
   for (const candidate of stored) if (isMaskOf(text, candidate) && !hits.has(phoneDigitsOf(candidate))) hits.set(phoneDigitsOf(candidate), String(candidate))
   if (hits.size === 0) return { ok: false, reason: 'masked_no_match' }

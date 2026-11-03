@@ -1,5 +1,5 @@
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { isDigitWord, nameWithoutPhoneSql, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { hasDigit, nameWithoutPhoneSql, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -727,7 +727,7 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       const wordClauses = words.map((word) => {
         const keyBase = `rsrch${groupIndex}_${wordIndex}`
         wordIndex += 1
-        const flatClause = buildLikeAliasClause(word, [guardDigitWords && isDigitWord(word) ? digitWordHaystack : flatHaystack], params, `${keyBase}_f`, true)
+        const flatClause = buildLikeAliasClause(word, [guardDigitWords && hasDigit(word) ? digitWordHaystack : flatHaystack], params, `${keyBase}_f`, true)
         const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
         return `(${flatClause} OR EXISTS (
           SELECT 1 FROM return_items rii

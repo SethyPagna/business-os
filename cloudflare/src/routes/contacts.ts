@@ -1343,6 +1343,9 @@ function registerContactRoutes(config: ContactConfig) {
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
+    // A cluster is identified by its real value. An account without the full-phone permission only holds the mask, which names no cluster:
+    // nothing is written (it would be a dismissal no list ever shows).
+    if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
     const db = getDb(c.env)
     await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ ok: true })
@@ -1360,6 +1363,9 @@ function registerContactRoutes(config: ContactConfig) {
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
+    // A cluster is identified by its real value. An account without the full-phone permission only holds the mask, which names no cluster:
+    // nothing is written (it would be a dismissal no list ever shows).
+    if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
     const db = getDb(c.env)
     await undismissDuplicateCluster(db, config.table, type, value)
     return c.json({ ok: true })

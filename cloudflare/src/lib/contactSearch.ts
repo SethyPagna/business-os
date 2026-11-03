@@ -22,7 +22,7 @@
 // searchMatch.ts instead of duplicating it here.
 import { tokenizeSearchWords, expandAliasCandidatesForFts } from './searchMatch'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
-import { fullContactPhoneClause, isDigitWord, phoneProbeOf, phoneShapedSql, type PhoneSearchAccess } from './phoneSearchGuard'
+import { fullContactPhoneClause, hasDigit, phoneProbeOf, phoneShapedSql, type PhoneSearchAccess } from './phoneSearchGuard'
 
 export type ContactSearchTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -98,7 +98,7 @@ function buildOpenContactMatchClause(
       // expandAliasCandidates call here would silently reintroduce the
       // exact same never-matches-a-multi-word-target bug the moment any
       // multi-word alias ever does apply to a contact field.
-      if (digitWordsAvoidPhones && isDigitWord(word)) return `${NON_PHONE_COLUMNS[table]} : ${word}*`
+      if (digitWordsAvoidPhones && hasDigit(word)) return `${NON_PHONE_COLUMNS[table]} : ${word}*`
       const candidateForms = expandAliasCandidatesForFts(word)
       const candidateExprs = candidateForms.map((formWords) =>
         formWords.length > 1 ? `(${formWords.map((w) => `${w}*`).join(' AND ')})` : `${formWords[0]}*`,
@@ -112,14 +112,14 @@ function buildOpenContactMatchClause(
   // query at all, same "drop the whole group" rule
   // buildTrigramMatchExpression already uses rather than silently loosening
   // AND semantics by checking only the long words.
-  const trigramEligible = words.every((word) => word.length >= 3) && !(digitWordsAvoidPhones && words.some(isDigitWord))
+  const trigramEligible = words.every((word) => word.length >= 3) && !(digitWordsAvoidPhones && words.some(hasDigit))
 
   const params: Record<string, string> = {}
   const wordParam = `${paramPrefix}_word`
   params[wordParam] = wordExpr
   const wordMatch = `id IN (SELECT rowid FROM ${wordTable} WHERE ${wordTable} MATCH @${wordParam})`
   // A contact saved by its number has that number as its name, so a digit word may not read such a name either.
-  const clauses = [digitWordsAvoidPhones && words.some(isDigitWord) ? `(${wordMatch} AND NOT ${phoneShapedSql('name')})` : wordMatch]
+  const clauses = [digitWordsAvoidPhones && words.some(hasDigit) ? `(${wordMatch} AND NOT ${phoneShapedSql('name')})` : wordMatch]
 
   if (trigramEligible) {
     const phoneParam = `${paramPrefix}_phone`

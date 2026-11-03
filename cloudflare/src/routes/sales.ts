@@ -30,7 +30,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
-import { fullContactPhoneClause, fullPhoneColumnClause, isDigitWord, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -5895,7 +5895,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = boundSearchClause(word, !access.fullPhone && isDigitWord(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
+      const flatClause = boundSearchClause(word, !access.fullPhone && hasDigit(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
       const itemClause = boundSearchClause(word, itemHaystack, `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis

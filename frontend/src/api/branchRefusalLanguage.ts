@@ -14,6 +14,8 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   stock_schema_unavailable: 'stock_receipt_unavailable',
   stock_transaction_outcome_unknown: 'stock_request_outcome_unknown',
   loyalty_points_disabled: 'loyalty_points_disabled',
+  // A phone that came back masked (Contacts, sales, merge, duplicates): the Worker's sentence word for word (lib/phoneWriteGuard.ts).
+  masked_phone_input: 'masked_phone_input',
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
   stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',
   customer_return_over_plan_budget: 'customer_return_over_plan_budget',

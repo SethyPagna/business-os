@@ -202,6 +202,15 @@ function run(modules) {
     assert.deepEqual(out.phones, [MASKED, '098 *** 222'])
     assert.equal(out.matchedPhone, MASKED)
   })
+  check('a mask matched only by position must fit exactly one distinct stored number', () => {
+    const left = '012 345 678'
+    const right = '012 999 678'
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right], left, true), { ok: false, reason: 'masked_ambiguous' }, 'delete the first option, rename the survivor: the position now points at the wrong number')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right], left), { ok: true, phone: left }, 'identified by label: the preferred number stands')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left], left, true), { ok: true, phone: left }, 'a mask no other stored number shares is safe by position')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, '+855 12 345 678'], left, true), { ok: true, phone: left }, 'the same number written twice is one number')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [right], '099 111 222', true), { ok: true, phone: right }, 'a position number that does not fit falls back to the one stored number that does')
+  })
   check('a phone sent as a JSON number is masked; a count or an id under a phone key is not', () => {
     const out = access.projectPhones({ customer_phone: 12345678, driver_phone: 87654321, phones: [12345678, 87654321], phone: 855123456789, phone_count: 3, phones_total: 12, phone_id: 4021 }, cashier)
     assert.deepEqual(out, { customer_phone: '12 *** 78', driver_phone: '87 *** 21', phones: ['12 *** 78', '87 *** 21'], phone: '012 *** 789', phone_count: 3, phones_total: 12, phone_id: 4021 })
@@ -341,7 +350,8 @@ const mutants = {
   'only Khmer digits folded': { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'code >= 0x17e0 && code <= 0x17e9') },
   'an asterisk anywhere is a mask': { phoneMask: replaceOnce("&& MASK_SHAPE.test(toAsciiDigits(value).replace(/\\s+/g, ' ').trim())", '') },
   'ambiguous mask resolved to the first number': { phoneMask: replaceOnce("if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }", "if (false) return { ok: false, reason: 'masked_ambiguous' }") },
-  'number at the same place ignored': { phoneMask: replaceOnce('if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }', '') },
+  'number at the same place ignored': { phoneMask: replaceOnce('if (preferred != null && isMaskOf(text, preferred)) {', 'if (false) {') },
+  'position match trusted without a uniqueness check': { phoneMask: replaceOnce('if (!requireUnique) return { ok: true, phone: String(preferred) }', 'if (true) return { ok: true, phone: String(preferred) }') },
   'JSON number phones kept': { phoneAccess: replaceOnce("else if (typeof value === 'number' && !exempt && (kind & PHONE))", 'else if (false)') },
   'counts under a phone key masked': { phoneAccess: replaceOnce('Math.abs(value) >= PHONE_NUMBER_MIN', 'Math.abs(value) >= 0') },
   'typed phone value kept': { phoneAccess: replaceOnce("if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE", '') },

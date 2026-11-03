@@ -19,13 +19,15 @@ const RUNS = [
   ['crawl', 'cache-shared-key', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ['crawl', 'cache-stores-full-body', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ['crawl', 'cache-variant-ignores-grant', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
-  ...['sales digit words read the phone', 'sales digit words guarded only for a raw all-digit search', 'sales whole number not compared', 'sales number saved as a name readable', 'delivery picker matches phone fragments',
+  ...['sales digit words read the phone', 'sales digit words guarded only for a raw all-digit search', 'contacts only an all-digit word is guarded',
+    'sales whole number not compared', 'sales number saved as a name readable', 'delivery picker matches phone fragments',
     'returns digit words read the name', 'returns digit words guarded only for a raw all-digit search', 'audit search reads phone text', 'contacts search ignores the grant',
     'contacts digit words guarded only for a raw all-digit search', 'sales stats cache shared across grants', 'reports sales list matches the phone by substring',
     'reports sales export matches the phone by substring', 'reports returns search reads a numeric name', 'delivery picker reads a numeric courier name', 'non-ASCII digits are not folded'].map((name) => ['oracle', name, {}]),
   ...['edit saves the mask it was shown', 'edit saves masked Contact Options', 'create accepts a mask', 'resolver accepts a mask of another number',
     'merge accepts a masked custom phone', 'mask matched against any stored number, first hit wins', 'option mask resolved against all stored options',
-    'asterisk phone that is not a mask saved as typed'].map((name) => ['write', name, {}]),
+    'asterisk phone that is not a mask saved as typed', 'position match trusted without a uniqueness check',
+    'duplicate dismissal accepts a mask'].map((name) => ['write', name, {}]),
 ]
 const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs' }
 const PARALLEL = Math.max(1, Number(process.env.PHONE_MUTANT_PARALLEL) || 4)
