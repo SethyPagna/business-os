@@ -30,7 +30,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
-import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -5839,6 +5839,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // Without the full-phone permission a digit-only word (as the matcher reads it: accents folded, a letter o beside a digit read
   // as zero) never matches the customer's number (lib/phoneSearchGuard.ts); a whole number, in any form, matches by equality.
   const probe = phoneProbeOf(raw)
+  const wordsInSearch = groups.reduce((sum, words) => sum + words.length, 0)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
   // Keep one shallow haystack per row context. Passing every raw column to
@@ -5874,9 +5875,9 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   ])
 
   const searchBindings = new Map<string, string>()
-  const boundSearchClause = (word: string, haystack: string, keyBase: string): string => {
+  const boundSearchClause = (word: string, haystacks: readonly string[], keyBase: string): string => {
     const wordParams: Record<string, unknown> = {}
-    const clause = buildLikeAliasClause(word, [haystack], wordParams, keyBase, true)
+    const clause = buildLikeAliasClause(word, haystacks, wordParams, keyBase, true)
     return clause.replace(/@(\w+)/g, (_match, key: string) => {
       const value = wordParams[key] as string
       let sharedKey = searchBindings.get(value)
@@ -5895,8 +5896,8 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = boundSearchClause(word, !access.fullPhone && hasDigit(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
-      const itemClause = boundSearchClause(word, itemHaystack, `${keyBase}_i`)
+      const flatClause = boundSearchClause(word, !access.fullPhone && hasDigit(word) ? restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch) : [flatHaystack], `${keyBase}_f`)
+      const itemClause = boundSearchClause(word, [itemHaystack], `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
         LEFT JOIN products sip ON sip.id = sis.product_id

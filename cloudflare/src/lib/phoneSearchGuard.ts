@@ -11,7 +11,7 @@
 // beside a digit read as zero, punctuation dropped), never on the raw text: "654" followed by a combining accent and "o8765"
 // reach the matcher as the digit words 654 and 08765. A holder searches as before.
 import { isPhoneShaped, phoneDigitsOf, toAsciiDigits } from './phoneMask'
-import { tokenizeSearchWords } from './searchMatch'
+import { SEARCH_MAX_WORDS, tokenizeSearchWords } from './searchMatch'
 
 export type PhoneSearchAccess = { readonly fullPhone: boolean }
 
@@ -37,6 +37,22 @@ export function isDigitWord(word: string): boolean {
  */
 export function hasDigit(word: string): boolean {
   return /\d/.test(toAsciiDigits(String(word)))
+}
+
+/**
+ * The haystacks one restricted search word (it holds a digit, and the account lacks the grant) is matched against. `rawHaystack` is
+ * the caller's raw, NON-phone text (no phone column, no search_normalized). The matcher reads a letter o beside a digit as a zero
+ * ("No1" is searched as "n01") and a sale's or return's folded copy held that spelling, but the copy also holds the customer's
+ * digits, so this account does not read it and the word "n01" matched nothing in the raw "No1". A word that has a letter AND a
+ * zero (so it may have been typed with an o) therefore also reads `rawHaystack` with every o turned into 0: the same as trying the
+ * word with each of its zeros turned back into o. Built from `rawHaystack` alone, it cannot reach a phone column or the folded
+ * copy; a word with no letter (a digit fragment, however disguised: "o8765" is 08765) never gets it.
+ *
+ * The retry repeats the haystack text, and D1 refuses a statement over 100 KB: 48 such words measured 118 KB against 73 KB without the
+ * retry. A search of more than SEARCH_MAX_WORDS words in all (`wordsInSearch`; nobody types that) keeps the restricted search it had.
+ */
+export function restrictedWordHaystacks(word: string, rawHaystack: string, wordsInSearch: number): string[] {
+  return wordsInSearch <= SEARCH_MAX_WORDS && /\p{L}/u.test(word) && word.includes('0') ? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]
 }
 
 /**

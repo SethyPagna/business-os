@@ -19,12 +19,12 @@ const sub = (needle, replacement) => (source) => {
 // letter o, a joiner) escaped it although the matcher reads those words as digits.
 const RAW_DIGITS = '/^[\\d\\s+().-]+$/'
 const MUTANTS = {
-  'sales digit words read the phone': ['routes/sales.ts', sub("!access.fullPhone && hasDigit(word) ? flatHaystackWithoutPhones : flatHaystack", 'flatHaystack')],
+  'sales digit words read the phone': ['routes/sales.ts', sub("!access.fullPhone && hasDigit(word) ? restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch) : [flatHaystack]", '[flatHaystack]')],
   'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('!access.fullPhone && hasDigit(word) ?', `!access.fullPhone && ${RAW_DIGITS}.test(raw) && hasDigit(word) ?`)],
   'sales whole number not compared': ['routes/sales.ts', sub("if (probe.kind !== 'full') return searched", 'return searched')],
   'sales number saved as a name readable': ['routes/sales.ts', sub("nameWithoutPhoneSql('s.customer_name')", "\"COALESCE(s.customer_name, '')\"")],
   'delivery picker matches phone fragments': ['routes/sales.ts', sub("const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)", "const probe = ({ kind: 'none' } as const)")],
-  'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && hasDigit(word) ? digitWordHaystack : flatHaystack", 'flatHaystack')],
+  'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && hasDigit(word) ? restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch) : [flatHaystack]", '[flatHaystack]')],
   'contacts only an all-digit word is guarded': ['lib/contactSearch.ts', sub('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))')],
   'returns digit words guarded only for a raw all-digit search': ['routes/returns.ts', sub('const guardDigitWords = !access.fullPhone', `const guardDigitWords = !access.fullPhone && ${RAW_DIGITS}.test(search)`)],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
