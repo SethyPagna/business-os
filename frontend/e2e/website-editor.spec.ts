@@ -74,6 +74,17 @@ async function openSection(page: Page, id: string): Promise<void> {
   await expect(page.locator(`#portal-section-${id}`)).toBeVisible()
 }
 
+// Waits until the element stops moving. Scrolling a far field into view also slides the app's top header away, and a tap aimed before that
+// has finished lands on the field's neighbour (on WebKit it opened a help popover instead of the language list).
+async function settled(locator: Locator): Promise<void> {
+  await expect.poll(async () => {
+    const top = async () => Math.round((await locator.boundingBox())!.y)
+    const first = await top()
+    await locator.page().waitForTimeout(200)
+    return first === await top()
+  }, { message: 'the field has stopped moving' }).toBe(true)
+}
+
 // Save opens the review ("Save these changes?"); the write happens when it is confirmed.
 async function confirmReview(page: Page): Promise<void> {
   await expect(reviewDialog(page)).toBeVisible()
@@ -239,6 +250,7 @@ const PREVIEW_GRID_WIDTH = { width: 1280, height: 800 }
 
 async function chooseOption(page: Page, select: Locator, option: string): Promise<void> {
   await select.scrollIntoViewIfNeeded()
+  await settled(select)
   await select.click()
   await page.getByRole('option', { name: option, exact: true }).click()
 }
@@ -303,6 +315,8 @@ test.describe('Website Editor fixes (ED-0)', () => {
     await openSection(page, 'faq')
     await expect(page.locator('label[for="portal-faq-title"]')).toHaveText('ចំណងជើង')
     await openSection(page, 'features')
+    await page.locator('#portal-language').scrollIntoViewIfNeeded()
+    await settled(page.locator('#portal-language'))
     await page.locator('#portal-language').click()
     await expect(page.getByRole('option').first()).toHaveText('អង់គ្លេស (លំនាំដើម)')
     await page.keyboard.press('Escape')
@@ -465,6 +479,7 @@ test.describe('Website Editor fixes (ED-0)', () => {
     await chooseOption(page, editor(page).locator('[id^="portal-promo-link-type-"]').nth(1), 'A product')
     const picker = editor(page).locator('[id^="portal-promo-product-"]').nth(1)
     await picker.scrollIntoViewIfNeeded()
+    await settled(picker)
     await picker.click()
     const product = page.getByRole('option').nth(1)
     await expect(product).toBeVisible()
