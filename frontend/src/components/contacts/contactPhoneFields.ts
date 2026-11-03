@@ -32,6 +32,24 @@ export function untouchedPhoneFields(baseline: PhoneFields, current: PhoneFields
   }
 }
 
+// What an account without "See full phone numbers" is shown for a number: `012 *** 678` (lib/phoneMask.ts). Its edit snapshot holds the mask, not the number.
+const SHOWN_MASK = /\*\*\*/
+
+/**
+ * True when UNDOING this edit would have to put back a phone the editor could not see (P2.8-F N1, 3 Nov 2026). The undo replays the
+ * snapshot taken before the edit, and an account without the grant took it from a masked list, so the field it would replay is the
+ * mask. The Worker reads a mask as "the number you already hold": it would answer 200 and keep the NEW number (or refuse when the new
+ * number has a different mask). Undo is refused up front instead, with a reason, and nothing is written. A field the edit did not
+ * touch is not replayed (withoutUntouchedPhoneFields), and a holder's snapshot has real numbers, so neither case is refused.
+ */
+export const UNDO_PHONE_HIDDEN_FALLBACK = 'Undo was refused: this edit changed a phone number you cannot see, and the old number cannot be put back from here. Nothing was changed.'
+
+export function undoNeedsHiddenPhone(before: object, untouched: UntouchedPhoneFields | null | undefined): boolean {
+  if (!untouched) return false
+  const { phone, address } = before as PhoneFields
+  return (!untouched.phone && SHOWN_MASK.test(phoneText(phone))) || (!untouched.address && SHOWN_MASK.test(String(address ?? '')))
+}
+
 /** `payload` without the phone fields the edit did not touch. Use it on an UPDATE only: a create needs every field. */
 export function withoutUntouchedPhoneFields<T extends object>(payload: T, untouched: UntouchedPhoneFields | null | undefined): T {
   if (!untouched || (!untouched.phone && !untouched.address)) return payload

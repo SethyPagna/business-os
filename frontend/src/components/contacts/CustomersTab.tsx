@@ -42,7 +42,7 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { ALL_PHONE_FIELDS_SENT, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
 import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
@@ -812,9 +812,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched)
         actionHistory.pushAction({
           label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr(t, 'contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => {
             const restoreResult = await runCustomerMutation(
               () => getCustomerApi().updateCustomer(existingSnapshot.id, withoutUntouchedPhoneFields(buildCustomerPayload(existingSnapshot), untouched)),
               'Undo customer edit',

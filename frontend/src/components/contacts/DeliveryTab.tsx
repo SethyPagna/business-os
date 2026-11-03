@@ -52,7 +52,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { ALL_PHONE_FIELDS_SENT, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
 const DeliveryContactReportModal = lazyRetry(() => import('./DeliveryContactReportModal'), 'delivery-contact-report')
@@ -898,9 +898,11 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       if (res?.success === false) { notify(res.error||'Failed', 'error'); return }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched)
         actionHistory.pushAction({
           label: `Edit delivery contact ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => {
             const restoreResult = await runDeliveryMutation(
               () => getDeliveryApi().updateDeliveryContact(existingSnapshot.id, withoutUntouchedPhoneFields(buildDeliveryPayload(existingSnapshot), untouched)),
               'Undo delivery contact edit',

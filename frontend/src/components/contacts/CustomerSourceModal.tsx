@@ -6,13 +6,13 @@ import { getCustomerIdentityById, invalidateCustomerReadCache } from '../../api/
 import { createCustomer, updateCustomer } from '../../api/contactWriteTransport.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { buildCustomerSourcePayload, customerSourceRestorePayload, type CustomerSource } from './customerSource.ts'
-import { withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type CustomerRow = Record<string, unknown> & { id?: number | string; name?: string; updated_at?: string }
 
 export type CustomerSourceSaved = { before: CustomerRow | null; record: CustomerRow }
-export type CustomerSourceHistoryAction = { label: string; undo: () => Promise<void>; redo: () => Promise<void> }
+export type CustomerSourceHistoryAction = { label: string; undo: () => Promise<void> | void; redo: () => Promise<void>; undoRefused?: boolean }
 
 function firstRow(data: unknown, id: number | string): CustomerRow | null {
   const rows = Array.isArray(data) ? data : Array.isArray((data as { items?: unknown } | null)?.items) ? (data as { items: unknown[] }).items : []
@@ -95,9 +95,11 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
       if (editing && loaded && pushAction) {
         const before = loaded
         const after = { ...before, ...record }
+        const undoBlocked = undoNeedsHiddenPhone(before, untouched)
         pushAction({
           label: `${tr(t, 'edit_customer', 'Edit Customer')} ${String(before.name || '')}`.trim(),
-          undo: async () => { await updateCustomer(before.id as number | string, withoutUntouchedPhoneFields(customerSourceRestorePayload(before, source), untouched)); invalidateCustomerReadCache() },
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr(t, 'contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => { await updateCustomer(before.id as number | string, withoutUntouchedPhoneFields(customerSourceRestorePayload(before, source), untouched)); invalidateCustomerReadCache() },
           redo: async () => { await updateCustomer(after.id as number | string, withoutUntouchedPhoneFields(customerSourceRestorePayload(after, source), untouched)); invalidateCustomerReadCache() },
         })
       }

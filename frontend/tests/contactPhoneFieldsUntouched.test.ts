@@ -13,7 +13,7 @@
 // Run: node tests/contactPhoneFieldsUntouched.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { ALL_PHONE_FIELDS_SENT, untouchedPhoneFields, withoutUntouchedPhoneFields } from '../src/components/contacts/contactPhoneFields.ts'
+import { ALL_PHONE_FIELDS_SENT, undoNeedsHiddenPhone, untouchedPhoneFields, withoutUntouchedPhoneFields } from '../src/components/contacts/contactPhoneFields.ts'
 import { serializeContactOptions } from '../src/components/contacts/contactOptionUtils.ts'
 
 const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -131,3 +131,37 @@ assert.match(worker, /if \(Object\.prototype\.hasOwnProperty\.call\(payload, 'ph
 assert.match(worker, /if \(Object\.prototype\.hasOwnProperty\.call\(payload, 'address'\)\) payload\.address = resolveAddressInput\(/, 'Contact Options that were not sent are not resolved')
 assert.match(worker, /const effectivePhone = Object\.prototype\.hasOwnProperty\.call\(payload, 'phone'\) \? payload\.phone : current\.phone/, 'the duplicate check reads the stored phone when none was sent')
 console.log('PASS the Worker leaves a phone field it was not sent as it is stored')
+
+// ---- Part 4 (N1): an undo that would put back a number the editor could not see is refused, never faked -----------------------------
+// The snapshot an account without the grant holds is the list row it was shown: the mask. The Worker reads a mask as "the number you
+// already hold", so replaying it answers 200 and keeps the NEW number when the two share their first and last three digits (the
+// review's probe 8). The undo is refused with a reason and writes nothing; a holder's snapshot has real numbers and still undoes.
+{
+  const maskedBefore = { phone: '012 *** 678', address: serializeContactOptions([{ label: 'Shop', name: 'Dara', phone: '098 *** 222', email: '', address: '', area: '' }]) }
+  const realBefore = { phone: '012 345 678', address: serializeContactOptions([{ label: 'Shop', name: 'Dara', phone: '098 111 222', email: '', address: '', area: '' }]) }
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, { phone: false, address: true }), true, 'the phone was changed and the snapshot holds its mask: refused')
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, { phone: true, address: false }), true, 'the Contact Options were changed and the snapshot holds their masks: refused')
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, { phone: false, address: false }), true)
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, { phone: true, address: true }), false, 'a notes-only edit replays no phone field: undo works')
+  assert.equal(undoNeedsHiddenPhone(realBefore, { phone: false, address: false }), false, 'a holder\'s snapshot has the real numbers: undo works')
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, ALL_PHONE_FIELDS_SENT), true)
+  assert.equal(undoNeedsHiddenPhone({ phone: '', address: '' }, { phone: false, address: false }), false, 'nothing was hidden: undo works')
+  assert.equal(undoNeedsHiddenPhone(maskedBefore, null), false, 'no information about an edit: nothing to refuse')
+  console.log('PASS undo is refused only when it would have to replay a mask over a changed phone field')
+}
+for (const [file, call] of [
+  ['../src/components/contacts/CustomersTab.tsx', 'undoNeedsHiddenPhone(existingSnapshot, untouched)'],
+  ['../src/components/contacts/SuppliersTab.tsx', 'undoNeedsHiddenPhone(existingSnapshot, untouched)'],
+  ['../src/components/contacts/DeliveryTab.tsx', 'undoNeedsHiddenPhone(existingSnapshot, untouched)'],
+  ['../src/components/contacts/CustomerSourceModal.tsx', 'undoNeedsHiddenPhone(before, untouched)'],
+] as const) {
+  const source = read(file)
+  assert.ok(source.includes(call), `${file}: the edit's undo asks whether it would replay a hidden number`)
+  assert.ok(source.includes('undoRefused: undoBlocked,'), `${file}: a refused undo is marked so that it never moves between stacks or marks the row failed`)
+  assert.ok(/undo: undoBlocked \? \(\) => \{ throw new Error\(tr\((t, )?'contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK\)\) \} : async \(\) => \{/.test(source), `${file}: the refusal says why, in the viewer's language`)
+}
+for (const pack of ['en', 'km']) {
+  const strings = JSON.parse(read(`../src/lang/${pack}.json`)) as Record<string, string>
+  assert.ok(typeof strings.contact_undo_phone_hidden === 'string' && strings.contact_undo_phone_hidden.length > 20, `${pack}: the refusal is translated`)
+}
+console.log('PASS the four edit sites refuse the undo with a translated reason (en and km)')

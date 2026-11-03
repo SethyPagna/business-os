@@ -53,7 +53,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
-import { ALL_PHONE_FIELDS_SENT, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
@@ -917,9 +917,11 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       }
       if (useUpdate && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: (selected as { id: number | string }).id })
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched)
         actionHistory.pushAction({
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => {
             const restoreResult = await runSupplierMutation(
               () => getSupplierApi().updateSupplier(existingSnapshot.id, withoutUntouchedPhoneFields(buildSupplierPayload(existingSnapshot), untouched)),
               'Undo supplier edit',
