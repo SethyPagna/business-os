@@ -112,11 +112,8 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // enough that a doubling -- the kind of regression a raw "under 1.85MB"
 // ceiling would miss for a long time -- fails immediately.
 // Re-measured 6.0.303: portalMotion.ts joined catalog-public-core (6.0.187) and the closure was already 19 bytes under the old limit.
-// Re-measured 6.0.1194 (MONEY-1): the lane base 6af0d3b49 measured 973,289 bytes / 31 chunks, 119 bytes and 0 chunks under the limit. The riel-cash
-// rule reaches the storefront through the api layer (api/shiftTransport.ts -> utils/saleStatusResolution.ts, the 5,443-byte money-core chunk),
-// and displayed money / price rounding grew pricing-utils, app-context-core, app-shared and app-api-methods by ~1.9 KB: 980,719 bytes / 32 chunks.
-const CATALOG_PRODUCTS_BASELINE_BYTES = 980_719
-const CATALOG_PRODUCTS_BASELINE_CHUNKS = 32
+const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
+const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
 
