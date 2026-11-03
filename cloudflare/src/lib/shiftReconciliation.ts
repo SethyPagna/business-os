@@ -88,9 +88,10 @@ function refundCashUsdSql(alias: string): string {
 export function refundDrawerUsdSql(alias: string): string {
   return `(CASE WHEN ${alias}.refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
 }
+/** A riel refund's cash share, rounded DOWN to whole 100-riel notes (owner, 21 and 27 Oct 2026; rielCashFloor). */
 export function refundDrawerKhrSql(alias: string): string {
   return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
-    THEN ROUND(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd) ELSE 0 END)`
+    THEN MAX(0, CAST(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd / 100 + 1e-9 AS INTEGER)) * 100 ELSE 0 END)`
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100

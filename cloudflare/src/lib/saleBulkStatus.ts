@@ -15,7 +15,7 @@ import { BranchEffectResolver, branchEffectGuardPredicate, branchEffectRefusal, 
 import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
-import { returnSaleAwaitsPayment, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type SaleStoredState } from './saleStatusResolution';
+import { returnSaleAwaitsPayment, RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, saleStoredState, statusChangeNeedsPayment, sumRefundsUsd, type SaleStoredState } from './saleStatusResolution';
 import { returnDebtLoweredSql } from './returnRefundSplit';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
@@ -361,6 +361,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row,
             fail('Request id was already used with different data.');
         return JSON.parse(String(previous.receipt_json));
     }
+    // A lost fee is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026). Asked after the receipt
+    // lookup, so a group committed before the rule still replays its receipt.
+    const rielFee = request.items.find(item => item.cancel && !rielCashAmountValid(Math.round(Number(item.cancel.fee_khr) || 0)));
+    if (rielFee)
+        throw new SaleBulkError('Riel paid in cash must be whole 100 riel notes.', 400, { code: RIEL_CASH_NOT_HUNDREDS, sale_ids: [rielFee.id] });
     const ids = request.items.map(i => i.id);
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before

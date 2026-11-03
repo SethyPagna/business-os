@@ -126,6 +126,7 @@ const route = loadReal('routes/fees.ts', {
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-11' },
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   '../lib/telegram': {
     sendTelegramEvent: async (...args) => { telegrams.push(args) },
     telegramMoney: () => '$2.50',
@@ -267,11 +268,11 @@ async function main() {
   assert.equal(broadcasts.length, 2, 'only the two distinct commits broadcast')
   assert.equal(telegrams.length, 2, 'only the two distinct commits send notifications')
 
-  const v1 = { ...normalBody, fee_money_version: 1, client_request_id: 'fee-money-v1-0001', amount_usd: '1.005', amount_khr: '20.5' }
+  const v1 = { ...normalBody, fee_money_version: 1, client_request_id: 'fee-money-v1-0001', amount_usd: '1.005', amount_khr: '2099.5' }
   const fresh = await create(v1)
   assert.equal(fresh.status, 201, JSON.stringify(fresh.body))
   assert.equal(fresh.body.fee.amount_usd, 1.01)
-  assert.equal(fresh.body.fee.amount_khr, 21)
+  assert.equal(fresh.body.fee.amount_khr, 2100)
   const once = counts()
   // Lost acknowledgement / double submit returns the same original receipt.
   for (const result of await Promise.all([create(v1), create(v1)])) {
@@ -279,7 +280,7 @@ async function main() {
     assert.deepEqual(result.body, fresh.body)
   }
   assert.deepEqual(counts(), once)
-  const versionConflict = await create({ ...v1, fee_money_version: undefined, amount_usd: 1.01, amount_khr: 21 })
+  const versionConflict = await create({ ...v1, fee_money_version: undefined, amount_usd: 1.01, amount_khr: 2100 })
   assert.equal(versionConflict.status, 409)
   assert.equal(versionConflict.body.code, 'idempotency_conflict')
   assert.deepEqual(counts(), once)
@@ -293,15 +294,23 @@ async function main() {
     assert.equal(result.body.code, 'invalid_fee_money')
     assert.deepEqual(counts(), once)
   }
-  const onlyKhr = { ...v1, client_request_id: 'fee-money-khr-only-0001', amount_usd: undefined, amount_khr: '20.499999' }
+  const onlyKhr = { ...v1, client_request_id: 'fee-money-khr-only-0001', amount_usd: undefined, amount_khr: '2000.499999' }
   const khr = await create(onlyKhr)
   assert.equal(khr.status, 201)
   assert.equal(khr.body.fee.amount_usd, 0)
-  assert.equal(khr.body.fee.amount_khr, 20)
-  const old = { ...normalBody, client_request_id: 'fee-legacy-fraction-0001', amount_khr: 20.49 }
+  assert.equal(khr.body.fee.amount_khr, 2000)
+  // Riel paid out of the drawer is whole 100-riel notes (owner, 27 Oct 2026): 20.499999 rounds to 20 riel and is refused.
+  const notHundreds = await create({ ...onlyKhr, client_request_id: 'fee-money-khr-tens-0001', amount_khr: '20.499999' })
+  assert.equal(notHundreds.status, 400)
+  assert.equal(notHundreds.body.code, 'riel_cash_not_hundreds')
+  // A legacy (unversioned) create keeps its 2-decimal admission; its riel must still be whole notes.
+  const oldTens = await create({ ...normalBody, client_request_id: 'fee-legacy-fraction-tens-0001', amount_khr: 20.49 })
+  assert.equal(oldTens.body.code, 'riel_cash_not_hundreds')
+  const old = { ...normalBody, client_request_id: 'fee-legacy-fraction-0001', amount_khr: 2000 }
   const oldCreated = await create(old)
   assert.equal(oldCreated.status, 201, 'uncommitted old requests retain admission')
-  assert.equal(oldCreated.body.fee.amount_khr, 20.49)
+  assert.equal(oldCreated.body.fee.amount_usd, 2.5)
+  assert.equal(oldCreated.body.fee.amount_khr, 2000)
   const stored = raw.prepare('SELECT request_json FROM fee_operation_receipts WHERE request_id=?').get(old.client_request_id).request_json
   assert.equal(stored, JSON.stringify({ fee_type: old.fee_type, label: old.label, amount_usd: old.amount_usd,
     amount_khr: old.amount_khr, fee_date: old.fee_date, sale_id: old.sale_id, branch_id: old.branch_id,
