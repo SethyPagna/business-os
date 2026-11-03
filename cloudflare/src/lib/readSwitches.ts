@@ -3,7 +3,7 @@ import { recordAnalytics } from './analytics'
 import type { Env } from '../index'
 
 // Stand-in for P0.3's lib/readSwitches.ts, which is not on this base. Same names, same stored row, same lazy 15 s memo;
-// the reconciler replaces this file with P0.3's and adds `report_atomic` and `report_atomic_long` to its KNOWN_READ_SWITCHES.
+// the reconciler replaces this file with P0.3's and adds `report_atomic`, `report_atomic_long` and `expense_reads` to its KNOWN_READ_SWITCHES.
 // A name that is absent, unknown or unreadable is OFF, and OFF is the exact pre-optimization code path.
 // Only the parsed value is kept between requests: a promise begun by one request is never awaited by another, so every caller that
 // finds the memo stale reads the row itself.
@@ -11,7 +11,7 @@ export const READ_SWITCH_KEY = 'read_switches'
 export const DATA_EPOCH_KEY = 'data_epoch'
 export const SWITCH_ROWS_SQL = 'SELECT key, value FROM system_flags WHERE key IN (@switches, @epoch)'
 export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH_KEY }
-export const KNOWN_READ_SWITCHES = ['report_atomic', 'report_atomic_long'] as const
+export const KNOWN_READ_SWITCHES = ['report_atomic', 'report_atomic_long', 'expense_reads'] as const
 export const READ_SWITCH_MEMO_MS = 15_000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1
 

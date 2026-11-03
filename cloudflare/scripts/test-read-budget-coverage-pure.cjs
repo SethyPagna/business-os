@@ -94,7 +94,7 @@ async function main() {
   })
 
   await check('the read switches the GET shapes are measured with name a known switch and state, and the gate says what that certifies', () => {
-    const KNOWN = { report_atomic: ['on'], report_atomic_long: ['on'] }
+    const KNOWN = { report_atomic: ['on'], report_atomic_long: ['on'], expense_reads: ['on'] }
     const switches = budgets.switches || {}
     for (const [name, state] of Object.entries(switches)) assert.ok(KNOWN[name] && KNOWN[name].includes(state), `unknown switch or state ${name}=${state}`)
     for (const s of shapes) assert.ok(!('switches' in s), `${s.id}: switches are stored once for the whole GET pass (budgets.json "switches"), not per shape`)

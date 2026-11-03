@@ -58,6 +58,8 @@ export type FeeListResult = {
   summary: FeeSummaryRow[]
   /** Present only while the Worker's sale-rows switch is on: the courier cost on sales for the filtered window, or null when the caller may not read it. */
   sale_delivery?: SaleDeliveryTotals | null
+  /** Present only on a page served by cursor (the Worker's `expense_reads` switch is on): the position of the next page, null after the last. */
+  next_cursor?: string | null
 }
 
 export type FeeListParams = {
@@ -441,13 +443,22 @@ export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
 
 // Fetch EVERY expense record matching the given filters (for CSV export),
 // paginating past the server's 500-row cap (routes/fees.ts clamps limit to
-// 500). Two deliberate choices keep the result complete and correct:
+// 500). Deliberate choices keep the result complete and correct:
 //   - It calls apiFetch directly rather than filling the interactive list's
 //     short-lived route cache with every export page. apiFetch's GET de-dupe
 //     key includes the offset in the path, so every page is distinct.
-//   - The loop is driven by the server's reported `total`, so it stops exactly
-//     when every matching row has been gathered and never truncates a real
-//     set; a page ceiling derived from that same total guards against a
+//   - It asks for cursor paging (`cursor=start`). A Worker with the read
+//     switch `expense_reads` on answers with `next_cursor` and each page reads
+//     only its own rows; the export is then driven by that cursor, whose first
+//     page also fixes the rows the export covers, so a row created mid-export is
+//     in no page. A Worker with the switch off ignores the parameter and the
+//     export pages by `offset` as before.
+//   - `offset` (the rows gathered so far) rides on every request, cursor or not,
+//     so a switch turned off mid-export makes the next page an offset page that
+//     continues where the cursor stopped: no row twice, none skipped.
+//   - The offset loop is driven by the server's reported `total`, so it stops
+//     exactly when every matching row has been gathered and never truncates a
+//     real set. A page with no rows ends either loop, which guards against a
 //     malformed response spinning forever.
 export async function getAllFeesForExport(
   params: Omit<FeeListParams, 'limit' | 'offset'> = {},
@@ -455,23 +466,25 @@ export async function getAllFeesForExport(
 ): Promise<FeeRecord[]> {
   const PAGE = 500
   const all: FeeRecord[] = []
-  let offset = 0
+  let cursor: string | null = 'start'
   let total = 0
-  let pagesRemaining = 1
-  do {
-    const query = buildQueryString({ ...params, limit: PAGE, offset } as QueryParams)
+  for (;;) {
+    const query = buildQueryString({ ...params, limit: PAGE, offset: all.length, ...(cursor ? { cursor } : {}) } as QueryParams)
     const result = (await apiFetch('GET', appendQuery('/api/fees', query))) as FeeListResult | null
     const rows = Array.isArray(result?.fees) ? result!.fees : []
-    if (offset === 0) {
-      total = Number(result?.total) || rows.length
-      pagesRemaining = Math.max(1, Math.ceil(total / PAGE))
-    }
+    if (all.length === 0) total = Number(result?.total) || rows.length
     all.push(...rows)
     onProgress?.(all.length, total)
-    offset += PAGE
-    pagesRemaining -= 1
-    if (rows.length < PAGE) break // server ran out early -- nothing more to page
-  } while (all.length < total && pagesRemaining > 0)
+    if (rows.length === 0) break
+    if (result && result.next_cursor !== undefined) {
+      // Served by cursor: the Worker says whether another page follows.
+      if (!result.next_cursor || result.next_cursor === cursor) break
+      cursor = result.next_cursor
+      continue
+    }
+    cursor = null
+    if (rows.length < PAGE || all.length >= total) break // server ran out -- nothing more to page
+  }
   return all
 }
 

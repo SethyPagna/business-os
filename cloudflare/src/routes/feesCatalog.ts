@@ -9,6 +9,8 @@ import { whereActiveSales, type SalesFilters } from '../lib/salesAnalytics'
 import { courierPayoutExpressions } from '../lib/shiftReconciliation'
 import { localDateExpr } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { decodeFeeCursor, encodeFeeCursor, expenseReadsOn, type FeeExportCursor } from '../lib/expenseReads'
+import { getPlanLimits } from '../lib/planTier'
 import {
   FEE_TYPES,
   collapseFeeName,
@@ -576,6 +578,8 @@ type SaleDeliveryRow = {
   delivery_contact_name: string | null
   amount_usd: number
   amount_khr: number
+  /** datetime(created_at): present only on the keyed statement (the export cursor's middle sort key). */
+  dt?: string
 }
 
 export type SaleScope = { sql: string; params: Record<string, unknown> }
@@ -651,10 +655,11 @@ async function saleDeliveryTotals(db: Db, scope: SaleScope): Promise<{ count: nu
   return { count: Number(row?.count || 0), usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
 }
 
-export function saleDeliveryRowsSql(scope: SaleScope): string {
+/** `keyed` adds the normalized entry time (`dt`), the middle part of the list's order and of the export cursor's sale key. Off, the text is the 6.0.1053 statement. */
+export function saleDeliveryRowsSql(scope: SaleScope, keyed = false): string {
   const expressions = courierPayoutExpressions()
   return `
-    SELECT sales.id, sales.receipt_number, sales.created_at, ${localDateExpr('sales.created_at')} AS d, sales.branch_id,
+    SELECT sales.id, sales.receipt_number, sales.created_at, ${localDateExpr('sales.created_at')} AS d, sales.branch_id,${keyed ? ' datetime(sales.created_at) AS dt,' : ''}
       COALESCE(NULLIF(TRIM(sales.branch_name), ''), b.name) AS branch_name,
       sales.delivery_contact_id, NULLIF(TRIM(sales.delivery_contact_name), '') AS delivery_contact_name,
       ${expressions.usd} AS amount_usd, ${expressions.khr} AS amount_khr
@@ -666,8 +671,30 @@ export function saleDeliveryRowsSql(scope: SaleScope): string {
   `
 }
 
-async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number): Promise<SaleDeliveryRow[]> {
-  return (await db.prepare(saleDeliveryRowsSql(scope)).all<SaleDeliveryRow>({ ...scope.params, saleLimit: limit })) || []
+async function saleDeliveryRows(db: Db, scope: SaleScope, limit: number, keyed = false): Promise<SaleDeliveryRow[]> {
+  return (await db.prepare(saleDeliveryRowsSql(scope, keyed)).all<SaleDeliveryRow>({ ...scope.params, saleLimit: limit })) || []
+}
+
+/**
+ * The next `limit` sale rows below the cursor's sale key (the list's order is day, entry time, id, all descending), reading about 2 x limit sale rows
+ * however far into the list the cursor is. The order is not an index order: entry times come in two spellings ('YYYY-MM-DD HH:MM:SS' and ISO
+ * 'T..Z') that interleave on one day, so idx_sales_courier_cost (created_at) cannot serve it. A cheap probe walks that index in raw order for `limit`
+ * rows; every row of the next `limit` in list order lies on the probe's last day or later (it has fewer than `limit` rows ahead of it otherwise),
+ * so the ordered statement only needs the rows from the day before that. No cursor = the head of the list.
+ */
+async function saleDeliveryRowsAfter(db: Db, scope: SaleScope, after: [string, string, number] | null, limit: number): Promise<SaleDeliveryRow[]> {
+  const bounded: SaleScope = after ? {
+    sql: `${scope.sql} AND sales.created_at < date(@afterDay, '+1 day') AND (${localDateExpr('sales.created_at')} < @afterDay
+      OR (${localDateExpr('sales.created_at')} = @afterDay AND (datetime(sales.created_at) < @afterAt OR (datetime(sales.created_at) = @afterAt AND sales.id < @afterId))))`,
+    params: { ...scope.params, afterDay: after[0], afterAt: after[1], afterId: after[2] },
+  } : scope
+  const probe = await db.prepare(`SELECT sales.created_at AS created_at FROM sales WHERE ${bounded.sql} ORDER BY sales.created_at DESC LIMIT @probeLimit`)
+    .all<{ created_at: string }>({ ...bounded.params, probeLimit: limit })
+  const day = String(probe?.[limit - 1]?.created_at || '').slice(0, 10)
+  const floored: SaleScope = /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(`${day}T00:00:00Z`))
+    ? { sql: `${bounded.sql} AND sales.created_at >= date(@probeDay, '-1 day')`, params: { ...bounded.params, probeDay: day } }
+    : bounded
+  return saleDeliveryRows(db, floored, limit, true)
 }
 
 const saleRowOut = (row: SaleDeliveryRow) => ({
@@ -716,6 +743,59 @@ export function mergeExpenseRows(expenses: MergeRow[], sales: MergeRow[]): Merge
   return out
 }
 
+const highestId = async (db: Db, table: 'fees' | 'sales'): Promise<number> =>
+  Number((await db.prepare(`SELECT MAX(id) AS id FROM ${table}`).get<{ id: number | null }>())?.id || 0)
+
+/**
+ * One page of the export by cursor (read switch `expense_reads`; `cursor=start` asks for the first). The order is the merge's, unchanged: between the two
+ * lists the later booked day goes first, then the later entry time, and an expense goes before a sale row on an exact tie; inside a list its own key
+ * decides (expenses: fee_date, id; sale rows: day, normalized entry time, id; all descending), so rows with the same timestamp are ordered by id and never
+ * reshuffled between pages. The merge above takes its next rows from the heads of the
+ * two lists, so the page after one that served i expenses and j sale rows is the merge of the next `limit` rows of each list below the last row served from
+ * it: the same rows offset i + j would give, read without reading the i + j rows before them. One row more than the page is read from each list to know
+ * whether another page follows. Only the first page carries the totals. The highest ids at the start (`snapshot_max_id`) ride in the cursor, so a row
+ * created mid-export is in no page; an edit that moves a row across the cursor is the one change no stateless paging can hide.
+ */
+async function exportPage(c: Ctx, db: Db, query: Record<string, string>, source: 'all' | 'sale', cursor: FeeExportCursor | null) {
+  const first = !cursor
+  const limit = Math.min(Math.max(toNumber(query.limit, 100), 1), getPlanLimits(c.env).expenseExportPageRows)
+  const showSales = canViewCourierCost(c.get('user'))
+  // The sale half of the snapshot is read, kept in the cursor and shown only to a caller who may read courier cost: the highest sale id is about the number of sales.
+  const hi = cursor ? cursor.h : await Promise.all([highestId(db, 'fees'), showSales ? highestId(db, 'sales') : 0]) as [number, number]
+  const base = showSales ? await saleScope(db, query, true) : null
+  // `+sales.id` keeps the bound out of index selection: a plain `sales.id <= ?` made the planner walk the sales primary key (every sale) instead of
+  // idx_sales_courier_cost (the few that carry a courier cost); the bound is checked on the rows that index yields. Same trap as the branch filter in saleScope.
+  const scope: SaleScope | null = base && { sql: `${base.sql} AND +sales.id <= @saleHi`, params: { ...base.params, saleHi: hi[1] } }
+  const [fees, saleTotals, saleRows] = await Promise.all([
+    source === 'all'
+      ? queryFeeList(db, query, limit + 1, 0, { upToId: hi[0], after: cursor?.e ? { feeDate: cursor.e[0], id: cursor.e[1] } : null, rowsOnly: !first })
+      : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),
+    scope && first ? saleDeliveryTotals(db, scope) : Promise.resolve({ count: 0, usd: 0, khr: 0 }),
+    scope ? saleDeliveryRowsAfter(db, scope, cursor?.s ?? null, limit + 1) : Promise.resolve<SaleDeliveryRow[]>([]),
+  ])
+  const merged = mergeExpenseRows(
+    fees.fees.map((row) => ({ ...row, kind: 'expense' as const })),
+    saleRows.map(saleRowOut),
+  )
+  const page = merged.slice(0, limit)
+  const hasMore = merged.length > limit
+  const entryTimes = new Map(saleRows.map((row) => [row.id, row.dt]))
+  let lastExpense = cursor?.e ?? null
+  let lastSale = cursor?.s ?? null
+  for (const row of page) {
+    if (row.kind === 'expense') lastExpense = [String(row.fee_date), Number(row.id)]
+    else lastSale = [String(row.fee_date), String(entryTimes.get(Number(row.id))), Number(row.id)]
+  }
+  return c.json({
+    fees: page,
+    ...(first ? { total: fees.total + saleTotals.count, offset: 0, summary: fees.summary, sale_delivery: showSales ? saleTotals : null } : {}),
+    limit,
+    has_more: hasMore,
+    next_cursor: hasMore ? encodeFeeCursor({ e: lastExpense, s: lastSale, h: hi }) : null,
+    snapshot_max_id: { fees: hi[0], sales: showSales ? hi[1] : null },
+  })
+}
+
 app.get('/', async (c, next) => {
   const source = c.req.query('source')
   if (source !== 'all' && source !== 'sale') return next()
@@ -726,6 +806,13 @@ app.get('/', async (c, next) => {
   const need = offset + limit
   const showSales = canViewCourierCost(c.get('user'))
   try {
+    // The export pages by cursor when the switch is on. A cursor this Worker did not hand out is ignored and the request pages by `offset`, which the
+    // export client sends with every request; with the switch off the parameter is never read, so the answer is the 6.0.1053 one.
+    const cursorText = c.req.query('cursor')
+    if (cursorText && await expenseReadsOn(c.env)) {
+      const cursor = cursorText === 'start' ? null : decodeFeeCursor(cursorText)
+      if (cursorText === 'start' || cursor) return await exportPage(c, db, query, source, cursor)
+    }
     const scope = showSales ? await saleScope(db, query, true) : null
     const [fees, saleTotals, saleRows] = await Promise.all([
       source === 'all' ? queryFeeList(db, query, need, 0) : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),

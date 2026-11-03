@@ -215,6 +215,19 @@ export type PlanLimits = {
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
 
+  // ---- Expenses page reads (E1-F; behind the read switch `expense_reads`) ----
+  //
+  // routes/feesCatalog.ts: the most rows ONE page of the Expenses export may carry when the export pages by cursor. A page reads up to this many rows from
+  // the expense list and as many from the sale courier-cost list, then merges them. Free is the smaller page: each page is one Worker invocation with a
+  // 10 ms CPU budget, and a smaller page costs only more (cheap) round trips, not more rows. The offset path keeps its own cap of 500.
+  expenseExportPageRows: number
+
+  // routes/fees.ts GET /report: the most groups the single grouped pass may return (one per day, type and label spelling in the window). The pass reads the
+  // expense table once instead of four times and hands the groups to the Worker to fold; a window with more groups than this is answered by the four
+  // statements instead, which return a few hundred rows however large the window is. Free 10,000 is about the whole expense table today (the seed has
+  // 4,455, production about 8,700) and the same order as the 9,000 rows GET /api/fees/labels already returns on Free.
+  expenseReportMaxGroups: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -285,6 +298,8 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  expenseExportPageRows: 500,
+  expenseReportMaxGroups: 50_000,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -311,6 +326,8 @@ const FREE_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  expenseExportPageRows: 250,
+  expenseReportMaxGroups: 10_000,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

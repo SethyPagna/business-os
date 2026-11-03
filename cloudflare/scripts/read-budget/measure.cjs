@@ -34,9 +34,9 @@ const ROUTE_NOTES = {
   },
   // The GET shapes are measured with these read switches stored (the state the Free plan is meant to run in; the old paths are covered by the slices' own
   // OFF-versus-ON tests); the write shapes are measured with none.
-  switches: { report_atomic: 'on', report_atomic_long: 'on' },
+  switches: { report_atomic: 'on', report_atomic_long: 'on', expense_reads: 'on' },
   // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
-  switchSensitive: ['/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
+  switchSensitive: ['/api/fees', '/api/fees/report', '/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
     '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],
   reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
@@ -63,9 +63,15 @@ const ENTRY_NOTES = {
   'fees-list-with-sale-delivery-rows-month-branch-source-all':
     'The window index (idx_fees_fee_date) leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 10,565 with the branch index reading the whole branch.',
   'fees-report-with-sale-delivery-all-time-branch-include-sales':
-    'No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index (4,455 + 8,910 + 8,912 + 13,365 expense rows, branch 1 holding about half of this seed) plus the sale half 1,506. Four passes over the branch; one grouped pass is the follow-up.',
+    "No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index. E1-F (read switch expense_reads ON): ONE grouped pass reads the branch's expenses once (8,910: entry plus lookup for about 4,455 rows) plus the sale half 1,506; it was four passes (4,455 + 8,910 + 8,912 + 13,365) and a 40,868 ceiling.",
   'fees-report-with-sale-delivery-month-branch-include-sales':
-    'The window index leads for all four statements and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch.',
+    "The window index leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch. E1-F (read switch expense_reads ON): one grouped pass over the window instead of four.",
+  'fees-export-first-page-by-cursor-source-all':
+    "E1-F (read switch expense_reads ON, Free page of 250): the first page also totals the expense summary (8,695) and the courier-sale totals (1,506); 6.0.1053 read 15,175 for the first page and again 16,000 to 28,000 for every later one.",
+  'fees-export-middle-page-by-cursor-source-all':
+    "E1-F: resumes after the 2,000th expense and the middle courier sale and reads its own rows (an expense index entry, row and joins per returned row, plus the sale probe and page), not the 2,000 before it; the 6.0.1053 page at offset 2,000 read 19,236.",
+  'fees-export-middle-page-by-cursor-with-a-branch-source-all':
+    "E1-F: the middle page with a branch filter: +f.branch_id and +sales.branch_id keep the branch index out, so the page still reads its own rows.",
 }
 
 // 6.0.1053: the sale half of the Expenses list (routes/feesCatalog.ts) must start from idx_sales_courier_cost, the partial index of the few sales that

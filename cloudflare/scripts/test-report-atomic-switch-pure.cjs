@@ -20,7 +20,7 @@ const MUTANTS = {
   'sample-boundary-inclusive': { file: 'reportAtomicSwitch', edit: t => seam(t, 'sampler() < reading.rate', 'sampler() <= reading.rate') },
   'shared-promise-returns': { file: 'readSwitches', edit: t => seam(t, 'async function load(env: Env): Promise<Loaded> {', 'let shared: Promise<Loaded> | null = null\nfunction load(env: Env): Promise<Loaded> {\n  if (shared) return shared\n  shared = loadOnce(env).finally(() => { shared = null })\n  return shared\n}\nasync function loadOnce(env: Env): Promise<Loaded> {') },
   'long-switch-reads-the-short-name': { file: 'reportAtomicSwitch', edit: t => seam(t, 'await readSwitchState(env, name)', 'await readSwitchState(env, REPORT_ATOMIC_SWITCH)') },
-  'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "['report_atomic', 'report_atomic_long'] as const", "['report_atomic'] as const") },
+  'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "['report_atomic', 'report_atomic_long', 'expense_reads'] as const", "['report_atomic', 'expense_reads'] as const") },
   'router-ignores-switch-option': { file: 'reportAtomicSwitch', edit: t => seam(t, 'reportAtomicMode(env, options.switch)', 'reportAtomicMode(env)') },
 }
 
@@ -87,13 +87,13 @@ async function runAll(mutant) {
     const off = { state: 'off', rate: 0 }
     for (const bad of [null, undefined, '', 'not json', '[]', 'null', '"on"', '1', 'true', '{', '{"switches":[]}', '{"switches":null}', '{"switches":"on"}', '{"epoch":1}', '{"switches":{"report_atomic_x":"on"}}', '{"switches":{"report_atomic_longer":"on"}}', '{"switches":{"REPORT_ATOMIC_LONG":"on"}}', '{"switches":{"__proto__":{"report_atomic_long":"on"}}}', '{"switches":{"__proto__":{"report_atomic":"on"}}}', '{"switches":{"constructor":{"report_atomic":"on"}}}', '{"switches":{"REPORT_ATOMIC":"on"}}'])
       for (const name of ['report_atomic', 'report_atomic_long']) assert.deepEqual(switches.parseReadSwitches(bad).switches[name], off, `${name} must be OFF: ${bad}`)
-    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, switches: { report_atomic: { state: 'on', rate: 0 }, report_atomic_long: off } }, 'a stored name turns on only itself')
-    assert.deepEqual(switches.parseReadSwitches(storedPair('off', 'shadow:0.05')), { epoch: 3, switches: { report_atomic: off, report_atomic_long: { state: 'shadow', rate: 0.05 } } })
-    assert.deepEqual(switches.parseReadSwitches('{"switches":{"report_atomic_long":"on","report_atomic":"junk"}}').switches, { report_atomic: off, report_atomic_long: { state: 'on', rate: 0 } }, 'one bad token does not spoil the other name')
+    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, switches: { report_atomic: { state: 'on', rate: 0 }, report_atomic_long: off, expense_reads: off } }, 'a stored name turns on only itself')
+    assert.deepEqual(switches.parseReadSwitches(storedPair('off', 'shadow:0.05')), { epoch: 3, switches: { report_atomic: off, report_atomic_long: { state: 'shadow', rate: 0.05 }, expense_reads: off } })
+    assert.deepEqual(switches.parseReadSwitches('{"switches":{"report_atomic_long":"on","report_atomic":"junk"}}').switches, { report_atomic: off, report_atomic_long: { state: 'on', rate: 0 }, expense_reads: off }, 'one bad token does not spoil the other name')
     assert.equal(switches.parseReadSwitches('{"epoch":1.5,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":-2,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":"3","switches":{"report_atomic":"on"}}').epoch, 0)
-    assert.equal(switches.isKnownReadSwitch('report_atomic'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_long'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_longer'), false); assert.equal(switches.isKnownReadSwitch('toString'), false); assert.equal(switches.isKnownReadSwitch('constructor'), false)
+    assert.equal(switches.isKnownReadSwitch('report_atomic'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_long'), true); assert.equal(switches.isKnownReadSwitch('expense_reads'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_longer'), false); assert.equal(switches.isKnownReadSwitch('toString'), false); assert.equal(switches.isKnownReadSwitch('constructor'), false)
   })
 
   check('memo: one statement per 15 s window, refetch at exactly 15 s, a clock that moves backwards refetches', async () => {

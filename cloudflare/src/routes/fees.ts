@@ -31,6 +31,8 @@ import { branchEffectRefusal, branchRedirectTarget, effectGuardStatement, resolv
 import { normalizeTypedDate } from '../lib/batchCode'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
+import { expenseReadsOn, foldFeeGroups, type FeeGroupRow, type FeeReportParts } from '../lib/expenseReads'
+import { getPlanLimits } from '../lib/planTier'
 import {
   canonicalFeeCreateRequest,
   feeCreateAuditStatement,
@@ -418,17 +420,34 @@ export type FeeListPage = {
 }
 
 /**
+ * The keyset form of the list (the export, behind the read switch `expense_reads`). `upToId` keeps rows created after the export began out of every page
+ * and out of the totals; `after` resumes below the last row served, in the list's own order (fee_date, then id, both descending); `rowsOnly` skips the
+ * totals, which only the first page needs. The rows statement keeps its text, ORDER BY and LIMIT: only its WHERE gains the two clauses.
+ */
+export type FeeKeyset = { upToId?: number | null; after?: { feeDate: string; id: number } | null; rowsOnly?: boolean }
+
+/**
  * The filtered expense rows (newest fee_date first, then id; `limit` and `offset` as given) and the filtered totals.
  * Search matches label/notes/fee_type, the same "one field, several columns" pattern sales.ts's list endpoint already uses
  * rather than a bespoke per-page search implementation. Throws RangeError for a bad date parameter.
  * routes/feesCatalog.ts calls this for the expense half of the merged list, so the two lists filter identically.
  */
-export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number): Promise<FeeListPage> {
+export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset): Promise<FeeListPage> {
   const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId } = query
 
   const range = feeRangePredicate(query)
   const conditions: string[] = [range.sql]
   const params: Record<string, unknown> = { ...range.params }
+  if (keyset?.upToId != null) {
+    conditions.push('+f.id <= @keysetHi') // the plus keeps the bound from steering the planner onto the primary key (see saleScope's branch filter)
+    params.keysetHi = keyset.upToId
+  }
+  if (keyset?.after) {
+    // The date bound lets idx_fees_fee_date start at the cursor; the second term settles the rows of the cursor's own day.
+    conditions.push('(f.fee_date <= @afterDate AND (f.fee_date < @afterDate OR f.id < @afterId))')
+    params.afterDate = keyset.after.feeDate
+    params.afterId = keyset.after.id
+  }
 
   if (search && search.trim()) {
     conditions.push('(f.label LIKE @search OR f.notes LIKE @search OR f.fee_type LIKE @search)')
@@ -469,6 +488,7 @@ export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<s
     LIMIT @limit OFFSET @offset
   `).all<Record<string, unknown>>({ ...params, limit, offset })
 
+  if (keyset?.rowsOnly) return { fees: rows || [], total: 0, summary: [] }
   const summaryRows = await db.prepare(`
     SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as total_khr
     FROM fees f
@@ -502,6 +522,25 @@ app.get('/', async (c) => {
   })
 })
 
+/**
+ * The report's four figures from ONE pass over the expense table (read switch `expense_reads`) instead of four: the rows are grouped by day, type and
+ * label key and folded in lib/expenseReads.ts. Null = answer with the four statements: the switch is off, the window holds more groups than the plan
+ * allows (expenseReportMaxGroups), or a figure sits on a rounding boundary where a sum of sums could round differently from the sum.
+ */
+async function groupedFeeReport(env: Env, db: ReturnType<typeof getDb>, where: string, params: Record<string, unknown>): Promise<FeeReportParts | null> {
+  if (!(await expenseReadsOn(env))) return null
+  const cap = getPlanLimits(env).expenseReportMaxGroups
+  const groups = await db.prepare(`
+    SELECT f.fee_date AS d, f.fee_type AS t, lower(trim(COALESCE(f.label, ''))) AS k, MIN(TRIM(f.label)) AS label,
+      COUNT(*) AS n, SUM(f.amount_usd) AS usd, SUM(f.amount_khr) AS khr
+    FROM fees f
+    WHERE ${where}
+    GROUP BY f.fee_date, f.fee_type, lower(trim(COALESCE(f.label, '')))
+    LIMIT @groupCap
+  `).all<FeeGroupRow>({ ...params, groupCap: cap + 1 })
+  return groups && groups.length <= cap ? foldFeeGroups(groups) : null
+}
+
 // GET /api/fees/report?startDate&endDate&branchId -- fee totals over a range
 // for the Reports hub: range totals, a per-day series (keyed on fee_date, the
 // effective date the fee is booked to, not created_at), and a per-fee-type
@@ -524,7 +563,8 @@ app.get('/report', async (c) => {
   // per-fee stored rate and the global one can be blank -- so both raw
   // totals are returned and the UI shows "$X · Y៛".
   const money = 'ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr'
-  const [totals, days, byType, byCategory] = await Promise.all([
+  const grouped = await groupedFeeReport(c.env, db, where, params)
+  const [totals, days, byType, byCategory] = grouped ? [grouped.totals, grouped.days, grouped.byType, grouped.byCategory] : await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT f.fee_type AS fee_type, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_type ORDER BY amount_usd DESC, amount_khr DESC`).all<Record<string, unknown>>(params),
