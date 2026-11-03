@@ -7917,7 +7917,7 @@
   "inventory_check_reason_target_not_whole": "មិនមែនចំនួនគត់",
   "inventory_check_reason_count_superseded": "ការរាប់ផ្សេងបានគ្របដណ្តប់រួចហើយ",
   "inventory_check_reason_stock_adjusted": "ស្តុកត្រូវបានកែដោយដៃក្រោយការរាប់",
-  "inventory_check_reason_no_lot": "គ្មានកាលបរិច្ឆេទទទួលដើម្បីបន្ថែម",
+  "inventory_check_reason_no_lot": "គ្មានថ្ងៃចូលដើម្បីបន្ថែម",
   "inventory_check_error_product_retired": "ផលិតផលមួយក្នុងការរាប់នេះត្រូវបានបញ្ចូលគ្នា ឬដកចេញ។ បដិសេធការរាប់នេះ ហើយរាប់ផលិតផលដែលជំនួសវា។",
   "inventory_check_approval_clamped": "ស្តុកអស់ ខ្វះ",
   "inventory_check_error_stock_adjusted": "ស្តុកត្រូវបានកែដោយដៃក្រោយការរាប់នេះ។ សូមបដិសេធការរាប់នេះ ហើយរាប់ឡើងវិញ។",
