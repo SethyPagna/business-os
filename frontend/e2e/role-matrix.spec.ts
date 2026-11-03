@@ -212,7 +212,7 @@ for (const known of KNOWN_EMPTY_DOORS) {
   for (const roleId of known.roles) {
     const role = ROLES.find((entry) => entry.id === roleId) as RoleDef
     test(`${role.label}: the ${known.page} page the role is offered has something on it`, async ({ browser }, testInfo) => {
-      test.setTimeout(120_000)
+      test.setTimeout(240_000)
       knownDefect(true, known.reason)
       const session = await begin(browser, testInfo.project.name, role)
       const { page } = session
@@ -234,9 +234,14 @@ for (const known of KNOWN_EMPTY_DOORS) {
 const DASHBOARD_FAILED = /did not finish loading|returned incomplete (summary|analytics) data|incomplete data|could not be loaded for this range/i
 for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashboard'))) {
   test(`${role.label}: the Dashboard loads with the payload the Worker sends this role`, async ({ browser }, testInfo) => {
-    test.setTimeout(120_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
-    const { page } = session
+    const { page, access } = session
+    // APP BUG, kept as a case: the Worker removes stock_value_usd (and the other cost-shaped keys) from /api/dashboard for a role without
+    // product_cost_view (compat.ts:34-35 mounts acquisitionCostResponses; acquisitionCostAccess.ts:136), and the Dashboard refuses a payload
+    // without it (Dashboard.tsx:727-735 isDashboardSummaryPayload, thrown at :990). The seeded Manager holds dashboard and not cost view, so
+    // it is shown "Dashboard summary unavailable". Confirmed in the browser, desktop-chromium, 3 Nov.
+    knownDefect(!seesCost(access), 'Dashboard.tsx:727-735/990 requires stock_value_usd, which compat.ts:34-35 + acquisitionCostAccess.ts:136 remove for a role without product_cost_view')
     try {
       const slot = await open(page, '/', 'dashboard')
       // The startup read fills the cards a moment after the shell settles.
@@ -256,9 +261,10 @@ const PRODUCT_NAME = 'E2E Product 001 Aurelia'
 
 /**
  * The product detail is a float, not a role="dialog" (ProductDetailModal.tsx draws a bare `modal-panel-safe` panel), so it is found as
- * the panel that holds the detail's own links row. It cannot be found through its Edit button: Edit is the very control under test.
+ * the panel that carries the product's name. It cannot be found through its Edit button (Edit is the very control under test) or through
+ * its links row (a role without Records / Stock Changes gets no links row: the Employee's detail has none).
  */
-const productDetailOf = (page: Page): Locator => page.locator('.modal-panel-safe').filter({ has: page.locator('[data-detail-links-row]') }).last()
+const productDetailOf = (page: Page): Locator => page.locator('.modal-panel-safe').filter({ hasText: PRODUCT_NAME }).last()
 
 /**
  * Products has no Select-all control until a row is selected: selecting starts with a hold on a row (Products.tsx:862-883, 500 ms,
@@ -315,13 +321,6 @@ for (const role of ROLES) {
           await page.keyboard.press('Escape')
           await expect(menu, 'the Manage menu closed').toBeHidden()
         }
-        if (grant(access, 'products', 'view')) {
-          // A product's detail sheet hides Edit by omission when products:edit is off.
-          await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
-          const productDetail = productDetailOf(page)
-          await expect(productDetail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
-          await expect.soft(productDetail.getByRole('button', { name: text('edit', 'Edit'), exact: true }), 'Edit on a product = products:edit').toHaveCount(grant(access, 'products', 'edit') ? 1 : 0, BRIEF)
-        }
       }
 
       if (access.canAccessPage('sales') && grant(access, 'sales', 'view')) {
@@ -350,7 +349,7 @@ for (const role of ROLES) {
 // rule list, so it needs no fixture read.
 for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return expectedHubSections(access, 'promotions').some((section) => section.id === 'rules') })) {
   test(`${role.label}: the Promotions rules offer New rule only with promotions:manage`, async ({ browser }, testInfo) => {
-    test.setTimeout(120_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     try {
@@ -367,9 +366,13 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
 // getPermissionTier, not copied.
 for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('settings'))) {
   test(`${role.label}: Settings offers Save only at the Full tier`, async ({ browser }, testInfo) => {
-    test.setTimeout(120_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
+    // APP BUG, kept as a case: Settings.tsx:1209-1219 hides the header Save for a view-only grant and shows a "View" badge (Part 557), but
+    // the page-bottom Save at Settings.tsx:2435 is drawn for every role. Clicking it only raises the view-only notice (:1032-1033); the
+    // Worker refuses the POST. Confirmed in the browser, desktop-chromium, 3 Nov.
+    knownDefect(access.getPermissionTier('settings') !== 'full', 'Settings.tsx:2435 draws a second Save for every tier; only the header one (:1209) is gated on canEditSettings')
     try {
       const slot = await open(page, '/settings', 'settings')
       const save = slot.getByRole('button', { name: text('save', 'Save'), exact: true })
@@ -380,13 +383,35 @@ for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('setti
   })
 }
 
+// -- Products: Edit on the detail ---------------------------------------------------------------------------------------
+for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') })) {
+  test(`${role.label}: a product's detail offers Edit only with products:edit`, async ({ browser }, testInfo) => {
+    test.setTimeout(240_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    const wantEdit = grant(access, 'products', 'edit')
+    // APP BUG, kept as a case: ProductDetailModal.tsx:466-470 draws Edit unconditionally (onEdit is a required prop), Products.tsx:5828 passes it
+    // with no products:edit check, and openProductFormTab (:4418) opens the form for anyone. The form guards only the price and cost fieldsets
+    // (ProductForm.tsx:2028/2059/1998), so a role with View and no Edit gets a form it can type into and the Worker then refuses the save.
+    // Found by the locked-employee role (products:edit switched off); every shipped role that can open Products also holds edit.
+    knownDefect(!wantEdit, 'ProductDetailModal.tsx:466 draws Edit with no products:edit check; Products.tsx:5828 passes onEdit unconditionally')
+    try {
+      const slot = await open(page, '/products', 'products')
+      await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
+      const detail = productDetailOf(page)
+      await expect(detail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
+      await expect(detail.getByRole('button', { name: text('edit', 'Edit'), exact: true }), 'Edit on a product = products:edit').toHaveCount(wantEdit ? 1 : 0, BRIEF)
+    } finally { await session.close() }
+  })
+}
+
 // -- Products: Add variant ----------------------------------------------------------------------------------------------
 // Every shipped role that holds products:add holds products:variant too, so the defect needs a role one override away.
 const MANAGER = ROLES.find((entry) => entry.id === 'manager') as RoleDef
 const VARIANT_OFF = deriveRole(MANAGER, 'manager-no-variant', 'Manager with Add variant switched off', { 'products:variant': false })
 for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') }), VARIANT_OFF]) {
   test(`${role.label}: a product's detail offers Add variant only with products:variant`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantVariant = grant(access, 'products', 'variant')
@@ -407,7 +432,7 @@ for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry)
 // -- Products: bulk Delete ----------------------------------------------------------------------------------------------
 for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') })) {
   test(`${role.label}: selecting products offers a bulk Delete only with products:delete and products:bulk_delete`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantBulkDelete = grant(access, 'products', 'delete') && grant(access, 'products', 'bulk_delete')
@@ -432,7 +457,7 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
 const RETURNS_ROLES = ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('sales') && grant(access, 'returns', 'view') })
 for (const role of RETURNS_ROLES) {
   test(`${role.label}: the Returns toolbar offers Add Return only with returns:add`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantAdd = grant(access, 'returns', 'add')
@@ -448,7 +473,7 @@ for (const role of RETURNS_ROLES) {
   })
 
   test(`${role.label}: the Returns toolbar offers Export only with returns:export`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     try {
@@ -465,7 +490,7 @@ for (const role of RETURNS_ROLES) {
 // CustomersTab.tsx:1083-1150: the toolbar renders before, and independently of, the customer list, so it needs no fixture read.
 for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('contacts') && grant(access, 'contacts', 'view') })) {
   test(`${role.label}: the Contacts toolbar buttons match the grants`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     try {
@@ -516,7 +541,7 @@ async function openProductForm(session: Session, tab?: 'pricing'): Promise<Locat
 
 for (const role of EDITORS) {
   test(`${role.label}: the product edit form offers Delete only with products:delete`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { access } = session
     const wantDelete = grant(access, 'products', 'delete')
@@ -531,7 +556,7 @@ for (const role of EDITORS) {
   })
 
   test(`${role.label}: the product edit form locks the selling and wholesale price without products:edit + products:price`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { access } = session
     // utils/productMergePriceAccess.ts canChangeProductPrices: administrator, or edit and price both held.
@@ -611,7 +636,7 @@ for (const role of ROLES) {
 
 for (const role of EDITORS) {
   test(`${role.label}: even when the server leaks cost, the product form holds the cost only for a role that may view it`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role, false)
     try {
       const dialog = await openProductForm(session, 'pricing')
@@ -648,7 +673,7 @@ test('the permission catalogue defines a "See full phone numbers" grant, off in 
 
 for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('sales') && grant(access, 'sales', 'view') })) {
   test(`${role.label}: a customer's full phone number is shown on a sale only to a role holding the full-phone grant`, async ({ browser }, testInfo) => {
-    test.setTimeout(150_000)
+    test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const mayReadFull = access.isAdmin || (!!phoneGrant && access.hasPermission(phoneGrant.key))

@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page, Route } from '@playwright/test'
+import type { APIResponse, Browser, BrowserContext, Page, Route } from '@playwright/test'
 import { PROJECT_CONTEXT_USE } from '../../playwright.config'
 import { ADMIN_ORIGIN, collectPageHealth, type PageHealth } from './harness'
 import { E2E_ACCOUNTS, signIn } from './session'
@@ -49,6 +49,22 @@ export type RoleSessionOptions = {
   redact?: boolean
 }
 
+/**
+ * route.fetch() with a bounded retry. The fixture server is a plain node:http server whose idle keep-alive sockets close under it; a request
+ * that reuses one throws "read ECONNRESET" before any byte of the answer. Retrying the same request is what a browser does, and without it a
+ * test marked `test.fail` could go red for this reason and be counted as its documented defect.
+ */
+async function fetchWithRetry(route: Route): Promise<APIResponse> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await route.fetch() } catch (error) {
+      lastError = error
+      if (!/ECONNRESET|socket hang up|EPIPE/i.test(String((error as Error)?.message ?? error))) throw error
+    }
+  }
+  throw lastError
+}
+
 export async function openAsRole(browser: Browser, projectName: string, role: RoleDef, options: RoleSessionOptions = {}): Promise<RoleSession> {
   const device = PROJECT_CONTEXT_USE[projectName as keyof typeof PROJECT_CONTEXT_USE]
   const viewport = VIEWPORT_BY_PROJECT[projectName]
@@ -70,7 +86,7 @@ export async function openAsRole(browser: Browser, projectName: string, role: Ro
   if (options.redact !== false) {
     await page.route('**/api/**', async (route) => {
       if (route.request().method() !== 'GET') return route.fallback()
-      const response = await route.fetch()
+      const response = await fetchWithRetry(route)
       if (!(response.headers()['content-type'] || '').includes('json')) return route.fulfill({ response })
       let body: unknown
       try { body = await response.json() } catch { return route.fulfill({ response }) }
@@ -78,7 +94,7 @@ export async function openAsRole(browser: Browser, projectName: string, role: Ro
     })
   }
   const withRole = async (route: Route) => {
-    const response = await route.fetch()
+    const response = await fetchWithRetry(route)
     const body = await response.json() as Record<string, unknown> & { user?: { id: number; username: string; name: string } }
     if (!body.user) return route.fulfill({ response })
     return route.fulfill({ response, json: { ...body, user: roleUser(role, body.user) } })
@@ -87,7 +103,7 @@ export async function openAsRole(browser: Browser, projectName: string, role: Ro
   // so the cookie the real response names is set on the context explicitly; if the browser applied it too, it is the same value.
   await page.route('**/api/auth/login', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback()
-    const response = await route.fetch()
+    const response = await fetchWithRetry(route)
     const [pair] = (response.headersArray().find((header) => header.name.toLowerCase() === 'set-cookie')?.value || '').split(';')
     const eq = pair.indexOf('=')
     if (response.ok() && eq > 0) {
