@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { APP_ROOT, E2E_ACCOUNTS, signInForTiming } from './support/session'
+import { APP_ROOT, E2E_ACCOUNTS, organizationReady, signInForTiming } from './support/session'
 
 /**
  * login-prerequisite.spec.ts -- the timed sign-in used by perf-budget.spec.ts
@@ -39,4 +39,20 @@ test('the timed sign-in waits for a slow organization bootstrap instead of click
   await expect(page.locator(APP_ROOT)).toBeVisible()
   expect(bootstrapAnsweredAt, 'the bootstrap really was held, so the wait was exercised').toBeGreaterThan(0)
   expect(loginPostedAt, 'Login was submitted after the organization arrived, not before').toBeGreaterThanOrEqual(bootstrapAnsweredAt)
+})
+
+test('the organization probe answers "not yet" at once when the row has not rendered, instead of waiting out the action timeout', async ({ page }) => {
+  // CATCHES: reading the organization box with a bare inputValue(). The form
+  // flips from the expanded box to the collapsed row between the button check
+  // and the read; the box is then gone, inputValue() waits the whole action
+  // timeout (30 s) for it, and the poll that was supposed to notice the
+  // collapsed row never gets to run (gate run 41712707233: two first attempts
+  // of the till budget failed at 'the organization bootstrap must land').
+  // Here neither the button nor the box exists, which is that instant held still.
+  await page.setContent('<main><p>the organization row is not rendered yet</p></main>')
+  const started = Date.now()
+  const ready = await organizationReady(page)()
+  const elapsedMs = Date.now() - started
+  expect(ready, 'with no organization row there is nothing to be ready').toBe(false)
+  expect(elapsedMs, 'a missing box must cost about one second, not the 30 s action timeout').toBeLessThan(5_000)
 })
