@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { priceText } from '../../utils/pricing.ts'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -847,9 +848,9 @@ export default function ProductDetailSheet({
           <div className="flex gap-3">
             <span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('selling_price') || 'Selling'}</span>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-              <span><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{!posPresentation && asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</span>
+              <span><span className="font-bold text-blue-600">{priceText(fmtUSD, asNumber(product.selling_price_usd))}</span>{!posPresentation && asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-1">{priceText(fmtKHR, asNumber(product.selling_price_khr))}</span> : null}</span>
               {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
-                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{!posPresentation && asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
+                <span><span className="text-xs text-gray-400 mr-1">{t('wholesale_price') || 'Wholesale price'}</span><span className="font-bold text-indigo-600">{priceText(fmtUSD, asNumber(product.wholesale_price_usd || 0))}</span>{!posPresentation && asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-1">{priceText(fmtKHR, asNumber(product.wholesale_price_khr || 0))}</span> : null}</span>
               ) : null}
               {/* P10-11 (owner ruling, 2026-09-17): the POS sheet never showed
                   cost at all -- gated to the same products-OR-inventory view
@@ -871,7 +872,7 @@ export default function ProductDetailSheet({
             </div>
           </div>
           {promotion.active ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{!posPresentation && (promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{priceText(fmtUSD, promotion.applied_price_usd || 0)}</span>{!posPresentation && (promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{priceText(fmtKHR, promotion.applied_price_khr || 0)}</span> : null}</div></div>
           ) : null}
           {/* One stock number, for the row and branch that Steps 1-2 actually
               resolved to -- the same figure the option pills show and the same
@@ -1084,7 +1085,7 @@ export default function ProductDetailSheet({
                   <div className="flex flex-wrap gap-1.5">
                     {onPick ? renderPickButton(effectiveVariant) : null}
                     {onPick ? null : <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                      {batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${priceText(fmtUSD, asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>}
                     {/* The variant's VIP add-to-cart button is deleted by the
                         2026-09-04 ruling; the Wholesale button beside it now
@@ -1095,14 +1096,14 @@ export default function ProductDetailSheet({
                         disabled={!effectiveVariantInStock || !batchReadyToSell}
                         onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
                       >
-                        {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
+                        {`${t('wholesale_price') || 'Wholesale price'} ${priceText(fmtUSD, asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
                       </button>
                     ) : null}
                     {!onPick && effectiveVariantPromotion.active ? (
                       <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
                           ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${effectiveVariantPromoBadge.min_quantity}+`)
-                          : `${(effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || effectiveVariant.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(effectiveVariantPromotion.applied_price_usd)}`}
+                          : `${(effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || effectiveVariant.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${priceText(fmtUSD, effectiveVariantPromotion.applied_price_usd)}`}
                       </button>
                     ) : null}
                   </div>
@@ -1192,13 +1193,13 @@ export default function ProductDetailSheet({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {onPick ? renderPickButton(product) : null}
               {onPick ? null : <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch && sheetState.selectedUnlottedProductId == null ? t('pick_received_date_first') || 'Pick a received date first' : `${t('selling_price') || 'Selling'} ${priceText(fmtUSD, asNumber(product.selling_price_usd || 0))}`}
               </button>}
               {!onPick && promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {promoBadge.kind === 'quantity_hint'
                     ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
-                    : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(promotion.applied_price_usd)}`}
+                    : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${priceText(fmtUSD, promotion.applied_price_usd)}`}
                 </button>
               ) : null}
               {/* The product's VIP add-to-cart button is deleted by the
@@ -1209,7 +1210,7 @@ export default function ProductDetailSheet({
                   disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
                   onClick={() => closeAfterAdd(product, 'wholesale')}
                 >
-                  {`${t('wholesale_price') || 'Wholesale price'} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
+                  {`${t('wholesale_price') || 'Wholesale price'} ${priceText(fmtUSD, asNumber(product.wholesale_price_usd || 0))}`}
                 </button>
               ) : null}
             </div>

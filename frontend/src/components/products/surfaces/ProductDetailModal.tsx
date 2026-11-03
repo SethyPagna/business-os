@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
 import { useCopyFloat } from '../../shared/CopyFloat.tsx'
 import { getContrastingTextColor } from '../../../utils/color.ts'
-import { calculateProductDiscount } from '../../../utils/pricing.ts'
+import { calculateProductDiscount, priceText } from '../../../utils/pricing.ts'
 import { getVisibleProductBatches } from '../../../utils/productBatches.ts'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
@@ -369,16 +369,16 @@ export default function ProductDetailModal({
                   <PriceCell label={T('wholesale_price', 'Wholesale price')}>
                     {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                       <>
-                        <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
-                        {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
+                        <span className="text-indigo-600 dark:text-indigo-300">{priceText(fmtUSD, wholesaleUsd)}</span>
+                        {wholesaleKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, wholesaleKhr)}</span> : null}
                       </>
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </PriceCell>
                 </div>
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="selling-margin">
                   <PriceCell label={T('label_selling_price', 'Selling price')}>
-                    <span className="text-green-600">{fmtUSD(sellingUsd)}</span>
-                    {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
+                    <span className="text-green-600">{priceText(fmtUSD, sellingUsd)}</span>
+                    {sellingKhr > 0 ? <span className="ml-2 text-xs font-normal text-gray-400">{priceText(fmtKHR, sellingKhr)}</span> : null}
                   </PriceCell>
                   {canViewCosts ? <PriceCell label={T('label_margin', 'Margin')}>
                     {costUsdValue !== null && sellingUsd > 0 ? (
@@ -414,8 +414,8 @@ export default function ProductDetailModal({
                 </Row>
                 {promotion.active ? (
                   <Row label={T('product_discount', 'Discounts')}>
-                    <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
-                    {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
+                    <span className="text-rose-600 dark:text-rose-300">{priceText(fmtUSD, promotion.applied_price_usd)}</span>
+                    {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{priceText(fmtKHR, promotion.applied_price_khr)}</span> : null}
                     <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
                       {p.discount_label || `${promotion.percent_off || 0}%`}
                     </span>

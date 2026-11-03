@@ -46,6 +46,7 @@ function loadReceiptComponent(source: string): unknown {
     }
     if (id.includes('utils/formatters')) return require('../src/utils/formatters.ts')
     if (id.includes('receiptLineMath')) return require('../src/utils/receiptLineMath.ts')
+    if (id.includes('utils/pricing')) return require('../src/utils/pricing.ts') // priceText: a unit price shows rounded UP, the till's rule
     if (id.includes('receiptTotals')) return require('../src/utils/receiptTotals.ts')
     if (id.includes('receipt-settings/template')) return require('../src/components/receipt-settings/template.ts')
     if (id.includes('receiptAppliedConfig')) return require('../src/utils/receiptAppliedConfig.ts')

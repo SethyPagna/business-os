@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
 import { buildPortalSocialFromConfig, flattenPortalSocialGroups } from './portalSocialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
@@ -1008,7 +1009,9 @@ function formatDateTime(value: unknown): string {
 
 /** Render product price text according to selected portal display mode. */
 function formatPortalPrice(usd: unknown, khr: unknown, config: PortalConfig): string {
-  const usdValue = Number(usd || 0)
+  // A selling price shown to a customer rounds UP, the way the till charges it (utils/pricing.ts priceText): a product stored at 2.161 is
+  // $2.17 here and at the counter.
+  const usdValue = normalizePriceValue(usd || 0)
   const exchangeRate = Number(config.exchangeRate || 4100)
   const khrValue = khr != null ? Number(khr || 0) : usdValue * exchangeRate
   const usdText = `$${usdValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import { useCopyFloat } from '../../shared/CopyFloat.tsx'
-import { calculateProductDiscount } from '../../../utils/pricing.ts'
+import { calculateProductDiscount, priceText } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
@@ -90,7 +90,7 @@ export function ProductDiscountBadge({
   const shownLabel = extra.title || label
   const text = extra.isQuantityHint
     ? (extra.title || `${label} ${extra.minQuantity || 0}+`)
-    : `${shownLabel} ${fmtUSD(promo.applied_price_usd || 0)}`
+    : `${shownLabel} ${priceText(fmtUSD, promo.applied_price_usd || 0)}`
   return (
     <span className={className} title={text} data-reveal-text={text}>
       {text}

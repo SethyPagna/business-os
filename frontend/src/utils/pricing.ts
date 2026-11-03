@@ -74,6 +74,16 @@ export function formatPriceNumber(value: unknown): string {
   })
 }
 
+/**
+ * THE one way to SHOW a selling, wholesale, promotion or unit price through a display formatter (fmtUSD / fmtKHR, from the app context or a
+ * prop): the price rounds UP first, with the rule the till charges it by (normalizePriceValue / sellingPriceCeilCent), and the formatter then
+ * prints that cent-valued figure. So a product stored at 2.161 reads $2.17 on its card, in the cart and on the receipt -- the same figure it is
+ * sold at. An AMOUNT (a total, tax, change, a line total, a report figure) goes straight to fmtUSD, which rounds to the nearest cent.
+ */
+export function priceText(format: (amount: number) => string, price: unknown): string {
+  return format(normalizePriceValue(price, 0))
+}
+
 /** Displayed money as a two-decimal string, rounded to the NEAREST cent (roundDisplayMoney). */
 export function formatMoneyNumber(value: unknown): string {
   return roundDisplayMoney(value).toLocaleString('en-US', {

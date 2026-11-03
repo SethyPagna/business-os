@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { priceText } from '../../utils/pricing.ts'
 import { createPortal } from 'react-dom'
 import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -3186,7 +3187,7 @@ export default function SaleDetailModal({
               items={[
                 ...(addReview?.lines || []).map((line): ConfirmReviewItem => ({
                   label: line.name,
-                  value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
+                  value: `${line.quantity} × ${priceText(fmtUSD, line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
                 })),
                 {
                   label: translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម'),

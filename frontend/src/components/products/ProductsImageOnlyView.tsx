@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { priceText } from '../../utils/pricing.ts'
 // ProductsImageOnlyView
 //
 // Part 241: the rendered surface for a user whose ONE route into the
@@ -556,8 +557,8 @@ export default function ProductsImageOnlyView() {
                     // this role has no other pricing on screen to infer from.
                     <p className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
                       <span className="text-gray-400 dark:text-gray-500">{t('selling_price') || 'Selling price'}: </span>
-                      {fmtUSD(product.selling_price_usd)}
-                      {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
+                      {priceText(fmtUSD, product.selling_price_usd)}
+                      {Number(product.selling_price_khr || 0) > 0 ? ` · ${priceText(fmtKHR, product.selling_price_khr)}` : ''}
                     </p>
                   ) : null}
                   {/* The VIP price row is deleted (2026-09-04 ruling). The card
@@ -707,8 +708,8 @@ export default function ProductsImageOnlyView() {
                 <div className="flex justify-between gap-3 py-2">
                   <dt className="text-gray-500 dark:text-gray-400">{t('selling_price') || 'Selling price'}</dt>
                   <dd className="text-right text-gray-800 dark:text-gray-100">
-                    {fmtUSD(detailsProduct.selling_price_usd)}
-                    {Number(detailsProduct.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.selling_price_khr)}` : ''}
+                    {priceText(fmtUSD, detailsProduct.selling_price_usd)}
+                    {Number(detailsProduct.selling_price_khr || 0) > 0 ? ` · ${priceText(fmtKHR, detailsProduct.selling_price_khr)}` : ''}
                   </dd>
                 </div>
               ) : null}
@@ -719,8 +720,8 @@ export default function ProductsImageOnlyView() {
                 <div className="flex justify-between gap-3 py-2">
                   <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale price'}</dt>
                   <dd className="text-right text-indigo-700 dark:text-indigo-300">
-                    {fmtUSD(detailsProduct.wholesale_price_usd)}
-                    {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.wholesale_price_khr)}` : ''}
+                    {priceText(fmtUSD, detailsProduct.wholesale_price_usd)}
+                    {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${priceText(fmtKHR, detailsProduct.wholesale_price_khr)}` : ''}
                   </dd>
                 </div>
               ) : null}

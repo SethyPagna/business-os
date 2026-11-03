@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { priceText } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
@@ -340,7 +341,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
     facts.push(['count', counted === null ? null : <span>{named('count', tr('inventory_check_counted', 'Counted'))} {counted}</span>])
   }
   if (wants('damaged')) facts.push(['damaged', finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <span>{named('damaged')} {product.damaged_quantity}</span> : null])
-  if (wants('price')) facts.push(['price', <span title={tr('inventory_check_price', 'Price')}><span className="sr-only">{tr('inventory_check_price', 'Price')} </span>{price === null ? '—' : fmtUSD(price)}</span>])
+  if (wants('price')) facts.push(['price', <span title={tr('inventory_check_price', 'Price')}><span className="sr-only">{tr('inventory_check_price', 'Price')} </span>{price === null ? '—' : priceText(fmtUSD, price)}</span>])
   if (wants('cost')) facts.push(['cost', <span>{named('cost')} {cost === null ? '—' : fmtUSD(cost)}{product.cost_needs_review === true ? <><span className={`ml-1 text-amber-700 dark:text-amber-300 ${BELOW_SHEET_ONLY}`}>{tr('merge_cost_needs_review', 'Cost needs review')}</span><span className="ml-0.5 hidden text-amber-700 lg:inline dark:text-amber-300" title={tr('merge_cost_needs_review', 'Cost needs review')} aria-hidden="true"><AlertTriangle className="inline h-3 w-3" /></span></> : null}</span>])
   if (wants('sold')) facts.push(['sold', finiteQuantity(product.qty_sold) ? <span>{named('sold')} {product.qty_sold}</span> : null])
   if (wants('customers')) facts.push(['customers', finiteQuantity(product.customer_count) ? <span title={tr('inventory_check_customers', 'Customers')}>{named('customers')} {product.customer_count}</span> : null])

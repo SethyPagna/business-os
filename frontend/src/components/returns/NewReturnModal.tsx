@@ -1,5 +1,6 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import { priceText } from '../../utils/pricing.ts'
 import Banknote from 'lucide-react/dist/esm/icons/banknote.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -1339,7 +1340,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                 ) : null}
                               </div>
                               <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                                <span>{T('qty_sold', 'Sold')}: {toNumber(item.quantity)} × {fmtUSD(toNumber(item.applied_price_usd))}</span>
+                                <span>{T('qty_sold', 'Sold')}: {toNumber(item.quantity)} × {priceText(fmtUSD, toNumber(item.applied_price_usd))}</span>
                                 {(item.alreadyQty || 0) > 0 && (
                                   <span className="inline-flex items-center gap-1 text-orange-500 dark:text-orange-400">
                                     <StockActionIcon action="restock" /> {item.alreadyQty} {T('already_returned', 'already returned')}
@@ -1524,7 +1525,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                   : [lead?.sku, lead?.barcode].filter(Boolean).join(' · ')}
                               </span>
                             </span>
-                            <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(toNumber(lead?.selling_price_usd))}</span>
+                            <span className="flex-shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-400">{priceText(fmtUSD, toNumber(lead?.selling_price_usd))}</span>
                           </button>
                         </li>
                       )

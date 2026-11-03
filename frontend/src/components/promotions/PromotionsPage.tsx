@@ -38,7 +38,7 @@ import {
 import { searchProducts, getProductFilters, updateProduct } from '../../api/methods.ts'
 import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { promotionAutoLabel, normalizePromotionRule } from '../../utils/promotionRules.ts'
-import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
+import { calculateProductDiscount, isProductDiscountActive, priceText } from '../../utils/pricing.ts'
 import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 
 // Same minimal-context cast pattern as FeesPage/LoyaltyPointsPage --
@@ -691,7 +691,7 @@ export default function PromotionsPage() {
                           onClick={() => { openDiscountEditor(product); setProductResults([]) }}
                         >
                           {String(product.name || `#${product.id}`)}
-                          <span className="ml-2 text-xs text-gray-400">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>
+                          <span className="ml-2 text-xs text-gray-400">{priceText(fmtUSD, Number(product.selling_price_usd) || 0)}</span>
                         </button>
                       </li>
                     ))}
@@ -731,7 +731,7 @@ export default function PromotionsPage() {
                         return <tr key={`desktop-${String(product.id)}`} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => openDiscountEditor(product)}>
                           <td className="max-w-[7rem] px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PD-${product.id}`}><span className="detail-scroll-text">PD-{String(product.id)}</span></td>
                           <td className="max-w-[16rem] px-3 py-1.5 font-semibold text-slate-800 dark:text-slate-100" title={String(product.name || `#${product.id}`)}><span className="detail-scroll-text">{String(product.name || `#${product.id}`)}</span></td>
-                          <td className="whitespace-nowrap px-3 py-1.5"><span className="text-slate-400 line-through">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>{promo.active ? <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">{fmtUSD(promo.applied_price_usd)}</span> : null}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5"><span className="text-slate-400 line-through">{priceText(fmtUSD, Number(product.selling_price_usd) || 0)}</span>{promo.active ? <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">{priceText(fmtUSD, promo.applied_price_usd)}</span> : null}</td>
                           <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-slate-500">{product.discount_ends_at ? fmtDate(String(product.discount_ends_at)) : '—'}</td>
                           <td className="px-3 py-1.5"><StatusPill status={status} /></td>
                           <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" onClick={() => openDiscountEditor(product)} aria-label={t('edit') || 'Edit'} title={t('edit') || 'Edit'}><Pencil className="h-3.5 w-3.5" /></button></td>
@@ -765,9 +765,9 @@ export default function PromotionsPage() {
                         <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
                           {promo.active ? (
                             <>
-                              <span className="text-gray-400 line-through">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>
+                              <span className="text-gray-400 line-through">{priceText(fmtUSD, Number(product.selling_price_usd) || 0)}</span>
                               {' → '}
-                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtUSD(promo.applied_price_usd)}</span>
+                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{priceText(fmtUSD, promo.applied_price_usd)}</span>
                               <span className="ml-1 text-gray-400">(−{promo.percent_off}%)</span>
                             </>
                           ) : (t('promo_discount_not_live') || 'Configured, not currently live')}

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
 import { computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
+import { priceText } from '../src/utils/pricing.ts'
 import './posMoneyV1.test.ts' // actual Receipt SSR proves exact29 versus rounded-unit29.0001
 import { normalizeReceiptPrintSettings, normalizeReceiptTemplate, RECEIPT_TEMPLATE_REVISION, DEFAULT_RECEIPT_TEMPLATE } from '../src/utils/receiptAppliedConfig.ts'
 
@@ -274,13 +275,14 @@ await runTest('receipt discounts stay beside the charged price and printable gri
   // The saving still belongs to the price, but the price is now a UNIT price
   // in its own column, so the parenthesised figure is the cut on one unit --
   // the owner's photo reads `28.00 (-7.00)` there, then `21.00` in Total.
-  assert.match(receiptSource, /\{unknownRecordedUnit \? '—' : fmtUSD\(unitUsd\)\}[\s\S]*\(-\{fmtUSD\(unitSavingsUsd\)\}\)/,
+  assert.match(receiptSource, /\{unknownRecordedUnit \? '—' : priceText\(fmtUSD, unitUsd\)\}[\s\S]*\(-\{fmtUSD\(unitSavingsUsd\)\}\)/,
     'the per-unit saving should be rendered next to the unit price in the Price cell')
-  const priceExpression = receiptSource.match(/\{(unknownRecordedUnit \? '—' : fmtUSD\(unitUsd\))\}/)?.[1]
+  const priceExpression = receiptSource.match(/\{(unknownRecordedUnit \? '—' : priceText\(fmtUSD, unitUsd\))\}/)?.[1]
   assert.ok(priceExpression)
-  const renderPrice = new Function('unknownRecordedUnit', 'unitUsd', 'fmtUSD', `return (${priceExpression})`)
-  assert.equal(renderPrice(false, 10, (amount: number) => `$${amount.toFixed(2)}`), '$10.00')
-  assert.equal(renderPrice(true, 0, () => { throw new Error('unknown unit cannot be formatted as zero') }), '—')
+  const renderPrice = new Function('unknownRecordedUnit', 'unitUsd', 'fmtUSD', 'priceText', `return (${priceExpression})`)
+  // priceText is the real one: a unit price shows rounded UP to the cent (the price the till charged), then goes through fmtUSD.
+  assert.equal(renderPrice(false, 10, (amount: number) => `$${amount.toFixed(2)}`, priceText), '$10.00')
+  assert.equal(renderPrice(true, 0, () => { throw new Error('unknown unit cannot be formatted as zero') }, priceText), '—')
   assert.match(receiptSource, /const lineUsd = figures\.lineUsd/,
     'the Total column carries the net line, which is what the printed Subtotal sums')
   assert.doesNotMatch(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,

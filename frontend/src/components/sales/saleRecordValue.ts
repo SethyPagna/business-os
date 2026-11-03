@@ -1,3 +1,5 @@
+import { priceText } from '../../utils/pricing.ts'
+
 type FormatUsd = (value: number | string) => string
 type FormatKhr = (value: number | string) => string
 type TranslateLabel = (key: string, fallback: string) => string
@@ -59,7 +61,7 @@ function productLine(value: unknown, fmtUSD: FormatUsd): string {
   let line = `${name}${sku ? ` (${sku})` : ''}`
   if (quantity !== null) line += ` × ${quantity}`
   if (lineTotal !== null) line += ` · ${fmtUSD(lineTotal)}`
-  else if (unitPrice !== null) line += ` · ${fmtUSD(unitPrice)}`
+  else if (unitPrice !== null) line += ` · ${priceText(fmtUSD, unitPrice)}`
   return line
 }
 
