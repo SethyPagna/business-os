@@ -221,6 +221,22 @@ if (process.argv.includes('--bundle')) {
     for (const name of forbidden) assert.equal([...closure].some(file => match(name).test(file)), false, `${entryName} statically pulls ${name}`)
   }
   console.log('PASS till, sales and report pages load no SheetJS/export code statically')
+  // A lazy chunk stays lazy only while nothing imports it statically. The Website Editor (catalog-editor) is reached through one dynamic
+  // import from the catalog route. A lucide icon the build had no named set for (Palette) was folded into that chunk, so ReceiptSettings
+  // imported it from there and /receipt-settings loaded the editor and the whole catalog page up front (+15 chunks, +494 KB raw).
+  const lazyEditor = files.find(file => /^catalog-editor-[\w-]{8}\.js$/.test(file))
+  assert.ok(lazyEditor, 'missing exact catalog-editor chunk')
+  const editorImporters = files.filter(file => graph.get(file)?.includes(lazyEditor))
+  assert.deepEqual(editorImporters.filter(file => !/^catalog-[\w-]{8}\.js$/.test(file)), [], 'only the catalog route may statically import catalog-editor')
+  {
+    const receiptEntry = files.find(file => /^ReceiptSettings-[\w-]{8}\.js$/.test(file))
+    assert.ok(receiptEntry, 'missing exact ReceiptSettings chunk')
+    const receiptClosure = closureOf([receiptEntry])
+    for (const name of ['catalog-editor', 'catalog']) {
+      assert.equal([...receiptClosure].some(file => new RegExp('^' + name + '-[\w-]{8}\.js$').test(file)), false, 'ReceiptSettings statically pulls ' + name)
+    }
+    console.log('PASS the Website Editor is lazy: only the catalog route imports it, and /receipt-settings pulls neither it nor the catalog page (' + receiptClosure.size + ' chunks)')
+  }
   // 6.0.935: ZXing is inside the barcode decode worker's own script (it was the vendor-zxing chunk). A worker
   // cannot import another chunk, so the scanner cannot pull the receipt libraries either: it imports nothing.
   const decodeWorker = files.find(file => /^barcodeDecode\.worker-[\w-]{8}\.js$/.test(file))

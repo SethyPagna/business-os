@@ -17,7 +17,7 @@ export type EditorSection = EditorSectionId
 
 // The four write grants of utils/portalPermissions.ts. A section opens for a person holding ANY of its grants.
 export type EditorGrant = 'customer_portal' | 'portal_posts' | 'portal_about' | 'portal_faq'
-export type EditorSectionIcon = 'palette' | 'phone' | 'shopping-bag' | 'megaphone' | 'store' | 'help-circle' | 'layout-grid'
+export type EditorSectionIcon = 'images' | 'phone' | 'shopping-bag' | 'megaphone' | 'store' | 'help-circle' | 'layout-grid'
 
 export type EditorSectionDef = {
   id: EditorSectionId
@@ -38,7 +38,7 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
   {
     id: 'shop',
     domId: 'portal-section-shop',
-    icon: 'palette',
+    icon: 'images',
     label: ['web_editor_section_shop', 'Shop', 'ហាង'],
     grants: ['customer_portal'],
     keys: [

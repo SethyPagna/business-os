@@ -1,9 +1,9 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
+import Images from 'lucide-react/dist/esm/icons/images.js'
 import LayoutGrid from 'lucide-react/dist/esm/icons/layout-grid.js'
 import Megaphone from 'lucide-react/dist/esm/icons/megaphone.js'
-import Palette from 'lucide-react/dist/esm/icons/palette.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
@@ -14,7 +14,7 @@ import type { EditorText } from './editorText.ts'
 
 type SectionIcon = ComponentType<{ className?: string; 'aria-hidden'?: boolean }>
 const ICONS: Record<EditorSectionIcon, SectionIcon> = {
-  palette: Palette,
+  images: Images,
   phone: Phone,
   'shopping-bag': ShoppingBag,
   megaphone: Megaphone,
