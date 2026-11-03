@@ -232,8 +232,16 @@ if (process.argv.includes('--bundle')) {
     const receiptEntry = files.find(file => /^ReceiptSettings-[\w-]{8}\.js$/.test(file))
     assert.ok(receiptEntry, 'missing exact ReceiptSettings chunk')
     const receiptClosure = closureOf([receiptEntry])
+    // The pattern is built with a template literal and doubled backslashes, like every other chunk matcher in this file. A plain
+    // '...[\w-]...' string loses its backslashes (\w becomes w, \. becomes any character), the pattern stops matching real chunk
+    // names, and this half of the check could never fail.
+    const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
+    // Positive control: the matcher must accept a real emitted name and refuse look-alikes, or the loop below proves nothing.
+    assert.equal(match('catalog-editor').test('catalog-editor-DUazrTS2.js'), true, 'the chunk matcher must match a real chunk name')
+    assert.equal(match('catalog').test('catalog-editor-DUazrTS2.js'), false, 'catalog must not match catalog-editor')
+    assert.equal(match('catalog').test('catalog-DUazrTS2xjs'), false, 'the dot before js must be literal')
     for (const name of ['catalog-editor', 'catalog']) {
-      assert.equal([...receiptClosure].some(file => new RegExp('^' + name + '-[\w-]{8}\.js$').test(file)), false, 'ReceiptSettings statically pulls ' + name)
+      assert.equal([...receiptClosure].some(file => match(name).test(file)), false, `ReceiptSettings statically pulls ${name}`)
     }
     console.log('PASS the Website Editor is lazy: only the catalog route imports it, and /receipt-settings pulls neither it nor the catalog page (' + receiptClosure.size + ' chunks)')
   }
