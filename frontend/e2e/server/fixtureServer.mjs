@@ -871,6 +871,17 @@ function handleApi(pathname, query, req, res, body) {
     })
   }
 
+  // ===== BEGIN E2E-P1 (role-matrix.spec.ts) -- additive, self-contained; other lanes add their own blocks beside this one =====
+  // Notes is where the shell sends every role that cannot open the page it asked for (App.tsx falls back to the first NAV_ITEMS
+  // page the role may open, and Notes carries no permission), so the role matrix lands on it for most roles. Its mount read is
+  // notes.ts GET / -> { notes }, which api/notesTransport.ts getNotes() declares and whose empty state is this.
+  if (pathname === '/api/notes') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    return sendJson(res, 200, { notes: [] })
+  }
+  // ===== END E2E-P1 =====
+
   // Anything the specs have not pinned. 404 with an explicit marker rather than
   // an empty 200: a silent {} lets a new first-paint dependency appear without
   // anyone noticing, and console-hygiene.spec.ts asserts on the log this

@@ -19,6 +19,7 @@ import { ROLE_PRESETS } from '../../src/components/users/rolePresetDefaults.ts'
  *
  *   Employee default   cloudflare/src/lib/roleDefaults.ts DEFAULT_ROLE_PERMISSIONS.employee (the one seed the Worker
  *                      writes and the role editor resets to)
+ *   Manager default    the same file's .manager: the one non-admin default that reaches Dashboard, Review, Settings, Branches
  *   cashier            the lead key of the POS section of permissionDefinitions.ts, and nothing else
  *   viewer             every section of permissionDefinitions.ts whose middle tier is 'view'
  *   image-only         rolePresetDefaults.ts ROLE_PRESETS 'product_viewer'
@@ -71,6 +72,7 @@ function define(id: string, label: string, roleCode: string, grants: Grants): Ro
 
 export const ROLES: RoleDef[] = [
   define('employee', 'Employee default', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee }),
+  define('manager', 'Manager default', 'manager', { ...DEFAULT_ROLE_PERMISSIONS.manager }),
   define('cashier', 'cashier (POS only)', 'cashier', { [posLead.key]: true }),
   define('viewer', 'viewer (view tier)', 'viewer', Object.fromEntries(
     PERMISSION_DEFS.filter((entry) => entry.tier && entry.middleTier === 'view').map((entry) => [entry.key, 'view' as const]),

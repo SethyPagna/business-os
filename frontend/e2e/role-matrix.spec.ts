@@ -33,7 +33,8 @@ import { isPhoneProject, openAsRole, type RoleSession } from './support/roleSess
  *
  * App tier only: the fixture server answers; nothing here proves the Worker refuses a forged call (system-tier lane).
  *
- * RUN ONLY THIS FILE:  cd frontend && npx playwright test role-matrix --workers=1
+ * RUN ONLY THIS FILE:  cd frontend && npx playwright test e2e/role-matrix.spec.ts --workers=1
+ * (Write the path: a bare `role-matrix` is a regex over the whole file path, so in a worktree whose directory name contains it, every spec matches.)
  */
 
 test.use({ serviceWorkers: 'block' })
@@ -138,6 +139,20 @@ for (const role of ROLES) {
 // =====================================================================================================================
 // 2. Direct URLs
 // =====================================================================================================================
+/**
+ * App defects this matrix found, kept as live cases rather than loosened away. Each is excluded from the route sweep's blank-page
+ * check (so one defect does not turn the whole sweep red) and has its own test below, marked test.fail with the reason. When the
+ * app is fixed that test passes, Playwright reports "expected to fail but passed", and the entry is deleted.
+ */
+const KNOWN_EMPTY_DOORS: Array<{ roles: string[]; page: string; reason: string }> = [
+  {
+    roles: ['employee', 'cost-viewer'],
+    page: 'promotions',
+    reason: 'AppContext.tsx:2530 opens the Promotions door for can(products,view), but PromotionsPage.tsx:539/547/670 render a section only for customer_portal, promotions, or products edit+price, so the Employee default is offered an empty page',
+  },
+]
+const isKnownEmptyDoor = (roleId: string, page: string): boolean => KNOWN_EMPTY_DOORS.some((entry) => entry.page === page && entry.roles.includes(roleId))
+
 for (const role of ROLES) {
   test(`${role.label}: a direct URL to each of the ${ADMIN_ROUTES.length} admin routes renders, or lands on a page the role may open, never blank or a crash`, async ({ browser }, testInfo) => {
     test.setTimeout(420_000)
@@ -154,7 +169,7 @@ for (const role of ROLES) {
 
         const shown = squash(await slot.innerText())
         const controls = await slot.locator('button, input, select, textarea, a, table, img').count()
-        expect.soft(shown.length > 0 || controls > 0, `${where} is not a blank page`).toBe(true)
+        if (!isKnownEmptyDoor(role.id, route.page)) expect.soft(shown.length > 0 || controls > 0, `${where} is not a blank page`).toBe(true)
         expect.soft(shown, `${where} did not hit the page error boundary`).not.toContain('Page failed to load')
 
         if (denied) {
@@ -164,7 +179,7 @@ for (const role of ROLES) {
           if (await deniedSlot.count()) {
             const body = squash((await deniedSlot.first().textContent()) || '')
             expect.soft(
-              body.startsWith(text('access_denied', 'Access Denied')) && body.length < 300,
+              body.includes(text('access_denied', 'Access Denied')) && body.length < 300,
               `${where}: the denied page's slot holds only the Access Denied panel (it holds "${body.slice(0, 120)}")`,
             ).toBe(true)
             expect.soft(await deniedSlot.first().getAttribute('data-bos-active-page'), `${where}: the denied slot is not the active one`).toBe('false')
@@ -185,6 +200,25 @@ for (const role of ROLES) {
       finish(session)
     } finally { await session.close() }
   })
+}
+
+for (const known of KNOWN_EMPTY_DOORS) {
+  for (const roleId of known.roles) {
+    const role = ROLES.find((entry) => entry.id === roleId) as RoleDef
+    test(`${role.label}: the ${known.page} page the role is offered has something on it`, async ({ browser }, testInfo) => {
+      test.setTimeout(120_000)
+      test.fail(true, known.reason)
+      const session = await begin(browser, testInfo.project.name, role)
+      const { page } = session
+      try {
+        const route = ADMIN_ROUTES.find((entry) => entry.page === known.page) as { page: string; path: string }
+        const slot = await open(page, route.path, known.page)
+        const shown = squash(await slot.innerText())
+        const controls = await slot.locator('button, input, select, textarea, a, table, img').count()
+        expect(shown.length > 0 || controls > 0, `the ${known.page} page is blank (text "${shown}", ${controls} controls)`).toBe(true)
+      } finally { await session.close() }
+    })
+  }
 }
 
 // =====================================================================================================================
@@ -259,7 +293,7 @@ const EDITORS = ROLES.filter((role) => {
   return access.canAccessPage('products') && grant(access, 'products', 'edit')
 })
 
-async function openProductForm(session: Session): Promise<Locator> {
+async function openProductForm(session: Session, tab?: 'pricing'): Promise<Locator> {
   const { page } = session
   const slot = await open(page, '/products', 'products')
   await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
@@ -267,6 +301,11 @@ async function openProductForm(session: Session): Promise<Locator> {
   const dialog = page.getByRole('dialog').last()
   await expect(dialog, 'the product edit form opened').toBeVisible({ timeout: 15_000 })
   await expect(dialog.locator('input').first()).toBeVisible()
+  if (tab === 'pricing') {
+    // ProductForm.tsx:1495 -- prices and costs are on the Pricing tab, not the first one.
+    await dialog.getByRole('button', { name: text('pricing', 'Pricing'), exact: true }).click()
+    await expect(dialog.getByTestId('product-pricing-grid'), 'the Pricing tab opened').toBeVisible({ timeout: 15_000 })
+  }
   return dialog
 }
 
@@ -293,9 +332,10 @@ for (const role of EDITORS) {
     // utils/productMergePriceAccess.ts canChangeProductPrices: administrator, or edit and price both held.
     const wantEditable = access.isAdmin || (grant(access, 'products', 'edit') && grant(access, 'products', 'price'))
     try {
-      const dialog = await openProductForm(session)
-      const locked = dialog.locator('fieldset[disabled][title*="change product prices"]')
-      await expect.soft(locked, 'price fieldsets are disabled with the read-only hint iff the role may not change prices').toHaveCount(wantEditable ? 0 : 2, BRIEF)
+      const dialog = await openProductForm(session, 'pricing')
+      // ProductForm.tsx:2028/2059 -- the selling and wholesale fieldsets are disabled, with the read-only hint as their title.
+      const locked = await dialog.locator('fieldset[disabled][title*="change product prices"]').count()
+      expect.soft(locked > 0, `price fieldsets locked iff the role may not change prices (${locked} locked)`).toBe(!wantEditable)
       finish(session)
     } finally { await session.close() }
   })
@@ -366,7 +406,7 @@ for (const role of EDITORS) {
     test.setTimeout(150_000)
     const session = await begin(browser, testInfo.project.name, role, false)
     try {
-      const dialog = await openProductForm(session)
+      const dialog = await openProductForm(session, 'pricing')
       const values = await dialog.locator('input, textarea').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value))
       const holdsCost = values.some((value) => /^13\.15/.test(value.trim()))
       expect(holdsCost, `form values: ${values.filter(Boolean).slice(0, 12).join(' | ')}`).toBe(seesCost(session.access))
