@@ -15,6 +15,9 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // Stock moved (a Remove, another till's sale) between the sale's reads and its write: the Worker aborts the whole
   // write, so nothing was recorded and the same checkout can simply be sent again. Not a pricing change.
   sale_stock_changed: 'sale_stock_changed',
+  // Riel paid in cash is whole 100-riel notes (owner, 27 Oct 2026): a cash tender row, stated riel change, or any other cash
+  // writer refused it. The till marks the field before it asks; this restates the Worker's refusal if a stale till still sent it.
+  riel_cash_not_hundreds: 'riel_cash_not_hundreds',
 }
 
 /**

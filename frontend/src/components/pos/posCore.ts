@@ -6,6 +6,7 @@ import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { rielCashFieldInvalid, type PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
 
 /** Raw draft text is retained by the input; only valid nonnegative decimals
  * enter a v1 calculation. In particular a sub-tick negative cannot become 0. */
@@ -24,6 +25,15 @@ export function posV1Tender(rows: readonly { method: string; usd: string; khr: s
     return { method: row.method.trim(), amount_usd: roundMoney2(row.usd.trim() || '0'), amount_khr: Math.round(Number(row.khr.trim() || '0')) }
   })
   return { details, paidUsd: sumMoney4(details.map(row => row.amount_usd)), paidKhr: sumMoney4(details.map(row => row.amount_khr)) }
+}
+
+/**
+ * The ids of the tender rows paid by a cash method whose riel is not whole 100-riel notes (owner, 27 Oct 2026: no riel coin
+ * below 100, so riel cash is 0 or a multiple of 100; any riel by a bank or QR method). The till marks them and sends
+ * nothing; POST /api/sales refuses the same rows with riel_cash_not_hundreds (lib/saleStatusResolution.ts).
+ */
+export function posRielCashRowIds(rows: readonly { id: string; method: string; khr: string }[], methodKinds: PaymentMethodKindMap = {}): string[] {
+  return rows.filter(row => rielCashFieldInvalid(row.method, row.khr, methodKinds)).map(row => row.id)
 }
 
 /** New-cart preview only. A saved/frozen checkout never enters this helper. */

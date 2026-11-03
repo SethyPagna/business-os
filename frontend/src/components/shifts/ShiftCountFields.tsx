@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import type { ShiftCountBlocker } from '../../api/shiftTransport.ts'
+import { shiftRielCountInvalid, type ShiftCountBlocker } from '../../api/shiftTransport.ts'
 
 /**
  * The two-currency drawer count, as ONE shared control.
@@ -48,13 +48,16 @@ type PairProps = {
    */
   hintDetail?: string
   className?: string
+  /** The riel count already stored (an amend): left unchanged, a count from before the whole-100៛ rule is kept. */
+  storedKhr?: unknown
 }
 
 const DENSE_INPUT = 'h-10 text-base sm:h-8 sm:text-[13px] w-full rounded-lg border border-gray-300 bg-white pl-2.5 pr-12 text-zinc-900 tabular-nums placeholder:text-gray-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100'
 const FORM_INPUT = 'input pr-12 tabular-nums'
 
-export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, hint, hintDetail, className = '' }: PairProps) {
+export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel, khrLabel, disabled = false, autoFocus = false, dense = false, hint, hintDetail, className = '', storedKhr }: PairProps) {
   const { t } = useApp() as ShiftGateContext
+  const rielInvalid = !disabled && shiftRielCountInvalid(khr, storedKhr)
   const inputClass = dense ? DENSE_INPUT : FORM_INPUT
   const suffixClass = 'pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[11px] font-semibold tracking-wide text-[color:var(--ui-accent,#9c7a3c)]'
   return (
@@ -76,13 +79,14 @@ export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel
         <span className="relative block min-w-0">
           <input
             type="number" inputMode="numeric" min="0" step="100" placeholder="0"
-            aria-label={khrLabel} title={khrLabel}
+            aria-label={khrLabel} title={khrLabel} aria-invalid={rielInvalid || undefined}
             className={inputClass} disabled={disabled}
             value={khr} onChange={(event) => onKhr(event.target.value)}
           />
           <span className={suffixClass} aria-hidden="true">KHR</span>
         </span>
       </div>
+      {rielInvalid ? <p className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{t('riel_cash_not_hundreds')}</p> : null}
       <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{hint ?? t('shift_blank_count_hint')}</p>
     </div>
   )
@@ -90,7 +94,7 @@ export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel
 
 /** The pack key that names a blocker, for the row under the pair. */
 export function shiftCountBlockerKey(blocker: ShiftCountBlocker): string {
-  return blocker === 'both_blank' ? 'shift_count_needed' : 'shift_count_invalid'
+  return blocker === 'both_blank' ? 'shift_count_needed' : blocker === 'riel_cash' ? 'riel_cash_not_hundreds' : 'shift_count_invalid'
 }
 
 type SubmitRowProps = {
