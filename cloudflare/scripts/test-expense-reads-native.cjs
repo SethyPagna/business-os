@@ -523,6 +523,67 @@ async function scenario(w, patches = []) {
     setSwitch(w2, false)
   })
 
+  // E1-F delta review: the probe floor and the upper bound compare the RAW text of created_at, while the list orders by the Cambodia day (UTC+7). A row written with
+  // an offset east of +07:00 carries a text date one day AFTER its Cambodia day ('2026-10-06T03:00:00+12:00' is 2026-10-05 in Cambodia), so a one-day margin on
+  // either bound dropped it (page 500, 501 courier sales: OFF 501 rows, ON 500). Offsets run from -12:00 to +14:00, so a two-day margin holds for all of them.
+  await check('OFFSETS: courier sales written with any offset from -12:00 to +14:00 are served exactly once at every page size, including those whose text date is a day after their Cambodia day', async () => {
+    const KINDS = [['Z', 0], ['space', 0], ['+09:00', 540], ['+12:00', 720], ['+14:00', 840], ['+08:00', 480], ['+07:00', 420], ['-05:00', -300], ['-12:00', -720]]
+    const spell = (utc, [kind, minutes]) => {
+      if (kind === 'Z') return new Date(utc).toISOString()
+      if (kind === 'space') return new Date(utc).toISOString().slice(0, 19).replace('T', ' ')
+      return `${new Date(utc + minutes * 60000).toISOString().slice(0, 19)}${kind}`
+    }
+    const EAST = KINDS.filter(([, minutes]) => minutes >= 540) // +09:00, +12:00, +14:00: the offsets that put the text date a day after the Cambodia day for part of the day
+    // The floor, both margins at once: the rows the probe reads are east of +07:00 (text date 10-06, Cambodia day 10-05) and the row the page needs is WEST (text date 10-04,
+    // Cambodia day 10-05, later in the day than both). A floor one day below the probe's text date (10-05) cuts it: the page would open with the wrong row.
+    {
+      const w3 = newWorld(patches)
+      w3.sql.exec('DELETE FROM sale_items; DELETE FROM sales')
+      const put = w3.sql.prepare("INSERT INTO sales (id, created_at, sale_status, branch_id, receipt_number, total_usd, subtotal_usd, delivery_actual_cost_usd, is_delivery) VALUES (?, ?, 'completed', 1, ?, 10, 10, 2, 1)")
+      for (const [id, text] of [[97001, '2026-10-06T00:00:00+14:00'], [97002, '2026-10-06T00:30:00+14:00'], [97003, '2026-10-04T23:30:00-12:00'], [97004, '2026-10-03 09:00:00']]) put.run(id, text, `F-${id}`)
+      setSwitch(w3, false)
+      const expected = await offsetExport(w3, 'source=sale', w3.users.full, 500)
+      assert.deepEqual(expected.rows.map((r) => r.id), [97003, 97002, 97001, 97004], 'control: the west row is first in the list although its text date is two days older than the probe rows')
+      setSwitch(w3, true)
+      for (const size of [1, 2, 3, 500]) assert.deepEqual(rowsJson((await cursorExport(w3, 'source=sale', w3.users.full, size)).rows), rowsJson(expected.rows), `floor fixture, page ${size}`)
+      setSwitch(w3, false)
+    }
+    for (const [count, days, seedValue, sizes] of [[501, 12, 7, [3, 7, 50, 500]], [60, 6, 11, [1, 2, 5, 500]]]) {
+      const w2 = newWorld(patches)
+      w2.sql.exec('DELETE FROM sale_items; DELETE FROM sales')
+      const add = w2.sql.prepare("INSERT INTO sales (id, created_at, sale_status, branch_id, receipt_number, total_usd, subtotal_usd, delivery_actual_cost_usd, is_delivery) VALUES (?, ?, 'completed', 1, ?, 10, 10, ?, 1)")
+      const rnd = lcg(seedValue)
+      w2.sql.exec('BEGIN')
+      for (let id = 96000; id < 96000 + count; id += 1) {
+        // The three oldest rows share one instant (23:30 in Cambodia, the day before every other row) and are spelled +14:00, +12:00 and +09:00: they sort LAST, so at page
+        // size count - 1 the last page is one of them and the bounds of the next page must reach a text date a day after its Cambodia day.
+        if (id < 96003) { add.run(id, spell(Date.UTC(2026, 8, 30, 16, 30), EAST[EAST.length - 1 - (id - 96000)]), `R-${id}`, 1 + (id % 7)); continue }
+        // a 30-minute grid over `days` days, so identical local days and entry times exist; each row in a random spelling of the same instant, half of them east of +07:00
+        const utc = Date.UTC(2026, 9, 1) + Math.floor(rnd() * days) * 86400000 + Math.floor(rnd() * 48) * 1800000
+        add.run(id, spell(utc, rnd() < 0.5 ? EAST[Math.floor(rnd() * EAST.length)] : KINDS[Math.floor(rnd() * KINDS.length)]), `R-${id}`, 1 + (id % 7))
+      }
+      w2.sql.exec('COMMIT')
+      setSwitch(w2, false)
+      const oracle = await offsetExport(w2, 'source=sale', w2.users.full, 500)
+      const eastShifted = oracle.rows.filter((r) => String(r.created_at).slice(0, 10) > r.fee_date).length
+      assert.equal(oracle.rows.length, count)
+      assert.ok(eastShifted >= count / 10,`control: ${eastShifted} of ${count} rows have a text date after their Cambodia day, so the bounds are tested`)
+      setSwitch(w2, true)
+      for (const qs of ['source=sale', 'source=all']) {
+        setSwitch(w2, false)
+        const expected = await offsetExport(w2, qs, w2.users.full, 500)
+        setSwitch(w2, true)
+        for (const size of sizes) {
+          const got = await cursorExport(w2, qs, w2.users.full, size)
+          const missing = expected.rows.filter((r) => !got.rows.some((g) => g.kind === r.kind && g.id === r.id)).map((r) => `${r.kind}:${r.id}`)
+          assert.deepEqual(missing, [], `${count} sales, ${qs}, page ${size}: ${expected.rows.length} rows by offset, ${got.rows.length} by cursor`)
+          assert.deepEqual(rowsJson(got.rows), rowsJson(expected.rows), `${count} sales, ${qs}, page ${size}`)
+        }
+      }
+      setSwitch(w2, false)
+    }
+  })
+
   // E1-F review N2: a month's export is one request today. It must not cost more by cursor: no probe (its whole sale list fits the page) and no high-water id.
   await check('EXPORT READS: an export that fits one page reads no probe and no id; a page that has a successor reads the ids once, after it; later pages read none', async () => {
     const { decodeFeeCursor } = w.load('lib/expenseReads.ts')
@@ -630,18 +691,37 @@ async function scenarioPlan(patches = []) {
     const exact = await run('?startDate=2025-01-01&endDate=2025-02-28', 'free')
     assert.equal(exact.body, await bodyOf('?startDate=2025-01-01&endDate=2025-02-28'))
     assert.equal(exact.statements, 1, 'a window of exactly the cap is folded')
-    // 1,601 rows: the attempt, then the four statements; the attempt reads cap + 1 rows, not the table
-    const over = await run('', 'free')
-    assert.equal(over.body, await bodyOf(''))
+    // 1,601 rows in a window with both dates: the attempt, then the four statements; the attempt reads cap + 1 rows, not the table
+    const wide = '?startDate=2025-01-01&endDate=2025-12-31'
+    const over = await run(wide, 'free')
+    assert.equal(over.body, await bodyOf(wide))
     assert.equal(over.statements, 5, 'the attempt, then the four statements')
     assert.equal(over.folded, 1501, 'the attempt read cap + 1 rows and no more')
-    // Paid reads the same window in one, with the same answer
-    const paid = await run('', 'paid')
-    assert.equal(paid.body, await bodyOf(''))
-    assert.deepEqual([paid.statements, paid.folded], [1, 1601], 'Paid read the whole window in one statement')
+    // E1-F delta review: a window without both dates is most of the table, and Free does not even try it: the all-time report reads what 6.0.1053 reads
+    for (const open of ['', '?startDate=2025-01-01', '?endDate=2025-12-31', '?branchId=1']) {
+      const free = await run(open, 'free')
+      assert.equal(free.body, await bodyOf(open), `Free ${open || 'all time'}`)
+      assert.deepEqual([free.statements, free.folded], [4, null], `Free ${open || 'all time'}: the four statements and no attempt`)
+    }
+    // Paid reads the same windows in one, with the same answer
+    for (const open of ['', wide, '?startDate=2025-01-01']) {
+      const paid = await run(open, 'paid')
+      assert.equal(paid.body, await bodyOf(open))
+      assert.deepEqual([paid.statements, paid.folded], [1, 1601], `Paid ${open || 'all time'} read the whole window in one statement`)
+    }
     const unset = await run('', undefined)
     assert.equal(unset.statements, 1, 'an unset PLAN_TIER is Paid')
     assert.equal(unset.body, await bodyOf(''))
+    // an exact time range has both ends
+    const timed = await run('?createdFrom=2025-01-01T00:00:00Z&createdTo=2025-01-10T00:00:00Z', 'free')
+    assert.equal(timed.statements, 1, 'an exact time range is bounded')
+    // the rule is the plan table's: a table whose Free tries unbounded windows tries them
+    const open = newWorld([...patches, { file: 'src/lib/planTier.ts', from: 'expenseReportFoldUnboundedWindows: false', to: 'expenseReportFoldUnboundedWindows: true' }])
+    open.sql.exec("DELETE FROM fees; INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at) VALUES ('other', 'One', 1, 0, '2025-02-01', 1, '2025-02-01 03:00:00')")
+    setSwitch(open, true)
+    const openLog = recordStatements(open)
+    await open.request('GET', '/api/fees/report', undefined, open.users.full, {}, asTier(open, 'free'))
+    assert.equal(feeStatements(openLog).length, 1, 'a Free table that folds unbounded windows folds them')
     // below the cap Free reads once
     const month = await run('?startDate=2025-03-01&endDate=2025-03-30', 'free')
     assert.equal(month.body, await bodyOf('?startDate=2025-03-01&endDate=2025-03-30'))
@@ -771,7 +851,9 @@ const MUTANTS = {
   'the snapshot is forgotten, so a row created mid-export appears': { file: CAT, from: 'upToId: cursor ? cursor.h[0] : null, ', to: '' },
   'the sale snapshot is forgotten': { file: CAT, from: "{ sql: `${base.sql} AND +sales.id <= @saleHi`, params: { ...base.params, saleHi: cursor.h[1] } }", to: '{ sql: base.sql, params: base.params }' },
   'a sale row tied on entry time with the cursor is skipped': { file: CAT, from: "OR (datetime(sales.created_at) = @afterAt AND sales.id < @afterId)", to: 'OR 1 = 0' },
-  'the sale floor is the probe day itself, not the day before': { file: CAT, from: "date(@probeDay, '-1 day')", to: '@probeDay' },
+  'the sale floor is the probe day itself, not two days before': { file: CAT, from: "date(@probeDay, '-2 day')", to: '@probeDay' },
+  'the sale floor keeps the one-day margin (an offset east of +07:00 is dropped)': { file: CAT, from: "date(@probeDay, '-2 day')", to: "date(@probeDay, '-1 day')" },
+  'the upper bound keeps the one-day margin (an offset east of +07:00 is dropped)': { file: CAT, from: "date(@afterDay, '+2 day')", to: "date(@afterDay, '+1 day')" },
   'the sale probe stops one row short': { file: CAT, from: 'probe?.[limit - 1]?.created_at', to: 'probe?.[limit - 2]?.created_at' },
   'the cursor keeps only the last expense, the sale key is lost': { file: CAT, from: 'lastSale = [row.fee_date == null ? null : String(row.fee_date), at == null ? null : String(at), Number(row.id)]', to: '' },
   'a NULL day goes into the cursor as the text null': { file: CAT, from: 'row.fee_date == null ? null : String(row.fee_date)', to: 'String(row.fee_date)' },
@@ -790,6 +872,10 @@ const MUTANTS = {
   'the report keeps the label case of the first row, not the smallest': { file: 'src/lib/expenseReads.ts', from: 'compareCodePoints(row.label, cat.label) < 0', to: 'false' },
   'the report breaks a tie between two types by type descending': { file: 'src/lib/expenseReads.ts', from: 'outCats.sort((a, b) => cmpMoney(a, b) || compareCodePoints(a.label, b.label))', to: 'outCats.sort((a, b) => cmpMoney(a, b) || compareCodePoints(a.label, b.label) || compareCodePoints(b.fee_type, a.fee_type))' },
   'the row cap is ignored: a window over it is folded anyway': { plan: true, file: FEES, from: 'return rows <= cap ? foldFeeGroups(groups) : null', to: 'return foldFeeGroups(groups)' },
+  'an unbounded window is tried on Free': { plan: true, file: FEES, from: 'if (!bounded && !limits.expenseReportFoldUnboundedWindows) return null', to: '' },
+  'the unbounded rule is a tier name, not the plan table': { plan: true, file: FEES, from: '!limits.expenseReportFoldUnboundedWindows', to: "String(env.PLAN_TIER).toLowerCase() === 'free'" },
+  'every window counts as unbounded': { plan: true, file: FEES, from: "const bounded = ('startDate' in range.params && 'endDate' in range.params) || ('createdFrom' in range.params && 'createdTo' in range.params)", to: 'const bounded = false' },
+  'a window with one end counts as bounded': { plan: true, file: FEES, from: "('startDate' in range.params && 'endDate' in range.params)", to: "('startDate' in range.params || 'endDate' in range.params)" },
   'the row cap is a literal, not the plan table': { plan: true, file: FEES, from: 'const cap = getPlanLimits(env).expenseReportFoldMaxRows', to: 'const cap = 1500' },
   'the scan is not cut inside the statement, so an over-cap window groups the whole table': { plan: true, file: FEES, from: 'LIMIT @rowCap) s', to: 'LIMIT @rowCap * 1000000) s' },}
 

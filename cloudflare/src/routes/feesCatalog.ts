@@ -705,9 +705,16 @@ async function saleDeliveryUndatedRows(db: Db, scope: SaleScope, after: SaleKey 
 /**
  * The next `limit` sale rows below the cursor's sale key (the list's order is day, entry time, id, all descending), reading about 2 x limit sale rows
  * however far into the list the cursor is. The order is not an index order: entry times come in two spellings ('YYYY-MM-DD HH:MM:SS' and ISO
- * 'T..Z') that interleave on one day, so idx_sales_courier_cost (created_at) cannot serve it. A cheap probe walks that index in raw order for `limit`
- * rows; every row of the next `limit` in list order lies on the probe's last day or later (it has fewer than `limit` rows ahead of it otherwise),
- * so the ordered statement only needs the rows from the day before that. No cursor = the head of the list.
+ * 'T..Z', and an offset such as '-07:00' or '+12:00') that interleave on one day, so idx_sales_courier_cost (created_at) cannot serve it. A cheap probe walks
+ * that index in raw order for `limit` rows; the ordered statement then reads only the rows from two days before the probe's last raw day. No cursor = the head
+ * of the list.
+ *
+ * Why two days, and why the bounds are only a narrowing: a row's raw text carries its own clock, whose date R can differ from its Cambodia day L (UTC+7) by
+ * the offset it was written with. Offsets run from -12:00 to +14:00, so L - R lies between -1 and +1 day for every spelling (R <= L + 1 and L <= R + 1).
+ * Upper bound: a row below the cursor has L <= A, so R <= A + 1, so its text is below date(A, '+2 day'). Floor: the probe's `limit` rows all have R >= P,
+ * so L >= P - 1; a row whose text is below date(P, '-2 day') has R <= P - 3 and L <= P - 2, which puts all `limit` of them ahead of it: it is not on the page.
+ * The exact comparison on the Cambodia day (below) is the filter; the bounds only narrow the index range. A one-day margin (the first design) lost rows written
+ * with an offset ahead of +07:00: their text date is a day after their Cambodia day. Assumes the text starts with its date, as every spelling the app writes does.
  *
  * A row whose created_at has no readable day (garbage, an empty string) has a NULL day and a NULL entry time. ORDER BY d DESC puts those rows LAST, after
  * every dated row, ordered by entry time then id, and the offset list serves them the same way. They cannot ride the probe (a raw created_at order puts
@@ -718,7 +725,7 @@ async function saleDeliveryRowsAfter(db: Db, scope: SaleScope, after: SaleKey | 
   if (after && after[0] === null) return saleDeliveryUndatedRows(db, scope, after, limit)
   const dated: SaleScope = undated && !after ? { sql: `${scope.sql} AND ${localDateExpr('sales.created_at')} IS NOT NULL`, params: scope.params } : scope
   const bounded: SaleScope = after ? {
-    sql: `${dated.sql} AND sales.created_at < date(@afterDay, '+1 day') AND (${localDateExpr('sales.created_at')} < @afterDay
+    sql: `${dated.sql} AND sales.created_at < date(@afterDay, '+2 day') AND (${localDateExpr('sales.created_at')} < @afterDay
       OR (${localDateExpr('sales.created_at')} = @afterDay AND (datetime(sales.created_at) < @afterAt OR (datetime(sales.created_at) = @afterAt AND sales.id < @afterId))))`,
     params: { ...dated.params, afterDay: after[0], afterAt: after[1], afterId: after[2] },
   } : dated
@@ -726,7 +733,7 @@ async function saleDeliveryRowsAfter(db: Db, scope: SaleScope, after: SaleKey | 
     .all<{ created_at: string }>({ ...bounded.params, probeLimit: limit })
   const day = String(probe?.[limit - 1]?.created_at || '').slice(0, 10)
   const floored: SaleScope = /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(`${day}T00:00:00Z`))
-    ? { sql: `${bounded.sql} AND sales.created_at >= date(@probeDay, '-1 day')`, params: { ...bounded.params, probeDay: day } }
+    ? { sql: `${bounded.sql} AND sales.created_at >= date(@probeDay, '-2 day')`, params: { ...bounded.params, probeDay: day } }
     : bounded
   const rows = await saleDeliveryRows(db, floored, limit, true)
   // fewer dated rows than the page wants = the dated list is over: the undated rows (last in the list) fill what is left

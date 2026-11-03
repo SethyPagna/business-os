@@ -525,15 +525,20 @@ app.get('/', async (c) => {
 /**
  * The report's four figures from ONE pass over the expense table (read switch `expense_reads`) instead of four: the rows are grouped by day, type and
  * label key and folded in lib/expenseReads.ts. Null = answer with the four statements: the switch is off, the window holds more expenses than the plan
- * lets the Worker fold (expenseReportFoldMaxRows), or a figure sits on a rounding boundary where a sum of sums could round differently from the sum.
+ * lets the Worker fold (expenseReportFoldMaxRows), the window is not bounded on both ends and the plan does not fold those (expenseReportFoldUnboundedWindows:
+ * Free skips them, which is how its all-time report reads what 6.0.1053 reads), or a figure sits on a rounding boundary where a sum of sums could round
+ * differently from the sum.
  *
  * The cap is on ROWS and is applied inside the scan (the subquery stops after cap + 1 rows), so a window over it is turned away after reading about cap
  * rows rather than after grouping the whole table, and the Worker never decodes or folds more than `cap` groups (a window has at most as many groups as
  * rows). A window with at most `cap` rows is read whole, so its groups are exactly the ones the unlimited statement would return.
  */
-async function groupedFeeReport(env: Env, db: ReturnType<typeof getDb>, where: string, params: Record<string, unknown>): Promise<FeeReportParts | null> {
+async function groupedFeeReport(env: Env, db: ReturnType<typeof getDb>, where: string, params: Record<string, unknown>, bounded: boolean): Promise<FeeReportParts | null> {
   if (!(await expenseReadsOn(env))) return null
-  const cap = getPlanLimits(env).expenseReportFoldMaxRows
+  const limits = getPlanLimits(env)
+  // A window without both dates is most or all of the table: where the plan cannot fold that, do not even try (the attempt would only be read and thrown away)
+  if (!bounded && !limits.expenseReportFoldUnboundedWindows) return null
+  const cap = limits.expenseReportFoldMaxRows
   const groups = await db.prepare(`
     SELECT s.fee_date AS d, s.fee_type AS t, lower(trim(COALESCE(s.label, ''))) AS k, MIN(TRIM(s.label)) AS label,
       COUNT(*) AS n, SUM(s.amount_usd) AS usd, SUM(s.amount_khr) AS khr
@@ -568,7 +573,9 @@ app.get('/report', async (c) => {
   // per-fee stored rate and the global one can be blank -- so both raw
   // totals are returned and the UI shows "$X · Y៛".
   const money = 'ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr'
-  const grouped = await groupedFeeReport(c.env, db, where, params)
+  // bounded = both ends of the window are given (two booked dates, or an exact time range); anything else reads most of the table
+  const bounded = ('startDate' in range.params && 'endDate' in range.params) || ('createdFrom' in range.params && 'createdTo' in range.params)
+  const grouped = await groupedFeeReport(c.env, db, where, params, bounded)
   const [totals, days, byType, byCategory] = grouped ? [grouped.totals, grouped.days, grouped.byType, grouped.byCategory] : await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),

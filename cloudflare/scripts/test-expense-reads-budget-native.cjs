@@ -28,7 +28,10 @@ const REPORTS = [
   ['report, all time + branch', '/api/fees/report?branchId=1'],
   ['report, month with the sale block', `/api/fees/report?${R}&include=sales`],
   ['report, all time with the sale block', '/api/fees/report?include=sales'],
+  // both dates given but wide (every expense in it): over the Free cap WITH a window, so Free tries the fold and turns it away
+  ['report, wide window (every expense)', `/api/fees/report?startDate=2000-01-01&endDate=${ctx.today}`],
 ]
+const hasBothDates = (url) => /[?&]startDate=[^&]+/.test(url) && /[?&]endDate=[^&]+/.test(url)
 const EXPORTS = [
   ['export, all time', 'source=all'],
   ['export, month', `source=all&${R}`],
@@ -113,19 +116,24 @@ async function measureAll(switches, tier = 'free', withExports = true) {
   console.log('\nexport rows read per page')
   for (const [label] of EXPORTS) console.log(`  ${label.padEnd(28)} OFF ${off.exports[label].perPage.join(' ')}\n  ${''.padEnd(28)} ON  ${on.exports[label].perPage.join(' ')}`)
 
-  // The report. A window of at most the Free fold cap is read once instead of four times: less than half. A window over it is folded only on Paid: Free is turned away after about
-  // cap rows, which costs at most the attempt (the scan of cap + 1 rows through an index, a sorter pass over them, and the switch row) more than OFF.
+  // The report. A window of at most the Free fold cap is read once instead of four times: less than half. A window over it is folded only on Paid. On Free it is turned away:
+  // with no dates (or one) it is not even tried, so it reads what OFF reads (a few rows for the switch); with both dates it is tried once, which costs at most the attempt
+  // (the scan of cap + 1 rows through an index, a sorter pass over them, and the switch row) more than OFF.
   const under = REPORTS.filter(([label]) => windowRows(label) <= FREE_FOLD_ROWS).map(([label]) => label)
   const over = REPORTS.filter(([label]) => windowRows(label) > FREE_FOLD_ROWS).map(([label]) => label)
-  assert.ok(under.length >= 3 && over.length >= 2, `control: the shapes fall on both sides of the Free cap (under ${under.join(' | ')}; over ${over.join(' | ')})`)
+  const overOpen = over.filter((label) => !hasBothDates(REPORTS.find(([l]) => l === label)[1]))
+  const overBounded = over.filter((label) => hasBothDates(REPORTS.find(([l]) => l === label)[1]))
+  assert.ok(under.length >= 3 && overOpen.length >= 2 && overBounded.length >= 1, `control: the shapes fall on every side of the Free rule (under ${under.join(' | ')}; over, open ${overOpen.join(' | ')}; over, bounded ${overBounded.join(' | ')})`)
   const ATTEMPT_ROWS = 3 * (FREE_FOLD_ROWS + 1) + 4
+  const SWITCH_ROWS = 4
   for (const label of under) assert.ok(on.reports[label].rows * 2 < off.reports[label].rows, `${label}: ${off.reports[label].rows} -> ${on.reports[label].rows} is not the cut this change is for`)
-  for (const label of over) {
+  for (const label of overOpen) assert.ok(on.reports[label].rows <= off.reports[label].rows + SWITCH_ROWS, `${label}: Free reads ${on.reports[label].rows} against OFF's ${off.reports[label].rows}: an all-time window must not pay for a fold it cannot do`)
+  for (const label of overBounded) {
     const extra = on.reports[label].rows - off.reports[label].rows
-    assert.ok(extra <= ATTEMPT_ROWS, `${label}: a window over the Free cap cost ${extra} rows more than OFF, more than the attempt (${ATTEMPT_ROWS})`)
-    assert.ok(paid.reports[label].rows * 2 < off.reports[label].rows, `${label}: Paid folds it: ${off.reports[label].rows} -> ${paid.reports[label].rows}`)
+    assert.ok(extra > SWITCH_ROWS && extra <= ATTEMPT_ROWS, `${label}: a bounded window over the Free cap cost ${extra} rows more than OFF (the attempt is ${ATTEMPT_ROWS} at most)`)
   }
-  console.log(`\nPASS report rows read: ${under.length} windows under the Free cap read less than half; ${over.length} over it cost at most ${ATTEMPT_ROWS} rows more on Free (${over.map((label) => `${on.reports[label].rows - off.reports[label].rows}`).join(', ')} measured) and less than half on Paid`)
+  for (const label of over) assert.ok(paid.reports[label].rows * 2 < off.reports[label].rows, `${label}: Paid folds it: ${off.reports[label].rows} -> ${paid.reports[label].rows}`)
+  console.log(`\nPASS report rows read: ${under.length} windows under the Free cap read less than half; ${overOpen.length} over it with no dates read what OFF reads (${overOpen.map((label) => `${off.reports[label].rows}->${on.reports[label].rows}`).join(', ')}); ${overBounded.length} over it with both dates cost the attempt (${overBounded.map((label) => `+${on.reports[label].rows - off.reports[label].rows}`).join(', ')}, at most ${ATTEMPT_ROWS}); Paid folds every one in less than half`)
 
   // The export. A large export reads each page's rows instead of the rows before them (a third or less). A small one (a month's, one request today) must cost no more than today.
   for (const [label] of EXPORTS) {

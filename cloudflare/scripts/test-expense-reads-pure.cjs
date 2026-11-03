@@ -229,11 +229,14 @@ async function run(mutant) {
   // source pins: the call sites read the plan fields, and the old statements are still in the file for the switch-off path
   const fees = read('routes/fees.ts'), catalog = read('routes/feesCatalog.ts'), tier = read('lib/planTier.ts'), switches = read('lib/readSwitches.ts')
   const pins = [
-    ['the report reads its row cap from getPlanLimits(env), not a literal', /getPlanLimits\(env\)\.expenseReportFoldMaxRows/.test(fees) && !/rowCap: \d/.test(fees)],
+    ['the report reads its row cap from getPlanLimits(env), not a literal', /const limits = getPlanLimits\(env\)/.test(fees) && /limits\.expenseReportFoldMaxRows/.test(fees) && !/rowCap: \d/.test(fees)],
+    ['the report skips a window without both dates where the plan says so, from the plan table and not from a tier name', /if \(!bounded && !limits\.expenseReportFoldUnboundedWindows\) return null/.test(fees) && !/PLAN_TIER|'free'/.test(fees)],
+    ['bounded means both booked dates or an exact time range', fees.includes("const bounded = ('startDate' in range.params && 'endDate' in range.params) || ('createdFrom' in range.params && 'createdTo' in range.params)")],
+    ['the raw-text bounds of the sale list keep a two-day margin (offsets -12:00 to +14:00)', catalog.includes("sales.created_at < date(@afterDay, '+2 day')") && catalog.includes("sales.created_at >= date(@probeDay, '-2 day')") && !/date\(@(afterDay|probeDay), '[+-]1 day'\)/.test(catalog)],
     ['the grouped scan stops after cap + 1 rows INSIDE the scan (a window over the cap is turned away after about cap rows, not after grouping the table)', /FROM \(SELECT f\.fee_date, f\.fee_type, f\.label, f\.amount_usd, f\.amount_khr FROM fees f WHERE \$\{where\} LIMIT @rowCap\) s/.test(fees) && /rowCap: cap \+ 1/.test(fees) && /return rows <= cap \? foldFeeGroups\(groups\) : null/.test(fees)],
     ['the export reads its page cap from getPlanLimits(env), not a literal', /getPlanLimits\(c\.env\)\.expenseExportPageRows/.test(catalog)],
     ['expense_reads is a known read switch on this base', /KNOWN_READ_SWITCHES = \[[^\]]*'expense_reads'/.test(switches)],
-    ['both plan fields exist on the type and on both tiers', ['expenseExportPageRows', 'expenseReportFoldMaxRows'].every((f) => (tier.match(new RegExp(`\\b${f}\\b`, 'g')) || []).length >= 3)],
+    ['both plan fields exist on the type and on both tiers', ['expenseExportPageRows', 'expenseReportFoldMaxRows', 'expenseReportFoldUnboundedWindows'].every((f) => (tier.match(new RegExp(`\\b${f}\\b`, 'g')) || []).length >= 3)],
     ['the four old report statements are still in the file (the switch-off path)', ['SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}', 'GROUP BY f.fee_date ORDER BY f.fee_date DESC', 'GROUP BY f.fee_type ORDER BY amount_usd DESC, amount_khr DESC', "GROUP BY f.fee_type, lower(trim(COALESCE(f.label, '')))"].every((s) => fees.includes(s))],
     ['the report consults the switch once and only before the old statements', (fees.match(/expenseReadsOn\(env\)/g) || []).length === 1 && fees.indexOf('groupedFeeReport(c.env') < fees.indexOf('const [totals, days, byType, byCategory]') + 200],
     ['the list consults the switch only for a request that carries a cursor (a plain list page pays no switch read)', /if \(cursorText && await expenseReadsOn\(c\.env\)\)/.test(catalog)],

@@ -227,10 +227,18 @@ export type PlanLimits = {
   // spelling). The pass reads the expense table once instead of four times and hands the groups to the Worker to fold; a window with more rows than this is
   // answered by the four statements instead, which return a few hundred rows however large the window is. The cap is on ROWS, not groups, so a window over it
   // costs only the first `cap + 1` rows of the scan before it is turned away, not the whole table. Free is bounded by CPU: folding is linear in the groups
-  // and the Free invocation has 10 ms in total (D1 decode of the groups and the JSON response come on top), and the reviewer timed foldFeeGroups at about
-  // 3 ms for 1,500 groups but 6-14 ms for 10,000. Paid keeps the generous bound (more than the whole expense table today: the seed has 8,695 rows,
-  // production about 8,700).
+  // and the Free invocation has 10 ms in total (D1 decode of the groups and the JSON response come on top). foldFeeGroups timed in node v24: at 1,500
+  // groups 1.73-2.55 ms warm (90th percentile up to 4.5 ms) but 6.2-11.8 ms for the FIRST call in a fresh module; at 10,000 groups 4.7-5.3 ms warm and
+  // 14-25 ms cold. A cold Free isolate may therefore exceed 10 ms even at 1,500, so turning `expense_reads` ON for a Free deployment WAITS for a CPU
+  // measurement on real Workers (the switch stays OFF until then; Paid has no such limit). Paid keeps the generous bound (more than the whole expense table
+  // today: the seed has 8,695 rows, production about 8,700).
   expenseReportFoldMaxRows: number
+
+  // routes/fees.ts GET /report: whether the grouped pass is tried at all for a window that is not bounded on both ends (no dates, or a start without an end
+  // or the reverse). Such a window is most or all of the table, and on Free that is over the row cap on any shop old enough to have a report worth reading,
+  // so the attempt (cap + 1 rows read, 2 reads each) is a pure cost before the four statements run anyway: Free skips it and the all-time report reads
+  // exactly what 6.0.1053 reads. A window with both ends can still be over the cap and pays the attempt once. Paid tries every window (it folds the table).
+  expenseReportFoldUnboundedWindows: boolean
 
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
@@ -304,6 +312,7 @@ const PAID_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 30,
   expenseExportPageRows: 500,
   expenseReportFoldMaxRows: 50_000,
+  expenseReportFoldUnboundedWindows: true,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -332,6 +341,7 @@ const FREE_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 300,
   expenseExportPageRows: 500,
   expenseReportFoldMaxRows: 1_500,
+  expenseReportFoldUnboundedWindows: false,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
