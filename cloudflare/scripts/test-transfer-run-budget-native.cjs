@@ -22,6 +22,8 @@ function load(relative) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   new Function('require', 'module', 'exports', output)(request => {
+    // A built-in (readSwitches.ts reaches node:async_hooks through cache.ts) is Node's own; anything else must be a relative lib file.
+    if (request.startsWith('node:')) return require(request)
     assert.ok(request.startsWith('.'), `unexpected dependency ${request}`)
     return load(path.posix.join(path.posix.dirname(relative), request))
   }, module, module.exports)

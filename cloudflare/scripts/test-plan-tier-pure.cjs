@@ -260,6 +260,23 @@ check('the client windows cover the longest server memo: the echo window outlast
   assert.ok(signal >= 3 * longest, `SIGNAL_TTL_MS ${signal} must cover three memos (${3 * longest})`)
 })
 
+// 6.0.1048 review B2: a restore and a forced clear wait one memo period (epochSettleMs) before they release writes. On Free that is the
+// longest request the app makes on purpose, and the browser must not give up on it.
+check('the restore and forced-clear requests outlast the Free settle with room to spare (computed from the plan, not a literal)', async () => {
+  const frontend = (...parts) => fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', ...parts), 'utf8').replace(/\r\n/g, '\n')
+  const margin = Number(/EPOCH_SETTLE_MARGIN_MS = ([0-9_]+)/.exec(fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'dataEpoch.ts'), 'utf8'))[1].replace(/_/g, ''))
+  const freeSettle = PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000 + margin
+  const timeout = Number(/export const WRITE_REQUEST_TIMEOUT_MS = ([0-9_]+)/.exec(frontend('http.ts'))[1].replace(/_/g, ''))
+  assert.ok(freeSettle > 15_000, 'the Free settle is the figure the review measured (about 16 s)')
+  assert.ok(timeout > freeSettle, `WRITE_REQUEST_TIMEOUT_MS ${timeout} must exceed the Free settle ${freeSettle}`)
+  assert.ok(timeout >= 2 * freeSettle, `and leave room for the password check, the epoch write and the release: at least 2 x ${freeSettle}`)
+  const sync = Number(/REQUEST_TIMEOUT_MS: ([0-9_]+)/.exec(fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'constants.ts'), 'utf8'))[1].replace(/_/g, ''))
+  assert.ok(sync < freeSettle, 'control: the ordinary request timeout IS shorter than the settle, which is why these two calls must not use it')
+  const jobs = frontend('systemJobs.ts')
+  assert.match(jobs, /'\/api\/backups\/maintenance\/clear', \{ force: true, currentPassword \}, WRITE_REQUEST_TIMEOUT_MS\)/, 'the forced clear')
+  assert.match(jobs, /type: 'import-folder',[\s\S]*?\}, WRITE_REQUEST_TIMEOUT_MS\)/, 'the restore')
+})
+
 check('planTier.ts imports nothing at runtime', async () => {
   const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'planTier.ts'), 'utf8')
   const imports = source.match(/^import .*$/gm) || []

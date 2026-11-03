@@ -557,7 +557,7 @@ app.get('/bootstrap', async (c) => {
   if (!user) {
     return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   }
-  // The data epoch rides the same 15 s per-isolate read as the read switches, and is asked for only once there is a session: a 401 never
+  // The data epoch rides the same per-isolate read as the read switches (planTier.ts readSwitchMemoSeconds), and is asked for only once there is a session: a 401 never
   // starts a read it would not wait for. Its tag is the runtime's dataEpoch: a client that sees a different one than it stored (a restore,
   // a cutover) drops its caches and keeps its drafts and carts (api/epochReset.ts). It is deliberately not the runtime's dataRootKey:
   // that key resets ALL local state, including every unsent draft and cart.

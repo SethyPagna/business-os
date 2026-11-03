@@ -10,6 +10,20 @@ await (async function backupJobApiShouldExposeQueuedFlows() {
   console.log('PASS backup API exposes queued job flows')
 })()
 
+await (async function restoreAndForcedClearTakeTheLongWriteTimeout() {
+  // Both end by rotating the data epoch and waiting one memo period before writes are released (16 s on Free): a 12 s request timeout
+  // reports failure for a clear that is still succeeding (6.0.1048 review B2).
+  const source = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const restore = /queueBackupFolderRestore[\s\S]*?\}, ([A-Za-z_.]+)\) as Promise/.exec(source)
+  const clear = /'\/api\/backups\/maintenance\/clear', \{[^}]*\}, ([A-Za-z_.]+)\)/.exec(source)
+  assert.ok(restore && clear, 'both calls found')
+  assert.equal(restore[1], 'WRITE_REQUEST_TIMEOUT_MS', 'the restore request')
+  assert.equal(clear[1], 'WRITE_REQUEST_TIMEOUT_MS', 'the forced clear request')
+  const http = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
+  assert.match(http, /export const WRITE_REQUEST_TIMEOUT_MS = 45_000/)
+  console.log('PASS restore and forced clear take the long write timeout')
+})()
+
 await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   const source = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
   assert.match(source, /JobProgressCard/)
