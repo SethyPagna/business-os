@@ -277,6 +277,38 @@ check('the restore and forced-clear requests outlast the Free settle with room t
   assert.match(jobs, /type: 'import-folder',[\s\S]*?\}, WRITE_REQUEST_TIMEOUT_MS\)/, 'the restore')
 })
 
+// 6.0.1048 (delta review): the Backup page races the restore request against a timer of its own (withLoaderTimeout). On Free the server
+// answers after 16 s or more, so that timer must be at least the transport timeout, which is at least twice the Free settle. The numbers are
+// resolved from the sources (a constant may be written as another constant plus a margin), never retyped here.
+check('the Backup page does not give up on a restore before the transport does: UI race >= transport >= 2 x the Free settle', async () => {
+  const read = (...parts) => fs.readFileSync(path.join(...parts), 'utf8').replace(/\r\n/g, '\n')
+  const frontend = path.join(cloudflareRoot, '..', 'frontend', 'src')
+  const sources = [
+    read(frontend, 'components', 'utils-settings', 'Backup.tsx'),
+    read(frontend, 'api', 'systemJobs.ts'),
+    read(frontend, 'api', 'http.ts'),
+    read(frontend, 'constants.ts'),
+  ]
+  const resolve = (name, depth = 0) => {
+    assert.ok(depth < 6, `${name}: constant chain too deep`)
+    for (const source of sources) {
+      const match = new RegExp(`(?:export )?const ${name}(?::[^=]+)? = ([^\\n]+)`).exec(source)
+      if (!match) continue
+      const expression = match[1].replace(/\/\/.*$/, '').trim()
+      return expression.split('+').map((term) => term.trim()).reduce((sum, term) => sum + (/^[0-9_]+$/.test(term) ? Number(term.replace(/_/g, '')) : resolve(term, depth + 1)), 0)
+    }
+    throw new Error(`constant ${name} not found`)
+  }
+  const call = /'Queue backup restore',\s*([A-Za-z_]+),?\s*\)/.exec(sources[0])
+  assert.ok(call, 'the restore call in Backup.tsx is found')
+  const uiRace = resolve(call[1])
+  const transport = resolve('WRITE_REQUEST_TIMEOUT_MS')
+  const margin = Number(/EPOCH_SETTLE_MARGIN_MS = ([0-9_]+)/.exec(read(cloudflareRoot, 'src', 'lib', 'dataEpoch.ts'))[1].replace(/_/g, ''))
+  const freeSettle = PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000 + margin
+  assert.ok(uiRace >= transport, `the restore's UI race (${call[1]} = ${uiRace}) must be at least the transport timeout (${transport}), or the page says "took longer" for a restore that succeeds`)
+  assert.ok(transport >= 2 * freeSettle, `the transport timeout ${transport} must be at least twice the Free settle ${freeSettle}`)
+})
+
 check('planTier.ts imports nothing at runtime', async () => {
   const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'planTier.ts'), 'utf8')
   const imports = source.match(/^import .*$/gm) || []

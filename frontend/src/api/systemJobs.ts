@@ -2,6 +2,10 @@ import { SYNC } from '../constants.ts'
 import { apiFetch, WRITE_REQUEST_TIMEOUT_MS } from './http.ts'
 
 export const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
+// The Backup page races the restore request against a timer of its own (withLoaderTimeout). That timer must outlast the transport timeout the
+// request runs under, or the page reports "took longer" for a restore that is still succeeding (on Free the server answers after 16 s or more).
+const RESTORE_UI_MARGIN_MS = 5_000
+export const BACKUP_RESTORE_UI_TIMEOUT_MS = WRITE_REQUEST_TIMEOUT_MS + RESTORE_UI_MARGIN_MS
 const DEFAULT_SYSTEM_JOB_POLL_MS = 1200
 
 export type SystemJob = Record<string, unknown> & {

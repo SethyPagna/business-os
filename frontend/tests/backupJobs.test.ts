@@ -24,6 +24,22 @@ await (async function restoreAndForcedClearTakeTheLongWriteTimeout() {
   console.log('PASS restore and forced clear take the long write timeout')
 })()
 
+await (async function restoreUiRaceIsDerivedFromTheTransportTimeout() {
+  // The Backup page wraps the restore request in withLoaderTimeout. A separate literal there (the 15 s export-queue timeout) made it say
+  // "took longer than 15s" on every Free restore, which takes 16 s or more by design. The race is derived from the transport timeout.
+  const page = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const jobs = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const call = /'Queue backup restore',\s*([A-Za-z_]+),?\s*\)/.exec(page)
+  assert.ok(call, 'the restore call is found')
+  assert.equal(call[1], 'BACKUP_RESTORE_UI_TIMEOUT_MS', 'the restore race')
+  assert.match(jobs, /export const BACKUP_RESTORE_UI_TIMEOUT_MS = WRITE_REQUEST_TIMEOUT_MS \+ RESTORE_UI_MARGIN_MS/)
+  assert.match(jobs, /const RESTORE_UI_MARGIN_MS = [0-9_]+/)
+  // Every other race on this page that wraps a call without the long timeout may stay on its own constants; the restore may not use them.
+  const queueTimeouts = [...page.matchAll(/'Queue backup restore',\s*(BACKUP_JOB_QUEUE_TIMEOUT_MS|DRIVE_SYNC_[A-Z_]+)/g)]
+  assert.equal(queueTimeouts.length, 0, 'the restore does not share a queue timeout')
+  console.log('PASS the restore UI race is derived from the transport timeout')
+})()
+
 await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   const source = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
   assert.match(source, /JobProgressCard/)
@@ -79,7 +95,7 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.disconnectGoogleDriveSync\?\.\(\),\s*'Disconnect Google Drive sync',\s*DRIVE_SYNC_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.forgetGoogleDriveSyncCredentials\?\.\(\{ confirm: true \}\),\s*'Forget Google Drive credentials',\s*DRIVE_SYNC_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.queueBackupFolderExport\?\.\(exportDestination\),\s*'Queue backup export',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => Promise\.resolve\(getBackupApi\(\)\.queueBackupFolderRestore\?\.\(folderImportPath, \{ currentPassword: restorePassword \}\)\)\s*\.catch\(\(error: unknown\) => \{ throw translateStepUpRefusal\(error, copy\) \}\),\s*'Queue backup restore',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => Promise\.resolve\(getBackupApi\(\)\.queueBackupFolderRestore\?\.\(folderImportPath, \{ currentPassword: restorePassword \}\)\)\s*\.catch\(\(error: unknown\) => \{ throw translateStepUpRefusal\(error, copy\) \}\),\s*'Queue backup restore',\s*BACKUP_RESTORE_UI_TIMEOUT_MS,\s*\)/)
   assert.match(source, /if \(!restorePassword\) return notify\(/, 'a restore never starts without the current password')
   assert.match(source, /id="backup-restore-password"[\s\S]{0,200}type="password"[\s\S]{0,120}autoComplete="current-password"/)
   assert.match(source, /consecutiveFailures >= SYSTEM_JOB_STATUS_MAX_FAILURES/)
