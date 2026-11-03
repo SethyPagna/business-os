@@ -6,9 +6,9 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 3 Nov 2026, 00:15 (Cambodia, UTC+7)
+## Status snapshot — 4 Nov 2026, 00:00 (Cambodia, UTC+7)
 
-- **Live:** `736929e91` = 6.0.1039 CI read-budget gate + 6.0.1040 leak stop (`/api` answers `private, no-store` + `Vary: Cookie`, logout clears the HTTP cache, bootstrap settings follow Settings visibility). Deployed 2 Nov 15:46Z (run 41451080414, Worker `bd5e9d4d-d6d7-4a05-86e9-7bc249195999`), tier paid, no migration, no shift open. Postflight headers confirmed; health pack 13/13 with no new drift against 1 Nov. Main `4f0bcb89f` carries the same code tree. Production migrations run through 0273. Rollback: redeploy `05ef61b73` (6.0.1035).
+- **Live:** `64c9e9166` = the 2 Nov release + 6.0.1043 health tiers + 6.0.1057 large-sale fix (a sale's lines read as rows, responses stored without repeating the basket, cancel above 58 lines fits). Deployed 3 Nov 15:45Z (run 41641802653, Worker `c471ed6b-3bbe-4957-82f5-208bad5d2cc2`), tier paid, no migration, no shift open. Postflight headers confirmed; health pack 13/13 with no new drift against 2 Nov; local Playwright run found no regression against the previous release. Main `37035543c` carries the same code tree. Production migrations run through 0273. Rollback: redeploy `736929e91`.
 - **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
 - **Plan:** the account is back on Workers Paid until 30 Nov after the 30 Oct Free outage. The owner's goal is the FREE plan permanently.
 - **Goal:** by 30 Nov, production runs on Free with every function intact. Measured as:
@@ -19,12 +19,10 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
   - the governor enforcing, and every optimization behind a read switch.
 
   Production read about 34–39M rows per day before 1035.
-- **Next RC (07:00 3 Nov, open_today = 0):** `rc/20261103a` `c551d4e5f` = the live release + P0.6 health tiers (6.0.1043, Opus re-review GO). Query budget 119 measured, 0 red; gitleaks clean; the exact gate (run 41485495612) and the Opus release review are running.
-- **Large sales (LS1, 6.0.1057, urgent):** one production sale is over the limit, a 62-line Not Paid sale from 27 Oct: 2.6 MB of stored pricing snapshots against D1's 2 MB value cap, so it likely cannot be paid or edited. No other sale is near it; the next largest has 32 lines. Since 13 Sep every line's snapshot copies the whole basket.
-  - The fix reads a sale's lines as rows, stores responses without repeating the basket per line, lets cancel above 58 lines fit, and makes the basket check linear (a 200-line sale took 47 s to open).
-  - It is code only and changes no stored data.
-  - It is building and gets its own RC after review: 07:00 if in time, otherwise the evening slot.
-  - Storing the basket once per sale, which also shrinks the database, needs the owner's ruling on rewriting saved rows.
+- **Next RC (`rc/20261104a`):** `6af0d3b49` = the live release + P1.4 report chain, E1 Expenses labels and types (migration 0292, so the deploy needs `run_migrations=true`), U2 leangbeauty.com, U1 install prompt, R1 Reports option rail, a plan-literals ratchet test and comment-only cleanup. Stage A gate green at the exact SHA; the stage B1 gate is running. P0.3/P0.4/P0.7, P1.1, Inventory Check, P2.8 and the new fix lanes join once each has a green exact gate and an Opus GO.
+- **Owner rules added 3 Nov:** Free-plan numbers stay adjustable (every plan-sensitive number is a `getPlanLimits(env)` field, now guarded by `test-plan-literals-pure`); rigorous browser testing (the Playwright suite was repaired to near-green and joins gate.yml as a report-only job first).
+- **Found by the new browser tests, fixes in progress:** the till and the Worker accept riel cash that is not a multiple of 100; displayed money rounds up instead of to the nearest cent; eight UI permission gates (including the Manager Dashboard failing to load); two live cross-request shared promises that can hang a request (storefront build, dashboard overview) plus one awaited on every `/api` request.
+- **Large sales:** the live fix should make the one production sale over the limit (62 lines, 27 Oct) open again; a read-only check is still to do. Storing the basket once per sale, which also shrinks the database, still needs the owner's ruling on rewriting saved rows.
 
 ### Free-plan programme board
 
@@ -34,17 +32,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on
 - [x] 6.0.1036–1038, 1055 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
 - [x] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config): live
 - [x] P0.2 6.0.1040 leak stop: live 2 Nov 15:46Z, health pack clean
-- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling: committed (`6a8cbbb54`, `94e5d010a`). Opus review NO-GO: the code is right, but four test harnesses would fail the gate; fixes in progress
+- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling · P0.7 6.0.1048 cache lifecycle: the isolate freeze is fixed (a pending read is shared only within one request); review fixes pushed (`62634ae13`); exact gate and Opus delta check running
 - [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
-- [~] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: Opus re-review GO (`ab6d239cc`); in RC 20261103a
-- [~] P0.7 6.0.1048 cache lifecycle: one cache-key builder (deployment + data epoch + grants), `X-BOS-Build`/`X-BOS-Epoch`, the Restart bar as the only update path, versioned local records: building
-- [~] P1.1 6.0.1049 call counting: committed (`7cdee15e5`). On Free, behind the `call_counting` switch, a batch counts as one D1 call, so stock sessions and returns fit; exact gate and Opus review running. It found the large-sale failures above, and that a stock session reads about 8.5k rows per line
-- [~] P1.4 6.0.1050 report chain in one call: committed (`4b99640ec`), sweep and review next. Deadline 11 Nov, when the read-budget coverage test starts failing every deploy without P1.2 and P1.4
-- [~] P1.6a 6.0.1044 Inventory Check, the owner's 2 Nov design (check box before the image, direct counts, date and time, no refresh, Products-style rows on phones) · P1.7 6.0.1045 submitted counts wait for admin approval (new permissions): building
-- [ ] P1.2 1008 operations · P1.3 sole-branch read · P1.5 long reports · P1.8 bell + 5-minute overview with its time beside the date
+- [x] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: live 3 Nov
+- [~] P1.1 6.0.1049 call counting: gate green (`66a208601`); composes on P0.3. It found that a stock session reads about 8.5k rows per line
+- [~] P1.4 6.0.1050 report chain in one call: Opus GO, gate green, in RC `rc/20261104a`. Deadline 11 Nov, when the read-budget coverage test starts failing every deploy without P1.2 and P1.4
+- [~] P1.6a 6.0.1044 Inventory Check (owner's 2 Nov design) · P1.7 6.0.1045 submitted counts wait for admin approval: stock fixes in progress after a second Opus NO-GO (two approvers at once could apply a count twice); off in production
+- [~] P1.2 1008 operations (payment-method impact, un-cancel, bulk transfer under 50 calls): building, focused tests running
+- [ ] P1.3 sole-branch read · P1.5 long reports · P1.8 bell + 5-minute overview with its time beside the date
 - [ ] P2.1 sale-money CPU (86 lines) · P2.2 merges · P2.3 paged integrity scan · P2.5 fast stock-in · P2.6 imports on Free
 - [!] P2.4 off-site backups: waits on the owner's backup token
-- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov): built, leak crawl over 5 accounts finds zero full numbers, full sweep running
+- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov): held out of the next RC; a security review found that masked notes and names can still be searched by digit fragments; fix in progress
 - [ ] P2.7 tills keep only the search index · P2.9 documents off public `/uploads` · P2.10 push hub closes on revoke · P2.11 isolation tests
 - [ ] P3 per-sale report facts + day rollups + sales search + 10 ms CPU rehearsal · P4 catalog SQL, customers, tracked ids, hidden-tab hold, client fixes
 - [ ] Switch gate: Free-config rehearsal from about 22 Nov + 7 measured days; switch on or before 30 Nov
@@ -52,10 +50,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on
 
 ### Owner UX asks (2 Nov afternoon)
 
-- [~] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: committed (`201f56eb8`, `a40add57a`); exact gate and Opus review running; one browser test still collides with the shift-history modal
-- [~] U2 6.0.1052 leangbeauty.com: About page with the full cover photo (`80a06bba3`) and 2–6 product columns with search joined to the tabs (`3d089b80a`) committed; colour chat buttons with Instagram DM and the announcement strip building
-- [~] E1 6.0.1053 Expenses: labels and types added and edited in their own section, sale-linked expenses such as delivery listed, no cost of goods, totals equal to the reports: building
-- [~] R1 6.0.1054 one shared option button without the extra arrow, and one shared preset/option scroll row on every page: built, test chain running
+- [~] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: Opus GO, gate green, in RC `rc/20261104a`
+- [~] U2 6.0.1052 leangbeauty.com: About page with the full cover photo, 2–6 product columns, one-tap chat buttons and the announcement strip: Opus GO, gate green, in RC `rc/20261104a`
+- [~] E1 6.0.1053 Expenses: labels and types in their own section, sale-linked expenses with no cost of goods, totals equal to the reports: Opus GO, gate green, in RC `rc/20261104a` (migration 0292). Follow-up E1-F cuts the export's reads about 8x behind a switch: in review
+- [~] R1 6.0.1054 one shared option button and one shared preset/option rail on every page: Opus GO, gate green, in RC `rc/20261104a`
+- [~] Website Editor new look (owner GO 3 Nov): ED-1a (bar, save states with a review before going live, seven sections) built, browser tests finishing; ED-1b, ED-2, ED-3, ED-4 follow
 - [!] Round 2 owner questions (database space, release rules on Free, which expiry date counts, sign-in after a rewind): asked 2 Nov
 
 ## Status snapshot — 27 Oct 2026 (superseded; kept for the lanes below)
