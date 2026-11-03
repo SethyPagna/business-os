@@ -32,7 +32,6 @@ import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAct
 import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { customerRequestIsCurrent, saleCustomerMode } from '../../utils/saleCustomerMode.ts'
-import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { EMPTY_DATE_TIME_RANGE, todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
@@ -44,6 +43,10 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+// The Expenses transport is its own chunk ('fees-api'). SaleDetailModal and CancelSaleModal import shared code from this page's chunk, so a static import here made
+// every page that opens either modal (Dashboard, POS) fetch the Expenses transport too. The period strip loads it when it needs the expense figures.
+const getFeesReport = (params: { startDate: string; endDate: string }): Promise<unknown> => import('../../api/feesTransport.ts').then((module) => module.getFeesReport(params))
+
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
 const SaleCustomerActionModal = lazyRetry(() => import('./SaleCustomerActionModal'), 'sales-customer-action-modal')

@@ -752,6 +752,10 @@ function manualChunks(id: string): string | undefined {
     // Left to the /src/api/ catch-all it rode in app-api-methods, which the storefront catalog closure loads at boot, and 114 bytes of export
     // cursor code pushed catalog-products past its performanceBudgets ceiling (E1-F, gate 41667595202).
     if (normalized.endsWith('/src/api/feesTransport.ts')) return 'fees-api'
+    // The 4xx predicate feesTransport.ts shares with the other mutation transports (directMutationRequest.ts re-exports it to Returns, EditReturnModal,
+    // SaleDetailModal, CancelSaleModal and saleStatusRecovery). With no rule of its own Rollup moved it into fees-api after its first importer, and every
+    // one of those pages then fetched the 11 KB Expenses transport for ten lines (E1-F delta review). It stays where it always was; only fees code is in fees-api.
+    if (normalized.endsWith('/src/utils/directMutationRefusal.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
