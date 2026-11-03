@@ -350,10 +350,8 @@ for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('setti
     test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
-    // APP BUG, kept as a case: Settings.tsx:1209-1219 hides the header Save for a view-only grant and shows a "View" badge (Part 557), but
-    // the page-bottom Save at Settings.tsx:2435 is drawn for every role. Clicking it only raises the view-only notice (:1032-1033); the
-    // Worker refuses the POST. Confirmed in the browser, desktop-chromium, 3 Nov.
-    knownDefect(access.getPermissionTier('settings') !== 'full', 'Settings.tsx:2435 draws a second Save for every tier; only the header one (:1209) is gated on canEditSettings')
+    // FIXED (PERM-UI, 3 Nov): the page-bottom Save was drawn for every tier while the header Save and the View badge were gated (Part 557).
+    // Both Saves now ride canEditSettings; the Worker refuses a View-tier POST either way.
     try {
       const slot = await open(page, '/settings', 'settings')
       const save = slot.getByRole('button', { name: text('save', 'Save'), exact: true })

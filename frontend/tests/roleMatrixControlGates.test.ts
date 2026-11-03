@@ -67,6 +67,21 @@ test('DOOR: each of the three sections still opens the page on its own, and an a
 })
 
 // --- PINS ------------------------------------------------------------------------------------------------------------------------
+/** Every `onClick={handler}` of a button must sit directly inside `{gate ? (<button ... ` -- the nearest conditional is the gate. */
+function assertEveryButtonGated(source: string, handler: string, gate: string, expectedCount: number, what: string): void {
+  const clicks = [...source.matchAll(new RegExp(`onClick=\\{${handler}\\}`, 'g'))]
+  assert.equal(clicks.length, expectedCount, `${what}: ${expectedCount} button(s) call ${handler}, found ${clicks.length}`)
+  for (const click of clicks) {
+    const before = source.slice(0, click.index)
+    assert.match(before, new RegExp(`\\{${gate} \\? \\(\\s*<button[^>]*$`), `${what}: the button calling ${handler} at offset ${click.index} is not directly behind ${gate}`)
+  }
+}
+
+test('SETTINGS: both Save buttons ride canEditSettings, so a View-tier role gets the read-only badge and no Save', () => {
+  const settings = read('../src/components/utils-settings/Settings.tsx')
+  assert.match(settings, /const canEditSettings = getPermissionTier\('settings'\) === 'full'/)
+  assertEveryButtonGated(settings, 'handleSaveSettings', 'canEditSettings', 2, 'Settings header and page-bottom Save')
+})
 
 console.log(failed ? `${failed} role-matrix control gate test(s) failed` : 'all role-matrix control gate tests passed')
 process.exitCode = failed ? 1 : 0
