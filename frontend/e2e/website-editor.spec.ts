@@ -24,7 +24,6 @@ const POSTER_FILE = fileURLToPath(new URL('./fixtures/about-poster.png', import.
 const POSTER = readFileSync(POSTER_FILE)
 const POSTER_UPLOAD = '/uploads/about-poster-e2e.png'
 const POSTER_STORED = `${POSTER_UPLOAD}?v=e2e1`
-const SAVE_DELAY_MS = 1_500
 const BROADCAST_RELOAD_SETTLE_MS = 2_500
 const FILE_CHOOSER_ATTEMPT_MS = 3_000
 /** frontend/src/utils/standaloneNavigation.ts IOS_INSTALL_HINT_DISMISSED_KEY */
@@ -56,8 +55,9 @@ async function openEditor(page: Page, context: BrowserContext, { seed = {}, lang
 }
 
 const editor = (page: Page): Locator => page.locator('#portal-editor-top')
-// The bar's Save: its name is Save, Saving or Saved by state, and a substring match takes all three.
-const saveButton = (page: Page): Locator => editor(page).getByRole('button', { name: 'Save' })
+// The bar's Save: its name is Save, Saving or Saved by state ("Saving" does not contain "Save", so a plain name match loses it
+// mid-write). Scoped to the bar so the review dialog's own Save button, which renders inside the aside, never makes it ambiguous.
+const saveButton = (page: Page): Locator => page.locator('#portal-editor-bar').getByRole('button', { name: /^Sav(?:e|ing|ed)$/ })
 const statusLine = (page: Page): Locator => editor(page).locator('#portal-editor-status')
 const reviewDialog = (page: Page): Locator => page.getByRole('dialog', { name: 'Save these changes?' })
 const aboutPicture = (page: Page): Locator => page.locator('[data-testid="portal-about-image-field"]')
@@ -148,9 +148,11 @@ test.describe('Website Editor round trip', () => {
     await openSection(page, 'shop')
     await page.locator('#portal-business-tagline').fill('Second save')
     const second = await saveAndCapture(page)
-    expect(second.customer_portal_logo_size, 'never the default 80').toBe('120')
-    expect(second.customer_portal_show_top_seller_badge, 'never the default on').toBe('false')
-    expect(second.customer_portal_about_title).toBe('Our story')
+    // A Save sends only the keys that differ from the settings this tab holds (AppContext.saveSettings -> sendChangedSettings), so
+    // an untouched stored value is absent from the second POST. What must never happen is the default riding in its place.
+    expect(second.customer_portal_logo_size ?? '120', 'never the default 80').toBe('120')
+    expect(second.customer_portal_show_top_seller_badge ?? 'false', 'never the default on').toBe('false')
+    expect(second.customer_portal_about_title ?? 'Our story').toBe('Our story')
     const { settings } = await storedSettings(page, scope)
     expect(settings.customer_portal_logo_size).toBe('120')
     expect(settings.customer_portal_show_top_seller_badge).toBe('false')
@@ -178,7 +180,7 @@ test.describe('Website Editor round trip', () => {
     await openSection(page, 'shop')
     await page.locator('#portal-business-tagline').fill('Second save')
     const second = await saveAndCapture(page)
-    expect(second.customer_portal_about_image).toBe(POSTER_STORED)
+    expect(second.customer_portal_about_image ?? POSTER_STORED, 'untouched, so absent or unchanged; never the preview URL').toBe(POSTER_STORED)
     const { settings } = await storedSettings(page, scope)
     expect(settings.customer_portal_about_image).toBe(POSTER_STORED)
   })
@@ -202,9 +204,12 @@ test.describe('Website Editor round trip', () => {
     // CATCHES: marking the whole draft clean when the write returns, then the
     // settings broadcast reload putting the old tagline back.
     const scope = await openEditor(page, context)
+    // Held until the text has been typed: a timed delay raced the review's extra click on a slow WebKit (the Save landed first).
+    let releaseWrite = () => {}
+    const writeHeld = new Promise<void>((resolve) => { releaseWrite = resolve })
     await page.route('**/api/settings', async (route) => {
       if (route.request().method() !== 'POST') return route.fallback()
-      await new Promise((resolve) => setTimeout(resolve, SAVE_DELAY_MS))
+      await writeHeld
       return route.fallback()
     })
     await openSection(page, 'shop')
@@ -215,6 +220,7 @@ test.describe('Website Editor round trip', () => {
     await clickSave(page)
     await page.locator('#portal-business-tagline').fill('Typed while saving')
     expect(saveLanded, 'the text was typed while the Save was still in flight').toBe(false)
+    releaseWrite()
     expect((await response).ok()).toBe(true)
 
     await page.waitForTimeout(BROADCAST_RELOAD_SETTLE_MS)
@@ -508,12 +514,23 @@ test.describe('Website Editor bar (ED-1a)', () => {
           expect(control.y, `control ${index} sits inside the one row`).toBeGreaterThanOrEqual(box.y - 0.5)
           expect(control.y + control.height, `control ${index} sits inside the one row`).toBeLessThanOrEqual(box.y + box.height + 0.5)
         }
-        const overflow = await page.evaluate(() => ({
-          page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          editor: (document.querySelector('#portal-editor-top') as HTMLElement).scrollWidth - (document.querySelector('#portal-editor-top') as HTMLElement).clientWidth,
-        }))
+        // The bar is full-bleed on a phone (-mx-4), so the aside's own scrollWidth is 16 px wider than its box by design and the
+        // aside clips it; what must hold is that neither the document nor the page's scroller moves sideways and the bar stays on screen.
+        const overflow = await page.evaluate(() => {
+          const scroller = document.querySelector('.page-scroll') as HTMLElement
+          const bar = (document.querySelector('#portal-editor-bar') as HTMLElement).getBoundingClientRect()
+          return {
+            page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            scroller: scroller.scrollWidth - scroller.clientWidth,
+            barLeft: bar.left,
+            barRight: bar.right,
+            viewport: window.innerWidth,
+          }
+        })
         expect(overflow.page, `the page does not scroll sideways at ${width} px`).toBeLessThanOrEqual(0)
-        expect(overflow.editor, `the editor does not scroll sideways at ${width} px`).toBeLessThanOrEqual(0)
+        expect(overflow.scroller, `the page scroller does not scroll sideways at ${width} px`).toBeLessThanOrEqual(0)
+        expect(overflow.barLeft, `the bar starts on screen at ${width} px`).toBeGreaterThanOrEqual(-0.5)
+        expect(overflow.barRight, `the bar ends on screen at ${width} px`).toBeLessThanOrEqual(overflow.viewport + 0.5)
       }
       expectNoRuntimeErrors(health)
     })
@@ -567,6 +584,31 @@ test.describe('Website Editor bar (ED-1a)', () => {
     await expect(page.locator('#portal-section-features')).toBeVisible()
     await page.keyboard.press('Home')
     await expect(page.locator('#portal-section-shop')).toBeVisible()
+    expectNoRuntimeErrors(health)
+  })
+
+  test('the bar stays in view while the page scrolls under it, in every section', async ({ page, context }) => {
+    // CATCHES: a sticky bar inside a scroll container. overflow-x: hidden on the editor's aside made it the sticky scrollport (a
+    // box that never scrolls), so the bar scrolled away with the page and Save was out of reach from the middle of a long section.
+    const health = collectPageHealth(page)
+    await openEditor(page, context)
+    for (const id of ['products', 'features']) {
+      await openSection(page, id)
+      const scrolled = await page.locator('.page-scroll').evaluate((node) => {
+        node.scrollTop = 900
+        return node.scrollTop
+      })
+      expect(scrolled, 'the page really scrolled').toBeGreaterThan(300)
+      // Pinned to the top of the page scroller (its own top edge, plus sm:top-2): measured against the scroller, not the screen, because
+      // a phone's browser chrome can leave the shell a few px off the viewport edge.
+      const offset = await page.evaluate(() => {
+        const scroller = document.querySelector('.page-scroll') as HTMLElement
+        return document.getElementById('portal-editor-bar')!.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      })
+      expect(offset, 'the bar is not above the scroller top').toBeGreaterThanOrEqual(-1)
+      expect(offset, 'and has not scrolled away with the page').toBeLessThanOrEqual(12)
+      await page.locator('.page-scroll').evaluate((node) => { node.scrollTop = 0 })
+    }
     expectNoRuntimeErrors(health)
   })
 
@@ -647,9 +689,12 @@ test.describe('Website Editor bar (ED-1a)', () => {
   test('the bar walks idle, changed, saving, saved and back to idle; Ctrl+S opens the same review', async ({ page, context }) => {
     const health = collectPageHealth(page)
     const scope = await openEditor(page, context)
+    // The write is held until the test has seen "Saving": a timed delay races a loaded machine (the click alone can outlast it).
+    let releaseWrite = () => {}
+    const writeHeld = new Promise<void>((resolve) => { releaseWrite = resolve })
     await page.route('**/api/settings', async (route) => {
       if (route.request().method() !== 'POST') return route.fallback()
-      await new Promise((resolve) => setTimeout(resolve, SAVE_DELAY_MS))
+      await writeHeld
       return route.fallback()
     })
     await expect(saveButton(page)).toHaveAttribute('aria-disabled', 'true')
@@ -665,6 +710,7 @@ test.describe('Website Editor bar (ED-1a)', () => {
     await expect(saveButton(page)).toHaveAttribute('aria-busy', 'true')
     await expect(saveButton(page)).toHaveAccessibleName('Saving')
     await expect(statusLine(page)).toHaveText('Saving')
+    releaseWrite()
     await expect(saveButton(page)).toHaveAccessibleName('Saved')
     await expect(statusLine(page)).toHaveText('Saved')
     await expect(saveButton(page)).toHaveAttribute('aria-disabled', 'true')
