@@ -79,6 +79,14 @@ for (const language of ['en', 'km'] as const) {
     const t = language === 'en' ? en : km
     const health = collectPageHealth(page), state = await fixture(context)
     await enter(page, context, language)
+    if (info.project.name === 'ios-webkit') {
+      // The install notice sits under every modal (z-1020 under z-1050), so once the shift history is open its X
+      // cannot be pressed. Close it first, while it is the top layer, with its own visible control.
+      const installNotice = page.getByRole('status').filter({ hasText: t.ios_install_hint })
+      await expect(installNotice).toBeVisible()
+      await installNotice.getByRole('button', { name: t.dismiss_notification, exact: true }).click()
+      await expect(installNotice).toBeHidden()
+    }
     await expect(page.getByText('1-20 / 245', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: t.next, exact: true }).click()
     await expect(page.locator('.report-shift-plain')).toContainText('SHIFT-21')
@@ -108,14 +116,6 @@ for (const language of ['en', 'km'] as const) {
     await history(page, t.shift_history)
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('1-20 / 245', { exact: true })).toBeVisible()
-    if (info.project.name === 'ios-webkit') {
-      // The real iOS install notice overlaps the lower pager in this viewport.
-      // Dismiss its visible control, not a forced click through an overlay.
-      const installNotice = page.getByRole('status').filter({ hasText: t.ios_install_hint })
-      await expect(installNotice).toBeVisible()
-      await installNotice.getByRole('button', { name: t.dismiss_notification, exact: true }).click()
-      await expect(installNotice).toBeHidden()
-    }
     await dialog.getByRole('button', { name: t.next, exact: true }).click()
     await expect(dialog.getByText('21-40 / 245', { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: t.back, exact: true }).click()
