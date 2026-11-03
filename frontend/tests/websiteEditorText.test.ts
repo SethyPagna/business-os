@@ -158,7 +158,7 @@ const ED1A_PAIRS: Record<string, [string, string]> = {
   web_editor_saving: ['Saving', 'កំពុងរក្សាទុក'],
   web_editor_saved: ['Saved', 'បានរក្សាទុក'],
   web_editor_unsaved: ['Unsaved changes', 'មិនទាន់រក្សាទុក'],
-  web_editor_blocked_uploads: ['Wait for uploads to finish', 'រង់ចាំការផ្ទុកឡើងឱ្យចប់'],
+  web_editor_blocked_uploads: ['Wait for uploads to finish', 'រង់ចាំការផ្ទុកឡើងបញ្ចប់'],
   web_editor_blocked_loading: ['Loading settings', 'កំពុងផ្ទុកការកំណត់'],
   web_editor_page_title: ['Website Editor', 'កម្មវិធីកែសម្រួលគេហទំព័រ'],
   web_editor_sections: ['Sections', 'ផ្នែក'],
@@ -169,7 +169,7 @@ const ED1A_PAIRS: Record<string, [string, string]> = {
   web_editor_section_faq: ['FAQ', 'សំណួរញឹកញាប់'],
   web_editor_section_features: ['Features', 'មុខងារ'],
   web_editor_review_title: ['Save these changes?', 'រក្សាទុកការផ្លាស់ប្ដូរទាំងនេះ?'],
-  web_editor_changes_count: ['Changes: {n}', 'កែ {n} កន្លែង'],
+  web_editor_changes_count: ['Changes: {n}', 'ការផ្លាស់ប្ដូរ {n}'],
   web_editor_seller_missing: ['Seller details missing', 'ខ្វះព័ត៌មានអ្នកលក់'],
   web_editor_group_top_of_page: ['Top of page', 'ខាងលើទំព័រ'],
 }

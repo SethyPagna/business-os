@@ -38,7 +38,7 @@ function statusText(ed: EditorText, state: SaveBarState, blockedReason: SaveBloc
   if (state === 'changed') return ed('web_editor_unsaved', 'Unsaved changes', 'មិនទាន់រក្សាទុក')
   if (state === 'blocked') {
     return blockedReason === 'uploads'
-      ? ed('web_editor_blocked_uploads', 'Wait for uploads to finish', 'រង់ចាំការផ្ទុកឡើងឱ្យចប់')
+      ? ed('web_editor_blocked_uploads', 'Wait for uploads to finish', 'រង់ចាំការផ្ទុកឡើងបញ្ចប់')
       : ed('web_editor_blocked_loading', 'Loading settings', 'កំពុងផ្ទុកការកំណត់')
   }
   return ''

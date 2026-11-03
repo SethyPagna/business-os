@@ -523,7 +523,7 @@ function CatalogEditorSurfaceContent() {
       title: ed('web_editor_review_title', 'Save these changes?', 'រក្សាទុកការផ្លាស់ប្ដូរទាំងនេះ?'),
       items: rows.map(({ id, count }) => ({
         label: sectionLabel(id),
-        value: ed('web_editor_changes_count', 'Changes: {n}', 'កែ {n} កន្លែង').replace('{n}', String(count)),
+        value: ed('web_editor_changes_count', 'Changes: {n}', 'ការផ្លាស់ប្ដូរ {n}').replace('{n}', String(count)),
       })),
       confirmLabel: ed('web_editor_save', 'Save', 'រក្សាទុក'),
     })
