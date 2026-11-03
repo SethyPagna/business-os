@@ -213,8 +213,21 @@ not skipped noise; each one names the exact lines that decide it.
 | `storage-isolation` | the till is wiped of A's **unprefixed** keys too | `clientRuntime.ts:46/221` clears only `businessos_` / `business_os_` prefixes, leaving `pos_search`, the seven `pos_*` filters, the legacy `bos_pos_*` keys (still read by `POS.tsx:700`) and `bos_dashboard_filters:<id>` |
 | `storage-isolation` | signing out is not an error | `POS.tsx:1436` logs `console.error` and sets `catalogLoadError` on the 401 caused by a deliberate logout; `Dashboard.tsx:844` guards the identical case with `isInvalidSessionError` |
 | `storage-isolation` | an account handover does not surface the read fence | `actorReadScope.ts:220` `stale_read_scope` is treated as a hard failure by `Dashboard.tsx:838-848`, `POS.tsx:1436` and `POS.tsx:2121` |
+| `role-matrix` | the product edit form offers Delete only with `products:delete` | `Products.tsx:5969` hands `ProductForm` `onDelete` for every selected product; `ProductForm.tsx:2302` draws the trash button on `isEditMode && onDelete` alone; `canRemoveProduct` (`Products.tsx:1498`) reaches only the Conflicts tab |
+| `role-matrix` | selecting products offers a bulk Delete only with `products:delete` and `products:bulk_delete` | `Products.tsx:5347` draws the bulk toolbar's Delete for any non-empty selection; no UI source reads either grant (the Worker refuses at `routes/products.ts:3182`) |
+| `role-matrix` | a product's detail offers Add variant only with `products:variant` | `Products.tsx:5829` gates `onAddVariant` on `products:add` alone; `products:variant` is read by no UI source |
+| `role-matrix` | a product's detail offers Edit only with `products:edit` | `ProductDetailModal.tsx:466-470` draws Edit unconditionally; `Products.tsx:5828` passes `onEdit` with no check and `openProductFormTab` (`:4418`) opens the form for anyone |
+| `role-matrix` | the Returns toolbar offers Add Return only with `returns:add` | `Returns.tsx:1745` renders the button with no check; `canAddReturn` (`Returns.tsx:391`) reaches only the take-back control at `:2000` |
+| `role-matrix` | the Promotions page the Employee is offered has something on it | `AppContext.tsx:2530` opens the door for `can('products','view')`; `PromotionsPage.tsx:539/547/670` render a section only for `customer_portal`, `promotions`, or products edit + price |
+| `role-matrix` | the Dashboard loads for a role that holds `dashboard` and not `product_cost_view` (the seeded Manager) | `compat.ts:34-35` + `acquisitionCostAccess.ts:136` remove `stock_value_usd`; `Dashboard.tsx:727-735` `isDashboardSummaryPayload` requires it, thrown at `:990` |
+| `role-matrix` | Settings offers Save only at the Full tier | `Settings.tsx:1209-1219` gates the header Save and shows a View badge; `Settings.tsx:2435` draws a second Save for every tier |
+| `role-matrix` | a customer's full phone number is withheld from a role without a "See full phone numbers" grant | no such grant at `rc/20261104a` (P2.8, `claude/p28-phone-permission-20261102`, is not in it); the sale detail shows the number to every role that opens Sales. The catalogue case and the per-role case turn themselves off when `permissionDefinitions.ts` gains the grant |
 
 When one of them is fixed, delete the `.fixme` — do not weaken the assertion.
+
+The `role-matrix` rows are `test.fail` (via `knownDefect` in `role-matrix.spec.ts`), not `fixme`: the case runs, and when the app is fixed Playwright
+reports "expected to fail but passed" — delete that `knownDefect` line. `E2E_ROLE_MATRIX_RAW=1` switches every annotation off to read the real failure.
+Read each failed-as-expected message before trusting it: `test.fail` also accepts a failure for the wrong reason (a locator, a connection reset).
 
 ## Known-noise quarantines
 

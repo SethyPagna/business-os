@@ -266,6 +266,21 @@ const PRODUCT_NAME = 'E2E Product 001 Aurelia'
  */
 const productDetailOf = (page: Page): Locator => page.locator('.modal-panel-safe').filter({ hasText: PRODUCT_NAME }).last()
 
+const SALE_RECEIPT = '20260914-101500'
+
+/**
+ * Opens the fixture sale's detail. On the desktop table the receipt number is a button; on the phone card it is plain text inside a
+ * sideways-scrolling meta row that takes a press as the start of a scroll, so the card is tapped on its own padding instead
+ * (SalesListSurface.tsx:462-486 -- the card's mouse and touch handlers open the detail from a tap anywhere on it).
+ */
+async function openFixtureSale(slot: Locator, projectName: string): Promise<void> {
+  if (isPhoneProject(projectName)) {
+    await slot.locator('.card:visible').filter({ hasText: SALE_RECEIPT }).last().click({ position: { x: 6, y: 6 } })
+    return
+  }
+  await slot.getByText(SALE_RECEIPT).filter({ visible: true }).first().click()
+}
+
 /**
  * Products has no Select-all control until a row is selected: selecting starts with a hold on a row (Products.tsx:862-883, 500 ms,
  * utils/longPress.ts, mouse and touch handlers both). Pointer events from page.mouse reach those handlers on desktop and phone alike.
@@ -305,7 +320,7 @@ for (const role of ROLES) {
     try {
       if (access.canAccessPage('products')) {
         const slot = await open(page, '/products', 'products')
-        await expect(slot.getByText(PRODUCT_NAME).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
+        await expect(slot.getByText(PRODUCT_NAME).filter({ visible: true }).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
         const entries = manageEntries(access)
         const wantAdjust = grant(access, 'products', 'add') || grant(access, 'inventory', 'adjust')
         await expect.soft(slot.getByRole('button', { name: /^Adjust stock/ }), 'Adjust stock = products:add or inventory:adjust').toHaveCount(wantAdjust ? 1 : 0, BRIEF)
@@ -325,12 +340,12 @@ for (const role of ROLES) {
 
       if (access.canAccessPage('sales') && grant(access, 'sales', 'view')) {
         const slot = await open(page, '/sales', 'sales')
-        await expect(slot.getByText('20260914-101500').first(), 'the fixture sales rendered').toBeVisible({ timeout: 30_000 })
+        await expect(slot.getByText(SALE_RECEIPT).filter({ visible: true }).first(), 'the fixture sales rendered').toBeVisible({ timeout: 30_000 })
         // Export rides the mobile header on a phone, so these two are looked up page-wide.
         await expect.soft(page.getByRole('button', { name: text('export', 'Export'), exact: true }), 'Sales Export = sales:export').toHaveCount(grant(access, 'sales', 'export') ? 1 : 0, BRIEF)
         await expect.soft(page.getByRole('button', { name: text('manage', 'Manage'), exact: true }), 'Sales Manage (Import) = sales:import').toHaveCount(grant(access, 'sales', 'import') ? 1 : 0, BRIEF)
 
-        await slot.getByText('20260914-101500').first().click()
+        await openFixtureSale(slot, testInfo.project.name)
         const footer = page.locator('[data-sale-detail-footer-actions]')
         await expect(footer, 'the sale detail opened').toBeVisible({ timeout: 15_000 })
         // Scoped to the open detail so a same-named row action cannot inflate a count.
@@ -442,7 +457,7 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     knownDefect(!wantBulkDelete, 'Products.tsx:5347 shows the bulk Delete for any selection; products:delete and products:bulk_delete are never consulted')
     try {
       const slot = await open(page, '/products', 'products')
-      await expect(slot.getByText(PRODUCT_NAME).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
+      await expect(slot.getByText(PRODUCT_NAME).filter({ visible: true }).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
       await selectFirstProductByHold(page, slot)
       const toolbar = slot.locator('.bulk-toolbar')
       await expect(toolbar, 'selecting rows opens the bulk toolbar').toBeVisible({ timeout: 10_000 })
@@ -621,7 +636,7 @@ for (const role of ROLES) {
         const landing = expectedLanding(access, pageId)
         if (landing !== pageId) continue
         const slot = await open(page, path, landing)
-        if (pageId === 'products') await expect(slot.getByText(PRODUCT_NAME).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
+        if (pageId === 'products') await expect(slot.getByText(PRODUCT_NAME).filter({ visible: true }).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
         if (hasProbeCost(await slot.innerText())) shownOn.push(pageId)
         if (pageId === 'products' && !session.phone && grant(access, 'products', 'view')) {
           await expect.soft(slot.getByRole('columnheader', { name: new RegExp(`^${text('cost', 'Cost')}`) }), 'the Cost column exists iff the role may view costs').toHaveCount(seesCost(access) ? 1 : 0, BRIEF)
@@ -689,8 +704,8 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
         return route.fulfill({ response, json: rows.map((row, index) => (index === 0 ? { ...row, customer_id: 5001, customer_name: 'E2E Phone Customer', customer_phone: sent } : row)) })
       })
       const slot = await open(page, '/sales', 'sales')
-      await expect(slot.getByText('20260914-101500').first()).toBeVisible({ timeout: 30_000 })
-      await slot.getByText('20260914-101500').first().click()
+      await expect(slot.getByText(SALE_RECEIPT).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 })
+      await openFixtureSale(slot, testInfo.project.name)
       await expect(page.locator('[data-sale-detail-footer-actions]'), 'the sale detail opened').toBeVisible({ timeout: 15_000 })
       const screen = digitsOf(await page.locator(APP_ROOT).innerText())
       const received = session.bodies.some((body) => body.text.includes(PHONE_FULL))
