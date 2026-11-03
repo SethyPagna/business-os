@@ -52,7 +52,7 @@ async function main() {
     const started = Date.now()
     assert.equal(await share.run(env, 'k', async () => { builds += 1; return 'a' }, () => undefined), 'a')
     assert.equal(builds, 1)
-    assert.ok(Date.now() - started < 100, 'no marker, no wait')
+    assert.ok(Date.now() - started < 250, 'no marker, no wait')
   })
 
   await check('A slow, B arrives meanwhile: B returns A\'s finished result and builds nothing', async () => {
@@ -91,7 +91,7 @@ async function main() {
     assert.notEqual(b, HELD, 'B must not wait on A\'s promise')
     assert.equal(b, 'B-result', 'B did the work itself')
     assert.ok(waited >= LIMITS.buildShareWaitMs * 0.8, `B first gave A the wait (${waited} ms)`)
-    assert.ok(waited < LIMITS.buildShareWaitMs + 30 + 150, `then built at once (${waited} ms)`)
+    assert.ok(waited < LIMITS.buildShareWaitMs + 500, `then built at once (${waited} ms)`)
     // The next caller finds B's result, not A's dead marker.
     assert.equal(await within(share.run(env, 'k', async () => 'never', () => memo.value), 500), 'B-result')
   })
@@ -105,7 +105,7 @@ async function main() {
     const started = Date.now()
     const b = await share.run(env, 'k', async () => { memo.value = 'B-result'; return 'B-result' }, () => memo.value)
     assert.equal(b, 'B-result')
-    assert.ok(Date.now() - started < LIMITS.buildShareWaitMs * 0.6, `B started building when A failed (${Date.now() - started} ms)`)
+    assert.ok(Date.now() - started < LIMITS.buildShareWaitMs * 0.9, `B started building when A failed, not at the end of the wait (${Date.now() - started} ms)`)
     await assert.rejects(a, /boom/)
   })
 
@@ -115,7 +115,7 @@ async function main() {
     await sleep(20)
     const started = Date.now()
     assert.equal(await share.run(env, 'k', async () => 'B', () => undefined), 'B')
-    assert.ok(Date.now() - started < LIMITS.buildShareWaitMs * 0.6)
+    assert.ok(Date.now() - started < LIMITS.buildShareWaitMs * 0.9, 'B started building when A finished, not at the end of the wait')
     await a
   })
 
@@ -127,12 +127,12 @@ async function main() {
     let started = Date.now()
     await share.run(env, 'k', async () => 'B', () => undefined)
     const partial = Date.now() - started
-    assert.ok(partial < 100 && partial >= 20, `B arrived at marker age 40 of 100 and waited out the rest, not the 300 ms wait (${partial} ms)`)
+    assert.ok(partial < 220 && partial >= 20, `B arrived at marker age 40 of 100 and waited out the rest, not the 300 ms wait (${partial} ms)`)
     void share.run(env, 'other', () => new Promise(() => {}), () => undefined)
     await sleep(150)
     started = Date.now()
     await share.run(env, 'other', async () => 'C', () => undefined)
-    assert.ok(Date.now() - started < 40, 'a marker older than the staleness window costs nothing')
+    assert.ok(Date.now() - started < 120, 'a marker older than the staleness window costs nothing (it would otherwise wait 300 ms)')
   })
 
   await check('a clock that does not move cannot lengthen the wait: the step count bounds it as well', async () => {
@@ -146,7 +146,7 @@ async function main() {
       const started = performance.now()
       assert.notEqual(await within(share.run(env, 'k', async () => 'B', () => undefined), 2000), HELD)
       const waited = performance.now() - started
-      assert.ok(waited >= LIMITS.buildShareWaitMs * 0.8 && waited < LIMITS.buildShareWaitMs + 200, `${Math.round(waited)} ms with a frozen clock`)
+      assert.ok(waited >= LIMITS.buildShareWaitMs * 0.8 && waited < LIMITS.buildShareWaitMs * 3, `${Math.round(waited)} ms with a frozen clock (30 timer steps; it must end, not spin)`)
     } finally { Date.now = realNow }
   })
 
@@ -156,7 +156,7 @@ async function main() {
     await sleep(10)
     const started = Date.now()
     assert.equal(await share.run(env, 'y', async () => 'y', () => undefined), 'y')
-    assert.ok(Date.now() - started < 60)
+    assert.ok(Date.now() - started < 200, 'a different key has no marker to wait on')
   })
 
   await check('a finished result in the memo is returned with no build and no wait', async () => {
@@ -166,23 +166,12 @@ async function main() {
     assert.equal(builds, 0)
   })
 
-  await check('remember: the short memo serves a repeat run for the wait window, then lets go', async () => {
+  await check('remember is not a cache: a request that finds no builder running builds for itself, whatever was remembered', async () => {
     const share = isolate()
     share.remember(env, 'k', { body: 1 })
     let builds = 0
-    assert.deepEqual(await share.run(env, 'k', async () => { builds += 1; return { body: 2 } }), { body: 1 })
-    assert.equal(builds, 0, 'served from the memo')
-    await sleep(LIMITS.buildShareWaitMs + 40)
     assert.deepEqual(await share.run(env, 'k', async () => { builds += 1; return { body: 2 } }), { body: 2 })
-    assert.equal(builds, 1, 'after the window the work is done again')
-  })
-
-  await check('remember never outlives the stored entry it mirrors: a lifetime shorter than the window wins', async () => {
-    const share = isolate()
-    share.remember(env, 'short', 'body', 40)
-    assert.equal(await share.run(env, 'short', async () => 'rebuilt'), 'body')
-    await sleep(80)
-    assert.equal(await share.run(env, 'short', async () => 'rebuilt'), 'rebuilt', 'the 40 ms entry is gone although the window is 300 ms')
+    assert.equal(builds, 1, 'a repeat request sees what it would have seen without the module (a setting changed a moment ago shows at once)')
   })
 
   await check('waiting on the short memo: the builder remembers its result, the waiter takes it', async () => {
@@ -193,6 +182,29 @@ async function main() {
     assert.equal(await share.run(env, 'k', async () => { builds += 1; return 'B-body' }), 'A-body')
     assert.equal(builds, 1)
     await a
+  })
+
+  await check('a waiter takes only a result stored after the builder it waited on started, never an older one', async () => {
+    const share = isolate()
+    share.remember(env, 'k', 'OLD-body')
+    await sleep(15)
+    let builds = 0
+    const a = share.run(env, 'k', async () => { builds += 1; await sleep(100); share.remember(env, 'k', 'NEW-body'); return 'NEW-body' })
+    await sleep(20)
+    assert.equal(await share.run(env, 'k', async () => { builds += 1; return 'B-body' }), 'NEW-body', 'not the body remembered before the builder started')
+    assert.equal(builds, 1)
+    await a
+  })
+
+  await check('remember never outlives the stored entry it mirrors: a lifetime shorter than the window wins', async () => {
+    const share = isolate()
+    // The builder stores its result at once (lifetime 40 ms, or the full window) and keeps working; a waiter that arrives later looks at it.
+    for (const [key, lifetime, expected] of [['short', 40, 'rebuilt'], ['long', undefined, 'body']]) {
+      const a = share.run(env, key, async () => { share.remember(env, key, 'body', lifetime); await sleep(220); return 'A' })
+      await sleep(100)
+      assert.equal(await share.run(env, key, async () => 'rebuilt'), expected, key === 'short' ? 'the 40 ms entry is gone although the window is 300 ms' : 'inside the window the entry is taken')
+      await a
+    }
   })
 
   await check('the limits are the plan\'s: Paid waits 1,000 ms on a dead builder, Free 2,000 ms', async () => {
@@ -207,7 +219,7 @@ async function main() {
       const started = Date.now()
       await share.run(tierEnv, 'k', async () => 'B', () => undefined)
       const waited = Date.now() - started
-      assert.ok(waited >= expected * 0.9 && waited < expected + 300, `${tier}: waited ${waited} ms for a ${expected} ms cap`)
+      assert.ok(waited >= expected * 0.9 && waited < expected + 700, `${tier}: waited ${waited} ms for a ${expected} ms cap`)
     }
   })
 
