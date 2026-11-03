@@ -491,7 +491,8 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
       local += charge
       return executeStockTransaction(db, statements, 'once')
     },
-    finishReads() { admission = false; tailReads = true },
+    // After a commit the stock has moved, so the receipt read must not refuse; after a failed commit the tail reads stay guarded.
+    finishReads(committed = false) { admission = false; tailReads = !committed },
   }
 }
 
@@ -1251,7 +1252,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   checkBounds(statements, snapshot)
   try {
     await execution.commit(packSessionAssertions(statements))
-    execution.finishReads()
+    execution.finishReads(true)
   } catch (error) {
     execution.finishReads()
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error

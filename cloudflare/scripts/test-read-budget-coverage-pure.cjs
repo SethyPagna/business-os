@@ -23,6 +23,28 @@ const budgets = loadBudgets()
 const on = today()
 const key = (x) => `${x.method} ${x.route}`
 
+// A shape's "raised" is one note, or an array of notes when several of its fields rose.
+const notesOf = (s) => [].concat(s.raised || [])
+
+// What the ratchet finds when `shapes` replace `before`. A ceiling that rose needs a "raised" note for that field naming its old value.
+// "lifted" excuses the rise only when the old expect was a refusal: that measured a rejected request, so the new ceilings are the first
+// real ones. A shape that was already `ok` and now does more work is a raise.
+function ratchetProblems(shapes, before) {
+  const problems = []
+  for (const s of shapes) {
+    const old = before.get(s.id)
+    if (!old) continue
+    if (s.lifted && old.expect !== 'ok' && JSON.stringify(s.lifted) !== JSON.stringify(old.lifted)) continue
+    for (const field of RATCHETED) {
+      if (!(s[field] > old[field])) continue
+      const note = notesOf(s).find((n) => (n.field || 'rows_max') === field)
+      if (!note) problems.push(`${s.id}: ${field} rose from ${old[field]} to ${s[field]} with no "raised" note for it`)
+      else if (note.from !== old[field]) problems.push(`${s.id}: raised.from ${note.from} is not the previous ${field} ${old[field]}`)
+    }
+  }
+  return problems
+}
+
 // The budgets before this change: HEAD while the file has uncommitted edits, else its parent commit. Null when git cannot say
 // (a shallow checkout, the commit that introduced the file).
 function previousBudgets() {
@@ -102,12 +124,13 @@ async function main() {
     const refused = shapes.filter((s) => s.expect !== 'ok' && s.method !== 'GET')
     for (const s of refused) assert.ok(s.expect.until === null || /^P\d\.\d/.test(s.expect.until), `${s.id}: until`)
     console.log(`read-budget: ${refused.filter((s) => s.expect.until).length} write shapes refused on the Free config until a named slice: ${refused.filter((s) => s.expect.until).map((s) => `${s.id}->${s.expect.until}`).join(', ') || 'none'}`)
-    for (const s of shapes.filter((x) => x.raised)) {
-      assert.ok(Number.isInteger(s.raised.from) && typeof s.raised.reason === 'string' && s.raised.reason.length > 8, `${s.id}: raised needs from and reason`)
-      console.log(`RAISED ${s.id}: ${s.raised.from} -> ${s.rows_max} rows. ${s.raised.reason}`)
+    for (const s of shapes.filter((x) => x.raised)) for (const note of notesOf(s)) {
+      assert.ok(Number.isInteger(note.from) && typeof note.reason === 'string' && note.reason.length > 8, `${s.id}: raised needs from and reason`)
+      const field = note.field || 'rows_max'
+      console.log(`RAISED ${s.id} ${field}: ${note.from} -> ${s[field]}. ${note.reason}`)
     }
-    // A shape whose measured request changed KIND (a refusal lifted by its slice, lines once deferred now carried) is re-measured, not raised:
-    // its ceilings are the new request's, so the ratchet below skips it. The note names the slice and what the request used to be.
+    // A shape that was a refusal and now carries the request is re-measured, not raised: its ceilings are the first real ones, so the
+    // ratchet below skips it. The note names the slice and what the request used to be.
     for (const s of shapes.filter((x) => x.lifted)) {
       assert.ok(/^P\d\.\d/.test(s.lifted.slice) && typeof s.lifted.was === 'string' && s.lifted.was.length > 8, `${s.id}: lifted needs a slice and a "was"`)
       console.log(`LIFTED ${s.id} by ${s.lifted.slice}: was ${s.lifted.was}`)
@@ -117,17 +140,23 @@ async function main() {
   await check('ratchet: no ceiling went up against the previous budgets without a "raised" note that names the old value', () => {
     const previous = previousBudgets()
     if (!previous) return console.log('read-budget: no previous budgets.json to compare with (new file or shallow checkout); ratchet not checked')
-    const before = new Map(previous.shapes.map((s) => [s.id, s]))
-    for (const s of shapes) {
-      const old = before.get(s.id)
-      if (!old) continue
-      if (s.lifted && JSON.stringify(s.lifted) !== JSON.stringify(old.lifted)) continue
-      for (const field of RATCHETED) {
-        if (!(s[field] > old[field])) continue
-        assert.ok(s.raised && (s.raised.field || 'rows_max') === field, `${s.id}: ${field} rose from ${old[field]} to ${s[field]} with no "raised" note for it`)
-        assert.strictEqual(s.raised.from, old[field], `${s.id}: raised.from ${s.raised.from} is not the previous ${field} ${old[field]}`)
-      }
-    }
+    assert.deepStrictEqual(ratchetProblems(shapes, new Map(previous.shapes.map((s) => [s.id, s]))), [])
+  })
+
+  await check('the ratchet itself: "lifted" excuses a rise only on a former refusal; a raise names every field that rose and its old value', () => {
+    const refusal = { id: 'a', expect: { refused: 'x', until: 'P1.1' }, rows_max: 10, rows_max_analyze: 10, rows_written_max: 5, cold_calls_max: 8 }
+    const ok = { ...refusal, expect: 'ok' }
+    const rose = { rows_max: 20, rows_max_analyze: 20, rows_written_max: 9, cold_calls_max: 15 }
+    const lifted = { slice: 'P1.1', was: 'refused for the statement count' }
+    const run = (now, old) => ratchetProblems([now], new Map([[old.id, old]]))
+    assert.deepStrictEqual(run({ ...ok, ...rose, lifted }, refusal), [], 'a refusal that is now carried is re-measured')
+    assert.strictEqual(run({ ...ok, ...rose, lifted }, ok).length, 4, 'an ok shape that does more work is a raise, "lifted" does not excuse it (all four fields)')
+    assert.strictEqual(run({ ...ok, ...rose }, refusal).length, 4, 'a refusal that is now carried without a "lifted" note is a raise')
+    const notes = [['cold_calls_max', 8], ['rows_max', 10], ['rows_max_analyze', 10], ['rows_written_max', 5]].map(([field, from]) => ({ field, from, reason: 'twice the work per request' }))
+    assert.deepStrictEqual(run({ ...ok, ...rose, raised: notes }, ok), [], 'one note per field that rose is enough')
+    assert.deepStrictEqual(run({ ...ok, ...rose, raised: notes.slice(0, 3) }, ok), [`a: rows_written_max rose from 5 to 9 with no "raised" note for it`])
+    assert.strictEqual(run({ ...ok, ...rose, raised: notes.map((n) => ({ ...n, from: n.from + 1 })) }, ok).length, 4, 'a note must name the previous value')
+    assert.deepStrictEqual(run({ ...ok, ...rose, raised: { ...notes[1] } }, { ...ok, cold_calls_max: 15, rows_max_analyze: 20, rows_written_max: 9 }), [], 'a single note object still works')
   })
 
   if (process.exitCode) console.error(`test-read-budget-coverage-pure: FAILED (${checks} passed)`)

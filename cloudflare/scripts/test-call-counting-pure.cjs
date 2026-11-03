@@ -15,11 +15,17 @@ const ts = require('typescript')
 const { Hono } = require('hono')
 
 const SRC = path.join(__dirname, '..', 'src')
-function makeLoader(overrides = {}) {
+// patches: [{ file: 'lib/x.ts', from, to }] rewrite the source text before it is transpiled, to build a mutant of the real module.
+function makeLoader(overrides = {}, patches = []) {
   const cache = new Map()
   const load = (rel) => {
     if (cache.has(rel)) return cache.get(rel).exports
-    const out = ts.transpileModule(fs.readFileSync(path.join(SRC, rel), 'utf8'), {
+    let text = fs.readFileSync(path.join(SRC, rel), 'utf8')
+    for (const patch of patches.filter((p) => p.file === rel)) {
+      assert.equal(text.split(patch.from).length, 2, `mutant anchor must occur exactly once in ${rel}: ${patch.from}`)
+      text = text.replace(patch.from, () => patch.to)
+    }
+    const out = ts.transpileModule(text, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText
     const mod = { exports: {} }
@@ -281,6 +287,24 @@ check('stock session: a 20-line session is admitted on calls ON and refused befo
   planTier.__resetPlanTierCacheForTests()
 })
 
+check('stock session: once the batch has committed the receipt read never refuses, ON or OFF (the stock has moved, so a refusal would lie)', async () => {
+  const { loadStockSession, user } = require('./test-stock-session-atomic.cjs')
+  const planTier = loadStockSession('lib/planTier.ts')
+  planTier.__resetPlanTierCacheForTests()
+  const kernel = loadStockSession()
+  for (const callCounting of [true, false]) {
+    const f = callFixture(1)
+    // Admitted with room to spare; then the invocation turns out to have spent far more than planned (retries, background work).
+    const budget = { statementsUsed: () => (f.batches() > 0 ? 1000 : 0), reserveStatements: 4, ...(callCounting ? { callCounting } : {}) }
+    const receipt = await kernel.commitStockSession(f.env, user, sessionOf(1, 'cc-tail-' + callCounting), null, budget)
+    assert.ok(receipt.operationId, 'the committed session answers with its receipt')
+    assert.equal(receipt.replayed, false)
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_session_operations').get().n, 1)
+    assert.equal(f.sql.prepare('SELECT SUM(stock_quantity) n FROM products').get().n, 5)
+  }
+  planTier.__resetPlanTierCacheForTests()
+})
+
 check('stock receipts: the batch about to be sent is admitted as one call ON and as its statement count OFF; exact at the limit', async () => {
   const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
   const receipts = loadStockSession('lib/stockMutationReceipt.ts')
@@ -310,6 +334,49 @@ check('bulk returns: planned is one call, the check itself still refuses an over
   assert.throws(() => assertReturnBulkBudget(ENV_FREE, 42, 1, 8), /too large for the current plan/, '42 spent + the batch + 8 reserve is 51')
   assert.throws(() => assertReturnBulkBudget(ENV_FREE, 0, 62, 8), /too large for the current plan/, 'a plan charged as 62 statements is over')
   planTier.__resetPlanTierCacheForTests()
+})
+
+check('take-back: ON a replacement of up to 10 lines is taken back as ONE return and a longer one per line; OFF Free is per line and Paid one return (with mutants)', async () => {
+  // The tier is cached per module instance, so each loader hands back the planTier its own returnBulkAction.ts uses.
+  const bulk = (patches = []) => {
+    const load = makeLoader({ './db': { getDb: () => ({}) }, '../durable-objects/broadcastHub': {}, './cache': {} }, patches)
+    return Object.assign(load('lib/returnBulkAction.ts'), { __planTier: load('lib/planTier.ts') })
+  }
+  const ENV_PAID = { PLAN_TIER: 'paid' }
+  const request = (items, lines) => ({ items: Array.from({ length: items }, (_, i) => ({ id: i + 1, replacement: { planned: Array.from({ length: lines }, () => ({})), return_ids: [] } })) })
+  const REFUSED = /Select between 1 and 25 returns|too large for the current plan/
+  // What the take-back sizing must answer, written once and run against the real module and each mutant.
+  const expectations = (mod) => {
+    mod.__planTier.__resetPlanTierCacheForTests()
+    // ON: three replacements of 10 lines are 3 take-back returns (3 + 3 of the 25 an action may carry) ...
+    mod.assertTakeBackFitsPlan(ENV_FREE, request(3, 10), true)
+    assert.equal(mod.takeBackPerLine(ENV_FREE, true, 10), false)
+    // ... and a replacement of 11 lines goes back to one return per line, which exceeds the 10 returns one item may link: refused.
+    assert.equal(mod.takeBackPerLine(ENV_FREE, true, 11), true)
+    assert.throws(() => mod.assertTakeBackFitsPlan(ENV_FREE, request(1, 11), true), /too large for the current plan/)
+    // OFF: Free takes back one return per line: the same three replacements are 30 returns + 3 items, over the 25.
+    assert.equal(mod.takeBackPerLine(ENV_FREE, false, 10), true)
+    assert.throws(() => mod.assertTakeBackFitsPlan(ENV_FREE, request(3, 10), false), REFUSED)
+    mod.assertTakeBackFitsPlan(ENV_FREE, request(2, 10), false)
+    // Paid has room whatever the switch says: one return for all the lines.
+    mod.__planTier.__resetPlanTierCacheForTests()
+    assert.equal(mod.takeBackPerLine(ENV_PAID, false, 11), false)
+    mod.assertTakeBackFitsPlan(ENV_PAID, request(3, 10), false)
+    mod.__planTier.__resetPlanTierCacheForTests()
+  }
+  expectations(bulk())
+  const mutants = [
+    ['ON always per line (counting calls changes nothing)', 'if (callCounting) return plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES', 'if (callCounting) return true'],
+    ['ON never per line (a long replacement is sent as one return)', 'if (callCounting) return plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES', 'if (callCounting) return false'],
+    ['ON per line from 12 lines (the measured ten-line bound is lost)', 'plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES', 'plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES + 2'],
+    ['OFF follows the switch (the old per-line rule is dropped)', 'return getPlanLimits(env).d1QueriesPerInvocation < SMALL_PLAN_QUERY_LIMIT', 'return false'],
+  ]
+  for (const [name, from, to] of mutants) {
+    const mutant = bulk([{ file: 'lib/returnBulkAction.ts', from, to }])
+    let caught = null
+    try { expectations(mutant) } catch (error) { caught = error }
+    assert.ok(caught, `mutant "${name}" must turn the expectations red`)
+  }
 })
 
 check('import stock-action budget: ON a 60-statement batch is one call and the 51st single read is deferred; OFF the batch is deferred', async () => {

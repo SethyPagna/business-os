@@ -1362,12 +1362,12 @@ const SMALL_PLAN_QUERY_LIMIT = 200
 // Counting calls, one return of up to this many lines fits a Free invocation (measured: a 10-line return is 19 calls), so the take-backs of
 // a replacement of at most this many lines are made as ONE return; a longer replacement keeps one return per line.
 export const TAKE_BACK_ONE_RETURN_MAX_LINES = 10
-function takeBackPerLine(env: Env, callCounting = false, plannedLines = 0): boolean {
+export function takeBackPerLine(env: Env, callCounting = false, plannedLines = 0): boolean {
   if (callCounting) return plannedLines > TAKE_BACK_ONE_RETURN_MAX_LINES
   return getPlanLimits(env).d1QueriesPerInvocation < SMALL_PLAN_QUERY_LIMIT
 }
 const longestReplacement = (request: BulkRequest): number => Math.max(0, ...request.items.map((item) => item.replacement?.planned?.length ?? 0))
-function assertTakeBackFitsPlan(env: Env, request: BulkRequest, callCounting = false): void {
+export function assertTakeBackFitsPlan(env: Env, request: BulkRequest, callCounting = false): void {
   const perLine = takeBackPerLine(env, callCounting, longestReplacement(request))
   let announced = 0
   for (const item of request.items) {

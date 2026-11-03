@@ -118,6 +118,17 @@ async function main() {
         assert.deepEqual(after, before)
       })
     } finally { await off.mf.dispose() }
+
+    // The mutant always runs (the gate sets no MUTANT): with the batch charged as N statements again, the ON request is refused,
+    // so every ON expectation above would be red.
+    const mutated = await world('on', MUTANTS.statements.map((patch, index) => ({ name: `mutant:statements:${index}`, ...patch })))
+    try {
+      const refused = await bulkCancel(mutated, await seedReturns(mutated, 'mut'), 'cc-bulk-mut-0001')
+      r.check(`MUTANT (batch charged as N statements): the ON request is refused (${refused.status} ${refused.body.code}), so the ON expectations go red`, () => {
+        assert.equal(refused.status, 400, JSON.stringify(refused.body))
+        assert.equal(refused.body.code, 'return_bulk_over_plan_budget')
+      })
+    } finally { await mutated.mf.dispose() }
   }
 
   const failed = r.results.filter((result) => !result.ok)
