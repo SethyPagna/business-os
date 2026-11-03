@@ -143,6 +143,7 @@ function run(modules) {
     const body = { name: 'Dara', notes: '097 262 822', phone: '087 *** 321', address: '[{"phone":"087 *** 321"}]', payload: '{"name":"097 *** 822"}', total: 3, sale_note: null, items: [] }
     assert.equal(scrub(body), body, 'the same object comes back when nothing was removed')
     assert.deepEqual(scrub({ name: 'Mask *** here', notes: 'a *** b' }), { name: 'Mask *** here', notes: 'a *** b' }, 'a *** that is not the mask shape is a typed value')
+    assert.deepEqual(scrub({ notes: 'call *** later', label: 'ref 4471', description: '097 262 822' }), { notes: 'call *** later', label: 'ref 4471', description: '097 262 822' }, 'a note that merely contains *** or digits is a note, not a mask')
     assert.deepEqual(scrub({ name: '097 **** 822' }), { name: '097 **** 822' })
     assert.equal(scrub(null), null)
     assert.equal(scrub('097 *** 822'), '097 *** 822', 'a bare string has no key')
@@ -201,6 +202,7 @@ function run(modules) {
 
 // ---- mutants -------------------------------------------------------------------------------------------------------------------------
 const MUTANTS = [
+  ['scrub: any text that contains *** is taken for a mask', { phoneAccess: replaceOnce('!== 0) && isMaskedPhone(value))', "!== 0) && value.includes('***'))") }],
   ['scrub: a masked name is kept', { phoneAccess: replaceOnce('(((classify(key) & (NAME | CATALOG)) !== 0) && isMaskedPhone(value))', 'false') }],
   ['scrub: a mask under a product name is kept', { phoneAccess: replaceOnce('(NAME | CATALOG)) !== 0) && isMaskedPhone', '(NAME)) !== 0) && isMaskedPhone') }],
   ['scrub: a quoted mask is kept', { phoneAccess: replaceOnce("(mask === 'quoted' && AUTHORED_SENTENCE.test(key) && hasMaskedQuote(value))", 'false') }],

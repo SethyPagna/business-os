@@ -43,6 +43,7 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
 import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
@@ -812,7 +813,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
-        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched)
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched) || undoNeedsHiddenValue(existingSnapshot, nextSnapshot)
         actionHistory.pushAction({
           label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undoRefused: undoBlocked,

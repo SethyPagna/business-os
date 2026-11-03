@@ -1,4 +1,5 @@
 import { parseStoredContactOptions, serializeContactOptions } from './contactOptionUtils.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK } from '../../utils/hiddenValueUndo.ts'
 
 // A contact save carries a phone field only when the person changed it (P2.8-F, 3 Nov 2026).
 //
@@ -42,7 +43,7 @@ const SHOWN_MASK = /\*\*\*/
  * number has a different mask). Undo is refused up front instead, with a reason, and nothing is written. A field the edit did not
  * touch is not replayed (withoutUntouchedPhoneFields), and a holder's snapshot has real numbers, so neither case is refused.
  */
-export const UNDO_PHONE_HIDDEN_FALLBACK = 'Undo was refused: this edit changed a phone number you cannot see, and the old number cannot be put back from here. Nothing was changed.'
+export const UNDO_PHONE_HIDDEN_FALLBACK = UNDO_HIDDEN_VALUE_FALLBACK // one reason for a phone and for a name, note or label that is only a number (utils/hiddenValueUndo.ts)
 
 export function undoNeedsHiddenPhone(before: object, untouched: UntouchedPhoneFields | null | undefined): boolean {
   if (!untouched) return false

@@ -7,6 +7,7 @@ import { createCustomer, updateCustomer } from '../../api/contactWriteTransport.
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { buildCustomerSourcePayload, customerSourceRestorePayload, type CustomerSource } from './customerSource.ts'
 import { UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type CustomerRow = Record<string, unknown> & { id?: number | string; name?: string; updated_at?: string }
@@ -95,7 +96,7 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
       if (editing && loaded && pushAction) {
         const before = loaded
         const after = { ...before, ...record }
-        const undoBlocked = undoNeedsHiddenPhone(before, untouched)
+        const undoBlocked = undoNeedsHiddenPhone(before, untouched) || undoNeedsHiddenValue(before, { ...before, ...payload })
         pushAction({
           label: `${tr(t, 'edit_customer', 'Edit Customer')} ${String(before.name || '')}`.trim(),
           undoRefused: undoBlocked,

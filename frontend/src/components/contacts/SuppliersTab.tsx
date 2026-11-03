@@ -54,6 +54,7 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
@@ -917,7 +918,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       }
       if (useUpdate && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: (selected as { id: number | string }).id })
-        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched)
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched) || undoNeedsHiddenValue(existingSnapshot, nextSnapshot)
         actionHistory.pushAction({
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undoRefused: undoBlocked,

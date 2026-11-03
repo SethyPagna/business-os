@@ -33,7 +33,7 @@ const RUNS = [
     'merge accepts a masked custom phone', 'mask matched against any stored number, first hit wins', 'option mask resolved against all stored options',
     'asterisk phone that is not a mask saved as typed', 'position match trusted without a uniqueness check',
     'duplicate dismissal accepts a mask'].map((name) => ['write', name, {}]),
-  ...['write: the masked values are not taken out of the request', 'catalog: a product or branch name is masked like a person', 'people: contact_person and cashier are not names',
+  ...['write: the masked values are not taken out of the request', 'write: the masked values are also taken out of an account that holds the grant', 'write: any text that contains *** is taken for a mask', 'catalog: a product or branch name is masked like a person', 'people: contact_person and cashier are not names',
     'people: username is not a name', 'people: the cashiers list key is shown', 'search: a supplier contact person is readable through a digit word',
     'search: the legacy deleted reason is read raw', 'search: the legacy deleted cashier filter reads the number'].map((name) => ['text', name, {}]),
 ]

@@ -28,6 +28,8 @@ const sub = (needle, replacement) => (source) => {
 }
 const MUTANTS = {
   'write: the masked values are not taken out of the request': ['lib/phoneMaskMiddleware.ts', sub('if (sessionActor && !canSeeFullPhones(sessionActor)) await scrubMaskedWrite(c)', '')],
+  'write: the masked values are also taken out of an account that holds the grant': ['lib/phoneMaskMiddleware.ts', sub('if (sessionActor && !canSeeFullPhones(sessionActor)) await scrubMaskedWrite(c)', 'if (sessionActor) await scrubMaskedWrite(c)')],
+  'write: any text that contains *** is taken for a mask': ['lib/phoneAccess.ts', sub('!== 0) && isMaskedPhone(value))', '!== 0) && value.includes(\'***\'))')],
   'catalog: a product or branch name is masked like a person': ['lib/phoneAccess.ts', sub('kind |= CATALOG_KEY.test(normalized) ? CATALOG : NAME', 'kind |= NAME')],
   'people: contact_person and cashier are not names': ['lib/phoneAccess.ts', sub('summary|person|cashier', 'summary|xperson|xcashier')],
   'people: username is not a name': ['lib/phoneAccess.ts', sub('|cashier|username|user|', '|cashier|xusername|user|')],
@@ -106,6 +108,30 @@ async function main() {
     const saleId = sold.json && (sold.json.id ?? (sold.json.sale && sold.json.sale.id))
     const line = await world.first('SELECT product_name FROM sale_items WHERE sale_id = ? ORDER BY id LIMIT 1', saleId)
     t.eq('the stored line carries the product row\'s name', line && line.product_name, SOLD_CODE)
+  })
+
+  // ---------------------------------------------------------------- the scrub reads only the exact mask, and only for an account without the grant
+  await check('B1 the scrub drops only a value that IS the mask, and only for an account without the grant: "call *** later" is saved as typed', async (t) => {
+    const made = await world.api('POST', '/api/customers', { name: 'B1 Typed Notes', phone: '097 280 880', membership_number: 'LC-B1-TYPED' }, { as: 'admin' })
+    t.ok(`fixture created (status ${made.status})`, made.status === 200 || made.status === 201, made.text.slice(0, 200))
+    const id = made.json && made.json.id
+    const save = (notes, as) => world.api('PUT', `/api/customers/${id}`, { name: 'B1 Typed Notes', notes }, { as })
+    const stored = async () => (await world.first('SELECT notes FROM customers WHERE id = ?', id)).notes
+    // An account without the grant: text that merely contains *** or digits is a note, not a mask.
+    for (const notes of ['call *** later', 'a *** b', '097 **** 822', '097 ** 822', 'ref 4471', '097 262 822']) {
+      const put = await save(notes, 'manager')
+      t.ok(`manager saves "${notes}" (status ${put.status})`, put.status === 200, put.text.slice(0, 200))
+      t.eq(`manager: "${notes}" is stored as typed`, await stored(), notes)
+    }
+    // A value that IS the mask means "unchanged": the stored note stays.
+    await save('keep this note', 'manager')
+    const masked = await save('097 *** 822', 'manager')
+    t.ok(`manager sends back the mask (status ${masked.status})`, masked.status === 200, masked.text.slice(0, 200))
+    t.eq('manager: the mask did not replace the stored note', await stored(), 'keep this note')
+    // The scrub does not run for an account that holds the grant: it is never shown a mask, so a mask-shaped note is what it typed.
+    const holder = await save('097 *** 822', 'manager_granted')
+    t.ok(`manager_granted saves a mask-shaped note (status ${holder.status})`, holder.status === 200, holder.text.slice(0, 200))
+    t.eq('manager_granted: stored as typed', await stored(), '097 *** 822')
   })
 
   // ---------------------------------------------------------------- E4: a contact saved under its number can be edited

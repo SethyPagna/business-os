@@ -31,6 +31,7 @@ import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 import { toggleIdSet } from '../../utils/groupedRecords.ts'
 import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
@@ -1101,10 +1102,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         return
       }
       const entryId = crypto.randomUUID()
+      // A note, reason or name the edit changed that was shown masked (a number) cannot be put back from a masked snapshot.
+      const undoBlocked = undoNeedsHiddenValue(previousSnapshot, latestSnapshot)
       actionHistory.pushAction({
         ...entry,
         id: entryId,
-        undo: () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
+        undoRefused: undoBlocked,
+        undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : () => restoreReturnSnapshot(previousSnapshot, 'Undo return edit', { entryId, direction: 'undo' }),
         redo: () => restoreReturnSnapshot(latestSnapshot, 'Redo return edit', { entryId, direction: 'redo' }),
       })
       return
@@ -1121,7 +1125,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         scope: 'returns',
       })
     }
-  }, [actionHistory, fetchReturnSnapshot, loadReturns, restoreReturnSnapshot])
+  }, [actionHistory, fetchReturnSnapshot, loadReturns, restoreReturnSnapshot, tr])
 
   const typeOptions = useMemo(() => {
     const options = new Map<string, string>()
