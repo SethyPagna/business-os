@@ -36,7 +36,7 @@
 // before the forward guard (it answered 200 and wrote the paid status); the
 // two PATCH controls pass on both and go red under a guard that refuses every
 // Not Paid -> Completed move instead of the uncovered ones. The one-riel-short
-// Completed case is red on the exact-formula gate (400); the $0.00525 and
+// Completed case is red on the exact-formula gate (400); the 100-riel-short and
 // zero-tender refusals go red under a band that is too wide. The ONE
 // DEFINITION OF PAID cases (the owner's tender asked as Not Paid, restored to
 // Completed by PATCH without a payment, or settled by PATCH) are red on the
@@ -255,10 +255,24 @@ async function patchStatus(db, id, body) {
     assert.equal(Number(row.amount_paid_khr), 39400)
   })
 
-  await runTest('Completed short by $0.00525 ($9.50 at 4,000, 37,979 riel) is refused -- past the band', async () => {
+  // A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026): short by under a note is recorded Completed,
+  // short by a whole note is refused. The tender here is CASH, which is whole 100-riel notes (owner, same day), so the case
+  // uses a total that is not whole hundreds: $9.99 at 4,000 is 39,960 riel and 39,900 riel is 60 short. The 99 / 100 edge itself
+  // (odd riel, so a bank tender) is pinned in frontend/tests/rielRemainderCoverage.test.ts and test-payment-settlement-pure.cjs.
+  await runTest('Completed 60 riel short ($9.99 at 4,000, 39,900 riel cash) is accepted -- the riel rule', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.99, 39960)
+    const created = await h.postSale(f.route, rielRequest('band-riel-60', {
+      priceUsd: 9.99, priceKhr: 39960, rate: 4000, paidKhr: 39900, status: 'completed',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+  })
+
+  await runTest('Completed 100 riel short ($9.50 at 4,000, 37,900 riel) is refused -- past the riel rule', async () => {
     const f = h.fixture()
     const created = await h.postSale(f.route, rielRequest('band-past-half-cent', {
-      priceUsd: 9.5, priceKhr: 38000, rate: 4000, paidKhr: 37979, status: 'completed',
+      priceUsd: 9.5, priceKhr: 38000, rate: 4000, paidKhr: 37900, status: 'completed',
     }))
     assert.equal(created.status, 400, JSON.stringify(created.body))
     assert.equal(created.body.code, 'insufficient_payment_for_status')
