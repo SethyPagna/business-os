@@ -5959,7 +5959,9 @@ function ProductsFullEditor() {
               setModal(null); setSelected(null); setFormInitialTab('basic')
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
             }}
-            onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
+            // ProductForm draws its Delete on onDelete alone (its footer comment), so the host decides: only a role with products:delete
+            // is handed one. A Review-tier role keeps it -- its delete is queued for approval.
+            onDelete={selected && canRemoveProduct ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
             khrSymbol={khrSymbol}

@@ -522,10 +522,9 @@ for (const role of EDITORS) {
     const session = await begin(browser, testInfo.project.name, role)
     const { access } = session
     const wantDelete = grant(access, 'products', 'delete')
-    // APP BUG, kept as a case: Products.tsx:5969 hands ProductForm `onDelete` for every selected product and ProductForm.tsx:2302
-    // draws the trash button on `isEditMode && onDelete` alone. canRemoveProduct (Products.tsx:1498) only reaches the Conflicts tab.
-    // A role that may edit but not delete (the Employee default) is offered Delete, then collects the Worker's 403.
-    knownDefect(!wantDelete, 'Products.tsx:5969 passes onDelete to ProductForm with no products:delete check; ProductForm.tsx:2302 shows Delete on onDelete alone')
+    // FIXED (PERM-UI, 3 Nov): the host handed ProductForm `onDelete` for every selected product and the form draws its trash button on
+    // `isEditMode && onDelete` alone, so a role that may edit but not delete (the Employee default) was offered Delete and then
+    // collected the Worker's 403. The host now passes it only with products:delete.
     try {
       const dialog = await openProductForm(session)
       await expect(dialog.getByRole('button', { name: text('delete', 'Delete'), exact: true }), 'Delete in the product form = products:delete').toHaveCount(wantDelete ? 1 : 0, BRIEF)

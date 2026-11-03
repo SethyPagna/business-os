@@ -77,6 +77,15 @@ function assertEveryButtonGated(source: string, handler: string, gate: string, e
   }
 }
 
+const productsSource = read('../src/components/products/Products.tsx')
+
+test('PRODUCTS: the product form is handed onDelete only with products:delete (the form draws its trash button on onDelete alone)', () => {
+  assert.ok(productsSource.includes("const canRemoveProduct = can('products', 'delete')"), 'canRemoveProduct is the products:delete answer')
+  assert.equal(productsSource.split('onDelete={').length - 1, 1, 'Products.tsx hands onDelete to one component, the form')
+  assert.ok(productsSource.includes('onDelete={selected && canRemoveProduct ? () => {'), 'onDelete is handed over only with products:delete')
+  assert.ok(read('../src/components/products/forms/ProductForm.tsx').includes('{isEditMode && onDelete ? ('), 'the form still keys its Delete on the callback, so the host is the gate')
+})
+
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
   const returns = read('../src/components/returns/Returns.tsx')
   assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)
