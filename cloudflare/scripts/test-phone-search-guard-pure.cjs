@@ -286,7 +286,9 @@ function run(load, { baseLoad }) {
     assert.ok(/details LIKE/.test(sqlOf('654', false)) && /old_value LIKE/.test(sqlOf('654', false)) && /new_value LIKE/.test(sqlOf('654', false)), 'a holder still searches the three text columns')
     const blocked = sqlOf('654', true)
     assert.ok(!/details LIKE|old_value LIKE|new_value LIKE/.test(blocked), blocked)
-    assert.ok(/user_name LIKE/.test(blocked) && /CAST\(entity_id AS TEXT\) LIKE/.test(blocked), 'ids and users still match')
+    // The user name is a name column: a user saved under a number reads as empty (restrictedColumnSql), any other name is read as stored.
+    assert.ok(/COALESCE\(user_name,''\) END LIKE/.test(blocked) && /CAST\(entity_id AS TEXT\) LIKE/.test(blocked), 'ids and users still match')
+    assert.ok(sqlOf('654', false).includes('user_name LIKE') && !sqlOf('654', false).includes('CASE WHEN'), 'a holder reads the user name as stored')
     assert.ok(/details LIKE/.test(sqlOf('dara', true)), 'a word still searches details')
     assert.ok(/details LIKE/.test(sqlOf('RCP-1234', true)), 'a receipt label still searches details')
     assert.ok(!/details LIKE/.test(sqlOf('087-654-321', true)))
@@ -344,7 +346,7 @@ const mutants = [
   ['picker whole number compared by containment', { salesCustomerSearch: replaceOnce('(phone_normalized=@${key} OR ${displayDigits}=@${key})', '(phone_normalized=@${key} OR instr(${displayDigits},@${key})>0)') }],
   ['non-ASCII digits are not folded', { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false') }],
   ['Reports > Sales search treats everyone as a holder', { phoneSearchGuard: replaceOnce('if (access.fullPhone) return (row) =>', 'if (true) return (row) =>') }],
-  ['Reports > Sales search reads a numeric customer name', { phoneSearchGuard: replaceOnce('!(key === \'customer\' && customerIsNumber) && ', '') }],
+  ['Reports > Sales search reads a numeric customer name', { phoneSearchGuard: replaceOnce('restrictedTextOf(key, row[key] || \'\').toLowerCase().includes(search)', 'text(row, key).includes(search)') }],
   ['Reports > Sales search compares the whole number by containment', { phoneSearchGuard: replaceOnce('probe.forms.includes(typed) || probe.forms.includes(phoneDigitsOf(text))', 'probe.forms.some((form) => typed.includes(form))') }],
   ['audit word guard ignores punctuation around digits', { phoneSearchGuard: replaceOnce('return !/\\p{L}/u.test(ascii) || /["{}[\\]:,\\\\]/.test(ascii)', 'return !/\\p{L}/u.test(ascii) && /^[+\\d().-]+$/.test(ascii)') }],
   ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (false && hasDigit(word))') }],

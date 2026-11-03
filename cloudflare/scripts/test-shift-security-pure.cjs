@@ -70,7 +70,7 @@ async function main() {
   const route = loadReal('routes/shifts.ts', {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
-    '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/db': { getDb: () => d1(sqlite) },
+    '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) }, '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': permissions,
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),

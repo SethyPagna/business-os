@@ -67,9 +67,10 @@ const forbiddenDb = {
   },
 }
 const phoneMaskModule = load('lib/phoneMask.ts')
-const phoneSearchGuardModule = load('lib/phoneSearchGuard.ts', { './phoneMask': phoneMaskModule, './phone': load('lib/phone.ts'), './searchMatch': load('lib/searchMatch.ts') })
+const phoneAccessModule = load('lib/phoneAccess.ts', { './permissions': permissionHelpers, './phoneMask': phoneMaskModule })
+const phoneSearchGuardModule = load('lib/phoneSearchGuard.ts', { './phoneMask': phoneMaskModule, './phoneAccess': phoneAccessModule, './phone': load('lib/phone.ts'), './searchMatch': load('lib/searchMatch.ts') })
 const routeDependencies = {
-  '../lib/phoneAccess': load('lib/phoneAccess.ts', { './permissions': permissionHelpers, './phoneMask': phoneMaskModule }),
+  '../lib/phoneAccess': phoneAccessModule,
   '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissionHelpers }),
   '../lib/courierCostAccess': load('lib/courierCostAccess.ts', { './permissions': permissionHelpers }),
   '../lib/auth': {

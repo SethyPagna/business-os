@@ -1,5 +1,5 @@
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { hasDigit, nameWithoutPhoneSql, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -711,24 +711,25 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(rip.barcode, '') || ' ' || COALESCE(rip.brand, '') || ' ' ||
       COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
     )`
-    // A return carries no phone column; the customer name can be a phone number (a customer saved by it), so without the
-    // full-phone permission a digit-only word reads neither that name nor the folded copy of it (lib/phoneSearchGuard.ts).
-    const digitWordHaystack = `(
-      COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' ||
-      COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' ||
-      ${nameWithoutPhoneSql('r.customer_name')} || ' ' || COALESCE(r.supplier_name, '') || ' ' ||
-      COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' ||
-      COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, '')
-    )`
+    // A return carries no phone column, but a customer, a supplier, a cashier or a note can be a phone number (saved by it), and the
+    // projection masks that. Without the full-phone permission a digit word reads those columns through the projection's own rule
+    // (restrictedColumnSql) and never the folded copy (lib/phoneSearchGuard.ts); the haystack is computed once per row
+    // (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
     const guardDigitWords = !access.fullPhone
-    const wordsInSearch = searchGroups.reduce((sum, words) => sum + words.length, 0)
+    const digitWordHaystack = `(${restrictedHaystackParts([
+      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name', 'r.customer_name',
+      'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type', 'r.supplier_settlement',
+    ]).join(" || ' ' || ")})`
+    let usesRestrictedHaystack = false
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
       let wordIndex = 0
       const wordClauses = words.map((word) => {
         const keyBase = `rsrch${groupIndex}_${wordIndex}`
         wordIndex += 1
-        const flatClause = buildLikeAliasClause(word, guardDigitWords && hasDigit(word) ? restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch) : [flatHaystack], params, `${keyBase}_f`, true)
+        const restricted = guardDigitWords && hasDigit(word)
+        if (restricted) usesRestrictedHaystack = true
+        const flatClause = buildLikeAliasClause(word, restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack], params, `${keyBase}_f`, true)
         const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
         return `(${flatClause} OR EXISTS (
           SELECT 1 FROM return_items rii
@@ -740,7 +741,8 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
     })
     const joiner = searchMode === 'OR' ? ' OR ' : ' AND '
-    where.push(groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0])
+    const combined = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+    where.push(usesRestrictedHaystack ? restrictedSearchScope(combined, digitWordHaystack) : combined)
   }
 
   return { scope, where, params }

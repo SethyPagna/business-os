@@ -1916,7 +1916,8 @@ app.get('/stock-in-sessions', async (c) => {
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const page = clampInt(c.req.query('page'), 1, 1, 100000)
   const pageSize = clampInt(c.req.query('pageSize'), 30, 1, 100)
-  const { groupedSql, params } = buildStockInSessionListQuery(c.req.query('search'))
+  const [{ phoneSearchAccessOf }, { searchableColumnSql }] = await Promise.all([import('../lib/phoneAccess'), import('../lib/phoneSearchGuard')])
+  const { groupedSql, params } = buildStockInSessionListQuery(c.req.query('search'), (sql, key) => searchableColumnSql({ sql, key }, phoneSearchAccessOf(user)))
   const db = getDb(c.env)
   // The old page did the full legacy grouping twice at the same time: once
   // for COUNT(*) and once for the visible rows. That doubles the D1 work for

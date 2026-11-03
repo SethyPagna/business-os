@@ -19,13 +19,19 @@ const sub = (needle, replacement) => (source) => {
 // The review's B1 defect: the guard was decided on the RAW text, so a search whose raw text is not all digits (an accent, a
 // letter o, a joiner) escaped it although the matcher reads those words as digits.
 const RAW_DIGITS = '/^[\\d\\s+().-]+$/'
+// A column read raw by the restricted search, as a SearchColumn whose key carries no mask (lib/phoneSearchGuard.ts restrictedColumnSql).
+const RAW = (column) => `{ sql: "COALESCE(${column}, '')", key: 'raw' }`
+const subAll = (needle, replacement) => (source) => {
+  if (!source.includes(needle)) throw new Error(`mutant anchor missing: ${needle}`)
+  return source.split(needle).join(replacement)
+}
 const MUTANTS = {
-  'sales digit words read the phone': ['routes/sales.ts', sub("!access.fullPhone && hasDigit(word) ? restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch) : [flatHaystack]", '[flatHaystack]')],
-  'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('!access.fullPhone && hasDigit(word) ?', `!access.fullPhone && ${RAW_DIGITS}.test(raw) && hasDigit(word) ?`)],
+  'sales digit words read the phone': ['routes/sales.ts', sub('restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack]', '[flatHaystack]')],
+  'sales digit words guarded only for a raw all-digit search': ['routes/sales.ts', sub('const restricted = !access.fullPhone && hasDigit(word)', `const restricted = !access.fullPhone && ${RAW_DIGITS}.test(raw) && hasDigit(word)`)],
   'sales whole number not compared': ['routes/sales.ts', sub("if (probe.kind !== 'full') return searched", 'return searched')],
-  'sales number saved as a name readable': ['routes/sales.ts', sub("nameWithoutPhoneSql('s.customer_name')", "\"COALESCE(s.customer_name, '')\"")],
+  'sales number saved as a name readable': ['routes/sales.ts', sub("'s.cashier_name', 's.customer_name',", `'s.cashier_name', ${RAW('s.customer_name')},`)],
   'delivery picker matches phone fragments': ['routes/sales.ts', sub("const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)", "const probe = ({ kind: 'none' } as const)")],
-  'returns digit words read the name': ['routes/returns.ts', sub("guardDigitWords && hasDigit(word) ? restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch) : [flatHaystack]", '[flatHaystack]')],
+  'returns digit words read the name': ['routes/returns.ts', sub('restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack]', '[flatHaystack]')],
   'contacts only an all-digit word is guarded': ['lib/contactSearch.ts', sub('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))')],
   'returns digit words guarded only for a raw all-digit search': ['routes/returns.ts', sub('const guardDigitWords = !access.fullPhone', `const guardDigitWords = !access.fullPhone && ${RAW_DIGITS}.test(search)`)],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
@@ -37,11 +43,18 @@ const MUTANTS = {
   'non-ASCII digits are not folded': ['lib/phoneMask.ts', sub('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false')],
   'delivery picker reads a numeric courier name': ['routes/sales.ts', sub("const nameColumn = probe.kind === 'none' ? \"lower(COALESCE(name,''))\" : `lower(${nameWithoutPhoneSql('name')})`", "const nameColumn = \"lower(COALESCE(name,''))\"")],
   // P2.8-F: the 0-to-o retry of a word that mixes letters and digits must read the raw non-phone text and nothing else.
-  'sales zero-to-o retry reaches the phone column': ['routes/sales.ts', sub('restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch)', '[flatHaystackWithoutPhones, ...restrictedWordHaystacks(word, flatHaystack, wordsInSearch).slice(1)]')],
-  'returns zero-to-o retry reaches the folded copy': ['routes/returns.ts', sub('restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch)', '[digitWordHaystack, ...restrictedWordHaystacks(word, flatHaystack, wordsInSearch).slice(1)]')],
+  'sales zero-to-o retry reaches the phone column': ['routes/sales.ts', sub('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]')],
+  'returns zero-to-o retry reaches the folded copy': ['routes/returns.ts', sub('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]')],
   'zero-to-o retry removed (a mixed word is lost again)': ['lib/phoneSearchGuard.ts', sub("? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]", '? [rawHaystack] : [rawHaystack]')],
   'zero-to-o retry also for a digit-only word': ['lib/phoneSearchGuard.ts', sub('/\\p{L}/u.test(word) && word.includes', 'word.includes')],
-  'reports returns search reads a numeric name': ['routes/reports.ts', sub("const hideNumericName = kind === 'returns' && !phoneSearchAccessOf(user).fullPhone", 'const hideNumericName = false')],
+  'reports returns search reads a numeric name': ['routes/reports.ts', sub('const unrestricted = phoneSearchAccessOf(user).fullPhone', 'const unrestricted = true')],
+  // P2.8-F S1: a number saved in a column the response masks (a note, a cashier, a branch, a supplier) must read as empty to the search.
+  'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`)],
+  'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`)],
+  'sales branch that is a number readable': ['routes/sales.ts', sub("'s.branch_name', 's.payment_method',", `${RAW('s.branch_name')}, 's.payment_method',`)],
+  'sales cashier filter reads the number': ['routes/sales.ts', subAll("restrictedColumnSql('s.cashier_name')", "'s.cashier_name'")],
+  'returns note that is a number readable': ['routes/returns.ts', sub("'r.reason', 'r.notes', 'r.return_type'", `'r.reason', ${RAW('r.notes')}, 'r.return_type'`)],
+  'returns supplier saved under a number readable': ['routes/returns.ts', sub("'r.supplier_name', 'r.reason',", `${RAW('r.supplier_name')}, 'r.reason',`)],
 }
 
 const receiptsIn = (text) => [...new Set(String(text).match(/P28-000\d/g) || [])].sort()
@@ -85,6 +98,25 @@ async function main() {
   )
   await insertReturn('P28-RET-3', 'sokha2', 'P28-0004', 'p28-ret-3 s0kha2')
   await insertReturn('P28-RET-4', 'Fixture Sophea', 'P28-0004', 'p28-ret-4 fixture sophea tel010222333')
+
+  // P2.8-F S1 (the review's probes 6 and 7): a number saved in a column the response masks. A sale's note, cashier and branch, a return's
+  // note, a supplier return saved under a number. The response shows each as `093 *** 789`; a fragment typed into the search must find nothing.
+  const insertMaskedSale = (receipt, { cashier = 'Admin', notes = null, branch = 'Main' }, hoursAgo) => world.run(
+    `INSERT INTO sales (receipt_number, customer_id, customer_name, customer_phone, total_usd, total_khr, sale_status, payment_method, cashier_name, notes, search_normalized, branch_id, branch_name, created_at)
+     VALUES (?, NULL, 'Walk-in', '', 5, 20000, 'completed', 'Cash', ?, ?, ?, ?, ?, datetime('now', ?))`,
+    receipt, cashier, notes, `${receipt.toLowerCase()} ${[cashier, notes, branch].filter(Boolean).join(' ').toLowerCase()} walk in`, world.ids.branch, branch, `-${hoursAgo} hour`,
+  )
+  await insertMaskedSale('P28-0007', { notes: '093 456 789' }, 7)
+  await insertMaskedSale('P28-0008', { cashier: '094 555 818' }, 8)
+  await insertMaskedSale('P28-0009', { branch: '095 777 626' }, 9)
+  await world.run(
+    `INSERT INTO returns (return_number, customer_name, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, notes, search_normalized, created_at)
+     VALUES ('P28-RET-5', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0004', '093 456 789', 'p28-ret-5 walk in', datetime('now'))`,
+  )
+  await world.run(
+    `INSERT INTO returns (return_number, supplier_name, return_scope, status, total_refund_usd, total_refund_khr, search_normalized, created_at)
+     VALUES ('P28-RET-6', '094 555 818', 'supplier', 'completed', 1, 4100, 'p28-ret-6', datetime('now'))`,
+  )
 
   // ---- positive controls: the holder reads through the same boxes, or a green run proves nothing -----------------------
   await check('positive control: the holder finds contacts, sales and returns by a number fragment', async (t) => {
@@ -166,6 +198,49 @@ async function main() {
       const items = (JSON.parse(r.text).items) || []
       t.eq(`audit ${q}: rows found through recorded phone text`, items.length, 0)
       t.eq(`audit ${q} leaks`, leaksIn(r.text), [])
+    }
+  })
+
+  // ---- P2.8-F S1: a number saved in a note, a cashier, a branch or a supplier is hidden from the search as it is from the screen ----------
+  await check('positive control: the holder finds a sale, a return and a supplier return by a fragment of a number saved in a note, cashier or branch', async (t) => {
+    t.ok('sales 456 (note)', receiptsIn((await get(`/api/sales?search=${enc('456')}`, 'admin')).text).includes('P28-0007'))
+    t.ok('sales 555 (cashier)', receiptsIn((await get(`/api/sales?search=${enc('555')}`, 'admin')).text).includes('P28-0008'))
+    t.ok('sales 777 (branch)', receiptsIn((await get(`/api/sales?search=${enc('777')}`, 'admin')).text).includes('P28-0009'))
+    t.ok('sales ?cashier=555', receiptsIn((await get(`/api/sales?cashier=${enc('555')}`, 'admin')).text).includes('P28-0008'))
+    t.ok('returns 456 (note)', has((await get(`/api/returns?search=${enc('456')}`, 'admin')).text, 'P28-RET-5'))
+    t.ok('supplier returns 555', has((await get(`/api/returns?scope=supplier&search=${enc('555')}`, 'admin')).text, 'P28-RET-6'))
+    t.ok('sales totals 456', Number((await get(`/api/sales/stats?search=${enc('456')}`, 'admin')).json?.total_count) >= 1)
+  })
+  await check('no grant: a sale whose note, cashier or branch is a number is not found by a fragment of it (list, totals, cashier filter, digit by digit)', async (t) => {
+    for (const [receipt, queries] of [['P28-0007', ['456', '45', '4567', '093 4', '789']], ['P28-0008', ['555', '094 555', '818']], ['P28-0009', ['777', '095 777', '626']]]) {
+      for (const q of queries) {
+        const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
+        t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
+        t.ok(`sales ${q}: ${receipt} must not be found`, !receiptsIn(r.text).includes(receipt), snippetOf(r.text))
+        t.eq(`sales ${q}: totals`, (await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count, 0)
+      }
+    }
+    // The reviewer's bisection: the digit after a known prefix, ten requests per digit.
+    const hits = []
+    for (let digit = 0; digit <= 9; digit += 1) {
+      if (receiptsIn((await get(`/api/sales?search=${enc(`45${digit}`)}`, 'sales_only')).text).includes('P28-0007')) hits.push(digit)
+    }
+    t.eq('digit by digit: no digit after "45" is told apart', hits, [])
+    for (const q of ['555', '094', '818']) {
+      const list = await get(`/api/sales?cashier=${enc(q)}`, 'sales_only')
+      t.ok(`?cashier=${q}: P28-0008 must not be found`, !receiptsIn(list.text).includes('P28-0008'), snippetOf(list.text))
+      t.eq(`?cashier=${q}: totals`, (await get(`/api/sales/stats?cashier=${enc(q)}`, 'sales_only')).json?.total_count, 0)
+    }
+    t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '093 *** 789'))
+  })
+  await check('no grant: a return whose note is a number, and a supplier return saved under a number, are not found by a fragment of it', async (t) => {
+    for (const q of ['456', '45', '093 4', '789']) {
+      const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
+      t.ok(`returns ${q}: P28-RET-5 must not be found`, r.status === 200 && !has(r.text, 'P28-RET-5'), snippetOf(r.text))
+    }
+    for (const q of ['555', '094 555', '818', '0945']) {
+      const r = await get(`/api/returns?scope=supplier&search=${enc(q)}`, 'sales_only')
+      t.ok(`supplier returns ${q}: P28-RET-6 must not be found`, r.status === 200 && !has(r.text, 'P28-RET-6'), snippetOf(r.text))
     }
   })
 

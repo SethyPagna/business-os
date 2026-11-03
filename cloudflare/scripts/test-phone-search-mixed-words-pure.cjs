@@ -16,108 +16,25 @@
 //
 // Run (from cloudflare/): node scripts/test-phone-search-mixed-words-pure.cjs
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const path = require('node:path')
-const { execFileSync } = require('node:child_process')
-const ts = require('typescript')
-const Database = require('better-sqlite3')
 const { DatabaseSync } = require('node:sqlite')
 const { disguises } = require('./harness/phone_disguises.cjs')
-
-const ROOT = path.join(__dirname, '..')
-const BASE_COMMIT = 'd1a29856a'
-const unix = (text) => text.split('\r\n').join('\n')
-const readSrc = (rel) => unix(fs.readFileSync(path.join(ROOT, 'src', rel), 'utf8'))
-const readBase = (rel) => unix(execFileSync('git', ['show', `${BASE_COMMIT}:cloudflare/src/${rel}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
-const transpile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
-
-const must = (source, needle) => { assert.ok(source.includes(needle), `mutation anchor missing: ${needle}`); return needle }
-const replaceOnce = (needle, replacement) => (source) => source.replace(must(source, needle), () => replacement)
-
-/** The real lib modules (relative imports resolved among themselves). `mutate[name]` rewrites one module's source. */
-function libLoader(mutate = {}) {
-  const cache = new Map()
-  const load = (name) => {
-    if (cache.has(name)) return cache.get(name).exports
-    const module = { exports: {} }
-    cache.set(name, module)
-    let source = readSrc(`lib/${name}.ts`)
-    if (mutate[name]) source = mutate[name](source)
-    new Function('require', 'module', 'exports', transpile(source))((id) => {
-      if (id.startsWith('./')) return load(id.slice(2))
-      throw new Error(`unexpected import ${id}`)
-    }, module, module.exports)
-    return module.exports
-  }
-  return load
-}
-
-/** A function copied out of a route file between two anchors and run with the named dependencies. */
-function sliceOf(source, start, end, deps, exported, prelude = '') {
-  const from = source.indexOf(must(source, start))
-  const to = source.indexOf(must(source, end), from)
-  assert.ok(to > from, `slice end after start: ${end}`)
-  const names = Object.keys(deps)
-  return new Function('deps', `const { ${names.join(', ')} } = deps\n${prelude}\n${transpile(source.slice(from, to))}\nreturn { ${exported.join(', ')} }`)(deps)
-}
-
-const SALES_SLICE = ['function concatBalanced(', '\n// GET /api/sales -- the real list']
-const RETURNS_SLICE = ['type ReturnsFilter =', "\napp.get('/', async (c) => {\n  const db = getDb(c.env)\n  const query = c.req.query()\n  const includeItems"]
-const RETURNS_PRELUDE = "const CUSTOMER_SCOPE = 'customer'; const SUPPLIER_SCOPE = 'supplier'; const normalizeScope = (value, fallback) => fallback"
-
-function build({ lib = {}, sales = (s) => s, returns = (s) => s, base = false } = {}) {
-  const load = libLoader(lib)
-  const guard = load('phoneSearchGuard')
-  const match = load('searchMatch')
-  const deps = {
-    tokenizeSearchTermGroups: match.tokenizeSearchTermGroups, buildLikeAliasClause: match.buildLikeAliasClause,
-    phoneProbeOf: guard.phoneProbeOf, hasDigit: guard.hasDigit, nameWithoutPhoneSql: guard.nameWithoutPhoneSql,
-    fullPhoneColumnClause: guard.fullPhoneColumnClause, restrictedWordHaystacks: guard.restrictedWordHaystacks,
-  }
-  const read = base ? readBase : readSrc
-  const { buildSalesSearchWhere } = sliceOf(sales(read('routes/sales.ts')), SALES_SLICE[0], SALES_SLICE[1], deps, ['buildSalesSearchWhere'])
-  const { returnsFilter } = sliceOf(returns(read('routes/returns.ts')), RETURNS_SLICE[0], RETURNS_SLICE[1], deps, ['returnsFilter'], RETURNS_PRELUDE)
-  return { guard, match, buildSalesSearchWhere, returnsFilter }
-}
-
-const OPEN = { fullPhone: true }
-const CLOSED = { fullPhone: false }
-
-const SCHEMA = [
-  'CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT)',
-  'CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, barcode TEXT, brand TEXT, name_normalized TEXT, brand_compact TEXT)',
-  `CREATE TABLE sales (id INTEGER PRIMARY KEY, receipt_number TEXT, legacy_receipt_number TEXT, cashier_name TEXT, customer_name TEXT, customer_phone TEXT,
-    branch_name TEXT, payment_method TEXT, notes TEXT, search_normalized TEXT, customer_id INTEGER)`,
-  'CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER, product_name TEXT, sku TEXT)',
-  `CREATE TABLE returns (id INTEGER PRIMARY KEY, return_number TEXT, receipt_number TEXT, cashier_name TEXT, customer_name TEXT, supplier_name TEXT, reason TEXT,
-    notes TEXT, return_type TEXT, supplier_settlement TEXT, search_normalized TEXT, return_scope TEXT, created_at TEXT)`,
-  'CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, product_name TEXT)',
-]
+const { replaceOnce, build, OPEN, CLOSED, SCHEMA, freshDb: freshWorld, finders } = require('./harness/phone_route_slices.cjs')
 
 function freshDb(normalize) {
-  const db = new Database(':memory:')
-  for (const ddl of SCHEMA) db.exec(ddl)
-  db.prepare('INSERT INTO products (id, sku, barcode, brand, name_normalized, brand_compact) VALUES (1, ?, ?, ?, ?, ?)').run('P28-SKU-1', '8871000000019', 'Fixture Brand', 'fixture soap', 'fixturebrand')
   // Every row is invented. search_normalized is written the way the app writes it: the folded text of the row's own fields.
-  const sale = db.prepare(`INSERT INTO sales (id, receipt_number, cashier_name, customer_name, customer_phone, branch_name, payment_method, search_normalized)
-    VALUES (?, ?, ?, ?, ?, ?, 'Cash', ?)`)
-  const addSale = (id, receipt, cashier, name, phone, branch = 'Main') => sale.run(id, receipt, cashier, name, phone, branch, normalize([receipt, cashier, name, phone.replace(/\s+/g, ''), branch].filter(Boolean).join(' ')))
-  addSale(1, 'P28-0101', 'No1', 'Walk-in', '087 654 321')
-  addSale(2, 'P28-0102', 'SOKHA2', 'Walk-in', '')
-  addSale(3, 'P28-0103', 'Sovann2024', 'Walk-in', '')
-  addSale(4, 'P28-0104', 'Admin', 'Fixture Legacy', 'Tel099456789')
-  addSale(5, 'P28-0105', 'Admin', 'O1988375', '')
-  addSale(6, 'P28-0106', 'Admin', 'Walk-in', '', 'Room1')
-  addSale(7, 'P28-0107', 'Admin', '010 222 333', '010 222 333')
-  for (const id of [1, 2, 3, 4, 5, 6, 7]) db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, sku) VALUES (?, 1, ?, ?)').run(id, 'Fixture Soap', 'P28-SKU-1')
-  const ret = db.prepare(`INSERT INTO returns (id, return_number, receipt_number, cashier_name, customer_name, search_normalized, return_scope, created_at)
-    VALUES (?, ?, 'P28-0101', 'Admin', ?, ?, 'customer', '2026-11-03 01:00:00')`)
-  const addReturn = (id, number, name, folded) => ret.run(id, number, name, folded ?? normalize([number, 'P28-0101', name].join(' ')))
-  addReturn(1, 'P28-RET-AA', 'sokha2')
-  addReturn(2, 'P28-RET-BB', 'Fixture Sophea', 'p28-ret-bb tel010222333')
-  addReturn(3, 'P28-RET-CC', '010 222 333')
-  addReturn(4, 'P28-RET-DD', 'MIMO10')
-  return db
+  return freshWorld(normalize, ({ addSale, addReturn }) => {
+    addSale(1, 'P28-0101', { cashier: 'No1', phone: '087 654 321' })
+    addSale(2, 'P28-0102', { cashier: 'SOKHA2' })
+    addSale(3, 'P28-0103', { cashier: 'Sovann2024' })
+    addSale(4, 'P28-0104', { name: 'Fixture Legacy', phone: 'Tel099456789' })
+    addSale(5, 'P28-0105', { name: 'O1988375' })
+    addSale(6, 'P28-0106', { branch: 'Room1' })
+    addSale(7, 'P28-0107', { name: '010 222 333', phone: '010 222 333' })
+    addReturn(1, 'P28-RET-AA', { name: 'sokha2' })
+    addReturn(2, 'P28-RET-BB', { name: 'Fixture Sophea', folded: 'p28-ret-bb tel010222333' })
+    addReturn(3, 'P28-RET-CC', { name: '010 222 333' })
+    addReturn(4, 'P28-RET-DD', { name: 'MIMO10' })
+  })
 }
 
 function run(world) {
@@ -125,16 +42,7 @@ function run(world) {
   const check = (name, fn) => { try { fn() } catch (error) { failures.push(`${name}: ${String(error && error.message || error).split('\n')[0]}`) } }
   const { guard, match, buildSalesSearchWhere, returnsFilter } = world
   const db = freshDb(match.normalizeSearchText)
-  const sales = (search, access, searchMode) => {
-    const params = {}
-    const where = buildSalesSearchWhere({ search, ...(searchMode ? { searchMode } : {}) }, params, access)
-    if (!where) return null
-    return db.prepare(`SELECT s.receipt_number AS r FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE ${where} ORDER BY s.id`).all(params).map((row) => row.r)
-  }
-  const returns = (search, access) => {
-    const filter = returnsFilter({ search }, { sql: '1=1', params: {} }, access)
-    return db.prepare(`SELECT r.return_number AS n FROM returns r WHERE ${filter.where.join(' AND ')} ORDER BY r.id`).all(filter.params).map((row) => row.n)
-  }
+  const { sales, returns } = finders(db, world)
 
   // ---- 1. a word that mixes letters and digits is found again, without the grant ----------------------------------------------
   check('no grant: a cashier named No1 is found by "No1", "no1" and "NO1" (the o beside the digit is read as a zero)', () => {
@@ -163,10 +71,9 @@ function run(world) {
   })
   check('restrictedWordHaystacks: a letter and a zero get the folded copy of the haystack that was passed in; nothing else does', () => {
     const fold = (h) => `replace(lower(${h}),'o','0')`
-    for (const word of ['n01', 's0kha2', 'tel0994', 'x0', 'r001']) assert.deepEqual(guard.restrictedWordHaystacks(word, 'H', 1), ['H', fold('H')], word)
-    for (const word of ['08765', '0', '654', 'x12', 'abc', '654️', '๐๘๗', 'x๐']) assert.deepEqual(guard.restrictedWordHaystacks(word, 'H', 1), ['H'], JSON.stringify(word))
-    assert.deepEqual(guard.restrictedWordHaystacks('n01', 'H', 12), ['H', fold('H')], 'a search of 12 words keeps the retry')
-    assert.deepEqual(guard.restrictedWordHaystacks('n01', 'H', 13), ['H'], 'a search of more than 12 words is the restricted search it had')
+    for (const word of ['n01', 's0kha2', 'tel0994', 'x0', 'r001']) assert.deepEqual(guard.restrictedWordHaystacks(word, 'H'), ['H', fold('H')], word)
+    for (const word of ['08765', '0', '654', 'x12', 'abc', '654️', '๐๘๗', 'x๐']) assert.deepEqual(guard.restrictedWordHaystacks(word, 'H'), ['H'], JSON.stringify(word))
+    assert.deepEqual(guard.restrictedWordHaystacks('n01', 'H'), ['H', fold('H')], 'the retry has no word cap: the haystack is written once per statement')
   })
 
   // ---- 2. the security cases: still nothing through a phone, the folded copy, or a digit fragment ---------------------------------
@@ -216,13 +123,13 @@ function run(world) {
     const returnsStatement = (words) => `SELECT r.id FROM returns r WHERE ${returnsFilter({ search: search(words) }, { sql: "r.created_at >= '2026-01-01'", params: {} }, CLOSED).where.join(' AND ')}`
     for (const [label, statement] of [['sales', salesStatement], ['returns', returnsStatement]]) {
       for (const words of [1, 12, 13, 48]) assert.doesNotThrow(() => d1.prepare(statement(words)), `${label}: ${words} mixed words`)
-      assert.ok(statement(12).includes("replace(lower("), `${label}: the retry is on at 12 words`)
-      assert.ok(!statement(13).includes("replace(lower("), `${label}: the retry is off above 12 words`)
+      for (const words of [1, 12, 13, 48]) assert.ok(statement(words).includes("replace(lower("), `${label}: the retry is on at ${words} words`)
     }
   })
 
-  // ---- 3. nothing else moved: the holder, and every word without a letter and a zero, is byte-equal to the base commit -----------------
-  check('holder and other words: SQL and parameters equal the base commit; a mixed word only ever adds rows', () => {
+  // ---- 3. nothing else moved: the holder is byte-equal to the base commit; without the grant a word only gains rows when it is mixed, and
+  //         only loses rows in a column the projection masks (test-phone-search-masked-columns-pure.cjs owns that half) --------------------
+  check('holder: SQL and parameters equal the base commit; no grant: this fixture finds the same rows, a mixed word only adds rows', () => {
     const baseWorld = build({ base: true })
     const queries = ['', 'dara', 'No1', 'sokha2', 'room1', 'sovann2024', 'tel0994', '654', '0876', 'o8765', '087 654 321', '085 999 000', 'P28-0101', 'p28 0101', 'rcp-1234, jane',
       'no1 walk', 'a1', 'x12', 'lc-p28-1', '0001', '12.5', 'ក១', 'dara,sophea', 'mimo10', 'tel0102', 'O1988375', "o'brien", '%', '_', 'x'.repeat(70), '654́', 'ｎｏ１']
@@ -235,13 +142,16 @@ function run(world) {
         before.sql = baseWorld.buildSalesSearchWhere({ search: q }, before.params, access)
         const laneReturns = world.returnsFilter({ search: q }, { sql: '1=1', params: {} }, access)
         const baseReturns = baseWorld.returnsFilter({ search: q }, { sql: '1=1', params: {} }, access)
-        if (name === 'holder' || !mixedWord(q)) {
+        if (name === 'holder') {
           assert.deepEqual(lane, before, `sales ${name} ${JSON.stringify(q)}`)
           assert.deepEqual({ where: laneReturns.where, params: laneReturns.params }, { where: baseReturns.where, params: baseReturns.params }, `returns ${name} ${JSON.stringify(q)}`)
         } else {
-          const rowsOf = (sql, params) => (sql ? db.prepare(`SELECT s.id FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE ${sql}`).all(params).map((row) => row.id) : [])
-          const laneRows = rowsOf(lane.sql, lane.params)
-          assert.ok(rowsOf(before.sql, before.params).every((id) => laneRows.includes(id)), `sales ${JSON.stringify(q)}: the retry only adds rows`)
+          const salesOf = (sql, params) => (sql ? db.prepare(`SELECT s.id FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE ${sql}`).all(params).map((row) => row.id) : [])
+          const returnsOf = (filter) => db.prepare(`SELECT r.id FROM returns r WHERE ${filter.where.join(' AND ')}`).all(filter.params).map((row) => row.id)
+          for (const [label, laneRows, baseRows] of [['sales', salesOf(lane.sql, lane.params), salesOf(before.sql, before.params)], ['returns', returnsOf(laneReturns), returnsOf(baseReturns)]]) {
+            if (mixedWord(q)) assert.ok(baseRows.every((id) => laneRows.includes(id)), `${label} ${JSON.stringify(q)}: the retry only adds rows`)
+            else assert.deepEqual(laneRows, baseRows, `${label} ${JSON.stringify(q)}: same rows as the base commit`)
+          }
         }
       }
     }
@@ -254,11 +164,10 @@ const MUTANTS = [
   ['retry removed (a mixed word is lost again)', { lib: { phoneSearchGuard: replaceOnce('? [rawHaystack, `replace(lower(${rawHaystack}),\'o\',\'0\')`] : [rawHaystack]', '? [rawHaystack] : [rawHaystack]') } }],
   ['retry also for a digit-only word', { lib: { phoneSearchGuard: replaceOnce('/\\p{L}/u.test(word) && word.includes(\'0\')', 'word.includes(\'0\')') } }],
   ['retry without lower() (an upper-case name is lost)', { lib: { phoneSearchGuard: replaceOnce('replace(lower(${rawHaystack}),\'o\',\'0\')', 'replace(${rawHaystack},\'o\',\'0\')') } }],
-  ['sales: the retry reads the phone column and the folded copy', { sales: replaceOnce('restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch)', '[flatHaystackWithoutPhones, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]') }],
-  ['returns: the retry reads the folded copy', { returns: replaceOnce('restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch)', '[digitWordHaystack, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]') }],
-  ['no cap on the retry (48 mixed words overrun the 100 KB D1 statement limit)', { lib: { phoneSearchGuard: replaceOnce('wordsInSearch <= SEARCH_MAX_WORDS && ', '') } }],
-  ['sales: a word with letters escapes the restriction', { sales: replaceOnce('!access.fullPhone && hasDigit(word) ?', '!access.fullPhone && hasDigit(word) && !/\\p{L}/u.test(word) ?') }],
-  ['returns: a word with letters escapes the restriction', { returns: replaceOnce('guardDigitWords && hasDigit(word) ?', 'guardDigitWords && hasDigit(word) && !/\\p{L}/u.test(word) ?') }],
+  ['sales: the retry reads the phone column and the folded copy', { sales: replaceOnce('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]') }],
+  ['returns: the retry reads the folded copy', { returns: replaceOnce('restrictedWordHaystacks(word, RESTRICTED_HAYSTACK)', '[RESTRICTED_HAYSTACK, ...restrictedWordHaystacks(word, flatHaystack).slice(1)]') }],
+  ['sales: a word with letters escapes the restriction', { sales: replaceOnce('const restricted = !access.fullPhone && hasDigit(word)', 'const restricted = !access.fullPhone && hasDigit(word) && !/\\p{L}/u.test(word)') }],
+  ['returns: a word with letters escapes the restriction', { returns: replaceOnce('const restricted = guardDigitWords && hasDigit(word)', 'const restricted = guardDigitWords && hasDigit(word) && !/\\p{L}/u.test(word)') }],
 ]
 
 const failures = run(build())

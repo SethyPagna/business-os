@@ -32,10 +32,10 @@ function ok(cond, label) {
 
 // ---- compile the real modules ---------------------------------------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-log-page-'))
-const libFiles = ['auditLogPage.ts', 'auditLogQuery.ts', 'auditSections.ts', 'businessDateWindow.ts', 'continuousReadWindow.ts', 'phoneSearchGuard.ts', 'phoneMask.ts', 'phone.ts', 'searchMatch.ts']
+const libFiles = ['auditLogPage.ts', 'auditLogQuery.ts', 'auditSections.ts', 'businessDateWindow.ts', 'continuousReadWindow.ts', 'phoneSearchGuard.ts', 'phoneAccess.ts', 'permissions.ts', 'phoneMask.ts', 'phone.ts', 'searchMatch.ts']
 for (const file of libFiles) fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${libFiles.map((f) => path.join(tmpDir, f)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --outDir ${tmpDir} ${libFiles.map((f) => path.join(tmpDir, f)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
 const { readAuditLogPage } = require(path.join(tmpDir, 'auditLogPage.js'))
 const query = require(path.join(tmpDir, 'auditLogQuery.js'))
 

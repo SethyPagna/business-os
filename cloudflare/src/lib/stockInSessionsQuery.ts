@@ -295,7 +295,10 @@ export function asciiCodeSearch(search: string): string {
   return folded !== search && /^[!-~]+$/.test(folded) ? folded : ''
 }
 
-export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: string; params: Record<string, unknown> } {
+// `readable` maps a column (and the key it leaves the Worker under) to what the reader may search: an account without the full-phone
+// permission passes the projection's own rule (lib/phoneSearchGuard.ts searchableColumnSql), so a supplier or actor saved under a
+// number reads as empty. It is passed in, not imported: this module is compiled alone by its test loaders.
+export function buildStockInSessionListQuery(searchValue = '', readable: (column: string, key: string) => string = (column) => column): { groupedSql: string; params: Record<string, unknown> } {
   const search = String(searchValue || '').trim().slice(0, 120).toLowerCase()
   const params: Record<string, unknown> = search ? { search: escapedLike(search) } : {}
   const codeSearch = asciiCodeSearch(search)
@@ -304,8 +307,8 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
     ? ` OR lower(COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @codeSearch ESCAPE '\\'`
     : ''
   const having = search
-    ? `HAVING lower(COALESCE(MAX(s.supplier_name), '') || ' ' || COALESCE(MAX(s.branch_name), '') || ' ' ||
-             COALESCE(MAX(s.user_name), '') || ' ' || COALESCE(GROUP_CONCAT(s.product_name, ' '), '') || ' ' ||
+    ? `HAVING lower(COALESCE(MAX(${readable('s.supplier_name', 'supplier_name')}), '') || ' ' || COALESCE(MAX(s.branch_name), '') || ' ' ||
+             COALESCE(MAX(${readable('s.user_name', 'user_name')}), '') || ' ' || COALESCE(GROUP_CONCAT(s.product_name, ' '), '') || ' ' ||
              COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @search ESCAPE '\\'${barcodeOnlyMatch}`
     : ''
   // The list reads every receipt line -- a reverted one kept as history, but

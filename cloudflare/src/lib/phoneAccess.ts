@@ -72,6 +72,25 @@ function classify(key: string): number {
   return kind
 }
 
+/**
+ * How the projection treats a STRING under `key`, which is also the name of the column a list returns it from (`s.notes` leaves
+ * as `notes`). The restricted searches ask this instead of keeping a column list of their own (lib/phoneSearchGuard.ts), so a
+ * column the projection hides is never searched raw by an account without the grant, and the two cannot drift:
+ *   'always': masked whatever it holds (a phone key, the search helper text, serialized JSON): never searchable without the grant;
+ *   'name':   masked when the WHOLE value is a number (a name, label or note that is a phone): searchable only when it is not;
+ *   'quoted': a sentence whose quoted numbers are masked (a reason, a message): searchable only when it quotes none;
+ *   'none':   shown as stored.
+ */
+export type KeyMask = 'always' | 'name' | 'quoted' | 'none'
+export function keyMaskOf(key: string): KeyMask {
+  const kind = classify(key)
+  if (kind & BUSINESS) return 'none'
+  if (kind & (PHONE | SEARCH_TEXT | ENVELOPE)) return 'always'
+  if (kind & NAME) return 'name'
+  if (kind & MESSAGE) return 'quoted'
+  return 'none'
+}
+
 /** The branch rows carry the shop's own line: location + manager mark the row (migrations/0001_init.sql). */
 function isBranchRow(node: Record<string, unknown>): boolean {
   return Object.hasOwn(node, 'manager') && Object.hasOwn(node, 'location') && !Object.hasOwn(node, 'customer_id')

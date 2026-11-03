@@ -27,7 +27,7 @@ function loadModule(relPath) {
   const moduleObj = { exports: {} }
   const req = (spec) => {
     if (spec === './searchMatch') return loadModule('lib/searchMatch.ts')
-    if (['./contactOptions', './phoneSearchGuard', './phoneMask', './phone'].includes(spec)) return loadModule(`lib/${spec.slice(2)}.ts`)
+    if (['./contactOptions', './phoneSearchGuard', './phoneAccess', './permissions', './phoneMask', './phone'].includes(spec)) return loadModule(`lib/${spec.slice(2)}.ts`)
     throw new Error(`unexpected require in test harness: ${spec}`)
   }
   new Function('exports', 'require', outputText)(moduleObj.exports, req)

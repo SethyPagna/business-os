@@ -10,8 +10,9 @@
 // What counts as a digit word is decided on the words the MATCHER searches (tokenizeSearchWords: accents folded, a letter o
 // beside a digit read as zero, punctuation dropped), never on the raw text: "654" followed by a combining accent and "o8765"
 // reach the matcher as the digit words 654 and 08765. A holder searches as before.
-import { isPhoneShaped, phoneDigitsOf, toAsciiDigits } from './phoneMask'
-import { SEARCH_MAX_WORDS, tokenizeSearchWords } from './searchMatch'
+import { keyMaskOf } from './phoneAccess'
+import { isPhoneShaped, maskQuotedPhones, phoneDigitsOf, toAsciiDigits } from './phoneMask'
+import { tokenizeSearchWords } from './searchMatch'
 
 export type PhoneSearchAccess = { readonly fullPhone: boolean }
 
@@ -47,12 +48,9 @@ export function hasDigit(word: string): boolean {
  * zero (so it may have been typed with an o) therefore also reads `rawHaystack` with every o turned into 0: the same as trying the
  * word with each of its zeros turned back into o. Built from `rawHaystack` alone, it cannot reach a phone column or the folded
  * copy; a word with no letter (a digit fragment, however disguised: "o8765" is 08765) never gets it.
- *
- * The retry repeats the haystack text, and D1 refuses a statement over 100 KB: 48 such words measured 118 KB against 73 KB without the
- * retry. A search of more than SEARCH_MAX_WORDS words in all (`wordsInSearch`; nobody types that) keeps the restricted search it had.
  */
-export function restrictedWordHaystacks(word: string, rawHaystack: string, wordsInSearch: number): string[] {
-  return wordsInSearch <= SEARCH_MAX_WORDS && /\p{L}/u.test(word) && word.includes('0') ? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]
+export function restrictedWordHaystacks(word: string, rawHaystack: string): string[] {
+  return /\p{L}/u.test(word) && word.includes('0') ? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]
 }
 
 /**
@@ -101,15 +99,99 @@ export function phoneDigitsSql(value: string): string {
   return `replace(replace(replace(${digits},char(9),''),char(10),''),char(13),'')`
 }
 
-/** SQL that is true when the column holds a value that is wholly a phone number (a contact saved by its number): isPhoneShaped. */
+// D1 refuses a LIKE or GLOB pattern over 50 bytes, so the decimal digits of the scripts a phone may be written in are tested in four
+// patterns of at most five families each (with ASCII): Arabic-Indic, Persian, N'Ko, Devanagari, Bengali; Gurmukhi, Gujarati, Oriya, Tamil,
+// Telugu; Kannada, Malayalam, Thai, Lao, Tibetan; Myanmar, Khmer, Mongolian, full-width, mathematical. A number written in a script not listed
+// (Javanese, Balinese ...) is not recognised here although phoneMask.ts masks any Unicode digit; test-phone-search-masked-columns-pure.cjs
+// pins the families that are.
+const NON_DIGIT_GLOBS = [
+  '*[^0-9\u0660-\u0669\u06f0-\u06f9\u07c0-\u07c9\u0966-\u096f\u09e6-\u09ef]*',
+  '*[^0-9\u0a66-\u0a6f\u0ae6-\u0aef\u0b66-\u0b6f\u0be6-\u0bef\u0c66-\u0c6f]*',
+  '*[^0-9\u0ce6-\u0cef\u0d66-\u0d6f\u0e50-\u0e59\u0ed0-\u0ed9\u0f20-\u0f29]*',
+  '*[^0-9\u1040-\u1049\u17e0-\u17e9\u1810-\u1819\uff10-\uff19\u{1d7ce}-\u{1d7ff}]*',
+]
+
+// What isPhoneShaped lets stand between the digits: + ( ) . - and every character a JavaScript \s matches (the separators of a number
+// pasted from a chat: no-break, narrow, thin and ideographic spaces, a line break ...). Stripped one by one, because SQLite has no regex.
+const SHAPE_SEPARATORS = ['+', '(', ')', '.', '-', ' ']
+const SHAPE_SPACE_CODES = [9, 10, 11, 12, 13, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
+
+function shapeStrippedSql(columnSql: string): string {
+  let text = `COALESCE(${columnSql},'')`
+  for (const separator of SHAPE_SEPARATORS) text = `replace(${text},'${separator}','')`
+  for (const code of SHAPE_SPACE_CODES) text = `replace(${text},char(${code}),'')`
+  return text
+}
+
+/**
+ * SQL that is true when the column holds a value that is wholly a phone number (a contact saved by its number): isPhoneShaped.
+ * The separators are stripped once, in a one-row subquery, so a statement that tests many columns does not repeat the chain.
+ */
 export function phoneShapedSql(columnSql: string): string {
-  const digits = phoneDigitsSql(`COALESCE(${columnSql},'')`)
-  return `(${digits}<>'' AND ${digits} NOT GLOB '*[^0-9]*' AND length(${digits})>=8)`
+  return `(SELECT length(ds)>=8 AND (${NON_DIGIT_GLOBS.map((glob) => `ds NOT GLOB '${glob}'`).join(' OR ')}) FROM (SELECT ${shapeStrippedSql(columnSql)} AS ds))`
 }
 
 /** A name column as a digit-word search may read it: empty when the name is itself a number. */
 export function nameWithoutPhoneSql(columnSql: string): string {
   return `CASE WHEN ${phoneShapedSql(columnSql)} THEN '' ELSE COALESCE(${columnSql},'') END`
+}
+
+/** A search column as an account without the grant may read it. `quoted`: a sentence that quotes a number reads as empty. */
+function quotedNumberFreeSql(columnSql: string): string {
+  const text = `COALESCE(${columnSql},'')`
+  return `CASE WHEN ${text} GLOB '*["''\u201c\u2018\u201d\u2019][+0-9]*' AND ${text} GLOB '*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*' THEN '' ELSE ${text} END`
+}
+
+export type SearchColumn = string | { sql: string; key: string }
+
+/**
+ * SQL for a column a restricted search reads raw. The projection that masks a response (phoneAccess.ts keyMaskOf) decides by the key
+ * a value leaves under, and a list's column carries that key as its name (`s.notes` leaves as `notes`; pass `key` for an expression), so
+ * the search asks the SAME rule: a column the projection always hides reads as empty, a name or a note that is itself a number reads as
+ * empty, a sentence quoting a number reads as empty, anything else is read as stored. A column added tomorrow inherits the rule.
+ */
+export function restrictedColumnSql(column: SearchColumn): string {
+  const { sql, key } = typeof column === 'string' ? { sql: column, key: column.slice(column.lastIndexOf('.') + 1) } : column
+  switch (keyMaskOf(key)) {
+    case 'always': return "''"
+    case 'name': return nameWithoutPhoneSql(sql)
+    case 'quoted': return quotedNumberFreeSql(sql)
+    default: return `COALESCE(${sql},'')`
+  }
+}
+
+/** `column` as this account may search it with LIKE: as stored for a holder of the grant, through the projection's rule for everybody else. */
+export function searchableColumnSql(column: SearchColumn, access: PhoneSearchAccess): string {
+  if (access.fullPhone) return typeof column === 'string' ? column : column.sql
+  return restrictedColumnSql(column)
+}
+
+/** The parts of a restricted haystack (join them with a space): every column through restrictedColumnSql. */
+export function restrictedHaystackParts(columns: readonly SearchColumn[]): string[] {
+  return columns.map(restrictedColumnSql)
+}
+
+/** The name the restricted haystack carries inside restrictedSearchScope. */
+export const RESTRICTED_HAYSTACK = 'rh'
+
+/**
+ * `searchedSql`, whose digit words read RESTRICTED_HAYSTACK, evaluated over the restricted haystack `haystackSql`: the haystack is
+ * written once in the statement and computed once per row, whatever the number of words (written per word it overran D1's 100 KB
+ * statement limit at twelve words, and the wrapped columns repeat their separator chain).
+ */
+export function restrictedSearchScope(searchedSql: string, haystackSql: string): string {
+  return `(SELECT ${searchedSql} FROM (SELECT ${haystackSql} AS ${RESTRICTED_HAYSTACK}))`
+}
+
+/** The text of a value as an account without the grant may search it in JS (the same rule as restrictedColumnSql, for row filters). */
+export function restrictedTextOf(key: string, value: unknown): string {
+  const text = String(value ?? '')
+  switch (keyMaskOf(key)) {
+    case 'always': return ''
+    case 'name': return isPhoneShaped(text) ? '' : text
+    case 'quoted': return maskQuotedPhones(text) === text ? text : ''
+    default: return text
+  }
 }
 
 export interface PhoneClause {
@@ -169,9 +251,6 @@ export function salesReportSearchMatcher(search: string, access: PhoneSearchAcce
   const text = (row: Record<string, unknown>, key: string): string => String(row[key] || '').toLowerCase()
   const whole = (row: Record<string, unknown>): boolean => probe.kind === 'full' && (digitsEqualProbe(row.customer_phone, probe) || digitsEqualProbe(row.customer, probe))
   if (access.fullPhone) return (row) => whole(row) || [...SALES_REPORT_TEXT_KEYS, 'customer_phone'].some((key) => text(row, key).includes(search))
-  return (row) => {
-    if (whole(row)) return true
-    const customerIsNumber = isPhoneShaped(String(row.customer || ''))
-    return SALES_REPORT_TEXT_KEYS.some((key) => !(key === 'customer' && customerIsNumber) && text(row, key).includes(search))
-  }
+  // Each key is read through the projection's rule for that key (restrictedTextOf): a customer that is a number reads as empty.
+  return (row) => whole(row) || SALES_REPORT_TEXT_KEYS.some((key) => restrictedTextOf(key, row[key] || '').toLowerCase().includes(search))
 }

@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
@@ -1118,7 +1120,7 @@ app.get('/', async (c) => {
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
       ${openingWindow ? `AND ${continuousReadWindowSql('opened_at')}` : ''}
-      AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
+      AND (@search IS NULL OR ${searchableColumnSql('user_name', phoneSearchAccessOf(user))} LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
         WITH RECURSIVE hit(id) AS (
           SELECT segment.id FROM shift_sessions segment WHERE segment.shift_code LIKE @search ESCAPE '\\'
           UNION SELECT later.id FROM shift_sessions later JOIN hit ON later.parent_shift_id = hit.id)

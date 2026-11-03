@@ -30,7 +30,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
 import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
-import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, RESTRICTED_HAYSTACK, restrictedColumnSql, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -5839,7 +5839,6 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // Without the full-phone permission a digit-only word (as the matcher reads it: accents folded, a letter o beside a digit read
   // as zero) never matches the customer's number (lib/phoneSearchGuard.ts); a whole number, in any form, matches by equality.
   const probe = phoneProbeOf(raw)
-  const wordsInSearch = groups.reduce((sum, words) => sum + words.length, 0)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
   // Keep one shallow haystack per row context. Passing every raw column to
@@ -5863,12 +5862,14 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
     "COALESCE(c.membership_number, '')",
   ])
-  const flatHaystackWithoutPhones = concatBalanced([
-    "COALESCE(s.receipt_number, '')", "COALESCE(s.legacy_receipt_number, '')",
-    "COALESCE(s.cashier_name, '')", nameWithoutPhoneSql('s.customer_name'),
-    "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
-    "COALESCE(c.membership_number, '')",
-  ])
+  // A digit word of an account without the grant reads these columns through the projection's own rule (restrictedColumnSql): a
+  // note, cashier, branch or customer name that is itself a number shows masked, so it reads as empty here. The haystack is computed
+  // once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+  const flatHaystackWithoutPhones = concatBalanced(restrictedHaystackParts([
+    's.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.customer_name',
+    's.branch_name', 's.payment_method', 's.notes', 'c.membership_number',
+  ]))
+  let usesRestrictedHaystack = false
   const itemHaystack = concatBalanced([
     "COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')", "COALESCE(sip.barcode, '')",
     "COALESCE(sip.brand, '')", "COALESCE(sip.name_normalized, '')", "COALESCE(sip.brand_compact, '')",
@@ -5896,7 +5897,9 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = boundSearchClause(word, !access.fullPhone && hasDigit(word) ? restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch) : [flatHaystack], `${keyBase}_f`)
+      const restricted = !access.fullPhone && hasDigit(word)
+      if (restricted) usesRestrictedHaystack = true
+      const flatClause = boundSearchClause(word, restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack], `${keyBase}_f`)
       const itemClause = boundSearchClause(word, [itemHaystack], `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
@@ -5908,7 +5911,8 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
   })
   const joiner = mode === 'OR' ? ' OR ' : ' AND '
-  const searched = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+  const combined = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+  const searched = usesRestrictedHaystack ? restrictedSearchScope(combined, flatHaystackWithoutPhones) : combined
   if (probe.kind !== 'full') return searched
   const whole = fullPhoneColumnClause("COALESCE(s.customer_phone, '')", probe, 'salesPhoneDigits')
   Object.assign(params, whole.params)
@@ -5943,7 +5947,8 @@ app.get('/', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
-  if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
+  // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
+  if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   // Exact-id lookup -- there's still no separate GET /:id route (see this
   // file's own comment above), but a caller that already has a specific
   // sale id (e.g. the Fees form re-displaying an already-attached
@@ -6250,7 +6255,8 @@ app.get('/stats', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
-  if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
+  // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
+  if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
     const isAdmin = isAdminControlUser(user)
     if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)

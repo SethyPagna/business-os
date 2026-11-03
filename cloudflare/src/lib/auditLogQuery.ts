@@ -24,7 +24,8 @@
 // deliberately not the device-supplied client_time (see businessDateWindow.ts;
 // the created_at prefilter there keeps the index usable).
 
-import { isBareNumberWord, isMoneyShapedWord } from './phoneSearchGuard'
+import { keyMaskOf } from './phoneAccess'
+import { isBareNumberWord, isMoneyShapedWord, restrictedColumnSql } from './phoneSearchGuard'
 import { businessToday, localDateExpr } from './businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
 import {
@@ -316,7 +317,9 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
       ...(figureOnly ? [wholeFigure(column, `@searchFigure${index}`)] : []),
       ...(redactable ? hiddenTextPatterns.map((_, at) => `${column} NOT LIKE @hiddenText${at}`) : []),
     ]
-    const match = `${column} LIKE @search${index} ESCAPE '\\'`
+    // A name column (user_name, device_name, table_name) that is itself a number shows masked to this reader: it reads as empty.
+    const readable = input.phoneTextBlocked && keyMaskOf(column) === 'name' ? restrictedColumnSql(column) : column
+    const match = `${readable} LIKE @search${index} ESCAPE '\\'`
     return guards.length ? `(${match} AND ${guards.join(' AND ')})` : match
   }
   searchWords.forEach((word, index) => {
