@@ -208,6 +208,7 @@ runTest('T-L4: the section picker is a menu of seven radio items; the chips are 
   // The menu hangs from its button, so it moves with the bar however the page shifts (a scroll, a collapsing app header, a resize). Fixed to the
   // screen it closed on every scroll event, and a late one shut it as it opened.
   assert.match(nav, /role="menu"[\s\S]*className="absolute left-0 top-full /, 'the menu is absolute under its button')
+  assert.match(nav, /className="absolute left-0 top-full [^"]*\bw-max\b[^"]*\bmin-w-full\b/, 'as wide as its longest name (an absolute box is otherwise capped at the button width and wraps Khmer)')
   assert.doesNotMatch(nav, /\bfixed\b/, 'and not fixed to the screen')
   assert.doesNotMatch(nav, /addEventListener\('(?:scroll|resize)'/, 'so there is no scroll or resize handler to close it')
   assert.match(nav, /web_editor_unsaved/, 'a dirty dot has sr-only text')

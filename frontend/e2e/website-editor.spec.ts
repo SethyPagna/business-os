@@ -531,6 +531,12 @@ test.describe('Website Editor bar (ED-1a)', () => {
         expect(overflow.scroller, `the page scroller does not scroll sideways at ${width} px`).toBeLessThanOrEqual(0)
         expect(overflow.barLeft, `the bar starts on screen at ${width} px`).toBeGreaterThanOrEqual(-0.5)
         expect(overflow.barRight, `the bar ends on screen at ${width} px`).toBeLessThanOrEqual(overflow.viewport + 0.5)
+        // The open menu is as wide as its longest word: a menu only as wide as the picker button wrapped the Khmer names onto two lines.
+        await row.locator('button[aria-haspopup="menu"]').click()
+        const heights = await editor(page).getByRole('menuitemradio').evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().height)))
+        expect(heights, `seven entries at ${width} px`).toHaveLength(7)
+        expect(Math.max(...heights), `every section name fits on one line in the open menu at ${width} px`).toBeLessThanOrEqual(48)
+        await page.keyboard.press('Escape')
       }
       expectNoRuntimeErrors(health)
     })
