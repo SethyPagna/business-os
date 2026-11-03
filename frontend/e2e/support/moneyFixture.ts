@@ -21,6 +21,7 @@ export type SeedProduct = { id: number; name: string; barcode: string; priceUsd:
 export type SeedActor = { id: number; username: string; name: string; roleCode: string; permissions: Record<string, unknown>; deviceId?: string }
 export type Seed = {
   password: string
+  organizationName: string
   exchangeRate: number
   branches: Array<{ id: number; name: string; isDefault: number }>
   actors: { admin: SeedActor; cashier: SeedActor }
@@ -120,6 +121,9 @@ export async function signInAs(page: Page, who: 'cashier' | 'admin', seed: Seed)
   if (actor.deviceId) await page.addInitScript(deviceId => { localStorage.setItem('businessos_device_id', deviceId) }, actor.deviceId)
   await page.goto(MONEY_ORIGIN)
   await expect(page.locator('#login-username')).toBeVisible()
+  // The form learns its organisation from an asynchronous bootstrap request. Pressing Login before it lands is answered by the form
+  // itself ("Please choose your organization first."), with no request sent -- so wait for the organisation the form shows.
+  await expect(page.getByText(seed.organizationName, { exact: true }).first(), 'the login form must have resolved its organisation').toBeVisible({ timeout: 30_000 })
   await page.locator('#login-username').fill(actor.username)
   await page.locator('#login-password').fill(seed.password)
   await expect(page.locator('#login-username')).toHaveValue(actor.username)

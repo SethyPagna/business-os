@@ -56,6 +56,8 @@ const repo = path.resolve(root, '..')
 /** Synthetic data only: the repository is public, so no real name, phone or id appears here. */
 const SEED = {
   password: 'money-pass-123',
+  // The organisation the login form resolves from the Worker's bootstrap; the client waits for this text before it signs in.
+  organizationName: 'Disposable E2E',
   exchangeRate: 4000,
   branches: [
     { id: 1, name: 'Shop', isDefault: 1 },
@@ -128,7 +130,7 @@ async function startMoneyFixture(options = {}) {
     modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], r2Buckets: ['ASSETS'], kvNamespaces: ['CACHE'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
-    bindings: { PLAN_TIER: 'paid', BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: origin, BUSINESS_OS_ADMIN_URL: origin, BUSINESS_OS_ORGANIZATION_SLUG: 'leang-cosmetics', BUSINESS_OS_ORGANIZATION_NAME: 'Disposable E2E' },
+    bindings: { PLAN_TIER: 'paid', BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: origin, BUSINESS_OS_ADMIN_URL: origin, BUSINESS_OS_ORGANIZATION_SLUG: 'leang-cosmetics', BUSINESS_OS_ORGANIZATION_NAME: SEED.organizationName },
     outboundService: request => { info.outboundRefusals.push({ method: request.method, url: request.url }); return new Response('External network refused by local fixture', { status: 503 }) },
     log: new Log(LogLevel.ERROR),
   })
@@ -187,10 +189,12 @@ async function startMoneyFixture(options = {}) {
     try { await db.batch(stockWrites) } catch (error) { throw new Error(`Seeding stock through the stock-transaction permit failed: ${error.message}`) }
     if ((await all("SELECT 1 AS left FROM system_flags WHERE key='stock_transaction_permit'")).length) throw new Error('The seed left a stock_transaction_permit behind')
     const { customer, courier } = SEED
+    // Settings first: migration 0251 switches loyalty off, and its trigger loyalty_award_on_insert aborts any positive points
+    // row (loyalty_points_disabled) until loyalty_points_enabled is true -- so the opening points below need it already set.
+    for (const [key, value] of Object.entries(SEED.settings)) await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value)
     await run('INSERT INTO customers(id,name,phone,membership_number) VALUES(?,?,?,?)', customer.id, customer.name, customer.phone, customer.membershipNumber)
     await run("INSERT INTO loyalty_point_adjustments(customer_id,points,note,created_by_id,created_by_name) VALUES(?,?,'M1 fixture opening points',?,?)", customer.id, customer.points, SEED.actors.admin.id, SEED.actors.admin.name)
     await run('INSERT INTO delivery_contacts(id,name,phone,area) VALUES(?,?,?,?)', courier.id, courier.name, courier.phone, courier.area)
-    for (const [key, value] of Object.entries(SEED.settings)) await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value)
 
     // The two stock ledgers must agree at seed time (branch_stock = the sum of the lots in that branch = what SEED says),
     // or every later "stock fell by the quantity" check would be measuring a fork the fixture itself created.

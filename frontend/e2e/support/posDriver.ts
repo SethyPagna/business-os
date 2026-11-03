@@ -39,10 +39,22 @@ export function cartLine(page: Page, productName: string): Locator {
 }
 
 /**
+ * How the till names a lot: its received DATE, day first (2026-10-01 reads "01/10/2026"). Owner rule Z1a, utils/batchLabel.ts:
+ * the stored received_at wins over the lot code, so the code never appears on a cashier's pill. The spec still names lots by
+ * their code; this is the one place that turns a seeded lot into what a cashier can actually see and tap.
+ */
+export function lotLabel(lot: SeedLot): string {
+  const [year, month, day] = lot.receivedAt.slice(0, 10).split('-')
+  return `${day}/${month}/${year}`
+}
+
+/**
  * Put `qty` of a product, from a chosen lot, in the cart. Every seeded product has lots, so the tile always opens
  * the detail sheet (a one-tap add cannot know which lot to sell from); the cashier picks the received date, then
- * the price button. Choosing the lot by its code, not by position, is what lets a spec sell from the NEWER lot
- * and prove the sale did not fall back to oldest-first.
+ * the price button. Choosing the lot by its date, not by position, is what lets a spec sell from the NEWER lot
+ * and prove the sale did not fall back to oldest-first. The pill list also shows the OTHER branch's lot of the product
+ * (greyed, 0 pcs at this branch, often the same date), so only an enabled pill counts; the stock and allocation rows
+ * the spec reads afterwards are what prove the lot that was sold is the lot that was meant.
  */
 export async function addToCart(page: Page, product: SeedProduct, lot: SeedLot, qty = 1): Promise<void> {
   await showProducts(page)
@@ -55,7 +67,7 @@ export async function addToCart(page: Page, product: SeedProduct, lot: SeedLot, 
     await expect(chooser).toBeVisible({ timeout: 5_000 })
   }, 'the detail sheet must open on the product tile').toPass({ timeout: 45_000 })
   await chooser.click()
-  await page.getByRole('button', { name: new RegExp(lot.code) }).click()
+  await page.getByRole('button', { name: new RegExp(`^${lotLabel(lot)}`), disabled: false }).click()
   await page.getByRole('button', { name: /^Selling price/ }).click()
   await showCart(page)
   const line = cartLine(page, product.name)
