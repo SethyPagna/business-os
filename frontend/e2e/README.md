@@ -216,7 +216,7 @@ build under test, `E2E_EXPECTED_BUILD_SHA`.
 | seed | detail |
 | --- | --- |
 | administrator | `m1_admin`, role `admin`, every permission |
-| cashier | `m1_cashier`, role `employee`, permissions `pos` + `sales`, **not** an administrator: its device `m1-cashier-device` is pre-approved in `trusted_devices` (the browser presents it as `localStorage.businessos_device_id`), and `shift_admin_exempt` spares only administrators, so the till shows the opening-cash gate until the cashier registers a shift |
+| cashier | `m1_cashier`, role `employee`, permissions `pos` + `sales` + `contacts` at the Review-Required tier (the Delivery panel's rider list is a Contacts read; a POS-only cashier gets an empty list), **not** an administrator: its device `m1-cashier-device` is pre-approved in `trusted_devices` (the browser presents it as `localStorage.businessos_device_id`), and `shift_admin_exempt` spares only administrators, so the till shows the opening-cash gate until the cashier registers a shift |
 | branches | `Shop` (id 1, default, sells) and `Warehouse` (id 2, stock only) |
 | products | M1 Rose Serum $12.50 (two Shop lots, Aug and Oct, plus a Warehouse lot), M1 Mint Balm $4.75, M1 Clay Mask $3.68, M1 Oat Soap $2.20; each with a lot and stock in **both** branches, costs different from prices. Shop lots hold 300 to 500 pieces so one fixture serves many passes of a spec; Warehouse lots are small |
 | rate | `exchange_rate` 4,000 ៛ per $; `change_exchange_rate` unset (change uses the main rate) |

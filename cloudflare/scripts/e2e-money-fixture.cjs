@@ -68,7 +68,10 @@ const SEED = {
     // A cashier is NOT an administrator, so lib/deviceTrust.ts requires an approved device (seeded below, id
     // `deviceId`; the browser must present it as localStorage `businessos_device_id`) and routes/shifts.ts
     // requires a registered shift before the POS lets the till ring a sale (shift_admin_exempt only spares admins).
-    cashier: { id: 811, username: 'm1_cashier', name: 'M1 Cashier', roleCode: 'employee', deviceId: 'm1-cashier-device', permissions: { pos: true, sales: true } },
+    cashier: { id: 811, username: 'm1_cashier', name: 'M1 Cashier', roleCode: 'employee', deviceId: 'm1-cashier-device',
+      // contacts: 'review' (Review Required: view + add directly) because the Delivery panel's rider list is a Contacts read --
+      // routes/contacts.ts requireContactsAccess answers a POS-only cashier 403 and the till shows an empty "No contacts yet.".
+      permissions: { pos: true, sales: true, contacts: 'review' } },
   },
   // Prices are exact cents and costs differ from prices, so a spec can tell a price from a cost.
   // Shop lots hold hundreds of pieces on purpose: a case that rings a sale spends stock, and a fixture that runs dry after a few

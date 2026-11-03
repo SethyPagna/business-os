@@ -62,10 +62,13 @@ export async function addToCart(page: Page, product: SeedProduct, lot: SeedLot, 
   const chooser = page.getByRole('button', { name: /^Choose a received date/ })
   // The catalogue re-renders as its later loads land (measured in pos-sale.spec.ts), so a tap can hit a tile that
   // is being replaced. A cashier whose tap did nothing taps again.
+  // The sheet is a full-screen overlay carrying the product's name. Once it is open its lot list still has to load, which on a busy
+  // machine takes longer than a few seconds; tapping the tile again then only hits the overlay, so re-tap ONLY when no sheet is open.
+  const sheet = page.locator('div.fixed.inset-0').filter({ hasText: product.name }).first()
   await expect(async () => {
-    if (!(await chooser.isVisible())) await tile.click({ timeout: 10_000 })
-    await expect(chooser).toBeVisible({ timeout: 5_000 })
-  }, 'the detail sheet must open on the product tile').toPass({ timeout: 45_000 })
+    if (!(await sheet.isVisible())) await tile.click({ timeout: 10_000 })
+    await expect(chooser).toBeVisible({ timeout: 20_000 })
+  }, 'the detail sheet must open on the product tile').toPass({ timeout: 90_000 })
   await chooser.click()
   await page.getByRole('button', { name: new RegExp(`^${lotLabel(lot)}`), disabled: false }).click()
   await page.getByRole('button', { name: /^Selling price/ }).click()
