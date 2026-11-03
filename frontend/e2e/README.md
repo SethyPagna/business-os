@@ -1,16 +1,25 @@
 # Browser end-to-end suite (Playwright)
 
-Sixteen spec files drive the **built** app in three browsers: desktop Chromium, a
+39 spec files at the root of `e2e/` (tier "app") plus 3 under `e2e/system/` (tier
+"system") drive the **built** app in three browsers: desktop Chromium, a
 Pixel 7 Chromium and an iPhone 13 WebKit. They exist to catch the error classes
 this project has actually shipped before — blank page, runtime error, glitch,
 slowness, another cashier's data on my screen — at the only layer where those
 classes are observable at all.
 
-A tenth spec, `e2e/system/pos-sale.spec.ts`, is opt-in and answers the one
-question the others structurally cannot: does a sale rung on the till
-actually survive the round trip through the real Worker and the real database.
+The three system specs are opt-in and answer the one question the others
+structurally cannot: does what the till and the pages do actually survive the
+round trip through the real Worker and the real database.
+`pos-sale.spec.ts` rings one cash sale as an administrator;
+`employee-sale-save.spec.ts` saves edits to a sale as restricted employees;
+`pos-checkout.spec.ts` rings the money cases (Not Paid, riel, change, discounts
+against tax, a price override, a customer, delivery, a changed rate, a double
+click) as a non-admin cashier and checks every stored figure.
 
 Nothing here can reach production. Every URL is loopback.
+
+Counts as of rc/20261104a (b6ebf551d): `ls e2e/*.spec.ts | wc -l` is 39 and
+`ls e2e/system/*.spec.ts | wc -l` is 3. Re-count rather than trusting this line.
 
 ---
 
@@ -103,6 +112,19 @@ and the fixture server sets the real session cookie (`bos_session`). Accounts:
 fixture `webServer` is suppressed so it cannot shadow the real one. Nothing is
 stubbed: the real bcrypt check, the real `POST /api/sales`, the real D1.
 
+There are **two system harnesses**, and a spec needs exactly one of them running
+before it starts:
+
+| harness | what it is | port | specs |
+| --- | --- | --- | --- |
+| `wrangler dev` + `scripts/seed-e2e-local.cjs` | a local Worker on a seeded SQLite file; one administrator | 4319 | `pos-sale.spec.ts` |
+| native Miniflare fixtures | a disposable in-memory Worker + D1 per process, serving `frontend/dist` | 4349 and 4351 | `employee-sale-save.spec.ts` (`employee-sale-save-fixture.cjs`, its own seed; it refuses a dirty tracked tree); `pos-checkout.spec.ts` (`e2e-money-fixture.cjs`, the reusable one, below) |
+
+`npm run test:e2e:system` collects all three spec files, so it needs all three
+servers up; run a single file by path, as the headers of the specs show.
+
+#### Harness 1: `wrangler dev`
+
 One-time, then once per machine reboot:
 
 ```bash
@@ -167,6 +189,62 @@ that sale carries the right total, status, item, quantity, cashier and branch
 Sales page. If the till refuses instead of selling, the refusal toast is read
 back into the failure message rather than left to expire.
 
+#### Harness 2: the money fixture (`cloudflare/scripts/e2e-money-fixture.cjs`)
+
+Built so a later money spec (shift lifecycle, cancel and refund, returns, reports)
+can reuse it **without editing it**. `employee-sale-save-fixture.cjs` is left as
+it was (its twelve tests keep their seed and port 4349); this is its sibling, with
+the seed a money flow needs and an API that does not have to be extended per spec.
+
+```bash
+cd frontend && npm run build                    # the fixture serves frontend/dist
+git status --porcelain --untracked-files=no     # must be empty (or E2E_MONEY_ALLOW_DIRTY=1)
+node ../cloudflare/scripts/e2e-money-fixture.cjs   # prints E2E_MONEY_READY http://127.0.0.1:4351 ...
+E2E_SYSTEM=1 npx playwright test e2e/system/pos-checkout.spec.ts --project=desktop-chromium --workers=1
+```
+
+Start a fresh fixture per browser project: the cases measure their own before and
+after, but the shift gate case only sees the gate on a database with no shift yet,
+and the revenue case reconciles against what the file rang. `POST /__fixture/shutdown`
+(or Ctrl-C) ends it. Env: `E2E_MONEY_PORT` (4351), `E2E_MONEY_DIST`,
+`E2E_MONEY_ALLOW_DIRTY=1`; the spec side reads `E2E_MONEY_ORIGIN` and, to prove the
+build under test, `E2E_EXPECTED_BUILD_SHA`.
+
+**What it seeds** (one object, `SEED`, exported from the module and served at
+`/__fixture/ready`, so a spec never copies a number):
+
+| seed | detail |
+| --- | --- |
+| administrator | `m1_admin`, role `admin`, every permission |
+| cashier | `m1_cashier`, role `employee`, permissions `pos` + `sales`, **not** an administrator: its device `m1-cashier-device` is pre-approved in `trusted_devices` (the browser presents it as `localStorage.businessos_device_id`), and `shift_admin_exempt` spares only administrators, so the till shows the opening-cash gate until the cashier registers a shift |
+| branches | `Shop` (id 1, default, sells) and `Warehouse` (id 2, stock only) |
+| products | M1 Rose Serum $12.50 (two Shop lots, Aug and Oct, plus a Warehouse lot), M1 Mint Balm $4.75, M1 Clay Mask $3.68, M1 Oat Soap $2.20; each with a lot and stock in **both** branches, costs different from prices |
+| rate | `exchange_rate` 4,000 ៛ per $; `change_exchange_rate` unset (change uses the main rate) |
+| tax | stored at 10 % but **off**; a spec switches it on through the real Settings route |
+| customer | M1 Dara Sok, membership `M1-0001`, 300 loyalty points (3 redeemable units at 100 points = $1) |
+| courier | M1 Courier Vibol, Phnom Penh |
+| payment methods | `Cash`, `Bank` |
+
+**Endpoints** (loopback only; `/api/*` and `/uploads/*` are the real Worker):
+
+| endpoint | use |
+| --- | --- |
+| `GET /__fixture/ready` | `{ sourceHead, trackedChanges, frontendBuild, organizationId, seed }`; the spec checks provenance with it |
+| `GET /__fixture/state[?sale=id]` | raw rows: `saleIds, sales, lines, allocations, stock, lots, movements, shifts, settings, audits, foreignKeyCheck, outboundRefusals` |
+| `POST /__fixture/select` | `{ sql, params }` → `{ rows }`, exactly one read-only `SELECT`, for any table the snapshot does not carry |
+| `POST /__fixture/admin-call` | `{ path, method, body }` → `{ status, body }`, a real `/api/*` request as the administrator (change the rate, switch tax on, read a report) |
+| `POST /__fixture/shutdown` | stops the process |
+
+Client side: `support/moneyFixture.ts` (`loadReady`, `readState`, `selectRows`,
+`adminCall`, `ensureSettings`, `stockQty`, `lotQty`, `signInAs`) and
+`support/posDriver.ts` (the till's gestures: `addToCart` from a chosen lot,
+`setLinePrice`, `setOrderDiscount`, `setTender`, `tapExact`, `attachCustomer`,
+`setDelivery`, `completeSale`). They hold no expected number: a spec derives those
+from the seed and the owner's rules and compares them with the database.
+
+A second cashier, another branch or a different shop policy is a change to `SEED`
+in the fixture module, made once, not a second fixture.
+
 ---
 
 ## The specs
@@ -189,6 +267,8 @@ back into the failure message rather than left to expire.
 | `receipt-print.spec.ts` | the receipt that reaches the printer: Printer paper by default with no blank top band, one print call per tap, the 80x50 card from the top of the paper, the app's Khmer font in the print document, and Print → All printing the card and then the full receipt. |
 | `online-auth-safety.spec.ts` | a sign-out whose request is lost asks for confirmation ("Finish signing out") instead of leaving the app half signed in. Runs with the real service worker. |
 | `console-hygiene.spec.ts` | every public surface and every signed-out admin route boots with no uncaught error, no `console.error`, no failed resource and no unmocked API call. |
+| `system/pos-checkout.spec.ts` | **opt-in, money fixture.** A non-admin cashier (approved device, shift gate) rings Not Paid, a riel cash sale, a refused 150 riel row, mixed dollar and riel with change, a percent and a dollar discount against tax, a line price override, an attached and a redeeming customer, customer- and shop-paid delivery, a changed exchange rate and a double click; each stored figure, the branch and lot stock, the payment rows and the receipt on Sales are compared with numbers derived in the spec from the seed prices and the owner's rules. |
+| `system/employee-sale-save.spec.ts` | **opt-in, Miniflare fixture on 4349.** Restricted employees add to, amend and replace lines on a sale; the stored sale, both stock ledgers, audit rows and receipts agree, a concurrent edit is refused, a view-only employee cannot write, and cost stays redacted. |
 | `system/pos-sale.spec.ts` | **opt-in.** A real cashier signs in against real bcrypt, rings a real sale through `POST /api/sales`, and the sale, its money, its item, its cashier, its branch, the shop's stock and the receipt on the Sales page all agree afterwards. |
 
 Every spec file opens with a header naming what it proves, the incident class it
