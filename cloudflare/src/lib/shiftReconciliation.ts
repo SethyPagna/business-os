@@ -261,13 +261,17 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
       changeKhr: row.change_khr,
       changeExchangeRate: row.change_exchange_rate,
     })
-    if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
-    else if (change.kind === 'unknown') codes.add(SHIFT_REVIEW.change)
-    // Over-tender with no change recorded is flagged, except a riel tender over by less than one 100-riel note: no
-    // note exists to hand that back (owner ruling 27 Oct 2026, the same rule that accepts a riel tender short by under
-    // 100 riel as fully paid -- lib/saleStatusResolution.ts shortfallCovered).
+    // A riel tender over the total by less than one 100-riel note leaves nothing to hand back: no note exists for it (owner
+    // ruling 27 Oct 2026, the same rule that accepts a riel tender short by under 100 riel as fully paid --
+    // lib/saleStatusResolution.ts shortfallCovered), so the till's computed (unmarked) change of that size is not an unknown
+    // amount of change given, and the over-tender is not an incomplete tender. A recorded change marker, or a larger
+    // over-tender, is judged as before.
     const overUsd = row.total_usd == null ? 0 : paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) - Number(row.total_usd)
     const underOneRielNote = paidKhr > 0 && rate > 0 && overUsd * rate < 100
+    const unmarkedChange = row.change_is_actual == null || Number(row.change_is_actual) === 0
+    if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
+    else if (change.kind === 'unknown' && !(underOneRielNote && unmarkedChange)) codes.add(SHIFT_REVIEW.change)
+    // Over-tender with no change recorded is flagged, except the sub-note one above.
     if (row.total_usd != null && overUsd > 0.011 && change.kind !== 'actual' && !underOneRielNote) codes.add(SHIFT_REVIEW.tender)
   }
   // The rename guard. Only meaningful once money has actually been tendered:

@@ -64,6 +64,7 @@ import {
   parsePosInternalAmount,
   posV1Tender,
   posRielCashRowIds,
+  posExactRielTender,
   frozenPosPreview,
   resolveWholesaleAutoRule,
   applyWholesaleAutoPricing,
@@ -84,7 +85,7 @@ import {
 } from '../../utils/loaders.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
-import { cashierCollectKhr, cashierChangeKhr, roundRielUp } from '../../utils/rielRounding.ts'
+import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
@@ -2392,9 +2393,8 @@ export default function POS() {
   const setExactPayment = useCallback((currency: 'usd' | 'khr', amount: number) => {
     updatePaymentDetails((details) => {
       const method = details[0]?.method || posPaymentMethods[0] || 'Cash'
-      // Riel paid in cash is whole 100៛ notes (owner, 27 Oct 2026), so the figure that settles a cash row is the total taken UP
-      // to the next note -- never short, so the sale still covers. A bank or QR row keeps the whole-riel total.
-      const khr = isCashPaymentMethod(method, parsePaymentMethodKinds(settings.pos_payment_method_kinds)) ? roundRielUp(Math.ceil(amount)) : Math.ceil(amount)
+      // A cash row takes the total DOWN to a whole 100៛ note, a bank row the whole-riel total (posExactRielTender).
+      const khr = posExactRielTender(amount, isCashPaymentMethod(method, parsePaymentMethodKinds(settings.pos_payment_method_kinds)))
       return [{
         id: details[0]?.id || `payment-${Date.now()}`,
         method,
@@ -3290,9 +3290,9 @@ export default function POS() {
   // Physical-cash cashier figures (business rule, Aug 31 2026): the whole-100៛
   // notes actually collected from / handed back to the customer. Display-only
   // hints -- the saved sale and printed receipt keep the exact figures above.
-  // Collect rounds UP only for a non-cash payment on a delivery order (a cash
-  // payment or any walk-in is exact); change always rounds DOWN. See
-  // utils/rielRounding.ts.
+  // Collect rounds DOWN for cash (whole 100៛ notes, owner 27 Oct 2026), UP only
+  // for a non-cash payment on a delivery order, and is exact for any other
+  // walk-in; change always rounds DOWN. See utils/rielRounding.ts.
   const isWalkInSale = !active.isDelivery
   const isCashPayment = activePaymentDetails.every((d) => isCashPaymentMethod(d.method, posMethodKinds))
   const cashCollectKhr = cashierCollectKhr(totalKhr, { isCashPayment, isWalkIn: isWalkInSale })

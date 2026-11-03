@@ -125,7 +125,7 @@ runTest('POS and expense form wire the same rule at the field and stop the reque
   assert.match(pos, /if \(rielCashInvalidIds\.size\) return notify\(t\('riel_cash_not_hundreds'\), 'error'\)\n\s+if \(saleStatus !== 'awaiting_payment' && !posTenderCovers\)/)
   assert.match(pos, /rielCashInvalidIds\.has\(detail\.id\) \? <p [^>]*data-riel-cash-error>\{t\('riel_cash_not_hundreds'\)/)
   assert.match(pos, /isCashPaymentMethod\(d\.method, posMethodKinds\)/, 'the collect hint asks the same cash definition')
-  assert.match(pos, /isCashPaymentMethod\(method, parsePaymentMethodKinds\(settings\.pos_payment_method_kinds\)\) \? roundRielUp\(Math\.ceil\(amount\)\) : Math\.ceil\(amount\)/, 'Exact riel on a cash row is a whole number of notes, taken up so it still covers')
+  assert.match(pos, /posExactRielTender\(amount, isCashPaymentMethod\(method, parsePaymentMethodKinds\(settings\.pos_payment_method_kinds\)\)\)/, 'Exact riel on a cash row is a whole number of notes, taken DOWN (exactRielCashTender.test.ts pins the figures)')
   const fee = source('../src/components/fees/FeeForm.tsx')
   assert.match(fee, /if \(!pendingCreate && rielCashInvalid\) return/)
   assert.match(fee, /rielCashInvalid \? <p [^>]*data-riel-cash-error>/)

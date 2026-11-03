@@ -7,6 +7,7 @@ import type { ProductRecord as ProductGroupRecord } from '../../utils/productGro
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { rielCashFieldInvalid, type PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
+import { roundRielDown, roundRielUp } from '../../utils/rielRounding.ts'
 
 /** Raw draft text is retained by the input; only valid nonnegative decimals
  * enter a v1 calculation. In particular a sub-tick negative cannot become 0. */
@@ -25,6 +26,16 @@ export function posV1Tender(rows: readonly { method: string; usd: string; khr: s
     return { method: row.method.trim(), amount_usd: roundMoney2(row.usd.trim() || '0'), amount_khr: Math.round(Number(row.khr.trim() || '0')) }
   })
   return { details, paidUsd: sumMoney4(details.map(row => row.amount_usd)), paidKhr: sumMoney4(details.map(row => row.amount_khr)) }
+}
+
+/**
+ * The riel figure the "Exact ៛" button puts on a tender row. Riel paid in cash is whole 100៛ notes (owner, 27 Oct 2026), so a cash
+ * row takes the total DOWN to the note: the customer never pays above the total, and the sub-note remainder is absorbed because a riel
+ * payment short by under 100៛ is fully paid (utils/saleStatusResolution.ts shortfallCovered). A total under one note takes that one
+ * note. A bank or QR row keeps the whole-riel total, rounded up so it is never short.
+ */
+export function posExactRielTender(totalKhr: number, isCashMethod: boolean): number {
+  return isCashMethod ? roundRielDown(totalKhr) || roundRielUp(totalKhr) : Math.ceil(totalKhr)
 }
 
 /**
