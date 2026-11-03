@@ -73,7 +73,7 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   }
 
   return (
-    <ChipRail label={taggedLabel} stretch data-stock-condition-row={mode}>
+    <ChipRail label={tr('stock_condition_label', 'Condition', 'ស្ថានភាព')} stretch data-stock-condition-row={mode}>
       <RailChip selected={!tagged} disabled={disabled} onClick={() => onChange('')}>
         {plainLabel}
       </RailChip>

@@ -5117,7 +5117,7 @@ function ProductsFullEditor() {
             never offer different sections. */}
         {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
           <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1">
-            <ChipRail label={tr('product_sections', 'Product sections')} className="hub-section-pills">
+            <ChipRail label={tr('product_sections', 'Product sections')} className="hub-section-pills chip-rail-tall">
               {productSectionTabs.map((section) => {
                 const isActive = activeProductSection === section.id
                 return (

@@ -152,8 +152,9 @@ try {
     assert.ok(geometry.selectedText.trim().length > 0, `${width}px ${lang} selected report has an accessible visible label`)
     assert.ok(geometry.selectedScroll >= geometry.selectedClient, `${width}px ${lang} selected label remains horizontally reachable without ellipsis clipping`)
 
-    const externalPresets = await evaluate<number>(`document.querySelectorAll('[data-reports-hub] .chip-rail-item').length`)
+    const externalPresets = await evaluate<number>(`document.querySelectorAll('[data-reports-hub] [data-reports-presets] .chip-rail-item').length`)
     assert.equal(externalPresets, STATS_PRESETS.length, `${width}px ${lang} renders exactly one canonical preset rail`)
+    assert.equal(await evaluate<number>(`document.querySelectorAll('[data-reports-hub] [data-reports-presets]').length`), 1, `${width}px ${lang} and only one`)
     await evaluate(`document.querySelector('[data-date-range-trigger-values]').closest('button').click()`)
     const panel = await waitFor(async () => await evaluate<any>(`(() => { const p=document.querySelector('[data-date-time-range-panel]'); if(!p)return null; const r=p.getBoundingClientRect(); return { left:r.left,right:r.right,top:r.top,bottom:r.bottom,client:p.clientHeight,scroll:p.scrollHeight,overflow:getComputedStyle(p).overflowY,innerPresets:p.querySelectorAll('[data-date-time-range-presets] button').length } })()`))
     assert.equal(panel.innerPresets, 0, `${width}px ${lang} picker does not duplicate external presets`)

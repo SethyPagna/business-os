@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import { Button, SectionHeader } from '../../shared/kit'
+import ChipRail from '../../shared/kit/ChipRail.tsx'
 
 export interface ReportFrameProps {
   title: ReactNode
@@ -17,6 +18,8 @@ export interface ReportFrameProps {
   menuAction?: ReactNode
   /** View-specific chips/history live below the title row without crowding it. */
   secondaryActions?: ReactNode
+  /** Accessible name of the secondary row (already translated); the row is the shared ChipRail. */
+  secondaryLabel?: string
   /** The " | "-joined summary string (may be empty while loading). */
   summary?: string
   /** Secondary summary line (e.g. the previous period) -- muted. */
@@ -28,7 +31,7 @@ export interface ReportFrameProps {
   className?: string
 }
 
-export default function ReportFrame({ title, titleControl, menuAction, secondaryActions, summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
+export default function ReportFrame({ title, titleControl, menuAction, secondaryActions, secondaryLabel = '', summary, summaryNote, error, onRetry, retryLabel = 'Retry', children, className = '' }: ReportFrameProps) {
   // The selectable active report title replaces (rather than sits beside)
   // the static title. This prevents the former "Overview" +
   // "Overview (all)" double heading and gives every report type one
@@ -47,7 +50,7 @@ export default function ReportFrame({ title, titleControl, menuAction, secondary
         title={activeTitle}
         actions={menuAction ? <span className="reports-frame-menu">{menuAction}</span> : undefined}
       />
-      {secondaryActions ? <div className="reports-frame-secondary-actions">{secondaryActions}</div> : null}
+      {secondaryActions ? <ChipRail label={secondaryLabel}>{secondaryActions}</ChipRail> : null}
       {summary ? (
         <p className="min-w-0 text-[length:var(--ui-size-meta)] leading-5 text-[var(--ui-ink-2)] [font-variant-numeric:tabular-nums]" data-report-summary="">
           {summary}

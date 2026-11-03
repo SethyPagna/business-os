@@ -805,7 +805,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.ok(hub.includes('selected={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state (RailChip renders aria-pressed from it)')
   assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')
-  assert.match(hub, /<ChipRail label=\{trh\('quick_range', 'Quick range'\)\}>/, 'quick ranges stay in one horizontal scrolling rail (the shared ChipRail)')
+  assert.match(hub, /<ChipRail label=\{trh\('quick_range', 'Quick range'\)\} data-reports-presets="">/,'quick ranges stay in one horizontal scrolling rail (the shared ChipRail)')
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
   assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
   assert.match(css, /\.reports-filter-trigger\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Filters follows the shared Manage-aligned 40px control height')
@@ -814,7 +814,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-view-picker \[data-app-select-selected='true'\]\s*\{[^}]*overflow-x:\s*auto !important[^}]*text-overflow:\s*clip/, 'the complete selected report name is horizontally reachable without an ellipsis')
   assert.match(css, /body\.lang-km \[data-reports-hub\] \.reports-view-picker \[data-app-select-selected='true'\][^}]*overflow-x:\s*auto !important/, 'the report-name scroller outranks the global Khmer truncate clip rule')
   assert.match(css, /\.reports-frame-menu,[\s\S]*?\.reports-frame-menu button\s*\{[^}]*width:\s*40px[^}]*height:\s*40px/, 'the report overflow action completes the header with a 40px square')
-  assert.match(css, /\.reports-frame-secondary-actions\s*\{[^}]*display:\s*flex[^}]*overflow-x:\s*auto/, 'view-specific mode and history controls retain a separate scrolling rail')
+  assert.doesNotMatch(css, /reports-frame-secondary-actions/, 'view-specific mode and history controls scroll in the shared ChipRail, not a Reports-only rule')
   assert.match(css, /\[data-reports-hub\] \.lucide-more-horizontal\s*\{[^}]*transform:\s*rotate\(90deg\)/, 'only report overflow dots rotate to the vertical convention')
   assert.match(css, /font-variant-numeric:\s*tabular-nums/, 'report amounts use tabular numerals')
   assert.match(css, /overflow-x:\s*clip/, 'the report surface cannot create page-level horizontal overflow')
@@ -854,7 +854,7 @@ test('report title rows omit the redundant report Info button', () => {
   assert.doesNotMatch(frame, /import InfoHint|infoHint=\{/, 'ReportFrame does not render an Info trigger beside the report picker')
   assert.doesNotMatch(frame, /count=\{count\}/, 'ReportFrame does not render a result count beside the report picker')
   assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the header action slot contains only the report overflow menu')
-  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'other view controls render below the header')
+  assert.match(frame, /secondaryActions \? <ChipRail label=\{secondaryLabel\}>\{secondaryActions\}<\/ChipRail> : null/, 'other view controls render below the header in the shared ChipRail')
 })
 
 test('every report keeps export in the four-control header and relocates other actions', () => {

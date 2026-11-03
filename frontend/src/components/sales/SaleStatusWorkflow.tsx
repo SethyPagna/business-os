@@ -52,7 +52,7 @@ export default function SaleStatusWorkflow({
 
   if (step === 'destination') {
     return (
-      <ChipRail label={t('status') || 'Status'} data-sale-status-destinations="">
+      <ChipRail label={t('status') || 'Status'} className="chip-rail-tall" data-sale-status-destinations="">
         {destinations.map((status) => (
           <RailChip key={status} onClick={() => { onSelect(status); setStep('review') }}>
             {destinationLabel(status)}

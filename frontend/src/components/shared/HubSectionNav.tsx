@@ -106,7 +106,7 @@ export default function HubSectionNav({
           `sections` lang key is still live as the Settings toggle's option
           label. */}
       <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-        <ChipRail label={(typeof t === 'function' && t('sections')) || 'Sections'} className="hub-section-pills">
+        <ChipRail label={(typeof t === 'function' && t('sections')) || 'Sections'} className="hub-section-pills chip-rail-tall">
           {visible.map((section) => {
             const Icon = section.icon
             const isActive = active === section.id

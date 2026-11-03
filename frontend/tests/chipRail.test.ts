@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import React from 'react'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { STATS_PRESETS, activeStatsPreset, statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
-import { railEdges, railRevealTarget } from '../src/components/shared/kit/chipRailMath.ts'
+import { RAIL_SELECTED_SELECTOR, railEdges, railRevealTarget } from '../src/components/shared/kit/chipRailMath.ts'
 import { DRAG_SCROLL_SELECTOR } from '../src/runtime/horizontalDragScroll.ts'
 
 // R1 (owner, 2 Nov 2026): "the options available and presets (horizontal scrollability) are
@@ -342,6 +342,14 @@ await runTest('AppSelect (the Reports "Overview" button and every option picker)
 const MIGRATED: Array<{ file: string; rails: number; stale: RegExp[] }> = [
   { file: 'components/shared/StatsRangeRow.tsx', rails: 2, stale: [/stats-date-presets/, /h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs/, /bg-slate-800 text-white/] },
   { file: 'components/sales/ReportsHub.tsx', rails: 1, stale: [/reports-mobile-preset/] },
+  // The rest of Reports: the Overview breakdown row (counts in the badge slot), the secondary row every report frame
+  // owns (Period Day/Week/Month, Expenses and Returns modes, Shift history), and the Display / Currency groups.
+  { file: 'components/sales/reports/OverviewReport.tsx', rails: 1, stale: [/reports-overview-tabs/, /<Chip\b/, /count=\{c\.count\}/] },
+  { file: 'components/sales/reports/PeriodReport.tsx', rails: 0, stale: [/<Chip\b/] },
+  { file: 'components/sales/reports/ExpensesReport.tsx', rails: 0, stale: [/<Chip\b/] },
+  { file: 'components/sales/reports/ReturnsReport.tsx', rails: 0, stale: [/<Chip\b/] },
+  { file: 'components/sales/reports/ReportFrame.tsx', rails: 1, stale: [/reports-frame-secondary-actions/] },
+  { file: 'components/sales/reports/ReportOptionsFold.tsx', rails: 1, stale: [/<Chip\b/, /inline-flex items-center gap-1"><Table2/] },
   { file: 'components/shared/DateTimeRangePicker.tsx', rails: 1, stale: [/hover:border-blue-300 hover:text-blue-700/] },
   { file: 'components/shared/HubSectionNav.tsx', rails: 1, stale: [/hub-section-pill\b/, /bos-nav-chrome hub-section-pills/, /useActivePillScroll/, /md:inline-flex/] },
   { file: 'components/products/Products.tsx', rails: 1, stale: [/hub-section-pill\b/, /bos-nav-chrome hub-section-pills/, /useActivePillScroll/, /sectionPillsRef/] },
@@ -368,7 +376,8 @@ const MIGRATED: Array<{ file: string; rails: number; stale: RegExp[] }> = [
 await runTest('every migrated row uses ChipRail and none of its old hand-rolled markup is left', () => {
   for (const { file, rails, stale } of MIGRATED) {
     const source = src(file)
-    assert.match(source, /import ChipRail(, \{ RailChip \})? from '(\.\.\/)+(shared\/)?kit\/ChipRail\.tsx'|import ChipRail(, \{ RailChip \})? from '\.\/kit\/ChipRail\.tsx'/, `${file} imports the shared rail`)
+    assert.match(source, /import (ChipRail(, \{ RailChip \})?|\{ RailChip \}) from '(\.\.\/)+(shared\/)?kit\/ChipRail\.tsx'|import ChipRail(, \{ RailChip \})? from '\.\/kit\/ChipRail\.tsx'/, `${file} imports the shared rail`)
+    if (rails === 0) assert.match(source, /<RailChip\b/, `${file} fills its row with RailChip children`)
     assert.equal((source.match(/<ChipRail\b/g) || []).length, rails, `${file} renders exactly ${rails} shared row(s): a row swapped back to a hand-rolled div is a red`)
     assert.equal((source.match(/<\/ChipRail>/g) || []).length, (source.match(/<ChipRail\b/g) || []).length - (source.match(/<ChipRail\b[^>]*\/>/g) || []).length, `${file}: every rail is closed as a ChipRail`)
     for (const pattern of stale) assert.doesNotMatch(source, pattern, `${file} still holds ${pattern}`)
@@ -423,6 +432,71 @@ await runTest('no source file hand-rolls an overflow-x-auto row of aria-pressed 
   }
   walk('components')
   assert.deepEqual(offenders, [], 'migrate these to ChipRail/RailChip or add them, with the reason, to AD_HOC_ROW_EXEMPT')
+})
+
+// The kit Chip was a second chip design (24px pills, a thin scrollbar, no fade) that hid in the Reports
+// views from the first sweep. It is retired, and ANY way back to it fails: an import from the kit barrel,
+// from kit/Chip, or the file itself.
+await runTest('the kit Chip is retired and nothing imports it again', () => {
+  assert.equal(fs.existsSync(path.join(here, '..', 'src/components/shared/kit/Chip.tsx')), false, 'kit/Chip.tsx is deleted')
+  assert.doesNotMatch(src('components/shared/kit/index.ts'), /\bChip\b(?!Rail)/, 'the barrel no longer exports Chip')
+  const importers: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(path.join(here, '..', 'src', dir), { withFileTypes: true })) {
+      const relative = `${dir}/${entry.name}`
+      if (entry.isDirectory()) { walk(relative); continue }
+      if (!/\.(tsx|ts)$/.test(entry.name)) continue
+      const text = src(relative)
+      if (/import\s*(?:type\s*)?\{[^}]*\bChip\b[^}]*\}\s*from\s*'[^']*\/kit(?:\/index(?:\.ts)?)?'/.test(text) || /from\s*'[^']*\/kit\/Chip(?:\.tsx)?'/.test(text) || /import\s+Chip\s+from/.test(text)) importers.push(relative)
+    }
+  }
+  walk('components')
+  assert.deepEqual(importers, [], 'a chip row is ChipRail + RailChip; there is no other chip component')
+})
+
+await runTest('Reports: no Reports-only scrolling row is left (the two old blocks are gone, the select label scroller is not a chip row)', () => {
+  const css = src('components/sales/reports/reports-surface.css')
+  assert.doesNotMatch(css, /reports-overview-tabs|reports-frame-secondary-actions|reports-mobile-preset/)
+  for (const match of css.matchAll(/([^{}]+)\{[^}]*overflow-x:\s*auto[^}]*\}/g)) {
+    assert.match(match[1], /reports-view-picker|data-app-select-selected/, `${match[1].trim()}: a Reports scroll rule that is not the report-name select must be a ChipRail`)
+  }
+  const frame = src('components/sales/reports/ReportFrame.tsx')
+  assert.match(frame, /secondaryLabel\?: string/)
+  const shift = src('components/sales/reports/ShiftReport.tsx')
+  assert.match(shift, /secondaryLabel=\{tr\('shift_history', 'Shift history'\)\}/, 'every secondary row names itself')
+  for (const file of ['PeriodReport', 'ExpensesReport', 'ReturnsReport']) assert.match(src(`components/sales/reports/${file}.tsx`), /secondaryLabel=\{/, `${file} names its row`)
+  const options = src('components/sales/reports/ReportOptionsFold.tsx')
+  assert.match(options, /<Group rail title=\{tr\('display', 'Display settings'\)\}>/, 'Display is a ChipRail group')
+  assert.match(options, /<Group rail title=\{tr\('rpt_currency', 'Currency'\)\}>/, 'Currency is a ChipRail group')
+  assert.match(options, /\{rail \? <ChipRail label=\{title\}>\{children\}<\/ChipRail> : /, 'a rail group is the shared ChipRail')
+})
+
+await runTest('CSS: counts ride a badge, section switchers keep a 44px phone target, the chip is dense enough for the presets', () => {
+  const css = src('styles/main.css')
+  assert.match(block(css, '.chip-rail-badge'), /min-width:\s*1\.125rem[\s\S]*font-variant-numeric:\s*tabular-nums/, 'a count badge with tabular figures')
+  assert.match(css, /@media \(max-width: 767\.98px\)\s*\{\s*\.chip-rail\.chip-rail-tall\s*\{\s*--chip-rail-h:\s*2\.75rem/, 'the hub chips keep their 44px phone height')
+  assert.match(block(css, '.chip-rail-item'), /padding:\s*0 0\.625rem/, '10px each side, so 11 of the 15 Reports presets still fit a 1280 px row')
+  assert.match(block(css, ':where(.chip-rail)'), /--chip-rail-fade:\s*1rem/)
+  for (const file of ['components/shared/HubSectionNav.tsx', 'components/products/Products.tsx', 'components/products/forms/ProductForm.tsx', 'components/sales/SaleStatusWorkflow.tsx']) {
+    assert.match(src(file), /<ChipRail\b[^>]*chip-rail-tall/, `${file}: it had 44px chips on a phone before the shared rail`)
+  }
+})
+
+await runTest('the selected chip is what scrolls into view: a pressed button that is not a RailChip never steals it', () => {
+  for (const part of RAIL_SELECTED_SELECTOR.split(',')) assert.match(part.trim(), /^\.chip-rail-item\[/, `${part.trim()} names a RailChip`)
+  assert.equal(RAIL_SELECTED_SELECTOR.split(',').length, 2, 'pressed toggles and selected tabs, nothing wider')
+  const rail = src('components/shared/kit/ChipRail.tsx')
+  assert.match(rail, /querySelector<HTMLElement>\(RAIL_SELECTED_SELECTOR\)/, 'the reveal uses that selector')
+  assert.doesNotMatch(rail, /querySelector<HTMLElement>\('\[aria-pressed/, 'no bare attribute selector')
+})
+
+await runTest('the condition row is named "Condition" in English and Khmer, not by one of its own options', () => {
+  const row = src('components/inventory/StockConditionTagRow.tsx')
+  assert.match(row, /<ChipRail label=\{tr\('stock_condition_label', 'Condition', 'ស្ថានភាព'\)\}/)
+  const en = JSON.parse(src('lang/en.json')) as Record<string, string>, km = JSON.parse(src('lang/km.json')) as Record<string, string>
+  assert.equal(en.stock_condition_label, 'Condition')
+  assert.match(km.stock_condition_label, /[ក-៿]/)
+  assert.notEqual(km.stock_condition_label, en.stock_condition_label)
 })
 
 await harness.close()

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ButtonHTMLAttributes, HTMLAttributes, KeyboardEvent, ReactNode } from 'react'
-import { railEdges, railRevealTarget } from './chipRailMath.ts'
+import { RAIL_SELECTED_SELECTOR, railEdges, railRevealTarget } from './chipRailMath.ts'
 
 // The one horizontal row of choices (owner, 2 Nov 2026: the option chips and the date presets
 // "are different"). Section chips, date presets, tabs, segmented toggles and filter pickers all
@@ -13,7 +13,6 @@ import { railEdges, railRevealTarget } from './chipRailMath.ts'
 // are scrolled into view, so the open choice is never the one off-screen.
 
 export const CHIP_RAIL_ITEM_SELECTOR = '.chip-rail-item'
-const SELECTED_SELECTOR = '[aria-pressed="true"], [aria-selected="true"]'
 
 function setFlag(el: HTMLElement, name: 'data-fade-start' | 'data-fade-end', on: boolean): void {
   const value = on ? 'true' : 'false'
@@ -29,7 +28,7 @@ function syncEdges(el: HTMLElement): void {
 function fadeWidth(el: HTMLElement): number {
   const raw = typeof getComputedStyle === 'function' ? getComputedStyle(el).getPropertyValue('--chip-rail-fade') : ''
   const rem = Number.parseFloat(raw)
-  return Number.isFinite(rem) ? rem * 16 : 24
+  return Number.isFinite(rem) ? rem * 16 : 16
 }
 
 function revealChip(rail: HTMLElement, chip: HTMLElement): void {
@@ -84,7 +83,7 @@ export default function ChipRail({ label, role = 'group', stretch = false, class
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const selected = el.querySelector<HTMLElement>(SELECTED_SELECTOR)
+    const selected = el.querySelector<HTMLElement>(RAIL_SELECTED_SELECTOR)
     if (selected === revealedRef.current) return
     revealedRef.current = selected
     if (selected) revealChip(el, selected)

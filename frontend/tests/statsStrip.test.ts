@@ -357,7 +357,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   assert.match(hub, /titleControl: reportControlRow/, 'every report receives the shared compound title')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
   assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
-  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
+  assert.match(frame, /secondaryActions \? <ChipRail label=\{secondaryLabel\}>\{secondaryActions\}<\/ChipRail> : null/, 'mode and history controls remain on the secondary rail, the shared ChipRail')
   // The branch select rides the shared control row's filters slot, not its own line.
   assert.ok(/const filterSelects = \([\s\S]{0,120}showsBranchHistoryFilter\(branchRows\) \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
   // Part 586: the selects no longer sit inline on wide screens at all -- they
@@ -377,7 +377,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   const shell = read('src/components/sales/SalesHubPage.tsx')
   assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
   const nav = read('src/components/shared/HubSectionNav.tsx')
-  assert.ok(nav.includes('className="hub-section-pills">'), 'the chip row is the shared ChipRail: viewport bounded and scrolling inside its own box (owner choice, 5 Oct 2026; pinned in chipRail.test.ts)')
+  assert.ok(nav.includes('className="hub-section-pills chip-rail-tall">'), 'the chip row is the shared ChipRail: viewport bounded and scrolling inside its own box (owner choice, 5 Oct 2026; pinned in chipRail.test.ts)')
   const sidebar = read('src/components/navigation/Sidebar.tsx')
   assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
   assert.ok(sidebar.includes('flex min-h-16 min-w-0 flex-col items-center justify-center'), 'mobile leaf tiles keep a 64px touch target with icon above title')

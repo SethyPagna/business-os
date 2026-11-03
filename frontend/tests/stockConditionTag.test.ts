@@ -139,7 +139,7 @@ runTest('the choice is one compact row, on the surface that offers it', () => {
   // "Restock with" were cut off. The row scrolls sideways instead of
   // truncating, and the segments keep their own width until the row has room to share. R1 (2 Nov 2026): that is
   // the shared ChipRail (chips never shrink or wrap, the row scrolls; `stretch` shares the spare width).
-  assert.match(control, /<ChipRail label=\{taggedLabel\} stretch data-stock-condition-row=\{mode\}>/)
+  assert.match(control, /<ChipRail label=\{tr\('stock_condition_label', 'Condition', 'ស្ថានភាព'\)\} stretch data-stock-condition-row=\{mode\}>/)
   assert.doesNotMatch(control, /SEGMENT_BASE|overflow-x-auto/, 'the private segment classes are gone')
 
   // The adjust half of InventoryStockModals was retired into the Stock

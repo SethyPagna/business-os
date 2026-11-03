@@ -2,6 +2,10 @@
 
 export const EDGE_SLACK_PX = 2
 
+// Only a RailChip can be the open choice: a pressed button that is not a chip (the Stats toggle beside the date presets)
+// must never steal the scroll-into-view from the selected preset.
+export const RAIL_SELECTED_SELECTOR = '.chip-rail-item[aria-pressed="true"], .chip-rail-item[aria-selected="true"]'
+
 export type RailEdges = { start: boolean; end: boolean }
 
 /** Which edges still hide content: a fade is drawn only on a side the row can scroll toward. */

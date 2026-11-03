@@ -127,7 +127,7 @@ await runTest('mobile body has no intermediate picker or extra history, legacy p
   const navSource = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(navSource, /pushState|history.back|hub-section-grid|HUB_HISTORY_MARKER/)
   assert.match(navSource, /if \(layered \|\| visible.length <= 1\) return <>{content}<\/>/)
-  assert.match(navSource, /<ChipRail [^\n]*className="hub-section-pills">/, 'the pills are the shared one-row ChipRail (flex-nowrap, overflow-x-auto, touch-safe in main.css)')
+  assert.match(navSource, /<ChipRail [^\n]*className="hub-section-pills chip-rail-tall">/, 'the pills are the shared one-row ChipRail (flex-nowrap, overflow-x-auto, touch-safe in main.css)')
   assert.match(navSource, /<RailChip\s+selected=\{isActive\}/, 'the open section is announced through RailChip (aria-pressed)')
   // "The compact home sheet owns section switching" is ONE decision shared
   // by HubSectionNav and by every page that keeps a hand-placed section row

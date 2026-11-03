@@ -434,9 +434,9 @@ runTest('every hub reaches the chip row through the one shared component', () =>
   }
   // Two call sites of one row is the standing exception, and both are the shared ChipRail (kit/ChipRail.tsx):
   // the chips, the scrolling and the selected state come from one rule set, not a fork.
-  assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills">/,
+  assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills chip-rail-tall">/,
     'the Products copy is the same row')
-  assert.match(hubNav, /<ChipRail label=\{[^\n]*\} className="hub-section-pills">/,
+  assert.match(hubNav, /<ChipRail label=\{[^\n]*\} className="hub-section-pills chip-rail-tall">/,
     'so is the shared one')
 })
 
@@ -528,7 +528,7 @@ runTest('the chip row stays compact and touch-safe on every screen it appears on
   // Owner choice (5 Oct 2026) stands: the page never gains a horizontal scrollbar, and Khmer keeps a >=1.6
   // leading inside the clipped scroller.
   for (const [label, source] of [['HubSectionNav', hubNav], ['Products', products]] as Array<[string, string]>) {
-    assert.match(source, /<ChipRail [^\n]*className="hub-section-pills">/, `${label}: the shared one-row scroller`)
+    assert.match(source, /<ChipRail [^\n]*className="hub-section-pills chip-rail-tall">/, `${label}: the shared one-row scroller`)
     assert.doesNotMatch(source, /hub-section-pill inline-flex|text-\[13px\] font-semibold|md:h-8 md:min-h-0/, `${label}: no private chip geometry left`)
   }
   assert.match(mainCss, /--chip-rail-h:\s*2\.25rem/)

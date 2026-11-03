@@ -453,45 +453,9 @@
   flex: 0 0 40px;
 }
 
-.reports-frame-secondary-actions {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
-}
-
-.reports-frame-secondary-actions > * { flex: 0 0 auto; }
-
 /* The kit's overflow menu stays horizontal everywhere else. Reports alone
    use the vertical convention requested for their export/action menu. */
 [data-reports-hub] .lucide-more-horizontal { transform: rotate(90deg); }
-
-/* Overview breakdowns are navigation-like buttons directly after the filter
-   controls. Long English/Khmer labels scroll inside this strip rather than
-   widening the document or the report frame. */
-.reports-overview-tabs {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  gap: 6px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  padding: 1px 0 3px;
-  scrollbar-width: thin;
-}
-
-.reports-overview-tabs > span {
-  flex: 0 0 auto;
-}
-
-.reports-overview-tabs button {
-  min-height: 36px;
-  white-space: nowrap;
-}
 
 /* The live-shift block is the one report segment whose BODY is a component
    shared with three non-report callers (FeesPage, Sales, ShiftHistoryModal),

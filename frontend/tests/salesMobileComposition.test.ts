@@ -55,7 +55,7 @@ assert.match(sales, /onCustomerAction=\{canChangeSaleCustomer \? \(sale\) => \{ 
 
 // The destination statuses are one horizontally scrolling row from first paint (no
 // 'Status' opener). Review keeps the Back icon and Apply together on one row.
-assert.match(workflow, /<ChipRail label=\{t\('status'\) \|\| 'Status'\} data-sale-status-destinations="">/, 'one shared ChipRail (nowrap, overflow-x auto, hidden scrollbar)')
+assert.match(workflow, /<ChipRail label=\{t\('status'\) \|\| 'Status'\} className="chip-rail-tall" data-sale-status-destinations="">/,'one shared ChipRail (nowrap, overflow-x auto, hidden scrollbar)')
 assert.match(workflow, /<RailChip key=\{status\} onClick=/, 'destination chips are RailChips: they keep their width and the shared Khmer-safe line height (chipRail.test.ts)')
 assert.doesNotMatch(workflow, /Choose destination status/)
 // Return words are tags, never destinations, and the current status is not offered (utils/saleStatusDisplay.ts).

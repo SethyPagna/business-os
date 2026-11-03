@@ -33,7 +33,7 @@ const productRowParts = readFileSync(new URL('../src/components/products/surface
 // aside in compact "pages" mode where the home sheet owns section switching.
 assert.match(products, /getHubDestinations\('products'/, 'the section list must come from the shared hub table, not a second hand-rolled one')
 assert.match(products, /useHubSection<'products' \| 'stock_changes' \| 'stock_in_sessions' \| 'duplicates'>/, "the active section must ride the app's guarded section navigation like every other hub")
-assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills">/, 'the Products section switcher is the shared ChipRail: it scrolls inside the viewport (max-width 100%, overflow-x auto, no wrap in main.css), never widening the page')
+assert.match(products, /<ChipRail label=\{tr\('product_sections', 'Product sections'\)\} className="hub-section-pills chip-rail-tall">/, 'the Products section switcher is the shared ChipRail: it scrolls inside the viewport (max-width 100%, overflow-x auto, no wrap in main.css), never widening the page')
 assert.match(products, /<RailChip selected=\{isActive\}/, 'section chips are RailChips (36px, 40px on touch, owner R1 2 Nov 2026)')
 assert.match(products, /layeredSectionNav \|\| productSectionTabs\.length <= 1 \? null :/, 'the page must not draw a second section row when the compact home sheet owns it')
 assert.doesNotMatch(products, /overflow-x-auto pb-1 \[scrollbar-width:thin\]/, 'the hand-rolled section scroller must be gone')

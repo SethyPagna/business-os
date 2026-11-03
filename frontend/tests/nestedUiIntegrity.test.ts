@@ -57,7 +57,7 @@ for (const file of ['components/branches/BranchesHubPage.tsx', 'components/revie
   const pageSource = read(file)
   const source = rowSource(pageSource)
   if (delegatesRow(pageSource)) {
-    assert.match(source, /<ChipRail [^\n]*className="hub-section-pills">/, `${file}: shared section row is the ChipRail`)
+    assert.match(source, /<ChipRail [^\n]*className="hub-section-pills chip-rail-tall">/, `${file}: shared section row is the ChipRail`)
     const chipRailRule = read('styles/main.css').match(/:where\(\.chip-rail\) \{[^}]*\}/)?.[0] ?? ''
     assert.match(chipRailRule, /max-width:\s*100%[\s\S]*overflow-x:\s*auto|overflow-x:\s*auto[\s\S]*max-width:\s*100%/, `${file}: shared section row must be viewport bounded and scroll inside its own box`)
     assert.match(chipRailRule, /flex-wrap:\s*nowrap/, `${file}: and stay on one row`)

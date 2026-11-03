@@ -384,7 +384,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   )
 
   const presetControls = (
-    <ChipRail label={trh('quick_range', 'Quick range')}>
+    <ChipRail label={trh('quick_range', 'Quick range')} data-reports-presets="">
       {mobilePresets.map((preset) => (
         <RailChip key={preset.id} selected={selectedMobilePreset === preset.id}
           onClick={() => setRange(mobilePresetRange(preset.id))}>

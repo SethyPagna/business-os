@@ -29,7 +29,7 @@ assert.doesNotMatch(hub, /CurrentShiftSummary|ShiftHistoryPanel/, 'no shift over
 // the hub controls. The statement no longer repeats those controls with a
 // prose summary before showing the canonical rows.
 const overviewRender = overview.slice(overview.lastIndexOf('  return ('))
-const tabs = overviewRender.indexOf('className="reports-overview-tabs"')
+const tabs = overviewRender.indexOf("<ChipRail label={tr('details', 'Details')}>")
 const frame = overviewRender.indexOf('<ReportFrame')
 assert.ok(tabs >= 0 && tabs < frame, 'Overview breakdown tabs precede the statement frame')
 assert.doesNotMatch(overviewRender, /summary=\{|summaryNote=/, 'Overview does not render the redundant summary prose')
@@ -69,7 +69,7 @@ assert.doesNotMatch(
 )
 assert.doesNotMatch(frameSource, /count=\{count\}/, 'result counts stay out of the four-control report header')
 assert.match(frameSource, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'only the overflow menu occupies the header action slot')
-assert.match(frameSource, /secondaryActions \? <div className="reports-frame-secondary-actions">/, 'mode chips and Shift History move to the secondary rail')
+assert.match(frameSource, /secondaryActions \? <ChipRail label=\{secondaryLabel\}>\{secondaryActions\}<\/ChipRail> : null/, 'mode chips and Shift History move to the secondary rail, which is the shared ChipRail')
 assert.match(frameSource, /title=\{activeTitle\}/)
 
 // The desktop tier is untouched: sticky ControlRow plus the preset row.
