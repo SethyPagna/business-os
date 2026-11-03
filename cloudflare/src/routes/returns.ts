@@ -781,7 +781,7 @@ app.get('/', async (c) => {
 // same filters (returnsFilter) in a total order -- the entry time, then the id, both descending -- with an opaque keyset cursor, so no row is skipped or repeated
 // across pages and the order is the same on every run.
 // Cost: every page is a keyset seek on the indexed created_at column (idx_returns_created_pg, or idx_returns_scope_created_pg when a scope is named) in index order, so a page
-// reads about its own size, not the whole history. A request runs at most three D1 queries (maintenance flag, the snapshot aggregate, the page); the Free plan allows 1000
+// reads about its own size, not the whole history. A request runs at most three D1 queries (maintenance flag, the snapshot aggregate, the page); the Free plan allows 50 (planTier.ts)
 // per invocation, so the bound that matters is rows: RETURN_EXPORT_PAGE_MAX_FREE per request, RETURN_EXPORT_ROWS_MAX per statement, one calendar year (returnExportWindow).
 // snapshotToken is a digest of what the pages are made of: the filter, the matched returns' count, ids, write revisions (a return, its lines, its products and its
 // replacement sale each bump one), update stamps, and the customer marker that has no revision of its own. It is computed from the whole matched set, which is one pass over
