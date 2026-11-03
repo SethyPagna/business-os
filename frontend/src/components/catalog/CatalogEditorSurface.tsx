@@ -548,7 +548,7 @@ function CatalogEditorSurfaceContent() {
   const failedField = (field: string) => (saveFailure?.field === field ? saveFailure.message : '')
 
   return (
-    <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
+    <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-clip pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
       <EditorBar
         ed={ed}
         compact={compact}

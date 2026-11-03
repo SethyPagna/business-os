@@ -170,6 +170,17 @@ runTest('T-L3: the bar is sticky, opaque and not blurred, one row of 56 px (52 p
   assert.match(bar, /aria-busy=\{/, 'Save says busy while it saves')
 })
 
+runTest('T-L3b: the bar can stick: nothing between it and the page scroller is a scroll container', () => {
+  // CATCHES: overflow-x: hidden on the aside. CSS rewrites the paired overflow-y to auto, which makes the aside the scrollport
+  // every sticky descendant resolves against -- a box that never scrolls -- so the bar scrolled away with the page. clip is the
+  // one overflow value that is not rewritten (CatalogPreviewSurface.tsx records the same trap on the storefront).
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  const aside = surface.match(/<aside id="portal-editor-top" className="([^"]*)"/)?.[1] || ''
+  assert.ok(aside, 'the aside is found')
+  assert.match(aside, /(?:^|\s)overflow-x-clip(?:\s|$)/, 'the aside contains sideways overflow with clip')
+  assert.doesNotMatch(aside, /overflow-(?:x-|y-)?(?:hidden|auto|scroll)/, 'a hidden, auto or scroll aside would be the sticky bar its scrollport')
+})
+
 runTest('T-L4: the section picker is a menu of seven radio items; the chips are a tablist with a roving tabindex', () => {
   const nav = noComments(editorFile('EditorSectionNav.tsx'))
   assert.match(nav, /aria-haspopup="menu"/)

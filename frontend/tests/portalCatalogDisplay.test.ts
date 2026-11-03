@@ -301,7 +301,7 @@ runTest('stock withheld by the Worker (stock status off) is never read as out of
 })
 
 runTest('portal editor compacts compatible controls into responsive rows with mobile clearance', () => {
-  assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-hidden[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
+  assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-clip[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
   assert.match(catalogEditorSource, /data-testid="portal-visibility-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
   assert.match(catalogEditorSource, /data-testid="portal-layout-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-4/)
   assert.match(catalogEditorSource, /data-testid="portal-highlight-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
