@@ -66,9 +66,13 @@
 -- lot: name a lot of the received date the counted units belong to. Units no
 -- longer on the shelf need nothing -- the ledgers already dropped them; only
 -- their movement row is missing.
+-- 6.0.1043: the same-instant sibling check read every positive lot of the branch for each lot at 0 (209,756,641 rows on the
+-- production-sized seed). It now walks the product's own lots and seeks each at the branch (973,048 rows without statistics, 993,653
+-- with): a one-off forensic that fits the Free day, not a pack member. test-stk-c-detection-query-pure.cjs and
+-- test-health-pack-parity-native.cjs pin that the rows did not change.
 -- ops:min-rows 0
 -- ops:max-rows 2000
--- ops:refused-on-free
+-- ops:max-rows-read 1093019
 WITH receipt_fields AS (
   SELECT
     r.id AS receipt_id,
@@ -105,10 +109,10 @@ orphan AS (
   WHERE bbs.quantity = 0
     AND julianday(bbs.updated_at) IS NOT NULL
     AND NOT EXISTS (
-      SELECT 1 FROM branch_batch_stock kept
-      JOIN product_batches kept_pb ON kept_pb.id = kept.batch_id
+      SELECT 1 FROM product_batches kept_pb INDEXED BY idx_product_batches_variant_number
+      CROSS JOIN branch_batch_stock kept INDEXED BY idx_branch_batch_stock_batch_branch_unique
+        ON kept.batch_id = kept_pb.id AND kept.branch_id = bbs.branch_id
       WHERE kept_pb.variant_product_id = pb.variant_product_id
-        AND kept.branch_id = bbs.branch_id
         AND kept.quantity > 0
         AND kept.updated_at = bbs.updated_at
     )

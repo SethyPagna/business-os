@@ -25,7 +25,7 @@
 -- One pass over inventory_movements, grouped per pair.
 -- ops:min-rows 1
 -- ops:max-rows 1
--- ops:max-rows-read 247672
+-- ops:max-rows-read 238156
 WITH mv AS MATERIALIZED (
   SELECT COALESCE(product_id, -1) AS pid, COALESCE(branch_id, -1) AS bid,
     SUM(CASE WHEN movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -48,11 +48,11 @@ prod_imp AS MATERIALIZED (
   SELECT pid, SUM(implied) AS implied FROM pair_imp GROUP BY pid
 )
 SELECT
-  (SELECT COUNT(*) FROM prod_imp) AS products_seen,
-  (SELECT COUNT(*) FROM prod_imp WHERE ABS(implied) > 0.000001) AS products_unbalanced,
+  g0.products_seen,
+  g0.products_unbalanced,
   (SELECT ROUND(COALESCE(SUM(ABS(implied)), 0), 4) FROM prod_imp) AS product_abs_implied,
   (SELECT ROUND(COALESCE(SUM(implied * ((pid % 997) + 1)), 0), 4) FROM prod_imp) AS product_checksum,
-  (SELECT COUNT(*) FROM pair_imp WHERE ABS(implied) > 0.000001) AS pairs_unbalanced,
+  g1.pairs_unbalanced,
   (SELECT ROUND(COALESCE(SUM(ABS(implied)), 0), 4) FROM pair_imp) AS pair_abs_implied,
   (SELECT ROUND(COALESCE(SUM(implied * ((pid % 997) + 1) * ((bid % 13) + 2)), 0), 4) FROM pair_imp) AS pair_checksum,
   (SELECT COALESCE(SUM(n), 0) FROM mv) AS movement_rows,
@@ -61,3 +61,10 @@ SELECT
   (SELECT ROUND(COALESCE(SUM(quantity_remaining), 0), 4) FROM damaged_stock_lots) AS held_pool_units,
   (SELECT MAX(id) FROM inventory_movements) AS max_movement_id,
   datetime('now') AS checked_at_utc
+FROM (SELECT
+    COUNT(*) AS products_seen,
+    COALESCE(SUM(ABS(implied) > 0.000001), 0) AS products_unbalanced
+  FROM prod_imp) g0,
+  (SELECT
+    COALESCE(SUM(ABS(implied) > 0.000001), 0) AS pairs_unbalanced
+  FROM pair_imp) g1

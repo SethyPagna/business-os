@@ -159,6 +159,7 @@ async function main() {
     assert.ok(guard.loadQuery('health-supplier-lots').sql.includes(`movement_type IN (${STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')})`), 'health-supplier-lots lost STOCK_RECEIPT_MOVEMENT_TYPES')
     const { CATALOG_COST_DERIVE_SQL } = loadRealLib('catalogCostRecompute.ts')
     assert.ok(squash(guard.loadQuery('health-catalog-cost').sql).includes(squash(CATALOG_COST_DERIVE_SQL)), 'health-catalog-cost lost CATALOG_COST_DERIVE_SQL')
+    assert.ok(squash(guard.loadQuery('recent-prepared-figures').sql).includes(squash(CATALOG_COST_DERIVE_SQL)), 'recent-prepared-figures lost CATALOG_COST_DERIVE_SQL: its oracle forked from the Worker formula')
     const { UPLOAD_REFERENCE_SOURCES } = loadRealLib('uploadReferences.ts')
     const r2 = guard.loadQuery('health-r2-references').sql
     for (const source of UPLOAD_REFERENCE_SOURCES) {

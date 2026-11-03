@@ -1,0 +1,103 @@
+# The consistency packs (ops/scripts/ops-consistency.mjs) laid out for a schedule: Tier A "recent" every day at 22:40 UTC
+# (05:40 Cambodia, before opening) and Tier B "full" on Sundays at 23:00 UTC (06:00 Cambodia, when the shop is closed and that UTC
+# day's remaining allowance would otherwise expire unused at 00:00 UTC). RELIABILITY-PLAN 5.2 and 5.3.
+#
+# STATUS: DISPATCH-ONLY. The two cron lines below are commented out on purpose, and test-ops-workflow-pure.cjs fails if one is switched
+# on without the test being changed with it. Reason: owner ruling R5 (RELIABILITY-PLAN section 10) has not been given. It asks whether the
+# nightly run is reviewer-gated or may use an unattended, read-scoped D1 token, and whether Cloudflare offers such a token is still
+# UNVERIFIED. This job reads production through the same CLOUDFLARE_API_TOKEN as ops.yml, so it stays behind the `production`
+# environment's required reviewer: a scheduled run would WAIT for that approval, and a run waiting in the shared concurrency group
+# below holds up a release queued behind it. Decide both before enabling.
+#
+# To enable once R5 is ruled: uncomment the `schedule:` block (both lines), then make the same change in the test. Nothing else needs to change:
+# the pack is picked from the cron line that fired.
+#
+# It does the same as the `consistency` task of ops.yml (guarded read-only queries, a read ceiling per query, the 400 MB storage alarm,
+# an encrypted report kept 3 days, a public log of file names, PASS or FAIL and counts), and never repairs anything.
+#
+# THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and artifacts: nothing but counts, verdict words and file names
+# is ever printed; everything else is encrypted on the runner for the owner's key (ops/keys/ops-export-public.pem).
+name: Consistency watch
+
+on:
+  workflow_dispatch:
+    inputs:
+      pack:
+        description: recent (Tier A, only what the last two business days touched, about 20 thousand rows read) or full (Tier B, the whole health pack, about 2 million rows read; start it when the shop is closed)
+        required: true
+        default: recent
+        type: choice
+        options:
+          - recent
+          - full
+      confirm:
+        description: Type consistency-watch to confirm
+        required: true
+        type: string
+  # schedule:
+  #   - cron: '40 22 * * *'
+  #   - cron: '0 23 * * 0'
+
+permissions:
+  contents: read
+
+# Shared with Deploy, Deploy rollback and Ops, so the packs never read production during a release.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: consistency-watch
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # A scheduled run has no confirm box; the reviewer's approval of the environment is its gate.
+      - name: Check the confirm word
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'consistency-watch', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type consistency-watch in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Run the pack (read-only, encrypted on the runner)
+        timeout-minutes: 90
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_PACK: ${{ inputs.pack || (github.event.schedule == '0 23 * * 0' && 'full' || 'recent') }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-consistency.mjs
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-consistency-watch
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore

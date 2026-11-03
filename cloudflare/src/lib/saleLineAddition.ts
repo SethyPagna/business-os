@@ -59,7 +59,7 @@ import { computeSaleTotals, round2, type SaleTotals } from './saleTotals'
 import { financialCalculationValue } from './financialPrecision'
 import { divideMoney4, multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { validateSaleMoneySnapshot, SaleMoneyContractError } from './saleMoneyPrecision'
-import { capturedPricingMetadata, parseSaleItemPricing } from './saleItemPricing'
+import { capturedPricingMetadata, chunkRowsByJsonBytes, parseSaleItemPricing } from './saleItemPricing'
 
 export type StockStatement = { sql: string; params: Record<string, unknown> }
 
@@ -724,13 +724,15 @@ export function rebaseSaleLineKhrSnapshot(rows: Array<Record<string, unknown>>, 
   }))
 }
 
-/** One bounded JSON parameter restores every snapshotted line exactly. */
+/** One bounded JSON parameter restores every snapshotted line exactly. Refuses (rather than failing inside D1) when the lines do not fit
+ * one parameter: a basket with captured snapshots goes through saleLineKhrSnapshotStatements. */
 export function saleLineKhrSnapshotStatement(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement {
-  const pricing=lines.some(line=>Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json'))
-  if (pricing) for (const line of lines) {
-    if (!Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json')) throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
-    parseSaleItemPricing(line.pricing_snapshot_json)
-  }
+  const statements = saleLineKhrSnapshotStatements(saleId, lines)
+  if (statements.length > 1) throw new SaleMoneyContractError('money_precision_basket_review_needed')
+  return statements[0] ?? saleLineKhrSnapshotUpdate(saleId, [], false)
+}
+
+function saleLineKhrSnapshotUpdate(saleId: number | string, lines: SaleLineKhrSnapshot[], pricing: boolean): StockStatement {
   return {
     sql: `UPDATE sale_items SET
             applied_price_khr=(SELECT json_extract(value,'$.applied_price_khr') FROM json_each(@lines) WHERE json_extract(value,'$.id')=sale_items.id),
@@ -742,6 +744,17 @@ export function saleLineKhrSnapshotStatement(saleId: number | string, lines: Sal
           WHERE sale_id=@sale_id AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@lines))`,
     params: { sale_id: saleId, lines: JSON.stringify(lines) },
   }
+}
+
+/** The same restore for a basket of any size: one statement per group of lines whose JSON stays under STORED_COPY_CHUNK_BYTES (a 62-line
+ * sale carries 2.6 MB of snapshots against D1's 2,000,000-byte cap). Each row is written by exactly one statement, in the same atomic batch. */
+export function saleLineKhrSnapshotStatements(saleId: number | string, lines: SaleLineKhrSnapshot[]): StockStatement[] {
+  const pricing=lines.some(line=>Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json'))
+  if (pricing) for (const line of lines) {
+    if (!Object.prototype.hasOwnProperty.call(line,'pricing_snapshot_json')) throw new SaleMoneyContractError('money_precision_incomplete_snapshot')
+    parseSaleItemPricing(line.pricing_snapshot_json)
+  }
+  return chunkRowsByJsonBytes(lines).map((group) => saleLineKhrSnapshotUpdate(saleId, group, pricing))
 }
 
 /** Rebase every surviving/new line to one authoritative receipt rate. */

@@ -18,7 +18,7 @@
 -- Counts only.
 -- ops:min-rows 1
 -- ops:max-rows 1
--- ops:max-rows-read 94120
+-- ops:max-rows-read 90316
 WITH sh AS MATERIALIZED (
   SELECT id, user_id, branch_id, scope_mode, business_date,
     COALESCE(datetime(opened_at), opened_at) AS o,
@@ -43,13 +43,23 @@ miss AS MATERIALIZED (
       AND (sh.scope_mode = 'shop_wide' OR e.actor IS sh.user_id))
 )
 SELECT
-  (SELECT COUNT(*) FROM miss WHERE kind = 'sale') AS sales_outside_shift,
-  (SELECT COUNT(*) FROM miss WHERE kind = 'return') AS returns_outside_shift,
-  (SELECT COUNT(*) FROM miss WHERE kind = 'fee') AS fees_outside_shift,
-  (SELECT COUNT(*) FROM ev) AS events_checked,
-  (SELECT COUNT(*) FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL
-     AND business_date < date('now', '+7 hours')) AS open_shifts_before_today,
-  (SELECT COUNT(*) FROM shift_sessions WHERE closed_at IS NOT NULL
-     AND closing_counted_usd IS NULL AND closing_counted_khr IS NULL) AS closed_without_count,
-  (SELECT COUNT(*) FROM shift_sessions WHERE closed_at IS NOT NULL
-     AND COALESCE(strftime('%s', closed_at), 0) < COALESCE(strftime('%s', opened_at), 0)) AS closed_before_opened
+  g0.sales_outside_shift,
+  g0.returns_outside_shift,
+  g0.fees_outside_shift,
+  g1.events_checked,
+  g2.open_shifts_before_today,
+  g2.closed_without_count,
+  g2.closed_before_opened
+FROM (SELECT
+    COALESCE(SUM(kind = 'sale'), 0) AS sales_outside_shift,
+    COALESCE(SUM(kind = 'return'), 0) AS returns_outside_shift,
+    COALESCE(SUM(kind = 'fee'), 0) AS fees_outside_shift
+  FROM miss) g0,
+  (SELECT
+    COUNT(*) AS events_checked
+  FROM ev) g1,
+  (SELECT
+    COALESCE(SUM(closed_at IS NULL AND cancelled_at IS NULL AND business_date < date('now', '+7 hours')), 0) AS open_shifts_before_today,
+    COALESCE(SUM(closed_at IS NOT NULL AND closing_counted_usd IS NULL AND closing_counted_khr IS NULL), 0) AS closed_without_count,
+    COALESCE(SUM(closed_at IS NOT NULL AND COALESCE(strftime('%s', closed_at), 0) < COALESCE(strftime('%s', opened_at), 0)), 0) AS closed_before_opened
+  FROM shift_sessions) g2

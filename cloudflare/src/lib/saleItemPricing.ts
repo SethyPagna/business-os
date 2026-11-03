@@ -201,6 +201,20 @@ export function serializeSaleItemPricing(pool: CapturedPricingPool, quantities: 
   return json
 }
 
+// A basket of n lines stores n snapshots that all embed the SAME pool, and parsing each one re-evaluates that pool and re-allocates the same
+// receipt context (about 30 ms per line at 200 lines, so seconds for one validation). Both are pure functions of their JSON text, so the
+// results are kept by that text for the next few snapshots. A parsed snapshot is still a fresh object every call; only these two
+// results, which parseSaleItemPricing reads and never returns, are shared.
+const parseMemo = { evaluations: new Map<string, Map<string, ExactLinePricing>>(), allocations: new Map<string, Map<string, ReceiptLineAllocation>>() }
+function memoized<T>(memo: Map<string, T>, key: string, compute: () => T): T {
+  const hit = memo.get(key)
+  if (hit !== undefined) { memo.delete(key); memo.set(key, hit); return hit }
+  const value = compute()
+  memo.set(key, value)
+  if (memo.size > 4) memo.delete(memo.keys().next().value as string)
+  return value
+}
+
 /** Call only for trusted persisted snapshots, never client-provided authority. */
 export function parseSaleItemPricing(json: string | null | undefined): SaleItemPricingSnapshot | null {
   if (json == null) return null
@@ -208,9 +222,9 @@ export function parseSaleItemPricing(json: string | null | undefined): SaleItemP
   let value: SaleItemPricingSnapshot
   try { value = JSON.parse(json) } catch { return invalid() }
   if (value?.version !== 1) invalid()
-  const evaluated = evaluateCapturedPricingPool(value.pool,value.quantities).get(value.line_key)
+  const evaluated = memoized(parseMemo.evaluations,JSON.stringify([value.pool,value.quantities]),()=>evaluateCapturedPricingPool(value.pool,value.quantities)).get(value.line_key)
   if (!evaluated || !value.amounts || Object.keys(evaluated).some(k => evaluated[k as keyof ExactLinePricing] !== value.amounts[k as keyof ExactLinePricing])) invalid()
-  const allocated=allocateReceiptLines(value.allocation_context).get(value.line_key)
+  const allocated=memoized(parseMemo.allocations,JSON.stringify(value.allocation_context),()=>allocateReceiptLines(value.allocation_context)).get(value.line_key)
   if (!allocated || !value.receipt_allocation || value.allocation_context.lines.find(line=>line.line_key===value.line_key)?.amount!==evaluated.total_usd
     || Object.keys(allocated).some(k=>allocated[k as keyof ReceiptLineAllocation]!==value.receipt_allocation[k as keyof ReceiptLineAllocation])) invalid()
   return value
@@ -304,15 +318,22 @@ export function validateCapturedSaleBasket(lines: readonly Record<string,unknown
   if (allocation.discount_usd!==header.discount_usd || allocation.membership_discount_usd!==header.membership_discount_usd || allocation.tax_usd!==header.tax_usd
     || allocation.lines.length!==lines.length) invalid()
   for (const entry of allocation.lines) if (byKey.get(entry.line_key)?.amounts.total_usd!==entry.amount) invalid()
+  // Every snapshot embeds its whole pool, so comparing them pairwise by re-serializing is O(n^3) bytes (a 62-line sale: ~240 MB).
+  // Each distinct text is serialized once and interned to a number; equal text is equal number.
+  const interned=new Map<string,number>()
+  const intern=(text:string)=>{let id=interned.get(text);if(id===undefined){id=interned.size;interned.set(text,id)}return id}
+  const texts=new Map(snapshots.map(snapshot=>[snapshot,{pool:intern(JSON.stringify(snapshot.pool)),quantities:intern(JSON.stringify(snapshot.quantities)),
+    allocation:intern(JSON.stringify(snapshot.allocation_context))}]))
   const poolContexts=new Map<string,string>()
   for (const snapshot of snapshots) {
-    const context=JSON.stringify({pool:snapshot.pool,quantities:snapshot.quantities})
+    const text=texts.get(snapshot)!
+    const context=`${text.pool}:${text.quantities}`
     if (poolContexts.has(snapshot.pool.pool_key) && poolContexts.get(snapshot.pool.pool_key)!==context) invalid()
     poolContexts.set(snapshot.pool.pool_key,context)
-    if (JSON.stringify(snapshot.allocation_context)!==JSON.stringify(allocation)) invalid()
+    if (text.allocation!==texts.get(snapshots[0])!.allocation) invalid()
     for (const member of snapshot.pool.lines) {
       const other=byKey.get(member.line_key)
-      if (!other || JSON.stringify(other.pool)!==JSON.stringify(snapshot.pool) || JSON.stringify(other.quantities)!==JSON.stringify(snapshot.quantities)) invalid()
+      if (!other || texts.get(other)!.pool!==text.pool || texts.get(other)!.quantities!==text.quantities) invalid()
     }
   }
   if (sumMoney4(snapshots.map(snapshot=>snapshot.amounts.total_usd))!==header.subtotal_usd) invalid()
@@ -392,6 +413,28 @@ export async function classifyPricingSourceConflict(
 /** Quantity/stock changes are separate guarded plans. This updates only the
  * captured financial fields, after those plans, in that same transaction. */
 export function pricingRowsStatement(saleId:number, rows:readonly Record<string,unknown>[]):{sql:string;params:Record<string,unknown>} {
+  const {fields,projected}=projectPricingRows(saleId,rows)
+  const json=JSON.stringify(projected)
+  if (new TextEncoder().encode(json).length>500_000) invalid()
+  return pricingRowsUpdate(saleId,fields,json)
+}
+
+/** The same update for a basket of any size: one statement per group of rows whose JSON stays under `maxBytes`, so no bound value nears
+ * D1's 2,000,000-byte cap (a 62-line sale carries 2.6 MB of snapshots). Same atomic batch, same rows, same columns as pricingRowsStatement. */
+export function pricingRowsStatements(saleId:number, rows:readonly Record<string,unknown>[], maxBytes=900_000):{sql:string;params:Record<string,unknown>}[] {
+  const {fields,projected}=projectPricingRows(saleId,rows)
+  const encoder=new TextEncoder(), groups:Record<string,unknown>[][]=[]
+  let current:Record<string,unknown>[]=[], bytes=2
+  for (const row of projected) {
+    const size=encoder.encode(JSON.stringify(row)).length+1
+    if (current.length && bytes+size>maxBytes) { groups.push(current); current=[]; bytes=2 }
+    current.push(row); bytes+=size
+  }
+  if (current.length) groups.push(current)
+  return groups.map(group=>pricingRowsUpdate(saleId,fields,JSON.stringify(group)))
+}
+
+function projectPricingRows(saleId:number, rows:readonly Record<string,unknown>[]):{fields:string[];projected:Record<string,unknown>[]} {
   const fields=['applied_price_usd','applied_price_khr','base_price_usd','base_price_khr','total_usd','total_khr',
     'product_discount_usd','product_discount_khr','product_discount_type','product_discount_label','manual_discount_usd','manual_discount_khr','manual_discount_type','manual_discount_value','price_mode','pricing_snapshot_json']
   if (!rows.length || rows.length>MAX_PRICING_LINES || !Number.isSafeInteger(saleId) || saleId<=0) invalid()
@@ -402,8 +445,199 @@ export function pricingRowsStatement(saleId:number, rows:readonly Record<string,
     if (fields.some(field=>!Object.prototype.hasOwnProperty.call(row,field))) invalid()
     return Object.fromEntries(['id',...fields].map(field=>[field,row[field]]))
   })
-  const json=JSON.stringify(projected)
-  if (new TextEncoder().encode(json).length>500_000) invalid()
+  return {fields,projected}
+}
+
+function pricingRowsUpdate(saleId:number, fields:string[], json:string):{sql:string;params:Record<string,unknown>} {
   return {sql:`UPDATE sale_items SET ${fields.map(field=>`${field}=(SELECT json_extract(value,'$.${field}') FROM json_each(@pricing_rows) WHERE json_extract(value,'$.id')=sale_items.id)`).join(',')}
     WHERE sale_id=@pricing_sale AND id IN (SELECT json_extract(value,'$.id') FROM json_each(@pricing_rows))`,params:{pricing_sale:saleId,pricing_rows:json}}
+}
+
+// ---- Bounded copies of a basket's snapshots (backend only; below the parity marker above nothing here is mirrored in the frontend) ----
+/**
+ * Every line of a money-v1 sale stores `pricing_snapshot_json`, and each snapshot embeds the WHOLE basket's pool, so a sale's
+ * snapshots are O(n^2) bytes (62 lines: 2.6 MB, 200 lines: about 24 MB) while D1 refuses any single string, BLOB or row value
+ * above 2,000,000 bytes. The lines themselves stay as they are (one row each, always far below the cap). What must not grow
+ * without bound is every COPY made of all lines at once: the mutation receipt's before/after images, the undo payload of an
+ * added-items action, the stored response, and the JSON parameters of the guards that prove a basket is unchanged.
+ *
+ * Two tools, both lossless:
+ *   - pack/unpack: a canonical snapshot is stored as {line_key, amounts, receipt_allocation} plus an index into a shared table of
+ *     pools and allocation contexts, kept ONCE per copy. A snapshot is packed only when rebuilding it reproduces the original
+ *     string byte for byte; anything else (an older shape, another key order) stays the raw string, so nothing is ever altered.
+ *     Unpacking is tolerant: a string, a null or a missing field passes through, so a copy made before this module existed reads
+ *     exactly as it always did.
+ *   - chunking: a statement that compares all lines takes them in groups whose JSON stays under STORED_COPY_CHUNK_BYTES.
+ */
+
+export const STORED_COPY_CHUNK_BYTES = 900_000
+
+/**
+ * A copy is packed only when it has to be. Below the thresholds (every ordinary sale) the stored text is exactly what it was before this
+ * module existed: the common case does not change shape, a receipt written now still reads under the previous Worker version, and the
+ * packed paths run only where the raw copy would approach D1's 2,000,000-byte value cap.
+ *   - PACK_ABOVE_BYTES: an undo payload is packed when its raw text is larger than this.
+ *   - PACK_IMAGES_ABOVE_BYTES: a mutation receipt's two images (before and after) share ONE row with the stored response, so they are packed
+ *     TOGETHER once their combined raw text passes this: unpacked they are at most 1.1 MB and the response (unpacked up to about 0.7 MB when it
+ *     is not packed) leaves the row under 1.9 MB; packed, the row is a few hundred KB. Packed one by one at 1,000,000 bytes each, a 33-line
+ *     amend stored a 2,013,933-byte row, over D1's documented 2,000,000-byte row cap (workerd accepts about 2.2 MB, so only a margin sees it).
+ *   - PACK_RESPONSE_ABOVE_BYTES: the stored response is aggregated in SQL, so its raw size is not known up front; it is packed when the
+ *     basket's snapshots total more than this. The unpacked aggregate is the snapshots with their quotes escaped plus about 800 bytes a
+ *     line, so a basket under the threshold aggregates to at most about 1.4 MB (nearer 0.8 MB in practice), under the cap.
+ */
+export const PACK_ABOVE_BYTES = 1_000_000
+export const PACK_IMAGES_ABOVE_BYTES = 1_100_000
+export const PACK_RESPONSE_ABOVE_BYTES = 600_000
+
+export function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
+export type PricingPacks = { version: 1; pools: Array<{ pool: unknown; quantities: unknown }>; contexts: unknown[] }
+export type PackedPricingSnapshot = { packed_snapshot: 1; line_key: string; pool: number; context: number; amounts: unknown; receipt_allocation: unknown }
+
+export class PackedSnapshotError extends Error {
+  readonly code = 'packed_snapshot_unavailable'
+  constructor() { super('A saved pricing snapshot could not be rebuilt.'); this.name = 'PackedSnapshotError' }
+}
+
+const PACKED_SNAPSHOT_KEYS = 'version,line_key,pool,quantities,amounts,allocation_context,receipt_allocation'
+
+/** The exact text serializeSaleItemPricing writes, from its parts. */
+export function snapshotText(part: { line_key: string; pool: unknown; quantities: unknown; amounts: unknown; allocation_context: unknown; receipt_allocation: unknown }): string {
+  return JSON.stringify({ version: 1, line_key: part.line_key, pool: part.pool, quantities: part.quantities, amounts: part.amounts,
+    allocation_context: part.allocation_context, receipt_allocation: part.receipt_allocation })
+}
+
+export function isPackedSnapshot(value: unknown): value is PackedPricingSnapshot {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && (value as Record<string, unknown>).packed_snapshot === 1
+}
+
+export class PackTable {
+  readonly packs: PricingPacks = { version: 1, pools: [], contexts: [] }
+  private readonly poolIndex = new Map<string, number>()
+  private readonly contextIndex = new Map<string, number>()
+  poolSlot(pool: unknown, quantities: unknown): number {
+    const text = JSON.stringify([pool, quantities])
+    let slot = this.poolIndex.get(text)
+    if (slot === undefined) { slot = this.packs.pools.length; this.packs.pools.push({ pool, quantities }); this.poolIndex.set(text, slot) }
+    return slot
+  }
+  contextSlot(context: unknown): number {
+    const text = JSON.stringify(context)
+    let slot = this.contextIndex.get(text)
+    if (slot === undefined) { slot = this.packs.contexts.length; this.packs.contexts.push(context); this.contextIndex.set(text, slot) }
+    return slot
+  }
+}
+
+function packOneSnapshot(json: string, table: PackTable): PackedPricingSnapshot | string {
+  let value: Record<string, unknown>
+  try { value = JSON.parse(json) } catch { return json }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).join(',') !== PACKED_SNAPSHOT_KEYS || value.version !== 1
+    || typeof value.line_key !== 'string') return json
+  const part = value as { line_key: string; pool: unknown; quantities: unknown; amounts: unknown; allocation_context: unknown; receipt_allocation: unknown }
+  if (snapshotText(part) !== json) return json
+  return { packed_snapshot: 1, line_key: part.line_key, pool: table.poolSlot(part.pool, part.quantities), context: table.contextSlot(part.allocation_context),
+    amounts: part.amounts, receipt_allocation: part.receipt_allocation }
+}
+
+/** Packs `field` of every row that holds a canonical snapshot string. `table` lets several lists of one copy share their pools. */
+export function packSnapshotField<T extends Record<string, unknown>>(rows: readonly T[], field: string, table: PackTable = new PackTable()): { rows: T[]; table: PackTable } {
+  return { table, rows: rows.map((row) => {
+    const raw = row[field]
+    if (typeof raw !== 'string') return row
+    const packed = packOneSnapshot(raw, table)
+    return typeof packed === 'string' ? row : { ...row, [field]: packed }
+  }) }
+}
+
+/** The packs of a copy, or undefined when nothing in it was packed (the copy then has the exact shape it always had). */
+export function packsOf(table: PackTable): PricingPacks | undefined {
+  return table.packs.pools.length ? table.packs : undefined
+}
+
+export function newPackTable(): PackTable { return new PackTable() }
+
+function rebuildPackedSnapshot(value: PackedPricingSnapshot, packs: PricingPacks | undefined): string {
+  const pool = packs?.pools?.[value.pool], context = packs?.contexts?.[value.context]
+  if (!pool || context === undefined || typeof value.line_key !== 'string') throw new PackedSnapshotError()
+  return snapshotText({ line_key: value.line_key, pool: pool.pool, quantities: pool.quantities, amounts: value.amounts, allocation_context: context, receipt_allocation: value.receipt_allocation })
+}
+
+/** Inverse of packSnapshotField. A row whose field is a string, null or absent is returned as it is. */
+export function unpackSnapshotField<T extends Record<string, unknown>>(rows: readonly T[] | undefined, field: string, packs: PricingPacks | undefined): T[] | undefined {
+  if (!rows) return undefined
+  return rows.map((row) => {
+    const value = row[field]
+    return isPackedSnapshot(value) ? { ...row, [field]: rebuildPackedSnapshot(value, packs) } : row
+  })
+}
+
+/** A SQL-built stored response (canonicalMutationResponseSql) carries the pools once and a packed core per line. Rebuilds the wire form. */
+export function expandStoredSaleResponse(response: Record<string, unknown>): Record<string, unknown> {
+  const sale = response?.sale as Record<string, unknown> | undefined
+  const packs = sale?.pricing_packs as { allocation_context?: unknown; pools?: Record<string, { pool: unknown; quantities: unknown }> } | undefined
+  if (!sale || !packs) return response
+  const items = Array.isArray(sale.items) ? sale.items as Array<Record<string, unknown>> : []
+  const expanded = items.map((item) => {
+    const core = item.pricing_snapshot_packed as { line_key?: string; pool_key?: string; amounts?: unknown; receipt_allocation?: unknown } | undefined
+    if (!core) return item
+    const pool = core.pool_key === undefined ? undefined : packs.pools?.[core.pool_key]
+    if (!pool || typeof core.line_key !== 'string' || packs.allocation_context === undefined) throw new PackedSnapshotError()
+    const { pricing_snapshot_packed: _core, ...rest } = item
+    return { ...rest, pricing_snapshot_json: snapshotText({ line_key: core.line_key, pool: pool.pool, quantities: pool.quantities, amounts: core.amounts,
+      allocation_context: packs.allocation_context, receipt_allocation: core.receipt_allocation }) }
+  })
+  const { pricing_packs: _packs, ...saleRest } = sale
+  return { ...response, sale: { ...saleRest, items: expanded } }
+}
+
+/** Groups rows so the JSON of each group stays within `maxBytes` (a single row larger than that still forms its own group). */
+export function chunkRowsByJsonBytes<T>(rows: readonly T[], maxBytes: number = STORED_COPY_CHUNK_BYTES): T[][] {
+  const encoder = new TextEncoder()
+  const chunks: T[][] = []
+  let current: T[] = [], bytes = 2
+  for (const row of rows) {
+    const size = encoder.encode(JSON.stringify(row)).length + 1
+    if (current.length && bytes + size > maxBytes) { chunks.push(current); current = []; bytes = 2 }
+    current.push(row); bytes += size
+  }
+  if (current.length) chunks.push(current)
+  return chunks
+}
+
+/** The undo payload of an added-items action, read back: packed snapshots are rebuilt as the strings they were. A payload written before
+ * packing existed has no `pricing_packs` and passes through untouched, so undoing an old action behaves exactly as it always did. */
+export function unpackAddItemsReversal<T extends Record<string, unknown>>(payload: T): T {
+  const packs = payload?.pricing_packs as PricingPacks | undefined
+  if (!packs) return payload
+  const { pricing_packs: _packs, ...rest } = payload
+  const out: Record<string, unknown> = { ...rest }
+  for (const [list, field] of [['lines', 'pricingSnapshotJson'], ['lineMoneyBefore', 'pricing_snapshot_json'], ['lineMoneyAfter', 'pricing_snapshot_json']] as const) {
+    if (Array.isArray(rest[list])) out[list] = unpackSnapshotField(rest[list] as Record<string, unknown>[], field, packs)
+  }
+  return out as T
+}
+
+/** True only for a LARGE basket (its snapshots total more than PACK_RESPONSE_ABOVE_BYTES; a smaller one keeps the full per-line text exactly as
+ * before, byte for byte) in which every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names
+ * ONE pool and quantity map. "Canonical" is checked line by line: the stored text must equal its own rebuild from version 1 and the six
+ * parts in serializeSaleItemPricing's order (a line with an extra key, whitespace, another version or reordered keys is NOT packed, because
+ * the expansion would rewrite it). Then the packed form loses nothing; otherwise the response keeps the full per-line text (which, for a
+ * basket this large, D1 refuses loudly instead of storing a rewritten copy). The size test comes first so an ordinary sale pays nothing for
+ * the checks after it. */
+export function packedItemsCondition(): string {
+  return `(SELECT COALESCE(SUM(length(CAST(pricing_snapshot_json AS BLOB))),0) FROM sale_items WHERE sale_id=s.id)>${PACK_RESPONSE_ABOVE_BYTES}
+    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
+        OR json_extract(pricing_snapshot_json,'$.pool.pool_key') IS NULL OR json_extract(pricing_snapshot_json,'$.allocation_context') IS NULL))
+    AND (SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.allocation_context')) FROM sale_items WHERE sale_id=s.id)=1
+    AND (SELECT COUNT(*) FROM (SELECT DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS k,json_extract(pricing_snapshot_json,'$.pool') AS p,
+        json_extract(pricing_snapshot_json,'$.quantities') AS q FROM sale_items WHERE sale_id=s.id))
+      =(SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key')) FROM sale_items WHERE sale_id=s.id)
+    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND pricing_snapshot_json IS NOT json_object('version',1,
+        'line_key',json_extract(pricing_snapshot_json,'$.line_key'),'pool',json(json_extract(pricing_snapshot_json,'$.pool')),
+        'quantities',json(json_extract(pricing_snapshot_json,'$.quantities')),'amounts',json(json_extract(pricing_snapshot_json,'$.amounts')),
+        'allocation_context',json(json_extract(pricing_snapshot_json,'$.allocation_context')),
+        'receipt_allocation',json(json_extract(pricing_snapshot_json,'$.receipt_allocation'))))`
 }
