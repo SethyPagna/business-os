@@ -7923,7 +7923,7 @@
   "inventory_check_approval_set_to": "កំណត់ទៅ",
   "inventory_check_error_stock_inconsistent": "កំណត់ត្រាស្តុកទំនិញមួយមិនត្រូវគ្នា។ កែវាមុនអនុម័ត។",
   "inventory_check_error_target_not_whole": "ចំនួនរាប់ដកទំនិញខូច មិនមែនចំនួនគត់។ បដិសេធ ហើយរាប់ម្តងទៀត។",
-  "inventory_check_error_no_lot": "ទំនិញមួយគ្មានថ្ងៃទទួលដើម្បីបន្ថែមស្តុក។ ទទួលស្តុកជាមុន។",
+  "inventory_check_error_no_lot": "ទំនិញមួយគ្មានថ្ងៃចូលដើម្បីបន្ថែមស្តុក។ ទទួលស្តុកជាមុន។",
   "inventory_check_error_write_refused": "មិនអាចកែស្តុកទំនិញខ្លះបានទេ។ សាកម្តងទៀត។",
   "inventory_check_error_approve_required": "អ្នកគ្មានសិទ្ធិអនុម័តការរាប់ទេ។",
   "inventory_check_error_adjust_required": "ការអនុម័តក៏ត្រូវការសិទ្ធិកែស្តុកផងដែរ។",

@@ -27,7 +27,7 @@ import type { InventoryCheckListStatus, InventoryCheckObservation, InventoryChec
 import InventoryCheckControls, { countActiveFilters, type InventoryCheckFilters } from './InventoryCheckControls.tsx'
 import InventoryCheckRows, { InventoryCheckSheetHeader, type InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelectionBar, type ListDraft } from './InventoryCheckListRows.tsx'
-import { countMatchesStock, finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
+import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import InventoryCheckApprovalPanel from './InventoryCheckApprovalPanel.tsx'

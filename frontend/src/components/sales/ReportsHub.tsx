@@ -182,13 +182,19 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   // ---- filters ----
   // An empty range left the Expenses report without an actionable initial
   // request. Today gives every report a concrete, business-time scope.
-  const [range, setRange] = useState<DateTimeRange>(() => arrival.current ? { ...todayDateTimeRange(), startDate: arrival.current.startDate, endDate: arrival.current.endDate } : todayDateTimeRange())
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('')
-  const [searchText, setSearchText] = useState(() => arrival.current?.search ?? '')
-  const [search, setSearch] = useState(() => arrival.current?.search ?? '')
-  useEffect(() => { if (arrival.current) takeReportsFocus() }, [])
+  const [searchText, setSearchText] = useState('')
+  const [search, setSearch] = useState('')
+  useEffect(() => {
+    const focus = arrival.current
+    if (!focus) return
+    setRange((current) => ({ ...current, startDate: focus.startDate, endDate: focus.endDate }))
+    setSearchText(focus.search); setSearch(focus.search)
+    takeReportsFocus()
+  }, [])
   // The page can already be open when the link is followed.
   useEffect(() => {
     const follow = () => {
