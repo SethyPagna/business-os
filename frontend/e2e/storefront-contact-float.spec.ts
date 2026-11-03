@@ -9,6 +9,8 @@ import { stubStorefrontConfig } from './support/storefrontStub'
  *    Telegram t.me/<name>, Messenger m.me/<page>, Instagram DM ig.me/m/<name> (never a profile page).
  *  - The accounts are the Website Editor's contact settings; an account that is not set has no button.
  *  - Accessible names are translated (en and km); the page end clears the whole stack; no horizontal scroll.
+ *  - From 640 px the column is always shown. Below it the column would cover the right-hand product card, so a
+ *    phone shows one Contact button that opens the same links (3 Nov review, N2).
  *
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test storefront-contact-float
  *
@@ -50,6 +52,14 @@ async function openStorefront(page: Page, width: number, patch: Record<string, u
 
 const floatButtons = (page: Page) => page.locator('[data-portal-contact-float="true"] a')
 const platforms = (page: Page): Promise<string[]> => floatButtons(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-portal-contact-platform') ?? ''))
+const toggle = (page: Page) => page.locator('[data-portal-contact-toggle="true"]')
+const myList = (page: Page) => page.locator('button[aria-label="My List"]')
+
+/** On a phone the chat buttons wait behind the Contact button; from 640 px they are already there. */
+async function revealFloat(page: Page): Promise<void> {
+  if (await toggle(page).isVisible()) await toggle(page).click()
+  await expect(floatButtons(page).first()).toBeVisible()
+}
 
 test.describe('Floating contact buttons', () => {
   test('each configured account is a brand-colour button that links straight to its chat', async ({ page }) => {
@@ -85,6 +95,7 @@ test.describe('Floating contact buttons', () => {
     // navigates the storefront away instead of opening a new tab.
     await context.route('https://t.me/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>chat</title>' }))
     await openStorefront(page, 390, THREE)
+    await revealFloat(page)
     const popup = context.waitForEvent('page')
     await page.locator('[data-portal-contact-platform="telegram"]').click()
     const opened = await popup
@@ -132,6 +143,7 @@ test.describe('Floating contact buttons', () => {
   test('accessible names and tooltips are translated in English', async ({ page }) => {
     // CATCHES: icon-only links with no name or tooltip.
     await openStorefront(page, 390, THREE, 'en')
+    await revealFloat(page)
     expect(await floatButtons(page).evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('aria-label'), node.getAttribute('title')]))).toEqual([
       ['Chat on Messenger', 'Chat on Messenger'],
       ['Chat on Telegram', 'Chat on Telegram'],
@@ -142,6 +154,7 @@ test.describe('Floating contact buttons', () => {
   test('accessible names are translated in Khmer', async ({ page }) => {
     // CATCHES: a Khmer page that reads the English labels.
     await openStorefront(page, 390, THREE, 'km')
+    await revealFloat(page)
     const khmer = await floatButtons(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') ?? ''))
     expect(khmer).toHaveLength(3)
     for (const name of khmer) expect(name).toMatch(/[ក-៿]/)
@@ -152,6 +165,7 @@ test.describe('Floating contact buttons', () => {
       // CATCHES: a taller stack than the reserve at the bottom of the page (the footer links hidden under a
       // button) and a button pushed past the viewport edge.
       await openStorefront(page, width, ALL_FIVE)
+      await revealFloat(page)
       expect(await platforms(page)).toEqual(['messenger', 'telegram', 'instagram', 'whatsapp', 'phone'])
       const report = await page.evaluate(async () => {
         window.scrollTo(0, document.documentElement.scrollHeight)
@@ -192,6 +206,7 @@ test.describe('Floating contact buttons', () => {
   test('the five buttons never overlap each other and each is a 44 px target', async ({ page }) => {
     // CATCHES: buttons that touch, and a target below the 44 px touch size.
     await openStorefront(page, 360, ALL_FIVE)
+    await revealFloat(page)
     const rects = await floatButtons(page).evaluateAll((nodes) => nodes.map((node) => {
       const rect = node.getBoundingClientRect()
       return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height }
@@ -203,5 +218,71 @@ test.describe('Floating contact buttons', () => {
     }
     const ordered = [...rects].sort((a, b) => a.top - b.top)
     for (let index = 1; index < ordered.length; index += 1) expect(ordered[index].top).toBeGreaterThan(ordered[index - 1].bottom)
+  })
+
+  for (const width of [360, 390]) {
+    test(`at ${width}px one Contact button stands in for the column, and it opens and closes the chat buttons`, async ({ page }) => {
+      // CATCHES: the always-open column on a phone (4 round buttons over the right-hand card and the About text), a
+      // Contact button that opens nothing, one that cannot be closed (Escape, a tap elsewhere), and a toggle that
+      // is not a 44 px target or has no translated name.
+      await openStorefront(page, width, ALL_FIVE)
+      await expect(toggle(page)).toBeVisible()
+      await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
+      await expect(toggle(page)).toHaveAttribute('aria-label', 'Contact us')
+      const size = await toggle(page).boundingBox()
+      expect(size?.width).toBeGreaterThanOrEqual(44)
+      expect(size?.height).toBeGreaterThanOrEqual(44)
+      for (const link of await floatButtons(page).all()) await expect(link).toBeHidden()
+
+      await toggle(page).click()
+      await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+      await expect(toggle(page)).toHaveAttribute('aria-label', 'Close')
+      await expect(floatButtons(page)).toHaveCount(5)
+      for (const link of await floatButtons(page).all()) await expect(link).toBeVisible()
+
+      await page.keyboard.press('Escape')
+      await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
+      for (const link of await floatButtons(page).all()) await expect(link).toBeHidden()
+
+      await toggle(page).click()
+      await expect(floatButtons(page).first()).toBeVisible()
+      await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+      await expect(floatButtons(page).first()).toBeHidden()
+    })
+  }
+
+  test('on a tablet and a desktop the column is always shown and there is no Contact button', async ({ page }) => {
+    // CATCHES: the phone toggle leaking to 640 px and up, where a column fits beside the content.
+    for (const width of [640, 768, 1280]) {
+      await openStorefront(page, width, ALL_FIVE)
+      await expect(toggle(page), `${width}px`).toBeHidden()
+      for (const link of await floatButtons(page).all()) await expect(link, `${width}px`).toBeVisible()
+    }
+  })
+
+  test('at 390px the floating controls stay in the bottom corner, clear of each other and of the viewport edge', async ({ page }) => {
+    // CATCHES: the 4-button stack (3 chat buttons + My List) that covered the right-hand product card and the About
+    // text: closed, the Contact button and My List together reach no higher than 8rem above the bottom, and opened,
+    // the five chat buttons never touch My List.
+    await openStorefront(page, 390, ALL_FIVE)
+    const box = async (locator: ReturnType<typeof myList>) => {
+      const rect = await locator.boundingBox()
+      expect(rect).not.toBeNull()
+      return rect as { x: number; y: number; width: number; height: number }
+    }
+    const height = page.viewportSize()?.height ?? 0
+    const contact = await box(toggle(page))
+    const list = await box(myList(page))
+    expect(Math.min(contact.y, list.y), 'closed, nothing floats above 8rem').toBeGreaterThanOrEqual(height - 128)
+    expect(contact.y + contact.height, 'the Contact button sits above My List').toBeLessThanOrEqual(list.y)
+
+    await toggle(page).click()
+    await expect(floatButtons(page)).toHaveCount(5)
+    for (const link of await floatButtons(page).all()) {
+      const rect = await box(link)
+      expect(rect.x + rect.width, 'inside the viewport').toBeLessThanOrEqual(390)
+      expect(rect.y, 'inside the viewport').toBeGreaterThanOrEqual(0)
+      expect(rect.y + rect.height, 'above My List').toBeLessThanOrEqual(list.y)
+    }
   })
 })

@@ -165,10 +165,11 @@ check('2 the header icon rows never wrap on a phone', () => {
 
 // P-public-5 (owner, 2026-09-25): "minimized by default as a small icon and expands on click" replaced the Sep 15
 // per-viewer memory. 2 Nov 2026 (owner): the Contact us float is a column of brand-colour chat links
-// (PortalContactFloat) shown from the first paint, each opening its chat directly, so there is no stub to expand
-// and no minimize control. What this check still guards: no remembered state, no overlaid or hover-gated control,
-// 44px targets, and the retired pieces staying retired.
-check('3 the contact buttons are always shown, open the chat directly, and have no minimize stub', () => {
+// (PortalContactFloat), each opening its chat directly, with no minimize control. Below 640px the column would cover the
+// right-hand product card, so a phone shows one Contact button that opens the same links (3 Nov review); from 640px the
+// column is always shown. What this check still guards: no remembered state, no overlaid or hover-gated control, 44px
+// targets, plain links, and the retired pieces staying retired.
+check('3 the contact buttons open the chat directly; a phone gets one Contact button, not a remembered minimize stub', () => {
   assert.doesNotMatch(publicCatalogPage, /contactMinimized|setContactMinimized/, 'the page keeps no minimized state')
   assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring a stub back')
   assert.match(publicCatalogPage, /<PortalContactFloat channels=\{contactChannels\} copy=\{copy\} \/>/, 'the float is the page contact control')
@@ -176,7 +177,11 @@ check('3 the contact buttons are always shown, open the chat directly, and have 
   assert.match(floatSource, /flex h-11 w-11 shrink-0 items-center justify-center rounded-full/, 'each button is a 44px touch target')
   assert.doesNotMatch(floatSource, /-right-1\.5 -top-1\.5/, 'no control overlaps a button corner')
   assert.doesNotMatch(floatSource, /opacity-0.*group-hover:opacity-100/, 'no control is hover-gated invisible by default')
-  assert.doesNotMatch(floatSource, /onClick/, 'a button is a plain link to the chat, not a handler that opens something else')
+  assert.doesNotMatch(/<a\b[\s\S]*?<\/a>/.exec(floatSource)?.[0] ?? 'missing', /onClick|missing/, 'a chat button is a plain link to the chat, not a handler that opens something else')
+  assert.equal((floatSource.match(/onClick/g) ?? []).length, 1, 'the only handler is the phone Contact button')
+  assert.match(floatSource, /\$\{open \? 'flex' : 'hidden'\} flex-col items-center gap-2 sm:flex/, 'from 640px the chat buttons are always shown')
+  assert.match(floatSource, /data-portal-contact-toggle="true"[\s\S]*?\bsm:hidden\b/, 'the Contact button exists below 640px only')
+  assert.doesNotMatch(floatSource, /localStorage|sessionStorage/, 'nothing about it is remembered')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and
@@ -271,7 +276,7 @@ check('5 the storefront mounts the shared install band, not a duplicate implemen
   assert.match(publicCatalogPage, /const offersShopInstall = !isAdminHostname\(\)\r?\n/, 'the shop install offer is keyed on the host')
   assert.match(
     publicCatalogPage,
-    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div className="pointer-events-none fixed [^"]*">\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
+    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div\s+className="pointer-events-none fixed [^"]*"(?:\s+style=\{announcementHeight \? \{ top: [\x60][^\x60]*[\x60] \} : undefined\})?\s*>\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
     'the band renders only when the shop offers the install, through the storefront copy()',
   )
   assert.equal((publicCatalogPage.match(/<InstallPromptBand /g) || []).length, 1, 'no second, ungated band')
