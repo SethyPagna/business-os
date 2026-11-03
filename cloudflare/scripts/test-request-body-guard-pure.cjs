@@ -211,6 +211,8 @@ async function main() {
     // Real module too: the /api cache-header middleware (6.0.1040) is mounted right behind the metrics wrapper and must
     // call next(); a poisoned stub would throw on every /api request and send the error handler's own poisoned calls astray.
     './lib/apiCacheHygiene': load('lib/apiCacheHygiene.ts'),
+    // P2.8 (6.0.1046): mounted on /api/* ahead of every route; it must call next() (this test has no phones).
+    './lib/phoneMaskMiddleware': { phoneMaskResponses: async (_c, next) => next() },
     // Real module too: the review-alert deferral scope is /api middleware that must call next(). The alert installer is
     // called once at module scope and this test sends no review alert, so it is a no-op here.
     './lib/requestDefer': load('lib/requestDefer.ts', { 'node:async_hooks': require('node:async_hooks') }),

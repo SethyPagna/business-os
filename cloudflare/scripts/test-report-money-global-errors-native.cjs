@@ -77,6 +77,8 @@ Module._load = function(request, parent, isMain) {
   if (request === './lib/requestMetrics') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestMetrics.ts'), parent, isMain)
   // The /api cache-header middleware (6.0.1040) sits right behind it and calls next(): same reason, the real module.
   if (request === './lib/apiCacheHygiene') return originalLoad.call(this, path.join(root, 'src', 'lib', 'apiCacheHygiene.ts'), parent, isMain)
+  // P2.8 (6.0.1046): the phone-mask middleware is mounted on /api/* ahead of every route and must call next(); this test has no phones.
+  if (request === './lib/phoneMaskMiddleware') return { phoneMaskResponses: async (_c, next) => next() }
   // The review-alert deferral scope is /api middleware too (it calls next() inside AsyncLocalStorage.run): same reason.
   if (request === './lib/requestDefer') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestDefer.ts'), parent, isMain)
   if (request === './lib/coreInvariantsGate') return { ensureCoreDataInvariantsForRequest: async () => {} }
