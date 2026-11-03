@@ -80,13 +80,14 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
   inventory_check_stock_inconsistent: { key: 'inventory_check_error_stock_inconsistent', fallback: 'A product\'s stock records do not add up. Correct them before approving.' },
   inventory_check_product_retired: { key: 'inventory_check_error_product_retired', fallback: 'A product in this count was merged or removed. Reject this count and count the product that replaced it.' },
-  inventory_check_count_pending: { key: 'inventory_check_error_count_pending', fallback: 'A product in this count already waits for approval. Wait for that count to be decided, then count it again.' },
+  inventory_check_count_in_progress: { key: 'inventory_check_error_count_in_progress', fallback: 'An earlier count of a product here is being applied right now, so it cannot be counted again yet. Try again when it is finished.' },
   inventory_check_count_superseded: { key: 'inventory_check_error_count_superseded', fallback: 'Another count already covered a product in this one. Reject this count and recount.' },
   inventory_check_stock_adjusted: { key: 'inventory_check_error_stock_adjusted', fallback: 'Stock was changed by hand after this count. Reject this count and recount.' },
   inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number is not a whole number. Reject this count and recount.' },
   inventory_check_count_below_damaged: { key: 'inventory_check_error_count_below_damaged', fallback: 'A counted number is less than the product\'s damaged units. Reject this count and recount.' },
   inventory_check_baseline_missing: { key: 'inventory_check_error_baseline_missing', fallback: 'A product in this count has no recorded starting stock. Reject this count and recount.' },
   inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Another approver is applying this count. If they cannot continue, close the remaining lines.' },
+  inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_approve_required: { key: 'inventory_check_error_approve_required', fallback: 'You do not have permission to approve counts.' },
@@ -614,7 +615,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id, entry.checked || named.has(Number(id)) ? { ...entry, count: '', checked: false } : entry])))
       }
       if (current() && !unknown && isStaleConflict(cause)) reloadAll()
-      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+      // The server names the products whose earlier count is being applied (the refusal is the same whatever figure was typed): the person is told which, and the counts are kept.
+      const busy = (cause as { code?: unknown })?.code === 'inventory_check_count_in_progress' && Array.isArray((cause as { productIds?: unknown }).productIds)
+        ? ((cause as { productIds: unknown[] }).productIds).map(id => draftsRef.current[String(id)]?.name).filter((name): name is string => typeof name === 'string' && name !== '') : []
+      if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}` : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
   // Counts approval (ic_fix_stock): approving changes stock, so the person must hold the extra, may adjust stock and be online.
@@ -631,7 +635,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         title: decision === 'approve' ? tr('inventory_check_approve_title', 'Approve these counts?') : decision === 'close' ? tr('inventory_check_close_title', 'Close the remaining lines?') : tr('inventory_check_reject_title', 'Reject these counts?'),
         message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.')
           : decision === 'close' ? tr('inventory_check_close_message', 'Stock does not change. Lines already applied stay applied; the rest are recorded as not applied.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
-        items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied }],
+        items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied - Object.keys(approval.superseded ?? {}).length }],
         confirmLabel: decision === 'approve' ? tr('inventory_check_approve', 'Approve') : decision === 'close' ? tr('inventory_check_close', 'Close') : tr('inventory_check_reject', 'Reject'),
         danger: decision !== 'approve',
       })

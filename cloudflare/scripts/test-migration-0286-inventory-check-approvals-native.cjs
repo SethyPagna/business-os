@@ -31,7 +31,7 @@ function seed(db) {
 const insertPending = (db, id = 's1', extra = '') => db.prepare(`INSERT INTO ${T}(session_id,organization_id,branch_id,lines,submitted_by,submitted_at${extra ? ',' + extra.split('=')[0] : ''}) VALUES(?,1,1,2,7,'2026-11-02T01:00:00Z'${extra ? ',' + extra.split('=')[1] : ''})`).run(id)
 const decide = (db, status = 'approved') => db.prepare(`UPDATE ${T} SET status=?,decided_by=9,decided_by_name='admin',decided_at='2026-11-02T02:00:00Z',decision_request_id='dec-12345678',applied_json='{"lines":{"5":{"before":3,"target":5,"after":5,"at":"x"}}}' WHERE session_id='s1'`).run(status)
 
-check('the table is new, adds one table, one index and four triggers, and changes no history row', () => {
+check('the table is new, adds one table, two indexes and four triggers, and changes no history row', () => {
   const db = chain(); seed(db)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sqlite_master WHERE name=?').get(T).n, 0, 'absent before')
   const before = Object.fromEntries(HISTORY.map(table => [table, dump(db, table)]))
@@ -46,7 +46,8 @@ check('the table is new, adds one table, one index and four triggers, and change
     { type: 'trigger', name: 'inventory_check_approvals_identity' },
     { type: 'trigger', name: 'inventory_check_approvals_no_delete' },
     { type: 'index', name: 'inventory_check_approvals_pending' },
-  ].sort((a, b) => a.name.localeCompare(b.name)), 'exactly the table, its index and its four triggers')
+    { type: 'index', name: 'inventory_check_approvals_progress' },
+  ].sort((a, b) => a.name.localeCompare(b.name)), 'exactly the table, its two indexes and its four triggers')
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${T}`).get().n, 0, 'no approval row is created by the migration (existing submissions stay as they are)')
 })
 
@@ -142,6 +143,32 @@ check('a row is deleted only while the restore maintenance flag is set', () => {
   db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode: 'restore', token: 't' }))
   db.prepare(`DELETE FROM ${T}`).run()
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${T}`).get().n, 0, 'restore may clear the table')
+})
+
+check('lines replaced by a newer count: superseded_json is an object that starts empty, can grow while the approval is pending (claimed or not) and is frozen with the decision', () => {
+  const db = chain(); seed(db); db.exec(sql)
+  insertPending(db)
+  const replaced = () => db.prepare(`SELECT superseded_json AS json FROM ${T}`).get().json
+  assert.equal(replaced(), '{}', 'a new approval replaced nothing')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET superseded_json='[1]'`).run(), /CHECK|constraint/i, 'an object, not an array')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET superseded_json='not json'`).run(), /CHECK|constraint|malformed/i, 'valid JSON only')
+  db.prepare(`UPDATE ${T} SET superseded_json=json_patch(superseded_json,'{"5":"s2"}')`).run()
+  assert.equal(replaced(), '{"5":"s2"}', 'a newer count replaces a line of a pending approval')
+  db.prepare(`UPDATE ${T} SET applying_request_id='approve-request-01',applying_by=9,applying_at='2026-11-02T01:30:00Z',plan_json='{"6":{"before":3,"target":5}}'`).run()
+  db.prepare(`UPDATE ${T} SET superseded_json=json_patch(superseded_json,'{"7":"s3"}')`).run()
+  assert.equal(replaced(), '{"5":"s2","7":"s3"}', 'a claimed approval can lose a line that was not planned')
+  db.prepare(`UPDATE ${T} SET status='approved',decided_by=9,decided_by_name='admin',decided_at='2026-11-02T02:00:00Z',decision_request_id='dec-12345678',applied_json='{"lines":{"6":{"before":3,"target":5,"after":5,"at":"x"}}}',plan_json='{}'`).run()
+  assert.throws(() => db.prepare(`UPDATE ${T} SET superseded_json='{}'`).run(), /inventory_check_approval_immutable/, 'frozen with the decision')
+  // An approval every line of which was replaced is rejected in the commit that replaced the last one (an unclaimed row may be rejected, with no stock applied).
+  const fresh = chain(); seed(fresh); fresh.exec(sql); insertPending(fresh)
+  fresh.prepare(`UPDATE ${T} SET superseded_json='{"5":"s2"}',status='rejected',decided_by=7,decided_by_name='counter',decided_at='2026-11-02T02:00:00Z',decision_request_id='req-12345678'`).run()
+  assert.equal(fresh.prepare(`SELECT status FROM ${T}`).get().status, 'rejected')
+})
+
+check('the progress index serves the question "did another approval of this branch apply anything since this count" by decided or last claimed time', () => {
+  const db = chain(); db.exec(sql)
+  const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT session_id FROM ${T} a WHERE a.branch_id=1 AND COALESCE(a.decided_at,a.applying_at)>'2026-11-02T01:00:00Z'`).all().map(row => row.detail).join(' | ')
+  assert.match(plan, /inventory_check_approvals_progress/, plan)
 })
 
 const chainColumns = (() => { const db = chain(); return Object.fromEntries(HISTORY.map(table => [table, db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('${table}')`).get().n])) })()

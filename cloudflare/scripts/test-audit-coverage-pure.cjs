@@ -83,7 +83,7 @@ const approvalWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryChe
 ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 5 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 6,
   'the approval writer includes its line, approve, reject, takeover and close events in the atomic record (the claim and its release are the other two records: they carry no event because they change no count)')
 ok(approvalWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'the approval event and decision share the authority-guarded transaction')
-ok(/status='pending' AND applied_json=@oldApplied/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read')
+ok(/status='pending' AND \$\{UNCHANGED\}/.test(approvalWriter) && /const UNCHANGED = `applied_json=@oldApplied AND superseded_json=@oldSuperseded`/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read (the lines applied and the lines replaced by newer counts)')
 const inventoryMigration = fs.readFileSync(path.join(routesDir, '../../migrations/0259_inventory_check_sessions.sql'), 'utf8')
 ok(/UNIQUE\(actor_id,request_id\)/.test(inventoryMigration) && /inventory_check_events_no_update BEFORE UPDATE/.test(inventoryMigration)
   && /inventory_check_events_no_delete BEFORE DELETE/.test(inventoryMigration), 'Inventory audit is request-unique and immutable')

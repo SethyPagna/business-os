@@ -2511,7 +2511,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
-      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
+      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError || atomicMark?.answered?.(err)) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)

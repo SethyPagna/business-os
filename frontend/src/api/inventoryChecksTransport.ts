@@ -30,6 +30,8 @@ export type InventoryCheckApproval = {
   closed?: { lines: Record<string, string> }
   /** Session detail only: per product, the stock the counter saw. The count is measured against it. */
   baselines?: Record<string, number>
+  /** Lines a newer count of the same product replaced (one waiting item per product): product id -> the newer count's session. They are never applied. */
+  superseded?: Record<string, string>
 }
 /** The answer to one request of a decision: approving repeats the same request until done. */
 export type InventoryCheckApprovalDecision = {
@@ -43,6 +45,8 @@ export type InventoryCheckApprovalDecision = {
   refused?: Array<{ productId: number; code: string }>
   /** The request took the approval over from an approver who is gone; it moved no stock, repeating it continues. */
   takeover?: true
+  /** The request recorded the plan but used up its statements before any stock was written; nothing is lost, repeating it writes. */
+  deferred?: true
 }
 
 export type InventoryCheckSession = {

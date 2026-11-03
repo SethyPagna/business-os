@@ -21,8 +21,8 @@ export async function runApprovalFlow(args: {
     if (result.done) return { outcome: 'done', last }
     // Everything still unapplied is a line the approval cannot apply (it names the reason): asking again changes nothing, the person decides (fix the cause, or close).
     if (result.refused?.length && result.remaining <= result.refused.length) return { outcome: 'refused', last }
-    // A takeover moves no stock by design: the repeat continues under the new approver's own request.
-    if (result.takeover) continue
+    // A takeover moves no stock by design: the repeat continues under the new approver's own request. So does a request that planned the count and ran out of statements before writing.
+    if (result.takeover || result.deferred) continue
     // Lines the stock writer refused, or a request that moved nothing: stop and let the person look instead of asking again forever.
     if (result.failed?.length || result.applied === 0) return { outcome: 'stalled', last }
   }

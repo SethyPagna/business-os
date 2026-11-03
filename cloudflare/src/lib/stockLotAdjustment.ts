@@ -472,6 +472,9 @@ export async function applyStockLotSet(
       await atomicMark.execute(db, addressedStatements(landing, statements))
     } else await executeStockTransaction(db, addressedStatements(landing, statements), 'retry')
   } catch (error) {
+    // Out of statements before the batch was sent, or the counts approval this line was written for was taken over or closed first: nothing was written, and the receipt wrapper answers it
+    // (a refusal turned into "stock changed" here would tell the person to refresh a count that only needs its next request).
+    if (atomicMark?.answered?.(error)) throw error
     if (recordOperation && requestId) {
       const concurrent = await previous()
       if (concurrent) return replay(concurrent)

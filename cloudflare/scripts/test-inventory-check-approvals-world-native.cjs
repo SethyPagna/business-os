@@ -16,7 +16,8 @@ const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 
 const FREE_CALL_LIMIT = 50
 let groups = 0
-const check = async (name, run) => { await run(); groups++; console.log(`PASS ${name}`) }
+// ONLY=<text> runs the groups whose name contains it (diagnosis only; the gate runs them all).
+const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; await run(); groups++; console.log(`PASS ${name}`) }
 let sequence = 0
 const key = label => `world-${label}-${Date.now().toString(36)}-${++sequence}`
 
@@ -196,22 +197,26 @@ async function main() {
       console.log('  D1 calls per variance step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
     })
 
-    await check('N2 on the real Worker: a second count of a product whose count still waits is refused, and a count is never stacked on a correction a person made after it', async () => {
+    await check('N2 queue-first on the real Worker: a later count of a product whose count waits replaces it (the older approval is rejected in the same commit), and a count is never stacked on a correction a person made after it', async () => {
       const pid = rows[7].pid, start = await stock(pid), total = start.ordinary + start.damaged
       const submit = (counted, who = 'counter') => as(who, 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: pid, countedQuantity: counted, seenQuantity: total, checked: false }] })
       const first = await submit(total - 2)
       assert.equal(first.status, 201, first.text.slice(0, 300))
       const second = await submit(total - 2, 'lead')
-      assert.equal(second.status, 409, second.text.slice(0, 300)); assert.equal(second.json.code, 'inventory_check_count_pending'); assert.deepEqual(second.json.productIds, [pid])
-      assert.equal((await world.all("SELECT COUNT(*) AS n FROM inventory_check_approvals WHERE session_id=?", first.json.item.id))[0].n, 1)
+      assert.equal(second.status, 201, second.text.slice(0, 300)); assert.equal(second.json.approval.status, 'pending')
+      const older = (await world.all('SELECT status,decided_by,superseded_json FROM inventory_check_approvals WHERE session_id=?', first.json.item.id))[0]
+      assert.deepEqual({ ...older }, { status: 'rejected', decided_by: 903, superseded_json: JSON.stringify({ [pid]: second.json.item.id }) }, 'the older line is replaced by the newer count and, being its only line, the older approval is rejected with it')
+      const decided = await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'approve', requestId: key('older') })
+      assert.equal(decided.status, 409); assert.equal(decided.json.code, 'inventory_check_approval_decided')
+      assert.equal((await world.all("SELECT COUNT(*) AS n FROM inventory_check_approvals WHERE status='pending' AND session_id IN (?,?)", first.json.item.id, second.json.item.id))[0].n, 1, 'one waiting item for the product')
       // A person lowers the same stock by hand after the count: applying the count on top of that would take the shortage twice.
       const counted = await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'recounted by hand', client_request_id: key('hand') })
       assert.equal(counted.status, 200, counted.text.slice(0, 300))
       const after = await stock(pid)
-      const stacked = await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'approve', requestId: key('stack') })
+      const stacked = await as('admin', 'POST', `/api/inventory-checks/sessions/${second.json.item.id}/approval`, { decision: 'approve', requestId: key('stack') })
       assert.equal(stacked.status, 409, stacked.text.slice(0, 300)); assert.equal(stacked.json.code, 'inventory_check_stock_adjusted'); assert.deepEqual(stacked.json.productIds, [pid])
       assert.deepEqual(await stock(pid), after, 'nothing was written')
-      assert.equal((await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'reject', requestId: key('stack-reject') })).status, 200, 'it can still be rejected')
+      assert.equal((await as('admin', 'POST', `/api/inventory-checks/sessions/${second.json.item.id}/approval`, { decision: 'reject', requestId: key('stack-reject') })).status, 200, 'it can still be rejected')
     })
 
     await check('a lost answer on the real stock writers (a removal, then a lot-level raise): the approval is claimed, cannot be rejected, and each repeat replays the write that landed instead of applying it twice', async () => {
@@ -224,9 +229,9 @@ async function main() {
       const id = made.json.item.id, request = key('approve'), url = `/api/inventory-checks/sessions/${id}/approval`
       const step = () => as('lead', 'POST', url, { decision: 'approve', requestId: request })
       const lose = async () => {
-        db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
+        await db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
         try { const lost = await step(); assert.equal(lost.status, 503, lost.text.slice(0, 300)); assert.equal(lost.json.code, 'inventory_check_outcome_unknown'); return lost.calls }
-        finally { db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
+        finally { await db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
       }
       const receipts = async () => (await world.all('SELECT COUNT(*) AS n FROM stock_mutation_receipts WHERE request_id LIKE ?', `${request}-%`))[0].n
       const calls = [await lose()]
@@ -235,6 +240,9 @@ async function main() {
       assert.deepEqual({ ...claim }, { applying_request_id: request, applying_by: 903, status: 'pending', applied_json: '{}' })
       const reject = await as('lead', 'POST', url, { decision: 'reject', requestId: key('reject') })
       assert.equal(reject.status, 409); assert.equal(reject.json.code, 'inventory_check_approval_in_progress')
+      // A line being applied is never replaced by a newer count, whatever the figure (even one that matches stock): the answer names the product and tells nobody what the stock holds.
+      const busy = await as('lead', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('busy'), lines: [{ productId: LOST_RAISE, countedQuantity: start[LOST_RAISE].ordinary, seenQuantity: start[LOST_RAISE].ordinary, checked: true }] })
+      assert.equal(busy.status, 409, busy.text.slice(0, 300)); assert.equal(busy.json.code, 'inventory_check_count_in_progress'); assert.deepEqual(busy.json.productIds, [LOST_RAISE])
       const other = await as('admin', 'POST', url, { decision: 'approve', requestId: key('other') })
       assert.equal(other.status, 409); assert.equal(other.json.code, 'inventory_check_approval_in_progress', 'only the approver who started continues: the stock writers receipts are per approver')
       await sell(LOST_LOW)
@@ -260,8 +268,8 @@ async function main() {
       assert.equal(made.status, 201, made.text.slice(0, 300))
       const id = made.json.item.id, url = `/api/inventory-checks/sessions/${id}/approval`, request = key('approve')
       // The lead starts it and the removal lands, but the answer is lost before the approval records it.
-      db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
-      try { const lost = await as('lead', 'POST', url, { decision: 'approve', requestId: request }); assert.equal(lost.status, 503, lost.text.slice(0, 300)) } finally { db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
+      await db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
+      try { const lost = await as('lead', 'POST', url, { decision: 'approve', requestId: request }); assert.equal(lost.status, 503, lost.text.slice(0, 300)) } finally { await db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
       assert.equal((await stock(pid)).ordinary, start.ordinary - 2, 'the removal did land')
       const claimer = (await world.all('SELECT applying_by FROM inventory_check_approvals WHERE session_id=?', id))[0].applying_by
       await db.prepare('UPDATE users SET is_active=0 WHERE id=?').bind(claimer).run()
@@ -280,6 +288,61 @@ async function main() {
         assert.ok(calls.every(count => count <= FREE_CALL_LIMIT), `D1 calls per step: ${calls.join(', ')}`)
         console.log('  D1 calls per takeover step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
       } finally { await db.prepare('UPDATE users SET is_active=1 WHERE id=?').bind(claimer).run() }
+    })
+
+    await check('R1 on the real stock writers: a line written under an approval commits only while that approval is still claimed by its writer; otherwise nothing is written, the receipt is released, and the answer says so', async () => {
+      const [LOWER, RAISER] = [REJECT_A, REJECT_B]
+      const start = await snapshot([LOWER, RAISER])
+      const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [
+        { productId: LOWER, countedQuantity: start[LOWER].ordinary - 2, seenQuantity: start[LOWER].ordinary, checked: false },
+        { productId: RAISER, countedQuantity: start[RAISER].ordinary + 2, seenQuantity: start[RAISER].ordinary, checked: false }] })
+      assert.equal(made.status, 201, made.text.slice(0, 300))
+      const id = made.json.item.id, claimKey = key('claim')
+      const batchOf = pid => world.all('SELECT b.id FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id AND s.branch_id=1 WHERE b.variant_product_id=? ORDER BY b.id LIMIT 1', pid).then(found => found[0].id)
+      const lowering = (request, over = {}) => ({ productId: LOWER, branchId: 1, quantity: 1, type: 'remove', reason: 'Inventory check approved: counted test', client_request_id: request, approvalClaim: { sessionId: id, key: claimKey }, ...over })
+      const raising = async (request, over = {}) => ({ productId: RAISER, branchId: 1, quantity: start[RAISER].ordinary + 1, type: 'set', setScope: 'branch', batchId: await batchOf(RAISER), expectedBranchQuantity: start[RAISER].ordinary,
+        reason: 'Inventory check approved: counted test', client_request_id: request, approvalClaim: { sessionId: id, key: claimKey }, ...over })
+      const receiptsFor = request => world.all('SELECT written FROM stock_mutation_receipts WHERE request_id=?', request)
+      const refusedClean = async (answer, request, pid) => {
+        assert.equal(answer.status, 409, answer.text.slice(0, 300)); assert.equal(answer.json.code, 'inventory_check_claim_lost')
+        assert.deepEqual(await stock(pid), start[pid], 'nothing was written in any ledger'); assert.equal((await receiptsFor(request)).length, 0, 'the receipt this attempt made is released')
+      }
+      // Nobody claimed the approval yet: the claim names a key it does not hold, so neither writer writes.
+      const lowerNoClaim = key('lower'), raiseNoClaim = key('raise')
+      await refusedClean(await as('lead', 'POST', '/api/inventory/adjust', lowering(lowerNoClaim)), lowerNoClaim, LOWER)
+      await refusedClean(await as('lead', 'POST', '/api/inventory/adjust', await raising(raiseNoClaim)), raiseNoClaim, RAISER)
+      const viaCommit = key('commit')
+      const committed = await as('lead', 'POST', '/api/inventory/fast-stock-in/commit', { lines: [{ key: 'one', wire: 'adjust', body: lowering(viaCommit) }] })
+      assert.equal(committed.status, 200, committed.text.slice(0, 300)); assert.deepEqual([committed.json.results[0].ok, committed.json.results[0].code], [false, 'inventory_check_claim_lost'])
+      assert.deepEqual(await stock(LOWER), start[LOWER]); assert.equal((await receiptsFor(viaCommit)).length, 0)
+      const malformed = await as('lead', 'POST', '/api/inventory/adjust', lowering(key('bad'), { approvalClaim: { sessionId: id } }))
+      assert.equal(malformed.status, 400); assert.equal(malformed.json.code, 'invalid_approval_claim')
+      // The lead claims the approval (as the approval engine does) and writes under it: both writers commit, and mark the receipt in the same batch.
+      await db.exec(`UPDATE inventory_check_approvals SET applying_request_id='${claimKey}',applying_by=903,applying_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),plan_json='{"${LOWER}":{"before":1,"target":0,"counted":0,"damaged":0}}' WHERE session_id='${id}'`)
+      const lowerOk = key('lower'), raiseOk = key('raise')
+      const lowered = await as('lead', 'POST', '/api/inventory/adjust', lowering(lowerOk))
+      assert.equal(lowered.status, 200, lowered.text.slice(0, 300)); assert.equal((await stock(LOWER)).ordinary, start[LOWER].ordinary - 1); assert.deepEqual((await receiptsFor(lowerOk)).map(row => row.written), [1])
+      const raised = await as('lead', 'POST', '/api/inventory/adjust', await raising(raiseOk))
+      assert.equal(raised.status, 200, raised.text.slice(0, 300)); assert.equal((await stock(RAISER)).ordinary, start[RAISER].ordinary + 1); assert.deepEqual((await receiptsFor(raiseOk)).map(row => row.written), [1])
+      // Another approver holds the claim now (a takeover committed first): the old claimer's next line writes nothing; and so does a request from the wrong person under the right key.
+      const afterFirst = await snapshot([LOWER, RAISER])
+      const wrongPerson = key('wrong')
+      const intruder = await as('admin', 'POST', '/api/inventory/adjust', lowering(wrongPerson))
+      assert.equal(intruder.status, 409); assert.equal(intruder.json.code, 'inventory_check_claim_lost'); assert.deepEqual(await snapshot([LOWER, RAISER]), afterFirst); assert.equal((await receiptsFor(wrongPerson)).length, 0)
+      await db.exec(`UPDATE inventory_check_approvals SET applying_request_id='${key('taken')}',applying_by=1,takeovers=1,plan_json='{}' WHERE session_id='${id}'`)
+      const lateLower = key('late'), lateRaise = key('late')
+      for (const [request, body, pid] of [[lateLower, lowering(lateLower), LOWER], [lateRaise, await raising(lateRaise, { expectedBranchQuantity: start[RAISER].ordinary + 1, quantity: start[RAISER].ordinary + 2 }), RAISER]]) {
+        const late = await as('lead', 'POST', '/api/inventory/adjust', body)
+        assert.equal(late.status, 409, late.text.slice(0, 300)); assert.equal(late.json.code, 'inventory_check_claim_lost'); assert.equal((await stock(pid)).ordinary, afterFirst[pid].ordinary); assert.equal((await receiptsFor(request)).length, 0)
+      }
+      // A decided approval holds no claim at all.
+      await db.exec(`UPDATE inventory_check_approvals SET status='approved',decided_by=903,decided_by_name='budget_lead',decided_at='2026-11-03T00:00:00.000Z',decision_request_id='world-decided' WHERE session_id='${id}'`)
+      const decidedKey = key('decided')
+      const afterDecided = await as('lead', 'POST', '/api/inventory/adjust', lowering(decidedKey, { approvalClaim: { sessionId: id, key: key('taken') } }))
+      assert.equal(afterDecided.status, 409); assert.equal(afterDecided.json.code, 'inventory_check_claim_lost'); assert.deepEqual(await snapshot([LOWER, RAISER]), afterFirst)
+      // A request that names no approval is untouched by any of this.
+      const plain = await as('lead', 'POST', '/api/inventory/adjust', { productId: LOWER, branchId: 1, quantity: 1, type: 'remove', reason: 'ordinary removal', client_request_id: key('plain') })
+      assert.equal(plain.status, 200, plain.text.slice(0, 300))
     })
 
     await check('Fix stock is held on both real stock write routes while its count waits for approval, opens no receipt, and goes through once the count is rejected', async () => {

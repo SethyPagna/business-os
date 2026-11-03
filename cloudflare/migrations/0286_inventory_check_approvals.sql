@@ -10,8 +10,14 @@
 -- Applying is claimed before any stock is written: applying_request_id / applying_by name the one request (and person) continuing it, and plan_json
 -- holds the exact figures each line was sent with, so a repeat after a lost answer sends the identical request and the stock writers replay it.
 --
+-- One waiting item per product, holding the newest count (queue-first): a later count of a product whose earlier count still waits at the branch closes that older
+-- line as superseded in the same atomic commit that records the new count. superseded_json maps product id -> the session of the newer count; a superseded line is
+-- never applied, never waits, and is not counted as unapplied by a close. A line whose stock figures are planned (plan_json) is being applied and is never superseded:
+-- the newer count is refused instead, so the two never race. An approval left with no line to apply and nothing applied is rejected in that same commit.
+-- The index inventory_check_approvals_progress bounds the read that asks whether another approval applied a product since a count (decided or last claimed time).
+--
 -- PRE:  the three 0259 tables exist; inventory_check_approvals does not. A failed check reads a malformed JSON path and aborts the file.
--- POST: the table exists with its index and four triggers; it holds no row; the three 0259 tables are unchanged (the companion test
+-- POST: the table exists with its two indexes and four triggers; it holds no row; the three 0259 tables are unchanged (the companion test
 --       counts them before and after).
 -- Append-only, LF-only, generic (no client data), idempotent only through the PRE check (a second run aborts on the existing table).
 -- Rollback-safe: the previous Worker never names the table, so it runs unchanged on the new schema.
@@ -52,6 +58,7 @@ CREATE TABLE inventory_check_approvals (
   takeovers INTEGER NOT NULL DEFAULT 0 CHECK(takeovers>=0),
   closed_json TEXT CHECK(closed_json IS NULL OR (json_valid(closed_json) AND json_type(closed_json)='object')),
   plan_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(plan_json) AND json_type(plan_json)='object'),
+  superseded_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(superseded_json) AND json_type(superseded_json)='object'),
   FOREIGN KEY(session_id) REFERENCES inventory_check_sessions(id),
   CHECK((status='pending' AND decided_by IS NULL AND decided_at IS NULL AND decision_request_id IS NULL)
     OR (status<>'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL)),
@@ -59,6 +66,7 @@ CREATE TABLE inventory_check_approvals (
   CHECK(closed_json IS NULL OR status<>'pending')
 );
 CREATE INDEX inventory_check_approvals_pending ON inventory_check_approvals(organization_id, status, submitted_at DESC);
+CREATE INDEX inventory_check_approvals_progress ON inventory_check_approvals(branch_id, COALESCE(decided_at, applying_at));
 
 CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF
   session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json ON inventory_check_approvals
@@ -78,6 +86,6 @@ WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_e
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'trigger') = 4
-  AND (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'index' AND name = 'inventory_check_approvals_pending') = 1
+  AND (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'index' AND name IN ('inventory_check_approvals_pending','inventory_check_approvals_progress')) = 2
   AND (SELECT COUNT(*) FROM inventory_check_approvals) = 0
 THEN 1 ELSE json_extract('[]','$[inventory_check_approvals_0286_post]') END;

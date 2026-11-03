@@ -35,7 +35,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     await assert.rejects(run([refusal('inventory_check_stock_drifted')]), /inventory_check_stock_drifted/)
   }],
   ['every refusal and unknown outcome reaches the caller unchanged', async () => {
-    for (const code of ['inventory_check_stock_inconsistent', 'inventory_check_approve_required', 'inventory_check_conflict', 'inventory_check_approval_in_progress', 'inventory_check_count_below_damaged']) await assert.rejects(run([answer(1, 2), refusal(code)]), new RegExp(code))
+    for (const code of ['inventory_check_stock_inconsistent', 'inventory_check_approve_required', 'inventory_check_conflict', 'inventory_check_approval_in_progress', 'inventory_check_claim_lost', 'inventory_check_count_below_damaged']) await assert.rejects(run([answer(1, 2), refusal(code)]), new RegExp(code))
     await assert.rejects(run([Object.assign(new Error('unknown'), { outcome: 'unknown' })]), /unknown/)
   }],
   ['lines the stock writer refused stop the flow with what landed kept', async () => {
@@ -48,6 +48,12 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(result.outcome, 'done'); assert.equal(sent.length, 3)
     const alone = await run([answer(1, 0, { takeover: true })])
     assert.equal(alone.result.outcome, 'done', 'a takeover that recorded the last line is done')
+  }],
+  ['a request that planned the count and ran out of statements before writing moves no stock on purpose: the flow repeats it, and the repeat writes', async () => {
+    const { result, sent } = await run([answer(0, 2, { deferred: true }), answer(1, 1), answer(1, 0)])
+    assert.equal(result.outcome, 'done'); assert.equal(sent.length, 3)
+    const stuck = await run([answer(0, 2)])
+    assert.equal(stuck.result.outcome, 'stalled', 'an answer that moved nothing without saying why still stops the flow')
   }],
   ['lines the approval cannot apply stop the flow once nothing else is left, with every reason; while other lines can still be applied it goes on', async () => {
     const refused = [{ productId: 7, code: 'inventory_check_count_below_damaged' }]

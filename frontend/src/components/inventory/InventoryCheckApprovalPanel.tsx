@@ -95,12 +95,14 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
   const approve = label(t, 'inventory_check_approve', 'Approve'), reject = label(t, 'inventory_check_reject', 'Reject'), close = label(t, 'inventory_check_close', 'Close')
   const claimedByAnother = pending && approval.applying === true && !approval.applying_request_id
   const closable = pending && (approval.applying === true || approval.applied > 0)
+  // A line a newer count of the same product replaced is never applied: it is not part of what is left to decide.
+  const replaced = approval.superseded ?? {}, toApply = approval.lines - Object.keys(replaced).length
   return <section data-inventory-check-approval={approval.status} aria-label={label(t, 'inventory_check_approval', 'Count approval')}
     className="min-w-0 rounded-lg border border-gray-200 bg-white p-2 text-xs dark:border-zinc-700 dark:bg-zinc-900">
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <ApprovalChip status={approvalChipStatus(approval)} t={t} />
       <span className="tabular-nums">{label(t, 'inventory_check_differences', 'Differences')} {approval.lines}</span>
-      {pending && approval.applied > 0 ? <span data-approval-progress className="tabular-nums text-gray-600 dark:text-gray-300">{approval.applied}/{approval.lines}</span> : null}
+      {pending && approval.applied > 0 ? <span data-approval-progress className="tabular-nums text-gray-600 dark:text-gray-300">{approval.applied}/{toApply}</span> : null}
       {who || when ? <span data-approval-decided className="text-gray-600 dark:text-gray-300">{[who, when].filter(Boolean).join(' · ')}</span> : null}
       <span className="min-w-0 flex-1" />
       {claimedByAnother ? <span data-approval-in-progress className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_in_progress', 'Being applied by another approver')}</span> : null}
@@ -122,16 +124,17 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         const done = approval.applied_lines?.[id]
         const target = done ? done.after : approvalResult(item, approval)
         const short = approvalShortfall(item, approval)
-        const notApplied = approval.closed?.lines[id], cannot = pending ? refused?.[id] : undefined
+        const notApplied = approval.closed?.lines[id], cannot = pending ? refused?.[id] : undefined, replacedBy = replaced[id]
         return <li key={id} data-approval-line={id} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
           <span className="tabular-nums">{label(t, 'inventory_check_approval_counted', 'Counted')} {item.counted_quantity}</span>
           <span data-approval-baseline={id} className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_system', 'System')} {baselineOf(item, approval)}</span>
           {pending && finite(item.current_quantity) ? <span className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_now', 'Now')} {item.current_quantity}</span> : null}
-          {short === null ? null : <span data-approval-clamped={id} className="tabular-nums text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_clamped', 'Stock ran out, short by')} {short}</span>}
+          {replacedBy || short === null ? null : <span data-approval-clamped={id} className="tabular-nums text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_clamped', 'Stock ran out, short by')} {short}</span>}
+          {replacedBy ? <span data-approval-superseded={id} className="text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_superseded', 'Replaced by a newer count')}</span> : null}
           {notApplied ? <span data-approval-not-applied={id} className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_not_applied', 'Not applied')}: {reasonLabel(t, notApplied)}</span> : null}
           {cannot ? <span data-approval-refused={id} className="text-red-700 dark:text-red-300">{label(t, 'inventory_check_approval_cannot_apply', 'Cannot apply')}: {reasonLabel(t, cannot)}</span> : null}
-          {target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
+          {replacedBy || target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
         </li>
       })}
     </ul> : null}

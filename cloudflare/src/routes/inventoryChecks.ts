@@ -8,7 +8,6 @@ import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
 import { getPlanLimits } from '../lib/planTier'
-import { STOCK_MUTATION_STALE_SECONDS } from '../lib/stockMutationReceipt'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
@@ -65,7 +64,7 @@ app.post('/sessions/:id/approval', async c => {
     const rejected = decision === 'reject' || (decision === 'close' && !applied)
     return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null })
   }
-  const limits = { takeoverSeconds: getPlanLimits(c.env).inventoryCheckApprovalTakeoverSeconds, receiptStaleSeconds: STOCK_MUTATION_STALE_SECONDS }
+  const limits = { takeoverSeconds: getPlanLimits(c.env).inventoryCheckApprovalTakeoverSeconds }
   return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, limits, onDecided))
 })
 app.get('/sessions/:id/history', async c => c.json(await inventoryCheckSessionHistory(getDb(c.env), await principal(c), c.req.param('id'), c.req.query())))

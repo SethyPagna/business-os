@@ -119,6 +119,17 @@ const cases: Array<[string, () => Promise<void>]> = [
     await panel.render({ ...base, approval: { ...pending, status: 'rejected' }, refused: { 1: 'inventory_check_product_retired' } })
     assert.equal(panel.findAll(node => node.getAttribute('data-approval-refused') !== null).length, 0, 'a decided count shows no refusals')
   }],
+  ['a line a newer count of the same product replaced says so, shows no result, and is not part of what is left to apply', async () => {
+    const replaced: InventoryCheckApproval = { ...pending, applied: 1, applied_lines: { 2: { before: 4, target: 2, after: 2, at: 'x' } }, superseded: { 1: 'newer-session' } }
+    const panel = await mount({ approval: replaced })
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-superseded') === '1', 'replaced line')), /Replaced by a newer count/)
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-target') === '1').length, 0, 'a replaced line is never set to anything')
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-superseded') === '2').length, 0, 'the other line is untouched')
+    assert.equal(text(panel.find(node => node.getAttribute('data-approval-progress') !== null, 'progress')), '1/1', 'progress counts only the lines that can still be applied')
+    await panel.render({ ...base, approval: { ...pending, status: 'rejected', decided_at: '2026-11-02T03:00:00Z', superseded: { 1: 'newer-session', 2: 'newer-session' } } })
+    assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'rejected')
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-superseded') !== null).length, 2, 'an approval every line of which was replaced says so line by line')
+  }],
   ['approved and rejected counts say so, who decided and when, and keep their lines', async () => {
     const approved = await mount({ approval: { ...pending, status: 'approved', applied: 2, decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss',
       applied_lines: { 1: { before: 5, target: 10, after: 10, at: 'x' }, 2: { before: 1, target: 0, after: 0, at: 'x', clamped: true, wanted: -4 } } } })

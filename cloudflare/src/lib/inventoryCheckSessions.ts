@@ -133,12 +133,14 @@ export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejecte
   /** The approval was ended by a close: the lines applied stay applied (status approved), and these were NOT applied, each with the reason (a refusal code or inventory_check_not_applied). */
   closed?: { lines: Record<string, string> };
   /** Per product, the stock the counter saw when counting: the figure the count is measured against. */
-  baselines?: Record<string, number> }
+  baselines?: Record<string, number>;
+  /** Lines replaced by a newer count of the same product (queue-first: one waiting item per product): product id -> the session of the newer count. They are never applied. */
+  superseded?: Record<string, string> }
 export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
   decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string;
-  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string }
+  applying_request_id: string | null; applying_by: number | null; applying_at: string | null; takeovers: number; closed_json: string | null; baselines_json?: string; superseded_json?: string }
 export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json,applying_request_id,applying_by,applying_at,takeovers,closed_json'
-export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json`
+export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json,superseded_json`
 let approvalsSchemaReady = false
 /** True once migration 0286 (the table and its four triggers) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
 export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
@@ -166,6 +168,14 @@ export function approvalBaselines(json: string | undefined): Record<string, numb
     return Object.fromEntries(entries.filter(([, value]) => typeof value === 'number' && Number.isFinite(value))) as Record<string, number>
   } catch { return {} }
 }
+/** The lines a newer count replaced: product id -> the session of that count. */
+export function supersededLines(json: string | undefined): Record<string, string> {
+  try {
+    const parsed = JSON.parse(json ?? '{}') as unknown
+    const entries = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.entries(parsed) : []
+    return Object.fromEntries(entries.filter(([, value]) => typeof value === 'string')) as Record<string, string>
+  } catch { return {} }
+}
 /** The lines a close left unapplied, each with its reason. */
 export function closedLines(json: string | null): { lines: Record<string, string> } | undefined {
   if (!json) return undefined
@@ -181,7 +191,8 @@ export function projectApproval(actor: Actor, row: ApprovalRow, detail = false):
     ...(closed ? { closed } : {}),
     ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
     ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
-    ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}) } : {}) }
+    ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}),
+      ...(Object.keys(supersededLines(row.superseded_json)).length ? { superseded: supersededLines(row.superseded_json) } : {}) } : {}) }
 }
 /** One query for the approvals of the given sessions, inside the viewer's organization. Callers ask only for viewers who may see stock. */
 export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], detail = false): Promise<ApprovalRow[]> {
@@ -190,9 +201,10 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
   return db.prepare(`SELECT ${detail ? APPROVAL_DETAIL_COLUMNS : APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
-/** A line waits when its approval is pending, it is a difference, and no stock write for it has been recorded. */
-const WAITING_LINE_SQL = `a.status='pending' AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001
-  AND json_extract(a.applied_json,'$.lines."'||i.product_id||'"') IS NULL`
+/** A line waits when its approval is pending, it is a difference, no stock write for it has been recorded and no newer count of the product has replaced it. */
+const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
+  AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL`
+const WAITING_LINE_SQL = waitingLineSql('a', 'i')
 /** Does this one count line still wait for approval? (Fix stock is held while it does.) */
 export async function lineWaitsForApproval(db: D1Compat, sessionId: string, productId: number): Promise<boolean> {
   const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
@@ -302,7 +314,7 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
   catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
-    if (text.includes('inventory_check_count_pending')) fail(409, 'inventory_check_count_pending')
+    if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
       physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
       fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
@@ -444,6 +456,36 @@ export async function createInventoryCheckSession(db: D1Compat, principal: Inven
   const saved = await commit(db, principal, actor, statements, key, hash)
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
+/** The waiting lines of the submitted products at one branch whose stock figures are planned: they are being applied now and cannot be replaced. */
+const BEING_APPLIED_SQL = `FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
+  WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND i.product_id IN (SELECT value FROM json_each(@submitted)) AND ${WAITING_LINE_SQL}
+    AND json_extract(a.plan_json,'$."'||i.product_id||'"') IS NOT NULL`
+/**
+ * Queue-first: one waiting item per product, holding the newest count. A count of a product whose earlier count still waits at this branch closes that older line as
+ * superseded in the same atomic commit that records the new one; the new count then queues itself if it differs from stock, or is Done if it equals it. An approval left
+ * with nothing to apply and nothing applied is rejected there too. A line that is being applied right now (its stock figures are planned) is never replaced: the whole
+ * submission is refused, whatever the figures say, so a refusal tells nobody what the stock holds; the guard sits ahead of the replacement in the same batch, so the two never race.
+ * Four statements however many approvals are touched, and the same four for every submission (a commit that raced another still replaces what that one queued).
+ */
+function supersedeStatements(params: Record<string, unknown>): Statement[] {
+  const A = 'inventory_check_approvals'
+  const waitingOfApproval = `FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.product_id IN (SELECT value FROM json_each(@submitted)) AND ${waitingLineSql(A, 'i')}`
+  return [
+    guard(`NOT EXISTS(SELECT 1 ${BEING_APPLIED_SQL})`, 'inventory_check_count_in_progress', params),
+    { sql: `UPDATE ${A} SET superseded_json=json_patch(superseded_json,(SELECT json_group_object(CAST(i.product_id AS TEXT),@id) ${waitingOfApproval}))
+      WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND EXISTS(SELECT 1 ${waitingOfApproval})`, params },
+    { sql: `UPDATE ${A} SET status='rejected',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_request_id=@key
+      WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND applying_request_id IS NULL AND applied_json='{}'
+        AND EXISTS(SELECT 1 FROM json_each(superseded_json) WHERE value=@id)
+        AND NOT EXISTS(SELECT 1 FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL
+          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL)`, params },
+    { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      SELECT a.session_id,CAST(j.key AS INTEGER),@actorId,@actorName,'observe',@key||'-superseded-'||a.session_id||'-'||j.key,@hash,
+        json_object('approval','pending'),json_object('approval',a.status,'superseded_by',@id),json_object('sessionRevision',s.revision),@now
+      FROM ${A} a JOIN inventory_check_sessions s ON s.id=a.session_id, json_each(a.superseded_json) j
+      WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND j.value=@id`, params },
+  ]
+}
 /** A differing count with no typed note carries this sentence; the page shows its own translation in its place. */
 export const DEFAULT_COUNT_NOTE = 'Count differs from stock'
 const COUNT_EPSILON = 0.000000001
@@ -513,17 +555,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   if (members.some(member => !member.product || !member.baseline)) fail(409, 'inventory_check_baseline_changed')
   // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
-  const differingIds = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).map(item => item.line.productId) : []
-  const differing = differingIds.length
-  // One shortage is counted once: a differing count of a product whose earlier count still waits at this branch is refused (that count is measured from the same stock, so applying both would apply it twice).
-  // The read names the products; the guard in the commit below is the judge when two submissions race.
-  const waitingParams = { organization: actor.organization_id, branchId, differingIds: JSON.stringify(differingIds) }
-  const WAITING_AT_BRANCH = `FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
-    WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND i.product_id IN (SELECT value FROM json_each(@differingIds)) AND ${WAITING_LINE_SQL}`
-  if (differing) {
-    const waiting = await db.prepare(`SELECT DISTINCT i.product_id ${WAITING_AT_BRANCH} ORDER BY i.product_id`).all<{ product_id: number }>(waitingParams)
-    if (waiting.length) fail(409, 'inventory_check_count_pending', { productIds: waiting.map(row => row.product_id) })
-  }
+  const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
   const scope = { membership: 'submission' }
   // The figure a count is later measured against is the stock at submit. For a viewer who sees stock it equals what the counter saw (checked above); for anyone else it is the only trustworthy figure.
   const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
@@ -543,7 +575,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
       WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
       OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
       OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
-    ...(differing ? [guard(`NOT EXISTS(SELECT 1 ${WAITING_AT_BRANCH})`, 'inventory_check_count_pending', waitingParams)] : []),
+    ...(options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []),
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
@@ -558,7 +590,16 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
       VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson)`, params: { ...params, differing, seenJson } }] : []),
   ]
-  const saved = await commit(db, principal, actor, statements, key, hash)
+  let saved: Awaited<ReturnType<typeof commit>>
+  try { saved = await commit(db, principal, actor, statements, key, hash) }
+  catch (error) {
+    // The refusal names the products, read only now that it happened: it is the same for every count of them, whatever the figure typed.
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_count_in_progress') {
+      const busy = await db.prepare(`SELECT DISTINCT i.product_id ${BEING_APPLIED_SQL} ORDER BY i.product_id`).all<{ product_id: number }>({ organization: actor.organization_id, branchId, submitted: JSON.stringify(productIds) }).catch(() => [])
+      fail(409, 'inventory_check_count_in_progress', { productIds: busy.map(row => row.product_id) })
+    }
+    throw error
+  }
   // Told once, after the commit that made the approval (never for a replay); an announcement never fails the submission it announces.
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
@@ -638,7 +679,7 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
   actor = await currentInventoryCheckActor(db, principal)
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
   const access = getInventoryCheckAccess(actor), showCount = access.fields.stock || session.created_by === actor.id
-  const approvalKeys = access.fields.stock ? ['approval', 'stock_before', 'stock_after', 'lines'] : []
+  const approvalKeys = access.fields.stock ? ['approval', 'stock_before', 'stock_after', 'lines', 'superseded_by'] : []
   return { items: rows.map(row => {
     const project = (json: string) => {
       const parsed = JSON.parse(json) as Record<string, unknown> | null

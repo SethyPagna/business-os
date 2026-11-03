@@ -23,14 +23,21 @@ function load(file) {
   new Function('require', 'module', 'exports', source)(id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id.endsWith('.ts') ? id : `${id}.ts`)) : require(id), module, module.exports)
   return module.exports
 }
+const { APPROVAL_CLAIM_HELD_SQL, APPROVAL_CLAIM_LOST } = load(path.join(__dirname, '../src/lib/stockMutationReceipt.ts'))
 // The stock writer double: the Set sessions' commit. It enforces the line cap, refuses what the test says to refuse, and applies a Set to the tables the stock reader reads.
-const writer = { cap: 24, fail: new Set(), calls: [], replays: 0, afterWrite: null }
+const writer = { cap: 24, fail: new Set(), calls: [], replays: 0, afterWrite: null, beforeLine: null }
 cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { runStockInCommit: async (c, lines) => {
   assert.ok(c.get('user'), 'the approver is the acting user')
   const results = []
   for (const [index, line] of lines.entries()) {
     if (index >= writer.cap) { results.push({ ok: false, key: line.key, error: 'deferred', code: 'deferred' }); continue }
     const body = line.body, actor = c.get('user').id
+    // A test holds a request here, just before its receipt is created, to let another approver act first.
+    if (writer.beforeLine) await writer.beforeLine(body, actor)
+    // The real writers check the claim inside the batch that writes the stock (the receipt's written mark): nothing may be awaited between this check and the write below.
+    if (body.approvalClaim && !db.prepare(`SELECT ${APPROVAL_CLAIM_HELD_SQL} AS held`).get({ claimSession: body.approvalClaim.sessionId, claimKey: body.approvalClaim.key, actor }).held) {
+      results.push({ ok: false, key: line.key, error: 'claim lost', code: APPROVAL_CLAIM_LOST }); continue
+    }
     assert.equal(line.wire, 'adjust'); assert.match(body.client_request_id, /^[A-Za-z0-9_-]{8,120}$/); assert.ok(body.reason.length > 0 && body.reason.length < 200)
     // The stock writers' receipt: per approver and request id, the same request is replayed, a different one under the same id is refused.
     const canonical = JSON.stringify(body)
@@ -68,7 +75,7 @@ const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.t
 const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 const { __resetPlanTierCacheForTests } = load(path.join(__dirname, '../src/lib/planTier.ts'))
 
-let db, failApprovalRecord = false, beforeBatch = null, planEnv = {}
+let db, failApprovalRecord = false, beforeBatch = null, beforeBatchWhen = null, planEnv = {}
 // The Telegram alerts the route announces: a spy on the same global hook the Worker installs.
 const alerts = []
 globalThis[Symbol.for('business-os.review-alert.v1')] = { announce: async (_env, event) => { alerts.push(event) }, nameBeforeChange: async () => null }
@@ -80,6 +87,8 @@ function binding() {
   }
   return { prepare, async batch(statements) {
     if (beforeBatch && statements.some(statement => /INSERT INTO inventory_check_sessions/.test(statement.sql))) { const run = beforeBatch; beforeBatch = null; run(statements) }
+    // A write that commits between a decision's reads and its batch: runs once, just before the first batch holding a matching statement.
+    if (beforeBatchWhen && statements.some(statement => beforeBatchWhen.test.test(statement.sql))) { const run = beforeBatchWhen.run; beforeBatchWhen = null; run() }
     if (failApprovalRecord && statements.some(statement => /UPDATE inventory_check_approvals SET (applied_json|status)/.test(statement.sql))) throw new Error('D1 unavailable')
     db.exec('BEGIN')
     try { const result = []; for (const statement of statements) result.push(await statement.all()); db.exec('COMMIT'); return result }
@@ -113,7 +122,7 @@ function reset() {
   }
   // 910003 carries two damaged units: its stock now is 5 ordinary + 2 damaged = 7 (damaged units are not part of Set).
   db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910003,1,2)").run()
-  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null; planEnv = {}; __resetPlanTierCacheForTests(); alerts.length = 0
+  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null; beforeBatchWhen = null; planEnv = {}; __resetPlanTierCacheForTests(); alerts.length = 0; writer.beforeLine = null
 }
 const setSwitches = (simple, fix) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
@@ -143,10 +152,10 @@ let groups = 0
 // ONLY=<text> runs the groups whose name contains it (diagnosis only; the gate runs them all).
 const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; await run(); groups++; console.log(`PASS ${name}`) }
 /** A pending approval for one product created behind the API's back, as data from before a rule existed (or a racing submission) would be. */
-const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5 } = {}) => {
-  db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,1,1,?,'','closed',0,'{\"membership\":\"submission\"}',?,?,?)").run(sessionId, COUNTER, submittedAt, submittedAt, submittedAt)
-  db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES(?,?,1,'{}',?,'{}','issue',?,'Count differs from stock',1,?,?)").run(sessionId, productId, seen, counted, COUNTER, submittedAt)
-  db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json) VALUES(?,1,1,'pending',1,?,?,?)").run(sessionId, COUNTER, submittedAt, JSON.stringify({ [productId]: seen }))
+const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5, branchId = 1, organizationId = 1 } = {}) => {
+  db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,?,?,'','closed',0,'{\"membership\":\"submission\"}',?,?,?)").run(sessionId, organizationId, branchId, COUNTER, submittedAt, submittedAt, submittedAt)
+  db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES(?,?,?,'{}',?,'{}','issue',?,'Count differs from stock',1,?,?)").run(sessionId, productId, branchId, seen, counted, COUNTER, submittedAt)
+  db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json) VALUES(?,?,?,'pending',1,?,?,?)").run(sessionId, organizationId, branchId, COUNTER, submittedAt, JSON.stringify({ [productId]: seen }))
 }
 /** A stock movement of the products ledger (the real writers record one for every change); the double writer records none, so a test adds the ones it needs. */
 const movement = (productId, type, { reason = 'test', secondsAfterNow = 1 } = {}) => db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,created_at) VALUES(?,?,1,'One',?,1,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
@@ -686,34 +695,134 @@ async function main() {
     assert.equal((await submit([line(910002, 6, { seenQuantity: 0 })], { requestId: 'n3-off-000001' })).status, 201)
   })
 
-  await check('N2: the same product counted again while its first count waits is refused; an approval never applies a line that a later approval or a manual correction already settled', async () => {
-    const sessionCount = () => db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n
-    reset(); setSwitches('on', 'on')
-    const first = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-first-0001' })
-    assert.equal(first.status, 201)
-    // The second count of one shortage, seen 5 counted 3 again, would apply it twice (5 - 2 - 2 = 1).
-    const second = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-second-001' }, LEAD)
-    assert.equal(second.status, 409, JSON.stringify(second.body)); assert.equal(second.body.code, 'inventory_check_count_pending'); assert.deepEqual(second.body.productIds, [910002])
-    assert.equal(sessionCount(), 1, 'nothing is recorded for it')
-    // Only a DIFFERING count of a waiting product is refused: a matching one, and a differing count of another product, are fine.
-    const other = await submit([line(910004, 3, { seenQuantity: 5 }), line(910002, 5)], { requestId: 'n2-other-0001' }, LEAD)
-    assert.equal(other.status, 201, JSON.stringify(other.body))
-    assert.equal((await decide(first.body.item.id, { requestId: 'n2-approve-001' })).status, 200); assert.equal(ordinary(910002), 3, 'one shortage, applied once')
-    // Once decided it no longer blocks: the product can be counted again, against the stock it has now.
-    const again = await submit([line(910002, 2, { seenQuantity: 3 })], { requestId: 'n2-again-0001' }, LEAD)
-    assert.equal(again.status, 201); assert.equal((await decide(again.body.item.id, { requestId: 'n2-approve-002' })).status, 200); assert.equal(ordinary(910002), 2)
-    // A rejected count does not block either.
-    reset(); setSwitches('on', 'on')
-    const rejected = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-reject-0001' })
-    assert.equal((await decide(rejected.body.item.id, { decision: 'reject', requestId: 'n2-rej-000001' })).status, 200)
-    assert.equal((await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'n2-after-rej-1' }, LEAD)).status, 201)
-    // The race: both submissions pass the read, the commit is the judge (the guard sits in the same atomic batch).
-    reset(); setSwitches('on', 'on')
-    beforeBatch = () => injectPending('n2-racing-session', 910002)
-    const raced = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-race-00001' })
-    assert.equal(raced.status, 409); assert.equal(raced.body.code, 'inventory_check_count_pending')
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE id<>'n2-racing-session'").get().n, 0, 'the losing submission left nothing behind')
+  const approvalOf = sessionId => db.prepare('SELECT * FROM inventory_check_approvals WHERE session_id=?').get(sessionId)
+  const supersededOf = sessionId => JSON.parse(approvalOf(sessionId).superseded_json)
 
+  await check('N2 queue-first: a later count of a product that waits closes the older line as superseded in the same commit, and the newer differing count queues itself: one shortage, applied once', async () => {
+    reset(); setSwitches('on', 'on')
+    const first = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-first-0001' })
+    assert.equal(first.status, 201)
+    const second = await submit([line(910002, 2, { seenQuantity: 5 })], { requestId: 'n2q-second-001' }, LEAD)
+    assert.equal(second.status, 201, JSON.stringify(second.body)); assert.equal(second.body.approval.status, 'pending')
+    assert.deepEqual(supersededOf(first.body.item.id), { 910002: second.body.item.id }, 'the older line is closed as superseded by the newer session')
+    assert.equal(approvalOf(first.body.item.id).status, 'pending', 'its other line still waits'); assert.equal(approvalOf(second.body.item.id).status, 'pending')
+    // The people who decide see it, and the products list marks only the waiting lines.
+    const detail = (await sessions('GET', `/sessions/${first.body.item.id}`)).body
+    assert.deepEqual(detail.approval.superseded, { 910002: second.body.item.id }); assert.equal(detail.approval.lines, 2)
+    const marked = (await products('branchId=1&pageSize=12')).body.items.filter(item => item.check_pending).map(item => item.id).sort()
+    assert.deepEqual(marked, [910002, 910004], 'one waiting item per product')
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id WHERE i.product_id=910002 AND a.status='pending' AND a.superseded_json NOT LIKE '%910002%'").get().n, 1)
+    // The audit trail of the older count says what happened to it, to the people who may see approvals.
+    const trail = (await sessions('GET', `/sessions/${first.body.item.id}/history?page=1&pageSize=50`)).body.items.find(item => item.after?.superseded_by)
+    assert.equal(trail.product_id, 910002); assert.equal(trail.after.superseded_by, second.body.item.id); assert.equal(trail.after.approval, 'pending')
+    // Approving the older applies only the line that still waits; the newer count is measured from the same stock and applies once.
+    const olderDone = await decide(first.body.item.id, { requestId: 'n2q-approve-001' })
+    assert.equal(olderDone.status, 200, JSON.stringify(olderDone.body)); assert.equal(olderDone.body.done, true); assert.equal(olderDone.body.approval.status, 'approved')
+    assert.deepEqual(Object.keys(olderDone.body.approval.applied_lines), ['910004'], 'the superseded line is never applied'); assert.equal(ordinary(910004), 3); assert.equal(ordinary(910002), 5)
+    assert.equal((await decide(second.body.item.id, { requestId: 'n2q-approve-002' })).status, 200); assert.equal(ordinary(910002), 2, 'saw 5, counted 2: one shortage applied once (not 5 - 2 - 2)')
+    assert.deepEqual(writer.calls.map(call => call.productId), [910004, 910002])
+
+    // A closed older approval does not hide its superseded lines either: Close records the lines that were not applied, never the ones a newer count replaced.
+    reset(); setSwitches('on', 'on')
+    const kept = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-close-0001' })
+    const newer = await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'n2q-close-0002' }, LEAD)
+    const closedOlder = await decide(kept.body.item.id, { decision: 'close', requestId: 'n2q-close-dec01' })
+    assert.equal(closedOlder.status, 200, JSON.stringify(closedOlder.body)); assert.deepEqual(closedOlder.body.approval.closed, { lines: { 910004: 'inventory_check_not_applied' } }); assert.equal(closedOlder.body.approval.status, 'rejected')
+    assert.equal(approvalOf(newer.body.item.id).status, 'pending')
+  })
+
+  await check('N2 queue-first: an older approval left with no line to apply is rejected in the same commit; a newer count that matches stock is Done and still closes the older line; nothing else is touched', async () => {
+    reset(); setSwitches('on', 'on')
+    const first = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2q-all-000001' })
+    const matching = await submit([line(910002, 5, { seenQuantity: 5, checked: true })], { requestId: 'n2q-match-0001' }, LEAD)
+    assert.equal(matching.status, 201, JSON.stringify(matching.body)); assert.equal('approval' in matching.body, false, 'a count that matches stock queues nothing')
+    assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE session_id=?').get(matching.body.item.id).state, 'done')
+    const older = approvalOf(first.body.item.id)
+    assert.equal(older.status, 'rejected'); assert.equal(older.decided_by, LEAD); assert.equal(older.decision_request_id, 'n2q-match-0001'); assert.deepEqual(JSON.parse(older.superseded_json), { 910002: matching.body.item.id })
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_approvals').get().n, 1, 'no approval was made for the matching count')
+    const late = await decide(first.body.item.id, { requestId: 'n2q-late-00001' })
+    assert.equal(late.status, 409); assert.equal(late.body.code, 'inventory_check_approval_decided'); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 5, 'stock is untouched')
+    const shown = (await sessions('GET', `/sessions/${first.body.item.id}`)).body.approval
+    assert.equal(shown.status, 'rejected'); assert.deepEqual(shown.superseded, { 910002: matching.body.item.id })
+    assert.equal((await products('branchId=1&pageSize=12')).body.items.some(item => item.check_pending), false, 'nothing waits any more')
+    // A replay of the submission that replaced it changes nothing more.
+    const events = () => db.prepare('SELECT COUNT(*) AS n FROM inventory_check_events').get().n, before = events()
+    const replay = await submit([line(910002, 5, { seenQuantity: 5, checked: true })], { requestId: 'n2q-match-0001' }, LEAD)
+    assert.equal(replay.status, 200, JSON.stringify(replay.body)); assert.equal(replay.body.created, false); assert.equal(events(), before)
+
+    // A replaced line no longer waits: the product is not marked as waiting and Fix stock is not held for it, while the line of the same approval that still waits is.
+    reset(); setSwitches('on', 'on')
+    const pair = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-partial-001' })
+    assert.equal((await submit([line(910002, 5, { seenQuantity: 5, checked: true })], { requestId: 'n2q-partial-002' }, LEAD)).status, 201)
+    assert.deepEqual((await products('branchId=1&pageSize=12')).body.items.filter(item => item.check_pending).map(item => item.id), [910004], 'only the line that still waits is marked')
+    const { fixStockHeldByApproval } = load(path.join(__dirname, '../src/lib/inventoryCheckFixStock.ts')), { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
+    const held = productId => fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${pair.body.item.id}_${productId}_a1b2c3d4e5f60718`)
+    assert.deepEqual([await held(910002), await held(910004)], [false, true], 'Fix stock is held only for the line that still waits')
+
+    // Another product, another branch's waiting line and another organization's are never touched.
+    reset(); setSwitches('on', 'on')
+    const other = await submit([line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-other-0001' })
+    injectPending('n2q-branch-two', 910002, { branchId: 2 }); injectPending('n2q-org-two', 910002, { organizationId: 2 })
+    const recount = await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'n2q-recount-001' }, LEAD)
+    assert.equal(recount.status, 201, JSON.stringify(recount.body))
+    for (const id of [other.body.item.id, 'n2q-branch-two', 'n2q-org-two']) assert.deepEqual(supersededOf(id), {}, id)
+  })
+
+  await check('N2 queue-first: a line being applied right now is never replaced: the count is refused with its reason, the same for every figure typed, and a line nobody is applying never refuses anyone', async () => {
+    const sessionCount = () => db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    const first = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-claim-0001' })
+    assert.equal((await decide(first.body.item.id, { requestId: 'n2q-claim-dec01' })).status, 200) // 910002 applied; 910004 planned and being applied
+    const planned = Object.keys(JSON.parse(approvalOf(first.body.item.id).plan_json))
+    assert.deepEqual(planned, ['910004'])
+    const sessionsBefore = sessionCount(), answers = new Set()
+    for (let figure = 0; figure <= 9; figure++) {
+      const refused = await submit([line(910004, figure)], { requestId: `n2q-blind-${figure}-0001` }, BLIND)
+      assert.equal(refused.status, 409, `${figure}: ${JSON.stringify(refused.body)}`); assert.equal(refused.body.code, 'inventory_check_count_in_progress'); assert.deepEqual(refused.body.productIds, [910004])
+      answers.add(JSON.stringify(refused.body))
+    }
+    assert.equal(answers.size, 1, 'the answer does not depend on the figure typed: it tells nobody what the stock holds')
+    assert.equal(sessionCount(), sessionsBefore, 'nothing was recorded'); assert.deepEqual(supersededOf(first.body.item.id), {})
+    // The same count of a product that is not being applied is accepted: the line already applied, another product, and a count that also names the busy one is refused whole.
+    assert.equal((await submit([line(910002, 3, { seenQuantity: 3 })], { requestId: 'n2q-applied-001' }, LEAD)).status, 201, 'a line already applied no longer waits')
+    assert.equal((await submit([line(910006, 3, { seenQuantity: 5 })], { requestId: 'n2q-product-001' }, LEAD)).status, 201)
+    const whole = await submit([line(910004, 3, { seenQuantity: 5 }), line(910008, 3, { seenQuantity: 5 })], { requestId: 'n2q-whole-0001' }, LEAD)
+    assert.equal(whole.status, 409); assert.deepEqual(whole.body.productIds, [910004]); assert.equal(db.prepare("SELECT COUNT(*) AS n FROM inventory_check_items WHERE product_id=910008").get().n, 0)
+    // Once the approval is finished the product can be counted again.
+    assert.equal((await decide(first.body.item.id, { requestId: 'n2q-claim-dec01' })).status, 200)
+    assert.equal((await submit([line(910004, 2, { seenQuantity: 3 })], { requestId: 'n2q-after-0001' }, LEAD)).status, 201)
+
+    // A line nobody is applying: every figure is accepted, so a blind counter learns nothing from the answer either (the figures 0-9 against stock 5 were all refused but one before).
+    reset(); setSwitches('on', 'on')
+    const waiting = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2q-wait-00001' })
+    for (let figure = 0; figure <= 9; figure++) assert.equal((await submit([line(910002, figure)], { requestId: `n2q-free-${figure}-0001` }, BLIND)).status, 201, String(figure))
+    assert.deepEqual(Object.keys(supersededOf(waiting.body.item.id)), ['910002'])
+    const waitingNow = db.prepare("SELECT COUNT(DISTINCT a.session_id) AS n FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id WHERE a.status='pending' AND i.product_id=910002 AND json_extract(a.superseded_json,'$.\"910002\"') IS NULL").get().n
+    assert.equal(waitingNow, 1, 'only the newest count of the product waits')
+  })
+
+  await check('N2 queue-first: replacing and applying never race: the refusal is judged in the commit that would replace, and an approver that read the old lines cannot claim over a replacement', async () => {
+    // A claim lands between the submission's check and its commit (the guard sits in the same atomic batch, ahead of the replacement).
+    reset(); setSwitches('on', 'on')
+    const first = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2q-race-00001' })
+    beforeBatch = () => injectClaim(first.body.item.id, { plan: { 910002: planOf(5, 3, 3) } })
+    const racing = await submit([line(910002, 2, { seenQuantity: 5 })], { requestId: 'n2q-race-00002' }, LEAD)
+    assert.equal(racing.status, 409, JSON.stringify(racing.body)); assert.equal(racing.body.code, 'inventory_check_count_in_progress'); assert.deepEqual(racing.body.productIds, [910002])
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n, 1, 'the losing submission left nothing behind'); assert.deepEqual(supersededOf(first.body.item.id), {})
+
+    // A replacement lands between an approver's read and his claim: the claim is refused (the approval row is no longer as he read it), and his repeat applies only what still waits.
+    reset(); setSwitches('on', 'on')
+    const older = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'n2q-race-00003' })
+    beforeBatchWhen = { test: /SET applying_request_id=\?/, run: () => db.prepare('UPDATE inventory_check_approvals SET superseded_json=? WHERE session_id=?').run(JSON.stringify({ 910002: 'newer-session' }), older.body.item.id) }
+    const lost = await decide(older.body.item.id, { requestId: 'n2q-race-dec01' })
+    assert.equal(lost.status, 409, JSON.stringify(lost.body)); assert.equal(lost.body.code, 'inventory_check_conflict'); assert.equal(writer.calls.length, 0, 'nothing was written for a line that was just replaced')
+    const retried = await decide(older.body.item.id, { requestId: 'n2q-race-dec01' })
+    assert.equal(retried.status, 200, JSON.stringify(retried.body)); assert.equal(retried.body.approval.status, 'approved')
+    assert.equal(ordinary(910002), 5, 'the replaced line is never applied'); assert.equal(ordinary(910004), 3)
+  })
+
+  await check('N2: an approval never applies a line that a later approval or a manual correction already settled', async () => {
+    reset(); setSwitches('on', 'on')
     // At approval: a line another approval of the same branch already applied after this count was submitted is refused (data from before the rule, or a race that got through).
     reset(); setSwitches('on', 'on')
     const early = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-early-0001' })
@@ -875,15 +984,12 @@ async function main() {
     db.prepare('UPDATE users SET must_change_password=1 WHERE id=?').run(ADMIN)
     assert.equal((await decide(id, { requestId: 'n1-pass-lead-01' }, LEAD)).status, 200); assert.equal(eventOf('n1-pass-lead-01-takeover').after.reason, 'inactive')
 
-    // A write that is still running (a receipt without a write, younger than the writers' crash window) is never taken over; an older one wrote nothing and is replanned.
+    // A receipt that wrote nothing (a request still running, or one that crashed) says nothing and holds nobody back: the claim moves with the takeover, so that request can no longer write (R1), and the line is planned again.
     reset(); setSwitches('on', 'on')
     id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-flight-sub-1' })).body.item.id
     injectClaim(id, { key: 'n1-flight-key-01', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-flight-key-01-910002', { written: 0, ageSeconds: 10 }); deactivate(ADMIN)
     const running = await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)
-    assert.equal(running.status, 409); assert.equal(running.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().applying_by, ADMIN)
-    db.prepare("UPDATE stock_mutation_receipts SET created_at=strftime('%Y-%m-%d %H:%M:%S','now','-200 seconds')").run()
-    const crashed = await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)
-    assert.equal(crashed.status, 200, JSON.stringify(crashed.body)); assert.equal(crashed.body.takeover, true); assert.equal(crashed.body.applied, 0, 'it wrote nothing, so it is planned again')
+    assert.equal(running.status, 200, JSON.stringify(running.body)); assert.equal(running.body.takeover, true); assert.equal(running.body.applied, 0, 'it wrote nothing, so it is planned again'); assert.equal(approvalRow().applying_by, LEAD)
     assert.equal((await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)).status, 200); assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
     assert.equal(writer.calls[0].client_request_id, 'n1-flight-lead-1-910002')
   })
@@ -898,6 +1004,9 @@ async function main() {
     assert.equal(stuck.status, 409); assert.equal(stuck.body.code, 'inventory_check_count_below_damaged')
     assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-close-reject' })).status, 409, 'rejecting after a line landed is still refused')
     const tables = () => stockRows().slice(0, 5), before = tables(), writes = writer.calls.length
+    const underActiveClaimer = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'Damaged units were tagged' }, LEAD)
+    assert.equal(underActiveClaimer.status, 409); assert.equal(underActiveClaimer.body.code, 'inventory_check_approval_in_progress', 'another approver closes only once the claimer is gone'); assert.equal(approvalRow().status, 'pending')
+    idle(1000)
     const closed = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'Damaged units were tagged' }, LEAD)
     assert.equal(closed.status, 200, JSON.stringify(closed.body)); assert.equal(closed.body.done, true); assert.equal(closed.body.approval.status, 'approved', 'something was applied')
     assert.deepEqual(closed.body.approval.closed, { lines: { 910004: 'inventory_check_count_below_damaged' } }); assert.equal(closed.body.approval.applied, 1)
@@ -942,13 +1051,13 @@ async function main() {
     assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines), ['910002']); assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
     assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910002").get().state, 'done')
 
-    // A write still running blocks a close; one that crashed (older than the writers' window) wrote nothing: closed with nothing applied, recorded as rejected.
+    // A claimer who is still active holds a close back from other approvers; once he is gone a receipt that wrote nothing does not: the close moves the claim, so that request can no longer write, and nothing was applied.
     reset(); setSwitches('on', 'on')
     id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-fl-close-sub1' })).body.item.id
     injectClaim(id, { key: 'n1-fl-close-key1', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-fl-close-key1-910002', { written: 0, ageSeconds: 10 })
     const busy = await decide(id, { decision: 'close', requestId: 'n1-fl-close-lead' }, LEAD)
     assert.equal(busy.status, 409); assert.equal(busy.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().status, 'pending')
-    db.prepare("UPDATE stock_mutation_receipts SET created_at=strftime('%Y-%m-%d %H:%M:%S','now','-200 seconds')").run()
+    idle(1000)
     const idleClose = await decide(id, { decision: 'close', requestId: 'n1-fl-close-lead' }, LEAD)
     assert.equal(idleClose.status, 200, JSON.stringify(idleClose.body)); assert.equal(idleClose.body.approval.status, 'rejected', 'nothing was applied'); assert.deepEqual(idleClose.body.approval.closed, { lines: { 910002: 'inventory_check_not_applied' } })
     assert.equal(ordinary(910002), 5); assert.equal(writer.calls.length, 0); assert.equal(alerts.at(-1).kind, 'rejected'); assert.equal(alerts.at(-1).reason, 'Closed')
@@ -962,6 +1071,134 @@ async function main() {
     assert.equal(plain.status, 200, JSON.stringify(plain.body)); assert.equal(plain.body.approval.status, 'rejected'); assert.equal(Object.keys(plain.body.approval.closed.lines).length, 3)
     assert.deepEqual(Object.values(plain.body.approval.closed.lines), ['inventory_check_not_applied', 'inventory_check_not_applied', 'inventory_check_not_applied']); assert.equal(writer.calls.length, 0)
     assert.equal(alerts.at(-1).kind, 'rejected'); assert.equal(alerts.at(-1).reason, 'No longer wanted', 'its note is the reason')
+  })
+
+  // Holds the request whose stock line id starts with the prefix just before its receipt/stock write, until released.
+  const hold = prefix => {
+    let entered, released
+    const reached = new Promise(resolve => { entered = resolve }), go = new Promise(resolve => { released = resolve })
+    writer.beforeLine = async body => { if (body.client_request_id.startsWith(prefix)) { writer.beforeLine = null; entered(); await go } }
+    return { reached, release: released }
+  }
+  const untilDone = async (id, requestId, actor) => { let last; for (let step = 0; step < 10; step++) { last = await decide(id, { requestId }, actor); if (last.status !== 200 || last.body.done) break } return last }
+
+  // The stock write commits only while the approval is still claimed by the writer: a close or a takeover that wins the race leaves the old write nothing to land, and the record always matches the stock.
+  await check('R1 1: a close by another approver while the claimer is between its claim and its stock write: the old write lands nothing, and no stock moves under a rejected row', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on')
+    made = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'r1-close-sub-01' }); id = made.body.item.id
+    gate = hold('r1-close-a01'); inFlight = decide(id, { requestId: 'r1-close-a01' }); await gate.reached
+    deactivate(ADMIN) // another approver may close only once the claimer is gone
+    const closed = await decide(id, { decision: 'close', requestId: 'r1-close-lead01' }, LEAD)
+    gate.release(); const late = await inFlight
+    assert.equal(closed.status, 200, JSON.stringify(closed.body))
+    assert.equal(ordinary(910002), 5, 'the old write landed nothing'); assert.equal(approvalRow().status, 'rejected'); assert.deepEqual(JSON.parse(approvalRow().closed_json), { lines: { 910002: 'inventory_check_not_applied' } })
+    assert.equal(late.status, 409); assert.equal(late.body.code, 'inventory_check_claim_lost', 'the old approver is told his claim is gone'); assert.equal(writer.calls.length, 0)
+  })
+  await check('R1 2: an idle takeover with the old write landing last (after the new approver finished that line): the old write lands nothing', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-idle-sub-001' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-idle-a01' })).status, 200); idle(1000)
+    gate = hold('r1-idle-a01-910004'); inFlight = decide(id, { requestId: 'r1-idle-a01' }); await gate.reached
+    const take = await decide(id, { requestId: 'r1-idle-b01' }, LEAD); const finished = await untilDone(id, 'r1-idle-b01', LEAD)
+    gate.release(); const old = await inFlight
+    assert.equal(take.status, 200, JSON.stringify(take.body)); assert.equal(take.body.takeover, true); assert.equal(finished.body.approval.status, 'approved')
+    assert.equal(ordinary(910004), 3, 'one shortage, applied once'); assert.deepEqual(writer.calls.map(call => call.client_request_id), ['r1-idle-a01-910002', 'r1-idle-b01-910004'], 'the old approver late write never landed')
+    assert.equal(old.status, 409); assert.equal(old.body.code, 'inventory_check_claim_lost')
+  })
+  await check('R1 3: the old write would land between the takeover and the new approver repeat: it lands nothing', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-between-sub1' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-between-a01' })).status, 200); idle(1000)
+    gate = hold('r1-between-a01-910004'); inFlight = decide(id, { requestId: 'r1-between-a01' }); await gate.reached
+    const step = await decide(id, { requestId: 'r1-between-b01' }, LEAD)
+    gate.release(); const between = await inFlight
+    const rest = await untilDone(id, 'r1-between-b01', LEAD)
+    assert.equal(step.status, 200); assert.equal(step.body.takeover, true); assert.equal(rest.body.approval.status, 'approved')
+    assert.equal(ordinary(910004), 3, 'applied once'); assert.equal(between.body.code, 'inventory_check_claim_lost')
+    assert.deepEqual(writer.calls.map(call => call.client_request_id), ['r1-between-a01-910002', 'r1-between-b01-910004'])
+  })
+  await check('R1 4: a takeover for a lost permission needs no idle wait, and the first request write is still refused once the claim has moved', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on')
+    made = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'r1-perm-sub-001' }); id = made.body.item.id
+    gate = hold('r1-perm-a01'); inFlight = decide(id, { requestId: 'r1-perm-a01' }); await gate.reached
+    db.prepare('UPDATE users SET role_id=900001 WHERE id=?').run(ADMIN)
+    const permTake = await decide(id, { requestId: 'r1-perm-b01' }, LEAD); const permDone = await untilDone(id, 'r1-perm-b01', LEAD)
+    gate.release(); const permOld = await inFlight
+    assert.equal(permTake.status, 200, JSON.stringify(permTake.body)); assert.equal(permTake.body.takeover, true); assert.equal(permDone.body.approval.status, 'approved')
+    assert.equal(ordinary(910002), 3, 'applied once'); assert.deepEqual(writer.calls.map(call => call.client_request_id), ['r1-perm-b01-910002'])
+    assert.equal(permOld.status, 409, 'and the old approver is refused, not told it was applied')
+  })
+  await check('R1 5: the write that lands first wins: a takeover that read "nothing landed" is refused when a write landed in between, and records it on the retry', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-order-sub-01' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-order-a01' })).status, 200); idle(1000)
+    landedMeanwhile = false
+    beforeBatchWhen = { test: /takeovers=takeovers\+1/, run: () => { landedMeanwhile = true; moveStock(910004, 3); receipt(ADMIN, 'r1-order-a01-910004') } }
+    const raced = await decide(id, { requestId: 'r1-order-b01' }, LEAD)
+    assert.equal(landedMeanwhile, true, 'the interleaving happened')
+    assert.equal(raced.status, 409, JSON.stringify(raced.body)); assert.equal(raced.body.code, 'inventory_check_conflict', 'the takeover that read stale receipts is refused, not committed')
+    assert.equal(approvalRow().applying_by, ADMIN, 'the claim did not move'); assert.equal(approvalRow().takeovers, 0)
+    const retry = await decide(id, { requestId: 'r1-order-b01' }, LEAD)
+    assert.equal(retry.status, 200, JSON.stringify(retry.body)); assert.equal(retry.body.takeover, true); assert.equal(retry.body.applied, 1, 'now the landed line is recorded from its receipt')
+    assert.equal((await untilDone(id, 'r1-order-b01', LEAD)).body.approval.status, 'approved'); assert.equal(ordinary(910004), 3)
+  })
+  await check('R1 6: the same for a close: it reads "nothing landed", a write lands, and the close is refused instead of recording the line as not applied', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-cl-order-sub1' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-cl-order-a01' })).status, 200); idle(1000)
+    landedMeanwhile = false
+    beforeBatchWhen = { test: /,closed_json=/, run: () => { landedMeanwhile = true; moveStock(910004, 3); receipt(ADMIN, 'r1-cl-order-a01-910004') } }
+    const racedClose = await decide(id, { decision: 'close', requestId: 'r1-cl-order-c01' }, LEAD)
+    assert.equal(landedMeanwhile, true, 'the interleaving happened')
+    assert.equal(racedClose.status, 409, JSON.stringify(racedClose.body)); assert.equal(approvalRow().status, 'pending')
+    const closeRetry = await decide(id, { decision: 'close', requestId: 'r1-cl-order-c01' }, LEAD)
+    assert.equal(closeRetry.status, 200, JSON.stringify(closeRetry.body)); assert.equal(approvalRow().status, 'approved'); assert.deepEqual(JSON.parse(approvalRow().closed_json), { lines: {} }); assert.equal(Object.keys(JSON.parse(approvalRow().applied_json).lines).length, 2)
+  })
+  await check('R1 7: another approver may close only once the claimer is gone; the claimer himself may always close', async () => {
+    let made, id, gate, inFlight, landedMeanwhile
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-gone-sub-001' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-gone-a01' })).status, 200)
+    const refusedClose = await decide(id, { decision: 'close', requestId: 'r1-gone-close1' }, LEAD)
+    assert.equal(refusedClose.status, 409, JSON.stringify(refusedClose.body)); assert.equal(refusedClose.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().status, 'pending')
+    idle(1000)
+    assert.equal((await decide(id, { decision: 'close', requestId: 'r1-gone-close1' }, LEAD)).status, 200, 'an idle claimer no longer protects the approval')
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'r1-own-sub-0001' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'r1-own-a01' })).status, 200)
+    assert.equal((await decide(id, { decision: 'close', requestId: 'r1-own-close1' })).status, 200, 'the claimer closes his own approval at any time')
+  })
+
+  // The step that plans a count is the dearest request of an approval; on the Free plan the stock request that follows it in the same invocation can be left without statements, and the
+  // commit then answers the line 'deferred' (untouched). Cap 0 is that answer for every line.
+  await check('Budget defer: a step that recorded the plan but could not write keeps the claim and the plan and writes nothing; the repeat writes under the same key; a repeat that defers again is a refusal', async () => {
+    let made, id
+    reset(); setSwitches('on', 'on'); writer.cap = 0
+    made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'defer-sub-0001' }); id = made.body.item.id
+    const planned = await decide(id, { requestId: 'defer-a001' })
+    assert.equal(planned.status, 200, JSON.stringify(planned.body)); assert.equal(planned.body.deferred, true); assert.equal(planned.body.applied, 0); assert.equal(planned.body.remaining, 2); assert.equal(planned.body.done, false)
+    assert.equal(writer.calls.length, 0, 'nothing was written'); assert.equal(ordinary(910002), 5); assert.equal(ordinary(910004), 5)
+    const claimed = approvalRow()
+    assert.equal(claimed.status, 'pending'); assert.equal(claimed.applying_request_id, 'defer-a001', 'the claim stays'); assert.deepEqual(Object.keys(JSON.parse(claimed.plan_json)), ['910002', '910004'], 'and so does the plan')
+    writer.cap = 1
+    const first = await decide(id, { requestId: 'defer-a001' })
+    assert.equal(first.status, 200, JSON.stringify(first.body)); assert.equal(first.body.applied, 1); assert.equal(first.body.deferred, undefined)
+    const rest = await untilDone(id, 'defer-a001')
+    assert.equal(rest.body.approval.status, 'approved'); assert.equal(ordinary(910002), 3); assert.equal(ordinary(910004), 3, 'each shortage applied once')
+    assert.deepEqual(writer.calls.map(call => call.client_request_id), ['defer-a001-910002', 'defer-a001-910004'], 'under the key that claimed it')
+
+    reset(); setSwitches('on', 'on'); writer.cap = 0
+    made = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'defer-sub-0002' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'defer-b001' })).body.deferred, true)
+    const again = await decide(id, { requestId: 'defer-b001' })
+    assert.equal(again.status, 409, JSON.stringify(again.body)); assert.equal(again.body.code, 'inventory_check_stock_write_refused', 'a repeat that defers again records nothing new, so it is a refusal, not a loop')
+    assert.equal(approvalRow().applying_request_id, null, 'the claim is released'); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 5)
   })
 
   console.log(`${groups} groups passed`)
