@@ -733,7 +733,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const rights = effectivePermissions(user)
   const offered = fresh && !!detail && data?.capabilities?.fixStock === true
   const fixOpening = offered && detail && canWriteToServer && rights.can('inventory', 'adjust')
-    ? fixStockOpening(detail, { session: sessionId && session ? { branchId: Number(session.branch_id) } : null, observation: observations[String(detail.id)], listBranchId: filters.branchId,
+    ? fixStockOpening(detail, { session: sessionId && session ? { id: sessionId, branchId: Number(session.branch_id) } : null, observation: observations[String(detail.id)], listBranchId: filters.branchId,
+      pending: detail.check_pending === true || (!!sessionId && approval?.status === 'pending'),
       canViewStock: access.fields.stock, label: tr('inventory_check_fix_stock_reason', 'Inventory check') })
     : null
   function openFixStock(opening: FixStockOpening) {
@@ -839,7 +840,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}
         {fixStock ? <Suspense fallback={null}><FastStockInModal
           branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}
-          initialLines={[{ mode: 'set', quantity: fixStock.quantity, reason: fixStock.reason, product: fixStockCandidate(fixStock, branches.find(branch => branch.id === fixStock.branchId)?.name ?? null) }]}
+          initialLines={[{ mode: 'set', quantity: fixStock.quantity, reason: fixStock.reason, ...fixStock.requestId ? { requestId: fixStock.requestId } : {}, product: fixStockCandidate(fixStock, branches.find(branch => branch.id === fixStock.branchId)?.name ?? null) }]}
           tr={(key: string, fallback?: string) => tr(key, fallback ?? key)} notify={notify} onClose={() => setFixStock(null)} onDone={reloadAll} /></Suspense> : null}
         {confirmDialog}
       </div>

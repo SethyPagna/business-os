@@ -179,14 +179,21 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
   return db.prepare(`SELECT ${detail ? APPROVAL_DETAIL_COLUMNS : APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
+/** A line waits when its approval is pending, it is a difference, and no stock write for it has been recorded. */
+const WAITING_LINE_SQL = `a.status='pending' AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001
+  AND json_extract(a.applied_json,'$.lines."'||i.product_id||'"') IS NULL`
+/** Does this one count line still wait for approval? (Fix stock is held while it does.) */
+export async function lineWaitsForApproval(db: D1Compat, sessionId: string, productId: number): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
+    WHERE a.session_id=@sessionId AND i.product_id=@productId AND ${WAITING_LINE_SQL} LIMIT 1`).get<{ waiting: number }>({ sessionId, productId })
+  return row?.waiting === 1
+}
 /** The page's counts that still wait for approval, as `${session id}:${product id}`: one query for a page of list rows, inside the viewer's organization. Only a count that differs from stock waits; a matching line of the same submission does not. */
 export async function pendingApprovalLines(db: D1Compat, actor: Actor, productIds: number[]): Promise<Set<string>> {
   if (!productIds.length) return new Set()
   await approvalsReady(db)
   const rows = await db.prepare(`SELECT i.session_id,i.product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
-    WHERE a.organization_id IS @organization AND a.status='pending' AND i.product_id IN (SELECT value FROM json_each(@ids))
-      AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001
-      AND json_extract(a.applied_json,'$.lines."'||i.product_id||'"') IS NULL`)
+    WHERE a.organization_id IS @organization AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${WAITING_LINE_SQL}`)
     .all<{ session_id: string; product_id: number }>({ organization: actor.organization_id, ids: JSON.stringify(productIds) })
   return new Set(rows.map(row => `${row.session_id}:${row.product_id}`))
 }

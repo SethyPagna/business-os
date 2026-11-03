@@ -224,6 +224,23 @@ async function main() {
       console.log('  D1 calls per step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
     })
 
+    await check('Fix stock is held on both real stock write routes while its count waits for approval, opens no receipt, and goes through once the count is rejected', async () => {
+      const pid = rows[6].pid, start = await stock(pid), total = start.ordinary + start.damaged
+      const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: pid, countedQuantity: total - 1, seenQuantity: total, checked: false }] })
+      assert.equal(made.status, 201, made.text.slice(0, 300))
+      const id = made.json.item.id, set = { productId: pid, type: 'set', quantity: start.ordinary - 1, reason: 'Inventory check: fix', branchId: 1 }
+      const single = await as('admin', 'POST', '/api/inventory/adjust', { ...set, client_request_id: `icfix_${id}_${pid}_a1b2c3d4e5f60001` })
+      assert.equal(single.status, 409, single.text.slice(0, 300)); assert.equal(single.json.code, 'inventory_check_count_pending')
+      const commit = await as('admin', 'POST', '/api/inventory/fast-stock-in/commit', { lines: [{ key: 'fix', wire: 'adjust', body: { ...set, client_request_id: `icfix_${id}_${pid}_a1b2c3d4e5f60002` } }] })
+      assert.equal(commit.status, 200, commit.text.slice(0, 300)); assert.deepEqual([commit.json.results[0].ok, commit.json.results[0].code], [false, 'inventory_check_count_pending'])
+      assert.deepEqual(await stock(pid), start, 'nothing was written')
+      assert.equal((await world.all("SELECT COUNT(*) AS n FROM stock_mutation_receipts WHERE request_id LIKE 'icfix_%'"))[0].n, 0, 'a held request opens no receipt')
+      const rejected = await as('lead', 'POST', `/api/inventory-checks/sessions/${id}/approval`, { decision: 'reject', requestId: key('reject') })
+      assert.equal(rejected.status, 200, rejected.text.slice(0, 300))
+      const released = await as('admin', 'POST', '/api/inventory/adjust', { ...set, client_request_id: `icfix_${id}_${pid}_a1b2c3d4e5f60003` })
+      assert.equal(released.status, 200, released.text.slice(0, 300)); assert.equal((await stock(pid)).ordinary, start.ordinary - 1, 'the Set Fix stock opened goes through once the count is decided')
+    })
+
     await check('with ic_fix_stock off the same route does not exist and a new count creates no approval', async () => {
       await flags({ ic_simple: { state: 'on' } })
       const gone = await as('lead', 'POST', `/api/inventory-checks/sessions/${world.sessionId}/approval`, { decision: 'approve', requestId: key('off') })

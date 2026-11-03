@@ -545,6 +545,31 @@ async function main() {
     assert.equal(raced.status, 409); assert.equal(raced.body.code, 'inventory_check_conflict')
   })
 
+  await check('Fix stock is held while its count waits: a stock request that names the count is refused for exactly the lines nobody has applied or rejected', async () => {
+    const { fixStockCountOf, fixStockHeldByApproval } = load(path.join(__dirname, '../src/lib/inventoryCheckFixStock.ts'))
+    const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
+    assert.deepEqual(fixStockCountOf('icfix_3f9c1c2e-1111-4222-8333-444455556666_910002_a1b2c3d4e5f60718'), { sessionId: '3f9c1c2e-1111-4222-8333-444455556666', productId: 910002 })
+    for (const other of ['icfix_', 'icfix_x_0_a1b2c3d4', 'icfix__910002_a1b2c3d4', 'icfix_s_910002_short', 'stockline_abcdefgh', 'icfix_s_910002_a1b2c3d4_extra', 12, null, undefined]) assert.equal(fixStockCountOf(other), null, String(other))
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    const made = await standard(); const id = made.body.item.id
+    const held = requestProduct => fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${id}_${requestProduct}_a1b2c3d4e5f60718`)
+    assert.deepEqual([await held(910002), await held(910003), await held(910004)], [true, true, true], 'every difference of a waiting count is held')
+    assert.equal(await held(910001), false, 'a line that matched has nothing to fix'); assert.equal(await held(910009), false, 'nor a product that is not in the count')
+    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${id.split('').reverse().join('')}_910002_a1b2c3d4e5f60718`), false, 'nor a count that does not exist')
+    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), 'stockline_a1b2c3d4e5f60718'), false, 'a request that names no count is never held')
+    await decide(id, {})
+    assert.deepEqual([await held(910002), await held(910003), await held(910004)], [false, true, true], 'a line already applied is released; the rest stay held')
+    writer.cap = 24; await decide(id, {})
+    assert.deepEqual([await held(910002), await held(910003), await held(910004)], [false, false, false], 'an approved count holds nothing')
+    reset(); setSwitches('on', 'on')
+    const rejected = await standard()
+    await decide(rejected.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })
+    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${rejected.body.item.id}_910002_a1b2c3d4e5f60718`), false, 'a rejected count leaves the Issue to be fixed by hand')
+    // The adjust kernel asks before it claims a receipt, and only for such an id.
+    const kernel = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
+    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,700}startsWith\('icfix_'\)[\s\S]{0,700}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
+  })
+
   await check('the approval cannot be forged around the API: its rows are immutable once decided and never deleted', async () => {
     reset(); setSwitches('on', 'on')
     const made = await standard()
