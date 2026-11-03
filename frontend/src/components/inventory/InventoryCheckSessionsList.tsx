@@ -9,8 +9,8 @@ import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 type Translator = (key: string) => string | null | undefined
 const label = (t: Translator, key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
 
-export type SessionListFilters = { status: '' | 'open' | 'closed'; mine: boolean }
-export const initialSessionFilters: SessionListFilters = { status: '', mine: false }
+export type SessionListFilters = { status: '' | 'open' | 'closed'; mine: boolean; /** Only counts waiting for approval. */ waiting: boolean }
+export const initialSessionFilters: SessionListFilters = { status: '', mine: false, waiting: false }
 
 /** "dd/mm/yyyy · Branch": the name is built from the session's own start and branch, so it follows the viewer's language and never reads the stored title. */
 export function sessionDisplayName(session: Pick<InventoryCheckSession, 'started_at'>, branchName?: string | null): string {
@@ -84,8 +84,10 @@ export default function InventoryCheckSessionsList({ items, onOpen, t }: { items
 }
 
 /** The Sessions tab's one Filters menu: Open/Closed and Mine, plus Branch when the viewer has more than one. */
-export function InventoryCheckSessionFilterMenu({ value, onChange, branches, branchId, onBranchChange, onClear, t }: {
+export function InventoryCheckSessionFilterMenu({ value, onChange, branches, branchId, onBranchChange, onClear, approvals = false, t }: {
   value: SessionListFilters
+  /** The viewer is shown approvals (ic_fix_stock): the list may be narrowed to counts waiting for one. */
+  approvals?: boolean
   onChange: (patch: Partial<SessionListFilters>) => void
   branches: ReadonlyArray<{ id: number; name: string }>
   branchId: string
@@ -105,11 +107,15 @@ export function InventoryCheckSessionFilterMenu({ value, onChange, branches, bra
       choice('all', label(t, 'all', 'All'), !value.mine, () => onChange({ mine: false })),
       choice('mine', label(t, 'inventory_check_filter_creator_mine', 'Mine'), value.mine, () => onChange({ mine: true })),
     ] },
+    approvals ? { id: 'approval', label: label(t, 'inventory_check_approval', 'Count approval'), options: [
+      choice('all', label(t, 'all', 'All'), !value.waiting, () => onChange({ waiting: false })),
+      choice('waiting', label(t, 'inventory_check_approval_pending', 'Waiting for approval'), value.waiting, () => onChange({ waiting: true })),
+    ] } : null,
     branches.length > 1 ? { id: 'branch', label: label(t, 'branch', 'Branch'), searchable: true, options: [
       choice('all', label(t, 'all_branches', 'All Branches'), branchId === '', () => onBranchChange('')),
       ...branches.map(branch => choice(String(branch.id), branch.name, branchId === String(branch.id), () => onBranchChange(String(branch.id)))),
     ] } : null,
   ] as Array<FilterSection | null>).filter((section): section is FilterSection => section !== null)
-  const activeCount = (value.status ? 1 : 0) + (value.mine ? 1 : 0) + (branchChosen ? 1 : 0)
+  const activeCount = (value.status ? 1 : 0) + (value.mine ? 1 : 0) + (value.waiting ? 1 : 0) + (branchChosen ? 1 : 0)
   return <FilterMenu label={label(t, 'filters', 'Filters')} activeCount={activeCount} sections={sections} onClear={onClear} iconOnly large />
 }

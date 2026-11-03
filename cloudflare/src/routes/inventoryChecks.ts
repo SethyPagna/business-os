@@ -1,15 +1,27 @@
 import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { actorSnapshot } from '../lib/actorSnapshot'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval } from '../lib/inventoryCheckApprovals'
+import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
 import { approvalsAvailable, createInventoryCheckSession, createInventoryCheckSubmission, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession } from '../lib/inventoryCheckSessions'
+
+// A global hook, not an import: the alert module is installed by index.ts, many tests load this route alone, and an absent hook is a no-op
+// (the same contract as lib/reviewGate.ts). The Telegram alert is sent after the write it announces committed, never on a replay or a refusal.
+const reviewAlertHook = (): ReviewAlertHook | undefined =>
+  (globalThis as unknown as Record<symbol, ReviewAlertHook | undefined>)[Symbol.for('business-os.review-alert.v1')]
+const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent, 'kind' | 'reason'> & { sessionId: string }): Promise<void> =>
+  Promise.resolve(reviewAlertHook()?.announce(env, {
+    kind: event.kind, by: event.kind === 'created' ? undefined : actorSnapshot(user), reason: event.reason ?? null,
+    row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
+  }))
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -35,7 +47,8 @@ app.post('/sessions', async c => {
 // The owner's way to count (ic_simple): pick products, type counts in the rows, submit once. With the switch off the route does not exist.
 app.post('/submissions', async c => {
   if (!await readSwitch(c.env, 'ic_simple')) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
-  const result = await createInventoryCheckSubmission(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { approvals: await fixStockOn(c) })
+  const result = await createInventoryCheckSubmission(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env),
+    { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }) })
   return c.json(result, result.created ? 201 : 200)
 })
 app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await fixStockOn(c) })))
@@ -44,7 +57,9 @@ app.post('/sessions/:id/approval', async c => {
   if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
   // The stock writer is the Set sessions' own commit; it is loaded only when a decision reaches stock, so every refusal and a rejection never touch it.
   const writeStock = async (lines: StockInCommitLine[]) => (await import('./stockInCommit')).runStockInCommit(c as unknown as InventoryContext, lines)
-  return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock))
+  const onDecided = ({ decision, sessionId, note }: { decision: 'approve' | 'reject'; sessionId: string; note: string | null }) =>
+    announceCount(c.env, c.get('user'), { kind: decision === 'approve' ? 'approved' : 'rejected', sessionId, reason: decision === 'reject' ? note : null })
+  return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, onDecided))
 })
 app.get('/sessions/:id/history', async c => c.json(await inventoryCheckSessionHistory(getDb(c.env), await principal(c), c.req.param('id'), c.req.query())))
 app.patch('/sessions/:id/items/:productId', async c => {

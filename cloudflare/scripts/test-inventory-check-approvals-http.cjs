@@ -545,6 +545,28 @@ async function main() {
     assert.equal(raced.status, 409); assert.equal(raced.body.code, 'inventory_check_conflict')
   })
 
+  await check('the Count sessions list can show only counts waiting for approval (queue-first review): the filter, its total and who may use it', async () => {
+    reset(); setSwitches('on', 'on')
+    const waiting = await standard(), matching = await submit([line(910001, 5, { checked: true })], { requestId: 'match-request-09' }), decided = await submit([line(910002, 3)], { requestId: 'submit-request-02' })
+    await decide(decided.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })
+    const all = await sessions('GET', '/sessions?page=1&pageSize=20')
+    assert.equal(all.body.total, 3); assert.equal(all.body.approvals, true, 'the page learns this viewer is shown approvals')
+    const only = await sessions('GET', '/sessions?page=1&pageSize=20&approval=pending')
+    assert.equal(only.status, 200); assert.deepEqual(only.body.items.map(item => item.id), [waiting.body.item.id], 'only the count nobody decided')
+    assert.equal(only.body.total, 1, 'and the total counts only those'); assert.equal(only.body.items[0].approval.status, 'pending')
+    assert.equal((await sessions('GET', '/sessions?page=1&pageSize=20&approval=pending&mine=1', undefined, COUNTER)).body.items.length, 1, 'it combines with the other filters')
+    assert.equal((await sessions('GET', '/sessions?page=1&pageSize=20&approval=pending&status=open')).body.items.length, 0, 'submitted counts are closed sessions')
+    assert.equal((await sessions('GET', '/sessions?page=1&pageSize=20&approval=')).body.total, 3, 'an empty value is no filter')
+    for (const bad of ['approved', 'all', '1', 'pending,approved']) assert.equal((await sessions('GET', `/sessions?approval=${bad}`)).status, 400, bad)
+    assert.equal((await sessions('GET', '/sessions?approval=pending', undefined, BLIND)).status, 400, 'a viewer who is not shown approvals cannot ask for them')
+    assert.equal('approvals' in (await sessions('GET', '/sessions?page=1&pageSize=20', undefined, BLIND)).body, false)
+    void matching
+    setSwitches('on', 'off')
+    const off = await sessions('GET', '/sessions?page=1&pageSize=20&approval=pending')
+    assert.equal(off.status, 400); assert.equal(off.body.code, 'inventory_check_invalid_filter', 'with ic_fix_stock off the filter does not exist')
+    assert.equal('approvals' in (await sessions('GET', '/sessions?page=1&pageSize=20')).body, false)
+  })
+
   await check('Fix stock is held while its count waits: a stock request that names the count is refused for exactly the lines nobody has applied or rejected', async () => {
     const { fixStockCountOf, fixStockHeldByApproval } = load(path.join(__dirname, '../src/lib/inventoryCheckFixStock.ts'))
     const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))

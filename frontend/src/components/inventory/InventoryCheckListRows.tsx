@@ -3,13 +3,13 @@ import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
-import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ProductImage from '../pos/ProductImage.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import { PendingReviewMark } from '../shared/PendingReviewTag.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
@@ -161,8 +161,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   if (wants('status')) {
     const Icon = status ? LIST_STATUS[status].Icon : null
     const chip = status && Icon ? <span data-check-status-text={status} className={`inline-flex items-center gap-1 rounded-full px-2 text-[11px] font-semibold leading-relaxed ${LIST_STATUS[status].tone}`}><Icon className="h-3 w-3 shrink-0" aria-hidden="true" />{tr(LIST_STATUS[status].key, LIST_STATUS[status].fallback)}</span> : null
-    // A count that differs from stock and waits for an administrator (ic_fix_stock): the tag sits beside the status, it never replaces it.
-    facts.push(['status', chip && product.check_pending === true ? <span className="inline-flex flex-wrap items-center gap-1">{chip}<span data-check-pending role="img" aria-label={tr('inventory_check_approval_pending', 'Waiting for approval')} title={tr('inventory_check_approval_pending', 'Waiting for approval')} className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 text-[11px] font-semibold leading-relaxed text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"><Hourglass className="h-3 w-3 shrink-0" aria-hidden="true" />{tr('inventory_check_pending', 'Pending')}</span></span> : chip])
+    facts.push(['status', chip])
   }
   if (wants('counted')) {
     const recorded = canViewCounts && finiteQuantity(product.check_counted_quantity) ? product.check_counted_quantity : null
@@ -194,7 +193,9 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   }
 
   return <li data-inventory-check-row={id} data-check-list-status={status ?? undefined} data-selected={selected ? '' : undefined} data-scan-hit={scanHit ? '' : undefined}
-    className={`min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${selected ? 'bg-sky-50/70 dark:bg-sky-950/20' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
+    className={`relative min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 pr-1 last:border-b-0 dark:border-b-gray-800 ${edge} ${selected ? 'bg-sky-50/70 dark:bg-sky-950/20' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`}>
+    {/* A count that differs from stock and waits for an approver (ic_fix_stock): the review queue's mini tag, in the row's own start gutter. It takes no space, so the row looks the same with and without it. */}
+    {product.check_pending === true ? <PendingReviewMark data-check-pending="" label={tr('inventory_check_approval_pending', 'Waiting for approval')} className="-left-px top-1" /> : null}
     <div className="flex min-w-0 items-stretch gap-2 lg:items-center" data-inventory-check-main>
       {counting ? <label data-check-select-box className="flex w-11 shrink-0 cursor-pointer items-start justify-center pt-1.5 lg:w-7 lg:items-center lg:pt-0">
         <input type="checkbox" data-check-select checked={selected} disabled={locked} aria-label={selectLabel} title={selectLabel}

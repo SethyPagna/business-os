@@ -40,13 +40,24 @@ function useLabel(): string {
 // per row and reads only the store, so a language or notification change does not
 // re-render hundreds of them. Only a row that IS waiting mounts this and reads
 // the app context for its label.
-function PendingReviewGlyph({ className }: { className: string }) {
-  const label = useLabel()
+function Hourglass10({ className, label, ...rest }: { className: string; label: string } & Record<`data-${string}`, string | undefined>) {
   return (
-    <span role="img" aria-label={label} title={label} className={`${PENDING_REVIEW_TAG_CLASS} ${className}`}>
+    <span role="img" aria-label={label} title={label} className={`${PENDING_REVIEW_TAG_CLASS} ${className}`} {...rest}>
       <Hourglass aria-hidden="true" className="block h-2.5 w-2.5" strokeWidth={2.25} />
     </span>
   )
+}
+
+function PendingReviewGlyph({ className }: { className: string }) {
+  return <Hourglass10 className={className} label={useLabel()} />
+}
+
+/**
+ * The same tag, for a record that waits for approval somewhere other than the review queue (an Inventory count): the caller already knows it waits
+ * and names what it waits for. Same box, same rules: no space of its own, inside a container the caller made `relative`, in a gutter the row already has.
+ */
+export function PendingReviewMark({ label, className = '', ...rest }: { label: string; className?: string } & Record<`data-${string}`, string | undefined>) {
+  return <Hourglass10 label={label} className={className} {...rest} />
 }
 
 type PendingReviewTagProps = {

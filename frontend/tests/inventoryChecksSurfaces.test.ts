@@ -39,6 +39,8 @@ let selected = session('s-1', '2026-10-19 02:30:00')
 let members: InventoryCheckSessionItem[] = [{ product_id: 12, state: 'issue', revision: 1, counted_quantity: 8, reason: 'Shelf short', baseline_quantity: 12, current_quantity: 10, stock_changed: true, product_snapshot: products[0] }]
 const productReads: Array<Record<string, unknown>> = []
 const sessionReads: Array<Record<string, unknown>> = []
+// The Worker tells a viewer who is shown approvals (ic_fix_stock + stock figures) with `approvals: true`; only then may the list be narrowed to counts waiting for one.
+let sessionApprovals = false
 const creates: unknown[][] = []
 const submissions: Array<{ scope: unknown; input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> } }> = []
 // A held gate keeps a read pending so the loading shape can be inspected, then lets it through.
@@ -73,7 +75,7 @@ const doubles = {
       if (productGate) await productGate
       return productsBody(params)
     },
-    readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: sessionList, total: sessionTotal || sessionList.length, page: Number(params.page) || 1, pageSize: 20 } },
+    readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: sessionList, total: sessionTotal || sessionList.length, page: Number(params.page) || 1, pageSize: 20, ...(sessionApprovals ? { approvals: true } : {}) } },
     readInventoryCheckSession: async () => ({ item: selected, items: members }),
     readInventoryCheckHistory: async () => {
       if (historyGate) await historyGate
@@ -155,6 +157,39 @@ try {
     await list.click(list.button(pack.products))
     assert.ok(productReads.length > productsBefore && productReads.at(-1)?.startDate === undefined && productReads.at(-1)?.endDate === undefined, `${language}: the Products tab has no sales date range at all`)
     await list.unmount()
+
+    // Queue-first review: a viewer who is shown approvals can narrow the list to counts waiting for one; nobody else is offered the choice.
+    goTo('sessions')
+    const readsBefore = sessionReads.length
+    const plain = await mount()
+    await plain.click(byLabel(plain, pack.filters))
+    assert.deepEqual(plain.findAll(node => node.getAttribute('data-filter-menu-section') !== null).map(node => node.getAttribute('data-filter-menu-section')), ['status', 'creator'], `${language}: without approvals the menu has no approval section`)
+    assert.ok(sessionReads.length > readsBefore && sessionReads.slice(readsBefore).every(read => read.approval === undefined), `${language}: and no read ever asks for it`)
+    await plain.unmount()
+    sessionApprovals = true
+    goTo('sessions')
+    const approvers = await mount()
+    await approvers.click(byLabel(approvers, pack.filters))
+    assert.deepEqual(approvers.findAll(node => node.getAttribute('data-filter-menu-section') !== null).map(node => node.getAttribute('data-filter-menu-section')), ['status', 'creator', 'approval'], `${language}: a viewer shown approvals gets the approval section`)
+    await chooseFilter(approvers, pack.filters, 'approval', pack.inventory_check_approval_pending)
+    assert.deepEqual([sessionReads.at(-1)?.approval, sessionReads.at(-1)?.page], ['pending', 1], `${language}: Waiting for approval is a server filter and resets the page`)
+    assert.equal(byLabel(approvers, pack.filters).getAttribute('title'), `${pack.filters} (1)`, `${language}: the trigger counts it`)
+    const readsWithFilter = sessionReads.length
+    await chooseFilter(approvers, pack.filters, 'status', pack.shift_status_closed)
+    assert.deepEqual([sessionReads.at(-1)?.approval, sessionReads.at(-1)?.status], ['pending', 'closed'], `${language}: it joins the other filters`)
+    assert.equal(sessionReads.length, readsWithFilter + 1, `${language}: one read per change, none repeated because the answer says approvals`)
+    await chooseFilter(approvers, pack.filters, 'approval', pack.all)
+    assert.equal(sessionReads.at(-1)?.approval, undefined, `${language}: All lifts the approval filter`)
+    await chooseFilter(approvers, pack.filters, 'status', pack.all)
+    const kept = [sessionList, sessionTotal] as const
+    sessionList = []; sessionTotal = 0
+    await chooseFilter(approvers, pack.filters, 'approval', pack.inventory_check_approval_pending)
+    assert.ok(approvers.text().includes(pack.inventory_check_sessions_no_match) && emptyClear(approvers, pack.clear).length === 1, `${language}: with only Waiting for approval chosen, nothing waiting is told as a filtered-away list, with ✕ Clear`)
+    await approvers.click(emptyClear(approvers, pack.clear)[0])
+    assert.deepEqual([sessionReads.at(-1)?.approval, sessionReads.at(-1)?.status], [undefined, undefined], `${language}: Clear lifts the approval filter with the others`)
+    await approvers.unmount()
+    sessionApprovals = false
+    ;[sessionList, sessionTotal] = kept
 
     // Empty states carry the right action per tab.
     goTo('sessions')

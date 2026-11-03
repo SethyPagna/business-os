@@ -202,16 +202,25 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(row(s, 502).getAttribute('data-scan-hit'), '', 'the row is ringed for a moment')
     assert.ok(!calls.some(call => call[0] === 'count' && call[1] === 502 && call.length > 2 && call[2] !== '4' && call[2] !== ''), 'a scan enters no value')
   }],
-  ['a count waiting for approval carries a Pending tag beside its status, never instead of it, and only that product has it', async () => {
-    const surface = await mount({ products: [{ ...listed[1], check_pending: true }, listed[0], { ...listed[5], check_pending: false }] })
+  ['a count waiting for approval carries the review queue’s mini tag in the row’s own gutter, takes no space, and only that product has it', async () => {
+    const waiting = { ...listed[1], check_pending: true }
+    const surface = await mount({ products: [waiting, listed[0], { ...listed[5], check_pending: false }] })
     const tag = (id: number) => allInRow(surface, id, 'data-check-pending')
     assert.equal(tag(502).length, 1, 'the waiting product has one tag')
     assert.equal(tag(501).length, 0, 'a product with nothing waiting has none')
     assert.equal(tag(506).length, 0, 'an explicit false draws none')
-    assert.equal(inRow(surface, 502, 'data-check-status-text').getAttribute('data-check-status-text'), 'issue', 'the status chip is still there')
-    assert.equal(tag(502)[0].getAttribute('aria-label'), 'Waiting for approval'); assert.equal(tag(502)[0].getAttribute('role'), 'img')
-    assert.match(flat(tag(502)[0]), /Pending/)
-    assert.match(flat(cell(surface, 502, 'status')), /Issue.*Pending/, 'tag follows the status in the same cell')
+    const mark = tag(502)[0]
+    assert.equal(mark.getAttribute('aria-label'), 'Waiting for approval'); assert.equal(mark.getAttribute('role'), 'img'); assert.equal(mark.getAttribute('title'), 'Waiting for approval')
+    assert.equal(mark.textContent, '', 'a glyph only: no word, so the row has no text to make room for')
+    for (const word of ['absolute', 'pointer-events-none', 'h-2.5', 'w-2.5']) assert.ok(mark.className.split(/\s+/).includes(word), `the mark is out of the flow and inert (${word})`)
+    assert.ok(row(surface, 502).className.split(/\s+/).includes('relative'), 'the row is the mark’s positioning container')
+    assert.ok(row(surface, 502).children.includes(mark), 'the mark is the row’s own child, not part of any cell')
+    assert.ok(!cell(surface, 502, 'status').contains(mark), 'it is not inside the status cell')
+    assert.equal(flat(cell(surface, 502, 'status')), 'Issue', 'the status cell reads exactly what it reads without the mark')
+    assert.equal(inRow(surface, 502, 'data-check-status-text').getAttribute('data-check-status-text'), 'issue', 'the status chip is untouched')
+    assert.equal(flat(row(surface, 502)).replace('Waiting for approval', ''), flat(row(surface, 502)), 'the row’s text never says it')
+    await surface.render({ ...base, products: [{ ...waiting, check_pending: false }, listed[0]] })
+    assert.equal(tag(502).length, 0, 'once nothing waits (the line was applied), the mark is gone')
   }],
   ['the selection bar: select-all, how many, mark / clear as icons, and a Submit that says why it cannot go', async () => {
     const barCalls: string[] = []

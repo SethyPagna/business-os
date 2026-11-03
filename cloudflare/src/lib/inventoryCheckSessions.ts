@@ -235,11 +235,15 @@ export async function listInventoryCheckSessions(db: D1Compat, principal: Invent
   const page = pageNumber(query.page, 1, 100000), pageSize = pageNumber(query.pageSize, 20, 100)
   const branchId = query.branchId ? positive(Number(query.branchId)) : null
   const filters = sessionListFilters(query)
+  // "Waiting for approval" (ic_fix_stock): only for a viewer who is shown approvals, and only that value.
+  const showsApprovals = options.approvals === true && getInventoryCheckAccess(actor).fields.stock
+  const waiting = query.approval == null || query.approval === '' ? false : query.approval === 'pending' && showsApprovals ? true : fail(400, 'inventory_check_invalid_filter')
   const organization = actor.organization_id
   // Filters run before LIMIT so the page total counts every matching session. started_at is a UTC instant; the day filter is the Cambodia business day.
   const params = { organization, branchId, ...filters, actorId: actor.id, limit: pageSize, offset: (page-1)*pageSize }
   const where = `organization_id IS @organization AND (@branchId IS NULL OR branch_id=@branchId) AND (@status IS NULL OR status=@status)
-    AND (@mine=0 OR created_by=@actorId) AND (@startDate IS NULL OR ${localDateExpr('started_at')}>=@startDate) AND (@endDate IS NULL OR ${localDateExpr('started_at')}<=@endDate)`
+    AND (@mine=0 OR created_by=@actorId) AND (@startDate IS NULL OR ${localDateExpr('started_at')}>=@startDate) AND (@endDate IS NULL OR ${localDateExpr('started_at')}<=@endDate)${waiting
+      ? " AND EXISTS(SELECT 1 FROM inventory_check_approvals a WHERE a.session_id=inventory_check_sessions.id AND a.status='pending' AND a.organization_id IS @organization)" : ''}`
   const [count, rows] = await db.batch([{ sql: `SELECT COUNT(*) AS total FROM inventory_check_sessions WHERE ${where}`, params },
     { sql: `WITH page AS (SELECT * FROM inventory_check_sessions WHERE ${where} ORDER BY updated_at DESC,id DESC LIMIT @limit OFFSET @offset)
       SELECT page.*,b.name AS branch_name,u.username AS creator_username,COUNT(i.product_id) AS item_total,SUM(i.state='unstarted') AS item_unstarted,SUM(i.state='done') AS item_done,SUM(i.state='issue') AS item_issue
@@ -253,11 +257,12 @@ export async function listInventoryCheckSessions(db: D1Compat, principal: Invent
     const session = await projectSession(db, actor, row, { total: Number(row.item_total), unstarted: Number(row.item_unstarted), done: Number(row.item_done), issue: Number(row.item_issue) })
     items.push({ ...session, branch_name: row.branch_name ?? null, ...(canSeeStaffIdentity(actor, row.created_by) ? { creator_name: row.creator_username ?? null } : {}) })
   }
-  if (options.approvals && getInventoryCheckAccess(actor).fields.stock) {
+  if (showsApprovals) {
     const byId = new Map((await approvalRows(db, actor, items.map(item => item.id))).map(row => [row.session_id, row]))
     for (const item of items) { const row = byId.get(item.id); if (row) item.approval = projectApproval(actor, row) }
   }
-  return { items, page, pageSize, total: Number((count.results?.[0] as { total: number })?.total || 0) }
+  // `approvals` tells the page this viewer is shown approvals, so it may offer the "Waiting for approval" filter.
+  return { items, page, pageSize, total: Number((count.results?.[0] as { total: number })?.total || 0), ...(showsApprovals ? { approvals: true } : {}) }
 }
 function pageNumber(value: unknown, fallback: number, max: number): number {
   if (value == null || value === '') return fallback
@@ -449,7 +454,8 @@ function submissionLine(value: unknown): SubmissionLine {
  * A viewer without the stock field cannot compare, so every line of theirs is recorded Done (as marking Done has always been for them).
  * `approvals` (ic_fix_stock): a submission with at least one count that differs from stock also creates ONE pending approval in the same atomic commit.
  */
-export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { approvals?: boolean } = {}) {
+export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig,
+  options: { approvals?: boolean; onApprovalCreated?: (created: { sessionId: string }) => Promise<void> } = {}) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor)
@@ -526,6 +532,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
       VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson)`, params: { ...params, differing, seenJson } }] : []),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
+  // Told once, after the commit that made the approval (never for a replay); an announcement never fails the submission it announces.
+  if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {

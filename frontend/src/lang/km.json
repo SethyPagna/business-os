@@ -7901,7 +7901,6 @@
   "inventory_check_counts_in_progress": "ការរាប់មិនទាន់ដាក់ស្នើ",
   "inventory_check_error_stock_changed": "ស្តុកបានប្តូរក្រោយពេលអ្នកសម្គាល់ថាបានពិនិត្យ។ បញ្ជីត្រូវបានផ្ទុកឡើងវិញ៖ សូមសម្គាល់ម្តងទៀត។",
   "inventory_check_error_invalid_note": "កំណត់ចំណាំវែងពេក។ កាត់ឱ្យខ្លី រួចដាក់ស្នើម្តងទៀត។",
-  "inventory_check_pending": "កំពុងរង់ចាំ",
   "inventory_check_approval": "ការអនុម័តការរាប់",
   "inventory_check_approval_pending": "រង់ចាំការអនុម័ត",
   "inventory_check_approval_approved": "បានអនុម័ត",

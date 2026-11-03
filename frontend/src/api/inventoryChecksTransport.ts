@@ -60,6 +60,8 @@ export type InventoryCheckSessionsParams = QueryParams & {
   branchId?: string | number
   status?: 'open' | 'closed'
   mine?: 1 | '1'
+  /** Only counts waiting for approval (ic_fix_stock, for a viewer who is shown approvals). */
+  approval?: 'pending'
   /** Business days (YYYY-MM-DD, Cambodia UTC+7) on started_at. */
   startDate?: string
   endDate?: string
@@ -142,7 +144,7 @@ export function readInventoryCheckProducts<T>(params: QueryParams, signal?: Abor
   return apiFetch('GET', appendQuery(`${base}/products`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
-export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number }> {
+export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number; approvals?: boolean }> {
   return apiFetch('GET', appendQuery(`${base}/sessions`, buildQueryString(params)), undefined, undefined, { signal })
 }
 

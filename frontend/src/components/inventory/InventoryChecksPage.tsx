@@ -229,7 +229,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [approval, setApproval] = useState<InventoryCheckApproval | null>(null)
-  const [sessions, setSessions] = useState<{ items: InventoryCheckSession[]; total: number } | null>(null)
+  const [sessions, setSessions] = useState<{ items: InventoryCheckSession[]; total: number; approvals?: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sessionError, setSessionError] = useState('')
@@ -269,7 +269,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const current = () => mounted.current && isCurrent() && isActorReadScopeCurrent(writeScope.readScope, false) && isActorWriteIdentityCurrent(writeScope.writeIdentity)
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const params: QueryParams = { ...filters, query: appliedQuery, page, pageSize, sessionId, checkState: section === 'issues' ? 'issue' : filters.checkState }
-  const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
+  const sessionParams: QueryParams = { branchId, page, pageSize, ...(sessionFilters.status ? { status: sessionFilters.status } : {}), ...(sessionFilters.mine ? { mine: 1 } : {}), ...(sessionFilters.waiting && sessions?.approvals ? { approval: 'pending' as const } : {}), ...(sessionRange.startDate ? { startDate: sessionRange.startDate } : {}), ...(sessionRange.endDate ? { endDate: sessionRange.endDate } : {}) }
   // scopeKey identifies WHAT is listed (filters, page, section); requestKey also changes on every refresh bump.
   // Rows stay fresh for as long as the listed scope is the loaded one, so a refresh of the same scope (the Refresh button,
   // Close/Resume or a conflict) reloads in the background while the existing rows stay mounted. A saved tick reloads nothing.
@@ -683,7 +683,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const countLabel = createAttempt.current ? t('retry') : tr('inventory_check_start_page', 'Count')
   const statusFilter = section !== 'issues' && (!!sessionId || !!data?.simple)
   const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter }) > 0 || !!query.trim()
-  const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
+  const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
   const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length)
 
   // A scan points at the one exact row of the list on screen (product rows only: the all-sessions Issues list has none).
@@ -792,7 +792,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           {section === 'sessions'
             ? <StatsRangeRow layout="scroll" compactRange range={sessionRange} disabled={controlsLocked} t={t} onRangeChange={value => { if (!controlsLocked) { setSessionRange(value); setPage(1) } }}
               leading={<fieldset disabled={controlsLocked} className="min-w-0 shrink-0" data-inventory-check-query-lock>
-                <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
+                <InventoryCheckSessionFilterMenu value={sessionFilters} onChange={changeSessionFilters} approvals={sessions?.approvals === true} branches={branches} branchId={branchId} onBranchChange={id => changeFilters({ branchId: id })} onClear={clearFilters} t={t} />
               </fieldset>} />
             : <>
               {checkInfo ? <StatsStrip layout="scroll" cards={cards} t={t} loading={loading || !fresh} /> : null}

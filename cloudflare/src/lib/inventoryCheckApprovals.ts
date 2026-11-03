@@ -30,6 +30,8 @@ const EPSILON = 0.000000001
 const fail = (status: InventoryCheckSessionError['status'], code: string, details?: Record<string, unknown>): never => { throw new InventoryCheckSessionError(status, code, details) }
 
 export type ApprovalStockWriter = (lines: StockInCommitLine[]) => Promise<StockInCommitLineResult[]>
+/** Told once when a decision commits (never for a replay): who decided is the caller's own account; the reason is the rejection note. */
+export type ApprovalDecided = (decided: { decision: 'approve' | 'reject'; sessionId: string; note: string | null }) => Promise<void>
 type ItemFacts = { product_id: number; baseline_quantity: number | null; counted_quantity: number | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number }
 /** What one line is sent with, stored before the write so a repeat is identical. */
 type Plan = { before: number; target: number; counted: number; damaged: number; lot?: number }
@@ -65,7 +67,7 @@ async function receiptsOf(db: D1Compat, actorId: number, requestIds: string[]): 
   return new Set(rows.map(row => row.request_id))
 }
 
-export async function decideInventoryCheckApproval(db: D1Compat, principal: InventoryCheckPrincipal, sessionId: string, input: unknown, writeStock: ApprovalStockWriter) {
+export async function decideInventoryCheckApproval(db: D1Compat, principal: InventoryCheckPrincipal, sessionId: string, input: unknown, writeStock: ApprovalStockWriter, onDecided?: ApprovalDecided) {
   const body = object(input)
   const decision = body.decision === 'approve' || body.decision === 'reject' ? body.decision : fail(400, 'inventory_check_invalid_request')
   const key = requestIdOf(body.requestId)
@@ -101,6 +103,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
       { sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base },
       eventStatement(actor, { sessionId, action: 'observe', key, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'rejected', lines: row.lines }, result: { sessionRevision: session.revision }, now }),
     ])
+    await announce(onDecided, { decision, sessionId, note })
     return await respond(db, actor, sessionId, 0, 0, true)
   }
 
@@ -169,7 +172,13 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
       guard('changes()=1', 'inventory_check_conflict', {}))
   }
   await record(db, actor, statements)
+  if (finish) await announce(onDecided, { decision, sessionId, note })
   return await respond(db, actor, sessionId, landed.length, left, finish, failed)
+}
+
+/** An announcement never fails the decision it announces. */
+async function announce(onDecided: ApprovalDecided | undefined, decided: Parameters<ApprovalDecided>[0]): Promise<void> {
+  try { await onDecided?.(decided) } catch { /* announced best-effort */ }
 }
 
 /** Read the live stock of the lines still to apply and plan each one, refusing before any write everything the approval cannot do safely. */

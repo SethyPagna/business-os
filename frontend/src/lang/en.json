@@ -7901,7 +7901,6 @@
   "inventory_check_counts_in_progress": "Counts not submitted",
   "inventory_check_error_stock_changed": "Stock changed after you marked a product checked. The list was reloaded: mark those products again.",
   "inventory_check_error_invalid_note": "A note is too long. Shorten it and submit again.",
-  "inventory_check_pending": "Pending",
   "inventory_check_approval": "Count approval",
   "inventory_check_approval_pending": "Waiting for approval",
   "inventory_check_approval_approved": "Approved",
