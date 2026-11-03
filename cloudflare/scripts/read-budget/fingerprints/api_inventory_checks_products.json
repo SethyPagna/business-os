@@ -619,12 +619,12 @@
    "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
   ],
   [
-   "f9993ca0246a",
-   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+   "330ae46728e9",
+   "B| WITH stock AS MATERIALIZED (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s"
   ],
   [
-   "23154d47687e",
-   "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
+   "b4cbf3197766",
+   "B| WITH __page AS MATERIALIZED ( WITH stock AS MATERIALIZED (WITH wanted AS (SELECT id,stock_quantity FROM pro"
   ],
   [
    "97b980db705a",
@@ -661,20 +661,20 @@
    "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
   ],
   [
-   "5afa45c3bf8a",
-   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+   "a57703a92ab1",
+   "B| WITH stock AS MATERIALIZED (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s"
   ],
   [
-   "422314b559cf",
-   "B| WITH __page AS MATERIALIZED ( WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordin"
+   "aae37998e285",
+   "B| WITH __page AS MATERIALIZED ( WITH stock AS MATERIALIZED (WITH wanted AS (SELECT id,stock_quantity FROM pro"
   ],
   [
    "97b980db705a",
    "B| SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branc"
   ],
   [
-   "0defd22b84a5",
-   "B| WITH stock AS (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s.product_id,s"
+   "21f81a7f8273",
+   "B| WITH stock AS MATERIALIZED (WITH wanted AS (SELECT id,stock_quantity FROM products), ordinary AS ( SELECT s"
   ],
   [
    "3d0de332b3d9",

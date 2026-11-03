@@ -173,7 +173,9 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   const leafOnly = simple ? 'p.id NOT IN (SELECT child.parent_id FROM products child WHERE child.parent_id IS NOT NULL AND child.id<>child.parent_id)'
     : 'NOT EXISTS (SELECT 1 FROM products child WHERE child.parent_id=p.id AND child.id<>p.id)'
   // Stock-free ranking keeps the stock columns as NULL so the caller can fill them for the page rows only.
-  const ctes = (withStock: boolean) => `${withStock ? `stock AS (${stock.rowsSql}), ` : ''}base AS (
+  // ic_simple builds the whole-catalogue ledger once (MATERIALIZED): a stock filter makes the LEFT JOIN an inner join, and after ANALYZE SQLite then flattened the ledger into
+  // the cohort and scanned ordinary_totals once per product (8,652 x 8,394 rows, three times a request). The legacy path keeps its text byte for byte.
+  const ctes = (withStock: boolean) => `${withStock ? `stock AS ${simple ? 'MATERIALIZED ' : ''}(${stock.rowsSql}), ` : ''}base AS (
     SELECT ${columns.join(',')}, ${FAMILY_ROOT_KEY_SQL} AS family_key, parent.name AS parent_name,
       COALESCE(p.out_of_stock_threshold,0) AS __out, ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')} AS __low,
       ${stockColumnsSql(withStock ? 'stock' : null)},
