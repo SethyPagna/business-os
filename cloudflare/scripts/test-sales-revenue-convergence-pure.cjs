@@ -9,8 +9,8 @@
 // It runs the ACTUAL shipped code, not a reimplementation:
 //   - the kernel: salesAnalytics.ts is transpiled and getSalesTotals() is
 //     called against a real better-sqlite3 DB (a getDb shim hands it the DB);
-//   - the header: the revenue/pending SELECT is EXTRACTED verbatim from
-//     routes/sales.ts source and run against the same DB.
+//   - Stats: the current totals-purpose helper runs on the same DB and scope;
+//     a source contract pins delegation, while the Hono suite tests wire behavior.
 // If either surface's revenue math drifts, the equality assertions here break.
 //
 // Run (from cloudflare/): node scripts/test-sales-revenue-convergence-pure.cjs
@@ -20,6 +20,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const { installSwitchSiblings, switchRowSql } = require('./harness/report_atomic_switch.cjs')
 
 // ---- 1. Transpile the real kernel, injecting a getDb() that returns our DB ---
 const srcPath = path.join(__dirname, '..', 'src', 'lib', 'salesAnalytics.ts')
@@ -42,8 +43,10 @@ const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
 for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
+// The atomic report reader is behind the report_atomic switch; this test is about that reader, so the switch is ON.
+const switchFiles = installSwitchSiblings(tmpDir)
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')} ${switchFiles.join(' ')}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
@@ -51,7 +54,22 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
 
 // ---- 2. Real SQLite with the columns both surfaces read --------------------
 const db = new Database(':memory:')
+
+let reportReadBatches = 0
+const reportBatch = db.transaction((statements) => statements.map(({ sql, params = {} }) => {
+  assert.match(sql, /^\s*SELECT\b/i, 'Report batches contain reads only')
+  const bindings = Object.fromEntries(Object.entries(params).map(([name, value]) => [name,
+    value instanceof ArrayBuffer ? Buffer.from(value)
+      : ArrayBuffer.isView(value) ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : value]))
+  return { success: true, results: db.prepare(sql).all(bindings), meta: {} }
+}))
+db.batch = (statements) => {
+  reportReadBatches++
+  return reportBatch(statements)
+}
 db.exec(`
+  CREATE TABLE system_flags (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+  ${switchRowSql('on')};
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY,
     created_at TEXT,
@@ -270,44 +288,55 @@ const day15 = await lib.getSalesDayReport({ __db: db }, '2026-08-15', {})
 const day15Rows = Math.round(day15.sales.reduce((s, r) => s + r.revenue_usd, 0) * 100) / 100
 check('per-sale day-drill rows sum to the day total (S6: 60 net - 15 apportioned refund = 45)', day15Rows === 45 && day15.totals.revenue_usd === 45)
 
-// ---- 7. The REAL shared /stats snapshot/reducer, EXECUTED ------------------
-// The route no longer maintains a header SELECT or a third money formula. Run
-// the shipped snapshot/reducer against this same fixture, then pin delegation.
+// ---- 7. The current Stats totals projection on the same fixture --------------
 const salesTs = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-const statsSnapshot = await lib.readSalesReportSnapshot({ __db: db }, {}, false, alias => ({
+const statsReport = await lib.readSalesReportTotals({ __db: db }, {}, false, alias => ({
   sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale WHERE date(matched_sale.created_at, '+7 hours') >= @reportScope_startDate AND date(matched_sale.created_at, '+7 hours') <= @reportScope_endDate)`,
   params: { reportScope_startDate: '2026-08-01', reportScope_endDate: '2026-08-31' },
 }))
-const statsTotals = lib.salesTotalsFromSnapshot(statsSnapshot)
+const statsTotals = statsReport.totals
 const statsRevenue = statsTotals.revenue_usd
 const statsPending = statsTotals.pending_revenue_usd
 const statsBlock = salesTs.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
-check('the /stats route delegates to the shared exact snapshot and reducer',
-  /readSalesReportSnapshot\(c\.env,windowFilter,false/.test(statsBlock)
-  && /salesTotalsFromSnapshot\(snapshot\)/.test(statsBlock)
-  && /revenue_count: snapshot\.sales\.length/.test(statsBlock)
-  && /revenue_usd: totals\.revenue_usd/.test(statsBlock)
-  && /pending_revenue_usd: totals\.pending_revenue_usd/.test(statsBlock))
-check('the /stats route maintains no third money aggregate or formula',
-  !/db\.prepare/.test(statsBlock)
-  && /no third revenue or\s*\/\/\s*refund formula is maintained in this route/.test(statsBlock))
+check('the totals-purpose projection counts five active, one cancelled and six total matching sales',
+  statsReport.sale_count === 5 && statsReport.cancelled_count === 1
+  && statsReport.sale_count + statsReport.cancelled_count === 6
+  && statsReport.sale_count === statsTotals.tx_count && statsReport.cancelled_count === statsTotals.cancelled_tx_count)
+check('the /stats route delegates to the totals-purpose helper with its complete list scope',
+  /readSalesReportTotals\(c\.env,\s*windowFilter,\s*false,\s*salesListFilterReportScope\(where,\s*params\)\)/.test(statsBlock)
+  && /const totals\s*=\s*report\.totals\b/.test(statsBlock)
+  && /revenue_count:\s*report\.sale_count\b/.test(statsBlock)
+  && /const totalCount\s*=\s*report\.sale_count\s*\+\s*report\.cancelled_count\b/.test(statsBlock)
+  && /total_count:\s*totalCount\b/.test(statsBlock)
+  && /revenue_usd:\s*totals\.revenue_usd\b/.test(statsBlock)
+  && /pending_revenue_usd:\s*totals\.pending_revenue_usd\b/.test(statsBlock))
+check('the /stats route maintains no local database money aggregate or financial expression',
+  !/\bdb\.prepare\s*\(|\bnetSaleExpr\s*\(|\bnetRefundExpr\s*\(|\bSUM\s*\(/.test(statsBlock))
+check('the totals-purpose projection preserves every full-kernel total on the same fixture',
+  Object.keys(statsTotals).length === Object.keys(kernel).length
+  && Object.keys(kernel).every(key => statsTotals[key] === kernel[key]))
+check('the totals-purpose projection preserves the full-kernel precision and cost diagnostics',
+  JSON.stringify(lib.reportMoneyDiagnostic(statsTotals)) === JSON.stringify(lib.reportMoneyDiagnostic(kernel)))
+
+const selectedScope = lib.salesListFilterReportScope(['1=1', 's.id IN (@creditId, @cancelledId)'], { creditId: 4, cancelledId: 5 })
+const selectedBatchesBefore = reportReadBatches
+const selectedReport = await lib.readSalesReportTotals({ __db: db }, {}, false, selectedScope)
+check('the selected factory scope uses three transactional read batches', reportReadBatches - selectedBatchesBefore === 3)
+check('a scope selecting credit and cancelled sales keeps one active, one cancelled and two matches',
+  selectedReport.sale_count === 1 && selectedReport.cancelled_count === 1
+  && selectedReport.sale_count + selectedReport.cancelled_count === 2)
+check('the selective scope keeps only the credit sale and its apportioned customer refund',
+  selectedReport.totals.revenue_usd === 153 && selectedReport.totals.pending_revenue_usd === 153
+  && selectedReport.totals.cost_usd === 50 && selectedReport.totals.refund_usd === 27)
 
 // ---- 8. THE CONVERGENCE: header revenue == kernel revenue, to the cent ------
 check(`CONVERGENCE: /stats revenue (${statsRevenue}) == kernel revenue (${kernel.revenue_usd})`, statsRevenue === kernel.revenue_usd)
 check(`CONVERGENCE: /stats pending (${statsPending}) == kernel pending (${kernel.pending_revenue_usd})`, statsPending === kernel.pending_revenue_usd)
 check(`both surfaces equal the hand-computed net-sales revenue (${EXPECT.revenue})`, statsRevenue === EXPECT.revenue && kernel.revenue_usd === EXPECT.revenue)
-check(`CONVERGENCE: the shared snapshot's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
+check(`CONVERGENCE: the totals projection's refund is apportioned too -- the charged basis would have given ${230 - EXPECT.refundsChargedBasis}`,
   statsRevenue !== 230 - EXPECT.refundsChargedBasis)
 
-// ---- 8b. THE THIRD SURFACE: the Sales page's own fallback ------------------
-// Sales.tsx shows salesStats.revenue_usd (the /stats aggregate proved equal
-// above) and, when that request fails, reduces over the rows it already has.
-// That reduction used to be a THIRD definition -- `net_total_usd ?? total_usd`
-// over sales that were neither cancelled nor awaiting_payment -- so the one
-// page whose header exists to agree with the Dashboard disagreed with itself
-// the moment the network hiccuped. frontend/src/utils/statsFormulas.ts now
-// mirrors the kernel's fragments, and this runs the SHIPPED frontend module
-// over the rows GET /api/sales would have returned for the same window.
+// ---- 8b. Frontend formula utility parity on the complete window ------------
 const frontendSrc = path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts')
 const frontendTs = path.join(tmpDir, 'statsFormulas.ts')
 fs.writeFileSync(frontendTs, '// @ts-nocheck\n' + fs.readFileSync(frontendSrc, 'utf8'))
@@ -322,16 +351,16 @@ const listRows = db.prepare(`
   FROM sales s ${lib.CUSTOMER_REFUND_JOIN}s.id
   WHERE date(s.created_at, '+7 hours') BETWEEN '2026-08-01' AND '2026-08-31'
 `).all()
-const fallbackRevenue = front.saleListRevenueUsd(listRows)
-check(`the fallback sees every row of the window (${listRows.length})`, listRows.length === 6)
-check(`CONVERGENCE: the Sales page fallback (${fallbackRevenue}) == kernel revenue (${kernel.revenue_usd}) == /stats (${statsRevenue})`,
-  fallbackRevenue === kernel.revenue_usd && fallbackRevenue === statsRevenue)
-check('the fallback counts the rows /stats counts as revenue_count -- cancelled out, awaiting_payment IN',
-  listRows.filter(front.isRevenueCountedSale).length === 5)
+const utilityRevenue = front.saleListRevenueUsd(listRows)
+check(`the utility fixture contains every row of the window (${listRows.length})`, listRows.length === 6)
+check(`CONVERGENCE: the frontend revenue utility (${utilityRevenue}) == kernel revenue (${kernel.revenue_usd}) == /stats (${statsRevenue})`,
+  utilityRevenue === kernel.revenue_usd && utilityRevenue === statsRevenue)
+check('the frontend count utility matches the Stats active count -- cancelled out, awaiting_payment IN',
+  listRows.filter(front.isRevenueCountedSale).length === statsReport.sale_count)
 const oldFallback = listRows
   .filter((r) => !['cancelled', 'awaiting_payment'].includes(String(r.sale_status || 'completed')))
   .reduce((sum, r) => sum + (r.net_total_usd ?? r.total_usd ?? 0), 0)
-check(`POSITIVE CONTROL: the old fallback gave ${oldFallback} on these very rows, not ${EXPECT.revenue}`,
+check(`POSITIVE CONTROL: the historical credit-excluding formula gave ${oldFallback} on these very rows, not ${EXPECT.revenue}`,
   oldFallback === 208 && oldFallback !== EXPECT.revenue)
 
 // ---- 9. NO SIXTH COPY: sweep every route and lib for the raw refund --------

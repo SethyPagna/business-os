@@ -14,6 +14,7 @@ const path = require('node:path')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const Database = require(path.join(cloudflareRoot, 'node_modules', 'better-sqlite3'))
+const { installSwitchSiblings } = require('./harness/report_atomic_switch.cjs')
 let checks = 0
 function ok(cond, label) {
   assert.ok(cond, label)
@@ -31,7 +32,8 @@ const kernelSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'sales
     "import { getDb } from './db'",
     [
       'type __TestStmt = { get<T = Record<string, unknown>>(params?: unknown): Promise<T | undefined>; all<T = Record<string, unknown>>(params?: unknown): Promise<T[]> }',
-      'type __TestDb = { prepare(sql: string): __TestStmt }',
+      'type D1Result = { success: boolean; results?: unknown[]; meta?: unknown }',
+      'type __TestDb = { prepare(sql: string): __TestStmt; batch(statements: unknown[]): Promise<D1Result[]> }',
       'const getDb = (_env: unknown): __TestDb => (globalThis as { __testDb?: __TestDb }).__testDb as __TestDb',
     ].join('\n'),
   )
@@ -47,8 +49,10 @@ const readerDependencies = ['customerReturnEntitlement.ts', 'refundMoneyPrecisio
 for (const file of readerDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
 }
+// salesAnalytics.ts imports the report switch modules on demand; they compile beside it and the legacy readers run until a switch row says otherwise.
+const switchFiles = installSwitchSiblings(tmpDir)
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${path.join(tmpDir, 'moneyPrecision.ts')} ${path.join(tmpDir, 'reportMoneyPrecision.ts')} ${readerDependencies.map((file) => path.join(tmpDir, file)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${path.join(tmpDir, 'moneyPrecision.ts')} ${path.join(tmpDir, 'reportMoneyPrecision.ts')} ${readerDependencies.map((file) => path.join(tmpDir, file)).join(' ')} ${switchFiles.map((file) => path.join(tmpDir, file)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
 const migrationSql = (file) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', file), 'utf8')

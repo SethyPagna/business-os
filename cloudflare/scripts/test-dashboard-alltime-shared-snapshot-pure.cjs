@@ -76,8 +76,14 @@ check(
 // 2. Its body reads the snapshot exactly ONCE (not once per sub-computation).
 {
   const body = sliceFunctionBody(analyticsSrc, 'export async function getSalesTotalsAndPeriodSeries')
-  const readCalls = (body.match(/readSalesReportSnapshot\(/g) || []).length
-  check('getSalesTotalsAndPeriodSeries calls readSalesReportSnapshot exactly once', readCalls === 1)
+  const count = (re) => (body.match(re) || []).length
+  // 6.0.1050: the function is routed through the report_atomic switch, so it holds two paths; each reads ONE snapshot and neither reads one per figure.
+  check('getSalesTotalsAndPeriodSeries is routed through the report_atomic switch', /return routeReportRead\(env, 'totals_and_series',/.test(body))
+  check('getSalesTotalsAndPeriodSeries reads exactly one snapshot on the old path and none through the unrouted reader',
+    count(/readSalesReportSnapshotLegacy\(/g) === 1 && count(/readSalesReportSnapshot\(/g) === 0)
+  check('getSalesTotalsAndPeriodSeries reads exactly one snapshot on the atomic path',
+    count(/readSalesReportSnapshotForPurpose\(/g) === 1 && count(/const \[snapshot, loss\] = await Promise\.all\(/g) === 2)
+  check('getSalesTotalsAndPeriodSeries builds both paths through the same single-snapshot function', count(/return fromSnapshot\(snapshot, loss\)/g) === 2)
   check('getSalesTotalsAndPeriodSeries reuses the snapshot for both totals and the period series',
     /salesTotalsFromSnapshot\(snapshot\)/.test(body) && /salesPeriodRowsFromSnapshot\(snapshot, granularity\)/.test(body))
 }

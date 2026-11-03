@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { transformSync } from 'esbuild'
+import { requireSalesStatsResult } from '../src/api/salesStatsContract.ts'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent } from '../src/api/actorReadScope.ts'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
@@ -209,7 +211,7 @@ assert.equal(closed, 0)
 const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 function salesReadCallback(name: string, env: Record<string, unknown>) {
   const start = salesSource.indexOf(`const ${name} = useCallback`)
-  const end = salesSource.indexOf('\n\n  useEffect', start)
+  const end = salesSource.indexOf('])', salesSource.indexOf('\n  }, [', start)) + 2
   const code = transformSync(salesSource.slice(start, end), { loader: 'tsx' }).code
   return new Function(...Object.keys(env), `${code}; return ${name}`)(...Object.values(env))
 }
@@ -224,10 +226,11 @@ const readEnv: any = {
   statusSecurityRef: { current: 'scope1' }, loadSecurityRef: { current: 'scope1' }, aliveRef: { current: true },
   loadPromiseRef: { current: null }, pendingLoadRef: { current: null }, loadAbortRef: { current: null },
   loadRequestRef: { current: 0 }, loadedOnceRef: { current: false }, loadWatchdogRef: { current: undefined }, latestLoadRef: { current: null },
-  beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent,
+  beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, captureActorReadScope,
   clearLoadWatchdog: () => { watchdogClears++ }, setLoading: (value: boolean) => loadingStates.push(value), setLoadError: (value: unknown) => errors.push(value),
   window: { setTimeout: () => 1 }, isAdmin: false, userFilter: 'all', statusFilter: 'all', debouncedSearch: '',
   salesDateRange: {}, salesPage: 1, salesPageSize: 25, salesSortSpec: { field: 'date', direction: 'desc' },
+  salesPageParams: { page: 1, limit: 25, sortBy: 'date', sortDir: 'desc' }, salesPageScope: 'page1', salesPageRowsRef: { current: null },
   // The query generation refs (tests/salesPagedLoad.test.ts drives supersede and refresh with them).
   latestQueryKeyRef: { current: '' }, loadKeyRef: { current: '' }, salesRef: { current: [] },
   fetchSales: (_params: unknown, options: { signal: AbortSignal }) => { listSignals.push(options.signal); return listRequest.promise },
@@ -264,14 +267,14 @@ assert.equal(listSignals.length, 2, 'retained old closure cannot send a new read
 
 let statsRequest = deferred()
 const stats: unknown[] = []
-const statsEnv = { ...readEnv, isActive: true, salesStatsRequestRef: { current: 0 }, fetchSalesStats: () => statsRequest.promise, setSalesStats: (value: unknown) => stats.push(value) }
+const statsEnv = { ...readEnv, isActive: true, salesStatsRequestRef: { current: 0 }, fetchSalesStats: () => statsRequest.promise, salesStatsScope: 'stats1', salesStatsScopeRef: { current: 'stats1' }, salesStatsParams: {}, captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, requireSalesStatsResult, setSalesStatsRead: (value: any) => { if (value.status !== 'loading') stats.push(value.status === 'ready' ? value.value : null) } }
 const oldStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecurityScope: 'scope2' })()
 readEnv.statusSecurityRef.current = 'scope3'
 statsRequest.resolve({ total_count: 100 }); await oldStats
 assert.deepEqual(stats, [], 'old same-user aggregate cannot publish after permission change')
 statsRequest = deferred()
 const freshStats = salesReadCallback('loadSalesStats', { ...statsEnv, statusSecurityScope: 'scope3' })()
-statsRequest.resolve({ total_count: 2 }); await freshStats
+statsRequest.resolve({ total_count: 2, revenue_count: 2, revenue_usd: 20, pending_revenue_usd: 0, truncated_in_list: false }); await freshStats
 assert.equal((stats[0] as any).total_count, 2)
 listRequest = deferred()
 // This closure is the newest one (no newer commit), so it reads itself instead of handing over to the scope2 closure.

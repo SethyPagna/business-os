@@ -11,6 +11,12 @@ const { BUDGETS_FILE, FREE_CALL_LIMIT, loadBudgets, today, roundUp, callsLimit }
 // READ_BUDGET_ONLY=<regex> narrows a local run to the shape ids it matches (diagnosis only; the gate runs them all).
 const only = (id) => !process.env.READ_BUDGET_ONLY || new RegExp(process.env.READ_BUDGET_ONLY).test(id)
 
+// The GET shapes are measured with the read switches budgets.json lists stored (lib/readSwitches.ts reads them from system_flags), because that is the
+// state the Free plan is meant to run in; the write shapes are measured with none. READ_BUDGET_SWITCHES=off measures the GET shapes with none (the old
+// paths), for a before/after comparison. One state for the whole pass: flipping it between shapes would restart the isolate and move the rows of the
+// shapes that follow (a cold isolate reads more, a second login adds a session row every request reads).
+const getSwitches = (budgets) => (process.env.READ_BUDGET_SWITCHES === 'off' ? undefined : budgets.switches)
+
 // A shape's file is fixed by its id, so adding a shape never moves another one.
 const PARTS = 3
 const part = (id) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % PARTS
@@ -88,7 +94,7 @@ async function pinProblems(world, entry, statements) {
 async function runGetPass({ partIndex, analyze = false, label }) {
   const budgets = loadBudgets()
   const byId = new Map(budgets.shapes.map((e) => [e.id, e]))
-  const world = await bootWorld({ tier: 'free' })
+  const world = await bootWorld({ tier: 'free', switches: getSwitches(budgets) })
   const reds = []
   let n = 0
   try {
@@ -148,4 +154,4 @@ async function runWritePass({ label }) {
   return reds
 }
 
-module.exports = { prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
+module.exports = { getSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }

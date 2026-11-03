@@ -91,7 +91,7 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   // "‹ page (1-20) / total ›": an editable current page, then the range, then
   // "/ totalPages", bracketed by the prev/next arrows.
   assert.match(branch, /onKeyDown=\{handlePageInputKeyDown\}/, 'the current page must stay editable')
-  assert.match(branch, /\/ \{totalPages\}/, 'the total page count must be shown')
+  assert.match(branch, /\/ \{unknownTotal \? '—' : totalPages\}/, 'show a known page count or an explicit unavailable total')
   assert.match(branch, /aria-label=\{backLabel\}/, 'a localized previous-page control must exist')
   assert.match(branch, /aria-label=\{nextLabel\}/, 'a localized next-page control must exist')
 })
