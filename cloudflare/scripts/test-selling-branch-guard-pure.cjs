@@ -219,10 +219,18 @@ runTest('sale writers require one real active Shop header and identical line bra
 runTest('the guard runs before the write, not after it', () => {
   // A guard that lands after the atomic batch has already been built is a
   // guard that rejects nothing.
-  const guardAt = salesSource.indexOf('firstUnsellableBranch(')
-  const firstBatchAt = salesSource.indexOf('db.batch(')
-  assert.ok(guardAt > 0 && firstBatchAt > 0)
-  assert.ok(guardAt < firstBatchAt, 'the selling-branch check must precede the first atomic write')
+  // Scoped to the CREATE route's body: the file also holds helpers (a read batch in authoritativeSaleSnapshot) and other routes whose
+  // batches come earlier or later than the create route's guard and say nothing about it. The create route writes through
+  // executeStockTransaction (or a plain db.batch); the first of them is the atomic write the guard must precede.
+  const routeStart = salesSource.indexOf("app.post('/', async (c) => {")
+  assert.ok(routeStart > 0, 'the create route was not found')
+  const nextRoute = salesSource.slice(routeStart + 1).search(/\napp\.(get|post|put|patch|delete)\(/)
+  assert.ok(nextRoute > 0, 'the end of the create route was not found')
+  const createRoute = salesSource.slice(routeStart, routeStart + 1 + nextRoute)
+  const guardAt = createRoute.indexOf('firstUnsellableBranch(')
+  const writeAts = [createRoute.indexOf('executeStockTransaction('), createRoute.indexOf('db.batch(')].filter((at) => at > 0)
+  assert.ok(guardAt > 0 && writeAts.length > 0, 'the create route has no selling-branch guard or no atomic write to compare')
+  assert.ok(guardAt < Math.min(...writeAts), 'the selling-branch check must precede the first atomic write')
 })
 
 runTest('ALL THREE transfer routes check the direction', () => {

@@ -50,6 +50,15 @@ function loadTill() {
   return module.exports
 }
 
+// ---- the real pack condition (lib/saleItemPricing.ts), bundled ----
+function loadPricing() {
+  const entry = path.resolve(__dirname, '../src/lib/saleItemPricing.ts')
+  const code = buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'error' }).outputFiles[0].text
+  const module = { exports: {} }
+  new Function('module', 'exports', 'require', code)(module, module.exports, require)
+  return module.exports
+}
+
 // ---- the real return-create guard builder, bundled ----
 function loadReturnCreateAction() {
   const entry = path.resolve(__dirname, '../src/lib/returnCreateAction.ts')
@@ -100,6 +109,7 @@ async function mutate(world, method, url, body, fix) {
   let r
   for (let attempt = 0; attempt < 4; attempt++) {
     r = await world.send(method, url, body, SEND)
+    if (process.env.LS1_TIME) log(`      [timing] ${method} ${url.replace(/[0-9]+/g, "#")} attempt ${attempt + 1}: ${r.status} ${r.json?.code || ""} in ${r.ms} ms, ${r.calls} D1 calls, ${r.statements} statements`)
     if (r.status !== 409) return r
     if (r.json?.code === 'sale_pricing_quote_conflict') fix.quote(body, r.json)
     else if (r.json?.code === 'sale_header_quote_conflict') body.expected_header_quote = r.json.header_quote
@@ -177,7 +187,12 @@ async function main() {
   try {
     // ------------------------------------------------------------------ controls: the instrument is the D1 rule
     await step('controls', 'workerd refuses a value above the cap, SQL-built or bound', async () => {
-      await assert.rejects(world.db.prepare("SELECT length(replace(hex(zeroblob(1000001)),'0','ab')) AS v").all(), /too big|TOOBIG/i, 'a 2,000,002-byte SQL-built string must be refused')
+      // hex(zeroblob(1000001)) is 2,000,002 characters of '0'; replace() turns each into 'ab', so the string built here is 4,000,004 bytes.
+      await assert.rejects(world.db.prepare("SELECT length(replace(hex(zeroblob(1000001)),'0','ab')) AS v").all(), /too big|TOOBIG/i, 'a 4,000,004-byte SQL-built string must be refused')
+      // workerd is LOOSER than D1's documented 2,000,000-byte value cap (the real limit is applied well above the line it names), so a local pass
+      // proves nothing about a value between 2.0 and about 2.2 MB. Every stored-row assertion below therefore uses 1,900,000.
+      const probe = await world.db.prepare('SELECT length(hex(zeroblob(1050000))) AS v').all().then((r) => `accepted (${r.results[0].v} bytes)`, (e) => `refused (${String(e.message).slice(0, 60)})`)
+      log(`      workerd, a 2,100,000-byte SQL-built string: ${probe}`)
       await assert.rejects(world.db.prepare('SELECT length(?) AS v').bind('x'.repeat(CAP + 1_000_000)).all(), /too big|TOOBIG/i, 'a 3 MB bound value must be refused')
       await world.db.prepare('CREATE TABLE IF NOT EXISTS ls1_cap(v TEXT)').run()
       await assert.rejects(world.db.prepare('INSERT INTO ls1_cap(v) VALUES(?)').bind('x'.repeat(CAP + 1_000_000)).run(), /too big|TOOBIG/i, 'a 3 MB row must be refused')
@@ -345,6 +360,132 @@ async function main() {
         assert.equal(refunded.length, 1)
         assert.equal(money4(refunded[0].t), money4(expected.total_refund_usd), `${n} lines: the refund is the quoted refund`)
       }
+    })
+
+    // Sale 17612 as production holds it (ops run 41570262329): 62 lines, every one in the canonical serializeSaleItemPricing form, ONE allocation context,
+    // Not Paid, 2.6 MB of snapshots and NO sale_mutation_receipts row. The canonical check of the pack condition must accept it (so that it is packed, not
+    // refused), and it must open, settle and then take an edit after the change.
+    await step('flow', 'the shape of sale 17612: 62 canonical lines, one context, Not Paid, no receipt: opens, settles, edits', async () => {
+      const { packedItemsCondition } = loadPricing()
+      const rows = await take(62)
+      await heavyCatalogue(world, rows)
+      const base = await stockMaps(world, rows.map((r) => r.pid), rows.map((r) => r.batch))
+      const made = await createSale(world, 'p17612', rows, { paid: false, pos: true })
+      assert.ok(made.saleId, 'no sale was recorded')
+      const id = made.saleId
+      const st0 = await assertInvariants(world, id, base, 'p17612 after create')
+      assert.equal(st0.lines.length, 62)
+      assert.equal(st0.sale.sale_status, 'awaiting_payment')
+      const contexts = new Set()
+      for (const line of st0.lines) {
+        const p = JSON.parse(line.pricing_snapshot_json)
+        const rebuilt = JSON.stringify({ version: 1, line_key: p.line_key, pool: p.pool, quantities: p.quantities, amounts: p.amounts, allocation_context: p.allocation_context, receipt_allocation: p.receipt_allocation })
+        assert.equal(rebuilt, line.pricing_snapshot_json, 'every line is exactly the text serializeSaleItemPricing writes')
+        contexts.add(JSON.stringify(p.allocation_context))
+      }
+      assert.equal(contexts.size, 1, 'one allocation context')
+      const total = st0.lines.reduce((sum, l) => sum + l.pricing_snapshot_json.length, 0)
+      assert.ok(total > 2_000_000, `the fixture must be over D1's cap in total (${total})`)
+      assert.equal(Number((await world.all('SELECT COUNT(*) n FROM sale_mutation_receipts WHERE sale_id = ?', id))[0].n), 0, 'no receipt row, as in production')
+      assert.equal(Number((await world.all(`SELECT (${packedItemsCondition()}) AS p FROM sales s WHERE s.id = ?`, id))[0].p), 1, 'the canonical check must ACCEPT the 17612 shape')
+      // open
+      const list = await world.send('GET', `/api/sales?id=${id}`, undefined, READ)
+      assert.equal(list.status, 200, `open answered ${list.status} ${list.text.slice(0, 160)}`)
+      assertResponseMatchesStore(till, list.json[0], st0, 'p17612 open')
+      // settle
+      const pay = await world.send('PATCH', `/api/sales/${id}/status`, { sale_status: 'completed', client_request_id: `${made.requestId}-pay`, expected_exchange_rate: 4000,
+        payment_details: [{ method: 'Cash', amount_usd: Math.ceil(Number(st0.sale.total_usd)) + 1, amount_khr: 0 }] }, SEND)
+      assert.equal(pay.status, 200, `settle answered ${pay.status} ${pay.json?.code || ''} ${pay.text.slice(0, 220)}`)
+      const st1 = await assertInvariants(world, id, base, 'p17612 after settle')
+      assert.equal(st1.sale.sale_status, 'completed')
+      assert.deepEqual(st1.lines.map((l) => l.pricing_snapshot_json), st0.lines.map((l) => l.pricing_snapshot_json), 'settling leaves every snapshot as it was')
+      // open again, then edit
+      const list1 = await world.send('GET', `/api/sales?id=${id}`, undefined, READ)
+      assert.equal(list1.status, 200)
+      assertResponseMatchesStore(till, list1.json[0], st1, 'p17612 open after settle')
+      const line0 = st1.lines[0]
+      const amendBody = { kind: 'line_quantity_increased', sale_item_id: line0.id, quantity: Number(line0.quantity) + 1, client_request_id: `${made.requestId}-amend`, money_precision_version: 1, expected_exchange_rate: 4000 }
+      const amend = await mutate(world, 'POST', `/api/sales/${id}/amendments`, amendBody, amendFixFor(line0))
+      assert.equal(amend.status, 200, `edit answered ${amend.status} ${amend.json?.code || ''} ${amend.text.slice(0, 220)}`)
+      const st2 = await state(world, id)
+      assert.equal(st2.lines.length, 62)
+      assertResponseMatchesStore(till, amend.json.sale, st2, 'p17612 edit response')
+      const replay = await world.send('POST', `/api/sales/${id}/amendments`, amendBody, SEND)
+      assert.equal(replay.status, 200)
+      assert.deepEqual(replay.json, amend.json, 'the replay of the edit answers the same')
+      const receipt = (await world.all("SELECT length(CAST(response_json AS BLOB)) r, instr(response_json, '\"pricing_packs\"') > 0 packed FROM sale_mutation_receipts WHERE sale_id = ? AND mutation_kind = 'amendment'", id))[0]
+      assert.equal(Boolean(receipt.packed), true, 'the 62-line canonical basket is stored packed')
+      assert.ok(receipt.r < 1_000_000, `the stored response is ${receipt.r} bytes`)
+    })
+
+    // E1: a mutation receipt is ONE row (request + before + after + response). D1 documents 2,000,000 bytes per row; workerd accepts about 2.2 MB, so
+    // the bound asserted here is 1,900,000. Before the fix each image was packed on its own above 1,000,000 bytes, so a basket whose two images were
+    // each just under that (33 lines at the time of the review: 2,013,933 bytes with the response) made a row over the cap. The images are now packed
+    // TOGETHER once they pass 1,100,000 bytes (an image holds the snapshots as JSON strings, so about 1.2 times their size). In this harness 24 lines
+    // (snapshots 431 KB, two images about 1.03 MB, response about 0.5 MB, a row of about 1.55 MB) is the last that keeps the old text; 25 lines
+    // (470 KB) and 33 lines are packed.
+    await step('flow', '22, 24, 25 and 33 lines: an amend and an add-items leave every receipt row under 1.9 MB', async () => {
+      for (const n of [22, 24, 25, 33]) {
+        const rows = await take(n)
+        await heavyCatalogue(world, rows)
+        const made = await createSale(world, `e${n}`, rows, { paid: true, pos: true })
+        assert.ok(made.saleId, `${n} lines: no sale was recorded`)
+        const extra = await take(2)
+        const cur0 = await state(world, made.saleId), line0 = cur0.lines[0]
+        const amendBody = { kind: 'line_quantity_increased', sale_item_id: line0.id, quantity: Number(line0.quantity) + 1, client_request_id: `${made.requestId}-amend`, money_precision_version: 1, expected_exchange_rate: 4000 }
+        const amend = await mutate(world, 'POST', `/api/sales/${made.saleId}/amendments`, amendBody, amendFixFor(line0))
+        assert.equal(amend.status, 200, `${n} lines: amend answered ${amend.status} ${amend.json?.code || ''} ${amend.text.slice(0, 200)}`)
+        const addBody = { client_request_id: `${made.requestId}-add`, money_precision_version: 1, expected_exchange_rate: 4000,
+          items: [{ product_id: extra[0].pid, quantity: 1, branch_id: 1, batch_id: extra[0].batch, client_line_key: `${made.requestId}-extra`, pricing_source: 'selling', pricing_quote: { ...ZERO_QUOTE } }] }
+        const add = await mutate(world, 'POST', `/api/sales/${made.saleId}/items`, addBody, addFix)
+        assert.equal(add.status, 200, `${n} lines: add items answered ${add.status} ${add.json?.code || ''} ${add.text.slice(0, 200)}`)
+        const st = await state(world, made.saleId)
+        assertResponseMatchesStore(till, add.json.sale, st, `${n} lines add items response`)
+        const stored = await world.all("SELECT mutation_kind k, COALESCE(length(CAST(request_json AS BLOB)),0) + COALESCE(length(CAST(before_json AS BLOB)),0) + COALESCE(length(CAST(after_json AS BLOB)),0) + COALESCE(length(CAST(response_json AS BLOB)),0) bytes, instr(after_json, '\"pricing_packs\"') > 0 packedImage FROM sale_mutation_receipts WHERE sale_id = ? ORDER BY created_at", made.saleId)
+        const sz = await sizes(world, made.saleId)
+        log(`      ${n} lines: snapshots ${sz.total} bytes, receipt rows ${JSON.stringify(stored)}`)
+        assert.equal(stored.length, 2, `${n} lines: expected the amendment and the add-items receipt`)
+        for (const row of stored) assert.ok(row.bytes <= 1_900_000, `${n} lines: the ${row.k} receipt row is ${row.bytes} bytes (limit 1,900,000)`)
+        for (const row of sz.undo.slice(0, 1)) assert.ok(row.n <= 1_900_000, `${n} lines: the undo payload is ${row.n} bytes`)
+        if (n === 22) assert.ok(stored.every((r) => !r.packedImage), '22 lines: both images keep the text they always had')
+        if (n === 33) assert.ok(stored.every((r) => r.packedImage), '33 lines: both images are packed')
+      }
+    })
+
+    // E2: the SQL pack condition must see a line that is not the canonical text (an extra key, whitespace, another version, reordered keys) and
+    // refuse to pack it, because the expansion would rewrite it. The canonical sale of the same size is the control: it IS packable.
+    await step('flow', '36 lines: the pack condition accepts the canonical lines and refuses a rewritten one', async () => {
+      const { packedItemsCondition } = loadPricing()
+      const rows = await take(36)
+      await heavyCatalogue(world, rows)
+      const made = await createSale(world, 'e2', rows, { paid: true, pos: true })
+      assert.ok(made.saleId, 'no sale was recorded')
+      const packable = async () => Number((await world.all(`SELECT (${packedItemsCondition()}) AS p FROM sales s WHERE s.id = ?`, made.saleId))[0].p)
+      assert.equal(await packable(), 1, 'the canonical 36-line basket (over the 600,000-byte gate) must be packable')
+      const lines = await world.all('SELECT id, pricing_snapshot_json s FROM sale_items WHERE sale_id = ? ORDER BY id', made.saleId)
+      const target = lines[17]
+      const parsed = JSON.parse(target.s)
+      const variants = {
+        'trailing space': target.s + ' ',
+        'whitespace after a colon': target.s.replace('"version":1', '"version": 1'),
+        'an extra key': target.s.slice(0, -1) + ',"note":"x"}',
+        'another version': target.s.replace('"version":1', '"version":2'),
+        'reordered keys': JSON.stringify({ version: 1, line_key: parsed.line_key, amounts: parsed.amounts, pool: parsed.pool, quantities: parsed.quantities,
+          allocation_context: parsed.allocation_context, receipt_allocation: parsed.receipt_allocation }),
+      }
+      for (const [name, text] of Object.entries(variants)) {
+        assert.notEqual(text, target.s, `${name}: the variant did not change the text`)
+        JSON.parse(text)
+        await world.db.prepare('UPDATE sale_items SET pricing_snapshot_json = ? WHERE id = ?').bind(text, target.id).run()
+        try { assert.equal(await packable(), 0, `${name}: a line that is not the canonical text was reported packable`) }
+        finally { await world.db.prepare('UPDATE sale_items SET pricing_snapshot_json = ? WHERE id = ?').bind(target.s, target.id).run() }
+      }
+      assert.equal(await packable(), 1, 'restored: the canonical basket is packable again')
+      // below the size gate nothing is packed whatever the lines are
+      const small = await take(5)
+      const tiny = await createSale(world, 'e2s', small, { paid: true, pos: true })
+      assert.ok(tiny.saleId)
+      assert.equal(Number((await world.all(`SELECT (${packedItemsCondition()}) AS p FROM sales s WHERE s.id = ?`, tiny.saleId))[0].p), 0, 'a 5-line basket is under the size gate')
     })
 
     // undo / redo of added items, on its own sale: both directions must restore every snapshot byte for byte

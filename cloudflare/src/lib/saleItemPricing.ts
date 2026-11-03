@@ -476,12 +476,17 @@ export const STORED_COPY_CHUNK_BYTES = 900_000
  * A copy is packed only when it has to be. Below the thresholds (every ordinary sale) the stored text is exactly what it was before this
  * module existed: the common case does not change shape, a receipt written now still reads under the previous Worker version, and the
  * packed paths run only where the raw copy would approach D1's 2,000,000-byte value cap.
- *   - PACK_ABOVE_BYTES: a copy built in JS (a receipt's before/after image, an undo payload) is packed when its raw text is larger than this.
+ *   - PACK_ABOVE_BYTES: an undo payload is packed when its raw text is larger than this.
+ *   - PACK_IMAGES_ABOVE_BYTES: a mutation receipt's two images (before and after) share ONE row with the stored response, so they are packed
+ *     TOGETHER once their combined raw text passes this: unpacked they are at most 1.1 MB and the response (unpacked up to about 0.7 MB when it
+ *     is not packed) leaves the row under 1.9 MB; packed, the row is a few hundred KB. Packed one by one at 1,000,000 bytes each, a 33-line
+ *     amend stored a 2,013,933-byte row, over D1's documented 2,000,000-byte row cap (workerd accepts about 2.2 MB, so only a margin sees it).
  *   - PACK_RESPONSE_ABOVE_BYTES: the stored response is aggregated in SQL, so its raw size is not known up front; it is packed when the
  *     basket's snapshots total more than this. The unpacked aggregate is the snapshots with their quotes escaped plus about 800 bytes a
  *     line, so a basket under the threshold aggregates to at most about 1.4 MB (nearer 0.8 MB in practice), under the cap.
  */
 export const PACK_ABOVE_BYTES = 1_000_000
+export const PACK_IMAGES_ABOVE_BYTES = 1_100_000
 export const PACK_RESPONSE_ABOVE_BYTES = 600_000
 
 export function utf8Bytes(text: string): number {
@@ -562,7 +567,7 @@ function rebuildPackedSnapshot(value: PackedPricingSnapshot, packs: PricingPacks
 
 /** Inverse of packSnapshotField. A row whose field is a string, null or absent is returned as it is. */
 export function unpackSnapshotField<T extends Record<string, unknown>>(rows: readonly T[] | undefined, field: string, packs: PricingPacks | undefined): T[] | undefined {
-  if (!rows) return rows
+  if (!rows) return undefined
   return rows.map((row) => {
     const value = row[field]
     return isPackedSnapshot(value) ? { ...row, [field]: rebuildPackedSnapshot(value, packs) } : row
@@ -613,4 +618,26 @@ export function unpackAddItemsReversal<T extends Record<string, unknown>>(payloa
     if (Array.isArray(rest[list])) out[list] = unpackSnapshotField(rest[list] as Record<string, unknown>[], field, packs)
   }
   return out as T
+}
+
+/** True only for a LARGE basket (its snapshots total more than PACK_RESPONSE_ABOVE_BYTES; a smaller one keeps the full per-line text exactly as
+ * before, byte for byte) in which every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names
+ * ONE pool and quantity map. "Canonical" is checked line by line: the stored text must equal its own rebuild from version 1 and the six
+ * parts in serializeSaleItemPricing's order (a line with an extra key, whitespace, another version or reordered keys is NOT packed, because
+ * the expansion would rewrite it). Then the packed form loses nothing; otherwise the response keeps the full per-line text (which, for a
+ * basket this large, D1 refuses loudly instead of storing a rewritten copy). The size test comes first so an ordinary sale pays nothing for
+ * the checks after it. */
+export function packedItemsCondition(): string {
+  return `(SELECT COALESCE(SUM(length(CAST(pricing_snapshot_json AS BLOB))),0) FROM sale_items WHERE sale_id=s.id)>${PACK_RESPONSE_ABOVE_BYTES}
+    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
+        OR json_extract(pricing_snapshot_json,'$.pool.pool_key') IS NULL OR json_extract(pricing_snapshot_json,'$.allocation_context') IS NULL))
+    AND (SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.allocation_context')) FROM sale_items WHERE sale_id=s.id)=1
+    AND (SELECT COUNT(*) FROM (SELECT DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS k,json_extract(pricing_snapshot_json,'$.pool') AS p,
+        json_extract(pricing_snapshot_json,'$.quantities') AS q FROM sale_items WHERE sale_id=s.id))
+      =(SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key')) FROM sale_items WHERE sale_id=s.id)
+    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND pricing_snapshot_json IS NOT json_object('version',1,
+        'line_key',json_extract(pricing_snapshot_json,'$.line_key'),'pool',json(json_extract(pricing_snapshot_json,'$.pool')),
+        'quantities',json(json_extract(pricing_snapshot_json,'$.quantities')),'amounts',json(json_extract(pricing_snapshot_json,'$.amounts')),
+        'allocation_context',json(json_extract(pricing_snapshot_json,'$.allocation_context')),
+        'receipt_allocation',json(json_extract(pricing_snapshot_json,'$.receipt_allocation'))))`
 }

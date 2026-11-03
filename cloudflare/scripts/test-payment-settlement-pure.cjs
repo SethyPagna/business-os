@@ -27,7 +27,7 @@ const { planSaleSettlement, renameSalePaymentMethod, SettlementValidationError }
 async function verifyReceiptRoutes() {
   const routeText = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
   const ast = ts.createSourceFile('sales.ts', routeText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const helperNames = new Set(['normalizeClientRequestId', 'saleMutationDigest', 'saleStatusReceiptCanonical', 'saleLineReceiptCanonical'])
+  const helperNames = new Set(['normalizeClientRequestId', 'saleMutationDigest', 'saleStatusReceiptCanonical', 'saleLineReceiptCanonical', 'storedMutationResponse'])
   const routePaths = new Set(['/:id/status-receipt', '/:id/line-receipt/:kind'])
   const extracted = ast.statements.filter(statement => {
     if (ts.isFunctionDeclaration(statement)) return helperNames.has(statement.name?.text)
@@ -53,7 +53,9 @@ async function verifyReceiptRoutes() {
   const { getExpectedUpdatedAt } = load('lib/conflictControl.ts')
   const { normalizeCancelReason } = load('lib/saleTransitions.ts')
   const { round2 } = load('lib/saleTotals.ts')
-  new Function('exports', 'app', 'getDb', 'getActionTier', 'getExpectedUpdatedAt', 'normalizeCancelReason', 'round2', output)(exported, { post: (name, fn) => handlers.set(name, fn) }, () => db, getActionTier, getExpectedUpdatedAt, normalizeCancelReason, round2)
+  // The line-receipt route answers a stored response through storedMutationResponse, which expands a packed large-basket response.
+  const { expandStoredSaleResponse } = load('lib/saleItemPricing.ts')
+  new Function('exports', 'app', 'getDb', 'getActionTier', 'getExpectedUpdatedAt', 'normalizeCancelReason', 'round2', 'expandStoredSaleResponse', output)(exported, { post: (name, fn) => handlers.set(name, fn) }, () => db, getActionTier, getExpectedUpdatedAt, normalizeCancelReason, round2, expandStoredSaleResponse)
   const digest = async value => Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))).toString('hex')
   const actor = { id: 7, username: 'cashier', role_code: 'employee', permissions: { sales: true } }
   const request = { client_request_id: 'screenshot-20260910-171258', sale_status: 'completed', payment_details: [{ method: 'ABA', amount_usd: 7, amount_khr: 0 }], expected_exchange_rate: 4100 }

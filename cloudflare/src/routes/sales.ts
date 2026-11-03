@@ -12,7 +12,7 @@ import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePric
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, PACK_ABOVE_BYTES, PACK_RESPONSE_ABOVE_BYTES, packSnapshotField, packsOf, utf8Bytes } from '../lib/saleItemPricing'
+import { chunkRowsByJsonBytes, expandStoredSaleResponse, newPackTable, PACK_ABOVE_BYTES, PACK_IMAGES_ABOVE_BYTES, PACK_RESPONSE_ABOVE_BYTES, packedItemsCondition, packSnapshotField, packsOf, utf8Bytes } from '../lib/saleItemPricing'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
@@ -441,20 +441,6 @@ function pricingPacksSql() {
     'pools',json((SELECT json_group_object(pool_key,json_object('pool',json(pool),'quantities',json(quantities)))
       FROM (SELECT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS pool_key,json_extract(pricing_snapshot_json,'$.pool') AS pool,
         json_extract(pricing_snapshot_json,'$.quantities') AS quantities FROM sale_items WHERE sale_id=s.id GROUP BY 1))))`
-}
-
-/** True only for a LARGE basket (its snapshots total more than PACK_RESPONSE_ABOVE_BYTES; a smaller one keeps the full per-line text exactly as
- * before, byte for byte) in which every line holds a canonical v1 snapshot, all lines share ONE allocation context, and a pool_key names
- * ONE pool and quantity map. Then the packed form loses nothing; otherwise the response keeps the full per-line text. The size test comes
- * first so an ordinary sale pays nothing for the checks after it. */
-function packedItemsCondition() {
-  return `(SELECT COALESCE(SUM(length(CAST(pricing_snapshot_json AS BLOB))),0) FROM sale_items WHERE sale_id=s.id)>${PACK_RESPONSE_ABOVE_BYTES}
-    AND NOT EXISTS (SELECT 1 FROM sale_items WHERE sale_id=s.id AND (pricing_snapshot_json IS NULL OR json_valid(pricing_snapshot_json)=0
-        OR json_extract(pricing_snapshot_json,'$.pool.pool_key') IS NULL OR json_extract(pricing_snapshot_json,'$.allocation_context') IS NULL))
-    AND (SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.allocation_context')) FROM sale_items WHERE sale_id=s.id)=1
-    AND (SELECT COUNT(*) FROM (SELECT DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key') AS k,json_extract(pricing_snapshot_json,'$.pool') AS p,
-        json_extract(pricing_snapshot_json,'$.quantities') AS q FROM sale_items WHERE sale_id=s.id))
-      =(SELECT COUNT(DISTINCT json_extract(pricing_snapshot_json,'$.pool.pool_key')) FROM sale_items WHERE sale_id=s.id)`
 }
 
 function canonicalSaleIdentityBindingsSql(){
@@ -5598,15 +5584,21 @@ function amendmentMoneyAfter(
   }
 }
 
-/** A receipt's before/after image. Its `lines` carry every line's pricing snapshot, each embedding the whole pool, so the image is packed
- * (pools written once) to stay far below D1's 2,000,000-byte value cap. Nothing reads these columns back as lines, and the pack is lossless. */
-function packedReceiptImageJson(image: unknown): string {
-  const plain = JSON.stringify(image)
-  const lines = (image as { lines?: unknown } | null)?.lines
-  if (!Array.isArray(lines) || utf8Bytes(plain) <= PACK_ABOVE_BYTES) return plain
-  const packed = packSnapshotField(lines as Record<string, unknown>[], 'pricing_snapshot_json', newPackTable())
-  const packs = packsOf(packed.table)
-  return packs ? JSON.stringify({ ...(image as object), lines: packed.rows, pricing_packs: packs }) : plain
+/** A receipt's before and after images. Their `lines` carry every line's pricing snapshot, each embedding the whole pool, and both images sit
+ * in ONE row with the stored response, so they are packed TOGETHER (pools written once per image) when their combined raw size passes
+ * PACK_IMAGES_ABOVE_BYTES, which keeps the whole row under 1.9 MB; below it both keep the exact text they always had. The pack is lossless and
+ * nothing reads these columns back as lines. */
+function packedReceiptImagesJson(before: unknown, after: unknown): { before: string; after: string } {
+  const plainBefore = JSON.stringify(before), plainAfter = JSON.stringify(after)
+  if (utf8Bytes(plainBefore) + utf8Bytes(plainAfter) <= PACK_IMAGES_ABOVE_BYTES) return { before: plainBefore, after: plainAfter }
+  const pack = (image: unknown, plain: string): string => {
+    const lines = (image as { lines?: unknown } | null)?.lines
+    if (!Array.isArray(lines)) return plain
+    const packed = packSnapshotField(lines as Record<string, unknown>[], 'pricing_snapshot_json', newPackTable())
+    const packs = packsOf(packed.table)
+    return packs ? JSON.stringify({ ...(image as object), lines: packed.rows, pricing_packs: packs }) : plain
+  }
+  return { before: pack(before, plainBefore), after: pack(after, plainAfter) }
 }
 
 /** The undo payload of an added-items action: the line images before and after (every snapshot of the basket) and the added lines. */
@@ -5639,6 +5631,7 @@ function saleMutationReceiptStatement(input: {
   identityBindings: readonly import('../lib/saleItemPricing').CapturedProductIdentityBinding[]
   canonicalAvailable?:boolean
 }): StatementList[number] {
+  const receiptImages = packedReceiptImagesJson(input.before, input.after)
   return {
     sql: `INSERT INTO sale_mutation_receipts(
             id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_json,
@@ -5656,8 +5649,8 @@ function saleMutationReceiptStatement(input: {
       request: input.requestId,
       digest: input.requestDigest,
       requestJson: input.requestJson,
-      beforeJson: packedReceiptImageJson(input.before),
-      afterJson: packedReceiptImageJson(input.after),
+      beforeJson: receiptImages.before,
+      afterJson: receiptImages.after,
       responseJson: JSON.stringify(input.response),
       validatedIdentityBindings:JSON.stringify(input.identityBindings),
       stamp: input.stamp,
