@@ -40,7 +40,9 @@ for (const language of ['en', 'km'] as const) for (const recoveryFailure of [fal
   const authorizedAssetOrigin = ADMIN_ORIGIN.replace('127.0.0.1', '127.0.0.3')
   const paths: string[] = []
   const saves: Record<string, unknown>[] = []
-  let created: Record<string, unknown> | null = null
+  // "as" keeps the declared type: with a plain "= null" TS narrows to null and types the direct read of
+  // created?.image_path below as never, since it cannot see the route handler assign it (TS2339).
+  let created = null as Record<string, unknown> | null
   const errors: string[] = []
   let recordImageFlow = false
   let lastApiActivity = Date.now()
@@ -142,8 +144,9 @@ for (const language of ['en', 'km'] as const) for (const recoveryFailure of [fal
     await decodedGallery(count)
     await expect(page.getByRole('dialog').last().getByRole('button', { name: labels.save, exact: true })).toBeEnabled()
   }
-  // Products Add is the shared Add Stock session; new identity opens ProductForm.
-  await page.getByRole('button', { name: labels.add, exact: true }).click()
+  // The Products header button that opens the shared stock session reads "Adjust stock" (it read "Add" until
+  // 9 Oct 2026, a95501074; tests/ownerStockEntryPoints.test.ts pins the name). A new identity still opens ProductForm.
+  await page.getByRole('button', { name: labels.adjust_stock, exact: true }).click()
   await page.getByRole('textbox', { name: labels.stock_session_search, exact: true }).fill('Brand New Upload')
   await page.getByRole('option', { name: labels.create_named_product.replace('{name}', 'Brand New Upload'), exact: true }).click()
   await pick(labels.choose_file, 'ordinary.png', 'image/png', png, 1)
@@ -182,7 +185,18 @@ for (const language of ['en', 'km'] as const) for (const recoveryFailure of [fal
   const heicChooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: labels.choose_file, exact: true }).click()
   await (await heicChooser).setFiles({ name: 'unsupported.heic', mimeType: 'image/heic', buffer: Buffer.from('000000186674797068656963000000006d69663168656963', 'hex') })
-  await expect.poll(() => alerts.at(-1)).toBe(labels.product_image_unsupported_type)
+  // The refusal is inline now, not a native alert(): since 6.0.27 (13 Oct 2026) a failed photo keeps a tile with a
+  // role="alert" message plus Retry and Remove, and 6.0.912 (21 Oct) removed the last native alert from the product
+  // form. The assertion keeps its two halves: the exact translated refusal is shown, and nothing native opened.
+  const form = page.getByRole('dialog').last()
+  await expect(form.getByRole('alert').filter({ hasText: labels.product_image_unsupported_type })).toBeVisible()
+  expect(alerts, 'the refusal is inline, never a native alert()').toEqual([])
+  const failedTile = form.locator('[data-image-tile="failed"]')
+  await expect(failedTile).toHaveCount(1)
+  // A failed photo is not part of the product (Save and Minimize are refused while its tile stays), so remove it;
+  // the three stored photos must be untouched.
+  await failedTile.getByRole('button', { name: labels.remove, exact: true }).click()
+  await expect(failedTile).toHaveCount(0)
   await decodedGallery(3)
   await expect(page.getByRole('button', { name: labels.choose_file, exact: true })).toBeEnabled()
   // Zero-stock create completes through the real receiving session UI; the
@@ -194,8 +208,11 @@ for (const language of ['en', 'km'] as const) for (const recoveryFailure of [fal
   await page.getByRole('dialog').last().getByRole('button', { name: labels.add, exact: true }).click()
   await page.getByRole('dialog').last().getByRole('button', { name: labels.next, exact: true }).click()
   await page.getByRole('dialog').last().getByRole('button', { name: labels.next, exact: true }).click()
+  // Completing the session reloads the Products list and the tagged lots. It no longer re-reads
+  // /api/products/possible-duplicates: since 6.0.894 (21 Oct 2026, "Products page stops repeating duplicate scans")
+  // that sweep runs once per products sync generation, and this fixture broadcasts no sync event.
   const refreshedAfterCreate = Promise.all([
-    page.waitForResponse(response => response.url().includes('/api/products/possible-duplicates')),
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/products/search'),
     page.waitForResponse(response => response.url().includes('/api/inventory/tagged-lots?')),
   ])
   await page.getByRole('dialog').last().getByRole('button', { name: labels.complete_session, exact: true }).click()
