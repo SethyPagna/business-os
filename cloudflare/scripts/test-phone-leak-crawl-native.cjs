@@ -30,7 +30,7 @@ const { createReporter } = require('./harness/real_worker_world.cjs')
 const { bootPhoneWorld, PHONES, leaksIn, snippetOf, variantsOf } = require('./harness/phone_leak_world.cjs')
 
 const REQUEST_TIMEOUT_MS = 30000
-const PARAM_VALUES = (ids) => [...new Set([1, 2, 3, 4, 5, 6, ids.customer, ids.sale, ids.return])].map(String)
+const PARAM_VALUES = (ids) => [...new Set([1, 2, 3, 4, 5, 6, 9101, ids.customer, ids.sale, ids.return])].map(String)
 
 const MIDDLEWARE_LINE = "app.use('/api/*', phoneMaskResponses)"
 const sub = (needle, replacement) => (source) => {
@@ -46,6 +46,7 @@ const MUTANTS = {
     alt: sub("return c.json({ items: rows })\r\n", "return new Response(JSON.stringify({ items: rows }), { headers: { 'content-type': 'application/json' } })\r\n"),
     filter: 'api/sales/delivery-options',
   },
+  'duplicate pair value kept': { file: 'lib/phoneAccess.ts', rewrite: sub("if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE", ''), filter: 'duplicates' },
   'cache-shared-key': { file: 'lib/phoneCache.ts', rewrite: sub('phoneCacheVariant(user))', 'undefined)'), world: 'egress-off', mode: 'cache' },
   'cache-stores-full-body': { file: 'lib/phoneCache.ts', rewrite: sub('async () => projectPhones(await producer(), user)', 'async () => producer()'), world: 'egress-off', mode: 'cache' },
   'cache-variant-ignores-grant': { file: 'lib/phoneCache.ts', rewrite: sub("canSeeFullPhones(user) ? 'phone-full' : 'phone-masked'", "'phone-full'"), world: 'egress-off', mode: 'cache' },
@@ -108,8 +109,26 @@ async function main() {
       '/api/notifications/summary', '/api/notifications/summary/items', '/api/auth/bootstrap', '/api/auth/me', '/api/settings', '/api/branches', '/api/users',
       '/api/customers/link-conflicts', '/api/customers/duplicates', '/api/suppliers/duplicates', '/api/delivery-contacts/duplicates',
     ]
-    routes = [...new Set([...staticGets, ...concreteParamRoutes, ...shapes])].filter((route) => !only || route.includes(only))
-    console.log(`crawl: ${staticGets.length} static GET routes, ${paramGets.length} parameterised (${concreteParamRoutes.length} concrete), ${shapes.length} shapes; ${routes.length} requests per account`)
+    // Search-dependent replies: the shapes above only search by a whole number or a name. These are the oracle's queries (a digit
+    // fragment, a letter o for a zero, an accent, a joiner) on every search box, so a reply that depends on what was typed is scanned too.
+    const enc = encodeURIComponent
+    const WINDOW = 'startDate=2000-01-01&endDate=2100-01-01'
+    const wholeNumbers = [PHONES.customer, '+855 87 654 321', '0085587654321', '០៨៧ ៦៥៤ ៣២១']
+    const wholeShapes = wholeNumbers.flatMap((q) => [
+      `/api/customers?search=${enc(q)}&page=1&pageSize=50`, `/api/customers?fields=sales_picker&search=${enc(q)}`, `/api/sales?search=${enc(q)}`,
+      `/api/reports/business-summary/sales?${WINDOW}&q=${enc(q)}`,
+    ])
+    const fragments = ['654', '0876', '321', 'o8765', '654\u0301', '087 654', '98 111', '999', '222', '010', '333']
+    const fragmentShapes = fragments.flatMap((q) => [
+      `/api/customers?search=${enc(q)}&page=1&pageSize=50`, `/api/customers?fields=sales_picker&search=${enc(q)}`, `/api/suppliers?search=${enc(q)}&page=1&pageSize=50`,
+      `/api/delivery-contacts?search=${enc(q)}&page=1&pageSize=50`, `/api/sales?search=${enc(q)}`, `/api/sales/stats?search=${enc(q)}`, `/api/returns?search=${enc(q)}`,
+      `/api/reports/business-summary/sales?${WINDOW}&q=${enc(q)}`, `/api/reports/business-summary/returns?${WINDOW}&q=${enc(q)}`,
+      `/api/sales/delivery-options?search=${enc(q)}`, `/api/system/audit-logs?limit=200&search=${enc(q)}`,
+    ])
+    // A fragment finds rows for the holder and none for the other account by design: those replies are scanned for leaks but not compared.
+    const notCompared = new Set(fragmentShapes)
+    routes = [...new Set([...staticGets, ...concreteParamRoutes, ...shapes, ...wholeShapes, ...fragmentShapes])].filter((route) => !only || route.includes(only))
+    console.log(`crawl: ${staticGets.length} static GET routes, ${paramGets.length} parameterised (${concreteParamRoutes.length} concrete), ${shapes.length + wholeShapes.length + fragmentShapes.length} shapes; ${routes.length} requests per account`)
 
     // Ids of rows other routes name (action history), then their detail routes.
     if (!only) {
@@ -151,6 +170,7 @@ async function main() {
       const known = only ? [] : [
         '/api/customers?fields=sales_picker', '/api/customers?fields=picker', '/api/customers?page=1&pageSize=50',
         '/api/suppliers?page=1&pageSize=50', '/api/delivery-contacts?page=1&pageSize=50', '/api/sales?page=1&pageSize=50', '/api/system/audit-logs?limit=200',
+        '/api/customers/duplicates', '/api/suppliers/duplicates', '/api/delivery-contacts/duplicates',
       ]
       for (const route of known) t.ok(`${route} carries a fixture number for the administrator`, phoneBearing.has(route), results.admin.find((r) => r.route === route)?.status)
       t.ok(`at least ${only ? 1 : 15} routes carry numbers (the leak surface is wide)`, phoneBearing.size >= (only ? 1 : 15), phoneBearing.size)
@@ -191,6 +211,7 @@ async function main() {
           const bad = []
           let seen = 0
           for (const mine of results[holder]) {
+            if (notCompared.has(mine.route)) continue
             const theirs = results[other].find((r) => r.route === mine.route)
             if (!theirs || mine.status !== 200 || theirs.status !== 200 || !mine.json) continue
             const a = tokenize(mine.text, 'full'), b = tokenize(theirs.text, 'masked')
@@ -204,6 +225,28 @@ async function main() {
           t.ok('the comparison saw at least 10 routes that carry numbers (not a vacuous pass)', seen >= 10, seen)
         })
       }
+
+      // Replies to writes. A form filled from a masked read sends the mask back; the Worker saves the real number and the reply
+      // (the sale it saved, the contact it updated) must be masked like any read.
+      await check('POST replies: a sale created from a masked customer phone is saved with the real number and answers masked', async (t) => {
+        const sold = await world.placeSale({ as: 'manager', customerId: ids.customer, customerName: 'Fixture Dara', customerPhone: '087 *** 321' })
+        t.ok(`the sale is created (status ${sold.status})`, sold.status === 200 || sold.status === 201, sold.text.slice(0, 300))
+        t.eq('the reply carries no full number', leaksIn(sold.text), [])
+        t.ok('the reply shows the mask', /087 \*\*\* 321/.test(sold.text), sold.text.slice(0, 300))
+        const saved = await world.first('SELECT customer_phone FROM sales WHERE id = ?', sold.json && (sold.json.id ?? (sold.json.sale && sold.json.sale.id)))
+        t.eq('the saved sale holds the real number (the mask was resolved, not stored)', saved && String(saved.customer_phone).replace(/\D/g, ''), '087654321')
+        const holder = await world.placeSale({ as: 'manager_granted', customerId: ids.customer, customerName: 'Fixture Dara', customerPhone: PHONES.customer })
+        t.ok(`positive control: the holder's sale is created (status ${holder.status})`, holder.status === 200 || holder.status === 201, holder.text.slice(0, 300))
+        t.ok('and answers in full', leaksIn(holder.text).includes('customer'), holder.text.slice(0, 300))
+      })
+      await check('POST/PUT replies: updating a contact from its masked form answers masked', async (t) => {
+        const list = await get('/api/customers?search=Fixture%20Dara&page=1&pageSize=50', 'manager')
+        const row = ((list.json && (list.json.items || list.json.customers || list.json.data)) || []).find((r) => Number(r.id) === ids.customer)
+        t.ok('the masked row is found', !!row, list.text.slice(0, 160))
+        const put = await world.api('PUT', `/api/customers/${ids.customer}`, { ...row, name: 'Fixture Dara', notes: 'crawl edit' }, { as: 'manager' })
+        t.ok(`status ${put.status}`, put.status === 200, put.text.slice(0, 200))
+        t.eq('the reply carries no full number', leaksIn(put.text), [])
+      })
 
       await check('masked output keeps the first and last three digits and nothing between', async (t) => {
         const r = await get(`/api/customers?fields=sales_picker&ids=${ids.customer}`, 'cashier')

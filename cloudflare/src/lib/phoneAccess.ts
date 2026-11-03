@@ -77,9 +77,12 @@ function isBranchRow(node: Record<string, unknown>): boolean {
   return Object.hasOwn(node, 'manager') && Object.hasOwn(node, 'location') && !Object.hasOwn(node, 'customer_id')
 }
 
+// A number under a phone key is a phone when it is as long as one (a count or an id under such a key stays a number).
+const PHONE_NUMBER_MIN = 1_000_000
+
 function maskValue(value: unknown): unknown {
   if (typeof value === 'string') return maskPhone(value)
-  if (typeof value === 'number' && Number.isFinite(value)) return maskPhone(String(Math.trunc(value)))
+  if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) >= PHONE_NUMBER_MIN) return maskPhone(String(Math.trunc(Math.abs(value))))
   return value
 }
 
@@ -117,6 +120,12 @@ function projectString(text: string, kind: number, depth: number, actorId: strin
   return text
 }
 
+function isPhoneRowData(data: unknown): boolean {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false
+  for (const key in data as Record<string, unknown>) if (classify(key) & PHONE) return true
+  return false
+}
+
 function walk(node: unknown, depth: number, actorId: string | null): unknown {
   if (node === null || typeof node !== 'object') {
     return typeof node === 'string' ? projectString(node, 0, depth, actorId) : node
@@ -134,12 +143,19 @@ function walk(node: unknown, depth: number, actorId: string | null): unknown {
   const source = node as Record<string, unknown>
   const branch = isBranchRow(source)
   const own = actorId !== null && Object.hasOwn(source, 'username') && source.id != null && String(source.id) === actorId
+  // A phone under a generic key: the duplicates list says { type: 'phone', value }, the gender restoration { kind: 'unique_phone', key }.
+  const discriminator = typeof source.type === 'string' ? source.type : typeof source.kind === 'string' ? source.kind : ''
+  const phoneTyped = discriminator !== '' && /phone/i.test(discriminator)
+  // An import-review row names the contact it creates by its number: the identifier is a phone when the row carries a phone cell.
+  const phoneRow = typeof source.identifier === 'string' && isPhoneRowData(source.data)
   let out: Record<string, unknown> | null = null
   for (const key in source) {
     if (!Object.hasOwn(source, key)) continue
     const value = source[key]
     let next: unknown = value
-    const kind = classify(key)
+    let kind = classify(key)
+    if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE
+    if (phoneRow && key === 'identifier') kind |= NAME
     const exempt = (kind & BUSINESS) !== 0 || (branch && (kind & PHONE) !== 0) || (own && key === 'phone')
     if (typeof value === 'string') {
       if (!exempt) {
@@ -150,7 +166,7 @@ function walk(node: unknown, depth: number, actorId: string | null): unknown {
       next = exempt ? value : walk(value, depth + 1, actorId)
       if ((kind & PHONE) && !exempt && Array.isArray(value)) next = (next as unknown[]).map(maskValue)
       if ((kind & MESSAGE) && !exempt && Array.isArray(value)) next = (next as unknown[]).map((item) => (typeof item === 'string' ? maskQuotedPhones(item) : item))
-    } else if (typeof value === 'number' && !exempt && key === 'phone') {
+    } else if (typeof value === 'number' && !exempt && (kind & PHONE)) {
       next = maskValue(value)
     }
     if (next !== value && out === null) out = { ...source }

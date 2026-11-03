@@ -971,7 +971,7 @@ app.post('/', async (c) => {
   let saleCustomerPhone: string | null = null
   if (!anonymousCustomerSelected) {
     try {
-      saleCustomerPhone = resolvePhoneInput(body.customer_phone || null, storedPhonesOf(customer))
+      saleCustomerPhone = resolvePhoneInput(body.customer_phone || null, storedPhonesOf(customer), customer?.phone)
     } catch (error) {
       if (isMaskedPhoneInputError(error)) return c.json({ error: error.message, code: error.code }, 400)
       throw error
@@ -4017,6 +4017,8 @@ app.get('/delivery-options', async (c) => {
   // Contact Option phones); a whole number finds the contact whose phone is that number (lib/phoneSearchGuard.ts).
   const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)
   const whole = probe.kind === 'full' ? fullContactPhoneClause(probe, 'deliveryPhoneDigits', CONTACT_OPTION_LIMIT) : null
+  // A courier saved under its number has that number as its name: a digit word does not read such a name either.
+  const nameColumn = probe.kind === 'none' ? "lower(COALESCE(name,''))" : `lower(${nameWithoutPhoneSql('name')})`
   const phoneBearingMatches = probe.kind === 'none'
     ? `
       OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
@@ -4027,7 +4029,7 @@ app.get('/delivery-options', async (c) => {
     SELECT id,name,phone,area,address
     FROM delivery_contacts
     WHERE @search=''
-      OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
+      OR ${nameColumn} LIKE @pattern ESCAPE '\\'
       OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'${phoneBearingMatches}
     ORDER BY lower(COALESCE(name,'')) ASC, id ASC
     LIMIT 25
@@ -5834,8 +5836,9 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
   if (!groups.length) return undefined
-  // Without the full-phone permission a digit-only word never matches the customer's number (lib/phoneSearchGuard.ts).
-  const probe = access.fullPhone ? ({ kind: 'none' } as const) : phoneProbeOf(raw)
+  // Without the full-phone permission a digit-only word (as the matcher reads it: accents folded, a letter o beside a digit read
+  // as zero) never matches the customer's number (lib/phoneSearchGuard.ts); a whole number, in any form, matches by equality.
+  const probe = phoneProbeOf(raw)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
   // Keep one shallow haystack per row context. Passing every raw column to
@@ -5892,7 +5895,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = boundSearchClause(word, probe.kind !== 'none' && isDigitWord(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
+      const flatClause = boundSearchClause(word, !access.fullPhone && isDigitWord(word) ? flatHaystackWithoutPhones : flatHaystack, `${keyBase}_f`)
       const itemClause = boundSearchClause(word, itemHaystack, `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis

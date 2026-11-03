@@ -1,5 +1,5 @@
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { isDigitWord, nameWithoutPhoneSql, phoneProbeOf, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { isDigitWord, nameWithoutPhoneSql, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -720,7 +720,7 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' ||
       COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, '')
     )`
-    const guardDigitWords = !access.fullPhone && phoneProbeOf(search).kind !== 'none'
+    const guardDigitWords = !access.fullPhone
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
       let wordIndex = 0

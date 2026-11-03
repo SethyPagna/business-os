@@ -60,6 +60,21 @@ function run(modules) {
     ]
     for (const [input, expected] of table) assert.equal(mask.maskPhone(input), expected, `maskPhone(${JSON.stringify(input)})`)
   })
+  check('every Unicode decimal digit is folded before masking and matching', () => {
+    const scripts = {
+      thai: '๐๘๗๖๕๔๓๒๑', devanagari: '०८७६५४३२१', myanmar: '၀၈၇၆၅၄၃၂၁', lao: '໐໘໗໖໕໔໓໒໑', arabicIndic: '٠٨٧٦٥٤٣٢١',
+      extendedArabic: '۰۸۷۶۵۴۳۲۱', mathematicalBold: '𝟎𝟖𝟕𝟔𝟓𝟒𝟑𝟐𝟏', superscript: '⁰⁸⁷⁶⁵⁴³²¹', fullWidth: '０８７６５４３２１', khmer: '០៨៧៦៥៤៣២១',
+    }
+    for (const [script, digits] of Object.entries(scripts)) {
+      assert.equal(mask.toAsciiDigits(digits), '087654321', script)
+      assert.equal(mask.maskPhone(digits), '087 *** 321', script)
+      assert.equal(mask.isMaskOf('087 *** 321', digits), true, script)
+      if (script === 'superscript') continue
+      assert.equal(mask.maskPhonesInText(`call ${digits} now`), 'call 087 *** 321 now', script)
+      assert.equal(mask.isPhoneShaped(digits), true, script)
+    }
+    assert.equal(mask.toAsciiDigits('Soap 100ml'), 'Soap 100ml')
+  })
   check('hidden digits: at least three, never the whole number visible', () => {
     for (let length = 1; length <= 15; length += 1) {
       const digits = Array.from({ length }, (_, index) => String((index + 1) % 10)).join('')
@@ -95,6 +110,29 @@ function run(modules) {
     assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', ['099 111 222']), { ok: false, reason: 'masked_no_match' })
     assert.deepEqual(mask.resolveIncomingPhone('070 123 456', []), { ok: true, phone: '070 123 456' })
     assert.deepEqual(mask.resolveIncomingPhone(null, []), { ok: true, phone: null })
+  })
+  check('an asterisk anywhere but in the exact mask shape is a number to hide, not a mask', () => {
+    for (const note of ['012 345 678 *', '*012345678', '012345678 (*main)', '012 345 678 ***', '*** 012 345 678', '012 **** 678', '0*12 345 678']) {
+      assert.equal(mask.isMaskedPhone(note), false, note)
+      assert.ok(!/345/.test(String(mask.maskPhone(note))), `maskPhone(${note}) = ${mask.maskPhone(note)}`)
+      assert.equal(mask.isMaskOf(note, '012345678'), false, note)
+      assert.deepEqual(mask.resolveIncomingPhone(note, ['012 345 678']), { ok: false, reason: 'masked_no_match' }, 'an asterisk is never typed: refused, never saved')
+      assert.deepEqual(mask.resolveIncomingPhone(note, ['099 111 222', note]), { ok: true, phone: note }, 'the stored value sent back unchanged is not a write')
+      assert.deepEqual(mask.resolveIncomingPhone(note, [], note), { ok: true, phone: note })
+    }
+    for (const shown of ['012 *** 678', '***', '1 *** 5', '٠١٢ *** ៦៧៨', '012  ***  678']) assert.equal(mask.isMaskedPhone(shown), true, shown)
+    const out = access.projectPhones({ phone: '012 345 678 *', customer_phone: '*012345678', delivery_contact_phone: '012345678 (*main)' }, cashier)
+    assert.deepEqual(out, { phone: '012 *** 678', customer_phone: '012 *** 678', delivery_contact_phone: '012 *** 678' })
+  })
+  check('a mask that fits two different stored numbers is refused; the number at the same place wins', () => {
+    const left = '012 345 678'
+    const right = '012 999 678'
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right]), { ok: false, reason: 'masked_ambiguous' })
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right], right), { ok: true, phone: right })
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right], left), { ok: true, phone: left })
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, '+855 12 345 678']), { ok: true, phone: left }, 'the same number in two formats is one number')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left], '099 111 222'), { ok: true, phone: left }, 'a preferred number that does not fit falls back to the stored ones')
+    assert.deepEqual(mask.resolveIncomingPhone('012 *** 678', [left, right], '099 111 222'), { ok: false, reason: 'masked_ambiguous' })
   })
   check('maskPhonesInText', () => {
     assert.equal(mask.maskPhonesInText('Phone "012 345 678" is already registered to "Dara".'), 'Phone "012 *** 678" is already registered to "Dara".')
@@ -163,6 +201,43 @@ function run(modules) {
     assert.ok(!hasFull(out), JSON.stringify(out))
     assert.deepEqual(out.phones, [MASKED, '098 *** 222'])
     assert.equal(out.matchedPhone, MASKED)
+  })
+  check('a phone sent as a JSON number is masked; a count or an id under a phone key is not', () => {
+    const out = access.projectPhones({ customer_phone: 12345678, driver_phone: 87654321, phones: [12345678, 87654321], phone: 855123456789, phone_count: 3, phones_total: 12, phone_id: 4021 }, cashier)
+    assert.deepEqual(out, { customer_phone: '12 *** 78', driver_phone: '87 *** 21', phones: ['12 *** 78', '87 *** 21'], phone: '012 *** 789', phone_count: 3, phones_total: 12, phone_id: 4021 })
+    assert.ok(!/12345678|87654321/.test(JSON.stringify(out)), JSON.stringify(out))
+  })
+  check('a phone under a generic key: the duplicates list { type, value } and the gender restoration { kind, key }', () => {
+    const out = access.projectPhones({
+      groups: [
+        { type: 'phone', value: '087654321', ids: [4, 9], names: ['Dara', 'Sok'] },
+        { type: 'name', value: 'Dara Sok', ids: [4, 9] },
+        { type: 'barcode', value: '8851234567890', ids: [2, 3] },
+        { kind: 'unique_phone', key: '098111222', id: 4 },
+        { kind: 'unique_name', key: 'dara sok', id: 4 },
+      ],
+    }, cashier)
+    assert.deepEqual(out.groups[0], { type: 'phone', value: '087 *** 321', ids: [4, 9], names: ['Dara', 'Sok'] })
+    assert.equal(out.groups[1].value, 'Dara Sok')
+    assert.equal(out.groups[2].value, '8851234567890')
+    assert.deepEqual(out.groups[3], { kind: 'unique_phone', key: '098 *** 222', id: 4 })
+    assert.equal(out.groups[4].key, 'dara sok')
+    assert.ok(!hasFull(out), JSON.stringify(out))
+    assert.equal(access.projectPhones({ type: 'phone', value: '087654321' }, granted).value, '087654321', 'a holder reads it as written')
+  })
+  check('an import-review row named by its number: the identifier is masked beside the phone cell', () => {
+    const out = access.projectPhones({ rows: [
+      { row_number: 3, identifier: '087654321', action: 'create', data: { name: 'Dara', phone: '087654321' } },
+      { row_number: 4, identifier: '+855 98 111 222', action: 'update', data: { name: 'Sok', phone: '098111222' } },
+      { row_number: 5, identifier: '8851234567890', action: 'create', data: { name: 'Soap', barcode: '8851234567890' } },
+      { row_number: 6, identifier: 'Dara Sok', action: 'create', data: { name: 'Dara Sok', phone: '087654321' } },
+    ] }, cashier)
+    assert.equal(out.rows[0].identifier, '087 *** 321')
+    assert.equal(out.rows[0].data.phone, '087 *** 321')
+    assert.equal(out.rows[1].identifier, '098 *** 222')
+    assert.equal(out.rows[2].identifier, '8851234567890', 'a barcode row keeps its identifier')
+    assert.equal(out.rows[3].identifier, 'Dara Sok')
+    assert.ok(!hasFull(out), JSON.stringify(out))
   })
   check('a contact saved under its number is masked wherever it is written, even inside JSON without the word phone', () => {
     const out = access.projectPhones({
@@ -262,7 +337,15 @@ const mutants = {
   'masks nothing': { phoneMask: replaceOnce("  if (isMaskedPhone(value)) return value\n  const digits", "  return value\n  const digits") },
   'keeps the middle digits': { phoneMask: replaceOnce('Math.min(3, Math.floor((length - 3) / 2))', 'Math.min(3, Math.floor((length - 1) / 2))') },
   'not idempotent': { phoneMask: replaceOnce("  if (isMaskedPhone(value)) return value\n  const digits", "  const digits") },
-  'Khmer digits not normalized': { phoneMask: replaceOnce('else if (code >= KHMER_ZERO && code <= KHMER_ZERO + 9) out += String(code - KHMER_ZERO)', 'else if (false) out += char') },
+  'non-ASCII digits not folded': { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false') },
+  'only Khmer digits folded': { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'code >= 0x17e0 && code <= 0x17e9') },
+  'an asterisk anywhere is a mask': { phoneMask: replaceOnce("&& MASK_SHAPE.test(toAsciiDigits(value).replace(/\\s+/g, ' ').trim())", '') },
+  'ambiguous mask resolved to the first number': { phoneMask: replaceOnce("if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }", "if (false) return { ok: false, reason: 'masked_ambiguous' }") },
+  'number at the same place ignored': { phoneMask: replaceOnce('if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }', '') },
+  'JSON number phones kept': { phoneAccess: replaceOnce("else if (typeof value === 'number' && !exempt && (kind & PHONE))", 'else if (false)') },
+  'counts under a phone key masked': { phoneAccess: replaceOnce('Math.abs(value) >= PHONE_NUMBER_MIN', 'Math.abs(value) >= 0') },
+  'typed phone value kept': { phoneAccess: replaceOnce("if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE", '') },
+  'import identifier kept': { phoneAccess: replaceOnce("if (phoneRow && key === 'identifier') kind |= NAME", '') },
   '+855 not folded': { phoneMask: replaceOnce('if (/^(?:00)?855\\d{8,9}$/.test(digits))', 'if (false)') },
   'admin not implicit': { phoneAccess: replaceOnce("return !!user && hasPermission(user, 'contacts_full_phone')", "return !!user && JSON.parse((user as any).permissions || '{}').contacts_full_phone === true") },
   'Contacts Full implies the grant': { phoneAccess: replaceOnce("return !!user && hasPermission(user, 'contacts_full_phone')", "return !!user && (hasPermission(user, 'contacts_full_phone') || hasPermission(user, 'contacts'))") },
@@ -286,7 +369,7 @@ const mutants = {
 let missed = 0
 for (const [name, mutate] of Object.entries(mutants)) {
   let result
-  try { result = run(load(mutate)) } catch (error) { result = [`threw: ${error.message}`] }
+  try { result = run(load(mutate)) } catch (error) { if (/mutation anchor missing/.test(error.message)) { missed += 1; console.error(`STALE ANCHOR in ${name}: ${error.message}`); continue } result = [`threw: ${error.message}`] }
   if (result.length === 0) { missed += 1; console.error(`MUTANT SURVIVED: ${name}`) } else console.log(`killed  ${name} (${result.length} failing check${result.length === 1 ? '' : 's'})`)
 }
 assert.equal(missed, 0, `${missed} mutant(s) survived`)

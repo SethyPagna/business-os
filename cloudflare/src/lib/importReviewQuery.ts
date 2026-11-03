@@ -54,7 +54,7 @@ export function buildImportReviewWhere(filter: ImportReviewFilter): ImportReview
       OR LOWER(COALESCE(identifier, '')) LIKE @codeQuery ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @codeQuery ESCAPE '\\'`
       : ''
-    const numberSearchHidden = !!filter.phoneTextBlocked && /\d/.test(query) && !/\p{L}/u.test(query)
+    const numberSearchHidden = !!filter.phoneTextBlocked && /\p{Nd}/u.test(query) && !/\p{L}/u.test(query)
     clauses.push(`(
       ${numberSearchHidden ? '0' : `LOWER(COALESCE(identifier, '')) LIKE @query ESCAPE '\\'`}
       OR LOWER(COALESCE(json_extract(result_json, '$.data.name'), '')) LIKE @query ESCAPE '\\'

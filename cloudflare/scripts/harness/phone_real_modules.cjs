@@ -8,7 +8,7 @@ const path = require('node:path')
 const ts = require('typescript')
 
 const LIB = path.join(__dirname, '..', '..', 'src', 'lib')
-const NAMES = new Set(['phoneMask', 'phoneAccess', 'phoneWriteGuard', 'phoneSearchGuard', 'contactOptions', 'phone', 'permissions'])
+const NAMES = new Set(['phoneMask', 'phoneAccess', 'phoneWriteGuard', 'phoneSearchGuard', 'contactOptions', 'phone', 'permissions', 'searchMatch'])
 const cache = new Map()
 
 function load(name) {

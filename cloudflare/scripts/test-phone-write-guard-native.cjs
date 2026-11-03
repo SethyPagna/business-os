@@ -16,8 +16,11 @@ const sub = (needle, replacement) => (source) => {
   return source.replace(needle, () => replacement)
 }
 const MUTANTS = {
-  'edit saves the mask it was shown': ['routes/contacts.ts', sub('if (Object.prototype.hasOwnProperty.call(payload, \'phone\')) payload.phone = resolvePhoneInput(payload.phone, storedPhones)', '')],
-  'edit saves masked Contact Options': ['routes/contacts.ts', sub('payload.address = resolveAddressInput(payload.address, storedPhones, config.optionMode)', 'payload.address = payload.address')],
+  'edit saves the mask it was shown': ['routes/contacts.ts', sub('if (Object.prototype.hasOwnProperty.call(payload, \'phone\')) payload.phone = resolvePhoneInput(payload.phone, storedPhones, current?.phone)', '')],
+  'edit saves masked Contact Options': ['routes/contacts.ts', sub('payload.address = resolveAddressInput(payload.address, current, config.optionMode)', 'payload.address = payload.address')],
+  'mask matched against any stored number, first hit wins': ['lib/phoneMask.ts', (source) => sub("if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }", '')(sub('if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }', '')(source))],
+  'option mask resolved against all stored options': ['lib/phoneWriteGuard.ts', sub('resolvePhoneInput(option.phone, [], storedCounterpart(option, index, storedOptions)?.phone)', 'resolvePhoneInput(option.phone, storedOptions.map((stored) => stored.phone))')],
+  'asterisk phone that is not a mask saved as typed': ['lib/phoneMask.ts', sub("if (!text.includes('*')) return { ok: true, phone: text }", 'if (!isMaskedPhone(text)) return { ok: true, phone: text }')],
   'create accepts a mask': ['routes/contacts.ts', sub('if (bodyHasMaskedPhone(payload)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)', '')],
   'resolver accepts a mask of another number': ['lib/phoneMask.ts', sub('export function isMaskOf(incoming: unknown, stored: unknown): boolean {', 'export function isMaskOf(incoming: unknown, stored: unknown): boolean {\n  return true')],
   'merge accepts a masked custom phone': ['routes/contacts.ts', sub("if ((column === 'phone' || column === 'address') && bodyHasMaskedPhone({ [column]: choice.custom })) return { error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }", '')],
@@ -72,6 +75,41 @@ async function main() {
     const option = await world.api('PUT', `/api/customers/${ids.customer}`, { name: 'Fixture Dara', phone: '087 *** 321', address: optionJson([{ label: 'Home', name: 'x', phone: '011 *** 000', email: null, address: 'Street 1', area: null }]) }, { as: 'manager' })
     t.eq('a mask of an unknown Contact Option phone is refused', option.status, 400)
     t.eq('still unchanged', await stored(), before)
+  })
+
+  await check('edit: numbers that share their first and last three digits keep their own place when the form is saved unchanged', async (t) => {
+    const made = await world.api('POST', '/api/customers', {
+      name: 'Fixture Triplet', phone: '087 999 321',
+      address: optionJson([
+        { label: 'Home', name: 'Triplet H', phone: '087 111 321', email: null, address: 'Street 1', area: null },
+        { label: 'Work', name: 'Triplet W', phone: '087 222 321', email: null, address: 'Street 2', area: null },
+      ]),
+    }, { as: 'admin' })
+    t.ok(`fixture created (status ${made.status})`, made.status === 201 || made.status === 200, made.text.slice(0, 200))
+    const id = made.json.id
+    const triplet = () => world.first('SELECT phone, address FROM customers WHERE id = ?', id)
+    const read = async () => ((await world.api('GET', '/api/customers?search=Triplet&page=1&pageSize=50', undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === id)
+    const row = await read()
+    t.eq('all three numbers show the same mask', [row.phone, ...JSON.parse(row.address).map((option) => option.phone)], ['087 *** 321', '087 *** 321', '087 *** 321'])
+    const saved = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', notes: 'saved unchanged' }, { as: 'manager' })
+    t.ok(`unchanged form: status ${saved.status}`, saved.status === 200, saved.text.slice(0, 300))
+    const after = await triplet()
+    t.eq('primary phone kept', digitsOf(after.phone), '087999321')
+    t.eq('each option keeps its own number', phonesOfAddress(after.address), ['087111321', '087222321'])
+    const options = JSON.parse(row.address)
+    const swapped = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([options[1], options[0]]) }, { as: 'manager' })
+    t.ok(`options sent in the other order: status ${swapped.status}`, swapped.status === 200, swapped.text.slice(0, 300))
+    t.eq('a label follows its own number', JSON.parse((await triplet()).address).map((option) => [option.label, digitsOf(option.phone)]), [['Work', '087222321'], ['Home', '087111321']])
+    const fresh = await triplet()
+    const extra = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([...options, { label: 'New', name: 'x', phone: '087 *** 321', email: null, address: null, area: null }]) }, { as: 'manager' })
+    t.eq('a new option whose mask fits two stored numbers is refused', extra.status, 400)
+    t.eq('refusal code', extra.json && extra.json.code, 'masked_phone_input')
+    t.eq('nothing written', await triplet(), fresh)
+    const typed = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([options[0], options[1], { label: 'New', name: 'x', phone: '087 333 321', email: null, address: null, area: null }]) }, { as: 'manager' })
+    t.ok(`a new option typed in full is saved (status ${typed.status})`, typed.status === 200, typed.text.slice(0, 200))
+    t.eq('typed number kept beside the others', phonesOfAddress((await triplet()).address).slice().sort(), ['087111321', '087222321', '087333321'])
+    const hand = await world.api('PUT', `/api/customers/${id}`, { ...row, name: 'Fixture Triplet', address: JSON.stringify([{ ...options[0], phone: '087 ** 321' }]) }, { as: 'manager' })
+    t.eq('a hand-edited option mask is refused', hand.status, 400)
   })
 
   await check('edit: a number the person types is saved as typed (the mask guard only stops masks)', async (t) => {

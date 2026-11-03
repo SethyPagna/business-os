@@ -58,16 +58,24 @@ export function buildContactMatchClause(
   paramPrefix: string,
   access: PhoneSearchAccess,
 ): ContactMatchClause | undefined {
-  const probe = access.fullPhone ? ({ kind: 'none' } as const) : phoneProbeOf(rawSearch)
   const open = buildOpenContactMatchClause(table, rawSearch, paramPrefix, false)
-  if (probe.kind === 'none') return open
-  // The account cannot see numbers: digit-only words search the non-phone columns only; a whole number also finds the
-  // contact whose phone IS that number (the open match narrows the rows, the digit comparison confirms one string).
-  // Its own parameter names: the two matches carry different MATCH texts and must not overwrite each other.
+  const probe = phoneProbeOf(rawSearch)
+  const exact = probe.kind === 'full' ? fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT) : null
+  if (access.fullPhone) {
+    // A holder searches as before; a whole number written in a form the word match cannot find (+855, 00855, another script)
+    // also finds the contact whose phone IS that number.
+    if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params } : undefined)
+    return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params } }
+  }
+  // The account cannot see numbers. The restriction is decided on the words the matcher searches, for every search, so no
+  // spelling of a digit fragment (accent, letter o, punctuation) reaches a phone column: a digit-only word searches the
+  // non-phone columns only. A whole number also finds the contact whose phone IS that number (equality of the digits; for a
+  // plain local number the open match narrows the rows first). Its own parameter names: the matches carry different MATCH texts.
   const restricted = buildOpenContactMatchClause(table, rawSearch, `${paramPrefix}_restricted`, true)
-  if (probe.kind === 'partial' || !open || !restricted) return restricted
-  const exact = fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT)
-  return { sql: `((${open.sql} AND ${exact.sql}) OR ${restricted.sql})`, params: { ...open.params, ...exact.params, ...restricted.params } }
+  if (!exact || probe.kind !== 'full') return restricted
+  const whole = probe.plain && open ? `(${open.sql} AND ${exact.sql})` : exact.sql
+  if (!restricted) return { sql: whole, params: { ...(probe.plain && open ? open.params : {}), ...exact.params } }
+  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...(probe.plain && open ? open.params : {}), ...exact.params, ...restricted.params } }
 }
 
 function buildOpenContactMatchClause(

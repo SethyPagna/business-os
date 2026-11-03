@@ -4,10 +4,14 @@
 // stored number, typing 0123, 0124, ... and watching which rows come back would spell the hidden digits out one at a time.
 // So for that account a digit-only search word never matches a column that holds a phone number. The one exception is a
 // complete number typed on its own (8 to 15 digits, any common format): it finds the customer, as the owner asked, and is
-// compared as ONE digit string, so repeating a short word ("345 345 345") cannot turn it back into a 3-digit probe.
-// Everything else (names, receipts, barcodes, membership numbers, e-mail) searches as before. A holder searches as before.
-import { toAsciiDigits } from './phoneMask'
-import { canonicalizePhone } from './phone'
+// compared as ONE digit string (equality, never containment), so repeating a short word ("345 345 345") cannot turn it back
+// into a 3-digit probe. Everything else (names, receipts, barcodes, membership numbers, e-mail) searches as before.
+//
+// What counts as a digit word is decided on the words the MATCHER searches (tokenizeSearchWords: accents folded, a letter o
+// beside a digit read as zero, punctuation dropped), never on the raw text: "654" followed by a combining accent and "o8765"
+// reach the matcher as the digit words 654 and 08765. A holder searches as before.
+import { isPhoneShaped, phoneDigitsOf, toAsciiDigits } from './phoneMask'
+import { tokenizeSearchWords } from './searchMatch'
 
 export type PhoneSearchAccess = { readonly fullPhone: boolean }
 
@@ -17,29 +21,32 @@ export const FULL_NUMBER_MAX_DIGITS = 15
 export type PhoneProbe =
   | { kind: 'none' }
   | { kind: 'partial' }
-  | { kind: 'full'; digits: string; forms: string[] }
+  | { kind: 'full'; digits: string; forms: string[]; plain: boolean }
 
 const NO_PROBE: PhoneProbe = { kind: 'none' }
 const PARTIAL_PROBE: PhoneProbe = { kind: 'partial' }
 
-/** A search word made only of digits (any script the number can be typed in). */
+/** A search word made only of digits (the decimal digits of any script). */
 export function isDigitWord(word: string): boolean {
-  return /^\d+$/.test(toAsciiDigits(String(word).normalize('NFKC')))
+  return /^\d+$/.test(toAsciiDigits(String(word)))
 }
 
-/** What the typed search does to a hidden number: nothing, probes a fragment of it, or names a whole number. */
+/**
+ * What the typed search does to a hidden number: nothing, probes a fragment of it, or names a whole number. Decided on the
+ * words the matcher searches. `plain` is a local-format number typed in ASCII digits: the contact FTS already finds it, so
+ * the exact comparison only needs to run on the rows the FTS narrows to (a +855, 00855 or non-ASCII form has no such FTS hit).
+ */
 export function phoneProbeOf(rawSearch: unknown): PhoneProbe {
-  const raw = toAsciiDigits(String(rawSearch ?? '').normalize('NFKC'))
-  const hasDigitWord = raw.split(/[^\p{L}\p{M}\p{N}]+/u).some((token) => /^\d+$/.test(token))
-  if (!hasDigitWord) return NO_PROBE
-  const digits = raw.replace(/\D/g, '')
-  const wholeQueryIsANumber = /^[+\d\s().-]+$/.test(raw.trim())
-  if (!wholeQueryIsANumber || digits.length < FULL_NUMBER_MIN_DIGITS || digits.length > FULL_NUMBER_MAX_DIGITS) return PARTIAL_PROBE
-  const forms = new Set<string>([digits])
-  const canonical = canonicalizePhone(raw) || digits
-  forms.add(canonical)
+  const words = tokenizeSearchWords(rawSearch)
+  if (!words.some(isDigitWord)) return NO_PROBE
+  if (!words.every(isDigitWord)) return PARTIAL_PROBE
+  const digits = toAsciiDigits(words.join(''))
+  if (digits.length < FULL_NUMBER_MIN_DIGITS || digits.length > FULL_NUMBER_MAX_DIGITS) return PARTIAL_PROBE
+  const canonical = phoneDigitsOf(digits)
+  const forms = new Set<string>([digits, canonical])
   if (/^0\d{8,9}$/.test(canonical)) forms.add(`855${canonical.slice(1)}`)
-  return { kind: 'full', digits, forms: [...forms] }
+  const plain = /^[0-9\s().-]+$/.test(String(rawSearch ?? '').trim()) && canonical === digits
+  return { kind: 'full', digits, forms: [...forms], plain }
 }
 
 /**
@@ -50,10 +57,15 @@ export function isMoneyShapedWord(word: string): boolean {
   return /^[0-9]{1,9}[.][0-9]{1,4}$/.test(word)
 }
 
-/** True when the audit, import-review or any other free-text search word is a bare digit/phone-separator run. */
+/**
+ * True when a free-text search word (the audit log's, which stored text is searched raw) is a probe for digits: it holds a digit
+ * and either no letter at all (digits with any punctuation around them: 654", "0876, :654321) or JSON punctuation, which only
+ * serves to anchor digits in the stored JSON (e":"087654). A receipt label such as RCP-1234 has letters and no JSON punctuation.
+ */
 export function isBareNumberWord(word: string): boolean {
-  const ascii = toAsciiDigits(String(word).normalize('NFKC'))
-  return /\d/.test(ascii) && /^[+\d().-]+$/.test(ascii)
+  const ascii = toAsciiDigits(String(word))
+  if (!/\d/.test(ascii)) return false
+  return !/\p{L}/u.test(ascii) || /["{}[\]:,\\]/.test(ascii)
 }
 
 const DIGIT_SEPARATORS = [' ', '-', '(', ')', '.', '+']
@@ -81,14 +93,14 @@ export interface PhoneClause {
   params: Record<string, string>
 }
 
-/** `column` holds this whole number (compared as one digit string against every form of it). */
+/** `column` IS this whole number (its digits equal one form of it; a number that merely contains the digits does not match). */
 export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string): PhoneClause {
   const params: Record<string, string> = {}
   const digitsSql = phoneDigitsSql(columnSql)
   const sql = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_${index}`
     params[key] = form
-    return `instr(${digitsSql},@${key})>0`
+    return `${digitsSql}=@${key}`
   })
   return { sql: `(${sql.join(' OR ')})`, params }
 }
@@ -103,11 +115,39 @@ export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full'
   const optionMatches = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_o${index}`
     optionParams[key] = form
-    return `instr(${optionDigits},@${key})>0`
+    return `${optionDigits}=@${key}`
   })
   const options = `EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
     THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
     WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
       AND (${optionMatches.join(' OR ')}))`
   return { sql: `(${primary.sql} OR ${options})`, params: { ...primary.params, ...optionParams } }
+}
+
+const SALES_REPORT_TEXT_KEYS = ['receipt_number', 'customer', 'cashier', 'branch', 'payment_method'] as const
+
+function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'full' }>): boolean {
+  const text = String(value ?? '')
+  if (!text.trim()) return false
+  const typed = toAsciiDigits(text).replace(/\D/g, '')
+  return probe.forms.includes(typed) || probe.forms.includes(phoneDigitsOf(text))
+}
+
+/**
+ * Reports > Sales search (routes/reports.ts), a filter over the report's rows in JS (the matcher is built once per request). `search` is trimmed and lower-cased. A holder
+ * matches any text field or the phone by substring, as before (and a whole number in any format). Without the permission the phone
+ * is never matched by substring and a customer name that is itself a number counts as empty: only a whole number, equal to the
+ * phone (or to that numeric name), matches.
+ */
+export function salesReportSearchMatcher(search: string, access: PhoneSearchAccess): (row: Record<string, unknown>) => boolean {
+  if (!search) return () => true
+  const probe = phoneProbeOf(search)
+  const text = (row: Record<string, unknown>, key: string): string => String(row[key] || '').toLowerCase()
+  const whole = (row: Record<string, unknown>): boolean => probe.kind === 'full' && (digitsEqualProbe(row.customer_phone, probe) || digitsEqualProbe(row.customer, probe))
+  if (access.fullPhone) return (row) => whole(row) || [...SALES_REPORT_TEXT_KEYS, 'customer_phone'].some((key) => text(row, key).includes(search))
+  return (row) => {
+    if (whole(row)) return true
+    const customerIsNumber = isPhoneShaped(String(row.customer || ''))
+    return SALES_REPORT_TEXT_KEYS.some((key) => !(key === 'customer' && customerIsNumber) && text(row, key).includes(search))
+  }
 }

@@ -2,7 +2,7 @@
 //
 //   012 345 678        -> 012 *** 678
 //   +855 12 345 678    -> 012 *** 678   (the +855 / 855 / 00855 forms fold to the national 0 form first)
-//   ០១២ ៣៤៥ ៦៧៨       -> 012 *** 678   (Khmer, Arabic-Indic and full-width digits become ASCII first)
+//   ០១២ ៣៤៥ ៦៧៨       -> 012 *** 678   (the decimal digits of every script become ASCII first)
 //
 // The first and last three digits stay and the rest become `***`. A number too short to show six digits keeps fewer
 // (always at least three digits stay hidden), and a value with no digit has nothing to hide. A masked value is
@@ -12,21 +12,27 @@
 
 export const PHONE_MASK_MARK = '***'
 
-const KHMER_ZERO = 0x17e0
-const ARABIC_INDIC_ZERO = 0x0660
-const EXTENDED_ARABIC_INDIC_ZERO = 0x06f0
-const FULLWIDTH_ZERO = 0xff10
+const DECIMAL_DIGIT = /^\p{Nd}$/u
+const decimalValues = new Map<number, number>()
 
+/** The value 0-9 of a decimal digit in any script: Unicode lays every digit set out as ten consecutive code points from its zero. */
+function decimalValue(code: number): number {
+  const known = decimalValues.get(code)
+  if (known !== undefined) return known
+  let start = code
+  while (code - start < 50 && DECIMAL_DIGIT.test(String.fromCodePoint(start - 1))) start -= 1
+  const value = (code - start) % 10
+  decimalValues.set(code, value)
+  return value
+}
+
+/** Every decimal digit of every script (Khmer, Arabic-Indic, Thai, Devanagari, full-width, mathematical ...) becomes 0-9. */
 export function toAsciiDigits(value: string): string {
+  if (!/[^\x00-\x7f]/.test(value)) return value
   let out = ''
-  for (const char of value) {
+  for (const char of value.normalize('NFKC')) {
     const code = char.codePointAt(0) as number
-    if (code >= 0x30 && code <= 0x39) out += char
-    else if (code >= KHMER_ZERO && code <= KHMER_ZERO + 9) out += String(code - KHMER_ZERO)
-    else if (code >= ARABIC_INDIC_ZERO && code <= ARABIC_INDIC_ZERO + 9) out += String(code - ARABIC_INDIC_ZERO)
-    else if (code >= EXTENDED_ARABIC_INDIC_ZERO && code <= EXTENDED_ARABIC_INDIC_ZERO + 9) out += String(code - EXTENDED_ARABIC_INDIC_ZERO)
-    else if (code >= FULLWIDTH_ZERO && code <= FULLWIDTH_ZERO + 9) out += String(code - FULLWIDTH_ZERO)
-    else out += char
+    out += code > 0x7f && DECIMAL_DIGIT.test(char) ? String(decimalValue(code)) : char
   }
   return out
 }
@@ -38,8 +44,12 @@ export function phoneDigitsOf(value: unknown): string {
   return digits
 }
 
+// The one shape maskPhone writes: up to three digits, the mark, up to three digits (or the bare mark). An asterisk anywhere else
+// (a note "012345678 *", a leading star) is not a mask and does not stop the value being masked.
+const MASK_SHAPE = /^(?:\*\*\*|\d{1,3} \*\*\* \d{1,3})$/
+
 export function isMaskedPhone(value: unknown): boolean {
-  return typeof value === 'string' && value.includes('*')
+  return typeof value === 'string' && value.includes('*') && MASK_SHAPE.test(toAsciiDigits(value).replace(/\s+/g, ' ').trim())
 }
 
 function visiblePerSide(length: number): number {
@@ -78,7 +88,7 @@ export function isMaskOf(incoming: unknown, stored: unknown): boolean {
  * eight digits, separators allowed, becomes its masked form. Only for text the system composed from a phone field;
  * a note a person typed is not scanned.
  */
-const PHONE_IN_TEXT = /(?:\+|00)?[\d០-៩٠-٩۰-۹０-９](?:[\s().-]?[\d០-៩٠-٩۰-۹０-９]){6,}/g
+const PHONE_IN_TEXT = /(?:\+|00)?\p{Nd}(?:[\s().-]?\p{Nd}){6,}/gu
 export function maskPhonesInText(text: string): string {
   return text.replace(PHONE_IN_TEXT, (match) => {
     const masked = maskPhone(match)
@@ -90,7 +100,7 @@ export function maskPhonesInText(text: string): string {
  * A number the message itself quotes (`Phone "087 654 321" is already registered to "Dara"`): the duplicate and import checks name
  * the number they matched. Only a QUOTED number is touched, so a receipt number or an amount in running text is left alone.
  */
-const QUOTED_PHONE = /(["'“‘]{1,2})((?:\+|00)?[\d០-៩٠-٩۰-۹０-９](?:[\s().-]?[\d០-៩٠-٩۰-۹０-９]){6,})(["'”’]{1,2})/g
+const QUOTED_PHONE = /(["'“‘]{1,2})((?:\+|00)?\p{Nd}(?:[\s().-]?\p{Nd}){6,})(["'”’]{1,2})/gu
 export function maskQuotedPhones(text: string): string {
   return text.replace(QUOTED_PHONE, (match, open: string, number: string, close: string) => {
     const masked = maskPhone(number)
@@ -99,22 +109,35 @@ export function maskQuotedPhones(text: string): string {
 }
 
 /** A name field that is really a number (a contact saved by its phone): the whole value is a phone. */
-const PHONE_SHAPED = /^[+\d\s().\-០-៩٠-٩۰-۹０-９]{8,24}$/
+const PHONE_SHAPED = /^[+\s().\-\p{Nd}]{8,24}$/u
 export function isPhoneShaped(value: string): boolean {
   return PHONE_SHAPED.test(value.trim()) && phoneDigitsOf(value).length >= 8
 }
 
-export type MaskedPhoneResolution = { ok: true; phone: string | null } | { ok: false; reason: 'masked_no_match' }
+export type MaskedPhoneResolution = { ok: true; phone: string | null } | { ok: false; reason: 'masked_no_match' | 'masked_ambiguous' }
 
 /**
  * A phone value that came back from a client. A real number passes through. A masked value is accepted only when it
- * is the mask of one of the numbers the stored record already holds, and then the stored number is used; anything
- * else is refused so a mask can never be written over a real number.
+ * is the mask of a number the stored record already holds, and then the stored number is used; anything else is
+ * refused so a mask can never be written over a real number. `preferred` is the stored number at the same place (the
+ * primary phone, or the Contact Option with the same label or position): a mask that fits it is that number, even when
+ * another stored number has the same first and last three digits. Without a preferred match the mask must fit exactly
+ * ONE distinct stored number; two different numbers behind one mask are refused, never guessed.
  */
-export function resolveIncomingPhone(incoming: unknown, stored: ReadonlyArray<unknown>): MaskedPhoneResolution {
+export function resolveIncomingPhone(incoming: unknown, stored: ReadonlyArray<unknown>, preferred?: unknown): MaskedPhoneResolution {
   if (incoming == null) return { ok: true, phone: null }
   const text = String(incoming)
-  if (!isMaskedPhone(text)) return { ok: true, phone: text }
-  const hit = stored.find((candidate) => isMaskOf(text, candidate))
-  return hit == null ? { ok: false, reason: 'masked_no_match' } : { ok: true, phone: String(hit) }
+  if (!text.includes('*')) return { ok: true, phone: text }
+  if (!isMaskedPhone(text)) {
+    // An asterisk is never part of a number a person types ("087 ** 321" is a hand-edited mask). The one value allowed to keep one is
+    // a stored value sent back unchanged.
+    const unchanged = [preferred, ...stored].some((candidate) => candidate != null && String(candidate) === text)
+    return unchanged ? { ok: true, phone: text } : { ok: false, reason: 'masked_no_match' }
+  }
+  if (preferred != null && isMaskOf(text, preferred)) return { ok: true, phone: String(preferred) }
+  const hits = new Map<string, string>()
+  for (const candidate of stored) if (isMaskOf(text, candidate) && !hits.has(phoneDigitsOf(candidate))) hits.set(phoneDigitsOf(candidate), String(candidate))
+  if (hits.size === 0) return { ok: false, reason: 'masked_no_match' }
+  if (hits.size > 1) return { ok: false, reason: 'masked_ambiguous' }
+  return { ok: true, phone: [...hits.values()][0] }
 }

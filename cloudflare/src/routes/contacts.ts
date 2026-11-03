@@ -1877,8 +1877,8 @@ function registerContactRoutes(config: ContactConfig) {
     // stored number it hides, never as the mask.
     try {
       const storedPhones = storedPhonesOf(current, config.optionMode)
-      if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = resolvePhoneInput(payload.phone, storedPhones)
-      if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = resolveAddressInput(payload.address, storedPhones, config.optionMode)
+      if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = resolvePhoneInput(payload.phone, storedPhones, current?.phone)
+      if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = resolveAddressInput(payload.address, current, config.optionMode)
     } catch (error) {
       if (isMaskedPhoneInputError(error)) return c.json({ error: error.message, code: error.code }, 400)
       throw error

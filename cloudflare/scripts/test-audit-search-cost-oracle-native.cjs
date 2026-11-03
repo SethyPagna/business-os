@@ -64,7 +64,9 @@ async function main() {
     const READS = { sales: 'view', reports: true, audit_log: true }
     const accounts = {
       admin: undefined,
-      both: await h.addEmployee(970, 'aso_both', { ...READS, product_cost_view: true }),
+      // Holds the full-phone grant too: a reader without it cannot anchor digits in the audit text at all (a word that mixes letters,
+      // JSON punctuation and digits is a digit probe: lib/phoneSearchGuard.ts isBareNumberWord), so this control would not show the oracle.
+      both: await h.addEmployee(970, 'aso_both', { ...READS, product_cost_view: true, contacts_full_phone: true }),
       'no-courier': await h.addEmployee(971, 'aso_no_courier', { ...READS, product_cost_view: true, ...OFF }),
       'no-acquisition': await h.addEmployee(972, 'aso_no_acq', { ...READS }),
       blind: await h.addEmployee(973, 'aso_blind', { ...READS, ...OFF }),

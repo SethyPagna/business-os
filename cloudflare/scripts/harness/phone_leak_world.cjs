@@ -3,6 +3,7 @@
 // phone numbers in every place the app keeps one, and accounts that differ ONLY in the full-phone grant. Used by the
 // leak crawl and the write-path tests. Every name and number here is invented: 087 / 098 / 077 / 096 / 085 / 010 are
 // fixture prefixes and the repo is public.
+const path = require('node:path')
 const { randomBytes } = require('node:crypto')
 const { bootWorld } = require('./real_worker_world.cjs')
 
@@ -20,6 +21,9 @@ const PHONES = {
   driver: '092 101 202',
   user: '081 700 800',
   portal: '086 313 414',
+  duplicate: '011 888 999',
+  supplierDuplicate: '012 777 111',
+  deliveryDuplicate: '013 666 222',
 }
 
 const PROBES = [
@@ -158,9 +162,76 @@ async function bootPhoneWorld({ extraTransform, transformSources } = {}) {
   )
   ids.return = (await world.first("SELECT id FROM returns WHERE return_number = 'P28-RET-1'")).id
 
+  // ---- possible duplicates: two contacts of each kind that share one number (the Duplicates tab names the number) -----------
+  const twin = (table, id, name, phone) => world.run(
+    table === 'customers'
+      ? 'INSERT INTO customers (id, name, phone, phone_normalized, membership_number) VALUES (?, ?, ?, ?, ?)'
+      : table === 'suppliers'
+        ? 'INSERT INTO suppliers (id, name, phone) VALUES (?, ?, ?)'
+        : 'INSERT INTO delivery_contacts (id, name, phone) VALUES (?, ?, ?)',
+    ...(table === 'customers' ? [id, name, phone, phone.replace(/\D/g, ''), `LC-P28-${id}`] : [id, name, phone]),
+  )
+  await twin('customers', 9101, 'Fixture Twin A', PHONES.duplicate)
+  await twin('customers', 9102, 'Fixture Twin B', PHONES.duplicate)
+  await twin('suppliers', 9101, 'Fixture Twin Supplier A', PHONES.supplierDuplicate)
+  await twin('suppliers', 9102, 'Fixture Twin Supplier B', PHONES.supplierDuplicate)
+  await twin('delivery_contacts', 9101, 'Fixture Twin Courier A', PHONES.deliveryDuplicate)
+  await twin('delivery_contacts', 9102, 'Fixture Twin Courier B', PHONES.deliveryDuplicate)
+
   world.ids = ids
   world.PHONES = PHONES
+  world.placeSale = (options) => placeSale(world, options)
   return world
+}
+
+let stockKernelPromise
+function stockKernel() {
+  return stockKernelPromise ||= require('esbuild').build({
+    stdin: { contents: "export { executeRawStockTransaction } from './src/lib/stockTransaction'", resolveDir: path.resolve(__dirname, '..', '..'), loader: 'ts' },
+    bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022',
+  }).then((bundle) => {
+    const mod = { exports: {} }
+    new Function('module', 'exports', bundle.outputFiles[0].text)(mod, mod.exports)
+    return mod.exports
+  })
+}
+
+let saleSeq = 0
+/**
+ * A real POS sale (POST /api/sales) for an existing customer, with the customer_phone the till sends. A form filled from a masked
+ * read sends the mask back; the Worker resolves it to the stored number and the reply is the sale it saved. Returns the response.
+ */
+async function placeSale(world, { as = 'manager', customerId, customerName, customerPhone }) {
+  const { executeRawStockTransaction } = await stockKernel()
+  const sell = world.ids.branch
+  await world.run("UPDATE branches SET role = 'shop', canonical_key = 'shop' WHERE id = ?", sell)
+  saleSeq += 1
+  const id = 9300 + saleSeq
+  const lot = id * 10 + 1
+  const price = 10
+  await executeRawStockTransaction(world.db, [
+    world.db.prepare('INSERT INTO products(id,name,barcode,sku,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,?,4,0,?,?,?,1)')
+      .bind(id, `Fixture Soap ${id}`, `88710${String(id).padStart(8, '0')}`, `P28-SKU-${id}`, price, price * 4000, 20),
+    world.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, sell, 20),
+    world.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,'2026-09-02',1,4,1)").bind(lot, id, `P28${id}`, `P28${id}`),
+    world.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(lot, sell, 20),
+  ])
+  const actor = await world.first('SELECT id, organization_id FROM users WHERE username = ?', as)
+  const key = `p28-sale-${id}`
+  const body = {
+    branch_id: sell, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, payment_currency: 'USD', client_request_id: key,
+    offline_owner: { version: 1, actor_id: actor.id, organization_id: actor.organization_id ?? null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
+    payment_details: [{ method: 'Cash', amount_usd: price, amount_khr: 0 }], payment_method: 'Cash', amount_paid_usd: price, amount_paid_khr: 0,
+    customer_id: customerId, customer_name: customerName, customer_phone: customerPhone,
+    items: [{ product_id: id, quantity: 1, branch_id: sell, batch_id: lot, client_line_key: `${key}-line-1`, pricing_source: 'selling',
+      pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } }],
+  }
+  // The first answer to a zero quote is the server's own quote (the till's review step); the real request carries it.
+  const first = await world.api('POST', '/api/sales', body, { as })
+  if (first.status !== 409 || !first.json || !Array.isArray(first.json.pricing_quotes)) return first
+  const quote = first.json.pricing_quotes.find((q) => q.client_line_key === `${key}-line-1`)
+  body.items[0].pricing_quote = Object.fromEntries(['gross_usd', 'product_discount_usd', 'manual_discount_usd', 'total_usd', 'total_khr'].map((name) => [name, quote[name]]))
+  return world.api('POST', '/api/sales', body, { as })
 }
 
 /** The text around the first fixture number in `text`, for a failure message. */
