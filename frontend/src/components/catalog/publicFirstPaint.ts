@@ -63,6 +63,13 @@ const PAINT_CONFIG_SCHEMA: Readonly<Record<string, PaintValueKind>> = {
   gridColumnsMobile: 'number',
   gridColumnsDesktop: 'number',
   translateWidgetEnabled: 'switch',
+  announcementEnabled: 'switch',
+  announcementTextEn: 'text',
+  announcementTextKm: 'text',
+  announcementLink: 'text',
+  announcementStart: 'text',
+  announcementEnd: 'text',
+  announcementVersion: 'text',
 }
 
 export const PAINT_CONFIG_KEYS: readonly string[] = Object.keys(PAINT_CONFIG_SCHEMA)
