@@ -229,7 +229,7 @@ assert.match(
 // first round shipped it through TruncatedText: a receipt id is shown in FULL,
 // never truncated, wrapping onto a second row when it must, with the shared
 // copy affordance beside it -- and it opens its record where a detail opener
-// is reachable from the surface (it is not from here; see the lane report).
+// is reachable from the surface (it is not from here).
 // TruncatedText is the opposite bargain: it clips to one line and hands the
 // tail back only in a tooltip, and its whole click budget goes on opening that
 // tooltip. So the ledger's receipt renders through CopyableId -- the same

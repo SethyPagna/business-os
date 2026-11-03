@@ -2,7 +2,7 @@ const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
 // RET-D (owner, 5 Oct 2026): "Stock-in session edits: lowering or raising a
 // line's quantity adjusts stock to the new quantity WITHOUT booking a
 // loss/write-off", and "when Revert is not allowed, say concisely WHY and
-// WHERE (destination), with an in-built link" (TRANSITION-MATRIX-AUDIT.md 2.4).
+// WHERE (destination), with an in-built link".
 //
 // Real-SQLite harness (every migration applied; the REAL routes and libs
 // transpiled and mounted in Hono), the one test-stock-in-line-edit-pure.cjs

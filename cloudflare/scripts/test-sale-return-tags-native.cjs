@@ -1,5 +1,5 @@
 'use strict'
-// Returns writers (lane 6.0.905, plan PLAN-SALE-STATUS-TAGS S2a), against the
+// Returns writers (lane 6.0.905), against the
 // WHOLE Worker on workerd + D1 (harness: test-al-money-c-native.cjs).
 //
 // Owner, 20 Oct 2026: a sale has two statuses, Not Paid (awaiting_payment) and

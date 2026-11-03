@@ -6,7 +6,7 @@
 // a parity test that fails when the copies differ.
 //
 // Pure and import-free on purpose, so the Worker and the browser run the
-// same code. Design: Records/Lanes/2026-10-05/G37-SEARCH-DESIGN.md section 4.
+// same code.
 //
 // Matching contract (identical on every executor):
 //   - normalize: NFKC, strip zero-width/format characters, fold Latin

@@ -30,7 +30,7 @@ const heldText = fs.readFileSync(heldPath, 'utf8')
 let passed = 0
 function check(name, fn) { fn(); passed++; console.log(`PASS ${name}`) }
 
-// STUB of lane 6.0.890's 0263 -- column and table names from PLAN-SALE-STATUS-TAGS.md section 3.
+// STUB of lane 6.0.890's 0263 -- column and table names as that migration defines them.
 const STUB_0263 = `
 ALTER TABLE sales ADD COLUMN return_state TEXT CHECK (return_state IS NULL OR return_state IN ('partial','full'));
 ALTER TABLE sales ADD COLUMN return_review_state TEXT CHECK (return_review_state IS NULL OR return_review_state IN ('pending','confirmed'));

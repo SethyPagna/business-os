@@ -44,8 +44,7 @@ export function parseJsonObject(value: string | null | undefined): Record<string
 //               page-access see 'view' as "allowed, not none".
 export type PermissionValue = boolean | 'review' | 'view'
 
-// Parsed permissions, memoized per user object (perf CPU item, Records/
-// Performance/2026-09-25 I1). hasPermission() alone used to JSON.parse both
+// Parsed permissions, memoized per user object. hasPermission() alone used to JSON.parse both
 // strings twice (once via isAdminControlUser, once itself), and a route runs
 // many checks against the same session user -- all re-parsing identical
 // JSON. The WeakMap entry dies with the user object (one request), and it is

@@ -30,8 +30,7 @@
 //
 // Control: at 2558a7c55 (before this fix) the matrix checks fail -- the
 // unknown path spends one PBKDF2 and no bcrypt while a bcrypt account's wrong
-// password spends a bcrypt-10 compare and no PBKDF2. See E6-HASH-REPORT.md
-// section 8 for the recorded run.
+// password spends a bcrypt-10 compare and no PBKDF2.
 //
 // Run: node scripts/test-failed-sign-in-cost-pure.cjs
 

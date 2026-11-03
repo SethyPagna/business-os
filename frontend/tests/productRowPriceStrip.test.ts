@@ -288,7 +288,7 @@ runTest('the comment beside the class quotes the model, not a hand-computed gues
   // divider pull entirely and under-counted the font step, and shipped
   // "241px -> ~211px" beside a model that computes 242.1 -> 203.7. Prose that
   // disagrees with the executable model next to it is worse than no prose --
-  // the lane report then repeated the wrong pair as a fact, including a
+  // the write-up then repeated the wrong pair as a fact, including a
   // "3px over" degradation this file's own 360+select case proves does not
   // happen. So the two figures are machine-readable and answerable to the
   // model, and any drift between them is red.

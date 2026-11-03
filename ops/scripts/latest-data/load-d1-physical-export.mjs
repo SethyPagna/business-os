@@ -10,7 +10,7 @@
 // OPS_KEY_PASSPHRASE. --run must equal the run id inside the manifest (a manifest from another run is refused).
 // The database holds PRODUCTION DATA, personal data included (credentials, sessions and one-time codes are not in
 // the export: see manifest.redactions / manifest.omitted), so it is refused inside any folder that contains a .git
-// entry: write it to Records/Backups or a scratch folder, and point wrangler's --persist-to at a folder outside the repo.
+// entry: write it to a backup or scratch folder outside the repo, and point wrangler's --persist-to at a folder outside the repo.
 //
 // --schema export (default): the tables, indexes and views are created from the production DDL stored in the
 //   manifest, the rows are loaded, then triggers and FTS tables are created and the FTS indexes rebuilt. The result

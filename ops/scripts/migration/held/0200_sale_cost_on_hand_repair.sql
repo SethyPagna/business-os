@@ -3,7 +3,7 @@
 -- also be unknown. flag it." This repair treats cost <= 0 as "no cost" throughout (cost > 0 guards) and rewrites those lines.
 -- A recorded $0 is a real $0 and a missing cost is UNKNOWN; neither may be filled from a
 -- later catalog price, another lot or a same-name product. Any replacement must be
--- re-derived from that rule (plan: Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md, section 2.4).
+-- re-derived from that rule.
 --
 -- 0200: past sale lines and customer return lines whose recorded cost came
 -- from the buggy catalog average get the cost the stock on hand actually had

@@ -28,7 +28,7 @@ import { buildContactOptionSummary, parseStoredContactOptions } from './contactO
 // duplicate list counted them), the lowest id on a tie. It never changes when
 // a field is picked, so picking never re-reads the records.
 //
-// Rows (plan-resolver-grid.md §2B):
+// Rows:
 //   Each field   the surviving record's value when it has one, else the
 //                first record's that does (the server's own default).
 //   Membership   D6: one number stays, every other one is added to Notes.

@@ -1,4 +1,4 @@
-// F3 (Records/Performance/2026-09-25 I1): one session lookup per request.
+// F3: one session lookup per request.
 //
 // Stacked routers each ran requireAuth -- products + productCost, inventory +
 // stockInCommit, system + compat -- and index.ts's staff body admission ran

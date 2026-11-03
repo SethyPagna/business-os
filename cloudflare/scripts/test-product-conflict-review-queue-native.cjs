@@ -12,7 +12,7 @@
 //   - Approval refuses (409 ReviewCodedRefusal confirmed_value_changed, nothing written, request stays open) when the cost / barcode is
 //     no longer the value the requester confirmed -- including a change that leaves the product still listed.
 //   - Full tier applies directly and queues nothing.
-// Each rule has a mutant in the lane report: skip the queue, drop the value check, queue the Full tier, drop the dedupe.
+// Each rule has a mutant that turns this test red: skip the queue, drop the value check, queue the Full tier, drop the dedupe.
 const assert = require('node:assert/strict')
 const { createProductsRouteHarness } = require('./harness/load_products_route.cjs')
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')

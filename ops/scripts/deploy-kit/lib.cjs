@@ -144,7 +144,7 @@ function countsSql(tables = KEY_TABLES, mode = 'full') {
 // item sold reads 50 -> 51 (pass) where COUNT(*) reads 50 -> 41 (UNEXPECTED). The Worker deletes from all eight tables (undo, dated
 // stock counts, merges, retention), so "only a migration could delete a middle row" is false. What 'rowid' does see is a new
 // products row and a newest tail that vanished with nothing inserted after it (a restore). It is therefore opt-in, for the owner
-// who has ruled on Q6 (MASTER-PLAN) and once Tier A runs after every deploy to watch the touched rows:
+// who accepts that limit and once a check runs after every deploy to watch the touched rows:
 //   -Counts full (default): always the full count, the behaviour before 6.0.1043.
 //   -Counts auto: rowid when no database update is waiting, full otherwise (waiting updates unreadable counts as waiting).
 const COUNTS_REQUESTS = ['full', 'auto']

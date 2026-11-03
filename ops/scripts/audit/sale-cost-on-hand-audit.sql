@@ -3,7 +3,7 @@
 -- also be unknown. flag it." This audit mirrors the held 0200 repair, which counts only cost > 0 as recorded.
 -- A recorded $0 is a real $0 and a missing cost is UNKNOWN; neither may be filled from a
 -- later catalog price, another lot or a same-name product. Any replacement must be
--- re-derived from that rule (plan: Records/Lanes/2026-10-14/OPUS-PLAN-COST-UNKNOWN-CONFLICTS.md, section 2.4).
+-- re-derived from that rule.
 --
 -- Sale and return line cost audit for held migration 0200 (U-cost; owner
 -- decisions 2026-09-26 and 2026-09-27).

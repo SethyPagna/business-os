@@ -194,8 +194,8 @@ export function resolveAmendmentWindowMinutes(rawSetting: unknown): number {
  * a developer's machine is not, so a window check written the obvious way
  * passes in production and fails (or silently widens) in a test. Same
  * normalization lib/auth.ts, lib/portalSession.ts and lib/telegram.ts each
- * already do inline; see the note in the lane report about the three existing
- * copies, which belong to other files and were not refactored from here.
+ * already do inline; those three copies belong to other files and were not
+ * refactored from here.
  */
 export function parseSqliteTimestampMs(raw: unknown): number {
   const text = String(raw ?? '').trim()

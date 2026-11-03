@@ -1,6 +1,5 @@
 // RET-D (owner, 5 Oct 2026): "Stock changes: when Revert is not allowed, say
 // concisely WHY and WHERE (destination), with an in-built link."
-// TRANSITION-MATRIX-AUDIT.md section 2.4.
 //
 // The Worker names the record that blocked a stock Revert / Undo / line edit
 // (cloudflare/src/lib/stockRefusalBlocker.ts) beside its usual error/code:

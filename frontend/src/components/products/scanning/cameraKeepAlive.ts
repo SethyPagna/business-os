@@ -2,8 +2,7 @@
 //
 // WebKit caches a camera grant in memory per page and drops it after the last capture
 // STOPS. The idea (6.0.968) was to keep the stream with its tracks disabled so the next
-// tap reuses the grant. The WebKit source study (Records/Consolidation/2026-10-25/
-// RESEARCH-IOS-CAMERA-INDICATOR.md) shows it cannot work: track.enabled = false only
+// tap reuses the grant. A study of the WebKit source shows it cannot work: track.enabled = false only
 // flips a flag and never reaches the capture source, so the camera keeps capturing and
 // the green in-use indicator stays on. That breaks the owner's hard rule (never leave the
 // camera on when the scanner is not showing), and the owner has no iPhone to catch it.
