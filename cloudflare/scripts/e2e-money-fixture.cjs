@@ -228,19 +228,26 @@ async function startMoneyFixture(options = {}) {
     const lotIds = SEED.products.flatMap(p => p.lots.map(l => l.id)).join(',')
     async function state(saleId) {
       const scoped = Number.isFinite(saleId) && saleId > 0
+      const q = (sql, ...values) => db.prepare(sql).bind(...values)
+      // ONE batch: a single round trip, and one consistent snapshot -- the sales, the stock and the movements are read at the same
+      // instant, so a request still in flight cannot leave them disagreeing. (Eleven sequential reads grew with every sale and,
+      // on a busy laptop, outran the client's 30 s request limit.)
+      const [saleIds, sales, lines, allocations, stock, lots, movements, shifts, settings, audits] = (await db.batch([
+        q('SELECT id FROM sales ORDER BY id'),
+        scoped ? q('SELECT * FROM sales WHERE id=?', saleId) : q('SELECT * FROM sales ORDER BY id'),
+        scoped ? q('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id', saleId) : q('SELECT * FROM sale_items ORDER BY id'),
+        scoped
+          ? q('SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items s ON s.id=a.sale_item_id WHERE s.sale_id=? ORDER BY a.id', saleId)
+          : q('SELECT * FROM sale_item_batch_allocations ORDER BY id'),
+        q(`SELECT * FROM branch_stock WHERE product_id IN(${productIds}) ORDER BY product_id,branch_id`),
+        q(`SELECT * FROM branch_batch_stock WHERE batch_id IN(${lotIds}) ORDER BY batch_id,branch_id`),
+        q(`SELECT * FROM inventory_movements WHERE product_id IN(${productIds}) ORDER BY id`),
+        q('SELECT * FROM shift_sessions ORDER BY id'),
+        q(`SELECT key,value FROM settings WHERE key IN(${STATE_SETTING_KEYS.map(() => '?').join(',')}) ORDER BY key`, ...STATE_SETTING_KEYS),
+        q('SELECT id,action,entity,entity_id,user_id,user_name FROM audit_logs ORDER BY id'),
+      ])).map(result => result.results)
       return {
-        saleIds: (await all('SELECT id FROM sales ORDER BY id')).map(r => r.id),
-        sales: scoped ? await all('SELECT * FROM sales WHERE id=?', saleId) : await all('SELECT * FROM sales ORDER BY id'),
-        lines: scoped ? await all('SELECT * FROM sale_items WHERE sale_id=? ORDER BY id', saleId) : await all('SELECT * FROM sale_items ORDER BY id'),
-        allocations: scoped
-          ? await all('SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items s ON s.id=a.sale_item_id WHERE s.sale_id=? ORDER BY a.id', saleId)
-          : await all('SELECT * FROM sale_item_batch_allocations ORDER BY id'),
-        stock: await all(`SELECT * FROM branch_stock WHERE product_id IN(${productIds}) ORDER BY product_id,branch_id`),
-        lots: await all(`SELECT * FROM branch_batch_stock WHERE batch_id IN(${lotIds}) ORDER BY batch_id,branch_id`),
-        movements: await all(`SELECT * FROM inventory_movements WHERE product_id IN(${productIds}) ORDER BY id`),
-        shifts: await all('SELECT * FROM shift_sessions ORDER BY id'),
-        settings: await all(`SELECT key,value FROM settings WHERE key IN(${STATE_SETTING_KEYS.map(() => '?').join(',')}) ORDER BY key`, ...STATE_SETTING_KEYS),
-        audits: await all('SELECT id,action,entity,entity_id,user_id,user_name FROM audit_logs ORDER BY id'),
+        saleIds: saleIds.map(r => r.id), sales, lines, allocations, stock, lots, movements, shifts, settings, audits,
         foreignKeyCheck: await all('PRAGMA foreign_key_check'),
         outboundRefusals: info.outboundRefusals,
       }

@@ -37,7 +37,7 @@ import {
  * database; each measures its own before/after, so none depends on how many sales came before it.
  */
 
-test.describe.configure({ mode: 'serial', timeout: 180_000 })
+test.describe.configure({ mode: 'serial', timeout: 240_000 })
 
 // ---------------------------------------------------------------------------------------------------------------
 // The oracle: exact integer arithmetic on four-decimal units (1 USD = 10,000 units), written from the rules above.
@@ -295,8 +295,9 @@ test('a riel cash tender in whole hundreds is recorded as riel, not converted to
 test('a 150 riel cash row is refused by the till and no sale is recorded', async ({ page, request }) => {
   // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the till offers Completed and sends the 150 riel cash row, and
   // POST /api/sales answers 200 -- no multiple-of-100 check on the cash path (frontend/src/components/pos/posCore.ts:24, cloudflare/src/routes/sales.ts:1259).
-  // The case is declared expected-red only while that signature (a 200 and one new sale) is observed in the run itself, below. Anything
-  // else that goes wrong (a timeout, a missing control) stays plainly red, and once the rule is enforced the case simply passes.
+  // The case is declared expected-red only while that signature (ONE new sale in the database, holding the 150 riel row) is observed in
+  // the run itself, below. Anything else that goes wrong (a timeout, a missing control) stays plainly red, and once the rule is enforced
+  // the case simply passes. The evidence is the stored row, not the timing of one HTTP response, which a slow machine can miss.
   await configure(request, { tax: false, rate: 4000 })
   const before = await readState(request)
   await signInAndOpenPos(page)
@@ -305,7 +306,7 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   // $4.71 + 150 riel = $4.7475 against $4.75: inside the half-cent band, so the tender "covers" the sale. That is the
   // trap -- the only thing wrong with it is a cash row no coin can make.
   await setTender(page, { method: 'Cash', usd: '4.71', khr: '150' })
-  const posted = page.waitForResponse(r => new URL(r.url()).pathname === '/api/sales' && r.request().method() === 'POST', { timeout: 10_000 }).catch(() => null)
+  const posted = page.waitForResponse(r => new URL(r.url()).pathname === '/api/sales' && r.request().method() === 'POST', { timeout: 45_000 }).catch(() => null)
   // Open the picker by hand: a till that refuses by greying "Completed" out has refused just as well as one that
   // sends the sale and is answered 400, and the shared completeSale() would wait forever for a disabled option.
   await openStatusPicker(page)
@@ -313,11 +314,16 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   await expect(completed).toBeVisible()
   const refusedByPicker = await completed.isDisabled()
   if (!refusedByPicker) await completed.click()
-  const response = await posted
+  // Either the till sends the sale (its answer arrives) or it refuses by itself (an alert); a till that does neither inside 45 s is
+  // a failure of the case, not a refusal.
+  const response = refusedByPicker ? null : await Promise.race([posted, page.getByRole('alert').first().waitFor({ timeout: 45_000 }).then(() => null, () => null)])
   await page.waitForTimeout(1_000)
   const after = await readState(request)
+  const storedByTill = after.sales.find(row => !before.saleIds.includes(row.id))
   try {
-    test.fail(response?.status() === 200 && after.saleIds.length - before.saleIds.length === 1, 'owner rule 27 Oct #15 not enforced: till and POST /api/sales accept a 150 riel cash row (posCore.ts:24, sales.ts:1259)')
+    test.fail(
+      after.saleIds.length - before.saleIds.length === 1 && storedByTill != null && JSON.stringify(paymentRows(storedByTill)) === JSON.stringify([{ method: 'Cash', amount_usd: 4.71, amount_khr: 150 }]),
+      'owner rule 27 Oct #15 not enforced: till and POST /api/sales accept a 150 riel cash row (posCore.ts:24, sales.ts:1259)')
     // Wrong implementation caught: the 150 riel accepted (owner, 27 Oct: riel cash that is not a whole 100 is invalid on every cash path).
     if (response) expect(response.status(), 'a cash riel amount that is not a multiple of 100 must be refused').toBeGreaterThanOrEqual(400)
     expect(after.saleIds, 'no sale may be recorded').toEqual(before.saleIds)
