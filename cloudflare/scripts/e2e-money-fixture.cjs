@@ -181,6 +181,18 @@ async function startMoneyFixture(options = {}) {
     await run('INSERT INTO delivery_contacts(id,name,phone,area) VALUES(?,?,?,?)', courier.id, courier.name, courier.phone, courier.area)
     for (const [key, value] of Object.entries(SEED.settings)) await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value)
 
+    // The two stock ledgers must agree at seed time (branch_stock = the sum of the lots in that branch = what SEED says),
+    // or every later "stock fell by the quantity" check would be measuring a fork the fixture itself created.
+    for (const product of SEED.products) {
+      for (const branch of SEED.branches) {
+        const lots = product.lots.filter(l => l.branchId === branch.id)
+        const want = lots.reduce((sum, l) => sum + l.quantity, 0)
+        const stock = (await all('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?', product.id, branch.id))[0]
+        const lotSum = (await all('SELECT COALESCE(SUM(bbs.quantity),0) AS q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=? AND bbs.branch_id=?', product.id, branch.id))[0].q
+        if (Number(stock?.quantity) !== want || Number(lotSum) !== want) throw new Error(`Seed ledgers disagree for product ${product.id} at branch ${branch.id}: branch_stock ${stock?.quantity}, lots ${lotSum}, seed ${want}`)
+      }
+    }
+
     async function dispatch(url, method, body, cookie) {
       // Stands in for the admin page: same-origin JSON, as routes/auth.ts's credential guard requires of /login.
       const response = await mf.dispatchFetch(origin + url, { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })

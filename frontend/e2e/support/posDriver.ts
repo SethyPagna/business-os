@@ -71,7 +71,8 @@ export async function setLinePrice(page: Page, productName: string, usd: string)
   const price = cartLine(page, productName).locator('input[type="number"]').nth(1)
   await price.fill(usd)
   await price.blur()
-  await expect(price).toHaveValue(usd)
+  // The box redraws from the stored base price ("3.20" reads back as "3.2"), so compare the number, not the text.
+  await expect.poll(async () => Number(await price.inputValue()), { message: 'the line price must be committed on blur' }).toBe(Number(usd))
 }
 
 /** The order-level discount block (not the per-line one): it is the block labelled for `pos-discount-usd`. */
@@ -128,10 +129,24 @@ export async function setDelivery(page: Page, delivery: { courier: string; feeUs
   await page.locator('#pos-delivery-actual-cost').fill(delivery.costUsd)
 }
 
-/** Complete Sale, then the status the cashier picks in "Record Sale As". */
-export async function completeSale(page: Page, status: 'completed' | 'awaiting_payment'): Promise<void> {
+/** One option of the "Record Sale As" picker. It stays on screen, greyed, when the tender rules it out. */
+export function statusOption(page: Page, status: 'completed' | 'awaiting_payment'): Locator {
+  return page.locator(`[data-pos-status-option="${status}"]`)
+}
+
+export async function openStatusPicker(page: Page): Promise<void> {
   await showCart(page)
   await page.getByRole('button', { name: 'Complete Sale' }).click()
   await expect(page.getByText('Record Sale As')).toBeVisible()
-  await page.locator(`[data-pos-status-option="${status}"]`).click()
+}
+
+export async function closeStatusPicker(page: Page): Promise<void> {
+  await page.locator('div.fixed').filter({ hasText: 'Record Sale As' }).getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.getByText('Record Sale As')).toBeHidden()
+}
+
+/** Complete Sale, then the status the cashier picks in "Record Sale As". */
+export async function completeSale(page: Page, status: 'completed' | 'awaiting_payment'): Promise<void> {
+  await openStatusPicker(page)
+  await statusOption(page, status).click()
 }

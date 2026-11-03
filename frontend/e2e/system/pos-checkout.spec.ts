@@ -4,8 +4,8 @@ import {
   type MoneyState, type Row, type Seed, type SeedLot, type SeedProduct,
 } from '../support/moneyFixture'
 import {
-  addToCart, attachCustomer, cartLine, completeSale, openPos, setDelivery, setLinePrice, setOrderDiscount, setTender,
-  showCart, tapExact, totalRow,
+  addToCart, attachCustomer, cartLine, closeStatusPicker, completeSale, openPos, openStatusPicker, setDelivery, setLinePrice,
+  setOrderDiscount, setTender, showCart, statusOption, tapExact, totalRow,
 } from '../support/posDriver'
 
 /**
@@ -93,7 +93,9 @@ let seed: Seed
 let rose: SeedProduct, mint: SeedProduct, clay: SeedProduct, oat: SeedProduct
 let revenueBaseline = { revenue: 0, pending: 0, withoutNotPaid: 0, owed: 0 }
 /** Net revenue and Not Paid money of every sale THIS file rang, computed from the oracle, for the final reconcile. */
-const ledger: Array<{ name: string; net: number; notPaid?: number }> = []
+const ledger: Array<LedgerEntry> = []
+/** net: revenue (subtotal - discounts); pending: the part of it that is Not Paid; owed: what Not Paid sales still owe. */
+type LedgerEntry = { name: string; net: number; pending?: number; owed?: number }
 
 const lotOf = (product: SeedProduct, code: string): SeedLot => {
   const lot = product.lots.find(l => l.code === code)
@@ -137,12 +139,12 @@ async function signInAndOpenPos(page: Page): Promise<void> {
  * or a replayed request would show up here as two rows; waiting a beat after the first row appears is what gives a
  * duplicate time to arrive. If the till refuses instead, the toast is read back into the failure (it expires).
  */
-async function expectOneNewSale(page: Page, request: APIRequestContext, before: MoneyState, entry: { name: string; net: number; notPaid?: number }) {
+async function expectOneNewSale(page: Page, request: APIRequestContext, before: MoneyState, entry: LedgerEntry) {
   let after: MoneyState = before
   await expect.poll(async () => {
     after = await readState(request)
     if (after.saleIds.length > before.saleIds.length) return 'recorded'
-    const refusal = await page.getByRole('alert').first().innerText().catch(() => '')
+    const refusal = await page.getByRole('alert').first().innerText({ timeout: 1_000 }).catch(() => '')
     return refusal.trim() ? `the till refused: ${refusal.trim().replace(/\s+/g, ' ')}` : 'nothing yet'
   }, { message: 'POST /api/sales must have created the sale', timeout: 45_000 }).toBe('recorded')
   await page.waitForTimeout(1_000)
@@ -242,11 +244,10 @@ test('Not Paid records the debt with no tender, no payment row, and the stock ou
   const want = basket({ lines: [{ unit: '4.75', qty: 2 }], rate: 4000 })
   await expect(totalRow(page)).toContainText(money(want.total))
   // The picker offers Not Paid with nothing tendered.
-  await showCart(page)
-  await page.getByRole('button', { name: 'Complete Sale' }).click()
-  await expect(page.locator('[data-pos-status-option="awaiting_payment"]')).toBeEnabled()
-  await page.locator('[data-pos-status-option="awaiting_payment"]').click()
-  const rung = await expectOneNewSale(page, request, before, { name: 'Not Paid', net: want.netSales, notPaid: want.total })
+  await openStatusPicker(page)
+  await expect(statusOption(page, 'awaiting_payment')).toBeEnabled()
+  await statusOption(page, 'awaiting_payment').click()
+  const rung = await expectOneNewSale(page, request, before, { name: 'Not Paid', net: want.netSales, pending: want.netSales, owed: want.total })
   // Wrong implementations caught: Not Paid stored as Completed; a fabricated "Cash" payment row or an amount_paid equal to
   // the total; the stock not leaving the shelf (the picker promises "stock deducted"); the debt lost from the totals.
   expect(rung.sale).toMatchObject({
@@ -297,7 +298,13 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   // trap -- the only thing wrong with it is a cash row no coin can make.
   await setTender(page, { method: 'Cash', usd: '4.71', khr: '150' })
   const posted = page.waitForResponse(r => new URL(r.url()).pathname === '/api/sales' && r.request().method() === 'POST', { timeout: 10_000 }).catch(() => null)
-  await completeSale(page, 'completed')
+  // Open the picker by hand: a till that refuses by greying "Completed" out has refused just as well as one that
+  // sends the sale and is answered 400, and the shared completeSale() would wait forever for a disabled option.
+  await openStatusPicker(page)
+  const completed = statusOption(page, 'completed')
+  await expect(completed).toBeVisible()
+  const refusedByPicker = await completed.isDisabled()
+  if (!refusedByPicker) await completed.click()
   const response = await posted
   await page.waitForTimeout(1_000)
   const after = await readState(request)
@@ -306,7 +313,7 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
     if (response) expect(response.status(), 'a cash riel amount that is not a multiple of 100 must be refused').toBeGreaterThanOrEqual(400)
     expect(after.saleIds, 'no sale may be recorded').toEqual(before.saleIds)
     expectStockMoved(before, after, [])
-    await expect(page.getByRole('alert').first(), 'the cashier must be told why').toBeVisible()
+    if (!refusedByPicker) await expect(page.getByRole('alert').first(), 'the cashier must be told why').toBeVisible()
   } finally {
     // If the sale WAS recorded the final revenue reconcile must still know about it.
     if (after.saleIds.length > before.saleIds.length) ledger.push({ name: '150 riel accepted (bug path)', net: basket({ lines: [{ unit: '4.75', qty: 1 }], rate: 4000 }).netSales })
@@ -314,7 +321,7 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
 })
 
 /** A complete POST /api/sales body for one Mint Balm from the Shop lot, with the tender the case supplies. */
-function saleBody(ready: { organizationId: number }, tender: { rows: Array<{ method: string; amount_usd: number; amount_khr: number }>; usd: number; khr: number; currency: string }, requestId: string) {
+function saleBody(ready: { organizationId: number }, tender: { rows: Array<{ method: string; amount_usd: number; amount_khr: number }>; usd: number; khr: number; currency: string }, requestId: string, more: Record<string, unknown> = {}) {
   return {
     branch_id: SHOP, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, client_request_id: requestId,
     items: [{ product_id: mint.id, quantity: 1, branch_id: SHOP, batch_id: lotOf(mint, 'M1-MINT-SEP').id, client_line_key: 'line-1', pricing_source: 'selling',
@@ -322,6 +329,7 @@ function saleBody(ready: { organizationId: number }, tender: { rows: Array<{ met
     subtotal_usd: 4.75, total_usd: 4.75, total_khr: 19000,
     payment_method: 'Cash', payment_details: tender.rows, payment_currency: tender.currency, amount_paid_usd: tender.usd, amount_paid_khr: tender.khr,
     offline_owner: { version: 1, actor_id: seed.actors.cashier.id, organization_id: ready.organizationId, authority: MONEY_ORIGIN, runtime: 'cloudflare-workers' },
+    ...more,
   }
 }
 async function postSale(page: Page, body: unknown): Promise<{ status: number; body: any }> {
@@ -334,7 +342,7 @@ async function postSale(page: Page, body: unknown): Promise<{ status: number; bo
 test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, and takes the same sale with whole hundreds', async ({ page, request }) => {
   const ready = await loadReady(request)
   await configure(request, { tax: false, rate: 4000 })
-  await signInAndOpenPos(page)
+  await signInAs(page, 'cashier', seed)
   const before = await readState(request)
   // Positive control FIRST: the same body shape with $4.50 + 1,000 riel (= $4.75, a whole-hundred riel row) is a valid
   // sale. Without it a 4xx on the refused body could be nothing but a malformed request.
@@ -356,6 +364,109 @@ test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, a
   } finally {
     if (refusedStatus === 200) ledger.push({ name: '150 riel accepted by the Worker (bug path)', net: 4.75 })
   }
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// 2b. What "paid" means at its edges: nothing, one cent short, exact; a discount that eats more than the sale, and all of it
+// ---------------------------------------------------------------------------------------------------------------
+test('a tender one cent short cannot be recorded as Completed, by the till or the Worker, and Not Paid keeps the part payment', async ({ page, request }) => {
+  await configure(request, { tax: false, rate: 4000 })
+  const ready = await loadReady(request)
+  await signInAndOpenPos(page)
+  const lot = lotOf(mint, 'M1-MINT-SEP')
+  await addToCart(page, mint, lot, 1)
+  // The picker follows the tender. Wrong implementations caught: Completed offered on an unpaid or short sale (the debt vanishes
+  // from the Not Paid list), or Not Paid offered on a sale the customer has paid in full.
+  await openStatusPicker(page)
+  await expect(statusOption(page, 'completed'), 'nothing tendered').toBeDisabled()
+  await expect(statusOption(page, 'awaiting_payment')).toBeEnabled()
+  await closeStatusPicker(page)
+  await setTender(page, { method: 'Cash', usd: '4.74' })
+  await openStatusPicker(page)
+  await expect(statusOption(page, 'completed'), 'one cent short').toBeDisabled()
+  await expect(statusOption(page, 'awaiting_payment')).toBeEnabled()
+  await closeStatusPicker(page)
+  await setTender(page, { usd: '4.75' })
+  await openStatusPicker(page)
+  await expect(statusOption(page, 'completed'), 'the exact amount').toBeEnabled()
+  await expect(statusOption(page, 'awaiting_payment'), 'a covered sale cannot be recorded as a debt').toBeDisabled()
+  await closeStatusPicker(page)
+  // The Worker holds the same line (frontend validation needs backend enforcement). Wrong implementation caught: the till
+  // refusing while POST /api/sales takes a short tender as Completed.
+  const before = await readState(request)
+  const short = { rows: [{ method: 'Cash', amount_usd: 4.74, amount_khr: 0 }], usd: 4.74, khr: 0, currency: 'USD' }
+  const refused = await postSale(page, saleBody(ready, short, 'm1-short-completed'))
+  expect(refused.status, JSON.stringify(refused.body)).toBe(400)
+  expect(refused.body).toMatchObject({ code: 'insufficient_payment_for_status' })
+  expect((await readState(request)).saleIds, 'a refused request leaves no sale').toEqual(before.saleIds)
+  // The same short tender, honestly recorded as Not Paid, keeps what was paid and owes the cent.
+  const debt = await postSale(page, saleBody(ready, short, 'm1-short-notpaid', { sale_status: 'awaiting_payment' }))
+  expect(debt.status, JSON.stringify(debt.body)).toBe(200)
+  const after = await readState(request)
+  ledger.push({ name: 'one cent short, Not Paid', net: 4.75, pending: 4.75, owed: 0.01 })
+  expect(after.saleIds.length - before.saleIds.length).toBe(1)
+  const sale = after.sales.find(row => !before.saleIds.includes(row.id))!
+  expect(sale).toMatchObject({ sale_status: 'awaiting_payment', total_usd: 4.75, amount_paid_usd: 4.74, amount_paid_khr: 0, change_usd: 0, change_khr: 0 })
+  expect(paymentRows(sale)).toEqual([{ method: 'Cash', amount_usd: 4.74, amount_khr: 0 }])
+  expectStockMoved(before, after, [{ product: mint, lot, qty: 1 }])
+})
+
+test('a discount larger than the sale, or a negative one, is refused by the till and the Worker; one cent left is a valid sale', async ({ page, request }) => {
+  await configure(request, { tax: false, rate: 4000 })
+  const ready = await loadReady(request)
+  const start = await readState(request)
+  await signInAndOpenPos(page)
+  const lot = lotOf(mint, 'M1-MINT-SEP')
+  await addToCart(page, mint, lot, 1)
+  // The till: an impossible discount offers no total and records nothing, in dollars and in percent.
+  for (const discount of [{ usd: '5.00' }, { percent: '101' }]) {
+    await setOrderDiscount(page, discount)
+    await expect(totalRow(page), 'no total is offered for an impossible discount').toContainText('—')
+    // With no total to compare, the picker sees a zero sale and offers Completed; the click must still be refused.
+    await openStatusPicker(page)
+    await statusOption(page, 'completed').click()
+    await expect(page.getByRole('alert').first(), 'the cashier is told why').toBeVisible()
+    await page.waitForTimeout(500)
+    expect((await readState(request)).saleIds, 'nothing may be recorded').toEqual(start.saleIds)
+  }
+  // The Worker. Positive control first: a $4.74 discount leaves one cent and is a valid Not Paid sale, so the refusals
+  // below can only be about the discount.
+  const none = { rows: [], usd: 0, khr: 0, currency: 'USD' }
+  const valid = await postSale(page, saleBody(ready, none, 'm1-discount-474', { sale_status: 'awaiting_payment', discount_usd: 4.74 }))
+  expect(valid.status, JSON.stringify(valid.body)).toBe(200)
+  const afterControl = await readState(request)
+  ledger.push({ name: 'control: $4.74 off $4.75', net: 0.01, pending: 0.01, owed: 0.01 })
+  expect(afterControl.sales.find(row => !start.saleIds.includes(row.id))).toMatchObject({ subtotal_usd: 4.75, discount_usd: 4.74, total_usd: 0.01, total_khr: 40 })
+  // Wrong implementations caught: a total below zero stored, or a negative discount used to raise the price.
+  for (const [discount, label] of [[5, 'larger-than-the-sale'], [-1, 'negative']] as const) {
+    const refused = await postSale(page, saleBody(ready, none, `m1-discount-${label}`, { sale_status: 'awaiting_payment', discount_usd: discount }))
+    expect(refused.status, `a discount (${label}) must be refused: ${JSON.stringify(refused.body)}`).toBe(400)
+  }
+  const after = await readState(request)
+  expect(after.saleIds, 'only the control was recorded').toEqual(afterControl.saleIds)
+  expectStockMoved(start, after, [{ product: mint, lot, qty: 1 }])
+})
+
+test('a 100% discount rings a free sale as Completed with nothing tendered', async ({ page, request }) => {
+  await configure(request, { tax: false, rate: 4000 })
+  const before = await readState(request)
+  await signInAndOpenPos(page)
+  const lot = lotOf(mint, 'M1-MINT-SEP')
+  await addToCart(page, mint, lot, 1)
+  await setOrderDiscount(page, { percent: '100' })
+  const want = basket({ lines: [{ unit: '4.75', qty: 1 }], discount: { percent: 100 }, rate: 4000 })
+  expect([want.discount, want.total, want.totalKhr, want.netSales]).toEqual([4.75, 0, 0, 0])
+  await expect(totalRow(page)).toContainText(money(0))
+  // Zero is covered by a zero tender: Completed is offered, and Not Paid (a debt of nothing) is not.
+  await openStatusPicker(page)
+  await expect(statusOption(page, 'completed')).toBeEnabled()
+  await expect(statusOption(page, 'awaiting_payment')).toBeDisabled()
+  await statusOption(page, 'completed').click()
+  const rung = await expectOneNewSale(page, request, before, { name: '100% discount', net: want.netSales })
+  // Wrong implementations caught: the sale refused for having no money in it, recorded as Not Paid, or stored with the
+  // discount missing (total $4.75).
+  expect(rung.sale).toMatchObject({ sale_status: 'completed', subtotal_usd: 4.75, discount_usd: 4.75, total_usd: 0, total_khr: 0, amount_paid_usd: 0, amount_paid_khr: 0, change_usd: 0, change_khr: 0 })
+  expectStockMoved(before, rung.after, [{ product: mint, lot, qty: 1 }])
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -648,10 +759,8 @@ test('a double click while the server is slow sends one request and records one 
     await route.continue()
   })
   await tapExact(page, 'usd')
-  await showCart(page)
-  await page.getByRole('button', { name: 'Complete Sale' }).click()
-  await expect(page.getByText('Record Sale As')).toBeVisible()
-  await page.locator('[data-pos-status-option="completed"]').dblclick()
+  await openStatusPicker(page)
+  await statusOption(page, 'completed').dblclick()
   const rung = await expectOneNewSale(page, request, before, { name: 'double click', net: 2.2 })
   // Wrong implementations caught: a second POST (two sales, stock out twice), or a retry that mints a fresh request id.
   expect(sent, 'the till must send ONE create request for one sale').toHaveLength(1)
@@ -676,11 +785,12 @@ test('the Sales revenue figure is net sales of what this file rang: tax and deli
   expect(stats.status).toBe(200)
   const sum = (items: number[]) => items.reduce((total, value) => total + units(String(value)), 0n)
   const net = toUsd(sum(ledger.map(entry => entry.net)))
-  const notPaid = toUsd(sum(ledger.map(entry => entry.notPaid ?? 0)))
+  const pending = toUsd(sum(ledger.map(entry => entry.pending ?? 0)))
+  const owed = toUsd(sum(ledger.map(entry => entry.owed ?? 0)))
   // Wrong implementations caught: revenue summed from total_usd (tax and the customer-paid fee leak in), Not Paid dropped from
   // revenue, a shop-paid fee counted, membership dollars not taken off.
   expect(Number(stats.body.revenue_usd) - revenueBaseline.revenue, `revenue of ${ledger.map(entry => entry.name).join(', ')}`).toBeCloseTo(net, 4)
-  expect(Number(stats.body.pending_revenue_usd) - revenueBaseline.pending, 'Not Paid sales are counted in revenue and annotated as credit').toBeCloseTo(notPaid, 4)
-  expect(Number(stats.body.revenue_without_not_paid_usd) - revenueBaseline.withoutNotPaid).toBeCloseTo(net - notPaid, 4)
-  expect(Number(stats.body.not_paid_owed_usd) - revenueBaseline.owed, 'what the Not Paid sale still owes').toBeCloseTo(notPaid, 4)
+  expect(Number(stats.body.pending_revenue_usd) - revenueBaseline.pending, 'Not Paid sales are counted in revenue and annotated as credit').toBeCloseTo(pending, 4)
+  expect(Number(stats.body.revenue_without_not_paid_usd) - revenueBaseline.withoutNotPaid).toBeCloseTo(net - pending, 4)
+  expect(Number(stats.body.not_paid_owed_usd) - revenueBaseline.owed, 'what the Not Paid sales still owe').toBeCloseTo(owed, 4)
 })
