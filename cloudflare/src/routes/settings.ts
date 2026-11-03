@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
+import { getPlanLimits } from '../lib/planTier'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
 import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
@@ -313,7 +314,6 @@ function normalizeReferenceName(value: unknown): string {
   return paymentMethodKey(value)
 }
 
-const PAYMENT_METHOD_SCAN_PAGE_SIZE = 200
 const PAYMENT_METHOD_VARIANT_LIMIT = 1000
 
 type PaymentMethodSettingSnapshot = {
@@ -324,14 +324,8 @@ type PaymentMethodSettingSnapshot = {
 
 type PaymentMethodSaleRow = {
   id: number
-  receipt_number: string | null
-  cashier_name: string | null
-  customer_name: string | null
-  customer_phone: string | null
-  branch_name: string | null
   payment_method: string | null
   payment_details: string | null
-  write_revision: number
 }
 
 type PaymentMethodImpactSummary = {
@@ -549,15 +543,18 @@ async function loadPaymentMethodCandidates(
     identityVariants: [],
     variantLimitExceeded: false,
   }
+  // One D1 call per page (planTier.ts paymentMethodScanPageSize). Keyset on the
+  // unique sales.id, so a page edge never splits a sale; only the three columns
+  // the classification below reads. A sale written between pages is caught by
+  // the replace route's revision-sum guard, snapshotted before this scan.
+  const pageSize = getPlanLimits(env).paymentMethodScanPageSize
   let afterId = 0
   for (;;) {
     const rows = await db.prepare(`
-      SELECT s.id,s.receipt_number,s.cashier_name,s.customer_name,s.customer_phone,s.branch_name,
-             s.payment_method,s.payment_details,COALESCE(v.revision,0) AS write_revision
-      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
-      WHERE s.id>@afterId
-      ORDER BY s.id LIMIT @pageSize
-    `).all<PaymentMethodSaleRow>({ afterId, pageSize: PAYMENT_METHOD_SCAN_PAGE_SIZE })
+      SELECT id,payment_method,payment_details FROM sales
+      WHERE id>@afterId
+      ORDER BY id LIMIT @pageSize
+    `).all<PaymentMethodSaleRow>({ afterId, pageSize })
     if (!rows.length) break
     for (const row of rows) {
       const malformed = malformedPaymentDetails(row.payment_details)
@@ -609,7 +606,7 @@ async function loadPaymentMethodCandidates(
       if (currentSummary.matches > 0 && currentSummary.split) summary.splitSummarySales += 1
     }
     afterId = Number(rows[rows.length - 1].id)
-    if (rows.length < PAYMENT_METHOD_SCAN_PAGE_SIZE) break
+    if (rows.length < pageSize) break
   }
   summary.sourceVariants = [...sourceVariants]
   summary.identityVariants = [...identityVariants]

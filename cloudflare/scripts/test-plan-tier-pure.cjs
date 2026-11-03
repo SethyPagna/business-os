@@ -131,6 +131,7 @@ const PAID = {
   stockActionAddConcurrency: 12,
   historicalSalesImportConcurrency: 12,
   bulkDeleteChunkSize: 500,
+  paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
   maxImageDeletesPerReset: 500,
@@ -156,6 +157,7 @@ const FREE = {
   stockActionAddConcurrency: 6,
   historicalSalesImportConcurrency: 6,
   bulkDeleteChunkSize: 125,
+  paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
   maxImageDeletesPerReset: 40,
@@ -191,7 +193,10 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
 // reads fewer D1 rows, so on these Free is deliberately the LARGER number.
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
+// paymentMethodScanPageSize is the same kind of exception: a page is one D1
+// call, calls are what Free rations (50 per invocation), so a bigger page is the
+// cheaper one there; Paid keeps its old 200 so its reads do not change.
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'paymentMethodScanPageSize']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -232,6 +237,14 @@ check('a free deployment stays inside the platform ceilings it is sized against'
   assert.equal(free.d1QueriesPerInvocation, 50, 'documented assumption: the conservative of the two published figures')
   assert.equal(free.d1MaxDatabaseBytes, 500 * 1024 * 1024)
   assert.equal(free.scheduledBackupEnabled, false, 'a full D1 backup cannot run inside a 10ms cron invocation')
+  // The payment-method rename scans every sale, one D1 call per page. About
+  // 20 calls go to auth, settings, the revision snapshot, the write batch and
+  // the audit read-back; the rest is the scan. 100,000 sales is more than six
+  // times the shop's ~16k, and must still fit.
+  assert.ok(Math.ceil(100_000 / free.paymentMethodScanPageSize) + 20 <= free.d1QueriesPerInvocation,
+    'a free payment-method rename over 100,000 sales must fit the 50-call ceiling')
+  assert.ok(Math.ceil(16_000 / PLAN_LIMITS_BY_TIER.paid.paymentMethodScanPageSize) + 20 > free.d1QueriesPerInvocation,
+    'control: the PAID page would not fit the Free ceiling (that is why the page is a plan field)')
 })
 
 check('planTier.ts imports nothing at runtime', async () => {
