@@ -307,8 +307,20 @@ function FieldAlert({ id, message }: { id: string; message: string }) {
 function focusEditorField(elementId: string) {
   const field = document.getElementById(elementId)
     ?? document.querySelector<HTMLElement>(`[data-testid="${elementId}-field"] :is(input, textarea, select, button)`)
-  field?.focus({ preventScroll: true })
-  field?.scrollIntoView({ block: 'center' })
+  if (!field) return
+  field.focus({ preventScroll: true })
+  // Centre the field in the page scroller, below the sticky bar, and move nothing else: scrollIntoView also scrolls the app shell
+  // around the scroller, which pushed the bar half out of the top of a phone's screen.
+  const scroller = field.closest<HTMLElement>('.page-scroll')
+  if (!scroller) {
+    field.scrollIntoView({ block: 'center' })
+    return
+  }
+  const barHeight = document.getElementById('portal-editor-bar')?.getBoundingClientRect().height ?? 0
+  const room = scroller.getBoundingClientRect()
+  const box = field.getBoundingClientRect()
+  const target = barHeight + Math.max(0, (room.height - barHeight - box.height) / 2)
+  scroller.scrollTop += box.top - room.top - target
 }
 
 // Density: a setting's title with its explanation folded into an InfoHint (i)

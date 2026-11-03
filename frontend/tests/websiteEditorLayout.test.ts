@@ -181,6 +181,19 @@ runTest('T-L3b: the bar can stick: nothing between it and the page scroller is a
   assert.doesNotMatch(aside, /overflow-(?:x-|y-)?(?:hidden|auto|scroll)/, 'a hidden, auto or scroll aside would be the sticky bar its scrollport')
 })
 
+runTest('T-L3c: a refused field is centred inside the page scroller only, never with scrollIntoView on the app shell', () => {
+  // CATCHES: field.scrollIntoView({ block: 'center' }) after a refused Save. It scrolls every scrollable ancestor, the app shell around the
+  // page scroller included, which pushed the sticky bar about half out of the top of a 360 px phone (viewport ratio 0.57 in the e2e).
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  const start = surface.indexOf('function focusEditorField(')
+  assert.ok(start > 0, 'focusEditorField exists')
+  const body = surface.slice(start, surface.indexOf('\n}\n', start))
+  assert.match(body, /closest<HTMLElement>\('\.page-scroll'\)/, 'it finds the page scroller')
+  assert.match(body, /scroller\.scrollTop \+=/, 'and scrolls that one element')
+  assert.equal(count(body, /scrollIntoView/g), 1, 'scrollIntoView survives only as the fallback')
+  assert.ok(body.indexOf('scrollIntoView') > body.indexOf('if (!scroller)'), 'and only when there is no page scroller')
+})
+
 runTest('T-L4: the section picker is a menu of seven radio items; the chips are a tablist with a roving tabindex', () => {
   const nav = noComments(editorFile('EditorSectionNav.tsx'))
   assert.match(nav, /aria-haspopup="menu"/)

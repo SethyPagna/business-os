@@ -733,6 +733,9 @@ test.describe('Website Editor bar (ED-1a)', () => {
 
     await expect(page.locator('#portal-section-contact')).toBeVisible()
     await expect(page.locator('#portal-google-map-embed')).toBeFocused()
+    // Centring the field must move the page scroller only. scrollIntoView also scrolled the app shell around it, which pushed the sticky bar
+    // half out of the top of the screen (about half of it hidden on a 360 px phone).
+    await expect(page.locator('#portal-editor-bar'), 'the bar is still on screen after the field is focused').toBeInViewport({ ratio: 0.85 })
     await expect(page.locator('#portal-google-map-embed-error')).toHaveAttribute('role', 'alert')
     await expect(page.locator('#portal-google-map-embed-error')).toContainText('Google Maps')
     await expect(saveButton(page), 'back to changed, edits kept').not.toHaveAttribute('aria-disabled', 'true')
