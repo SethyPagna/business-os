@@ -162,19 +162,30 @@ async function startMoneyFixture(options = {}) {
       if (actor.deviceId) await run("INSERT INTO trusted_devices(user_id,device_id,device_name,status,decided_at,decided_by_user_id,decided_by_name) VALUES(?,?,?,'approved',CURRENT_TIMESTAMP,?,?)", actor.id, actor.deviceId, 'Disposable cashier till', SEED.actors.admin.id, SEED.actors.admin.name)
     }
     for (const branch of SEED.branches) await run('INSERT INTO branches(id,name,is_default,is_active) VALUES(?,?,?,1)', branch.id, branch.name, branch.isDefault)
+    // Products, lots and both stock ledgers are written through the permitted stock-transaction path: migration 0243 puts a
+    // trigger on products, product_batches, branch_stock and branch_batch_stock that aborts with stock_transaction_required
+    // unless a stock_transaction_permit flag equal to the epoch exists, and the Worker holds that flag only inside one atomic
+    // batch (cloudflare/src/lib/stockTransaction.ts). The seed does the same: permit, inserts, release -- one db.batch, so a
+    // failure rolls the permit back with the rows and a permit can never be left behind for the app under test to write through.
+    const stockWrites = [db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")]
+    const stage = (sql, ...values) => stockWrites.push(db.prepare(sql).bind(...values))
     for (const product of SEED.products) {
       const totals = new Map()
       for (const lot of product.lots) totals.set(lot.branchId, (totals.get(lot.branchId) || 0) + lot.quantity)
       const total = [...totals.values()].reduce((a, b) => a + b, 0)
-      await run('INSERT INTO products(id,name,barcode,sku,category,unit,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)',
+      stage('INSERT INTO products(id,name,barcode,sku,category,unit,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)',
         product.id, product.name, product.barcode, `M1-${product.id}`, 'M1 Skin', 'pcs', total, product.priceUsd, product.priceUsd * SEED.exchangeRate, product.costUsd, product.costUsd * SEED.exchangeRate)
-      for (const [branchId, quantity] of totals) await run('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)', product.id, branchId, quantity)
+      for (const [branchId, quantity] of totals) stage('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)', product.id, branchId, quantity)
       for (const lot of product.lots) {
-        await run("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,received_quantity,received_branch_id,is_active,batch_number) VALUES(?,?,?,?,?,?,?,1,?)",
+        stage("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,received_quantity,received_branch_id,is_active,batch_number) VALUES(?,?,?,?,?,?,?,1,?)",
           lot.id, product.id, `m1-batch-${lot.id}`, lot.code, lot.receivedAt, lot.quantity, lot.branchId, product.lots.indexOf(lot) + 1)
-        await run('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)', lot.id, lot.branchId, lot.quantity)
+        stage('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)', lot.id, lot.branchId, lot.quantity)
       }
     }
+    stockWrites.push(db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"))
+    if ((await all("SELECT 1 AS present FROM system_flags WHERE key='stock_schema_epoch'")).length !== 1) throw new Error('No stock_schema_epoch flag after the migrations: the permit cannot be minted, so the seed cannot write stock')
+    try { await db.batch(stockWrites) } catch (error) { throw new Error(`Seeding stock through the stock-transaction permit failed: ${error.message}`) }
+    if ((await all("SELECT 1 AS left FROM system_flags WHERE key='stock_transaction_permit'")).length) throw new Error('The seed left a stock_transaction_permit behind')
     const { customer, courier } = SEED
     await run('INSERT INTO customers(id,name,phone,membership_number) VALUES(?,?,?,?)', customer.id, customer.name, customer.phone, customer.membershipNumber)
     await run("INSERT INTO loyalty_point_adjustments(customer_id,points,note,created_by_id,created_by_name) VALUES(?,?,'M1 fixture opening points',?,?)", customer.id, customer.points, SEED.actors.admin.id, SEED.actors.admin.name)
