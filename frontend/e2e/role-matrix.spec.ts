@@ -440,10 +440,8 @@ for (const role of RETURNS_ROLES) {
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantAdd = grant(access, 'returns', 'add')
-    // APP BUG, kept as a case: Returns.tsx:1745 draws the Add Return button with no check at all. canAddReturn (Returns.tsx:391)
-    // reaches only the detail's take-back control (:2000). Where an administrator has switched returns:add off, the button is still
-    // offered and the Worker then refuses the create.
-    knownDefect(!wantAdd, 'Returns.tsx:1745 renders Add Return with no returns:add check; canAddReturn (:391) only gates the take-back control at :2000')
+    // FIXED (PERM-UI, 3 Nov): the Add Return button was drawn with no returns:add check where an administrator had switched it off, and the
+    // Worker then refused the create. Both create buttons now ride canAddReturn.
     try {
       const slot = await open(page, '/returns', 'sales')
       await expect(slot.locator('#returns-search'), 'the Returns section rendered').toBeVisible({ timeout: 30_000 })

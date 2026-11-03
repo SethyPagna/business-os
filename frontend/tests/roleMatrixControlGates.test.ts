@@ -77,6 +77,19 @@ function assertEveryButtonGated(source: string, handler: string, gate: string, e
   }
 }
 
+test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
+  const returns = read('../src/components/returns/Returns.tsx')
+  assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)
+  // One conditional wraps both buttons; each opener appears exactly once, after it.
+  const gate = returns.indexOf('{!canAddReturn ? null : scope === SUPPLIER_SCOPE ? (')
+  assert.ok(gate > 0, 'the create buttons sit behind canAddReturn')
+  for (const opener of ['onClick={() => setShowCustomerForm(true)}', 'onClick={() => setShowSupplierForm(true)}']) {
+    const at = returns.split(opener)
+    assert.equal(at.length, 2, `${opener} is drawn once`)
+    assert.ok(returns.indexOf(opener) > gate && returns.indexOf(opener) - gate < 2500, `${opener} is inside the gated block`)
+  }
+})
+
 test('SETTINGS: both Save buttons ride canEditSettings, so a View-tier role gets the read-only badge and no Save', () => {
   const settings = read('../src/components/utils-settings/Settings.tsx')
   assert.match(settings, /const canEditSettings = getPermissionTier\('settings'\) === 'full'/)

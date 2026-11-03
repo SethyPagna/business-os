@@ -217,7 +217,6 @@ not skipped noise; each one names the exact lines that decide it.
 | `role-matrix` | selecting products offers a bulk Delete only with `products:delete` and `products:bulk_delete` | `Products.tsx:5347` draws the bulk toolbar's Delete for any non-empty selection; no UI source reads either grant (the Worker refuses at `routes/products.ts:3182`) |
 | `role-matrix` | a product's detail offers Add variant only with `products:variant` | `Products.tsx:5829` gates `onAddVariant` on `products:add` alone; `products:variant` is read by no UI source |
 | `role-matrix` | a product's detail offers Edit only with `products:edit` | `ProductDetailModal.tsx:466-470` draws Edit unconditionally; `Products.tsx:5828` passes `onEdit` with no check and `openProductFormTab` (`:4418`) opens the form for anyone |
-| `role-matrix` | the Returns toolbar offers Add Return only with `returns:add` | `Returns.tsx:1745` renders the button with no check; `canAddReturn` (`Returns.tsx:391`) reaches only the take-back control at `:2000` |
 | `role-matrix` | a customer's full phone number is withheld from a role without a "See full phone numbers" grant | no such grant at `rc/20261104a` (P2.8, `claude/p28-phone-permission-20261102`, is not in it); the sale detail shows the number to every role that opens Sales. The catalogue case and the per-role case turn themselves off when `permissionDefinitions.ts` gains the grant |
 
 When one of them is fixed, delete the `.fixme` — do not weaken the assertion.
