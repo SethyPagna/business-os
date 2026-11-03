@@ -5906,6 +5906,8 @@ function ProductsFullEditor() {
             notify={notify}
             onClose={() => setManageBatchesProduct(null)}
             onChanged={() => load(true)}
+            canEditBatches={canAdjustInventoryStock}
+            canChangeSupplier={canEditSupplier}
             t={t}
             tr={tr}
           />

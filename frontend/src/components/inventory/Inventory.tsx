@@ -11,6 +11,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { canChangeProductSupplier } from '../../utils/productSupplierAccess.ts'
 import { formatSupplierCostTotal } from '../../utils/costDisplay.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
@@ -2613,6 +2614,8 @@ ${inventoryFeesFormulaText}`,
             notify={notify}
             onClose={() => setManageBatchesModal(null)}
             onChanged={() => load(true)}
+            canEditBatches={canAdjustStock}
+            canChangeSupplier={canChangeProductSupplier(user)}
             t={t}
             tr={tr}
           />
