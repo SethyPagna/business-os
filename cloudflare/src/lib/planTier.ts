@@ -228,9 +228,14 @@ export type PlanLimits = {
   //                      A cold-search slot (routes/portal.ts, the per-isolate cap on searches that run their own build) counts as lost
   //                      at the same age: its release sits in a `finally` that a request whose context ended never reaches, and a build
   //                      older than this is the one a waiter has already stopped trusting.
+  //   buildShareMemoMaxEntries  how many finished bodies the buildShare memo holds at once (the oldest go first). The memo is only read
+  //                      by a request waiting on a builder, for at most buildShareWaitMs, but it holds whole storefront bodies, so its
+  //                      size is bounded by count, not by time alone. An evicted body costs its waiter one rebuild. Unlike the three
+  //                      durations this is a ceiling, so Free is the SMALLER one: Paid 32, Free 16.
   buildSharePollMs: number
   buildShareWaitMs: number
   buildShareStaleMs: number
+  buildShareMemoMaxEntries: number
 
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
@@ -305,6 +310,7 @@ const PAID_LIMITS: PlanLimits = {
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
+  buildShareMemoMaxEntries: 32,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -334,6 +340,7 @@ const FREE_LIMITS: PlanLimits = {
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
+  buildShareMemoMaxEntries: 16,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

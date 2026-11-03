@@ -3,7 +3,7 @@
 // request created (workerd ties a promise to its request; the 6.0.1048 review, B1). The first request sets a "building since <time>"
 // marker, a plain value; the others poll for its FINISHED result with their own timer, for at most buildShareWaitMs.
 //
-// Every case runs the real module with small stubbed limits (poll 10 ms, wait 300 ms, stale 600 ms). The case that matters
+// Every case runs the real module with small stubbed limits (poll 10 ms, wait 300 ms, stale 600 ms, memo 3 entries). The case that matters
 // most is the dead builder: request A starts, never finishes (it answered, or it was cancelled), and request B must still answer within the
 // wait plus its own work. A mutant in which B awaits A's promise hangs there.
 //
@@ -31,7 +31,7 @@ function load(rel, overrides = {}) {
   return mod.exports
 }
 const KEY = Symbol.for('business-os.build-share.v1')
-const LIMITS = { buildSharePollMs: 10, buildShareWaitMs: 300, buildShareStaleMs: 600 }
+const LIMITS = { buildSharePollMs: 10, buildShareWaitMs: 300, buildShareStaleMs: 600, buildShareMemoMaxEntries: 3 }
 // A fresh module instance = a fresh isolate (its own markers and memo). It installs its hook on the global, as the Worker does.
 function isolate(limits = LIMITS) {
   load('lib/buildShare.ts', { './planTier': { getPlanLimits: () => limits } })
@@ -263,14 +263,36 @@ async function main() {
     }
   })
 
-  await timed('the limits are the plan\'s: Paid waits 1,000 ms on a dead builder, Free 2,000 ms', [SLOW], async (clock) => {
-    for (const [tier, expected, polls] of [['paid', 1000, 50], ['free', 2000, 100]]) {
+  // The memo holds whole bodies: it is bounded by count (buildShareMemoMaxEntries), the oldest entry first. Each builder below stores its body at
+  // once and keeps working, so a waiter that arrives later can only find the body in the memo or wait for a rebuild.
+  const bodiesLeft = async (share, keys) => Promise.all(keys.map((key) => share.run(env, key, async () => `rebuilt-${key}`)))
+  await timed('the memo is bounded by count: past buildShareMemoMaxEntries the oldest bodies are dropped, the newest kept', [SLOW], async () => {
+    const share = isolate() // 3 entries
+    const keys = ['k1', 'k2', 'k3', 'k4', 'k5']
+    const builders = keys.map((key) => share.run(env, key, async () => { share.remember(env, key, `body-${key}`); await sleep(200); return `A-${key}` }))
+    await sleep(20)
+    assert.deepEqual(await bodiesLeft(share, keys), ['rebuilt-k1', 'rebuilt-k2', 'body-k3', 'body-k4', 'body-k5'])
+    await Promise.all(builders)
+  })
+
+  await timed('a key stored again is the newest entry, not the oldest: the bound drops the entry that was not touched', [SLOW], async () => {
+    const share = isolate() // 3 entries
+    const started = ['k1', 'k2', 'k3'].map((key) => share.run(env, key, async () => { share.remember(env, key, `body-${key}`); await sleep(200); return `A-${key}` }))
+    share.remember(env, 'k1', 'body-k1-again')
+    started.push(share.run(env, 'k4', async () => { share.remember(env, 'k4', 'body-k4'); await sleep(200); return 'A-k4' }))
+    await sleep(20)
+    assert.deepEqual(await bodiesLeft(share, ['k1', 'k2', 'k3', 'k4']), ['body-k1-again', 'rebuilt-k2', 'body-k3', 'body-k4'])
+    await Promise.all(started)
+  })
+
+  await timed('the limits are the plan\'s: Paid waits 1,000 ms on a dead builder, Free 2,000 ms, and the memo holds 32 / 16 bodies', [SLOW], async (clock) => {
+    for (const [tier, expected, polls, memoMax] of [['paid', 1000, 50, 32], ['free', 2000, 100, 16]]) {
       const planTier = load('lib/planTier.ts')
       const tierEnv = { PLAN_TIER: tier }
       load('lib/buildShare.ts', { './planTier': planTier })
       const share = globalThis[KEY]
       const limits = planTier.getPlanLimits(tierEnv)
-      assert.deepEqual([limits.buildShareWaitMs, limits.buildSharePollMs], [expected, polls])
+      assert.deepEqual([limits.buildShareWaitMs, limits.buildSharePollMs, limits.buildShareMemoMaxEntries], [expected, polls, memoMax])
       void share.run(tierEnv, 'k', () => new Promise(() => {}), () => undefined)
       await sleep(10)
       const started = clock.now()

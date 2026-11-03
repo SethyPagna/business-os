@@ -40,12 +40,16 @@ function recall<T>(key: string, since: number): T | undefined {
 
 /**
  * Keeps a finished result for the longest any waiter waits, or for `lifetimeMs` if that is shorter (a stored entry's own lifetime: the memo
- * must never outlive it). Call it where the result is stored (the storefront's edge write).
+ * must never outlive it). Call it where the result is stored (the storefront's edge write). The memo holds whole bodies, so it is bounded by
+ * count as well as by time (buildShareMemoMaxEntries): past it the oldest entry goes first, and the waiter that wanted it rebuilds.
  */
 function remember(env: Env, key: string, value: unknown, lifetimeMs = Number.POSITIVE_INFINITY): void {
+  const limits = getPlanLimits(env)
   const now = Date.now()
   for (const [other, entry] of remembered) if (now >= entry.until) remembered.delete(other)
-  remembered.set(key, { value, at: now, until: now + Math.min(getPlanLimits(env).buildShareWaitMs, lifetimeMs) })
+  remembered.delete(key) // a key stored again is the newest, not the oldest
+  remembered.set(key, { value, at: now, until: now + Math.min(limits.buildShareWaitMs, lifetimeMs) })
+  while (remembered.size > limits.buildShareMemoMaxEntries) remembered.delete(remembered.keys().next().value as string)
 }
 
 /**
