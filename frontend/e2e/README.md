@@ -135,8 +135,9 @@ node scripts/apply-local-migrations.cjs --persist-to "$LOCAL_D1"
 
 # 2. The Worker. NOT port 8787: that is the shared worker-dev server other
 #    sessions own. It also provisions the pinned organization on first boot,
-#    which is why it starts BEFORE the seed.
-npx wrangler dev --local --port 4319 --ip 127.0.0.1 --persist-to "$LOCAL_D1"
+#    which is why it starts BEFORE the seed. --local-upstream is REQUIRED, see
+#    "Why --local-upstream" below: without it every staff API answers 404.
+npx wrangler dev --local --port 4319 --ip 127.0.0.1 --local-upstream 127.0.0.1:4319 --persist-to "$LOCAL_D1"
 
 # 3. Data: one administrator cashier, two canonical branches, three priced
 #    products with shop stock, and a reset of the login limiter's counters.
@@ -150,6 +151,22 @@ npm run test:e2e:system
 is what this was measured with. The default `cloudflare/.wrangler/state` inside
 a deep worktree exceeds the Windows path limit and miniflare fails with
 `SQLITE_CANTOPEN` before the first statement runs.
+
+**Why `--local-upstream 127.0.0.1:4319`.** The Worker refuses the staff app on a
+storefront host: `src/index.ts` runs `isBlockedOnStorefrontHost(c.req.url)`
+(`lib/publicHostGate.ts`, G38 P0, owner 27 Sep) before any route, and answers a
+plain 404 to every staff endpoint unless the request URL's host is `127.0.0.1`,
+`localhost`, `[::1]` or `admin.*`. `wrangler dev` forwards requests with the
+host of the project's zone, so without `--local-upstream` the Worker sees the
+public host and the login, `/api/auth/me` and every other staff call return 404
+(reported by the E2E-R repair lane, 3 Nov 2026). The flag keeps the loopback host
+on the request. It is a property of this harness only: the native Miniflare
+fixtures below build every request URL from their own `http://127.0.0.1:<port>`
+origin, so they pass the gate by construction (every staff call in their runs
+answers; nothing needs the flag). `seed-e2e-local.cjs` also writes stock
+directly, which migration 0243 refuses (`stock_transaction_required`) outside a
+stock-transaction permit; that script is repaired by the E2E-R lane, and until its
+fix is merged this harness stops at the seed step.
 
 One origin is enough: `wrangler.toml` serves `../frontend/dist` as `[assets]`
 with `run_worker_first = ["/api/*", …]`, and `src/app/pathRouting.ts:106`
