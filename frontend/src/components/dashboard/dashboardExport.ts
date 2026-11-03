@@ -2,7 +2,7 @@ import { buildCSV, downloadZipFilesAsync } from '../../utils/csv.ts'
 import { downloadXLSX } from '../../utils/xlsxExport.ts'
 import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
-import { formatPriceNumber } from '../../utils/pricing.ts'
+import { formatMoneyNumber } from '../../utils/pricing.ts'
 import { financialCalculationValue } from '../../utils/financialPrecision.ts'
 import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
 import { fmtDayFirst } from '../../utils/formatters.ts'
@@ -98,8 +98,9 @@ export interface DashboardExportContext {
   profitLabel: string
 }
 
+// Report figures are displayed money: the nearest cent (owner, 24 Sep 2026), not the selling-price round-up.
 function priceCsv(value: unknown): string {
-  return formatPriceNumber(value || 0)
+  return formatMoneyNumber(value || 0)
 }
 
 /** A sales-period row splits the KPI total: 4 places, so the exported rows

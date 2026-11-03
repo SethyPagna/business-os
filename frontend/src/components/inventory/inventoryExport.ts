@@ -1,4 +1,4 @@
-import { formatPriceNumber } from '../../utils/pricing.ts'
+import { formatMoneyNumber } from '../../utils/pricing.ts'
 // N13: the movement CSV names the RECORD a group belongs to, through the same
 // two functions the drill header above it uses. A spreadsheet that carries
 // Branch / Reason / User but not the receipt cannot be matched back to a sale,
@@ -27,8 +27,9 @@ type AnyRecord = Record<string, any>
 // vite.config keeps its named 'inventory-export' chunk out of eager
 // modulepreload, so the movement export still costs nothing until requested.
 
+// A cost total is displayed money: the nearest cent (owner, 24 Sep 2026), not the selling-price round-up.
 function priceCsv(value: unknown): string {
-  return formatPriceNumber(value || 0)
+  return formatMoneyNumber(value || 0)
 }
 
 // Every header in this file is English (Date, Activity, Branch, Reason, User),
