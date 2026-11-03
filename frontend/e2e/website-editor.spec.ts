@@ -506,9 +506,21 @@ test.describe('Website Editor bar (ED-1a)', () => {
         await expect(row.locator('button[aria-haspopup="menu"]'), `the picker replaces the chips at ${width} px`).toBeVisible()
         const box = (await row.boundingBox())!
         expect(box.height, `row height at ${width} px`).toBeLessThanOrEqual(56)
+        // An edit, so the status line has its words ("Unsaved changes") and Save its dot: the two things the phone bar once lost an edge of.
+        await page.locator('#portal-business-tagline').fill(`Bar check ${width}`)
+        await expect(statusLine(page)).not.toHaveText('')
+        // The aside clips sideways (so the bar can stick); a box that sticks out of it is cut off there, whatever the bar's own box says.
+        const aside = (await editor(page).boundingBox())!
+        const inside = (name: string, rect: { x: number; width: number }) => {
+          expect(rect.x, `${name} starts inside the editor at ${width} px`).toBeGreaterThanOrEqual(aside.x - 0.5)
+          expect(rect.x + rect.width, `${name} ends inside the editor at ${width} px`).toBeLessThanOrEqual(aside.x + aside.width + 0.5)
+        }
+        inside('the bar', (await page.locator('#portal-editor-bar').boundingBox())!)
+        inside('the status line', (await statusLine(page).boundingBox())!)
         const buttons = row.locator('button')
         for (let index = 0; index < await buttons.count(); index += 1) {
           const control = (await buttons.nth(index).boundingBox())!
+          inside(`control ${index}`, control)
           expect(control.height, `control ${index} height at ${width} px`).toBeGreaterThanOrEqual(43.5)
           expect(control.width, `control ${index} width at ${width} px`).toBeGreaterThanOrEqual(43.5)
           expect(control.y, `control ${index} sits inside the one row`).toBeGreaterThanOrEqual(box.y - 0.5)

@@ -10,6 +10,9 @@ import type { SaveBarState, SaveBlockedReason } from './saveReview.ts'
 // Save, and the status. One row on every width, 56 px on a phone and 52 px from md up. Sticky and opaque with no backdrop
 // blur: a blur over a near-opaque fill costs a GPU pass per scroll frame for no visible difference.
 //
+// The bar sits inside the editor's aside, which clips sideways (overflow-x: clip, so the bar can stick): a negative margin to run it full-bleed
+// would only be cut off at the aside's edge, taking the first letter of the status line and the Save dot with it. It is a rounded card at every width.
+//
 // Save is the one text button (icon + word). When there is nothing to save, a Save is in flight, or something blocks it,
 // it is aria-disabled rather than disabled: it stays focusable, so a keyboard user reaches it and hears the reason, and the
 // press is simply ignored. The reason is a visible live line -- never a tooltip -- inside the row from md up, one line
@@ -48,7 +51,7 @@ export default function EditorBar({ ed, compact, sections, activeSection, dirtyS
   return (
     <div
       id="portal-editor-bar"
-      className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white px-3 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border"
+      className="sticky top-0 z-30 rounded-2xl border border-slate-200 bg-white px-3 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2"
     >
       <div data-testid="editor-bar-row" className="flex h-14 min-w-0 items-center gap-2 md:h-[52px]">
         <EditorSectionNav
