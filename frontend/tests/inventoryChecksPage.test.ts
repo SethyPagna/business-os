@@ -42,7 +42,7 @@ const saves: unknown[][] = []
 const sessionReads: Array<Record<string, unknown>> = []
 const creates: unknown[][] = []
 const submissions: Array<{ scope: unknown; input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> } }> = []
-let submitFailure: 'none' | 'known' | 'unknown' | 'stale' | 'staleNamed' = 'none'
+let submitFailure: 'none' | 'known' | 'unknown' | 'stale' | 'staleNamed' | 'pending' = 'none'
 // Counts approval (ic_fix_stock): what the server says about the open submission, what this viewer may do, and the scripted answers to a decision.
 let sessionApproval: InventoryCheckApproval | null = null
 let capabilities: { fixStock?: boolean; approveCounts?: boolean } | null = null
@@ -113,6 +113,7 @@ const doubles = {
       submissions.push({ scope, input })
       if (submitFailure === 'unknown') throw Object.assign(new Error('answer lost'), { outcome: 'unknown' })
       if (submitFailure === 'stale') throw Object.assign(new Error('stock changed'), { status: 409, code: 'inventory_check_stock_changed', outcome: 'not_dispatched' })
+      if (submitFailure === 'pending') throw Object.assign(new Error('count pending'), { status: 409, code: 'inventory_check_count_pending', productIds: [13], outcome: 'not_dispatched' })
       if (submitFailure === 'staleNamed') throw Object.assign(new Error('stock changed'), { status: 409, code: 'inventory_check_stock_changed', productIds: [13], outcome: 'not_dispatched' })
       if (submitFailure === 'known') throw Object.assign(new Error('note too long'), { status: 400, code: 'inventory_check_invalid_note', outcome: 'not_dispatched' })
       return { item: { ...selected, id: 'check-submitted', status: 'closed' }, receipt: {}, created: true }
@@ -575,6 +576,12 @@ try {
   await counting.type(inside(14, 'data-check-count'), '9')
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
   assert.ok(counting.text().includes('A note is too long'), 'a refusal is said in words')
+  assert.equal(propsOf(inside(13, 'data-check-count')).readOnly, false, 'and the rows are editable again')
+  // a product whose earlier count still waits for approval: said in words, and the counts are kept (nothing about them is stale)
+  submitFailure = 'pending'
+  await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
+  assert.ok(counting.text().includes('already waits for approval'), 'the person is told why')
+  assert.equal((inside(13, 'data-check-count') as unknown as { value: string }).value, '5', 'the counts are kept')
   assert.equal(propsOf(inside(13, 'data-check-count')).readOnly, false, 'and the rows are editable again')
   // a count made against a screen that is out of date: the server names the product, and only its count is withdrawn so it is counted again against the stock now shown
   submitFailure = 'staleNamed'

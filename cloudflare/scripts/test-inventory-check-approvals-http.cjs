@@ -75,7 +75,7 @@ function binding() {
     }, async run() { const result = db.prepare(sql).run(...this.values); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } } }
   }
   return { prepare, async batch(statements) {
-    if (beforeBatch) { const run = beforeBatch; beforeBatch = null; run(statements) }
+    if (beforeBatch && statements.some(statement => /INSERT INTO inventory_check_sessions/.test(statement.sql))) { const run = beforeBatch; beforeBatch = null; run(statements) }
     if (failApprovalRecord && statements.some(statement => /UPDATE inventory_check_approvals SET (applied_json|status)/.test(statement.sql))) throw new Error('D1 unavailable')
     db.exec('BEGIN')
     try { const result = []; for (const statement of statements) result.push(await statement.all()); db.exec('COMMIT'); return result }
@@ -137,6 +137,16 @@ const moveStock = (id, quantity) => { for (const sql of [`UPDATE branch_stock SE
 const line = (productId, countedQuantity, extra = {}) => ({ productId, countedQuantity, ...extra })
 let groups = 0
 const check = async (name, run) => { await run(); groups++; console.log(`PASS ${name}`) }
+/** A pending approval for one product created behind the API's back, as data from before a rule existed (or a racing submission) would be. */
+const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5 } = {}) => {
+  db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,1,1,?,'','closed',0,'{\"membership\":\"submission\"}',?,?,?)").run(sessionId, COUNTER, submittedAt, submittedAt, submittedAt)
+  db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at) VALUES(?,?,1,'{}',?,'{}','issue',?,'Count differs from stock',1,?,?)").run(sessionId, productId, seen, counted, COUNTER, submittedAt)
+  db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json) VALUES(?,1,1,'pending',1,?,?,?)").run(sessionId, COUNTER, submittedAt, JSON.stringify({ [productId]: seen }))
+}
+/** A stock movement of the products ledger (the real writers record one for every change); the double writer records none, so a test adds the ones it needs. */
+const movement = (productId, type, { reason = 'test', secondsAfterNow = 1 } = {}) => db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,created_at) VALUES(?,?,1,'One',?,1,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
+  .run(productId, 'Product', type, reason, ADMIN, `+${secondsAfterNow} seconds`)
+
 /** Count of 910002 -> 3 (lower by 2), 910003 -> 12 with 2 damaged (raise: Set 10), 910004 -> 9 (raise by 4); 910001 matches. */
 const standard = () => submit([line(910001, 5, { checked: true }), line(910002, 3), line(910003, 12), line(910004, 9)])
 
@@ -551,7 +561,7 @@ async function main() {
 
   await check('the Count sessions list can show only counts waiting for approval (queue-first review): the filter, its total and who may use it', async () => {
     reset(); setSwitches('on', 'on')
-    const waiting = await standard(), matching = await submit([line(910001, 5, { checked: true })], { requestId: 'match-request-09' }), decided = await submit([line(910002, 3)], { requestId: 'submit-request-02' })
+    const waiting = await standard(), matching = await submit([line(910001, 5, { checked: true })], { requestId: 'match-request-09' }), decided = await submit([line(910005, 3)], { requestId: 'submit-request-02' })
     await decide(decided.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })
     const all = await sessions('GET', '/sessions?page=1&pageSize=20')
     assert.equal(all.body.total, 3); assert.equal(all.body.approvals, true, 'the page learns this viewer is shown approvals')
@@ -636,6 +646,65 @@ async function main() {
     // Without ic_fix_stock nothing is applied, so a stale seen changes nothing about the old behaviour.
     reset(); setSwitches('on', undefined)
     assert.equal((await submit([line(910002, 6, { seenQuantity: 0 })], { requestId: 'n3-off-000001' })).status, 201)
+  })
+
+  await check('N2: the same product counted again while its first count waits is refused; an approval never applies a line that a later approval or a manual correction already settled', async () => {
+    const sessionCount = () => db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n
+    reset(); setSwitches('on', 'on')
+    const first = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-first-0001' })
+    assert.equal(first.status, 201)
+    // The second count of one shortage, seen 5 counted 3 again, would apply it twice (5 - 2 - 2 = 1).
+    const second = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-second-001' }, LEAD)
+    assert.equal(second.status, 409, JSON.stringify(second.body)); assert.equal(second.body.code, 'inventory_check_count_pending'); assert.deepEqual(second.body.productIds, [910002])
+    assert.equal(sessionCount(), 1, 'nothing is recorded for it')
+    // Only a DIFFERING count of a waiting product is refused: a matching one, and a differing count of another product, are fine.
+    const other = await submit([line(910004, 3, { seenQuantity: 5 }), line(910002, 5)], { requestId: 'n2-other-0001' }, LEAD)
+    assert.equal(other.status, 201, JSON.stringify(other.body))
+    assert.equal((await decide(first.body.item.id, { requestId: 'n2-approve-001' })).status, 200); assert.equal(ordinary(910002), 3, 'one shortage, applied once')
+    // Once decided it no longer blocks: the product can be counted again, against the stock it has now.
+    const again = await submit([line(910002, 2, { seenQuantity: 3 })], { requestId: 'n2-again-0001' }, LEAD)
+    assert.equal(again.status, 201); assert.equal((await decide(again.body.item.id, { requestId: 'n2-approve-002' })).status, 200); assert.equal(ordinary(910002), 2)
+    // A rejected count does not block either.
+    reset(); setSwitches('on', 'on')
+    const rejected = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-reject-0001' })
+    assert.equal((await decide(rejected.body.item.id, { decision: 'reject', requestId: 'n2-rej-000001' })).status, 200)
+    assert.equal((await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'n2-after-rej-1' }, LEAD)).status, 201)
+    // The race: both submissions pass the read, the commit is the judge (the guard sits in the same atomic batch).
+    reset(); setSwitches('on', 'on')
+    beforeBatch = () => injectPending('n2-racing-session', 910002)
+    const raced = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-race-00001' })
+    assert.equal(raced.status, 409); assert.equal(raced.body.code, 'inventory_check_count_pending')
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM inventory_check_sessions WHERE id<>'n2-racing-session'").get().n, 0, 'the losing submission left nothing behind')
+
+    // At approval: a line another approval of the same branch already applied after this count was submitted is refused (data from before the rule, or a race that got through).
+    reset(); setSwitches('on', 'on')
+    const early = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-early-0001' })
+    injectPending('n2-older-session', 910002, { submittedAt: new Date(Date.now() - 60_000).toISOString() })
+    assert.equal((await decide(early.body.item.id, { requestId: 'n2-approve-003' })).status, 200); assert.equal(ordinary(910002), 3)
+    writer.calls = []
+    const superseded = await decide('n2-older-session', { requestId: 'n2-approve-004' })
+    assert.equal(superseded.status, 409, JSON.stringify(superseded.body)); assert.equal(superseded.body.code, 'inventory_check_count_superseded'); assert.deepEqual(superseded.body.productIds, [910002])
+    assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 3, 'the shortage was not applied twice')
+    assert.equal(db.prepare("SELECT status FROM inventory_check_approvals WHERE session_id='n2-older-session'").get().status, 'pending', 'still rejectable: nothing was claimed')
+    assert.equal((await decide('n2-older-session', { decision: 'reject', requestId: 'n2-reject-0002' })).status, 200)
+
+    // A manual Set (or any correction that asserts a figure) made after the count and before the approval: refused too, never stacked on top of it.
+    for (const type of ['set', 'adjustment', 'remove']) {
+      reset(); setSwitches('on', 'on')
+      const counted = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: `n2-manual-${type}`.padEnd(14, '0') })
+      moveStock(910002, 3); movement(910002, type, { reason: 'Shelf recount by hand' })
+      const stacked = await decide(counted.body.item.id, { requestId: 'n2-approve-005' })
+      assert.equal(stacked.status, 409, `${type}: ${JSON.stringify(stacked.body)}`); assert.equal(stacked.body.code, 'inventory_check_stock_adjusted'); assert.deepEqual(stacked.body.productIds, [910002])
+      assert.equal(ordinary(910002), 3, `${type}: the manual figure stands, the count is not stacked on it (would be 1)`); assert.equal(writer.calls.length, 0)
+      assert.equal((await decide(counted.body.item.id, { decision: 'reject', requestId: 'n2-reject-0003' })).status, 200, 'the count can still be rejected')
+    }
+    // What does not assert a figure keeps the variance model: a sale, goods received, an add, a correction BEFORE the count, another product, and this approval's own writes.
+    reset(); setSwitches('on', 'on')
+    movement(910002, 'set', { reason: 'before the count', secondsAfterNow: -3600 })
+    const kept = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2-kept-00001' })
+    movement(910002, 'sale'); movement(910002, 'add'); movement(910002, 'in'); movement(910004, 'set'); movement(910002, 'remove', { reason: 'Inventory check approved: counted 3' })
+    moveStock(910002, 4)
+    assert.equal((await decide(kept.body.item.id, { requestId: 'n2-approve-006' })).status, 200); assert.equal(ordinary(910002), 2, '4 + (3 - 5)')
   })
 
   console.log(`${groups} groups passed`)

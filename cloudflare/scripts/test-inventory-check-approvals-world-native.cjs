@@ -12,6 +12,7 @@ const assert = require('node:assert/strict')
 const bcrypt = require('bcryptjs')
 const { bootWorld } = require('./read-budget/world.cjs')
 const { ADMIN } = require('./read-budget/seed.cjs')
+const { executeRawStockTransaction } = require('../src/lib/stockTransaction.ts')
 
 const FREE_CALL_LIMIT = 50
 let groups = 0
@@ -163,7 +164,13 @@ async function main() {
       }
       throw new Error(`${label} did not finish`)
     }
-    const sell = async pid => assert.equal((await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 1, type: 'remove', reason: 'sold after the count', client_request_id: key('sale') })).status, 200)
+    // A sale after the count: the stock leaves through the real stock writer (so every ledger moves exactly as a sale moves them) and its movement is then labelled as a movement that is not a correction (a sale or goods out).
+    // A manual Remove would not do: a person's correction after the count is refused, a sale keeps the variance.
+    const sell = async pid => {
+      const sold = await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 1, type: 'remove', reason: 'sold after the count', client_request_id: key('sale') })
+      assert.equal(sold.status, 200)
+      await executeRawStockTransaction(world.db, [world.db.prepare("UPDATE inventory_movements SET movement_type='out' WHERE product_id=? AND reason='sold after the count'").bind(pid)])
+    }
     const breakTwo = async pid => assert.equal((await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'broken in store', conditionTag: 'damaged', client_request_id: key('damage') })).status, 200)
 
     await check('the count is applied as a VARIANCE on the real Worker: a sale after the count survives it (counted 26 over 24, one sold: 25), damaged units are never touched, a count below them is refused', async () => {
@@ -187,6 +194,24 @@ async function main() {
       assert.deepEqual(await stock(BELOW), start[BELOW], 'nothing was written')
       assert.equal((await as('lead', 'POST', `/api/inventory-checks/sessions/${below.json.item.id}/approval`, { decision: 'reject', requestId: key('below-reject') })).status, 200, 'and it can still be rejected')
       console.log('  D1 calls per variance step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
+    })
+
+    await check('N2 on the real Worker: a second count of a product whose count still waits is refused, and a count is never stacked on a correction a person made after it', async () => {
+      const pid = rows[7].pid, start = await stock(pid), total = start.ordinary + start.damaged
+      const submit = (counted, who = 'counter') => as(who, 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: pid, countedQuantity: counted, seenQuantity: total, checked: false }] })
+      const first = await submit(total - 2)
+      assert.equal(first.status, 201, first.text.slice(0, 300))
+      const second = await submit(total - 2, 'lead')
+      assert.equal(second.status, 409, second.text.slice(0, 300)); assert.equal(second.json.code, 'inventory_check_count_pending'); assert.deepEqual(second.json.productIds, [pid])
+      assert.equal((await world.all("SELECT COUNT(*) AS n FROM inventory_check_approvals WHERE session_id=?", first.json.item.id))[0].n, 1)
+      // A person lowers the same stock by hand after the count: applying the count on top of that would take the shortage twice.
+      const counted = await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'recounted by hand', client_request_id: key('hand') })
+      assert.equal(counted.status, 200, counted.text.slice(0, 300))
+      const after = await stock(pid)
+      const stacked = await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'approve', requestId: key('stack') })
+      assert.equal(stacked.status, 409, stacked.text.slice(0, 300)); assert.equal(stacked.json.code, 'inventory_check_stock_adjusted'); assert.deepEqual(stacked.json.productIds, [pid])
+      assert.deepEqual(await stock(pid), after, 'nothing was written')
+      assert.equal((await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'reject', requestId: key('stack-reject') })).status, 200, 'it can still be rejected')
     })
 
     await check('a lost answer on the real stock writers (a removal, then a lot-level raise): the approval is claimed, cannot be rejected, and each repeat replays the write that landed instead of applying it twice', async () => {

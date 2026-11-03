@@ -114,7 +114,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   const stored = plansOf(row.plan_json)
   const sent = await receiptsOf(db, actor.id, remaining.filter(item => stored[String(item.product_id)]).map(item => `${stockKey}-${item.product_id}`))
   const fresh = remaining.filter(item => !(stored[String(item.product_id)] && sent.has(`${stockKey}-${item.product_id}`)))
-  const planned = fresh.length ? await planLines(db, session.branch_id, fresh, approvalBaselines(row.baselines_json)) : new Map<string, Plan>()
+  const planned = fresh.length ? await planLines(db, session.branch_id, fresh, approvalBaselines(row.baselines_json), { sessionId, submittedAt: row.submitted_at }) : new Map<string, Plan>()
   const open: Open[] = remaining.map(item => ({ item, plan: planned.get(String(item.product_id)) ?? stored[String(item.product_id)] }))
   const todo = open.filter(entry => !settled(entry.plan))
   const plansOfTodo = (entries: Open[]): string => JSON.stringify(Object.fromEntries(entries.map(entry => [String(entry.item.product_id), entry.plan])))
@@ -182,8 +182,18 @@ async function announce(onDecided: ApprovalDecided | undefined, decided: Paramet
 }
 
 /** Read the live stock of the lines still to apply and plan each one, refusing before any write everything the approval cannot do safely. */
-async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], baselines: Record<string, number>): Promise<Map<string, Plan>> {
-  const stock = new Map((await readInventoryCheckStock(db, { branchId, productIds: lines.map(item => item.product_id) })).map(row => [row.product_id, row]))
+async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], baselines: Record<string, number>, count: { sessionId: string; submittedAt: string }): Promise<Map<string, Plan>> {
+  const ids = lines.map(item => item.product_id)
+  // What happened since the count rides in the stock read's own batch as ONE more statement: the stock request's budget on the Free plan is counted in statements.
+  let facts: D1Result | undefined
+  const rows = await readInventoryCheckStock({ batch: async statements => {
+    const all = await db.batch([...statements, sinceCountStatement(branchId, ids, count)])
+    facts = all[statements.length]
+    return all.slice(0, statements.length)
+  } }, { branchId, productIds: ids })
+  const stock = new Map(rows.map(row => [row.product_id, row]))
+  const since = (kind: string): number[] => (facts?.results ?? []).filter(value => (value as { kind: string }).kind === kind).map(value => Number((value as { product_id: number }).product_id))
+  const superseded = since('superseded'), adjusted = since('adjusted')
   const inconsistent: number[] = [], unseen: number[] = [], belowDamaged: number[] = [], fractional: number[] = []
   const plans = new Map<string, Plan>()
   for (const item of lines) {
@@ -200,6 +210,8 @@ async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], bas
   if (unseen.length) fail(409, 'inventory_check_baseline_missing', { productIds: unseen })
   if (belowDamaged.length) fail(409, 'inventory_check_count_below_damaged', { productIds: belowDamaged })
   if (fractional.length) fail(409, 'inventory_check_target_not_whole', { productIds: fractional })
+  if (superseded.length) fail(409, 'inventory_check_count_superseded', { productIds: superseded })
+  if (adjusted.length) fail(409, 'inventory_check_stock_adjusted', { productIds: adjusted })
   const raising = [...plans.entries()].filter(([, plan]) => plan.target > plan.before)
   if (raising.length) {
     // A raise tops up the newest received date, one that already holds this branch's stock first.
@@ -215,6 +227,26 @@ async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], bas
   }
   return plans
 }
+
+/**
+ * What happened to these products since the count was submitted, in one statement.
+ *  - superseded: another approval of this branch has applied the product since. The two counts are measured from the same stock, so applying both would apply one shortage
+ *    twice; the later one is refused (a count of a product is normally refused at submit while the first waits, this covers data from before that rule and races).
+ *  - adjusted: a person set the stock by hand (a Set, an adjustment or a removal outside this approval). Such a correction may already contain the shortage the count found, and
+ *    stacking the count on top of it would apply it twice, so the line is refused instead. Sales, goods received and adds keep the variance model.
+ *    This approval's own writes are told by their reason and are not counted.
+ */
+const sinceCountStatement = (branchId: number, productIds: number[], count: { sessionId: string; submittedAt: string }): Statement => ({
+  sql: `SELECT 'superseded' AS kind,CAST(j.key AS INTEGER) AS product_id FROM inventory_check_approvals a, json_each(a.applied_json,'$.lines') j
+      WHERE a.branch_id=@branchId AND a.session_id<>@sessionId AND CAST(j.key AS INTEGER) IN (SELECT value FROM json_each(@ids)) AND json_extract(j.value,'$.at')>@submittedAt
+    UNION
+    SELECT 'adjusted',product_id FROM inventory_movements WHERE branch_id=@branchId AND product_id IN (SELECT value FROM json_each(@ids))
+      AND movement_type IN ('set','adjustment','remove') AND COALESCE(reason,'') NOT LIKE 'Inventory check approved:%'
+      AND created_at>=date(@submittedFrom,'-1 day') AND julianday(created_at)>=julianday(@submittedFrom)
+    ORDER BY 1,2`,
+  // Movements are stamped to the second and the count to the millisecond: comparing from the start of the count's second never misses a correction made right after it (a false refusal is safe, a missed one applies a shortage twice).
+  // created_at mixes ISO and space forms, so julianday() decides; the plain comparison with the day before is only the floor that lets the (product, created_at) index skip the product's whole history.
+  params: { branchId, sessionId: count.sessionId, submittedAt: count.submittedAt, submittedFrom: count.submittedAt.slice(0, 19).replace('T', ' '), ids: JSON.stringify(productIds) } })
 
 /**
  * The stock writers refused every line of this request. If none of them holds a receipt, nothing was written, so a claim made only for this request is

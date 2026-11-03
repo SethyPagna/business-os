@@ -291,6 +291,7 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
   catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
+    if (text.includes('inventory_check_count_pending')) fail(409, 'inventory_check_count_pending')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
       physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
       fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
@@ -501,7 +502,17 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   if (members.some(member => !member.product || !member.baseline)) fail(409, 'inventory_check_baseline_changed')
   // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
-  const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
+  const differingIds = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).map(item => item.line.productId) : []
+  const differing = differingIds.length
+  // One shortage is counted once: a differing count of a product whose earlier count still waits at this branch is refused (that count is measured from the same stock, so applying both would apply it twice).
+  // The read names the products; the guard in the commit below is the judge when two submissions race.
+  const waitingParams = { organization: actor.organization_id, branchId, differingIds: JSON.stringify(differingIds) }
+  const WAITING_AT_BRANCH = `FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
+    WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND i.product_id IN (SELECT value FROM json_each(@differingIds)) AND ${WAITING_LINE_SQL}`
+  if (differing) {
+    const waiting = await db.prepare(`SELECT DISTINCT i.product_id ${WAITING_AT_BRANCH} ORDER BY i.product_id`).all<{ product_id: number }>(waitingParams)
+    if (waiting.length) fail(409, 'inventory_check_count_pending', { productIds: waiting.map(row => row.product_id) })
+  }
   const scope = { membership: 'submission' }
   // The figure a count is later measured against is the stock at submit. For a viewer who sees stock it equals what the counter saw (checked above); for anyone else it is the only trustworthy figure.
   const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
@@ -521,6 +532,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
       WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
       OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
       OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
+    ...(differing ? [guard(`NOT EXISTS(SELECT 1 ${WAITING_AT_BRANCH})`, 'inventory_check_count_pending', waitingParams)] : []),
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
