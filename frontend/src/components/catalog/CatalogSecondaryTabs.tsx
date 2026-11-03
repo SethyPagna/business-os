@@ -229,15 +229,18 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
 
 // The owner's photo, shown whole: it keeps its own proportions at every width and only a
 // very wide screen caps its height, so nothing is cropped or stretched (object-contain).
-// The frame holds a minimum height until the picture is decoded, so the page below it
-// does not jump when it arrives.
+// The settings keep a path, not a size, so the photo's proportions are known only once the file is
+// in; PublicCatalogPage therefore mounts this card after the file has arrived (useCoverState) and
+// the card then lays out at the photo's own size at once. If that wait runs out, the frame holds a
+// 16:9 box (the shape of the sample cover) until the picture is decoded, never a fixed height that
+// a taller picture outgrows (that pushed the whole card down by the difference: CLS 0.14-0.17).
 function AboutCover({ src, imageFetchPriority, onFailed }: { src: string; imageFetchPriority?: 'high' | 'low' | 'auto'; onFailed: () => void }) {
   const [loaded, setLoaded] = useState(false)
   return (
     <div
       data-portal-about-hero="true"
       data-portal-cover-frame="true"
-      className={`relative w-full bg-stone-100 dark:bg-neutral-800 ${loaded ? '' : 'min-h-36 sm:min-h-56'}`}
+      className={`relative w-full bg-stone-100 dark:bg-neutral-800 ${loaded ? '' : 'aspect-video'}`}
     >
       <img
         ref={(node) => { if (node && node.complete && node.naturalWidth > 0) setLoaded(true) }}

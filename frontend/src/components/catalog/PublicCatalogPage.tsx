@@ -405,6 +405,51 @@ function SignalOnMount({ onMount }: { onMount: () => void }) {
   return null
 }
 
+// How long the About card waits for its cover before it shows anyway (a slow connection keeps the 16:9 frame instead).
+const COVER_WAIT_MS = 1200
+
+type CoverState = 'waiting' | 'ready' | 'failed'
+
+/**
+ * Where the About cover stands: 'ready' once it has arrived or COVER_WAIT_MS has run out, 'failed' when the file could not be loaded,
+ * and 'ready' at once when there is nothing to wait for ('').
+ * The cover is shown whole at its own proportions, which only the file knows, so a card painted before the file is in is pushed
+ * down by the difference when the picture decodes. Holding the card (the page shows the skeleton meanwhile, and the footer waits
+ * for the card) puts the whole card on screen at its final size, and a failed file shows the brand banner from the start instead
+ * of a frame that collapses. The request starts as soon as the config is in hand, which is earlier than the lazy About chunk used
+ * to start it, and the card's own <img> then finds the file in the browser's cache.
+ */
+function useCoverState(src: string): CoverState {
+  const [settled, setSettled] = useState<{ src: string; state: CoverState }>({ src: '', state: 'waiting' })
+  useEffect(() => {
+    if (!src) return undefined
+    let live = true
+    let timer = 0
+    // The first outcome stands: a file that failed must not be turned back into 'ready' by the wait running out a moment later.
+    const finish = (state: CoverState) => {
+      if (!live) return
+      live = false
+      window.clearTimeout(timer)
+      setSettled({ src, state })
+    }
+    timer = window.setTimeout(() => finish('ready'), COVER_WAIT_MS)
+    const image = new Image()
+    image.fetchPriority = 'high'
+    image.onload = () => finish('ready')
+    image.onerror = () => finish('failed')
+    image.src = src
+    if (image.complete && image.naturalWidth > 0) finish('ready')
+    return () => {
+      live = false
+      window.clearTimeout(timer)
+      image.onload = null
+      image.onerror = null
+    }
+  }, [src])
+  if (!src) return 'ready'
+  return settled.src === src ? settled.state : 'waiting'
+}
+
 // The public catalog's bootstrap/search endpoints return one row per branch
 // for products that are otherwise identical, and grouped products (same
 // name, different branch/price/barcode) get collapsed to a single card
@@ -848,6 +893,7 @@ export default function PublicCatalogPage() {
   const productGridClass = getPortalProductGridClass(displayConfig)
   const businessLogoUrl = String(displayConfig.businessLogo || '').trim()
   const businessCoverUrl = String(displayConfig.businessCover || '').trim()
+  const coverState = useCoverState(activeTab === 'about' && realConfigInHand && displayConfig.showCover && businessCoverUrl ? businessCoverUrl : '')
   const selectedStockBranch = branchFilter[0] || 'all'
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
@@ -1140,7 +1186,7 @@ export default function PublicCatalogPage() {
     </Suspense>
   )) : null
 
-  const secondaryTabSection = activeTab !== 'products' ? (realConfigInHand ? (
+  const secondaryTabSection = activeTab !== 'products' ? (realConfigInHand && coverState !== 'waiting' ? (
     <Suspense fallback={storefrontSkeleton}>
       <CatalogSecondaryTabs
         tab={activeTab}
@@ -1153,7 +1199,7 @@ export default function PublicCatalogPage() {
         businessFacts={businessFacts}
         socialLinks={socialLinks}
         versionedBusinessLogo={businessLogoUrl}
-        versionedBusinessCover={businessCoverUrl}
+        versionedBusinessCover={coverState === 'failed' ? '' : businessCoverUrl}
         publicFaqItems={publicFaqItems}
         expandedFaqId={expandedFaqId}
         setExpandedFaqId={setExpandedFaqId}

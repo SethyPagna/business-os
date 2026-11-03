@@ -42,9 +42,12 @@ run('the cover is an in-flow image kept whole: contain, auto height, a cap on ve
   assert.doesNotMatch(cover, /object-cover|object-fill|absolute|inset-0|h-20|h-28|overflow-hidden/, 'no crop, no stretch, no thin strip, no overlay')
 })
 
-run('the frame holds a minimum height until the photo is decoded, then lets it set its own height', () => {
+run('the frame holds a 16:9 box until the photo is decoded (never a fixed height it can outgrow), then lets it set its own height', () => {
   assert.match(cover, /const \[loaded, setLoaded\] = useState\(false\)/)
-  assert.match(cover, /loaded \? '' : 'min-h-36 sm:min-h-56'/)
+  assert.match(cover, /loaded \? '' : 'aspect-video'/)
+  // A fixed minimum height (the old min-h-36 = 144 px) is outgrown by a taller photo, and the whole card under it is pushed down by the
+  // difference when the picture decodes: layout shift 0.14-0.17 on a phone against a 0.05 budget.
+  assert.doesNotMatch(cover, /min-h-/, 'no fixed minimum height on the cover frame')
   assert.match(cover, /onLoad=\{[^\n]*setLoaded\(true\)/)
   assert.match(cover, /node\.complete && node\.naturalWidth > 0/, 'a photo already in the browser cache still counts as loaded')
 })

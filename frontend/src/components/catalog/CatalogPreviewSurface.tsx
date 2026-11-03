@@ -533,7 +533,7 @@ export default function CatalogPreviewSurface({
                   </div>
                 </div>
                 {/* Owner rule: social icons + handles on their OWN row that scrolls sideways. The left cell above is kept (empty on the live shop) so the grid columns do not shift. */}
-                <PortalSocialRow groups={socialGroups} mapLink={mapLink} pageLanguage={pageLanguage} copy={copy} />
+                <PortalSocialRow groups={socialGroups} mapLink={mapLink} pageLanguage={pageLanguage} copy={copy} pending={configPending} />
               </div>
             </header>
 
