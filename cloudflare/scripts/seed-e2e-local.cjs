@@ -29,7 +29,9 @@
  *   branches      the two canonical branches: 'shop' (default, sells) and
  *                 'warehouse' (stock only).
  *   categories    one, so the till's category rail is not empty.
- *   products      three, priced, with branch_stock at the shop.
+ *   products      three, priced, with branch_stock at the shop. Written inside
+ *                 the stock permit, the same way the Worker writes stock: see
+ *                 STOCK_PERMIT_SQL below.
  *   settings      exchange_rate, which the till reads to show riel.
  *
  * The organization row is NOT created here: migration 0001 already inserts
@@ -43,6 +45,25 @@ const fs = require('fs')
 const path = require('path')
 const Database = require('better-sqlite3')
 const bcrypt = require('bcryptjs')
+
+// Stock rows cannot be written bare. Migration 0243 (stock_schema_epoch) put BEFORE INSERT/UPDATE/DELETE triggers on
+// products, branch_stock, branch_batch_stock, product_batches and damaged_stock_lots that ABORT 'stock_transaction_required'
+// unless a system_flags row 'stock_transaction_permit' equal to the 'stock_schema_epoch' value exists, and 0258 does the
+// same for cost columns. The Worker opens that permit as the first statement of every stock batch and deletes it as the
+// last one (src/lib/stockTransaction.ts executeStockTransaction: permitSql ... releaseSql). These two statements are those
+// two, verbatim: the permit is only granted when the epoch is the one this build understands and no maintenance row
+// exists (otherwise json_extract raises stock_schema_unavailable and the whole seed rolls back), and inside this seed's
+// single transaction it can never outlive the writes it covers. The seed used to write products and branch_stock
+// directly, which worked until 0243/0258 and has failed with stock_transaction_required at the products INSERT since.
+const STOCK_SCHEMA_EPOCH = 'legacy-separate-pool-v1'
+const STOCK_PERMIT_SQL = `INSERT INTO system_flags (key,value,updated_at)
+  VALUES ('stock_transaction_permit', CASE WHEN
+    (SELECT value FROM system_flags WHERE key='stock_schema_epoch')='${STOCK_SCHEMA_EPOCH}'
+    AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
+    THEN '${STOCK_SCHEMA_EPOCH}'
+    ELSE json_extract('[1]','$[stock_schema_unavailable]') END, CURRENT_TIMESTAMP)`
+const STOCK_RELEASE_SQL = `DELETE FROM system_flags
+  WHERE key='stock_transaction_permit' AND value='${STOCK_SCHEMA_EPOCH}'`
 
 const E2E_USERNAME = 'e2e_admin'
 const E2E_PASSWORD = 'e2e-password'
@@ -122,15 +143,36 @@ function main() {
 
     db.prepare("INSERT INTO categories (name) SELECT 'E2E' WHERE NOT EXISTS (SELECT 1 FROM categories WHERE name = 'E2E')").run()
 
+    // Everything that touches products or branch_stock happens between the two permit statements.
+    //
+    // Re-running the seed (the README flow starts the Worker once and then seeds again, and a database accumulates sales
+    // between runs) UPDATES a product that already exists instead of deleting and re-inserting it, as this used to.
+    // Migration 0242 refuses to delete a product that holds stock (product_has_stock) -- stock is resolved by an audited
+    // operation, never by dropping the row -- so the old DELETE failed on the second run. Updating also keeps the product id
+    // that earlier sale rows point at. Either way each run ends with the seeded price and the seeded shop quantity.
+    db.exec(STOCK_PERMIT_SQL)
     for (const product of PRODUCTS) {
-      db.prepare('DELETE FROM products WHERE name = ?').run(product.name)
-      const info = db.prepare(`
-        INSERT INTO products (name, barcode, category, unit, selling_price_usd, cost_price_usd, stock_quantity, is_active)
-        VALUES (@name, @barcode, 'E2E', 'pcs', @price, @cost, @qty, 1)
-      `).run({ name: product.name, barcode: product.barcode, price: product.price, cost: product.price / 2, qty: product.qty })
-      db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)')
-        .run(info.lastInsertRowid, shop.id, product.qty)
+      const values = { name: product.name, barcode: product.barcode, price: product.price, cost: product.price / 2, qty: product.qty }
+      const existing = db.prepare('SELECT id FROM products WHERE name = ?').get(product.name)
+      let productId
+      if (existing) {
+        productId = existing.id
+        db.prepare(`
+          UPDATE products SET barcode = @barcode, category = 'E2E', unit = 'pcs', selling_price_usd = @price,
+            cost_price_usd = @cost, stock_quantity = @qty, is_active = 1 WHERE id = @id
+        `).run({ ...values, id: productId })
+      } else {
+        productId = db.prepare(`
+          INSERT INTO products (name, barcode, category, unit, selling_price_usd, cost_price_usd, stock_quantity, is_active)
+          VALUES (@name, @barcode, 'E2E', 'pcs', @price, @cost, @qty, 1)
+        `).run(values).lastInsertRowid
+      }
+      const shopStock = db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(product.qty, productId, shop.id)
+      if (shopStock.changes === 0) {
+        db.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, ?)').run(productId, shop.id, product.qty)
+      }
     }
+    db.exec(STOCK_RELEASE_SQL)
 
     // Clear the REAL limiter's recorded attempts, without touching the limit
     // itself. routes/auth.ts:56 allows 8 logins per account per 15 minutes and
@@ -151,6 +193,9 @@ function main() {
     db.exec('ROLLBACK')
     throw error
   }
+  // A permit left behind would unlock raw stock writes for the next process that opens this database.
+  const permits = db.prepare("SELECT COUNT(*) AS n FROM system_flags WHERE key = 'stock_transaction_permit'").get().n
+  if (permits !== 0) throw new Error(`seed left ${permits} stock_transaction_permit row(s) behind`)
 
   console.log(`[seed-e2e] user ${E2E_USERNAME} / ${E2E_PASSWORD} (administrator role -- no device approval)`)
   console.log(`[seed-e2e] products ${db.prepare('SELECT COUNT(*) AS n FROM products').get().n}, branches ${db.prepare('SELECT COUNT(*) AS n FROM branches').get().n}`)
