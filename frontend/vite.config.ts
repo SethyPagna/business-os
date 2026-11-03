@@ -854,6 +854,9 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      // portalNavSearchSlot.ts (the tab bar's search slot context) is lent by CatalogPreviewSurface and
+      // consumed by CatalogProductsSection (catalog-products), so it lives in the shared core chunk.
+      || normalized.includes('/src/components/catalog/portalNavSearchSlot.ts')
       // portalNoTranslate.ts (owner [[ ]] never-translate markers) is imported by
       // CatalogSecondaryTabs (catalog-secondary-tabs), which must not pull the
       // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts).
@@ -870,6 +873,10 @@ function manualChunks(id: string): string | undefined {
       // portalMotion.ts (reduced-motion scroll behaviour) is imported by PublicCatalogPage,
       // PortalPromoStrip and the admin CatalogPage; same shared-core reason.
       || normalized.includes('/src/components/catalog/portalMotion.ts')
+      // portalAnnouncement.ts and PortalAnnouncementStrip.tsx (the announcement bar) are imported by the storefront page and
+      // its surface (catalog-public), the editor preview (catalog) and the editor surface (catalog-editor).
+      || normalized.includes('/src/components/catalog/portalAnnouncement.ts')
+      || normalized.includes('/src/components/catalog/PortalAnnouncementStrip.tsx')
       // PortalSocialRow.tsx (the one social icon map + header row) and
       // portalSocialLinks.ts (its builders) are imported by the storefront page and
       // its surface (catalog-public), the editor preview (catalog), About

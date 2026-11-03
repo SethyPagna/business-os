@@ -273,7 +273,7 @@ async function watchCoverAndPrices(page: Page): Promise<void> {
     ;(window as unknown as { __p2Paint: typeof state }).__p2Paint = state
     const PRICE = /\$\s?\d|\d[\d,]*\s?៛/
     const scan = () => {
-      for (const img of Array.from(document.querySelectorAll('img[aria-hidden="true"][alt=""].object-cover'))) {
+      for (const img of Array.from(document.querySelectorAll('img[data-portal-cover="true"]'))) {
         const src = img.getAttribute('src') || ''
         if (src && state.coverSrcs[state.coverSrcs.length - 1] !== src) state.coverSrcs.push(src)
       }
@@ -324,7 +324,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
 
     await expect(page.getByRole('heading', { level: 2, name: String(PAINT_EMBED.config.businessName) }), 'painted from the embed while the bootstrap is held').toBeVisible()
-    await expect(page.locator('img[aria-hidden="true"][alt=""].object-cover').first()).toHaveAttribute('src', cover)
+    await expect(page.locator('img[data-portal-cover="true"]').first()).toHaveAttribute('src', cover)
     release()
     await expect(page.locator('[data-portal-skeleton]')).toHaveCount(0)
     await storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products').click()
@@ -352,7 +352,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     await routeStorefrontConfig(page, { patch: REAL_SHOP, delayMs: 800 })
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
     await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
-    await expect.poll(() => page.locator('img[aria-hidden="true"][alt=""].object-cover').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
+    await expect.poll(() => page.locator('img[data-portal-cover="true"]').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
     await pause(500)
     const cls = await page.evaluate(() => (window as unknown as { __p2Cls: { cls: number } }).__p2Cls.cls)
     testInfo.annotations.push({ type: 'cls', description: cls.toFixed(4) })

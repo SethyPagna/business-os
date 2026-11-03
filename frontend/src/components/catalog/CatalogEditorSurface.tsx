@@ -22,6 +22,8 @@ import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
+import { PORTAL_ANNOUNCEMENT_MAX_LENGTH, portalAnnouncementIssues } from './portalAnnouncement.ts'
 import { PRODUCT_CAUTION_SUGGESTED_TEXT, PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT } from './productDetailDefaultsText.ts'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import type { PrivateAiStatus } from './portalPrivateAi.ts'
@@ -79,6 +81,13 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   customer_portal_faq_title?: string
   customer_portal_favicon_image?: string | null
   customer_portal_google_maps_embed?: string
+  customer_portal_grid_columns_auto?: boolean
+  customer_portal_announcement_enabled?: boolean
+  customer_portal_announcement_text_en?: string
+  customer_portal_announcement_text_km?: string
+  customer_portal_announcement_link?: string
+  customer_portal_announcement_start?: string
+  customer_portal_announcement_end?: string
   customer_portal_grid_columns_desktop?: string | number
   customer_portal_grid_columns_mobile?: string | number
   customer_portal_hero_gradient_end?: string
@@ -401,6 +410,7 @@ function CatalogEditorSurfaceContent() {
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
   const { t, language } = useApp() as Pick<AppContextCoreValue, 't' | 'language'>
   const ed = useMemo(() => createEditorText(t, language), [t, language])
+  const announcementIssues = portalAnnouncementIssues({ link: editorDraft.customer_portal_announcement_link, start: editorDraft.customer_portal_announcement_start, end: editorDraft.customer_portal_announcement_end })
   const linkInvalid = ed('web_editor_link_invalid', 'Use a full https:// link or a picture from this site.', 'សូមប្រើតំណ https:// ពេញលេញ ឬរូបភាពពីគេហទំព័រនេះ។')
   const linkRefused = (field: string, value: unknown) => refusedLink?.field === field && refusedLink.value === String(value ?? '').trim()
   const aboutBlocksFull = aboutBlocks.length >= ABOUT_BLOCKS_MAX
@@ -554,12 +564,20 @@ function CatalogEditorSurfaceContent() {
                   <label htmlFor="portal-refresh-seconds" className="block text-sm font-medium text-slate-700">{copy('refreshSeconds', 'Public refresh interval (seconds)', 'ចន្លោះពេលស្រស់ថ្មីសាធារណៈ (វិនាទី)')}</label>
                 <input id="portal-refresh-seconds" name="customer_portal_refresh_seconds" className="input" type="number" min="5" max="120" step="1" value={editorDraft.customer_portal_refresh_seconds || '20'} onChange={(event) => setDraft('customer_portal_refresh_seconds', event.target.value)} />
               </div>
+              <label htmlFor="portal-grid-auto" className="col-span-full flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-700">{copy('gridColumnsAuto', 'Automatic columns')}</span>
+                  <span className="block text-xs text-slate-500">{copy('gridColumnsAutoHint', 'On: 2 on phones, 3 on tablets, then 4, 5 and 6 as the screen gets wider. Off: set the columns yourself.')}</span>
+                </span>
+                <input id="portal-grid-auto" name="customer_portal_grid_columns_auto" type="checkbox" checked={editorDraft.customer_portal_grid_columns_auto !== false} onChange={(event) => setDraft('customer_portal_grid_columns_auto', event.target.checked)} />
+              </label>
               <div>
                 <label htmlFor="portal-grid-mobile" className="block text-sm font-medium text-slate-700">{copy('gridColumnsMobile', 'Mobile grid columns')}</label>
                 <input
                   id="portal-grid-mobile"
                   name="customer_portal_grid_columns_mobile"
                   className="input"
+                  disabled={editorDraft.customer_portal_grid_columns_auto !== false}
                   type="number"
                   min={editorLimits.phone[0]}
                   max={editorLimits.phone[1]}
@@ -574,6 +592,7 @@ function CatalogEditorSurfaceContent() {
                   id="portal-grid-desktop"
                   name="customer_portal_grid_columns_desktop"
                   className="input"
+                  disabled={editorDraft.customer_portal_grid_columns_auto !== false}
                   type="number"
                   min={editorLimits.desktop[0]}
                   max={editorLimits.desktop[1]}
@@ -583,6 +602,44 @@ function CatalogEditorSurfaceContent() {
                 />
               </div>
             </div>
+            {canEditConfig ? (
+              <div data-testid="portal-announcement-card" className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-1">
+                  <HintLabel className="text-sm font-semibold text-slate-900" title={copy('announcementBar', 'Announcement bar')} hint={copy('announcementBarHint', 'One line above the page header, in English and Khmer. Visitors can close it; a new message or link shows it to everyone again.')} />
+                </div>
+                <label className="mt-3 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-announcement-enabled">
+                  <span className="text-sm font-medium text-slate-700">{copy('announcementBarShow', 'Show the announcement bar')}</span>
+                  <input id="portal-announcement-enabled" name="customer_portal_announcement_enabled" type="checkbox" checked={!!editorDraft.customer_portal_announcement_enabled} onChange={(event) => setDraft('customer_portal_announcement_enabled', event.target.checked)} />
+                </label>
+                <div className="mt-3 grid min-w-0 gap-3 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="portal-announcement-text-en" className="block text-sm font-medium text-slate-700">{copy('announcementBarTextEn', 'Message (English)')}</label>
+                    <input id="portal-announcement-text-en" name="customer_portal_announcement_text_en" className="input mt-1" autoComplete="off" maxLength={PORTAL_ANNOUNCEMENT_MAX_LENGTH} value={editorDraft.customer_portal_announcement_text_en || ''} onChange={(event) => setDraft('customer_portal_announcement_text_en', event.target.value)} />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-announcement-text-km" className="block text-sm font-medium text-slate-700">{copy('announcementBarTextKm', 'Message (Khmer)')}</label>
+                    <input id="portal-announcement-text-km" name="customer_portal_announcement_text_km" lang="km" className="input mt-1" autoComplete="off" maxLength={PORTAL_ANNOUNCEMENT_MAX_LENGTH} value={editorDraft.customer_portal_announcement_text_km || ''} onChange={(event) => setDraft('customer_portal_announcement_text_km', event.target.value)} />
+                  </div>
+                </div>
+                <div className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
+                  <div>
+                    <label htmlFor="portal-announcement-link" className="block text-sm font-medium text-slate-700">{copy('announcementBarLink', 'Link (optional)')}</label>
+                    <input id="portal-announcement-link" name="customer_portal_announcement_link" type="url" inputMode="url" autoComplete="off" className="input mt-1" placeholder="https://" aria-invalid={announcementIssues.link || undefined} value={editorDraft.customer_portal_announcement_link || ''} onChange={(event) => setDraft('customer_portal_announcement_link', event.target.value)} />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-announcement-start" className="block text-sm font-medium text-slate-700">{copy('announcementBarStart', 'Show from (optional)')}</label>
+                    <DateEntryInput id="portal-announcement-start" name="customer_portal_announcement_start" t={t} value={editorDraft.customer_portal_announcement_start || ''} onChange={(iso) => setDraft('customer_portal_announcement_start', iso)} />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-announcement-end" className="block text-sm font-medium text-slate-700">{copy('announcementBarEnd', 'Show until (optional)')}</label>
+                    <DateEntryInput id="portal-announcement-end" name="customer_portal_announcement_end" t={t} value={editorDraft.customer_portal_announcement_end || ''} onChange={(iso) => setDraft('customer_portal_announcement_end', iso)} />
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">{copy('announcementBarDaysHint', 'Both days are included, in Cambodia time. The preview shows the message whatever the days say.')}</p>
+                {announcementIssues.link ? <p role="alert" data-testid="portal-announcement-link-issue" className="mt-1 text-xs font-medium text-rose-700">{copy('announcementBarLinkInvalid', 'The link must start with http:// or https:// and have no spaces.')}</p> : null}
+                {announcementIssues.range ? <p role="alert" data-testid="portal-announcement-range-issue" className="mt-1 text-xs font-medium text-rose-700">{copy('announcementBarRangeInvalid', 'The end day is before the start day.')}</p> : null}
+              </div>
+            ) : null}
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-1">
                 <HintLabel className="text-sm font-semibold text-slate-900" title={copy('portalHighlights', 'Product highlights')} hint={copy('portalHighlightsHint', 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.')} />
@@ -1619,7 +1676,7 @@ function CatalogEditorSurfaceContent() {
                     </label>
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-instagram">
                       <span className="text-sm text-slate-700">{copy('showContactInstagram', 'Show Instagram button')}</span>
-                      <input id="portal-show-contact-instagram" name="customer_portal_show_contact_instagram" type="checkbox" checked={!!editorDraft.customer_portal_show_contact_instagram} onChange={(event) => setDraft('customer_portal_show_contact_instagram', event.target.checked)} />
+                      <input id="portal-show-contact-instagram" name="customer_portal_show_contact_instagram" type="checkbox" checked={editorDraft.customer_portal_show_contact_instagram !== false} onChange={(event) => setDraft('customer_portal_show_contact_instagram', event.target.checked)} />
                     </label>
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-whatsapp">
                       <span className="text-sm text-slate-700">{copy('showContactWhatsapp', 'Show WhatsApp button')}</span>

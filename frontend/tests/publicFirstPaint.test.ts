@@ -130,6 +130,26 @@ await runTest('the paint reader drops every key outside the allow-list (prices, 
   }
 })
 
+await runTest('the announcement rides the paint embed, so the bar is there at the first paint instead of pushing the header down later', async () => {
+  const { parsePaintEmbed } = need()
+  const { resolvePortalAnnouncement } = await import('../src/components/catalog/portalAnnouncement.ts')
+  const announcement = {
+    announcementEnabled: true,
+    announcementTextEn: 'Sample sale this week',
+    announcementTextKm: 'ការលក់គំរូសប្តាហ៍នេះ',
+    announcementLink: 'https://example.test/sale',
+    announcementStart: '',
+    announcementEnd: '',
+    announcementVersion: 'v1',
+  }
+  const painted = parsePaintEmbed(embedText({ kind: 'paint', v: 1, config: { ...embedFixture.config, ...announcement } }))
+  assert.ok(painted)
+  for (const [key, value] of Object.entries(announcement)) assert.equal(painted[key], value, `${key} is painted`)
+  assert.equal(resolvePortalAnnouncement(painted, 'en', '2026-11-05')?.text, 'Sample sale this week', 'the painted fields are enough to draw the bar')
+  assert.equal(parsePaintEmbed(embedText({ kind: 'paint', v: 1, config: { ...announcement, announcementEnabled: 'yes', announcementTextEn: 7 } }))?.announcementEnabled, undefined, 'a value of the wrong type is dropped')
+  assert.ok(new TextEncoder().encode(embedText({ kind: 'paint', v: 1, config: { ...embedFixture.config, ...announcement, announcementTextEn: 'a'.repeat(200), announcementTextKm: 'ក'.repeat(200), announcementLink: 'https://example.test/' + 'a'.repeat(480) } })).length <= need().PAINT_EMBED_MAX_BYTES, 'a full-length message in both languages and a long link still fit the cap')
+})
+
 await runTest('the paint reader rejects another kind, another version, arrays, malformed JSON and oversized text', () => {
   const { parsePaintEmbed, PAINT_EMBED_MAX_BYTES } = need()
   const config = { businessName: 'Paint Fixture Shop' }
@@ -380,9 +400,11 @@ await runTest('the footer commits with the tab content, never under the skeleton
 })
 
 await runTest('the landing cover is fetched first and fades in; the PublicCatalogRoot fallback is the same skeleton', () => {
-  const about = between(secondaryTabs(), 'function CatalogAboutSection(', '\nfunction CatalogFaqSection(')
+  const about = secondaryTabs()
+  assert.ok(about.indexOf('data-portal-cover="true"') > -1, 'the cover image is still marked')
   const cover = about.slice(about.indexOf('data-portal-cover="true"') - 300, about.indexOf('data-portal-cover="true"') + 300)
   assert.match(cover, /fetchPriority=\{imageFetchPriority\}/)
+  assert.match(about, /<AboutCover src=\{versionedBusinessCover \|\| ''\} imageFetchPriority=\{imageFetchPriority\}/, 'the section hands its fetch priority to the cover')
   assert.match(cover, /onLoad=/, 'the cover fades in once decoded')
   assert.match(publicPage(), /imageFetchPriority="high"/)
   const css = read('../src/styles/public-portal.css')

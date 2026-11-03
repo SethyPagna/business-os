@@ -12,7 +12,7 @@ import { getPlanLimits } from '../lib/planTier'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday } from '../lib/businessDateWindow'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
-import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, isPrivateStorefrontFieldName, normalizePortalImageAlt, plainText, portalLanguageCode, PORTAL_TRANSLATED_COLLECTION_NAMES, type PortalTranslatedCollectionName } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, isPrivateStorefrontFieldName, normalizePortalImageAlt, plainText, portalAnnouncementConfig, portalLanguageCode, PORTAL_TRANSLATED_COLLECTION_NAMES, type PortalTranslatedCollectionName } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -621,7 +621,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showContactTelegram: normalizeBoolean(settings.customer_portal_show_contact_telegram, true),
     showContactWhatsapp: normalizeBoolean(settings.customer_portal_show_contact_whatsapp, false),
     showContactPhone: normalizeBoolean(settings.customer_portal_show_contact_phone, false),
-    showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, false),
+    showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, true),
     title: settings.customer_portal_title || settings.business_name || 'Leang Cosmetics',
     intro: settings.customer_portal_intro || '',
     heroGradientStart: settings.customer_portal_hero_gradient_start || '#0f172a',
@@ -630,6 +630,15 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     exchangeRate: toNumber(settings.exchange_rate, 4100),
     priceDisplay: settings.customer_portal_price_display || settings.display_currency || 'USD',
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(settings.customer_portal_refresh_seconds, 20)))),
+    gridColumnsAuto: normalizeBoolean(settings.customer_portal_grid_columns_auto, true),
+    ...portalAnnouncementConfig({
+      enabled: normalizeBoolean(settings.customer_portal_announcement_enabled, false),
+      textEn: settings.customer_portal_announcement_text_en,
+      textKm: settings.customer_portal_announcement_text_km,
+      link: settings.customer_portal_announcement_link,
+      start: settings.customer_portal_announcement_start,
+      end: settings.customer_portal_announcement_end,
+    }),
     gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(settings.customer_portal_grid_columns_mobile, 1)))),
     gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
     googleMapsEmbed: normalizeGoogleMapsEmbed(settings.customer_portal_google_maps_embed),

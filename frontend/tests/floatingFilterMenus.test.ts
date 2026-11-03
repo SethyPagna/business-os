@@ -51,7 +51,7 @@ runTest('catalog compact filters float instead of inserting a layout row', () =>
   assert.doesNotMatch(catalogProducts, /<aside className="hidden[^"]*lg:block/, 'the permanent filter rail is back')
   assert.match(catalogProducts, /const \[desktopFiltersOpen, setDesktopFiltersOpen\] = useState\(false\)/, 'the desktop panel starts collapsed')
   assert.match(catalogProducts, /aria-expanded=\{desktopFiltersOpen\}[\s\S]{0,120}aria-controls="portal-desktop-filters"/)
-  assert.match(catalogProducts, /\{desktopFiltersOpen \? \(\s*<div id="portal-desktop-filters"[^>]*lg:block/, 'the panel is lg+ only and mounted only while open')
+  assert.match(catalogProducts, /desktopFiltersOpen \? \(\s*<div id="portal-desktop-filters"[^>]*lg:block/, 'the panel is lg+ only and mounted only while open')
 })
 
 runTest('catalog option comboboxes share the body portal and searchable focus contract', () => {

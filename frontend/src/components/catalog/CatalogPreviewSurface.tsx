@@ -1,4 +1,4 @@
-import { Suspense, cloneElement, isValidElement } from 'react'
+import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -10,10 +10,13 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
+import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
 import PortalSocialRow from './PortalSocialRow.tsx'
+import PortalAnnouncementStrip from './PortalAnnouncementStrip.tsx'
+import type { PortalAnnouncement } from './portalAnnouncement.ts'
 import type { PortalSocialGroup } from './portalSocialLinks.ts'
 import '../../styles/public-portal.css'
 
@@ -111,6 +114,14 @@ type CatalogPreviewSurfaceProps = {
   // the admin preview show the SAME footer from one place; the caller
   // supplies it so this surface never has to know the business-detail shape.
   footer?: ReactNode
+  // How far above the safe area the public page must end so the floating contact buttons never cover the footer
+  // (portalFloatClearanceRem). Omitted: the fixed reserve below.
+  floatingStackClearanceRem?: number
+  // The announcement bar (owner, 2 Nov 2026), already resolved for this page and language: none draws nothing. The live page passes a way
+  // to close it; the Website Editor preview does not.
+  announcement?: PortalAnnouncement | null
+  onDismissAnnouncement?: () => void
+  onAnnouncementHeight?: (height: number) => void
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -172,6 +183,10 @@ export default function CatalogPreviewSurface({
   catalogSection,
   secondaryTabSection,
   footer,
+  floatingStackClearanceRem,
+  announcement,
+  onDismissAnnouncement,
+  onAnnouncementHeight,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -195,6 +210,9 @@ export default function CatalogPreviewSurface({
   pageLanguage,
   changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
+  // The tab bar's search slot (public storefront only): the products section draws its search and Filters into it.
+  const [searchSlotElement, setSearchSlotElement] = useState<HTMLElement | null>(null)
+  const searchSlot = useMemo(() => ({ expected: publicView, element: searchSlotElement }), [publicView, searchSlotElement])
 
   // P-public-9: the footer's quick links are the nav's own tabs. This
   // surface owns the tabs, so it hands them to whichever footer the caller
@@ -327,8 +345,14 @@ export default function CatalogPreviewSurface({
           monitors. Trimmed back so the row (and everything else in this
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
-      {/* The bottom padding is the tallest floating button stack (contact, 7.5rem), so at the page end no button covers the footer. */}
-      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''}`}>
+      {announcement ? <PortalAnnouncementStrip announcement={announcement} copy={copy} onDismiss={onDismissAnnouncement} onHeight={publicView ? onAnnouncementHeight : undefined} /> : null}
+      {/* The bottom padding clears the tallest floating stack, so at the page end no button covers the footer: 7.5rem by default
+          (My List and the scroll buttons), taller when the contact buttons are shown (floatingStackClearanceRem, portalFloatClearanceRem). */}
+      <div
+        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
+        data-portal-announcement-shown={announcement ? 'true' : undefined}
+        style={publicView && floatingStackClearanceRem ? { paddingBottom: `calc(${floatingStackClearanceRem}rem + env(safe-area-inset-bottom))` } : undefined}
+      >
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
             {/* WCAG 2.4.1: the storefront opens with a row of social links,
@@ -526,7 +550,10 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
+                {/* 2 Nov (owner): the search joins the tabs. The tabs scroll sideways on their own line on a phone,
+                    with the search directly under them (no gap); from lg up the search shares the tab row. */}
+                <div className="flex flex-wrap items-center gap-x-4 lg:flex-nowrap">
+                <div className="portal-nav-scroll w-full min-w-0 overflow-x-auto overflow-y-hidden lg:w-auto lg:flex-1">
                   <div className="portal-nav-track flex w-max min-w-full flex-nowrap items-center gap-6 px-1">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
@@ -550,6 +577,14 @@ export default function CatalogPreviewSurface({
                     })}
                   </div>
                 </div>
+                {publicView ? (
+                  <div
+                    ref={setSearchSlotElement}
+                    data-portal-nav-search-slot="true"
+                    className="relative w-full min-w-0 shrink-0 pb-2 empty:hidden lg:w-[min(34rem,52%)] lg:pb-0"
+                  />
+                ) : null}
+                </div>
               </div>
             </nav>
 
@@ -562,7 +597,7 @@ export default function CatalogPreviewSurface({
                 fields are still named to the owner inside the editor
                 (CatalogEditorSurface.tsx's publication summary). */}
             <main id="portal-main-content" tabIndex={-1}>
-              {catalogSection}
+              <PortalNavSearchSlotContext.Provider value={searchSlot}>{catalogSection}</PortalNavSearchSlotContext.Provider>
               {secondaryTabSection}
             </main>
             {footerWithQuickLinks}

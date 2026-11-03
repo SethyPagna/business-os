@@ -29,13 +29,16 @@ import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './publicFirstPaint.ts'
 import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
+import { dismissPortalAnnouncement, readDismissedPortalAnnouncement, resolvePortalAnnouncement } from './portalAnnouncement.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl } from './portalSocialLinks.ts'
-import { PORTAL_SOCIAL_ICONS, PortalSocialText } from './PortalSocialRow.tsx'
+import { buildPortalContactFloat, buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl, portalFloatClearanceRem } from './portalSocialLinks.ts'
+import { PORTAL_SOCIAL_ICONS, PortalContactFloat, PortalSocialText } from './PortalSocialRow.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
-import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
+import { getPortalProductGridClass, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
@@ -121,6 +124,14 @@ type PortalConfig = LooseRecord & {
   faqItems?: Array<{ id: string | number; question: string; answer: string }>
   faqTitle?: string
   googleMapsEmbed?: string
+  gridColumnsAuto?: boolean
+  announcementEnabled?: boolean
+  announcementTextEn?: string
+  announcementTextKm?: string
+  announcementLink?: string
+  announcementStart?: string
+  announcementEnd?: string
+  announcementVersion?: string
   gridColumnsDesktop?: unknown
   gridColumnsMobile?: unknown
   heroGradientEnd?: string
@@ -201,6 +212,14 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   contactLinks: { messenger: '', telegram: '', whatsapp: '', phone: '', instagram: '' },
   exchangeRate: 4100,
   faqItems: [],
+  gridColumnsAuto: true,
+  announcementEnabled: false,
+  announcementTextEn: '',
+  announcementTextKm: '',
+  announcementLink: '',
+  announcementStart: '',
+  announcementEnd: '',
+  announcementVersion: '',
   gridColumnsDesktop: 4,
   gridColumnsMobile: 2,
   heroGradientEnd: '#e7dccb',
@@ -225,7 +244,7 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   showAbout: true,
   showAddress: true,
   showCatalog: true,
-  showContactInstagram: false,
+  showContactInstagram: true,
   showContactMessenger: true,
   showContactTelegram: true,
   showContactPhone: false,
@@ -488,14 +507,8 @@ export default function PublicCatalogPage() {
   // once. Keeping the drawer's shortcut on its own state removes that
   // cross-talk entirely.
   const [contactOpen, setContactOpen] = useState(false)
-  // Owner, 2026-09-25 (P-public-5): "the Contact us floating button is
-  // minimized by default as a small icon and expands on click." Every page
-  // view starts minimized. The old per-viewer memory
-  // (business-os-portal-contact-minimized-v1) only ever remembered
-  // "minimized", which is now the default, and remembering "expanded" would
-  // bring the full button back on every later visit -- the opposite of the
-  // ask. So there is no storage read or write at all.
-  const [contactMinimized, setContactMinimized] = useState(true)
+  // 2 Nov (owner): the Contact us floating buttons are brand-colour chat links shown from the first paint (PortalContactFloat).
+  // They replace the 25 Sep minimized-by-default icon: a stub that has to be expanded first is not one tap to the chat.
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
@@ -803,6 +816,21 @@ export default function PublicCatalogPage() {
     () => localizeDefaultConfigCopy({ ...DEFAULT_PUBLIC_CONFIG, ...config }, pageLanguage),
     [config, pageLanguage],
   )
+  // The announcement bar (owner, 2 Nov): the Worker publishes the message with the config; whether it is on today and whether this
+  // browser already closed this version is decided here, so the cached payload never depends on the clock.
+  const [dismissedAnnouncement, setDismissedAnnouncement] = useState(readDismissedPortalAnnouncement)
+  const [announcementDay, setAnnouncementDay] = useState(todayStr)
+  const [announcementHeight, setAnnouncementHeight] = useState(0)
+  useEffect(() => startVisibleInterval(() => setAnnouncementDay(todayStr()), 5 * 60 * 1000), [])
+  const announcement = useMemo(() => {
+    const found = resolvePortalAnnouncement(displayConfig, pageLanguage, announcementDay)
+    return found && found.version !== dismissedAnnouncement ? found : null
+  }, [displayConfig, pageLanguage, announcementDay, dismissedAnnouncement])
+  const dismissAnnouncement = useCallback(() => {
+    if (!announcement) return
+    dismissPortalAnnouncement(announcement.version)
+    setDismissedAnnouncement(announcement.version)
+  }, [announcement])
   // A price sort from a stale link or bookmark on a store that now hides its
   // prices: drop back to the default rather than order by a hidden number.
   useEffect(() => {
@@ -816,11 +844,8 @@ export default function PublicCatalogPage() {
   const portalTabs = getPortalTabs(displayConfig, copy)
   const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
   const compactTwoColumnMobile = mobileGridColumns >= 2
-  // NOTE: getPortalGridClass only returns lg:/xl: classes (desktop). Without the
-  // mobile class combined in, the grid falls back to a bare `grid` with no
-  // column count below the `lg` breakpoint, which collapses to a single
-  // column on phones and tablets. Combine both, same as the admin preview.
-  const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(displayConfig.gridColumnsDesktop)}`
+  // One class string for every width (automatic by default), the same builder as the Website Editor preview.
+  const productGridClass = getPortalProductGridClass(displayConfig)
   const businessLogoUrl = String(displayConfig.businessLogo || '').trim()
   const businessCoverUrl = String(displayConfig.businessCover || '').trim()
   const selectedStockBranch = branchFilter[0] || 'all'
@@ -1022,11 +1047,8 @@ export default function PublicCatalogPage() {
       })
   }
 
-  // The same two steps the floating Contact button takes, so the FAQ button opens what that button opens.
-  const openContactSheet = () => {
-    setContactMinimized(false)
-    setContactOpen(true)
-  }
+  // The FAQ's Contact us button opens the list of every channel (names included) beside the floating buttons.
+  const openContactSheet = () => setContactOpen(true)
 
   const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
   const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
@@ -1534,7 +1556,10 @@ export default function PublicCatalogPage() {
   // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason);
   // pinned to the top, clear of the bottom-right bucket and contact buttons.
   const installBand = offersShopInstall ? (
-    <div className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end">
+    <div
+      className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end"
+      style={announcementHeight ? { top: `calc(0.75rem + ${announcementHeight}px + env(safe-area-inset-top))` } : undefined}
+    >
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
   ) : null
@@ -1561,72 +1586,12 @@ export default function PublicCatalogPage() {
     </button>
   )
 
-  // Minimized: one round icon that expands and opens the contact list on tap.
-  // Full: the round button and its own minimize control.
-  //
-  // 2026-09-18 (owner): "the x button just keep the icon instead of filling
-  // it and bocking the contact us button". The minimize X used to be an
-  // `absolute` badge, offset negative-right/negative-top, laid ON TOP of the round button's own
-  // corner -- a real overlap, since a `rounded-full` button's hit box is still
-  // its full square, so that corner belonged to BOTH controls. It was also
-  // invisible until hover on any pointer that supports hover at all (hidden
-  // by default, only faded in once the pointer was already somewhere over
-  // the group -- which includes the main button,
-  // so the fade-in and the accidental hit could happen in the same gesture).
-  // Now the two are siblings in a plain flex row, side by side with a gap: no
-  // shared pixels, no hover-gated visibility, and the minimize control is
-  // always the same filled pill the rest of the storefront's icon buttons
-  // are (bg-slate-700, not just an outline that only fills on hover).
-  const contactFab = contactChannels.length > 0 ? (
-    contactMinimized ? (
-      // A small round icon (40px -- still a full touch target), in the same
-      // slot as the full button. One tap expands it AND opens the contact
-      // list, so reaching a channel never takes an extra tap.
-      <button
-        type="button"
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(0.75rem+env(safe-area-inset-right))] z-50 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-700 shadow-lg ring-1 ring-slate-200 transition hover:bg-white dark:bg-neutral-900/95 dark:text-neutral-100 dark:ring-neutral-700"
-        onClick={() => {
-          setContactMinimized(false)
-          setContactOpen(true)
-        }}
-        aria-label={copy('contactUs', 'Contact us')}
-        title={copy('contactUs', 'Contact us')}
-        aria-expanded={false}
-      >
-        <Headset className="h-4 w-4" />
-      </button>
-    ) : (
-      <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-1.5">
-        <button
-          type="button"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
-          onClick={() => {
-            setContactOpen(false)
-            setContactMinimized(true)
-          }}
-          aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
-          title={copy('contactUsMinimize', 'Minimize the contact us button')}
-        >
-          <X className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:bg-slate-50 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700 dark:hover:bg-neutral-800"
-          onClick={() => setContactOpen((current) => !current)}
-          aria-label={copy('contactUs', 'Contact us')}
-          title={copy('contactUs', 'Contact us')}
-          aria-expanded={contactOpen}
-        >
-          <Headset className="h-5 w-5" />
-        </button>
-      </div>
-    )
-  ) : null
+  const contactFab = <PortalContactFloat channels={contactChannels} copy={copy} />
 
   const contactPopover = contactOpen && contactChannels.length > 0 ? (
     <div className="fixed inset-0 z-[65]" onClick={() => setContactOpen(false)}>
       <div
-        className="absolute bottom-[calc(8rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white p-3 shadow-2xl dark:border-neutral-800 dark:bg-neutral-900"
+        className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(4.5rem+env(safe-area-inset-right))] w-64 max-w-[calc(100vw-6rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white p-3 shadow-2xl dark:border-neutral-800 dark:bg-neutral-900"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">
@@ -1739,6 +1704,10 @@ export default function PublicCatalogPage() {
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
       productDetailCautionDefault={displayConfig.productCautionDefault || ''}
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
+      floatingStackClearanceRem={portalFloatClearanceRem(buildPortalContactFloat(contactChannels).length)}
+      announcement={announcement}
+      onDismissAnnouncement={dismissAnnouncement}
+      onAnnouncementHeight={setAnnouncementHeight}
       publicScrollButtonsVisible={scrollButtonsVisible && !bucketOpen && !contactOpen}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}

@@ -177,7 +177,7 @@ runTest('the one w-max track on the storefront stays inside its own scroller', (
   const trackAt = previewSurface.indexOf('portal-nav-track')
   assert.ok(trackAt > 0, 'the section-nav track must still exist')
   const before = previewSurface.slice(Math.max(0, trackAt - 300), trackAt)
-  assert.match(before, /portal-nav-scroll overflow-x-auto/, 'the nav track is `w-max`, so its parent must own the horizontal scroll')
+  assert.match(before, /portal-nav-scroll [^"]*overflow-x-auto/, 'the nav track is `w-max`, so its parent must own the horizontal scroll')
 })
 
 runTest('pull-to-refresh suppresses native scrolling only for a real downward pull', () => {

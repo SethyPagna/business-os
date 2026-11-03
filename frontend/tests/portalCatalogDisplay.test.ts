@@ -154,23 +154,23 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /className="relative h-(?:20|28) sm:h-(?:28|44)"/, 'public about hero banner should stay compact and fixed-height, not a tall forced viewport')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
-  assert.match(catalogSecondaryTabsSource, /-mt-(?:7|9) flex flex-wrap items-end gap-(?:3|4) sm:-mt-(?:9|12)/, 'public about name/tagline should sit on a plain surface below the banner, not overlaid on it')
+  assert.match(catalogSecondaryTabsSource, /\$\{hasCover \? 'pt-4 sm:pt-5' : '-mt-7 sm:-mt-9'\}/, 'with a cover the name sits below the photo (never over it); the gradient banner keeps the logo overlap')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
   assert.match(catalogSecondaryTabsSource, /<PortalSocialText text=\{item\.label\} latin=\{item\.latin \?\? true\} \/>/, 'owner rule: the About chips show the account handle at every width (the link keeps an accessible name)')
-  assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
+  assert.match(catalogSecondaryTabsSource, /const hasContactInfo = hasFacts \|\| hasSocial/, 'contact and social actions should share one compact mobile tray')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
 })
 
-runTest('public portal About tab keeps the story on the right, the map full-width below, and both logos clickable', () => {
+runTest('public portal About tab: story full width, contacts beside the map, and both logos clickable', () => {
   // These three items were previously listed as "still open" in progress.md,
   // but they were already fixed in this exact codebase in an earlier
   // session -- that entry was stale (copy-pasted forward without
   // re-checking). Locking each one in with a source assertion here so a
   // future session can't make the same stale-carry-forward mistake again.
   assert.match(portalSocialRowSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
-  assert.match(catalogSecondaryTabsSource, /the business story\/description on the right per the requested/, 'About tab facts\\/contact card should stay on the left and the story on the right')
-  assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map should render as its own full-width section')
+  assert.match(catalogSecondaryTabsSource, /data-portal-about-details="true"[^>]*lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\]/, 'About tab contacts and map share one row on a large screen (2 Nov owner ask)')
+  assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map still renders through the consent gate')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
   // 6.2 (Part 399, user): the LOGO left the top bar entirely -- social
   // links took its side, language + light/dark the other. The clickable
@@ -181,7 +181,8 @@ runTest('public portal About tab keeps the story on the right, the map full-widt
 })
 
 runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {
-  assert.match(catalogSecondaryTabsSource, /src=\{versionedBusinessCover\}/, 'public cover paths with spaces or parentheses must remain valid image URLs')
+  assert.match(catalogSecondaryTabsSource, /<AboutCover src=\{versionedBusinessCover \|\| ''\}/, 'the cover path reaches the image as a plain prop')
+  assert.match(catalogSecondaryTabsSource, /<img\s+ref=\{[^\n]*\}\s+src=\{src\}/, 'public cover paths with spaces or parentheses must remain valid image URLs')
   assert.doesNotMatch(catalogSecondaryTabsSource, /`url\(\$\{versionedBusinessCover\}\)`/, 'public cover paths must not be interpolated into an unquoted CSS url')
   assert.match(catalogEditorSource, /src=\{editorDraft\.customer_portal_cover_image\}/, 'editor cover previews should use the same robust image-source rendering')
   assert.doesNotMatch(catalogEditorSource, /url\(\$\{editorDraft\.customer_portal_cover_image\}\)/, 'editor cover paths must not be interpolated into an unquoted CSS url')
@@ -351,7 +352,7 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-amber-700/,
+  assert.match(catalogProductsSectionSource, /focus-within:border-amber-700[\s\S]*sticky top-16|sticky top-16[\s\S]*focus-within:border-amber-700/,
     'search should stay sticky and use the same brass discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
     'the brand index still needs its labelled, translated name')
