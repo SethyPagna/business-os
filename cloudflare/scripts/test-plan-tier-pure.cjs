@@ -140,6 +140,9 @@ const PAID = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
+  buildSharePollMs: 50,
+  buildShareWaitMs: 1000,
+  buildShareStaleMs: 3000,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -165,6 +168,9 @@ const FREE = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
+  buildSharePollMs: 100,
+  buildShareWaitMs: 2000,
+  buildShareStaleMs: 5000,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -191,7 +197,9 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
 // reads fewer D1 rows, so on these Free is deliberately the LARGER number.
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
+// The buildShare durations (lib/buildShare.ts) are in it too: Free waits longer for the first builder's result because a duplicate build costs
+// reads, and polls more coarsely because a Free invocation has 10 ms of CPU. Every one differs between the tiers, so none needs an exemption.
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

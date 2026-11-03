@@ -215,6 +215,20 @@ export type PlanLimits = {
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
 
+  // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
+  // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
+  // "building since <time>" marker (a plain value); the others poll for its FINISHED result with their own timer and never await
+  // anything the first request created: workerd ties a promise to its request, so awaiting another request's can hang for good (the
+  // 6.0.1048 review, B1). The wait and the staleness window save D1 reads (a longer wait means fewer duplicate builds), so Free's number is
+  // the LARGER one; the poll step is larger on Free too, because a Free invocation has 10 ms of CPU and fewer wake-ups spend less of it.
+  //   buildSharePollMs   the step between looks at the result memo. Paid 50, Free 100.
+  //   buildShareWaitMs   the longest one request waits; also how long a finished result stays in the buildShare memo (the longest any
+  //                      waiter waits). Paid 1,000, Free 2,000.
+  //   buildShareStaleMs  the age at which a marker is taken for a dead builder (cancelled, killed) and ignored. Paid 3,000, Free 5,000.
+  buildSharePollMs: number
+  buildShareWaitMs: number
+  buildShareStaleMs: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -285,6 +299,9 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  buildSharePollMs: 50,
+  buildShareWaitMs: 1000,
+  buildShareStaleMs: 3000,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -311,6 +328,9 @@ const FREE_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  buildSharePollMs: 100,
+  buildShareWaitMs: 2000,
+  buildShareStaleMs: 5000,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

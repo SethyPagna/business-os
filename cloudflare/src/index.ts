@@ -70,6 +70,8 @@ import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
+// Installs the hook the storefront, Dashboard, core-data and stock-session code reach through (lib/buildShare.ts); nothing is imported from it.
+import './lib/buildShare'
 import { installReviewAlerts } from './lib/reviewAlert'
 import { PendingActionIdempotencyError } from './lib/pendingActions'
 

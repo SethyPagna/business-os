@@ -1,0 +1,81 @@
+// Costly work that several requests of one isolate want at the same moment (a storefront build, the Dashboard overview, the core-data
+// check, the stock-session column probe) is done once, WITHOUT any request awaiting a promise another request created.
+//
+// WHY NOT A SHARED PROMISE. workerd ties a promise to the request that created it. A request that started the work and answered, or was
+// cancelled, before the work settled leaves a pending promise that never settles; every later request that awaits it waits for good, and
+// a map that held it until it settled held it forever (the 6.0.1048 review, B1; HANG-2 found the same in six more places).
+//
+// WHAT IS SHARED INSTEAD. Two plain values:
+//   * a marker "building since <time>" per key, set by the request that starts the work and removed when its work ends (success or
+//     failure). A request that dies leaves its marker behind, so a marker older than buildShareStaleMs is ignored;
+//   * the FINISHED result, in the caller's own memo (peek) or in the short memo kept here (remember).
+// A request that finds a fresh marker waits in its own context: a timer of its own every buildSharePollMs, looking at the memo, for at
+// most buildShareWaitMs. If the result appears it uses it. If the marker goes away without a result (the builder failed, or its result
+// is not storable, e.g. while a restore holds maintenance), or goes stale, or the wait is used up, it does the work itself. It never
+// awaits anything the other request created, so a dead builder costs a waiter at most the wait, never a hang.
+//
+// The three durations are plan limits (lib/planTier.ts). The module is reached through a global Symbol.for hook, like the request-metrics
+// and device hooks: coreDataInvariants.ts and lowStockSettings.ts keep their import lists as they are, and the hand-written module maps of
+// the portal and Dashboard tests need no new entry. index.ts imports this file for the side effect of installing the hook. With no hook (a
+// test that loads one module alone) nothing is shared and every caller does its own work. The key below must stay identical in every file
+// that reads the hook (scripts/test-build-share-pure.cjs enforces it).
+import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
+
+export const BUILD_SHARE_HOOK_KEY = 'business-os.build-share.v1'
+
+type Marker = { at: number }
+const building = new Map<string, Marker>()
+const remembered = new Map<string, { value: unknown; until: number }>()
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+function recall<T>(key: string): T | undefined {
+  const entry = remembered.get(key)
+  if (!entry) return undefined
+  if (Date.now() < entry.until) return entry.value as T
+  remembered.delete(key)
+  return undefined
+}
+
+/** Keeps a finished result for the longest any waiter waits; call it where the result is stored (the storefront's edge write). */
+function remember(env: Env, key: string, value: unknown): void {
+  const now = Date.now()
+  for (const [other, entry] of remembered) if (now >= entry.until) remembered.delete(other)
+  remembered.set(key, { value, until: now + getPlanLimits(env).buildShareWaitMs })
+}
+
+/**
+ * Runs `build` for `key`, or waits for the request that already is. `peek` reads the caller's own memo of the finished result and
+ * returns undefined while there is none; without it the memo kept here (see remember) is used.
+ */
+async function run<T>(env: Env, key: string, build: () => Promise<T>, peek: () => T | undefined = () => recall<T>(key)): Promise<T> {
+  const found = peek()
+  if (found !== undefined) return found
+  const limits = getPlanLimits(env)
+  const marker = building.get(key)
+  if (marker && Date.now() - marker.at < limits.buildShareStaleMs) {
+    const deadline = Math.min(Date.now() + limits.buildShareWaitMs, marker.at + limits.buildShareStaleMs)
+    while (Date.now() < deadline) {
+      await sleep(limits.buildSharePollMs)
+      const ready = peek()
+      if (ready !== undefined) return ready
+      const current = building.get(key)
+      if (!current || Date.now() - current.at >= limits.buildShareStaleMs) break
+    }
+  }
+  const mine: Marker = { at: Date.now() }
+  for (const [other, entry] of building) if (mine.at - entry.at >= limits.buildShareStaleMs) building.delete(other)
+  building.set(key, mine)
+  try {
+    return await build()
+  } finally {
+    if (building.get(key) === mine) building.delete(key)
+  }
+}
+
+export type BuildShareHook = {
+  run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T>
+  remember(env: Env, key: string, value: unknown): void
+}
+
+;(globalThis as unknown as Record<symbol, BuildShareHook>)[Symbol.for(BUILD_SHARE_HOOK_KEY)] = { run, remember }
