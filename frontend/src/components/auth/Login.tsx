@@ -933,8 +933,8 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100*var(--app-vh)_-_3rem)] w-full min-w-0 max-w-6xl items-center justify-center">
+    <div className="auth-shell relative min-h-screen overflow-hidden px-4 pt-[var(--auth-top)] pb-[var(--auth-bottom)] [--auth-top:4.75rem] [--auth-bottom:calc(1.5rem+var(--install-band-clearance,0px))] sm:px-6 md:[--auth-top:1.5rem] [@media(min-width:768px)_and_(min-height:761px)]:[--auth-bottom:1.5rem] lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100*var(--app-vh)_-_var(--auth-top)_-_var(--auth-bottom))] w-full min-w-0 max-w-6xl items-center justify-center">
         <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6 lg:right-8 lg:top-8">
           <div className="rounded-2xl border border-white/70 bg-white/85 p-1.5 shadow-sm backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/75">
             <QuickPreferenceToggles />

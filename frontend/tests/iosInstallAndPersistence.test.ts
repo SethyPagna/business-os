@@ -139,14 +139,16 @@ check('G5 the install hint is excluded from the public storefront', () => {
   assert.ok(app.indexOf('<IosInstallHint />') > at, 'the hint must be mounted below the storefront branch')
 })
 
-check('G5 the install hint is excluded from standalone mode and from desktop', () => {
+check('G5 the install hint is excluded from standalone mode, and from desktop for shoppers', () => {
   // CATCHES (a) offering "Add to Home Screen" to somebody already running the
-  // home-screen app; (b) showing the band on desktop Chrome, which fires
-  // beforeinstallprompt too: desktops get the account-menu entry only (owner
-  // default, 28 Sep 2026). installOffer.test.ts runs both against device doubles.
-  assert.match(standaloneNavigation, /if \(isStandaloneDisplayMode\(\) \|\| readDeviceTimestamp\(APP_INSTALLED_KEY\) > 0\) return null/, 'no offer in standalone or once installed')
-  assert.match(standaloneNavigation, /if \(!isHandheldInstallTarget\(\) \|\| isInstallBandDismissed\(\)\) return null/, 'the band never runs on desktop')
-  assert.match(installBand, /useSyncExternalStore\(subscribeInstallOffer, installBandRoute,/, 'the band reads the one install-offer store')
+  // home-screen app; (b) showing the band to a shopper on desktop Chrome, which
+  // fires beforeinstallprompt too: the staff app offers it on desktops (owner
+  // brief, 2 Nov 2026), the shop keeps the 28 Sep default of phones only.
+  // installOffer.test.ts runs both against device doubles.
+  assert.match(standaloneNavigation, /function isInstalledOnThisDevice\(\): boolean \{\s*return isStandaloneDisplayMode\(\) \|\| readDeviceTimestamp\(APP_INSTALLED_KEY\) > 0/, 'one definition of "already installed"')
+  assert.match(standaloneNavigation, /if \(isInstallBandDismissed\(\) \|\| isInstalledOnThisDevice\(\)\) return null/, 'the band never shows in the installed app')
+  assert.match(standaloneNavigation, /if \(route\) return staffApp \|\| handheld \? route : null/, 'a desktop shop never gets the band')
+  assert.match(installBand, /useSyncExternalStore\(subscribeInstallOffer, \(\) => installBandRoute\(staffApp\),/, 'the band reads the one install-offer store, for its own host')
 })
 
 check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
@@ -171,8 +173,8 @@ check('G5 the install hint renders its real content from first paint', () => {
 })
 
 check('G5 a closed install bar stays closed on the device, and survives sign-out', () => {
-  // The owner replaced the 14-day snooze with "never again" on 28 Sep 2026
-  // (PWA-FINAL D7); the account-menu Install row keeps a closed bar recoverable.
+  // A closed bar returns after 14 days (owner brief, 2 Nov 2026); the account-menu
+  // Install row keeps a closed bar recoverable meanwhile.
   // CATCHES (a) an unversioned key; (b) forgetting the old v1 dismissal, which
   // would re-open the bar on every phone that closed it; (c) a logout wiping a
   // device key: clearStorage() deletes every businessos_* key it does not
@@ -183,7 +185,8 @@ check('G5 a closed install bar stays closed on the device, and survives sign-out
   for (const key of ['install-offer-dismissed-at-v2', 'ios-install-hint-dismissed-at-v1', 'app-installed-at-v1']) {
     assert.ok(clientRuntime.includes('localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:' + key + '`)'), `${key} must survive logout`)
   }
-  assert.doesNotMatch(standaloneNavigation, /SNOOZE/, 'no snooze: a closed bar never comes back')
+  assert.doesNotMatch(standaloneNavigation, /SNOOZE/, 'no hidden snooze constant: the one re-offer window is INSTALL_BAND_REOFFER_MS')
+  assert.match(standaloneNavigation, /INSTALL_BAND_REOFFER_MS = 14 \* 24 \* 60 \* 60 \* 1000/, 'a closed bar returns after 14 days')
   assert.match(standaloneNavigation, /return Number\.isFinite\(stored\) && stored > 0 \? stored : 0/, 'a malformed or old value must fall back silently')
 })
 

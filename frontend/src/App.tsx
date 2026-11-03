@@ -24,6 +24,7 @@ import { refreshAppData } from './utils/appRefresh.ts'
 import { optionalAppOperation, restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
 import { reportClientCrash } from './utils/clientCrashReport.ts'
 import { installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
+import { useBottomActionBarVisible } from './utils/bottomActionBar.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
@@ -1262,6 +1263,7 @@ function useMobileHeaderAutoHide(page: string): boolean {
 }
 
 function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisible: boolean }) {
+  const coversPinnedAction = useBottomActionBarVisible()
   const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
@@ -1275,8 +1277,11 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
     }
   }
 
+  // The till's Complete Sale bar (and the payment rows above it) lies where these sit; its own panels scroll.
+  if (coversPinnedAction) return null
+  // Below md the install band spans the screen, so the buttons ride above it (--install-band-clearance is its top edge, 0 when none).
   return (
-    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
+    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[max(calc(5rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]' : 'bottom-[max(calc(0.75rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
       <button
         type="button"
         className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
@@ -2019,8 +2024,10 @@ export default function App() {
       <Notification notification={notification} onDismiss={dismissNotification} />
       {/* One bottom stack for the shell's persistent advisories, so two of
           them can never land on top of each other, and so the clearance over
-          the mobile bottom nav is decided once. Inert where empty. */}
-      <div className={bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)}>
+          the mobile bottom nav is decided once. Inert where empty. On desktop
+          it stops short of the scroll buttons that share its corner (1rem in,
+          2rem wide); the sign-in stack has none, so it keeps the full width. */}
+      <div className={`${bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)} md:pr-14`}>
         <IosInstallHint />
       </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
