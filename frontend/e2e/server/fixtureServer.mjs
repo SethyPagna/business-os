@@ -815,6 +815,13 @@ function handleApi(pathname, query, req, res, body) {
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
     return sendJson(res, 200, { notes: [] })
   }
+  // The Returns section hydrates from routes/returns.ts GET / -> a bare array of return rows (Returns.tsx loadReturns: `Array.isArray(result) ? result : []`);
+  // an unmocked 404 replaces the whole section, toolbar included, with its load-error screen. The empty list is the true empty state.
+  if (pathname === '/api/returns') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    return sendJson(res, 200, [])
+  }
   // ===== END E2E-P1 =====
 
   if (pathname === '/api/import-jobs') {

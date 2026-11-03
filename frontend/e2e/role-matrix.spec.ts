@@ -254,6 +254,27 @@ for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashb
 // =====================================================================================================================
 const PRODUCT_NAME = 'E2E Product 001 Aurelia'
 
+/**
+ * The product detail is a float, not a role="dialog" (ProductDetailModal.tsx draws a bare `modal-panel-safe` panel), so it is found as
+ * the panel that holds the detail's own links row. It cannot be found through its Edit button: Edit is the very control under test.
+ */
+const productDetailOf = (page: Page): Locator => page.locator('.modal-panel-safe').filter({ has: page.locator('[data-detail-links-row]') }).last()
+
+/**
+ * Products has no Select-all control until a row is selected: selecting starts with a hold on a row (Products.tsx:862-883, 500 ms,
+ * utils/longPress.ts, mouse and touch handlers both). Pointer events from page.mouse reach those handlers on desktop and phone alike.
+ */
+async function selectFirstProductByHold(page: Page, slot: Locator): Promise<void> {
+  const row = slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first()
+  await row.scrollIntoViewIfNeeded()
+  const box = await row.boundingBox()
+  if (!box) throw new Error('the product row has no box to hold')
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.waitForTimeout(800)
+  await page.mouse.up()
+}
+
 /** Products' Manage menu, as HeaderActions.tsx builds it: [label, the action that shows it]. */
 function manageEntries(access: RoleAccess): Array<[string, boolean]> {
   const lookups = grant(access, 'products', 'manage_lookups')
@@ -297,7 +318,7 @@ for (const role of ROLES) {
         if (grant(access, 'products', 'view')) {
           // A product's detail sheet hides Edit by omission when products:edit is off.
           await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
-          const productDetail = page.getByRole('dialog').last()
+          const productDetail = productDetailOf(page)
           await expect(productDetail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
           await expect.soft(productDetail.getByRole('button', { name: text('edit', 'Edit'), exact: true }), 'Edit on a product = products:edit').toHaveCount(grant(access, 'products', 'edit') ? 1 : 0, BRIEF)
         }
@@ -376,7 +397,7 @@ for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry)
     try {
       const slot = await open(page, '/products', 'products')
       await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
-      const detail = page.getByRole('dialog').last()
+      const detail = productDetailOf(page)
       await expect(detail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
       await expect(detail.getByRole('button', { name: text('add_variant', 'Add variant'), exact: true }), 'Add variant = products:add and products:variant').toHaveCount(wantVariant ? 1 : 0, BRIEF)
     } finally { await session.close() }
@@ -397,7 +418,7 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     try {
       const slot = await open(page, '/products', 'products')
       await expect(slot.getByText(PRODUCT_NAME).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
-      await slot.getByRole('checkbox', { name: text('select_all', 'Select all') }).first().check()
+      await selectFirstProductByHold(page, slot)
       const toolbar = slot.locator('.bulk-toolbar')
       await expect(toolbar, 'selecting rows opens the bulk toolbar').toBeVisible({ timeout: 10_000 })
       await expect(toolbar.getByRole('button', { name: text('delete_short', 'Delete'), exact: true }), 'bulk Delete = products:delete and products:bulk_delete').toHaveCount(wantBulkDelete ? 1 : 0, BRIEF)
