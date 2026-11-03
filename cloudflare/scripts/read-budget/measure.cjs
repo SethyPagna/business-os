@@ -56,11 +56,29 @@ function expectOf(status, code) {
   return { refused: code || 'http_' + status, until: ROUTE_NOTES.until[code] ?? null }
 }
 
+// Why a ceiling is what it is, for the shapes that need a word (written into the entry as "note").
+const ENTRY_NOTES = {
+  'fees-list-with-sale-delivery-rows-all-time-branch-source-all':
+    'No window, so the expense summary reads every expense once (8,695) plus the 100-row page (234); the sale half is 5,310 with idx_sales_courier_cost leading. 6.0.1053: +f.branch_id keeps the branch index out; it was 29,073 with it.',
+  'fees-list-with-sale-delivery-rows-month-branch-source-all':
+    'The window index (idx_fees_fee_date) leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 10,565 with the branch index reading the whole branch.',
+  'fees-report-with-sale-delivery-all-time-branch-include-sales':
+    'No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index (4,455 + 8,910 + 8,912 + 13,365 expense rows, branch 1 holding about half of this seed) plus the sale half 1,506. Four passes over the branch; one grouped pass is the follow-up.',
+  'fees-report-with-sale-delivery-month-branch-include-sales':
+    'The window index leads for all four statements and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch.',
+}
+
+// 6.0.1053: the sale half of the Expenses list (routes/feesCatalog.ts) must start from idx_sales_courier_cost, the partial index of the few sales that
+// carry a courier cost, whatever the filter. With a branch filter the planner once chose idx_sales_branch_created and read every sale of the branch.
+const SALE_COST_STATEMENTS = ['FROM sales WHERE', 'SELECT sales.id, sales.receipt_number']
 const pinsOf = (statements) => {
   const pins = []
   for (const s of statements || []) {
     const found = /INDEXED BY (\w+)/.exec(s.sql)
     if (found && !pins.some((p) => p.index === found[1])) pins.push({ match: `INDEXED BY ${found[1]}`, index: found[1] })
+  }
+  for (const start of SALE_COST_STATEMENTS) {
+    if ((statements || []).some((s) => s.sql.includes(start) && s.sql.includes('delivery_actual_cost_usd IS NOT NULL'))) pins.push({ match: start, index: 'idx_sales_courier_cost' })
   }
   return pins
 }
@@ -147,6 +165,7 @@ async function main() {
       if (!entry.target) throw new Error(`${shape.id}: ${cold} cold calls and no dated target for ${reg.route}`)
     }
     if (isGet && data.pins.length) entry.pins = data.pins
+    if (ENTRY_NOTES[shape.id]) entry.note = ENTRY_NOTES[shape.id]
     entries.push(entry)
     ;(prints[reg.route.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')] ||= {})[shape.id] = (isGet && done.get(`fpold:${shape.id}`)) || w.fingerprints
   }

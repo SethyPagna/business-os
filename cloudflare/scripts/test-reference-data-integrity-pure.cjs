@@ -62,13 +62,15 @@ check('payment method replacement previews then updates exact summaries/details 
 
 check('inventory reasons and expense labels use preview + exact normalized replacement', () => {
   const inventory = read('src/routes/inventory.ts')
-  const fees = read('src/routes/fees.ts')
+  // The label routes live in routes/feesCatalog.ts (6.0.1053); routes/fees.ts keeps the expenses themselves.
+  const fees = read('src/routes/feesCatalog.ts')
   assert.match(inventory, /reasons\/impact/)
   assert.match(inventory, /reasons\/replace/)
   assert.match(inventory, /lower\(trim\(COALESCE\(reason,''\)\)\) = @from/)
   assert.match(fees, /labels\/impact/)
   assert.match(fees, /labels\/replace/)
-  assert.match(fees, /lower\(trim\(COALESCE\(label,''\)\)\) = @from/)
+  assert.match(fees, /WHERE \$\{LABEL_KEY_SQL\} = @from/, 'the label impact count matches rows on the shared normalised key')
+  assert.match(fees, /const LABEL_KEY_SQL = feeNameKeySql\('label'\)/, 'and that key is the one the list groups by (repeated whitespace folded)')
 })
 
 check('return reason presets share one settings row and exact linked replacement is opt-in', () => {

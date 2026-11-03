@@ -80,11 +80,14 @@ check('returns report sums the refund and its riel twin, scoped + customer + not
 // --- source guard: the routes must keep summing KHR --------------------
 check('the route files still sum both currencies (no silent regression)', () => {
   const feesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'fees.ts'), 'utf8')
+  // The label routes live in routes/feesCatalog.ts (6.0.1053); routes/fees.ts keeps the expenses and their report.
+  const catalogSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'feesCatalog.ts'), 'utf8')
   const returnsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
   assert.match(feesSrc, /SUM\(amount_khr\)/, 'fees /report must sum amount_khr')
   assert.match(feesSrc, /by_category:/, 'fees /report must return its label/category breakdown')
-  assert.match(feesSrc, /app\.post\('\/labels\/classify'/, 'saved labels must expose one editable category path')
-  assert.match(feesSrc, /lower\(trim\(COALESCE\(label,''\)\)\) = @label/, 'category updates must use exact normalized labels')
+  assert.match(catalogSrc, /app\.post\('\/labels\/classify'/, 'saved labels must expose one editable category path')
+  assert.match(catalogSrc, /UPDATE fees SET fee_type = @feeType, updated_at = @now WHERE \$\{LABEL_KEY_SQL\} = @key/, 'category updates must use exact normalized labels')
+  assert.match(catalogSrc, /const LABEL_KEY_SQL = feeNameKeySql\('label'\)/, 'the normalised label key is the shared one (repeated whitespace folded)')
   assert.doesNotMatch(feesSrc, /const\s+(?:DELIVERY_)?CARRIERS?\s*=/i, 'the route must not introduce a parallel hardcoded carrier list')
   assert.match(returnsSrc, /SUM\(total_refund_khr\)/, 'returns /report must sum total_refund_khr')
 })

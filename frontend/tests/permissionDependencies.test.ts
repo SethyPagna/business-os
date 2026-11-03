@@ -193,7 +193,7 @@ await test('the saved-reasons manager offers rename only with rename_reasons, an
   const manager = readFileSync(new URL('../src/components/shared/StockReasonsManagerModal.tsx', import.meta.url), 'utf8')
   assert.match(manager, /onRename=\{can\('inventory', 'rename_reasons'\) \? \(entry, to\) => catalog\.rename\(entry, to\) : undefined\}/)
   const editor = readFileSync(new URL('../src/components/shared/ReasonListEditor.tsx', import.meta.url), 'utf8')
-  assert.match(editor, /\{onRename \? \(\s*<button/, 'no handler, no rename control')
+  assert.match(editor, /\{onRename(?: && \(canRename \? canRename\(item\) : true\))? \? \(\s*<button/, 'no handler, no rename control')
 })
 
 // The role editor, mounted for real with every row open: the second grant a row needs is named on the chip and in an

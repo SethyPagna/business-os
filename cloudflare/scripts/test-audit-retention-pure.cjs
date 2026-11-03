@@ -287,7 +287,7 @@ const driftReport = (overrides = {}) => {
     return out
   })(srcRoot)
   const { AUDIT_RETENTION_KEPT_REVERT_ACTIONS, AUDIT_RETENTION_KEPT_STOCK_ACTIONS, AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES } = moduleObj.exports
-  assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label'])
+  assert.deepEqual([...AUDIT_RETENTION_KEPT_EXPENSE_ENTITIES], ['fee', 'fee_label', 'fee_type'])
   const writtenActions = new Set()
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8')

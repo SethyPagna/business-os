@@ -174,6 +174,9 @@ export const BACKUP_TABLES = [
   'return_items',
   'return_item_batch_allocations',
   'return_replacement_items',
+  // The expense label and custom-type catalogs (0292): the choices and archive flags; expenses keep their own text.
+  'fee_types',
+  'fee_labels',
   'fees',
   // Manual-expense retry receipts identify fees and must survive with them;
   // otherwise a restored browser retry could commit the same expense twice.

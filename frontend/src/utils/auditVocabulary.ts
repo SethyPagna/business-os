@@ -91,6 +91,7 @@ export const AUDIT_ENTITY_LABELS: Record<string, [string, string]> = {
   settings: ['settings', 'Settings'],
   fee: ['expense', 'Expense'],
   fee_label: ['expense', 'Expense'],
+  fee_type: ['expense', 'Expense'],
   return: ['return', 'Return'],
   // The create row is written under its own entity because it is keyed by a
   // receipt id; to a reader it is the same kind of record.

@@ -30,6 +30,7 @@ import notesRoute from './routes/notes'
 import batchesRoute from './routes/batches'
 import shiftsRoute from './routes/shifts'
 import feesRoute from './routes/fees'
+import feesCatalogRoute from './routes/feesCatalog'
 import reportsRoute from './routes/reports'
 import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
@@ -615,6 +616,8 @@ app.route('/api/runtime', runtimeRoute)
 app.route('/api/notes', notesRoute)
 app.route('/api/batches', batchesRoute)
 app.route('/api/shifts', shiftsRoute)
+// Ahead of feesRoute: the label and type catalogs and the sale-linked list answer first; every other request falls through.
+app.route('/api/fees', feesCatalogRoute)
 app.route('/api/fees', feesRoute)
 app.route('/api/reports', reportsRoute)
 app.route('/api/telegram', telegramRoute)
