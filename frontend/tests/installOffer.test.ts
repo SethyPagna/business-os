@@ -643,12 +643,32 @@ await check('the sign-in screen keeps the form clear of the band on phones, and 
   const shell = /className="(auth-shell [^"]*)"/.exec(login)?.[1] ?? ''
   const centred = /className="(mx-auto flex min-h-[^"]*items-center justify-center[^"]*)"/.exec(login)?.[1] ?? ''
   const reserve = `var(${INSTALL_BAND_CLEARANCE_VAR},0px)`
-  assert.ok(shell.includes(`pb-[calc(1.5rem+${reserve})]`), 'the shell pads its bottom by the band height')
-  assert.ok(shell.includes('pt-[4.75rem]'), 'phones reserve the theme and language row, so the form can never rise under it')
-  assert.ok(shell.includes('md:py-6'), 'from md the band is a corner card, so both paddings go back')
-  assert.ok(centred.includes(`min-h-[calc(100*var(--app-vh)_-_6.25rem_-_${reserve})]`), 'the centred form fits between the toggles row and the band (4.75rem + 1.5rem), so the page is one screen tall when it fits')
-  assert.ok(centred.includes('md:min-h-[calc(100*var(--app-vh)_-_3rem)]'), 'desktops keep the full-height centring')
+  assert.ok(shell.includes('pt-[var(--auth-top)]') && shell.includes('pb-[var(--auth-bottom)]'), 'the shell pads by the two reserved rows')
+  assert.ok(shell.includes(`[--auth-bottom:calc(1.5rem+${reserve})]`), 'the bottom row is the band height by default')
+  assert.ok(shell.includes('[--auth-top:4.75rem]'), 'phones reserve the theme and language row, so the form can never rise under it')
+  assert.ok(shell.includes('md:[--auth-top:1.5rem]'), 'from md the toggles sit beside the card, not above it')
+  assert.ok(
+    shell.includes('[@media(min-width:768px)_and_(min-height:761px)]:[--auth-bottom:1.5rem]'),
+    'only a tall desktop gives the band row back; a short one (a phone turned sideways) keeps it, so the corner band never covers the lower form',
+  )
+  assert.ok(
+    centred.includes('min-h-[calc(100*var(--app-vh)_-_var(--auth-top)_-_var(--auth-bottom))]'),
+    'the centred form fits between the two reserved rows, so the page is one screen tall when it fits',
+  )
   assert.match(read('src/components/shared/InstallPromptBand.tsx'), /useInstallBandClearance\(bandRef, route !== null\)/, 'the band publishes its height only while it is shown')
+})
+
+await check('under 360 px the band is one short row; the signed-in stack leaves the scroll buttons their corner', () => {
+  const band = read('src/components/shared/InstallPromptBand.tsx')
+  assert.match(band, /const HIDDEN_WHEN_NARROW = 'max-\[359px\]:hidden'/)
+  assert.ok(band.includes("${route === 'open-elsewhere' ? '' : HIDDEN_WHEN_NARROW}`}>{detail}"), 'the sentence goes when narrow')
+  assert.ok(band.includes("${route === 'open-elsewhere' ? HIDDEN_WHEN_NARROW : ''}`}>{title}"), 'the open-in-another-browser hint is its own sentence, so the title goes instead')
+  for (const compact of ['max-[359px]:gap-2 max-[359px]:py-2', 'max-[359px]:h-8 max-[359px]:w-8', 'max-[359px]:px-3 max-[359px]:py-1.5']) {
+    assert.ok(band.includes(compact), `the narrow band shrinks: ${compact}`)
+  }
+  assert.ok(!band.includes('md:mr-14'), 'the offset lives on the signed-in stack, not on the band')
+  const app = read('src/App.tsx')
+  assert.match(app, /\$\{bottomStackClass\(inlineMobileNavigation \? [A-Z_]+ : [A-Z_]+\)\} md:pr-14`/, 'the signed-in stack stops short of the scroll buttons on desktop')
 })
 
 await check('the staff loading screens say Leang Cosmetics Admin', () => {

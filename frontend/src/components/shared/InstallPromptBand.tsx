@@ -29,8 +29,8 @@ const noRouteOutsideBrowser = () => null
 
 const STAFF_APP_ICON = '/icon-192.png'
 const SHOP_APP_ICON = '/leang-cosmetics-icon-192-v2.png'
-// The desktop stack shares its bottom-right corner with the scroll buttons (1rem in, 2rem wide); stay left of them.
-const BESIDE_SCROLL_BUTTONS = 'md:mr-14 md:w-auto'
+// Under 360 px (iPhone SE class) the band is one short row: icon, one word, X. The sentence goes, unless it is the whole message.
+const HIDDEN_WHEN_NARROW = 'max-[359px]:hidden'
 
 export default function InstallPromptBand({ translate }: { translate: InstallPromptTranslate }) {
   // The admin host installs the staff app; every other host is the shop, which names itself.
@@ -58,7 +58,7 @@ export default function InstallPromptBand({ translate }: { translate: InstallPro
   return (
     <div
       ref={bandRef}
-      className={`pointer-events-auto flex w-full items-center gap-3 rounded-2xl border border-blue-300 bg-blue-50 px-3 py-2.5 text-blue-900 shadow-lg dark:border-blue-700 dark:bg-blue-950/90 dark:text-blue-100 ${staffApp ? BESIDE_SCROLL_BUTTONS : ''}`}
+      className="pointer-events-auto flex w-full items-center gap-3 rounded-2xl border border-blue-300 bg-blue-50 px-3 py-2.5 text-blue-900 shadow-lg max-[359px]:gap-2 max-[359px]:py-2 dark:border-blue-700 dark:bg-blue-950/90 dark:text-blue-100"
       role="status"
     >
       <img
@@ -66,17 +66,17 @@ export default function InstallPromptBand({ translate }: { translate: InstallPro
         alt=""
         width={40}
         height={40}
-        className="h-10 w-10 shrink-0 rounded-xl"
+        className="h-10 w-10 shrink-0 rounded-xl max-[359px]:h-8 max-[359px]:w-8"
       />
       <div className="min-w-0 flex-1">
-        <p className="break-words text-sm font-semibold leading-5">{title}</p>
-        <p className="break-words text-xs leading-4 opacity-80">{detail}</p>
+        <p className={`break-words text-sm font-semibold leading-5 ${route === 'open-elsewhere' ? HIDDEN_WHEN_NARROW : ''}`}>{title}</p>
+        <p className={`break-words text-xs leading-4 opacity-80 ${route === 'open-elsewhere' ? '' : HIDDEN_WHEN_NARROW}`}>{detail}</p>
       </div>
       {route === 'open-elsewhere' ? null : (
         <button
           type="button"
           onClick={install}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-blue-700 px-3.5 py-2 text-sm font-semibold leading-5 text-white hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-blue-700 px-3.5 py-2 text-sm font-semibold leading-5 text-white max-[359px]:px-3 max-[359px]:py-1.5 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500"
         >
           <Download className="h-4 w-4" aria-hidden="true" />
           {translate('install_app_short', 'Install', 'ដំឡើង')}

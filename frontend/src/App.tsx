@@ -2019,8 +2019,10 @@ export default function App() {
       <Notification notification={notification} onDismiss={dismissNotification} />
       {/* One bottom stack for the shell's persistent advisories, so two of
           them can never land on top of each other, and so the clearance over
-          the mobile bottom nav is decided once. Inert where empty. */}
-      <div className={bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)}>
+          the mobile bottom nav is decided once. Inert where empty. On desktop
+          it stops short of the scroll buttons that share its corner (1rem in,
+          2rem wide); the sign-in stack has none, so it keeps the full width. */}
+      <div className={`${bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)} md:pr-14`}>
         <IosInstallHint />
       </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
