@@ -75,6 +75,8 @@ Module._load = function(request, parent, isMain) {
   // A0's per-request metrics middleware is mounted first on /api/*: same
   // reason as the origin guard, the real module (it calls next()).
   if (request === './lib/requestMetrics') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestMetrics.ts'), parent, isMain)
+  // The /api cache-header middleware (6.0.1040) sits right behind it and calls next(): same reason, the real module.
+  if (request === './lib/apiCacheHygiene') return originalLoad.call(this, path.join(root, 'src', 'lib', 'apiCacheHygiene.ts'), parent, isMain)
   // The review-alert deferral scope is /api middleware too (it calls next() inside AsyncLocalStorage.run): same reason.
   if (request === './lib/requestDefer') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestDefer.ts'), parent, isMain)
   if (request === './lib/coreInvariantsGate') return { ensureCoreDataInvariantsForRequest: async () => {} }
