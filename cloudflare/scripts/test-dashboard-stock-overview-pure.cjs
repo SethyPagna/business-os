@@ -408,6 +408,53 @@ async function main() {
     assert.equal(heavy(w.cdb), 0, 'the newer memo survived the older computation finishing after it')
   })
 
+  // With the buildShare hook the Worker installs (index.ts imports lib/buildShare.ts): the first request to start a key sets a "building
+  // since" marker, and a request that finds it fresh waits with a timer of its own, for a bounded time, for the FINISHED value.
+  const SHARE_KEY = Symbol.for('business-os.build-share.v1')
+  const withBuildShare = async (run) => {
+    load('lib/buildShare.ts', { './planTier': load('lib/planTier.ts') })
+    try { await run() } finally { delete globalThis[SHARE_KEY] }
+  }
+  await check('HANG-2b: a request behind a slow computation takes its finished value and computes nothing', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? gate.then(() => real(options)) : real(options) } })
+    await withBuildShare(async () => {
+      const a = mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const b = mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      release()
+      const [first, second] = await Promise.all([a, b])
+      assert.equal(computes, 1, 'two requests, one computation')
+      assert.deepEqual(second, first)
+      assert.equal(heavy(w.cdb), 3, 'one family pass and two expiry statements for both')
+    })
+  })
+  await check('HANG-2b: behind a computation that never finishes, a request answers after the wait plus its own computation, never hangs', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? new Promise(() => {}) : real(options) } })
+    await withBuildShare(async () => {
+      void mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const started = Date.now()
+      const answered = await Promise.race([
+        mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null }),
+        new Promise((resolve) => setTimeout(() => resolve('HELD'), 3500)),
+      ])
+      assert.notEqual(answered, 'HELD', 'request B must not wait on the computation of request A')
+      assert.ok(answered.inventory.total_products > 0)
+      assert.equal(computes, 2, 'B computed for itself')
+      const waited = Date.now() - started
+      assert.ok(waited >= 900, `B gave A the wait first (${waited} ms)`)
+    })
+  })
+
   await check('WIRING: compat.ts serves the stock block from the shared overview; undo/redo bumps stock', async () => {
     const compat = fs.readFileSync(path.join(SRC, 'routes/compat.ts'), 'utf8').replace(/\r\n/g, '\n')
     const summary = compat.slice(compat.indexOf('async function dashboardSummary'), compat.indexOf('async function dashboardAnalytics'))

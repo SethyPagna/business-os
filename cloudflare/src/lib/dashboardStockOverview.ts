@@ -27,10 +27,11 @@
 // Free (planTier.ts dashboardStockOverviewCacheSeconds).
 //
 // LAYERS: an isolate memo (shares a FINISHED answer with later requests in the
-// same isolate; a computation still running is shared only inside its own
-// request, never with another one) and the Workers Cache API (shares it across
-// isolates in a colo). Neither is a correctness dependency: no Cache API, or an
-// error from it, just computes.
+// same isolate; a computation still running is shared as a promise only inside
+// its own request, and with other requests through a "building since" marker
+// and a bounded wait for the finished value, lib/buildShare.ts) and the Workers
+// Cache API (shares it across isolates in a colo). Neither is a correctness
+// dependency: no Cache API, or an error from it, just computes.
 
 import type { Env } from '../index'
 import { getDb } from './db'
@@ -108,10 +109,16 @@ export function dashboardStockOverviewKey(parts: {
 // A promise belongs to the request that created it (workerd): awaiting another request's can hang for good once that request has
 // answered or was cancelled, and a memo that held the pending promise froze the Dashboard for every later request (the 6.0.1048
 // review, B1). So the isolate memo keeps the FINISHED value only, stamped with when its computation started, and a computation in
-// flight is shared inside one request only (the callers that pass the same context).
+// flight is shared inside one request only (the callers that pass the same context). Between requests a marker and a bounded wait
+// keep the saving (see loadDashboardStockOverview).
 type Memo = { key: string; startedAt: number; expiresAt: number; value: DashboardStockOverview }
 let memo: Memo | null = null
 const inRequest = new WeakMap<object, { key: string; promise: Promise<DashboardStockOverview> }>()
+
+// lib/buildShare.ts installs this hook (index.ts imports it); a test that loads this module alone has none. This file's imports are
+// stubbed by hand in many tests, so the hook is read, not imported.
+type BuildShareHook = { run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T> }
+const buildShareHook = (): BuildShareHook | undefined => (globalThis as unknown as Record<symbol, BuildShareHook | undefined>)[Symbol.for('business-os.build-share.v1')]
 
 export type DashboardStockOverviewContext = {
   // Origin the Cache API key is built on (the request's own origin: the
@@ -152,7 +159,7 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   const shared = inRequest.get(ctx)
   if (shared && shared.key === key) return shared.promise
 
-  const promise = (async () => {
+  const compute = async () => {
     const cache = ctx.cache === undefined ? defaultCache() : ctx.cache
     let cacheRequest: Request | null = null
     if (cache) {
@@ -178,11 +185,22 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
       }
     }
     return value
-  })().then((value) => {
+  }
+  const build = async () => {
+    const value = await compute()
     // Only a finished value is remembered (a failed computation never is), and an older start never replaces a newer one.
     if (!memo || memo.startedAt <= now) memo = { key, startedAt: now, expiresAt: now + ttlSeconds * 1000, value }
     return value
-  })
+  }
+  // Across requests: the first request to start this key sets a "building since" marker (lib/buildShare.ts) and a request that finds it
+  // fresh waits for the finished value in the memo with a timer of its own, for a bounded time, then computes for itself. No hook (a test
+  // that loads this module alone): every request computes for itself.
+  const settled = () => {
+    const entry = memo
+    return entry && entry.key === key && (ctx.now ?? Date.now)() < entry.expiresAt ? entry.value : undefined
+  }
+  const hook = buildShareHook()
+  const promise = hook ? hook.run(env, `dashboard-overview:${key}`, build, settled) : build()
   inRequest.set(ctx, { key, promise })
   const forget = () => { if (inRequest.get(ctx)?.promise === promise) inRequest.delete(ctx) }
   promise.then(forget, forget)
