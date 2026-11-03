@@ -103,6 +103,7 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
       <ApprovalChip status={approvalChipStatus(approval)} t={t} />
       <span className="tabular-nums">{label(t, 'inventory_check_differences', 'Differences')} {approval.lines}</span>
       {pending && approval.applied > 0 ? <span data-approval-progress className="tabular-nums text-gray-600 dark:text-gray-300">{approval.applied}/{toApply}</span> : null}
+      {approval.replaced ? <span data-approval-replaced-note className="text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_superseded', 'Replaced by a newer count')}</span> : null}
       {who || when ? <span data-approval-decided className="text-gray-600 dark:text-gray-300">{[who, when].filter(Boolean).join(' · ')}</span> : null}
       <span className="min-w-0 flex-1" />
       {claimedByAnother ? <span data-approval-in-progress className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_in_progress', 'Being applied by another approver')}</span> : null}

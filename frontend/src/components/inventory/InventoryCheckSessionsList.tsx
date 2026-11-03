@@ -2,6 +2,7 @@ import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
+import Replace from 'lucide-react/dist/esm/icons/replace.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import FilterMenu, { type FilterOption, type FilterSection } from '../shared/FilterMenu.tsx'
 import type { InventoryCheckSession } from '../../api/inventoryChecksTransport.ts'
@@ -29,11 +30,13 @@ const APPROVAL_CHIP = {
   pending: { key: 'inventory_check_approval_pending', fallback: 'Waiting for approval', tone: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', Icon: Hourglass },
   approved: { key: 'inventory_check_approval_approved', fallback: 'Approved', tone: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300', Icon: Check },
   rejected: { key: 'inventory_check_approval_rejected', fallback: 'Rejected', tone: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300', Icon: X },
+  replaced: { key: 'inventory_check_approval_replaced', fallback: 'Replaced', tone: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300', Icon: Replace },
   closed: { key: 'inventory_check_approval_closed', fallback: 'Closed', tone: 'bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-gray-200', Icon: Ban },
 } as const
 
 /** The tag an approval wears: a close reads as Closed whatever status it was recorded with. */
-export const approvalChipStatus = (approval: { status: 'pending' | 'approved' | 'rejected'; closed?: unknown }): keyof typeof APPROVAL_CHIP => approval.closed ? 'closed' : approval.status
+export const approvalChipStatus = (approval: { status: 'pending' | 'approved' | 'rejected'; closed?: unknown; replaced?: unknown }): keyof typeof APPROVAL_CHIP =>
+  approval.replaced ? 'replaced' : approval.closed ? 'closed' : approval.status
 
 /** Where a submitted count stands with its approver: waiting (the pending tag), approved or rejected. */
 export function ApprovalChip({ status, t }: { status: keyof typeof APPROVAL_CHIP; t: Translator }) {

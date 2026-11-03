@@ -13,7 +13,8 @@
 -- One waiting item per product, holding the newest count (queue-first): a later count of a product whose earlier count still waits at the branch closes that older
 -- line as superseded in the same atomic commit that records the new count. superseded_json maps product id -> the session of the newer count; a superseded line is
 -- never applied, never waits, and is not counted as unapplied by a close. A line whose stock figures are planned (plan_json) is being applied and is never superseded:
--- the newer count is refused instead, so the two never race. An approval left with no line to apply and nothing applied is rejected in that same commit.
+-- the newer count is refused instead, so the two never race. An approval left with no line to apply and nothing applied is rejected in that same commit, by the system, not by a person:
+-- decided_by and decided_by_name stay NULL (the only decision the table accepts without a decider, and only as a rejection that carries its note), the note says why, and the pages read it as "replaced".
 -- The index inventory_check_approvals_progress bounds the read that asks whether another approval applied a product since a count (decided or last claimed time).
 --
 -- PRE:  the three 0259 tables exist; inventory_check_approvals does not. A failed check reads a malformed JSON path and aborts the file.
@@ -61,7 +62,8 @@ CREATE TABLE inventory_check_approvals (
   superseded_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(superseded_json) AND json_type(superseded_json)='object'),
   FOREIGN KEY(session_id) REFERENCES inventory_check_sessions(id),
   CHECK((status='pending' AND decided_by IS NULL AND decided_at IS NULL AND decision_request_id IS NULL)
-    OR (status<>'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL)),
+    OR (status<>'pending' AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL
+      AND (decided_by IS NOT NULL OR (status='rejected' AND decided_by_name IS NULL AND decision_note IS NOT NULL)))),
   CHECK((applying_request_id IS NULL) = (applying_by IS NULL) AND (applying_request_id IS NULL) = (applying_at IS NULL)),
   CHECK(closed_json IS NULL OR status<>'pending')
 );

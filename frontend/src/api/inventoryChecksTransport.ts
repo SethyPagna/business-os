@@ -17,6 +17,8 @@ export type InventoryCheckApproval = {
   applied: number
   submitted_at: string
   can_approve: boolean
+  /** Decided by the system, not a person: every line was replaced by a newer count. It has no decided_by_name; its note says why. */
+  replaced?: true
   decided_at?: string
   decision_note?: string | null
   decided_by_name?: string | null

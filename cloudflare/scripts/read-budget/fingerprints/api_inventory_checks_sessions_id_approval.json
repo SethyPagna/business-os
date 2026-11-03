@@ -149,7 +149,7 @@
    "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=?1 AND u.is_ac"
   ],
   [
-   "c925cf836f84",
+   "b23eb3be8f29",
    "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=?1 AND status='pending' AN"
   ],
   [
@@ -169,7 +169,7 @@
    "B| UPDATE inventory_check_sessions SET updated_at=?1 WHERE id=?2"
   ],
   [
-   "508993da88b6",
+   "e56d45790db7",
    "B| UPDATE inventory_check_approvals SET applied_json=?1,plan_json=?2,applying_at=?3 WHERE session_id=?4 AND st"
   ],
   [

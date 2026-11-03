@@ -6,7 +6,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { APPROVAL_CLAIM_LOST } from './stockMutationReceipt'
 import {
   APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
-  object, projectApproval, requestId as requestIdOf, schemaReady, sessionRow, supersededLines,
+  object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
   type Actor, type ApprovalAppliedLine, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
 import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stockInCommit'
@@ -31,7 +31,12 @@ import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stock
  * The claim is what orders them. Every stock write of an approval carries the claim it is written under, and the stock commits only while that claim is still the writer's own: the
  * check rides inside the batch that writes the stock (stockMutationReceipt.ts). A takeover or a close, in turn, commits only if no write of the old claim landed that it did not read
  * (its batch re-proves the receipts). Whichever commits first wins and the other writes nothing, so the record can never disagree with the stock, whatever the timing. A claimer
- * cannot be closed under by another approver until he is gone, exactly as for a takeover.
+ * cannot be closed under by another approver until he is gone, exactly as for a takeover. Every transition of a claimed approval commits only over the plan it read (plan_json): a line that
+ * joins the plan after a read may already be written by the claimer, which the receipts of the lines read cannot show. That holds for a takeover, a close, the claimer's own landing and
+ * the release of a claim that wrote nothing (which also needs that none of the plan's receipts is written). An unclaimed approval can be rejected, and nothing can write for it.
+ *
+ * An approval every remaining line of which a newer count replaced ends as REPLACED, whichever way it ends (rejected in the submission that replaced the last line, or finished or closed once it
+ * was claimed): rejected by no person (decided_by is NULL), with a note that says why, and the same review alert as any rejection.
  *
  * A line a newer count of the same product has replaced (superseded_json; queue-first, one waiting item per product) is never applied, and is not a line to close either. The replacement
  * is refused while a line's figures are planned, and every decision below writes the approval row only if the set of superseded lines is the one it read, so a replacement and a plan
@@ -46,7 +51,7 @@ const fail = (status: InventoryCheckSessionError['status'], code: string, detail
 
 export type ApprovalStockWriter = (lines: StockInCommitLine[]) => Promise<StockInCommitLineResult[]>
 /** Told once when a decision commits (never for a replay): who decided is the caller's own account; the reason is the rejection note. */
-export type ApprovalDecided = (decided: { decision: ApprovalDecision; sessionId: string; note: string | null; applied?: number; notApplied?: number }) => Promise<void>
+export type ApprovalDecided = (decided: { decision: ApprovalDecision | 'replaced'; sessionId: string; note: string | null; applied?: number; notApplied?: number }) => Promise<void>
 export type ApprovalDecision = 'approve' | 'reject' | 'close'
 /** The plan-sized numbers (lib/planTier.ts); the caller reads them, this module holds no literal. */
 export type ApprovalLimits = { takeoverSeconds: number }
@@ -212,29 +217,32 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
     // Planning a count is the dearest request of an approval, and the stock writer sends nothing once the request has used the invocation's statements (the commit answers those lines 'deferred', untouched).
     // When this request has just recorded the plan, that costs nothing: the claim and the plan stay and the repeat, which does not record again, writes. A repeat that defers again is a refusal.
     if (recorded && !failed.length && results.some(result => result.code === 'deferred')) return await respond(db, actor, sessionId, 0, remaining.length, false, { refused, deferred: true })
-    await releaseUntouched(db, actor, claim, applied, todo.map(entry => `${stockKey}-${entry.item.product_id}`))
+    await releaseUntouched(db, actor, { ...claim, planNow: recorded ? claim.newPlan : row.plan_json }, applied, todo.map(entry => `${stockKey}-${entry.item.product_id}`))
     fail(409, 'inventory_check_stock_write_refused', { failed, remaining: remaining.length, ...(refused.length ? { refused } : {}) })
   }
 
   const nextApplied: Record<string, ApprovalAppliedLine & { settled?: true }> = { ...applied }
   for (const entry of landed) nextApplied[String(entry.item.product_id)] = { before: entry.plan.before, target: entry.plan.target, after: entry.plan.target, at: now, ...(settled(entry.plan) ? { settled: true as const } : {}), ...clampOf(entry.plan) }
   const landedIds = new Set(landed.map(entry => entry.item.product_id))
-  const next = { ...base, stockKey, newApplied: JSON.stringify({ lines: nextApplied }), planAfter: plansOfTodo(todo.filter(entry => !landedIds.has(entry.item.product_id))) }
+  // Nothing applied and nothing left to apply: every line was replaced by a newer count after this approval was claimed. It ends as replaced, exactly as a close does in that case.
+  const replacedOnly = finish && Object.keys(nextApplied).length === 0
+  // The plan this request wrote or read: a request of the same claimer that recorded another plan in between is not overwritten (the repeat replays what landed).
+  const next = { ...base, stockKey, planBefore: recorded ? claim.newPlan : row.plan_json, newApplied: JSON.stringify({ lines: nextApplied }), planAfter: plansOfTodo(todo.filter(entry => !landedIds.has(entry.item.product_id))) }
   const statements: Statement[] = [
-    guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND ${UNCHANGED} AND ${claimMine})`, 'inventory_check_conflict', next),
+    guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND ${UNCHANGED} AND plan_json=@planBefore AND ${claimMine})`, 'inventory_check_conflict', next),
   ]
   statements.push(...await landingStatements(actor, sessionId, session.revision, base, landed, stockKey))
   statements.push({ sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base })
   if (finish) {
     const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval', id: sessionId, decision, note }))
-    statements.push(decidedUpdate('approved', { ...next, key: stockKey }), guard('changes()=1', 'inventory_check_conflict', {}),
-      eventStatement(actor, { sessionId, action: 'observe', key: stockKey, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'approved', lines: row.lines }, result: { sessionRevision: session.revision }, now }))
+    statements.push(replacedOnly ? replacedUpdate({ ...next, key: stockKey }) : decidedUpdate('approved', { ...next, key: stockKey }), guard('changes()=1', 'inventory_check_conflict', {}),
+      eventStatement(actor, { sessionId, action: 'observe', key: stockKey, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: replacedOnly ? 'rejected' : 'approved', lines: row.lines, ...(replacedOnly ? { replaced: true } : {}) }, result: { sessionRevision: session.revision }, now }))
   } else {
-    statements.push({ sql: `UPDATE inventory_check_approvals SET applied_json=@newApplied,plan_json=@planAfter,applying_at=@now WHERE session_id=@id AND status='pending' AND ${UNCHANGED} AND ${claimMine}`, params: next },
+    statements.push({ sql: `UPDATE inventory_check_approvals SET applied_json=@newApplied,plan_json=@planAfter,applying_at=@now WHERE session_id=@id AND status='pending' AND ${UNCHANGED} AND plan_json=@planBefore AND ${claimMine}`, params: next },
       guard('changes()=1', 'inventory_check_conflict', {}))
   }
   await record(db, actor, statements)
-  if (finish) await announce(onDecided, { decision, sessionId, note })
+  if (finish) await announce(onDecided, replacedOnly ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision, sessionId, note })
   return await respond(db, actor, sessionId, landed.length, left, finish, { failed, refused })
 }
 
@@ -307,22 +315,25 @@ async function closeApproval(db: D1Compat, actor: Actor, session: { branch_id: n
   const nextApplied: Record<string, ApprovalAppliedLine> = { ...context.applied }
   for (const entry of landed) nextApplied[String(entry.item.product_id)] = appliedEntry(entry.plan, now)
   const appliedCount = Object.keys(nextApplied).length, status = appliedCount > 0 ? 'approved' : 'rejected'
-  const params = { ...base, oldKey: row.applying_request_id, oldBy: row.applying_by, newApplied: JSON.stringify({ lines: nextApplied }), unseenIds: JSON.stringify(unseen),
+  // Nothing applied and no line left to close: every remaining line was replaced by a newer count. It ends as replaced, with no person as its decider, exactly as an approval that finishes so does.
+  const replaced = appliedCount === 0 && unapplied.length === 0
+  const params = { ...base, deciderId: replaced ? null : base.actorId, deciderName: replaced ? null : base.actorName, decisionNote: replaced ? REPLACED_NOTE : note, oldKey: row.applying_request_id, oldBy: row.applying_by, oldPlan: row.plan_json, newApplied: JSON.stringify({ lines: nextApplied }), unseenIds: JSON.stringify(unseen),
     closed: JSON.stringify({ lines: Object.fromEntries(unapplied.map(item => [String(item.product_id), reasons.get(item.product_id) ?? 'inventory_check_not_applied'])) }) }
-  const claimed = `session_id=@id AND status='pending' AND ${UNCHANGED} AND applying_request_id IS @oldKey AND applying_by IS @oldBy`
+  // plan_json=@oldPlan: a line that joined the plan after this read (the claimer planned it and may already have written it) is not covered by the unseen receipts above, so a changed plan refuses the close.
+  const claimed = `session_id=@id AND status='pending' AND ${UNCHANGED} AND plan_json=@oldPlan AND applying_request_id IS @oldKey AND applying_by IS @oldBy`
   await record(db, actor, [
     guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE ${claimed}) AND ${NO_UNSEEN_WRITE_SQL}`, 'inventory_check_conflict', params),
     ...await landingStatements(actor, sessionId, session.revision, base, landed, row.applying_request_id as string),
     { sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base },
-    { sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key,
+    { sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@deciderId,decided_by_name=@deciderName,decided_at=@now,decision_note=@decisionNote,decision_request_id=@key,
       applied_json=@newApplied,plan_json='{}',closed_json=@closed WHERE ${claimed}`, params },
     guard('changes()=1', 'inventory_check_conflict', {}),
     eventStatement(actor, { sessionId, action: 'observe', key, hash: await inventoryCheckDigest(JSON.stringify({ action: 'approval', id: sessionId, decision: 'close', note })),
       before: { approval: 'pending', lines: row.lines, applied: Object.keys(context.applied).length },
-      after: { approval: status, closed: true, applied: appliedCount, not_applied: JSON.parse(params.closed).lines },
+      after: { approval: status, closed: true, applied: appliedCount, not_applied: JSON.parse(params.closed).lines, ...(replaced ? { replaced: true } : {}) },
       result: { sessionRevision: session.revision }, now }),
   ])
-  await announce(context.onDecided, { decision: 'close', sessionId, note, applied: appliedCount, notApplied: unapplied.length })
+  await announce(context.onDecided, replaced ? { decision: 'replaced', sessionId, note: REPLACED_NOTE } : { decision: 'close', sessionId, note, applied: appliedCount, notApplied: unapplied.length })
   return await respond(db, actor, sessionId, landed.length, 0, true)
 }
 
@@ -417,8 +428,10 @@ const sinceCountStatement = (branchId: number, productIds: number[], count: { se
 async function releaseUntouched(db: D1Compat, actor: Actor, claim: Record<string, unknown>, applied: Record<string, unknown>, requestIds: string[]): Promise<void> {
   if (Object.keys(applied).length || (await receiptsOf(db, actor.id, requestIds)).size) return
   try {
+    // Re-proved inside the statement: still the plan this request left, and none of its lines has a written receipt (a request of the same claimer may have written one since the read above).
     await record(db, actor, [{ sql: `UPDATE inventory_check_approvals SET applying_request_id=NULL,applying_by=NULL,applying_at=NULL,plan_json='{}'
-      WHERE session_id=@id AND status='pending' AND applied_json='{}' AND applying_request_id=@stockKey AND applying_by=@actorId`, params: claim }])
+      WHERE session_id=@id AND status='pending' AND applied_json='{}' AND plan_json=@planNow AND applying_request_id=@stockKey AND applying_by=@actorId
+        AND NOT EXISTS(SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@actorId AND written=1 AND request_id IN (SELECT value FROM json_each(@releaseIds)))`, params: { ...claim, releaseIds: JSON.stringify(requestIds) } }])
   } catch { /* the claim stays; the next request plans again */ }
 }
 
@@ -432,6 +445,11 @@ function stockLine(entry: Open, stockKey: string, branchId: number, sessionId: s
     ? { ...common, type: 'set', quantity: plan.target, setScope: 'branch', batchId: plan.lot, expectedBranchQuantity: plan.before }
     : { ...common, type: 'remove', quantity: plan.before - plan.target } }
 }
+
+/** An approval whose every line a newer count replaced: rejected by no person (the system decided), with the sentence that says why; a claimed row may only be rejected with closed_json set. */
+const replacedUpdate = (params: Record<string, unknown>): Statement => ({
+  sql: `UPDATE inventory_check_approvals SET status='rejected',decided_by=NULL,decided_by_name=NULL,decided_at=@now,decision_note=@replacedNote,decision_request_id=@key,applied_json=@newApplied,plan_json='{}',closed_json='{"lines":{}}'
+    WHERE session_id=@id AND status='pending' AND ${UNCHANGED}`, params: { ...params, replacedNote: REPLACED_NOTE } })
 
 const decidedUpdate = (status: 'approved' | 'rejected', params: Record<string, unknown>): Statement => ({
   sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key${status === 'approved' ? ",applied_json=@newApplied,plan_json='{}'" : ''}

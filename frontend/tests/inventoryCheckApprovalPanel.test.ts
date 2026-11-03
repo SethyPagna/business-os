@@ -130,6 +130,20 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'rejected')
     assert.equal(panel.findAll(node => node.getAttribute('data-approval-superseded') !== null).length, 2, 'an approval every line of which was replaced says so line by line')
   }],
+  ['a count the system rejected because a newer count replaced all of it says Replaced with its note, never Rejected and never a person: also when it ended as a close', async () => {
+    const replaced: InventoryCheckApproval = { ...pending, status: 'rejected', replaced: true, decided_at: '2026-11-02T03:00:00Z', decision_note: 'Replaced by a newer count', superseded: { 1: 'newer-session', 2: 'newer-session' } }
+    const panel = await mount({ approval: replaced })
+    assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'replaced')
+    const shown = text(panel.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'panel'))
+    assert.match(shown, /Replaced/); assert.doesNotMatch(shown, /Rejected/); assert.doesNotMatch(shown, /@/, 'no counter is named as the decider')
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-replaced-note') !== null, 'note')), /Replaced by a newer count/)
+    assert.equal(action(panel, 'approve'), undefined); assert.equal(action(panel, 'reject'), undefined); assert.equal(action(panel, 'close'), undefined)
+    await panel.render({ ...base, approval: { ...replaced, closed: { lines: {} } } })
+    assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'replaced', 'a claimed approval that ended replaced carries closed_json, and still reads Replaced')
+    await panel.render({ ...base, approval: { ...pending, status: 'rejected', decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss', decision_note: 'Recount' } })
+    assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'rejected', 'a rejection by a person is unchanged')
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-decided') !== null, 'who')), /@boss/)
+  }],
   ['approved and rejected counts say so, who decided and when, and keep their lines', async () => {
     const approved = await mount({ approval: { ...pending, status: 'approved', applied: 2, decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss',
       applied_lines: { 1: { before: 5, target: 10, after: 10, at: 'x' }, 2: { before: 1, target: 0, after: 0, at: 'x', clamped: true, wanted: -4 } } } })

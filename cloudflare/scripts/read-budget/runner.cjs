@@ -91,21 +91,42 @@ async function pinProblems(world, entry, statements) {
   return out
 }
 
-async function runGetPass({ partIndex, analyze = false, label }) {
+// The Worker keeps the read switches it last read for READ_SWITCH_MEMO_MS (15 s) per isolate, and the ANALYZE pass measures every shape warm on ONE isolate. A shape that names switches
+// (the ic_simple ones: the switch row is set around their request only) would otherwise run on the switch state of the shape before it: right after a switch-OFF shape it was measured on
+// the OFF path (218M rows read under ANALYZE instead of ~0.3M) and a green run proved nothing about the ON path. So whenever the switch state a shape needs differs from the one the
+// isolate last read, a fresh isolate (and a fresh login) is started first; consecutive shapes with the same switches share an isolate as before.
+function switchFence() {
+  let read = ''
+  return async (world, shape) => {
+    const wanted = (shape.switches || []).join(',')
+    if (wanted === read) return
+    await world.restart(); await world.login()
+    read = wanted
+  }
+}
+
+// `analyzeDb: false` runs the warm-only (analyze) measurement without the ANALYZE statistics: the switch memo test needs the shapes to be fast. `observe(shape, measurement)` sees every measured shape.
+async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, label, observe }) {
   const budgets = loadBudgets()
   const byId = new Map(budgets.shapes.map((e) => [e.id, e]))
   const world = await bootWorld({ tier: 'free' })
   const reds = []
+  const fence = switchFence()
   let n = 0
   try {
     await prepareWorld(world)
-    if (analyze) { await world.analyze(); await world.restart(); await world.login() }
+    if (analyzeDb) await world.analyze()
+    if (analyze) { await world.restart(); await world.login() }
     const shapes = getShapes(world.ctx).filter((s) => (partIndex === undefined || part(s.id) === partIndex) && only(s.id))
     for (const shape of shapes) {
       const entry = byId.get(shape.id)
       if (!entry) { reds.push(`${shape.id}: no budget in budgets.json`); continue }
       let m
-      try { m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) }) } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
+      try {
+        if (analyze) await fence(world, shape)
+        m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) })
+      } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
+      if (observe) observe(shape, m)
       const problems = [...getProblems(entry, m, { analyze }), ...(m.warm.overDeadline || !entry.pins ? [] : await pinProblems(world, entry, m.statements))]
       n += 1
       if (problems.length) reds.push(`${shape.id} (${entry.route}): ${problems.join('; ')}`)
@@ -154,4 +175,4 @@ async function runWritePass({ label }) {
   return reds
 }
 
-module.exports = { setSwitches, clearSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
+module.exports = { setSwitches, clearSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, switchFence, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }

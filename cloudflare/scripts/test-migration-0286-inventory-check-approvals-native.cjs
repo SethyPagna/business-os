@@ -161,8 +161,38 @@ check('lines replaced by a newer count: superseded_json is an object that starts
   assert.throws(() => db.prepare(`UPDATE ${T} SET superseded_json='{}'`).run(), /inventory_check_approval_immutable/, 'frozen with the decision')
   // An approval every line of which was replaced is rejected in the commit that replaced the last one (an unclaimed row may be rejected, with no stock applied).
   const fresh = chain(); seed(fresh); fresh.exec(sql); insertPending(fresh)
-  fresh.prepare(`UPDATE ${T} SET superseded_json='{"5":"s2"}',status='rejected',decided_by=7,decided_by_name='counter',decided_at='2026-11-02T02:00:00Z',decision_request_id='req-12345678'`).run()
-  assert.equal(fresh.prepare(`SELECT status FROM ${T}`).get().status, 'rejected')
+  fresh.prepare(`UPDATE ${T} SET superseded_json='{"5":"s2"}',status='rejected',decided_by=NULL,decided_by_name=NULL,decision_note='Replaced by a newer count',decided_at='2026-11-02T02:00:00Z',decision_request_id='req-12345678'`).run()
+  assert.deepEqual({ ...fresh.prepare(`SELECT status,decided_by,decided_by_name,decision_note FROM ${T}`).get() }, { status: 'rejected', decided_by: null, decided_by_name: null, decision_note: 'Replaced by a newer count' })
+})
+
+check('a decision with no person is accepted only as a rejection that carries its note (the system replaced the count); every other decision names its decider', () => {
+  const decideAs = (db, set) => db.prepare(`UPDATE ${T} SET decided_at='2026-11-02T02:00:00Z',decision_request_id='req-12345678',${set}`).run()
+  const fresh = () => { const db = chain(); seed(db); db.exec(sql); insertPending(db); return db }
+  assert.throws(() => decideAs(fresh(), "status='approved',decided_by=NULL,decision_note='Replaced by a newer count'"), /CHECK|constraint/i, 'an approval always has a decider')
+  assert.throws(() => decideAs(fresh(), "status='rejected',decided_by=NULL"), /CHECK|constraint/i, 'a rejection without a decider must say why')
+  assert.throws(() => decideAs(fresh(), "status='rejected',decided_by=NULL,decided_by_name='counter',decision_note='Replaced by a newer count'"), /CHECK|constraint/i, 'and must not name a person')
+  const ok = fresh(); decideAs(ok, "status='rejected',decided_by=NULL,decided_by_name=NULL,decision_note='Replaced by a newer count'")
+  assert.equal(ok.prepare(`SELECT status FROM ${T}`).get().status, 'rejected')
+  assert.throws(() => ok.prepare(`UPDATE ${T} SET decision_note='changed'`).run(), /inventory_check_approval_immutable/, 'and it is as immutable as any decision')
+  // A claimed approval may be rejected only through a close (closed_json): the system's decision on a claimed row carries it too.
+  const claimed = fresh(); claimed.prepare(`UPDATE ${T} SET applying_request_id='k-12345678',applying_by=9,applying_at='2026-11-02T01:30:00Z'`).run()
+  assert.throws(() => decideAs(claimed, "status='rejected',decided_by=NULL,decided_by_name=NULL,decision_note='Replaced by a newer count'"), /inventory_check_approval_immutable/, 'a claimed row is never rejected without closed_json')
+  decideAs(claimed, "status='rejected',decided_by=NULL,decided_by_name=NULL,decision_note='Replaced by a newer count',closed_json='{\"lines\":{}}'")
+  assert.equal(claimed.prepare(`SELECT status FROM ${T}`).get().status, 'rejected')
+})
+
+check('the audit events of a replacement read the waiting approvals and the ones this commit just rejected through an index, never the history of the branch', () => {
+  const db = chain(); db.exec(sql)
+  const source = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'), 'utf8')
+  const start = source.indexOf('export const SUPERSEDE_EVENTS_SQL = `') + 'export const SUPERSEDE_EVENTS_SQL = `'.length
+  const statement = source.slice(start, source.indexOf('`', start))
+  assert.equal(statement.includes('${'), false, 'a plain statement')
+  const plan = db.prepare('EXPLAIN QUERY PLAN ' + statement).all({ actorId: 1, actorName: 'a', key: 'k', hash: 'h', id: 's2', now: '2026-11-03T00:00:00.000Z', organization: 1, branchId: 1 }).map(row => row.detail)
+  const reads = plan.filter(detail => /inventory_check_approvals/.test(detail))
+  assert.equal(reads.length, 2, plan.join(' | '))
+  assert.ok(reads.every(detail => /SEARCH .* USING INDEX inventory_check_approvals_(pending|progress)/.test(detail)), plan.join(' | '))
+  assert.ok(reads.some(detail => /inventory_check_approvals_pending \(organization_id=\? AND status=\?\)/.test(detail)) && reads.some(detail => /inventory_check_approvals_progress \(branch_id=\? AND <expr>=\?\)/.test(detail)), plan.join(' | '))
+  assert.equal(plan.some(detail => /SCAN inventory_check_approvals/.test(detail)), false, 'no scan of the approvals table')
 })
 
 check('the progress index serves the question "did another approval of this branch apply anything since this count" by decided or last claimed time', () => {

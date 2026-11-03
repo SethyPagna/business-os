@@ -7910,6 +7910,7 @@
   "inventory_check_approval_closed": "បានបិទ",
   "inventory_check_approval_not_applied": "មិនបានអនុវត្ត",
   "inventory_check_approval_superseded": "ត្រូវបានជំនួសដោយការរាប់ថ្មីជាង",
+  "inventory_check_approval_replaced": "បានជំនួស",
   "inventory_check_approval_cannot_apply": "មិនអាចអនុវត្ត",
   "inventory_check_reason_product_retired": "ផលិតផលត្រូវបានបញ្ចូលគ្នា ឬដកចេញ",
   "inventory_check_reason_stock_inconsistent": "កំណត់ត្រាស្តុកមិនត្រូវគ្នា",

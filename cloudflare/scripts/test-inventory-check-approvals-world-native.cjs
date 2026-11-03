@@ -204,11 +204,14 @@ async function main() {
       assert.equal(first.status, 201, first.text.slice(0, 300))
       const second = await submit(total - 2, 'lead')
       assert.equal(second.status, 201, second.text.slice(0, 300)); assert.equal(second.json.approval.status, 'pending')
-      const older = (await world.all('SELECT status,decided_by,superseded_json FROM inventory_check_approvals WHERE session_id=?', first.json.item.id))[0]
-      assert.deepEqual({ ...older }, { status: 'rejected', decided_by: 903, superseded_json: JSON.stringify({ [pid]: second.json.item.id }) }, 'the older line is replaced by the newer count and, being its only line, the older approval is rejected with it')
+      const older = (await world.all('SELECT status,decided_by,decided_by_name,decision_note,superseded_json FROM inventory_check_approvals WHERE session_id=?', first.json.item.id))[0]
+      assert.deepEqual({ ...older }, { status: 'rejected', decided_by: null, decided_by_name: null, decision_note: 'Replaced by a newer count', superseded_json: JSON.stringify({ [pid]: second.json.item.id }) }, 'the older line is replaced by the newer count and, being its only line, the older approval is rejected with it, by the system (no person, a note that says why)')
       const decided = await as('lead', 'POST', `/api/inventory-checks/sessions/${first.json.item.id}/approval`, { decision: 'approve', requestId: key('older') })
       assert.equal(decided.status, 409); assert.equal(decided.json.code, 'inventory_check_approval_decided')
       assert.equal((await world.all("SELECT COUNT(*) AS n FROM inventory_check_approvals WHERE status='pending' AND session_id IN (?,?)", first.json.item.id, second.json.item.id))[0].n, 1, 'one waiting item for the product')
+      // The submission learns which approvals it rejected (to tell each of them) from the rows its UPDATE ... RETURNING gives back inside the batch: that is D1's contract, checked here on D1 itself.
+      const batched = await world.db.batch([world.db.prepare('UPDATE inventory_check_approvals SET decision_note=decision_note WHERE session_id=? RETURNING session_id').bind(second.json.item.id)])
+      assert.deepEqual(batched[0].results.map(row => row.session_id), [second.json.item.id], 'a batch hands back the rows of an UPDATE ... RETURNING')
       // A person lowers the same stock by hand after the count: applying the count on top of that would take the shortage twice.
       const counted = await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'recounted by hand', client_request_id: key('hand') })
       assert.equal(counted.status, 200, counted.text.slice(0, 300))

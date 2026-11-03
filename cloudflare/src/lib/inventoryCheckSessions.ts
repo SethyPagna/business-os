@@ -127,6 +127,8 @@ function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, cur
 /** What a submitted count's approval looks like to a viewer who may see stock (the approval row exists only for counts that differ, so it is withheld from everyone else). */
 export type ApprovalAppliedLine = { before: number; target: number; after: number; at: string; settled?: true; clamped?: true; wanted?: number }
 export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejected'; lines: number; applied: number; submitted_at: string; can_approve: boolean;
+  /** Decided by the system, not by a person: every line was replaced by a newer count (queue-first). It has no decider; its decision_note says why. */
+  replaced?: true;
   decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine>;
   /** Stock may already have moved for this approval: it can no longer be rejected; it ends by being finished or closed, and another approver takes it over only when its claimer is gone. */
   applying?: boolean; applying_request_id?: string;
@@ -188,6 +190,7 @@ export function projectApproval(actor: Actor, row: ApprovalRow, detail = false):
   const applied = appliedLines(row.applied_json), closed = closedLines(row.closed_json)
   return { status: row.status, lines: row.lines, applied: Object.keys(applied).length, submitted_at: row.submitted_at, can_approve: canApproveInventoryCounts(actor),
     ...(row.decided_at ? { decided_at: row.decided_at, decision_note: row.decision_note } : {}),
+    ...(row.status === 'rejected' && row.decided_by == null && row.decided_at ? { replaced: true as const } : {}),
     ...(closed ? { closed } : {}),
     ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
     ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
@@ -309,8 +312,9 @@ export function eventStatement(actor: Actor, args: { sessionId: string; productI
     key: args.key, hash: args.hash, before: JSON.stringify(args.before), after: JSON.stringify(args.after), result: JSON.stringify(args.result), now: args.now,
   } }
 }
-async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: Actor, statements: Statement[], key: string, hash: string): Promise<{ event: EventRow; replayed: boolean }> {
-  try { await db.batchOnce([authorityGuard(actor), ...statements]) }
+async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: Actor, statements: Statement[], key: string, hash: string): Promise<{ event: EventRow; replayed: boolean; results?: D1Result[] }> {
+  let results: D1Result[] | undefined
+  try { results = await db.batchOnce([authorityGuard(actor), ...statements]) }
   catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
@@ -327,7 +331,7 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     fail(503, 'inventory_check_outcome_unknown')
   }
   const event = await receipt(db, actor, key, hash)
-  return event ? { event, replayed: false } : fail(503, 'inventory_check_outcome_unknown')
+  return event ? { event, replayed: false, results } : fail(503, 'inventory_check_outcome_unknown')
 }
 async function committedSessionProjection(db: D1Compat, principal: InventoryCheckPrincipal, id: string, observation?: {productId:number;branchId:number}) {
   try {
@@ -467,6 +471,18 @@ const BEING_APPLIED_SQL = `FROM inventory_check_approvals a JOIN inventory_check
  * submission is refused, whatever the figures say, so a refusal tells nobody what the stock holds; the guard sits ahead of the replacement in the same batch, so the two never race.
  * Four statements however many approvals are touched, and the same four for every submission (a commit that raced another still replaces what that one queued).
  */
+/**
+ * The audit events of the older lines a submission replaced. Only approvals this very commit touched can hold the new session, and they are few: the ones still waiting (the queue) and the ones this
+ * commit just rejected (their decision time is this commit's). Neither reads the organization's history, however long: the first by the pending index, the second by the progress index.
+ */
+export const SUPERSEDE_EVENTS_SQL = `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+  SELECT a.session_id,CAST(j.key AS INTEGER),@actorId,@actorName,'observe',@key||'-superseded-'||a.session_id||'-'||j.key,@hash,
+    json_object('approval','pending'),json_object('approval',a.status,'superseded_by',@id),json_object('sessionRevision',s.revision),@now
+  FROM (SELECT session_id,status,superseded_json FROM inventory_check_approvals INDEXED BY inventory_check_approvals_pending WHERE organization_id IS @organization AND status='pending' AND branch_id=@branchId
+    UNION ALL
+    SELECT session_id,status,superseded_json FROM inventory_check_approvals WHERE branch_id=@branchId AND COALESCE(decided_at,applying_at)=@now AND status='rejected' AND organization_id IS @organization) a
+    JOIN inventory_check_sessions s ON s.id=a.session_id, json_each(a.superseded_json) j
+  WHERE j.value=@id`
 function supersedeStatements(params: Record<string, unknown>): Statement[] {
   const A = 'inventory_check_approvals'
   const waitingOfApproval = `FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.product_id IN (SELECT value FROM json_each(@submitted)) AND ${waitingLineSql(A, 'i')}`
@@ -474,20 +490,19 @@ function supersedeStatements(params: Record<string, unknown>): Statement[] {
     guard(`NOT EXISTS(SELECT 1 ${BEING_APPLIED_SQL})`, 'inventory_check_count_in_progress', params),
     { sql: `UPDATE ${A} SET superseded_json=json_patch(superseded_json,(SELECT json_group_object(CAST(i.product_id AS TEXT),@id) ${waitingOfApproval}))
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND EXISTS(SELECT 1 ${waitingOfApproval})`, params },
-    { sql: `UPDATE ${A} SET status='rejected',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_request_id=@key
+    { sql: `UPDATE ${A} SET status='rejected',decided_by=NULL,decided_by_name=NULL,decided_at=@now,decision_note=@replacedNote,decision_request_id=@key
       WHERE organization_id IS @organization AND branch_id=@branchId AND status='pending' AND applying_request_id IS NULL AND applied_json='{}'
         AND EXISTS(SELECT 1 FROM json_each(superseded_json) WHERE value=@id)
         AND NOT EXISTS(SELECT 1 FROM inventory_check_items i WHERE i.session_id=${A}.session_id AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL
-          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL)`, params },
-    { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
-      SELECT a.session_id,CAST(j.key AS INTEGER),@actorId,@actorName,'observe',@key||'-superseded-'||a.session_id||'-'||j.key,@hash,
-        json_object('approval','pending'),json_object('approval',a.status,'superseded_by',@id),json_object('sessionRevision',s.revision),@now
-      FROM ${A} a JOIN inventory_check_sessions s ON s.id=a.session_id, json_each(a.superseded_json) j
-      WHERE a.organization_id IS @organization AND a.branch_id=@branchId AND j.value=@id`, params },
+          AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001 AND json_extract(superseded_json,'$."'||i.product_id||'"') IS NULL)
+      RETURNING session_id`, params: { ...params, replacedNote: REPLACED_NOTE } },
+    { sql: SUPERSEDE_EVENTS_SQL, params },
   ]
 }
 /** A differing count with no typed note carries this sentence; the page shows its own translation in its place. */
 export const DEFAULT_COUNT_NOTE = 'Count differs from stock'
+/** The decision note of an approval every line of which a newer count replaced: no person decided it (decided_by is NULL), and this says why. The page and the alert show their own words. */
+export const REPLACED_NOTE = 'Replaced by a newer count'
 const COUNT_EPSILON = 0.000000001
 const SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
 type SubmissionLine = { productId: number; counted: number; seen: number | null; checked: boolean; note: string | null }
@@ -509,7 +524,7 @@ function submissionLine(value: unknown): SubmissionLine {
  * `approvals` (ic_fix_stock): a submission with at least one count that differs from stock also creates ONE pending approval in the same atomic commit.
  */
 export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig,
-  options: { approvals?: boolean; onApprovalCreated?: (created: { sessionId: string }) => Promise<void> } = {}) {
+  options: { approvals?: boolean; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> } = {}) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor)
@@ -563,6 +578,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     members: JSON.stringify(members), baseline: JSON.stringify(baselines), count: productIds.length, signature: snapshot.signature }
   const stock = buildInventoryCheckStockQuery({ branchId, productIds })
   const comparisons = [...STOCK_COLUMNS, 'consistent'].map(column => `a.${column} IS json_extract(e.value,'$.${column}')`).join(' AND ')
+  const supersede = options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []
   const statements: Statement[] = [
     guard(`EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)
       AND (${PHYSICAL_SCHEMA_SQL}) IS @signature AND (${LOW_STOCK_SIGNATURE_SQL}) IS @settingsSignature`, 'inventory_check_baseline_changed', { ...params, settingsSignature }),
@@ -575,7 +591,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
       WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
       OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
       OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
-    ...(options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []),
+    ...supersede,
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
@@ -602,6 +618,12 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   }
   // Told once, after the commit that made the approval (never for a replay); an announcement never fails the submission it announces.
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
+  // The approvals this commit replaced were rejected by the system: each is a review decided, so each is told once (the statement that rejected them names them; a replay is never told again).
+  if (!saved.replayed && supersede.length) {
+    const replacedAt = statements.indexOf(supersede[2]) + 1 // the batch starts with the authority guard
+    const replacedIds = (saved.results?.[replacedAt]?.results ?? []).map(row => String((row as { session_id: string }).session_id))
+    if (replacedIds.length) { try { await options.onApprovalsReplaced?.({ sessionIds: replacedIds }) } catch { /* announced best-effort */ } }
+  }
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {

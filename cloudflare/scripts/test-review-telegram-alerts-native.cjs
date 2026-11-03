@@ -506,6 +506,7 @@ async function main() {
     t.eq('count created', lib.formatReviewAlert({ kind: 'created', row: count({ requested_by_name: 'counter' }) }, 'LC Store'), { heading: '🕒 Review requested', lines: ['Request: Count approval · LC Store', 'Requested by: counter'] })
     t.eq('count approved', lib.formatReviewAlert({ kind: 'approved', row: count(), by: 'lead' }, 'LC Store'), { heading: '✅ Review approved', lines: ['Request: Count approval · LC Store', 'By: lead'] })
     t.eq('count rejected', lib.formatReviewAlert({ kind: 'rejected', row: count(), by: 'lead', reason: 'Recount first' }, 'LC Store'), { heading: '❌ Review rejected', lines: ['Request: Count approval · LC Store', 'Reason: Recount first', 'By: lead'] })
+    t.eq('count replaced by a newer count (decided by the system: the same rejection alert, its reason, no person)', lib.formatReviewAlert({ kind: 'rejected', row: count(), reason: 'Replaced by a newer count' }, 'LC Store'), { heading: '❌ Review rejected', lines: ['Request: Count approval · LC Store', 'Reason: Replaced by a newer count'] })
     t.eq('Khmer phrase for a count', lib.TELEGRAM_REVIEW_REQUEST_PHRASES['Count approval'], 'ការអនុម័តការរាប់')
     t.eq('a stock-reasons request has no record name', lib.formatReviewAlert({ kind: 'created', row: row({ section: 'inventory', action_type: 'update', entity_type: 'inventory_reason' }) }, null).lines[0], 'Request: Edit stock reasons')
     // No more than four rows under any heading, whatever the event carries.
@@ -1302,6 +1303,16 @@ async function main() {
       t.eq('rejected', [rejected.status, rejected.body && rejected.body.done], [200, true])
       const rejection = only(await reviewCalls(), t, 'rejected')
       t.eq('rejected text', lines(rejection).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· Reason/មូលហេតុ: Recount first', '· By/ដោយ: approver'])
+      // A newer count of a product whose count waits replaces it: the system rejects the older approval, and that review is announced like any other (the same rejection alert, its reason, no person named).
+      const third = await stocked('Count alert C', 5)
+      await reset()
+      t.eq('a count of the product waits', (await submit('count-alert-submit-4', [{ productId: third, countedQuantity: 3, seenQuantity: 5, checked: false }])).status, 201)
+      await reset()
+      const newer = await H.api('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: 'count-alert-submit-5', lines: [{ productId: third, countedQuantity: 2, seenQuantity: 5, checked: false }] }, { as: 'approver' })
+      t.eq('a newer count of the same product replaces it', newer.status, 201)
+      const afterReplace = await reviewCalls()
+      t.eq('two reviews are announced: the newer count requested, the older one replaced', afterReplace.map(call => /Review requested/.test(String(call.body.text)) ? 'requested' : 'rejected').sort(), ['rejected', 'requested'])
+      t.eq('replaced text', lines(only(afterReplace.filter(call => /Review rejected/.test(String(call.body.text))), t, 'replaced')).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· Reason/មូលហេតុ: Replaced by a newer count'])
       for (const text of await H.tg.texts()) t.ok('no full name', !/Fullname/.test(text), text)
     })
   } finally {

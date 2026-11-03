@@ -7910,6 +7910,7 @@
   "inventory_check_approval_closed": "Closed",
   "inventory_check_approval_not_applied": "Not applied",
   "inventory_check_approval_superseded": "Replaced by a newer count",
+  "inventory_check_approval_replaced": "Replaced",
   "inventory_check_approval_cannot_apply": "Cannot apply",
   "inventory_check_reason_product_retired": "Product merged or removed",
   "inventory_check_reason_stock_inconsistent": "Stock records do not add up",
