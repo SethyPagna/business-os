@@ -21,7 +21,7 @@ const PASSWORD = 'budget-password-1'
 async function main() {
   const world = await bootWorld({ tier: 'free' })
   const db = world.db
-  await db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: 'on' }, ic_fix_stock: { state: 'on' } } })).run()
+  await db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on', ic_fix_stock: 'on' } })).run()
   const counting = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
   await db.prepare("INSERT INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0),(903,'Lead','lead',?,0)")
     .bind(JSON.stringify(counting), JSON.stringify({ ...counting, inventory: true, inventory_check_approve: true })).run()

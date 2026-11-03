@@ -157,7 +157,7 @@ function writeShapes() {
     // The owner's way to count (ic_simple): 20 picked products with their counts, recorded whole as one closed session. Counted 0 against stock differs, so every line is an issue.
     { id: 'w-inventory-check-submission-20', label: 'POST /api/inventory-checks/submissions 20 products (ic_simple)', method: 'POST', url: '/api/inventory-checks/submissions',
       prepare: async (world) => {
-        world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: 'on' } } })).run()
+        await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on' } })).run()
         return (await world.all('SELECT id FROM products WHERE is_active=1 ORDER BY id LIMIT 20 OFFSET 80')).map((r) => r.id)
       },
       run: async (world, send, ids) => {
@@ -167,7 +167,9 @@ function writeShapes() {
     // Approving a submitted count (ic_fix_stock): on the Free plan the first request of an approval applies ONE stock line (a lowering Set), records it and answers.
     { id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', method: 'POST', url: '/api/inventory-checks/sessions/:id/approval',
       prepare: async (world) => {
-        world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: 'on' }, ic_fix_stock: { state: 'on' } } })).run()
+        await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on', ic_fix_stock: 'on' } })).run()
+        // The switches are memoized per isolate for 15 s: the counter's submission below must meet the row just written.
+        await world.restart()
         const rows = await lots(world, 2, 1100)
         // Nobody approves their own count: a counter (an approved device, as every non-administrator needs) submits, the administrator approves.
         await world.db.prepare("INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0)").bind(JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true })).run()

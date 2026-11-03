@@ -22,9 +22,14 @@ const key = label => `world-${label}-${Date.now().toString(36)}-${++sequence}`
 async function main() {
   const world = await bootWorld({ tier: 'free' })
   try {
-    const db = world.db
-    const flags = value => db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: value })).run()
-    await flags({ ic_simple: { state: 'on' }, ic_fix_stock: { state: 'on' } })
+    // world.restart() swaps the D1 handle, so every use goes through the world's current one.
+    const db = { prepare: (...args) => world.db.prepare(...args), exec: (...args) => world.db.exec(...args) }
+    // The Worker memoizes the switches for 15 s per isolate: a new document needs a fresh isolate to be seen at once.
+    const flags = async value => {
+      await db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: value })).run()
+      await world.restart()
+    }
+    await flags({ ic_simple: 'on', ic_fix_stock: 'on' })
 
     // A counter (may count, sees stock, may not approve) and a lead (may approve and adjust stock), beside the budget administrator.
     const counting = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
@@ -242,7 +247,7 @@ async function main() {
     })
 
     await check('with ic_fix_stock off the same route does not exist and a new count creates no approval', async () => {
-      await flags({ ic_simple: { state: 'on' } })
+      await flags({ ic_simple: 'on' })
       const gone = await as('lead', 'POST', `/api/inventory-checks/sessions/${world.sessionId}/approval`, { decision: 'approve', requestId: key('off') })
       assert.equal(gone.status, 404); assert.equal(gone.json.code, 'inventory_check_not_available')
       const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: SAME, countedQuantity: total(SAME) + 1, seenQuantity: total(SAME), checked: false }] })

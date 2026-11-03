@@ -65,6 +65,7 @@ cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { r
 } } })
 const productsRoute = load(path.join(__dirname, '../src/routes/inventoryCheckProducts.ts')).default
 const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.ts')).default
+const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 
 let db, failApprovalRecord = false
 function binding() {
@@ -112,9 +113,10 @@ function reset() {
 const setSwitches = (simple, fix) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
   const switches = {}
-  if (simple) switches.ic_simple = { state: simple }
-  if (fix) switches.ic_fix_stock = { state: fix }
-  db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, switches }))
+  if (simple) switches.ic_simple = simple
+  if (fix) switches.ic_fix_stock = fix
+  db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches }))
+  resetReadSwitchMemo()
 }
 async function send(route, method, url, body, actor = ADMIN) {
   const tasks = []
@@ -158,9 +160,10 @@ async function main() {
   })
 
   await check('OFF (ic_fix_stock not on): no approval is created, none is shown, and the decision route does not exist', async () => {
-    for (const form of [[undefined, undefined], ['on', undefined], ['on', 'off'], ['on', 'shadow']]) {
+    const forms = [[undefined, undefined], ['on', undefined], ['on', 'off'], ['on', 'shadow:0.05'], ['on', 'shadow'], ['on', 'ON'], ['on', { state: 'on' }]]
+    for (const [index, form] of forms.entries()) {
       reset(); setSwitches(...form)
-      const made = await submit([line(910002, 3)], { requestId: `off-request-${form.join('')}-1`.slice(0, 40) })
+      const made = await submit([line(910002, 3)], { requestId: `off-request-${index}-1` })
       if (form[0] !== 'on') { assert.equal(made.status, 404); continue }
       assert.equal(made.status, 201); assert.equal('approval' in made.body, false)
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_approvals').get().n, 0)

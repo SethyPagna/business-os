@@ -22,6 +22,7 @@ function load(file) {
 }
 const productsRoute = load(path.join(__dirname, '../src/routes/inventoryCheckProducts.ts')).default
 const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.ts')).default
+const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 
 let db, beforeCommit, queries = []
 function binding() {
@@ -69,7 +70,8 @@ function reset() {
 }
 const setSwitch = value => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
-  if (value) db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: value } } }))
+  if (value) db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: value } }))
+  resetReadSwitchMemo()
 }
 async function send(route, method, url, body, actor = ADMIN) {
   queries = []
@@ -91,11 +93,11 @@ const line = (productId, countedQuantity, extra = {}) => ({ productId, countedQu
 async function main() {
   await check('OFF: the route does not exist and nothing is written', async () => {
     reset()
-    for (const form of [undefined, 'off', 'shadow']) {
+    for (const form of [undefined, 'off', 'shadow:0.05', 'shadow', 'ON', { state: 'on' }]) {
       setSwitch(form)
       const before = metadata(), stock = physical()
       const response = await submit([line(910001, 5)])
-      assert.equal(response.status, 404, String(form)); assert.equal(response.body.code, 'inventory_check_not_available')
+      assert.equal(response.status, 404, JSON.stringify(form)); assert.equal(response.body.code, 'inventory_check_not_available')
       assert.deepEqual(metadata(), before); assert.deepEqual(physical(), stock)
     }
   })

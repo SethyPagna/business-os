@@ -485,10 +485,6 @@
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],
   [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
-  ],
-  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
@@ -531,10 +527,6 @@
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],
   [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
-  ],
-  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
@@ -571,10 +563,6 @@
   [
    "3d0de332b3d9",
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
-  ],
-  [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
   ],
   [
    "603e70996cd2",
@@ -619,10 +607,6 @@
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],
   [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
-  ],
-  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
@@ -663,10 +647,6 @@
   [
    "3d0de332b3d9",
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
-  ],
-  [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
   ],
   [
    "603e70996cd2",
@@ -711,10 +691,6 @@
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],
   [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
-  ],
-  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
@@ -757,10 +733,6 @@
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],
   [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
-  ],
-  [
    "603e70996cd2",
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
@@ -801,10 +773,6 @@
   [
    "3d0de332b3d9",
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
-  ],
-  [
-   "52307de3fd48",
-   "SELECT value FROM system_flags WHERE key = ?1"
   ],
   [
    "3d0de332b3d9",

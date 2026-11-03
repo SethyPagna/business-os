@@ -1270,7 +1270,7 @@ async function main() {
       const counting = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
       await H.addUser(31, 'counter', counting, { name: 'Counter Fullname' })
       await H.addUser(32, 'approver', { ...counting, inventory: true, inventory_check_approve: true }, { name: 'Approver Fullname' })
-      await H.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(JSON.stringify({ epoch: 1, switches: { ic_simple: { state: 'on' }, ic_fix_stock: { state: 'on' } } })).run()
+      await H.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on', ic_fix_stock: 'on' } })).run()
       const first = await stocked('Count alert A', 5), second = await stocked('Count alert B', 5)
       await reset()
       // The approval also moves stock, and the stock writers send their own message: only the review alerts are counted here.

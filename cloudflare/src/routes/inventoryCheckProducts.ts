@@ -7,7 +7,7 @@ import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryChec
 import { getActionTier } from '../lib/permissions'
 import { readInventoryCheckProducts, readInventoryCheckProductsSimple, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
 import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError, approvalsAvailable, pendingApprovalLines } from '../lib/inventoryCheckSessions'
-import { readSwitches } from '../lib/readSwitches'
+import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -24,8 +24,7 @@ app.get('/', async c => {
   const principal = { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
   const actor = await currentInventoryCheckActor(db, principal), raw = c.req.queries()
   for (const [key, values] of Object.entries(raw)) if (values.length !== 1) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', key)
-  const switches = await readSwitches(c.env, ['ic_simple', 'ic_fix_stock'])
-  if (switches.ic_simple) {
+  if (await readSwitch(c.env, 'ic_simple')) {
     // The owner's list (ic_simple): a closed query (state, reason, customerRanking, dates and sales sorts are refused as 400 by the validator), no sales stats.
     const { sessionId: rawSimpleSession, ...simpleQuery } = c.req.query()
     const simpleSession = rawSimpleSession?.trim() || undefined
@@ -41,7 +40,7 @@ app.get('/', async c => {
     // ic_fix_stock: counts waiting for approval are tagged, and the page learns which actions this viewer has. Only a viewer who may see stock learns either.
     let answer: Record<string, unknown> = simple
     // The switch counts as on only once migration 0286 is applied (otherwise this answers exactly as OFF).
-    if (getInventoryCheckAccess(actor).fields.stock && switches.ic_fix_stock && await approvalsAvailable(db)) {
+    if (getInventoryCheckAccess(actor).fields.stock && await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(db)) {
       const pending = await pendingApprovalLines(db, actor, simpleSession ? [] : simple.items.filter(item => typeof item.check_session_id === 'string').map(item => Number(item.id)))
       const adjust = getActionTier(actor, 'inventory', 'adjust') === 'full'
       answer = { ...simple, items: simple.items.map(item => pending.has(`${item.check_session_id}:${item.id}`) ? { ...item, check_pending: true } : item),

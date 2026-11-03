@@ -21,6 +21,7 @@ function load(file) {
 }
 const productsRoute = load(path.join(__dirname, '../src/routes/inventoryCheckProducts.ts')).default
 const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.ts')).default
+const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 
 let db, readHook, queries, hits = 0
 function binding() {
@@ -72,11 +73,14 @@ function reset() {
   item('legacy', 910005, 1, 'done', 5, null, ADMIN, '2026-10-05T01:00:00.000Z'); item('legacy', 910006, 1, 'issue', 3, 'Legacy issue', ADMIN, '2026-10-05T02:00:00.000Z')
   readHook = null; queries = []
 }
+// The stored document is P0.3's: { epoch, set_at, set_by, switches: { <name>: 'on' | 'off' | 'shadow:<rate>' } }. `value` is the ic_simple token; { raw } stores a document verbatim.
+const doc = switches => JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches })
 const setSwitch = value => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
-  if (value !== undefined) db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(typeof value === 'string' ? value : JSON.stringify({ epoch: 1, switches: { ic_simple: { state: value.state } } }))
+  if (value !== undefined) db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(value !== null && typeof value === 'object' && 'raw' in value ? value.raw : doc({ ic_simple: value }))
+  resetReadSwitchMemo()
 }
-const ON = { state: 'on' }
+const ON = 'on'
 async function send(route, method, url, body, actor = ADMIN) {
   queries = []
   const tasks = []
@@ -94,7 +98,8 @@ const check = async (name, run) => { await run(); groups++; console.log(`PASS ${
 async function main() {
   await check('OFF in every form (no row, off, shadow, garbage, unreadable table) is the old contract: stats, rankings, issues, dates and customerRanking all work', async () => {
     reset()
-    const forms = [undefined, { state: 'off' }, { state: 'shadow' }, 'not json', '[]', JSON.stringify({ switches: { ic_simple: { state: 'ON' } } }), JSON.stringify({ switches: { ic_simple: true } })]
+    // Only the exact token 'on' is on: no row, 'off', every shadow spelling, the pre-P0.3 object shape, other spellings, garbage and a non-object document are the old path.
+    const forms = [undefined, 'off', 'shadow:0.05', 'shadow', 'shadow:0', 'ON', 'enabled', 1, true, { state: 'on' }, { raw: 'not json' }, { raw: '[]' }, { raw: JSON.stringify({ switches: { ic_simple: 'ON' } }) }, { raw: JSON.stringify({ switches: ['on'] }) }, { raw: JSON.stringify({ switch: { ic_simple: 'on' } }) }]
     let reference
     for (const form of forms) {
       setSwitch(form)
@@ -110,7 +115,7 @@ async function main() {
     assert.equal((await products('sortBy=qty_sold')).status, 200)
     setSwitch(ON)
     hits = 0
-    readHook = { when: 'SELECT value FROM system_flags WHERE key = ?', sticky: true, run: () => { throw new Error('D1_ERROR: simulated switch read failure') } }
+    readHook = { when: 'FROM system_flags WHERE key IN', sticky: true, run: () => { throw new Error('D1_ERROR: simulated switch read failure') } }
     const unreadable = await products('state=issue&pageSize=1')
     assert.ok(hits >= 1, 'the switch read really ran and failed'); readHook = null
     assert.equal(unreadable.status, 200); assert.equal(JSON.stringify(unreadable.body), reference, 'a failing switch read falls back to the old path')
