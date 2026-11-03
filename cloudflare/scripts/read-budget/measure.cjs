@@ -34,7 +34,7 @@ const ROUTE_NOTES = {
   },
   // The GET shapes are measured with these read switches stored (the state the Free plan is meant to run in; the old paths are covered by the slices' own
   // OFF-versus-ON tests); the write shapes are measured with none.
-  switches: { report_atomic: 'on' },
+  switches: { report_atomic: 'on', report_atomic_long: 'on' },
   // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
   switchSensitive: ['/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
     '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],

@@ -87,7 +87,7 @@ function fixtureParams(params = {}) {
 // state is the report_atomic switch for this kernel: the oracle runs 'off' (the legacy reader, today's code) and the projection 'on'.
 function kernel(sql, hooks = {}, state = 'on') {
   cache.clear()
-  sql.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, switches: { report_atomic: state } }))
+  sql.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, switches: { report_atomic: state, report_atomic_long: state } }))
   const metrics = { calls: 0, statements: 0, batches: 0, atomicBatches: 0, rowsReturned: 0, resultBytes: 0, scalarRowsReturned: 0, groups: { sales: [], voidSales: [], items: [], returns: [], returnItems: [], deliveryFees: [] } }
   function record(query, result, one) {
     const rows = one ? (result ? [result] : []) : result

@@ -3,7 +3,7 @@
   "base": "05ef61b73",
   "rule": "MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs \"raised\": { from, reason }.",
   "programme": {"rows_ceiling":100000,"by":"2026-11-30"},
-  "switches": {"report_atomic":"on"},
+  "switches": {"report_atomic":"on","report_atomic_long":"on"},
   "reasons": {"static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check"},
   "exemptions": [
     {"method":"GET","route":"/admin/*","class":"N","reason":"static-or-document"},

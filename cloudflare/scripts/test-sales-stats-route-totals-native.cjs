@@ -126,7 +126,7 @@ function meter(db,raw,config={}){
 
 // The old pair member runs with report_atomic OFF (the legacy reader), the new one with it ON.
 async function call(h,f,url='/stats',user=ADMIN,config={},cache=state()){
-  f.raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run([JSON.stringify({epoch:1,switches:{report_atomic:h===after?'on':'off'}})])
+  f.raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run([JSON.stringify({epoch:1,switches:{report_atomic:h===after?'on':'off',report_atomic_long:h===after?'on':'off'}})])
   h.setUser(user);const measured=meter(f.route,f.raw.db,config)
   const semantic={fullReads:0,totalsReads:0,counts:null,diagnostic:null}
   active={cache,semantic}

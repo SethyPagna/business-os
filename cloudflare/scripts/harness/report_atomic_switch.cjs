@@ -7,7 +7,11 @@ const path = require('node:path')
 const LIB = path.join(__dirname, '..', '..', 'src', 'lib')
 const SIBLINGS = ['reportAtomicSwitch.ts', 'readSwitches.ts', 'analytics.ts', 'planTier.ts']
 
-const switchRowSql = (state) => `INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches','${JSON.stringify({ epoch: 1, switches: { report_atomic: state } })}')`
+const SWITCH_NAMES = ['report_atomic', 'report_atomic_long']
+// A state is one token for both switches, or a { name: token } map for one of them.
+const switchesOf = (state) => (typeof state === 'string' ? Object.fromEntries(SWITCH_NAMES.map((name) => [name, state])) : state)
+const switchRowJson = (state, epoch = 1) => JSON.stringify({ epoch, switches: switchesOf(state) })
+const switchRowSql = (state) => `INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches','${switchRowJson(state)}')`
 
 // Copies the switch modules into tmpDir, with getDb answered from env.__db like the kernel copy; returns the files to compile.
 function installSwitchSiblings(tmpDir) {
@@ -19,4 +23,4 @@ function installSwitchSiblings(tmpDir) {
   return [...SIBLINGS, 'db.ts']
 }
 
-module.exports = { installSwitchSiblings, switchRowSql, SWITCH_SIBLINGS: SIBLINGS }
+module.exports = { installSwitchSiblings, switchRowSql, switchRowJson, SWITCH_NAMES, SWITCH_SIBLINGS: SIBLINGS }

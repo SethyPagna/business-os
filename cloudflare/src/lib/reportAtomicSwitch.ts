@@ -4,10 +4,14 @@ import { readSwitchState } from './readSwitches'
 import { ReportMoneyPrecisionError } from './reportMoneyPrecision'
 import type { Env } from '../index'
 
-// The `report_atomic` switch for the report chain (P1.4). OFF is the exact pre-chain reader, kept in salesAnalytics.ts as
-// the *Legacy functions; ON is the bounded atomic batch. `shadow:<rate>` serves OFF and, on a sampled request, also runs ON
-// and compares the two final results. A shadow never doubles calls on the Free plan, where 50 calls is the whole budget.
+// The report chain's switches (P1.4). `report_atomic` covers the Dashboard and Sales stats totals; `report_atomic_long` covers the full
+// report family (readSalesReportSnapshot: daily, grouped, overview, customer and day reports), so each rolls back on its own.
+// OFF is the exact pre-chain reader, kept in salesAnalytics.ts as the *Legacy functions; ON is the bounded atomic batch.
+// `shadow:<rate>` serves OFF and, on a sampled request, also runs ON and compares the two final results. A shadow never doubles
+// calls on the Free plan, where 50 calls is the whole budget.
 export const REPORT_ATOMIC_SWITCH = 'report_atomic'
+export const REPORT_ATOMIC_LONG_SWITCH = 'report_atomic_long'
+export type ReportAtomicSwitchName = typeof REPORT_ATOMIC_SWITCH | typeof REPORT_ATOMIC_LONG_SWITCH
 export type ReportAtomicMode = 'off' | 'on' | 'shadow'
 
 let sampler: () => number = Math.random
@@ -15,8 +19,8 @@ export function setReportShadowSamplerForTests(next: (() => number) | null): voi
   sampler = next ?? Math.random
 }
 
-export async function reportAtomicMode(env: Env): Promise<ReportAtomicMode> {
-  const reading = await readSwitchState(env, REPORT_ATOMIC_SWITCH)
+export async function reportAtomicMode(env: Env, name: ReportAtomicSwitchName = REPORT_ATOMIC_SWITCH): Promise<ReportAtomicMode> {
+  const reading = await readSwitchState(env, name)
   if (reading.state === 'on') return 'on'
   if (reading.state !== 'shadow' || resolvePlanTier(env) === 'free') return 'off'
   return sampler() < reading.rate ? 'shadow' : 'off'
@@ -61,9 +65,9 @@ async function shadowCompare<T>(env: Env, route: string, served: T, legacy: () =
 
 /** OFF and unsampled shadow run `legacy`; ON runs `atomic`; a sampled shadow serves `legacy` and checks it against `atomic`. */
 export async function routeReportRead<T>(
-  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean } = {},
+  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean; switch?: ReportAtomicSwitchName } = {},
 ): Promise<T> {
-  const mode = await reportAtomicMode(env)
+  const mode = await reportAtomicMode(env, options.switch)
   if (mode === 'on') return atomic()
   const served = await legacy()
   if (mode === 'shadow' && options.compare !== false) await shadowCompare(env, route, served, legacy, atomic)

@@ -17,7 +17,7 @@ const { seedReportExtras } = require('./harness/report_atomic_extras.cjs')
 
 const EMPLOYEE = { username: 'budget_nocost', password: 'budget-password-2' }
 const stable = value => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v))
-const switchRow = state => JSON.stringify({ epoch: 1, switches: { report_atomic: state } })
+const switchRow = state => JSON.stringify({ epoch: 1, switches: { report_atomic: state, report_atomic_long: state } })
 
 function urls(ctx) {
   const T = ctx.today, W = ctx.week, M = ctx.month, Y = ctx.year

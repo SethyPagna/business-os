@@ -3,14 +3,15 @@ import { recordAnalytics } from './analytics'
 import type { Env } from '../index'
 
 // Stand-in for P0.3's lib/readSwitches.ts, which is not on this base. Same names, same stored row, same lazy 15 s memo;
-// the reconciler replaces this file with P0.3's and adds `report_atomic` to its KNOWN_READ_SWITCHES.
+// the reconciler replaces this file with P0.3's and adds `report_atomic` and `report_atomic_long` to its KNOWN_READ_SWITCHES.
 // A name that is absent, unknown or unreadable is OFF, and OFF is the exact pre-optimization code path.
-// Concurrent first readers share one statement, so a cold isolate pays one D1 call however many callers ask.
+// Only the parsed value is kept between requests: a promise begun by one request is never awaited by another, so every caller that
+// finds the memo stale reads the row itself.
 export const READ_SWITCH_KEY = 'read_switches'
 export const DATA_EPOCH_KEY = 'data_epoch'
 export const SWITCH_ROWS_SQL = 'SELECT key, value FROM system_flags WHERE key IN (@switches, @epoch)'
 export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH_KEY }
-export const KNOWN_READ_SWITCHES = ['report_atomic'] as const
+export const KNOWN_READ_SWITCHES = ['report_atomic', 'report_atomic_long'] as const
 export const READ_SWITCH_MEMO_MS = 15_000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1
 
@@ -54,25 +55,20 @@ export function parseReadSwitches(raw: string | null | undefined): { epoch: numb
 
 type Loaded = ReturnType<typeof parseReadSwitches>
 let memo: { at: number; value: Loaded } | null = null
-let inflight: Promise<Loaded> | null = null
 
 async function load(env: Env): Promise<Loaded> {
   if (memo && Date.now() - memo.at >= 0 && Date.now() - memo.at < READ_SWITCH_MEMO_MS) return memo.value
-  if (inflight) return inflight
-  inflight = (async () => {
-    const startedAt = Date.now()
-    let value = parseReadSwitches(null)
-    try {
-      const statement = getDb(env).prepare(SWITCH_ROWS_SQL)
-      const rows = await (statement.allOnce ?? statement.all).call(statement, SWITCH_ROWS_PARAMS) as Array<{ key: string; value: string }>
-      value = parseReadSwitches((rows || []).find((row) => row.key === READ_SWITCH_KEY)?.value)
-    } catch {
-      recordAnalytics(env, { kind: 'switch_read', labels: ['fallback'] })
-    }
-    memo = { at: startedAt, value }
-    return value
-  })().finally(() => { inflight = null })
-  return inflight
+  const startedAt = Date.now()
+  let value = parseReadSwitches(null)
+  try {
+    const statement = getDb(env).prepare(SWITCH_ROWS_SQL)
+    const rows = await (statement.allOnce ?? statement.all).call(statement, SWITCH_ROWS_PARAMS) as Array<{ key: string; value: string }>
+    value = parseReadSwitches((rows || []).find((row) => row.key === READ_SWITCH_KEY)?.value)
+  } catch {
+    recordAnalytics(env, { kind: 'switch_read', labels: ['fallback'] })
+  }
+  memo = { at: startedAt, value }
+  return value
 }
 
 export async function readSwitchState(env: Env, name: string): Promise<ReadSwitchReading> {
@@ -87,5 +83,4 @@ export async function readSwitch(env: Env, name: string): Promise<boolean> {
 
 export function resetReadSwitchMemo(): void {
   memo = null
-  inflight = null
 }

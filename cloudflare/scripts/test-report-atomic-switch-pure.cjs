@@ -1,8 +1,9 @@
 'use strict'
-// P1.4 (6.0.1050): the report_atomic switch, without a database. Proves the stored-row parser fails closed, the 15 s memo and the
-// in-flight share behave to the millisecond, the mode decision (OFF / ON / sampled shadow, never shadow on Free), the router calls
-// exactly the reader it should, and the shadow comparison tells a match, a real mismatch, a concurrent write and a refusal apart
-// without ever putting a business value in the log line or the datapoint. Five mutants of the source must each turn a check red.
+// P1.4 (6.0.1050): the report_atomic and report_atomic_long switches, without a database. Proves the stored-row parser fails closed, the
+// 15 s memo behaves to the millisecond and no promise is shared between callers, the mode decision (OFF / ON / sampled shadow, never
+// shadow on Free) is made per switch name, the router calls exactly the reader it should, and the shadow comparison tells a match, a real
+// mismatch, a concurrent write and a refusal apart without ever putting a business value in the log line or the datapoint.
+// Mutants of the source must each turn a check red.
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), ts = require('typescript')
 const LIB = path.join(__dirname, '..', 'src', 'lib')
 const FILES = ['readSwitches', 'reportAtomicSwitch', 'analytics', 'planTier', 'reportMoneyPrecision', 'moneyPrecision']
@@ -17,7 +18,10 @@ const MUTANTS = {
   'shadow-allowed-on-free': { file: 'reportAtomicSwitch', edit: t => seam(t, " || resolvePlanTier(env) === 'free'", '') },
   'no-write-between': { file: 'reportAtomicSwitch', edit: t => seam(t, 'if (reportCanonicalJson(again) === servedJson) {', 'if (true) {') },
   'sample-boundary-inclusive': { file: 'reportAtomicSwitch', edit: t => seam(t, 'sampler() < reading.rate', 'sampler() <= reading.rate') },
-  'no-inflight-share': { file: 'readSwitches', edit: t => seam(t, '  if (inflight) return inflight\n', '') },
+  'shared-promise-returns': { file: 'readSwitches', edit: t => seam(t, 'async function load(env: Env): Promise<Loaded> {', 'let shared: Promise<Loaded> | null = null\nfunction load(env: Env): Promise<Loaded> {\n  if (shared) return shared\n  shared = loadOnce(env).finally(() => { shared = null })\n  return shared\n}\nasync function loadOnce(env: Env): Promise<Loaded> {') },
+  'long-switch-reads-the-short-name': { file: 'reportAtomicSwitch', edit: t => seam(t, 'await readSwitchState(env, name)', 'await readSwitchState(env, REPORT_ATOMIC_SWITCH)') },
+  'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "['report_atomic', 'report_atomic_long'] as const", "['report_atomic'] as const") },
+  'router-ignores-switch-option': { file: 'reportAtomicSwitch', edit: t => seam(t, 'reportAtomicMode(env, options.switch)', 'reportAtomicMode(env)') },
 }
 
 function load(mutant) {
@@ -58,6 +62,7 @@ function envWith({ row, delay = 0, fail = false, tier = 'paid' } = {}) {
   return { env, points }
 }
 const stored = state => JSON.stringify({ epoch: 3, switches: { report_atomic: state } })
+const storedPair = (short, long) => JSON.stringify({ epoch: 3, switches: { report_atomic: short, report_atomic_long: long } })
 
 async function runAll(mutant) {
   const m = load(mutant)
@@ -80,13 +85,15 @@ async function runAll(mutant) {
 
   check('row parser: any parse error, wrong shape, unknown name or inherited key is OFF', () => {
     const off = { state: 'off', rate: 0 }
-    for (const bad of [null, undefined, '', 'not json', '[]', 'null', '"on"', '1', 'true', '{', '{"switches":[]}', '{"switches":null}', '{"switches":"on"}', '{"epoch":1}', '{"switches":{"report_atomic_x":"on"}}', '{"switches":{"__proto__":{"report_atomic":"on"}}}', '{"switches":{"constructor":{"report_atomic":"on"}}}', '{"switches":{"REPORT_ATOMIC":"on"}}'])
-      assert.deepEqual(switches.parseReadSwitches(bad).switches.report_atomic, off, 'must be OFF: ' + bad)
-    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, switches: { report_atomic: { state: 'on', rate: 0 } } })
+    for (const bad of [null, undefined, '', 'not json', '[]', 'null', '"on"', '1', 'true', '{', '{"switches":[]}', '{"switches":null}', '{"switches":"on"}', '{"epoch":1}', '{"switches":{"report_atomic_x":"on"}}', '{"switches":{"report_atomic_longer":"on"}}', '{"switches":{"REPORT_ATOMIC_LONG":"on"}}', '{"switches":{"__proto__":{"report_atomic_long":"on"}}}', '{"switches":{"__proto__":{"report_atomic":"on"}}}', '{"switches":{"constructor":{"report_atomic":"on"}}}', '{"switches":{"REPORT_ATOMIC":"on"}}'])
+      for (const name of ['report_atomic', 'report_atomic_long']) assert.deepEqual(switches.parseReadSwitches(bad).switches[name], off, `${name} must be OFF: ${bad}`)
+    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, switches: { report_atomic: { state: 'on', rate: 0 }, report_atomic_long: off } }, 'a stored name turns on only itself')
+    assert.deepEqual(switches.parseReadSwitches(storedPair('off', 'shadow:0.05')), { epoch: 3, switches: { report_atomic: off, report_atomic_long: { state: 'shadow', rate: 0.05 } } })
+    assert.deepEqual(switches.parseReadSwitches('{"switches":{"report_atomic_long":"on","report_atomic":"junk"}}').switches, { report_atomic: off, report_atomic_long: { state: 'on', rate: 0 } }, 'one bad token does not spoil the other name')
     assert.equal(switches.parseReadSwitches('{"epoch":1.5,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":-2,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":"3","switches":{"report_atomic":"on"}}').epoch, 0)
-    assert.equal(switches.isKnownReadSwitch('report_atomic'), true); assert.equal(switches.isKnownReadSwitch('toString'), false); assert.equal(switches.isKnownReadSwitch('constructor'), false)
+    assert.equal(switches.isKnownReadSwitch('report_atomic'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_long'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_longer'), false); assert.equal(switches.isKnownReadSwitch('toString'), false); assert.equal(switches.isKnownReadSwitch('constructor'), false)
   })
 
   check('memo: one statement per 15 s window, refetch at exactly 15 s, a clock that moves backwards refetches', async () => {
@@ -101,18 +108,24 @@ async function runAll(mutant) {
     } finally { Date.now = real }
   })
 
-  check('in-flight share: concurrent first readers cost one statement, and one failure is one fallback datapoint', async () => {
+  check('no promise is shared between callers: each cold reader reads for itself, then the memo serves the rest; every failure is one fallback datapoint', async () => {
     freshMemo(); const slow = envWith({ row: stored('on'), delay: 20 })
     const readings = await Promise.all(Array.from({ length: 8 }, () => switches.readSwitchState(slow.env, 'report_atomic')))
-    assert.equal(slow.env.statements, 1, 'eight concurrent callers share one statement'); assert.ok(readings.every(r => r.state === 'on'))
+    assert.equal(slow.env.statements, 8, 'eight concurrent cold callers make eight reads: a Worker request never awaits I/O begun for another request'); assert.ok(readings.every(r => r.state === 'on'))
+    await switches.readSwitchState(slow.env, 'report_atomic_long'); assert.equal(slow.env.statements, 8, 'the finished reads left one memo for both names')
     freshMemo(); const broken = envWith({ fail: true, delay: 5 })
     const failed = await Promise.all(Array.from({ length: 4 }, () => switches.readSwitchState(broken.env, 'report_atomic')))
-    assert.ok(failed.every(r => r.state === 'off' && r.on === false)); assert.equal(broken.env.statements, 1)
-    assert.deepEqual(broken.points.map(p => [p.indexes[0], p.blobs[0]]), [['switch_read', 'fallback']])
+    assert.ok(failed.every(r => r.state === 'off' && r.on === false)); assert.equal(broken.env.statements, 4)
+    assert.deepEqual(broken.points.map(p => [p.indexes[0], p.blobs[0]]), Array.from({ length: 4 }, () => ['switch_read', 'fallback']))
+    assert.equal((await switches.readSwitchState(broken.env, 'report_atomic_long')).state, 'off'); assert.equal(broken.env.statements, 4, 'an unreadable row is remembered as OFF for the memo window')
   })
 
   check('mode: ON is on; shadow is sampled by rate, boundary excluded, and never on Free; anything else is OFF', async () => {
-    const mode = async (row, { tier = 'paid', sample = 0 } = {}) => { freshMemo(); router.setReportShadowSamplerForTests(() => sample); return router.reportAtomicMode(envWith({ row, tier }).env) }
+    const mode = async (row, { tier = 'paid', sample = 0, name } = {}) => { freshMemo(); router.setReportShadowSamplerForTests(() => sample); return router.reportAtomicMode(envWith({ row, tier }).env, name) }
+    assert.equal(await mode(storedPair('on', 'off')), 'on', 'no name asked means report_atomic'); assert.equal(await mode(storedPair('on', 'off'), { name: 'report_atomic_long' }), 'off', 'report_atomic does not turn the long switch on')
+    assert.equal(await mode(storedPair('off', 'on'), { name: 'report_atomic_long' }), 'on'); assert.equal(await mode(storedPair('off', 'on')), 'off', 'the long switch does not turn report_atomic on')
+    assert.equal(await mode(storedPair('on', 'shadow:0.1'), { name: 'report_atomic_long', sample: 0 }), 'shadow'); assert.equal(await mode(storedPair('shadow:0.1', 'on'), { sample: 0 }), 'shadow')
+    assert.equal(await mode(storedPair('off', 'shadow:0.1'), { name: 'report_atomic_long', sample: 0, tier: 'free' }), 'off', 'the long switch never shadows on Free either')
     assert.equal(await mode(stored('on')), 'on'); assert.equal(await mode(stored('on'), { tier: 'free' }), 'on', 'ON is the owner decision, tier does not change it')
     assert.equal(await mode(stored('off')), 'off'); assert.equal(await mode(undefined), 'off'); assert.equal(await mode('garbage'), 'off')
     assert.equal(await mode(stored('shadow:0.1'), { sample: 0 }), 'shadow'); assert.equal(await mode(stored('shadow:0.1'), { sample: 0.0999 }), 'shadow')
@@ -124,12 +137,12 @@ async function runAll(mutant) {
   })
 
   const SECRET = '8675309.42'
-  const routeWith = async (row, { sample = 0, tier = 'paid', legacy, atomic, compare } = {}) => {
+  const routeWith = async (row, { sample = 0, tier = 'paid', legacy, atomic, compare, name } = {}) => {
     freshMemo(); router.setReportShadowSamplerForTests(() => sample)
     const { env, points } = envWith({ row, tier }); const calls = []
     const logged = []; const realError = console.error; console.error = (...args) => { logged.push(args.join(' ')) }
     try {
-      const result = await router.routeReportRead(env, 'unit', async () => { calls.push('legacy'); return legacy ? legacy(calls) : { total: 1 } }, async () => { calls.push('atomic'); return atomic ? atomic(calls) : { total: 1 } }, compare === undefined ? {} : { compare })
+      const result = await router.routeReportRead(env, 'unit', async () => { calls.push('legacy'); return legacy ? legacy(calls) : { total: 1 } }, async () => { calls.push('atomic'); return atomic ? atomic(calls) : { total: 1 } }, { ...(compare === undefined ? {} : { compare }), ...(name === undefined ? {} : { switch: name }) })
       return { result, calls, points, logged }
     } catch (error) { return { error, calls, points, logged } } finally { console.error = realError; router.setReportShadowSamplerForTests(null) }
   }
@@ -140,6 +153,12 @@ async function runAll(mutant) {
     assert.deepEqual((await routeWith(stored('shadow:0.1'), { sample: 0.5 })).calls, ['legacy'])
     const noCompare = await routeWith(stored('shadow:0.1'), { sample: 0, compare: false }); assert.deepEqual(noCompare.calls, ['legacy']); assert.equal(noCompare.points.length, 0)
     const freeShadow = await routeWith(stored('shadow:0.1'), { sample: 0, tier: 'free' }); assert.deepEqual(freeShadow.calls, ['legacy']); assert.equal(freeShadow.points.length, 0)
+    // Two switches, two decisions: the route reads the name it was given, and the default name is report_atomic.
+    assert.deepEqual((await routeWith(storedPair('on', 'off'), { name: 'report_atomic_long' })).calls, ['legacy'], 'report_atomic ON does not move a long-report route')
+    assert.deepEqual((await routeWith(storedPair('off', 'on'), { name: 'report_atomic_long' })).calls, ['atomic'])
+    assert.deepEqual((await routeWith(storedPair('off', 'on'))).calls, ['legacy'], 'report_atomic_long ON does not move a totals route')
+    assert.deepEqual((await routeWith(storedPair('on', 'off'))).calls, ['atomic'])
+    const longShadow = await routeWith(storedPair('on', 'shadow:0.1'), { name: 'report_atomic_long', sample: 0 }); assert.deepEqual(longShadow.calls, ['legacy', 'atomic']); assert.deepEqual(longShadow.points.map(p => p.blobs), [['unit', 'match']])
   })
 
   check('shadow: a sampled request serves the old result and records match / mismatch / write_between / refused / error', async () => {

@@ -167,17 +167,17 @@ async function main() {
     setup.push({ label, before, queries: queries.map(query => ({ sql: query.sql, bindings: (query.values ?? []).map(value => typeof value === 'string' ? { type: 'string', bytes: Buffer.byteLength(value), sha256: sha(value) } : value) })), result, after }); life('owned-write-after', { label })
   }
   await permit('branch', [{ sql: "INSERT OR IGNORE INTO branches(id,name,is_default,is_active) VALUES(1,'Private legacy fixture',1,1)" }])
-  await permit('read-switch', [{ sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on' } })] }])
+  await permit('read-switch', [{ sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on', report_atomic_long: 'on' } })] }])
   // The oracle (public-snapshot) is the old reader: report_atomic OFF runs the base two-pass copy. Every other selector runs with it ON.
   let switchState = 'on'
   const invoke = async (input, label) => {
     const want = input.mode === 'public-snapshot' ? 'off' : 'on'
-    if (want !== switchState) { await permit('read-switch-' + want, [{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want } })] }]); switchState = want }
+    if (want !== switchState) { await permit('read-switch-' + want, [{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want, report_atomic_long: want } })] }]); switchState = want }
     life('request-before', { label, input }); const response = await mf.dispatchFetch('http://fixture.test/run', { method: 'POST', body: JSON.stringify(input) }), text = await response.text(), value = JSON.parse(text)
     const record = { input, transport_status: response.status, response_utf8_bytes: Buffer.byteLength(text), metrics: metrics(value.calls ?? []), external_writer_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage === 'write')), external_writer_witness_metrics: metrics((value.writer_calls ?? []).filter(call => call.stage !== 'write')), value }
     sequence++; observationHashes.push({ sequence, label, input, response_status: response.status, body_sha256: sha(text), app: record.metrics, external_writer: record.external_writer_metrics, external_witnesses: record.external_writer_witness_metrics }); life('request-after', { label, transport_status: response.status, kind: value.kind, marker: value.error?.marker ?? null })
     assert.equal(response.status, 200, text); assert.equal(value.ok, true, text)
-    // Every public reader pays the report_atomic switch read once on a cold isolate (in-flight readers share it); the direct atomic entry pays none.
+    // Every public reader pays the report switch read once on a cold isolate (one reader per probe, so nothing is shared); the direct atomic entry pays none.
     assert.equal(value.switch_reads.length, input.mode === 'atomic-full-snapshot' ? 0 : 1, label + ': switch reads')
     return record
   }

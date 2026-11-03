@@ -195,7 +195,7 @@ async function main() {
   const item = (id, parent, name, quantity, total, cost) => ({ sql: 'INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,total_usd,cost_price_usd) VALUES(?,?,?, ?,?,?,?)', values: [id, parent, parent, name, quantity, total, cost] })
   lastStage = 'owned-fixture'
   await setup([
-    { sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on' } })] },
+    { sql: "INSERT INTO system_flags(key,value) VALUES('read_switches',?)", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: 'on', report_atomic_long: 'on' } })] },
     sale(10, '2026-09-10', 1, 10), sale(20, '2026-09-10', 1, 7, 'cancelled'), sale(30, '2026-09-09', 1, 6), sale(40, '2026-09-10', 2, 50), sale(50, '2026-09-11', 1, 30), sale(60, '2026-09-10', 3, 50),
     item(100, 10, 'Current recorded item', 2, 10, 2), item(200, 20, 'Cancelled item', 1, 7, 1), item(300, 30, 'Previous recorded item', 1, 6, 2), item(0, 40, 'Excluded invalid zero', 1, 0, 0), item(-7, 40, 'Excluded invalid negative', 1, 0, 0), item(400, 40, 'Other branch item', 1, 50, 10), item(500, 50, 'Other date item', 1, 30, 10), item(600, 60, 'Nonempty wrong branch', 1, 50, 10),
     { sql: "INSERT INTO returns(id,sale_id,created_at,total_refund_usd,status,return_scope) VALUES(1,10,'2026-09-20 01:00:00',2,'completed','customer')" },
@@ -207,11 +207,11 @@ async function main() {
   async function invoke(requested, label, filters = current, fault) {
     lastStage = label
     const mode = requested === 'full-on' ? 'full' : requested, want = requested === 'full' ? 'off' : 'on'
-    if (want !== switchState) { await setup([{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want } })] }]); switchState = want }
+    if (want !== switchState) { await setup([{ sql: "UPDATE system_flags SET value=? WHERE key='read_switches'", values: [JSON.stringify({ epoch: 1, switches: { report_atomic: want, report_atomic_long: want } })] }]); switchState = want }
     const response = await mf.dispatchFetch('http://dated.test/probe', { method: 'POST', body: JSON.stringify({ mode, filters, ...(fault ? { fault } : {}) }) }), text = await response.text()
     assert.equal(response.status, 200, text)
     const value = JSON.parse(text); assert.equal(value.ok, true, text)
-    // The report_atomic switch is read once per cold isolate by the public readers, and not at all by the direct atomic entry.
+    // The report switch row is read once per cold isolate by the public readers, and not at all by the direct atomic entry.
     assert.equal(metrics(value).switch_calls, ['context', 'default', 'explicit-false'].includes(mode) ? 0 : 1, label + ': switch reads')
     cases.push({ label, mode, fault: fault ?? null, filters: value.filters, metrics: metrics(value), kind: value.kind, error: value.error ?? null, response_sha256: sha(text) })
     return value

@@ -1956,7 +1956,7 @@ async function readSalesReportSnapshotLegacy(
 // Imported on demand: dozens of pure harnesses transpile this file alone and have no such sibling. Without the module every
 // reader runs the legacy path, which is what those harnesses were written against; in the Worker the import always succeeds.
 async function routeReportRead<T>(
-  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean } = {},
+  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean; switch?: 'report_atomic' | 'report_atomic_long' } = {},
 ): Promise<T> {
   let router: typeof import('./reportAtomicSwitch')
   try { router = await import('./reportAtomicSwitch') } catch { return legacy() }
@@ -1969,7 +1969,7 @@ function reportPlainFilters(f: SalesFilters): boolean {
   return Object.getOwnPropertyNames(f).every((key) => Object.hasOwn(Object.getOwnPropertyDescriptor(f, key) ?? {}, 'value'))
 }
 
-/** The full report family behind report_atomic: one bounded batch for an undated window or a plain dated Dashboard-style window
+/** The full report family behind report_atomic_long: one bounded batch for an undated window or a plain dated Dashboard-style window
  * (no scope, no courier fees, no export cap); every other request keeps the two scalar passes and their compare. */
 async function readSalesReportSnapshotAtomic(
   env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
@@ -1992,7 +1992,8 @@ export async function readSalesReportSnapshot(
 ): Promise<SalesReportSnapshot> {
   return routeReportRead(env, 'snapshot',
     () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
-    () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options))
+    () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options),
+    { switch: 'report_atomic_long' })
 }
 
 export interface SalesReportTotalsResult {
