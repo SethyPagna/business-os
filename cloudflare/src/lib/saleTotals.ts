@@ -34,6 +34,19 @@ export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
+/**
+ * DISPLAYED money at the nearest cent, half away from zero, read from the exact decimal (owner, 24 Sep 2026): 10.075 is 10.08 -- never the
+ * float answer 10.07 -- and a sub-cent negative is 0, never "-0.00". Telegram prints every dollar figure through this, so a message reads
+ * what the receipt (frontend roundDisplayMoney) and the reports read. A selling price is not displayed money (it rounds UP) and no
+ * arithmetic goes through this.
+ */
+export function displayMoney2(value: unknown): number {
+  const n = Number(value) || 0
+  let rounded: number
+  try { rounded = roundMoney2(n) } catch { rounded = Math.round(n * 100) / 100 }
+  return rounded === 0 ? 0 : rounded
+}
+
 export type CanonicalSaleItemMoneyInput = {
   sellingPriceInputUsd?: unknown
   appliedPriceUsd?: unknown

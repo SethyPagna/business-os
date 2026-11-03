@@ -94,4 +94,22 @@ runTest('AppContext no longer runs displayed money or the report currency fold t
   assert.equal(toFiniteNumber(2.161) * 4100, 2.161 * 4100, 'the fold keeps the cents it was given')
 })
 
+runTest('the no-provider fallback in AppContextCore reads the exact decimal too: 10.075 is $10.08, equal to roundDisplayMoney on every tie', () => {
+  const core = fs.readFileSync(new URL('../src/app/AppContextCore.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const start = core.indexOf('function normalizePriceValue(value: unknown): number {')
+  const end = core.indexOf('\nexport function isBrokenLocalizedString')
+  assert.ok(start > 0 && end > start, 'the fallback rounder is found in AppContextCore.tsx')
+  const js = transformSync(`${core.slice(start, end)}\nmodule.exports = normalizePriceValue`, { loader: 'ts', format: 'cjs' }).code
+  const holder = { exports: null as unknown as (value: unknown) => number }
+  new Function('module', js)(holder)
+  const fallback = holder.exports
+  for (const value of [10.075, 2.155, 1.005, 23.775, 1.115, 0.005, 4.7475, 8.345, 0.285, 1.255, 7.835, 2.161, 2.165, 2.1649, -2.165, -0.004, 0, 3, 250_000_000_000.126]) {
+    assert.equal(fallback(value), roundDisplayMoney(value), `fallback(${value})`)
+  }
+  assert.equal(fallback(10.075), 10.08, 'the float rounding this replaced read 10.07')
+  assert.equal(fallback('abc'), 0)
+  assert.ok(!Object.is(fallback(-0.004), -0), 'never -0')
+  for (let cents = 0; cents <= 2000; cents += 1) assert.equal(fallback(cents / 100 + 0.005), roundDisplayMoney(cents / 100 + 0.005), `grid ${cents}`)
+})
+
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
