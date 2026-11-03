@@ -236,12 +236,11 @@ for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashb
   test(`${role.label}: the Dashboard loads with the payload the Worker sends this role`, async ({ browser }, testInfo) => {
     test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
-    const { page, access } = session
-    // APP BUG, kept as a case: the Worker removes stock_value_usd (and the other cost-shaped keys) from /api/dashboard for a role without
-    // product_cost_view (compat.ts:34-35 mounts acquisitionCostResponses; acquisitionCostAccess.ts:136), and the Dashboard refuses a payload
-    // without it (Dashboard.tsx:727-735 isDashboardSummaryPayload, thrown at :990). The seeded Manager holds dashboard and not cost view, so
-    // it is shown "Dashboard summary unavailable". Confirmed in the browser, desktop-chromium, 3 Nov.
-    knownDefect(!seesCost(access), 'Dashboard.tsx:727-735/990 requires stock_value_usd, which compat.ts:34-35 + acquisitionCostAccess.ts:136 remove for a role without product_cost_view')
+    const { page } = session
+    // FIXED (PERM-UI, 3 Nov): the Worker removes stock_value_usd (and the other cost-shaped keys) from /api/dashboard for a role without
+    // product_cost_view (compat.ts mounts acquisitionCostResponses; acquisitionCostAccess.ts), and the Dashboard used to refuse a payload
+    // without it (isDashboardSummaryPayload), so the seeded Manager, who holds dashboard and not cost view, was shown "Dashboard summary
+    // unavailable". The validator no longer requires a cost-derived key and the stock-value card is left out without the grant.
     try {
       const slot = await open(page, '/', 'dashboard')
       // The startup read fills the cards a moment after the shell settles.

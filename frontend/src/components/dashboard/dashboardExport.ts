@@ -141,7 +141,8 @@ function buildDashboardKpiRows(ctx: DashboardExportContext): Row[] {
     { Section: 'KPI', Metric: 'Tax (USD)', Value: priceCsv(metricTotals.tax_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Delivery (USD)', Value: priceCsv(metricTotals.delivery_usd), Period: ctx.rangeLabel },
     { Section: 'KPI', Metric: 'Products', Value: ctx.summary?.product_count || 0, Period: 'current inventory' },
-    { Section: 'KPI', Metric: 'Stock Value (USD)', Value: priceCsv(ctx.summary?.stock_value_usd), Period: 'current inventory' },
+    // Cost-derived like COGS: the Worker omits stock_value_usd without the cost grant, so the row is left out rather than written as 0.00.
+    ...(typeof ctx.summary?.stock_value_usd === 'number' ? [{ Section: 'KPI', Metric: 'Stock Value (USD)', Value: priceCsv(ctx.summary.stock_value_usd), Period: 'current inventory' }] : []),
     ...(hasCost ? [{ Section: 'KPI', Metric: 'COGS (USD)', Value: priceCsv(metricTotals.cost_usd), Period: ctx.rangeLabel }] : []),
     // L4: a cost viewer's profit arrives on goods alone (revenue - cost), and is named so.
     ...(hasProfit ? [{ Section: 'KPI', Metric: (metricTotals as Record<string, unknown>).profit_excludes_delivery === true ? 'Est. Profit excl. delivery (USD)' : 'Est. Profit (USD)', Value: priceCsv(metricTotals.profit_usd), Period: ctx.rangeLabel }] : []),

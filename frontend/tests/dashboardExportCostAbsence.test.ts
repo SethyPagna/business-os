@@ -89,4 +89,13 @@ await test('presence decides, not value: a cost reader with a genuinely zero win
   assert.equal(kpi.find((row) => row.Metric === 'COGS (USD)')?.Value, '0.00')
 })
 
+await test('the stock value is cost-derived too: the Worker omits it without the cost grant, so the KPI file leaves the row out instead of writing 0.00', async () => {
+  const withStock = (await run('exportDashboardKpis', costReader)).xlsx!['dashboard-kpi-T.xlsx']
+  assert.equal(withStock.find((row) => row.Metric === 'Stock Value (USD)')?.Value, '10.00', 'control: a reader whose summary carries stock_value_usd gets the row')
+  const { stock_value_usd: _omitted, ...summaryWithoutCost } = (plainReader as { summary: Record<string, unknown> }).summary
+  const without = (await run('exportDashboardKpis', { ...plainReader, summary: summaryWithoutCost })).xlsx!['dashboard-kpi-T.xlsx']
+  assert.equal(without.some((row) => row.Metric === 'Stock Value (USD)'), false)
+  assert.ok(without.some((row) => row.Metric === 'Products'), 'the rest of the summary is still exported')
+})
+
 console.log(`${passed} dashboard export cost-absence tests passed`)
