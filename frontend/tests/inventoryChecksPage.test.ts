@@ -46,7 +46,7 @@ let submitFailure: 'none' | 'known' | 'unknown' | 'stale' = 'none'
 // Counts approval (ic_fix_stock): what the server says about the open submission, what this viewer may do, and the scripted answers to a decision.
 let sessionApproval: InventoryCheckApproval | null = null
 let capabilities: { fixStock?: boolean; approveCounts?: boolean } | null = null
-const decisions: Array<{ scope: unknown; input: { decision: string; requestId: string; confirmDrift?: boolean } }> = []
+const decisions: Array<{ scope: unknown; input: { decision: string; requestId: string } }> = []
 let decideScript: Array<InventoryCheckApprovalDecision | Error> = []
 const notices: Array<[string, string]> = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
@@ -99,7 +99,7 @@ const doubles = {
     },
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: [selected], total: 1, page: 1, pageSize: 20 } },
     readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation], ...(sessionApproval ? { approval: sessionApproval } : {}) }),
-    decideInventoryCheckApproval: async (scope: unknown, input: { decision: string; requestId: string; confirmDrift?: boolean }) => {
+    decideInventoryCheckApproval: async (scope: unknown, input: { decision: string; requestId: string }) => {
       decisions.push({ scope, input })
       const next = decideScript.shift()
       if (!next) throw new Error('no scripted answer')
@@ -674,30 +674,23 @@ try {
   assert.deepEqual(decisions.slice(decidedBefore).map(call => call.input.decision), ['approve', 'approve'])
   assert.equal(decisions[decidedBefore].input.requestId, decisions[decidedBefore + 1].input.requestId, 'every repeat of one approval carries the same request id')
   assert.match(decisions[decidedBefore].input.requestId, /^inventory_check_approval_/)
-  assert.ok(decisions.slice(decidedBefore).every(call => call.input.confirmDrift === undefined), 'nothing is confirmed that was not asked')
   assert.deepEqual(notices.at(-1), ['Counts approved. Stock updated.', 'success'])
   assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'approved', 'the panel shows the decision after the reload')
   assert.equal(approvalAction('approve'), undefined, 'a decided count has no actions')
 
-  // Stock moved since the count: asked once, Cancel stops with nothing changed, Apply anyway repeats with confirmDrift
+  // Stock moved since the count is no question: the count is applied as a variance. There is no "Apply anyway" any more.
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
-  const drift = Object.assign(new Error('stock moved'), { status: 409, code: 'inventory_check_stock_drifted', outcome: 'not_dispatched' })
-  const driftBefore = decisions.length
-  decideScript = [drift]
+  assert.ok(!approving.text().includes('Apply anyway') && !approving.text().includes('Stock changed since the count'), 'no drift dialog is left')
+  // An approval this approver already started continues under the request id that started it, and cannot be rejected; another approver's claim leaves no buttons
+  sessionApproval = { ...pendingApproval, applying: true, applying_request_id: 'inventory_check_approval_claimed01' }; await approving.click(approving.button('Leave session')); await openSession(approving)
+  assert.equal(approvalAction('reject'), undefined, 'a claimed approval has no Reject')
+  const claimedBefore = decisions.length
+  decideScript = [answerOf(2, 0)]
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
-  assert.ok(approving.text().includes('Stock changed since the count'), 'moved stock is put to the approver')
-  await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL' || node.textContent.includes('Some products have different stock'), 'drift dialog')))
-  assert.equal(decisions.length, driftBefore + 1, 'declining sends nothing more')
-  assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'pending')
-  decideScript = [drift, answerOf(2, 0)]
-  await approving.click(approvalAction('approve'))
-  assert.ok(approving.text().includes('Approve these counts?'), 'after declining, approving again is a fresh decision with its own review')
-  await confirmInDialog(approving, 'Approve')
-  await confirmInDialog(approving, 'Apply anyway')
-  const confirmed = decisions.slice(driftBefore + 1)
-  assert.ok(confirmed.length >= 2 && confirmed.at(-1)?.input.confirmDrift === true, 'Apply anyway repeats the same request with confirmDrift')
-  assert.equal(confirmed.at(-1)?.input.requestId, confirmed[0].input.requestId)
-  assert.notEqual(confirmed[0].input.requestId, decisions[driftBefore].input.requestId, 'a declined decision is dropped, not resumed')
+  assert.equal(decisions[claimedBefore].input.requestId, 'inventory_check_approval_claimed01', 'the repeat carries the claimed id, not a new one')
+  sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
+  assert.equal(approvalAction('approve'), undefined, 'another approver cannot continue'); assert.equal(approvalAction('reject'), undefined)
+  assert.ok(approving.text().includes('Being applied by another approver'))
 
   // An answer that never came keeps the request id: the next Approve repeats it without a second review
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)

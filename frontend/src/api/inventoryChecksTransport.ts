@@ -20,6 +20,12 @@ export type InventoryCheckApproval = {
   decided_by_name?: string | null
   /** Session detail only. */
   applied_lines?: Record<string, InventoryCheckApprovalLine>
+  /** Stock may already have moved for this approval: it cannot be rejected, and only the approver who started it can finish it. */
+  applying?: boolean
+  /** Sent to that approver only: the request id every repeat of the approval must carry. */
+  applying_request_id?: string
+  /** Session detail only: per product, the stock the counter saw. The count is measured against it. */
+  baselines?: Record<string, number>
 }
 /** The answer to one request of a decision: approving repeats the same request until done. */
 export type InventoryCheckApprovalDecision = {
@@ -82,7 +88,7 @@ export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'>
   current_quantity?: number | null
   stock_changed?: boolean
   /** The damaged units now (a Set excludes them); sent with the stock field. */
-  current_stock?: { recorded_damaged_quantity?: number | null; consistent?: boolean }
+  current_stock?: { recorded_ordinary_quantity?: number | null; recorded_damaged_quantity?: number | null; consistent?: boolean }
 }
 export type InventoryCheckReceipt = {
   requestId: string
@@ -173,7 +179,7 @@ export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, inpu
 }
 
 /** Approve or reject the open session's submitted count. Approving is repeated with the SAME requestId until the answer says done. */
-export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject'; requestId: string; confirmDrift?: boolean }): Promise<InventoryCheckApprovalDecision> {
+export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject'; requestId: string }): Promise<InventoryCheckApprovalDecision> {
   if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
   return write(scope, `${sessionPath(scope.context.sessionId)}/approval`, 'POST', input)
 }

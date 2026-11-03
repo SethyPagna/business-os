@@ -1,6 +1,7 @@
 'use strict'
-// Count approvals (lane 6.0.1045, ic_fix_stock): a submitted count that differs from stock waits for an administrator; approving sets stock to the
-// counted figure minus damaged units, rejecting changes nothing. Real routes, real cookie auth, the real stored switch rows, real SQLite; the stock writer
+// Count approvals (lane 6.0.1045, ic_fix_stock): a submitted count that differs from stock waits for an administrator; approving applies the VARIANCE the
+// count found (counted minus the stock the counter saw) to the stock of the moment, never an absolute figure; rejecting changes nothing. Applying is claimed
+// before any stock is written, so a lost answer is repeated exactly and an approval that may have moved stock can no longer be rejected. Real routes, real cookie auth, the real stored switch rows, real SQLite; the stock writer
 // (the Set sessions' commit) is replaced by a faithful double so the approval's own rules are what is under test (the real writer is exercised in
 // scripts/read-budget/test-inventory-check-approvals-world.cjs on the real Worker).
 //
@@ -23,23 +24,40 @@ function load(file) {
   return module.exports
 }
 // The stock writer double: the Set sessions' commit. It enforces the line cap, refuses what the test says to refuse, and applies a Set to the tables the stock reader reads.
-const writer = { cap: 24, fail: new Set(), calls: [], afterWrite: null }
+const writer = { cap: 24, fail: new Set(), calls: [], replays: 0, afterWrite: null }
 cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { runStockInCommit: async (c, lines) => {
   assert.ok(c.get('user'), 'the approver is the acting user')
   const results = []
   for (const [index, line] of lines.entries()) {
     if (index >= writer.cap) { results.push({ ok: false, key: line.key, error: 'deferred', code: 'deferred' }); continue }
-    const body = line.body
-    assert.equal(line.wire, 'adjust'); assert.equal(body.type, 'set'); assert.match(body.client_request_id, /^[A-Za-z0-9_-]{8,120}$/); assert.ok(body.reason.length > 0 && body.reason.length < 200)
-    writer.calls.push(JSON.parse(JSON.stringify(body)))
+    const body = line.body, actor = c.get('user').id
+    assert.equal(line.wire, 'adjust'); assert.match(body.client_request_id, /^[A-Za-z0-9_-]{8,120}$/); assert.ok(body.reason.length > 0 && body.reason.length < 200)
+    // The stock writers' receipt: per approver and request id, the same request is replayed, a different one under the same id is refused.
+    const canonical = JSON.stringify(body)
+    const receipt = db.prepare('SELECT request_json FROM stock_mutation_receipts WHERE actor_id=? AND request_id=?').get(actor, body.client_request_id)
+    if (receipt) {
+      if (receipt.request_json !== canonical) { results.push({ ok: false, key: line.key, error: 'used for different data', code: 'idempotency_conflict' }); continue }
+      writer.replays++; results.push({ ok: true, key: line.key, success: true, replayed: true }); continue
+    }
     if (writer.fail.has(body.productId)) { results.push({ ok: false, key: line.key, error: 'Stock changed while saving.', code: 'stock_changed' }); continue }
+    writer.calls.push(JSON.parse(JSON.stringify(body)))
     const ordinary = db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?').get(body.productId, body.branchId).quantity
-    const delta = body.quantity - ordinary
-    if (delta > 0) assert.equal(body.setScope, 'branch', 'raising uses the lot-level Set writer'); else assert.equal(body.setScope, undefined, 'lowering uses the stock-session Set conversion')
-    if (body.setScope) { assert.equal(body.expectedBranchQuantity, ordinary); assert.equal(body.batchId, db.prepare('SELECT id FROM product_batches WHERE variant_product_id=? ORDER BY received_at DESC,id DESC').get(body.productId).id) }
+    let delta
+    if (body.type === 'remove') {
+      assert.equal(body.setScope, undefined); assert.ok(body.quantity > 0)
+      if (body.quantity > ordinary) { results.push({ ok: false, key: line.key, error: 'Insufficient stock', code: 'insufficient_stock' }); continue }
+      delta = -body.quantity
+    } else {
+      assert.equal(body.type, 'set'); assert.equal(body.setScope, 'branch', 'raising uses the lot-level Set writer'); assert.equal(typeof body.batchId, 'number')
+      if (body.expectedBranchQuantity !== ordinary) { results.push({ ok: false, key: line.key, error: 'Stock changed since this received date was loaded.', code: 'stock_conflict' }); continue }
+      delta = body.quantity - ordinary; assert.ok(delta > 0)
+    }
+    const lot = body.type === 'set' ? body.batchId : db.prepare('SELECT batch_id FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=?) AND branch_id=? AND quantity>0 ORDER BY batch_id').get(body.productId, body.branchId).batch_id
     db.prepare('UPDATE branch_stock SET quantity=quantity+? WHERE product_id=? AND branch_id=?').run(delta, body.productId, body.branchId)
-    db.prepare('UPDATE branch_batch_stock SET quantity=quantity+? WHERE batch_id=? AND branch_id=?').run(delta, body.productId, body.branchId)
+    if (delta > 0) db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+?').run(lot, body.branchId, delta, delta)
+    else db.prepare('UPDATE branch_batch_stock SET quantity=quantity+? WHERE batch_id=? AND branch_id=?').run(delta, lot, body.branchId)
     db.prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?').run(delta, body.productId)
+    db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at) VALUES(?,?,'adjust',?,1,200,'{}',CURRENT_TIMESTAMP)").run(actor, body.client_request_id, canonical)
     results.push({ ok: true, key: line.key, success: true })
   }
   writer.afterWrite?.()
@@ -56,7 +74,7 @@ function binding() {
     }, async run() { const result = db.prepare(sql).run(...this.values); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } } }
   }
   return { prepare, async batch(statements) {
-    if (failApprovalRecord && statements.some(statement => /UPDATE inventory_check_approvals/.test(statement.sql))) throw new Error('D1 unavailable')
+    if (failApprovalRecord && statements.some(statement => /UPDATE inventory_check_approvals SET (applied_json|status)/.test(statement.sql))) throw new Error('D1 unavailable')
     db.exec('BEGIN')
     try { const result = []; for (const statement of statements) result.push(await statement.all()); db.exec('COMMIT'); return result }
     catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error }
@@ -89,7 +107,7 @@ function reset() {
   }
   // 910003 carries two damaged units: its stock now is 5 ordinary + 2 damaged = 7 (damaged units are not part of Set).
   db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910003,1,2)").run()
-  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.afterWrite = null; failApprovalRecord = false
+  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false
 }
 const setSwitches = (simple, fix) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
@@ -111,6 +129,8 @@ const decide = (id, body, actor = ADMIN) => sessions('POST', `/sessions/${id}/ap
 const stockRows = () => ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots', 'inventory_movements', 'audit_logs'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
 const approvalRow = () => ({ ...db.prepare('SELECT * FROM inventory_check_approvals').get() })
 const ordinary = id => db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=1').get(id).quantity
+/** Stock moves outside the count (a sale or a correction): every ledger together, as the real writers keep them. */
+const moveStock = (id, quantity) => { for (const sql of [`UPDATE branch_stock SET quantity=${quantity} WHERE product_id=${id} AND branch_id=1`, `UPDATE branch_batch_stock SET quantity=${quantity} WHERE batch_id=${id} AND branch_id=1`, `UPDATE products SET stock_quantity=${quantity} WHERE id=${id}`]) db.exec(sql) }
 const line = (productId, countedQuantity, extra = {}) => ({ productId, countedQuantity, ...extra })
 let groups = 0
 const check = async (name, run) => { await run(); groups++; console.log(`PASS ${name}`) }
@@ -118,6 +138,25 @@ const check = async (name, run) => { await run(); groups++; console.log(`PASS ${
 const standard = () => submit([line(910001, 5, { checked: true }), line(910002, 3), line(910003, 12), line(910004, 9)])
 
 async function main() {
+  // First, while this process has not yet seen the table: only a positive probe is remembered, a miss is asked again.
+  await check('ic_fix_stock ON while migration 0286 is not applied answers exactly like OFF, never 503: counts are recorded without an approval, nothing is tagged, the decision route does not exist', async () => {
+    reset(); setSwitches('on', 'on'); db.exec('DROP TABLE inventory_check_approvals')
+    const made = await submit([line(910002, 3)])
+    assert.equal(made.status, 201, JSON.stringify(made.body)); assert.equal('approval' in made.body, false)
+    const id = made.body.item.id
+    const detail = await sessions('GET', `/sessions/${id}`)
+    assert.equal(detail.status, 200); assert.equal('approval' in detail.body, false)
+    const listed = await sessions('GET', '/sessions?page=1&pageSize=20')
+    assert.equal(listed.status, 200); assert.equal(listed.body.items.some(item => 'approval' in item), false)
+    const rows = await products('branchId=1&pageSize=12')
+    assert.equal(rows.status, 200); assert.equal('capabilities' in rows.body, false); assert.equal(rows.body.items.some(item => 'check_pending' in item), false)
+    const gone = await decide(id, {})
+    assert.equal(gone.status, 404); assert.equal(gone.body.code, 'inventory_check_not_available')
+    reset(); setSwitches('on', 'on')
+    const applied = await submit([line(910002, 3)])
+    assert.equal(applied.body.approval.status, 'pending', 'once the migration is applied the same switch takes effect without a restart')
+  })
+
   await check('OFF (ic_fix_stock not on): no approval is created, none is shown, and the decision route does not exist', async () => {
     for (const form of [[undefined, undefined], ['on', undefined], ['on', 'off'], ['on', 'shadow']]) {
       reset(); setSwitches(...form)
@@ -212,7 +251,7 @@ async function main() {
     const none = await decide(other.body.item.id, {})
     assert.equal(none.status, 404); assert.equal(none.body.code, 'inventory_check_approval_not_found')
     const crafted = [['no decision', { decision: undefined }], ['other decision', { decision: 'maybe' }], ['no request id', { requestId: 'short' }], ['note not text', { note: 5 }],
-      ['long note', { note: 'x'.repeat(501) }], ['confirmDrift not boolean', { confirmDrift: 'yes' }]]
+      ['long note', { note: 'x'.repeat(501) }]]
     for (const [name, over] of crafted) assert.equal((await decide(id, over)).status, 400, name)
     assert.equal((await sessions('POST', `/sessions/${id}/approval`, 'nope')).status, 400)
     assert.deepEqual(approvalRow(), approval); assert.equal(writer.calls.length, 0)
@@ -228,7 +267,11 @@ async function main() {
     assert.equal(ordinary(910002), 3); assert.equal(ordinary(910003), 5, 'the next line has not been touched')
     assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE product_id=910002').get().state, 'done', 'the applied line is resolved')
     assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE product_id=910003').get().state, 'issue')
-    assert.equal((await products('branchId=1&pageSize=12')).body.items.find(item => item.id === 910003).check_pending, true, 'still pending while lines wait')
+    const midway = (await products('branchId=1&pageSize=12')).body.items
+    assert.equal(midway.find(item => item.id === 910003).check_pending, true, 'still pending while lines wait')
+    assert.equal('check_pending' in midway.find(item => item.id === 910002), false, 'a line already applied no longer waits for anything')
+    assert.deepEqual({ applying: first.body.approval.applying, request: first.body.approval.applying_request_id }, { applying: true, request: 'approve-request-01' }, 'the approver who started it is told which request continues it')
+    assert.equal((await sessions('GET', `/sessions/${id}`, undefined, LEAD)).body.approval.applying_request_id, undefined, 'and nobody else is')
     const second = await decide(id, {})
     assert.deepEqual({ applied: second.body.applied, remaining: second.body.remaining, done: second.body.done }, { applied: 1, remaining: 1, done: false })
     assert.equal(ordinary(910003), 10, 'count 12 minus 2 damaged = Set 10')
@@ -238,7 +281,7 @@ async function main() {
     assert.equal(ordinary(910001), 5, 'a matching count is never written')
     assert.equal(writer.calls.length, 3)
     const bodies = Object.fromEntries(writer.calls.map(call => [call.productId, call]))
-    assert.deepEqual({ type: bodies[910002].type, quantity: bodies[910002].quantity, setScope: bodies[910002].setScope }, { type: 'set', quantity: 3, setScope: undefined })
+    assert.deepEqual({ type: bodies[910002].type, quantity: bodies[910002].quantity, setScope: bodies[910002].setScope }, { type: 'remove', quantity: 2, setScope: undefined })
     assert.deepEqual({ quantity: bodies[910003].quantity, setScope: bodies[910003].setScope, batchId: bodies[910003].batchId, expected: bodies[910003].expectedBranchQuantity }, { quantity: 10, setScope: 'branch', batchId: 910003, expected: 5 })
     assert.equal(bodies[910002].client_request_id, 'approve-request-01-910002'); assert.match(bodies[910003].reason, /counted 12, 2 damaged/)
     const row = approvalRow()
@@ -323,24 +366,40 @@ async function main() {
     assert.deepEqual(approvalRow(), before)
   })
 
-  await check('stock that moved since the count is not applied blindly: the approver must confirm, and a line already at its target is not drift', async () => {
+  await check('the count is applied as a VARIANCE: what the counter saw is the baseline, so a sale after the count survives it (saw 5, sale leaves 4, counted 3 gives 2, not 3)', async () => {
     reset(); setSwitches('on', 'on')
-    const made = await standard(); const id = made.body.item.id
-    for (const sql of ['UPDATE branch_stock SET quantity=4 WHERE product_id=910002', 'UPDATE branch_batch_stock SET quantity=4 WHERE batch_id=910002', 'UPDATE products SET stock_quantity=4 WHERE id=910002']) db.exec(sql)
-    const stock = stockRows(), approval = approvalRow()
-    const refused = await decide(id, {})
-    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_stock_drifted')
-    assert.deepEqual(refused.body.lines, [{ productId: 910002, baseline: 5, current: 4 }])
-    assert.deepEqual(stockRows(), stock); assert.deepEqual(approvalRow(), approval); assert.equal(writer.calls.length, 0)
-    const confirmed = await decide(id, { confirmDrift: true })
-    assert.equal(confirmed.status, 200); assert.equal(confirmed.body.done, true); assert.equal(ordinary(910002), 3, 'the count still wins once confirmed')
+    const made = await submit([line(910002, 3, { seenQuantity: 5 })]); const id = made.body.item.id
+    assert.deepEqual(JSON.parse(approvalRow().baselines_json), { 910002: 5 }, 'what the counter saw is recorded at submit')
+    moveStock(910002, 4)
+    const done = await decide(id, {})
+    assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.done, true)
+    assert.equal(ordinary(910002), 2, 'live 4 + (counted 3 - saw 5) = 2')
+    assert.deepEqual(writer.calls.map(call => ({ type: call.type, quantity: call.quantity })), [{ type: 'remove', quantity: 2 }], 'the variance the count found (3 against the 5 it saw) is removed from the stock of now')
+    assert.deepEqual(JSON.parse(approvalRow().applied_json).lines['910002'], { before: 4, target: 2, after: 2, at: JSON.parse(approvalRow().applied_json).lines['910002'].at })
+    // The same sale happened between loading the page and submitting: the server's own baseline (4) differs from what the counter saw (5); the count is still measured against what was seen.
+    reset(); setSwitches('on', 'on'); moveStock(910002, 4)
+    const earlier = await submit([line(910002, 3, { seenQuantity: 5 })])
+    assert.equal((await decide(earlier.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 2)
+    // Counted 26 (saw 24), one removed after the count: 25, not 26. A raise is a guarded lot-level Set.
+    reset(); setSwitches('on', 'on'); moveStock(910002, 24)
+    const raise = await submit([line(910002, 26, { seenQuantity: 24 })]); moveStock(910002, 23)
+    assert.equal((await decide(raise.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 25)
+    assert.deepEqual({ type: writer.calls[0].type, quantity: writer.calls[0].quantity, expected: writer.calls[0].expectedBranchQuantity }, { type: 'set', quantity: 25, expected: 23 })
+    // A sale that takes more than the count found never goes below zero.
     reset(); setSwitches('on', 'on')
-    const again = await standard()
-    for (const sql of ['UPDATE branch_stock SET quantity=3 WHERE product_id=910002', 'UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=910002', 'UPDATE products SET stock_quantity=3 WHERE id=910002']) db.exec(sql)
-    const settled = await decide(again.body.item.id, {})
-    assert.equal(settled.status, 200, 'stock already at the counted figure is not drift'); assert.equal(settled.body.done, true)
-    assert.deepEqual(writer.calls.map(call => call.productId), [910003, 910004], 'the settled line is recorded without a write')
-    assert.equal(JSON.parse(approvalRow().applied_json).lines['910002'].settled, true)
+    const empty = await submit([line(910002, 0, { seenQuantity: 5 })]); moveStock(910002, 3)
+    assert.equal((await decide(empty.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 0, 'max(0, 3 + 0 - 5)')
+    // What the counter saw equals the count: nothing was found, so nothing is written, even though the stock at submit was a different figure.
+    reset(); setSwitches('on', 'on'); moveStock(910002, 4)
+    const same = await submit([line(910002, 5, { seenQuantity: 5 })]); const sameId = same.body.item.id
+    const settled = await decide(sameId, {})
+    assert.equal(settled.status, 200); assert.equal(settled.body.done, true); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 4)
+    assert.equal(JSON.parse(approvalRow().applied_json).lines['910002'].settled, true); assert.equal(approvalRow().applying_request_id, null, 'nothing was written, so nothing was claimed')
+    // A viewer who could not see stock is measured against the stock at submit (the same variance, with that figure as the baseline).
+    reset(); setSwitches('on', 'on')
+    const blind = await submit([line(910002, 3)], { requestId: 'blind-request-02' }, BLIND); moveStock(910002, 4)
+    assert.deepEqual(JSON.parse(approvalRow().baselines_json), { 910002: 5 })
+    assert.equal((await decide(blind.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 2)
   })
 
   await check('what cannot be applied safely is refused before any write: inconsistent stock, a fractional target, a raise with no received date', async () => {
@@ -361,11 +420,19 @@ async function main() {
     refused = await decide(id, {})
     assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_no_lot'); assert.deepEqual(refused.body.productIds, [910004])
     assert.equal(writer.calls.length, 0); assert.equal(approvalRow().status, 'pending')
-    // A count below the damaged units still sets ordinary stock to zero, never below.
+    // A count below the damaged units cannot be true (they are on the shelf too): refused clearly, nothing written.
     reset(); setSwitches('on', 'on')
     made = await submit([line(910003, 1)])
     const low = await decide(made.body.item.id, {})
-    assert.equal(low.status, 200); assert.equal(ordinary(910003), 0)
+    assert.equal(low.status, 409); assert.equal(low.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(low.body.productIds, [910003])
+    assert.equal(writer.calls.length, 0); assert.equal(ordinary(910003), 5); assert.equal(approvalRow().status, 'pending'); assert.equal(approvalRow().applying_request_id, null)
+    // An approval with no recorded baseline for a line (a row from before baselines were kept) is refused for that line, not guessed.
+    reset(); setSwitches('on', 'on')
+    made = await submit([line(910002, 3)])
+    db.exec("DROP TRIGGER inventory_check_approvals_identity"); db.exec("UPDATE inventory_check_approvals SET baselines_json='{}'")
+    const unseen = await decide(made.body.item.id, {})
+    assert.equal(unseen.status, 409); assert.equal(unseen.body.code, 'inventory_check_baseline_missing'); assert.deepEqual(unseen.body.productIds, [910002])
+    assert.equal(writer.calls.length, 0)
   })
 
   await check('a refused or failed stock line records nothing for it, keeps the lines that landed, and a repeat finishes the rest', async () => {
@@ -386,20 +453,65 @@ async function main() {
     assert.deepEqual(writer.calls.map(call => call.productId), [910003], 'only the unfinished line is written again')
   })
 
-  await check('a lost answer is repaired by repeating the request: the stock landed but was not recorded, and the repeat records it without writing twice', async () => {
+  await check('P2: a lost answer after the stock landed: the approval is claimed, so it cannot be rejected, and the repeat finishes it without writing twice', async () => {
     reset(); setSwitches('on', 'on')
     const made = await standard(); const id = made.body.item.id
     failApprovalRecord = true
     const lost = await decide(id, {})
     assert.equal(lost.status, 503); assert.equal(lost.body.code, 'inventory_check_outcome_unknown')
     assert.deepEqual([ordinary(910002), ordinary(910003), ordinary(910004)], [3, 10, 9], 'the stock did land')
-    assert.equal(approvalRow().status, 'pending'); assert.equal(approvalRow().applied_json, '{}')
-    failApprovalRecord = false; writer.calls = []
+    const claimed = approvalRow()
+    assert.deepEqual({ status: claimed.status, applied: claimed.applied_json, by: claimed.applying_by, request: claimed.applying_request_id }, { status: 'pending', applied: '{}', by: ADMIN, request: 'approve-request-01' }, 'claimed before the first write')
+    assert.deepEqual(Object.keys(JSON.parse(claimed.plan_json)).sort(), ['910002', '910003', '910004'], 'with the exact figures each line was sent with')
+    failApprovalRecord = false
+    const reject = await decide(id, { decision: 'reject', requestId: 'reject-request-01' })
+    assert.equal(reject.status, 409); assert.equal(reject.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().status, 'pending', 'never rejected with stock already moved')
+    assert.throws(() => db.exec("UPDATE inventory_check_approvals SET status='rejected',decided_by=1,decided_at='x',decision_request_id='x'"), /inventory_check_approval_immutable/, 'and not by a direct write either')
+    const other = await decide(id, { requestId: 'approve-request-77' }, LEAD)
+    assert.equal(other.status, 409); assert.equal(other.body.code, 'inventory_check_approval_in_progress', 'another approver cannot continue: the stock writers\' receipts are per approver')
+    moveStock(910002, 2) // a sale after the lost answer: the repeat must not apply the count a second time, nor undo the sale
+    const writes = writer.calls.length
     const repaired = await decide(id, {})
-    assert.equal(repaired.status, 200); assert.equal(repaired.body.done, true); assert.equal(repaired.body.approval.status, 'approved')
-    assert.equal(writer.calls.length, 0, 'every line was already at its target, so nothing was written again')
-    assert.deepEqual([ordinary(910002), ordinary(910003), ordinary(910004)], [3, 10, 9])
-    assert.ok(Object.values(JSON.parse(approvalRow().applied_json).lines).every(entry => entry.settled === true))
+    assert.equal(repaired.status, 200, JSON.stringify(repaired.body)); assert.equal(repaired.body.done, true); assert.equal(repaired.body.approval.status, 'approved')
+    assert.equal(writer.calls.length, writes, 'nothing was applied again'); assert.equal(writer.replays, 3, 'every line was replayed from its receipt')
+    assert.deepEqual([ordinary(910002), ordinary(910003), ordinary(910004)], [2, 10, 9])
+    assert.deepEqual(Object.values(JSON.parse(approvalRow().applied_json).lines).map(entry => entry.settled), [undefined, undefined, undefined], 'recorded from the plan that was sent')
+    assert.equal(JSON.parse(approvalRow().applied_json).lines['910002'].before, 5, 'the figures the line was sent with, not the live ones')
+    assert.equal(approvalRow().plan_json, '{}')
+    // Continuing under another request id uses the claimed one.
+    reset(); setSwitches('on', 'on')
+    const again = await standard(); failApprovalRecord = true
+    assert.equal((await decide(again.body.item.id, {})).status, 503); failApprovalRecord = false
+    const continued = await decide(again.body.item.id, { requestId: 'approve-request-02' })
+    assert.equal(continued.status, 200, JSON.stringify(continued.body)); assert.equal(continued.body.done, true)
+    assert.equal(approvalRow().decision_request_id, 'approve-request-01', 'the claimed id decided it'); assert.equal(writer.calls.length, 3)
+  })
+
+  await check('a claim made for a request whose lines were all refused cleanly is released (nothing was written): the approval can be rejected again and is planned afresh', async () => {
+    reset(); setSwitches('on', 'on'); writer.fail = new Set([910002, 910003, 910004])
+    const made = await standard(); const id = made.body.item.id
+    const refused = await decide(id, {})
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_stock_write_refused')
+    assert.deepEqual({ request: approvalRow().applying_request_id, by: approvalRow().applying_by, plan: approvalRow().plan_json }, { request: null, by: null, plan: '{}' })
+    writer.fail = new Set(); moveStock(910002, 4)
+    const done = await decide(id, { requestId: 'approve-request-02' })
+    assert.equal(done.status, 200); assert.equal(ordinary(910002), 2, 'planned again from the stock of now: 4 + 3 - 5')
+    reset(); setSwitches('on', 'on'); writer.fail = new Set([910002, 910003, 910004])
+    const rejectable = await standard()
+    await decide(rejectable.body.item.id, {})
+    assert.equal((await decide(rejectable.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })).status, 200)
+  })
+
+  await check('a raise tops up a received date that holds this branch\'s stock, not merely the newest one', async () => {
+    reset(); setSwitches('on', 'on')
+    db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at) VALUES(920001,910004,'batch-elsewhere','2026-10-25')").run()
+    db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(910004,2,3)').run()
+    db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(920001,2,3)').run()
+    db.prepare('UPDATE products SET stock_quantity=8 WHERE id=910004').run()
+    const made = await submit([line(910004, 9)])
+    assert.equal((await decide(made.body.item.id, {})).status, 200)
+    assert.equal(writer.calls[0].batchId, 910004, 'the newest lot (920001) has nothing at branch 1')
+    assert.equal(ordinary(910004), 9)
   })
 
   await check('nobody approves their own count unless they are the only approver: refused on the server before any write; rejecting one\'s own count stays allowed', async () => {

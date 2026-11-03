@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import type { InventoryCheckApproval, InventoryCheckSessionItem, InventoryCheckSession } from '../src/api/inventoryChecksTransport.ts'
 
-// Lane 6.0.1045 (P1.7): the decision on a submitted count. Where it stands, what approving will write per product (counted minus damaged units, the
-// figure Set takes), and Approve / Reject only for someone who may decide and only while it is pending.
+// Lane 6.0.1045 (P1.7): the decision on a submitted count. Where it stands, what approving will leave per product (the stock of now moved by what the
+// count found against what the counter saw, never below zero), and Approve / Reject only for someone who may decide and only while it is pending.
+// Once stock may have moved for it (claimed) there is no Reject, and only the approver who started it can finish it.
 
 const pending: InventoryCheckApproval = { status: 'pending', lines: 2, applied: 0, submitted_at: '2026-11-02T01:00:00Z', can_approve: true, applied_lines: {} }
 const item = (id: number, name: string, counted: number, baseline: number, extra: Partial<InventoryCheckSessionItem> = {}): InventoryCheckSessionItem => ({
@@ -35,12 +36,12 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.match(text(root), /Differences 2/)
     assert.deepEqual(panel.findAll(node => node.getAttribute('data-approval-line') !== null).map(node => node.getAttribute('data-approval-line')), ['1', '2'], 'the matching product is not a line')
   }],
-  ['each line shows counted, the system figure at count time, the figure now and what Set will write: count 12 with 2 damaged sets 10', async () => {
+  ['each line shows counted, the system figure at count time, the figure now and what Set will leave: count 12 with 2 damaged sets 10, and a sale since the count is kept', async () => {
     const panel = await mount()
     const serum = text(lineOf(panel, 1))
     assert.match(serum, /Serum A/); assert.match(serum, /Counted 12/); assert.match(serum, /System 7/); assert.match(serum, /Now 7/); assert.match(serum, /Set to 10/)
     const cream = text(lineOf(panel, 2))
-    assert.match(cream, /Counted 3/); assert.match(cream, /System 5/); assert.match(cream, /Now 4/); assert.match(cream, /Set to 3/, 'no damaged units: the count itself')
+    assert.match(cream, /Counted 3/); assert.match(cream, /System 5/); assert.match(cream, /Now 4/); assert.match(cream, /Set to 2/, 'saw 5, one sold (now 4), counted 3: 4 + 3 - 5 = 2, not 3')
     const target = (id: number) => panel.find(node => node.getAttribute('data-approval-target') === String(id), `target ${id}`)
     assert.equal(text(target(1)), 'Set to 10')
   }],
@@ -58,6 +59,24 @@ const cases: Array<[string, () => Promise<void>]> = [
     await panel.render({ ...base, busy: true })
     assert.equal(action(panel, 'approve').getAttribute('disabled') !== null || (action(panel, 'approve') as unknown as { disabled?: boolean }).disabled === true, true, 'a request in flight disables both')
     assert.equal((action(panel, 'reject') as unknown as { disabled?: boolean }).disabled === true || action(panel, 'reject').getAttribute('disabled') !== null, true)
+  }],
+  ['the result follows what the counter saw when the server recorded it, never goes below zero, and is left out when a figure is missing', async () => {
+    const seen = await mount({ approval: { ...pending, baselines: { 1: 9, 2: 5 } } })
+    assert.equal(text(seen.find(node => node.getAttribute('data-approval-target') === '1', 'target 1')), 'Set to 8', 'counted 12 over the 9 seen, ordinary now 5: 5 + 12 - 9')
+    await seen.render({ ...base, items: [item(2, 'Cream B', 0, 5, { current_quantity: 3 })], approval: { ...pending, baselines: { 2: 5 } } })
+    assert.equal(text(seen.find(node => node.getAttribute('data-approval-target') === '2', 'floored')), 'Set to 0', 'max(0, 3 + 0 - 5)')
+    await seen.render({ ...base, items: [item(2, 'Cream B', 3, 5, { current_quantity: undefined })] })
+    assert.equal(seen.findAll(node => node.getAttribute('data-approval-target') !== null).length, 0, 'no stock now: no invented figure')
+    assert.ok(lineOf(seen, 2), 'the line itself is still listed')
+  }],
+  ['a claimed approval has no Reject; the approver who started it can finish it, anyone else sees who has it', async () => {
+    const mine = await mount({ approval: { ...pending, applying: true, applying_request_id: 'inventory_check_approval_claimed' } })
+    assert.ok(action(mine, 'approve'), 'finishing it stays possible'); assert.equal(action(mine, 'reject'), undefined, 'stock may already have moved: it cannot be rejected')
+    await mine.render({ ...base, approval: { ...pending, applying: true } })
+    assert.equal(action(mine, 'approve'), undefined, 'another approver cannot continue'); assert.equal(action(mine, 'reject'), undefined)
+    assert.match(text(mine.find(node => node.getAttribute('data-approval-in-progress') !== null, 'who has it')), /Being applied by another approver/)
+    await mine.render({ ...base, approval: pending })
+    assert.equal(mine.findAll(node => node.getAttribute('data-approval-in-progress') !== null).length, 0, 'an unclaimed approval carries no note')
   }],
   ['a partly applied approval shows its progress and what each applied line wrote', async () => {
     const partly: InventoryCheckApproval = { ...pending, applied: 1, applied_lines: { 1: { before: 5, target: 10, after: 10, at: '2026-11-02T02:00:00Z' } } }

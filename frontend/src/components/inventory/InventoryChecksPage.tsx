@@ -79,7 +79,10 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you marked a product checked. The list was reloaded: mark those products again.' },
   inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
   inventory_check_stock_inconsistent: { key: 'inventory_check_error_stock_inconsistent', fallback: 'A product\'s stock records do not add up. Correct them before approving.' },
-  inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number minus damaged units is not a whole number. Reject this count and recount.' },
+  inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number is not a whole number. Reject this count and recount.' },
+  inventory_check_count_below_damaged: { key: 'inventory_check_error_count_below_damaged', fallback: 'A counted number is less than the product\'s damaged units. Reject this count and recount.' },
+  inventory_check_baseline_missing: { key: 'inventory_check_error_baseline_missing', fallback: 'A product in this count has no recorded starting stock. Reject this count and recount.' },
+  inventory_check_approval_in_progress: { key: 'inventory_check_error_approval_in_progress', fallback: 'Stock may already have changed for this count, so it cannot be rejected, and only the approver who started it can finish it.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
   inventory_check_approve_required: { key: 'inventory_check_error_approve_required', fallback: 'You do not have permission to approve counts.' },
@@ -607,29 +610,27 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
-  // Counts approval (ic_fix_stock): approving sets stock, so the person must hold the extra, may adjust stock and be online.
+  // Counts approval (ic_fix_stock): approving changes stock, so the person must hold the extra, may adjust stock and be online.
   const canDecide = fresh && !!approval && approval.can_approve && data?.capabilities?.approveCounts === true && canWriteToServer
   async function decideApproval(decision: 'approve' | 'reject') {
     if (!current() || !sessionId || !approval || approval.status !== 'pending' || inFlight.current) return
     if (!decideAttempt.current || decideAttempt.current.decision !== decision) {
       const confirmed = await askToConfirm({
         title: decision === 'approve' ? tr('inventory_check_approve_title', 'Approve these counts?') : tr('inventory_check_reject_title', 'Reject these counts?'),
-        message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock will be set to each counted number minus damaged units.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
+        message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock changes by what each count found. Sales since the count are kept.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
         items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied }],
         confirmLabel: decision === 'approve' ? tr('inventory_check_approve', 'Approve') : tr('inventory_check_reject', 'Reject'),
         danger: decision === 'reject',
       })
       if (!confirmed || !current() || inFlight.current) return
-      decideAttempt.current = { decision, requestId: createClientRequestId('inventory_check_approval') }
+      // An approval that already started under a request id (this approver's own earlier attempt) continues under it: that id is what the stock writers replay.
+      decideAttempt.current = { decision, requestId: decision === 'approve' && approval.applying_request_id ? approval.applying_request_id : createClientRequestId('inventory_check_approval') }
     }
     const attempt = decideAttempt.current
     inFlight.current = true; setBusy(true); setWriteError('')
     try {
       const flow = await runApprovalFlow({
-        send: extra => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId, ...extra }),
-        confirmDrift: () => askToConfirm({ title: tr('inventory_check_drift_title', 'Stock changed since the count'),
-          message: tr('inventory_check_drift_message', 'Some products have different stock now than when they were counted. Set them to the counted numbers anyway?'),
-          confirmLabel: tr('inventory_check_apply_anyway', 'Apply anyway'), danger: true }),
+        send: () => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId }),
         onProgress: result => { if (current()) setApproval(result.approval) },
         isCurrent: current,
       })

@@ -111,10 +111,10 @@ assert.equal(calls.at(-1)?.body.expectedRevision, 4)
 assert.throws(() => exports.saveInventoryCheckObservation(capture(), 0, { state: 'done' }, 0, 1, 'invalid'), /product are required/)
 // Counts approval (6.0.1045): a decision goes to the open session's approval path, with its request id and drift confirmation as given, through the same write fences.
 current = { branchId: '1', sessionId: 'sub 1', epoch: 10 }
-await exports.decideInventoryCheckApproval(capture(), { decision: 'approve', requestId: 'approve-aaaa', confirmDrift: true })
+await exports.decideInventoryCheckApproval(capture(), { decision: 'approve', requestId: 'approve-aaaa' })
 assert.equal(calls.at(-1)?.method, 'POST')
 assert.equal(calls.at(-1)?.path, '/api/inventory-checks/sessions/sub%201/approval')
-assert.deepEqual(calls.at(-1)?.body, { decision: 'approve', requestId: 'approve-aaaa', confirmDrift: true })
+assert.deepEqual(calls.at(-1)?.body, { decision: 'approve', requestId: 'approve-aaaa' })
 assert.equal(routes.at(-1)?.channel, 'inventoryChecks:sub 1'); assert.equal(routes.at(-1)?.options.isWrite, true); assert.equal(routes.at(-1)?.local, null)
 await exports.decideInventoryCheckApproval(capture(), { decision: 'reject', requestId: 'reject-bbbb' })
 assert.deepEqual(calls.at(-1)?.body, { decision: 'reject', requestId: 'reject-bbbb' }, 'nothing is added to a rejection')

@@ -6,7 +6,7 @@ import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryCheckAccess, canApproveInventoryCounts } from '../lib/inventoryCheckAccess'
 import { getActionTier } from '../lib/permissions'
 import { readInventoryCheckProducts, readInventoryCheckProductsSimple, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
-import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError, pendingApprovalLines } from '../lib/inventoryCheckSessions'
+import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError, approvalsAvailable, pendingApprovalLines } from '../lib/inventoryCheckSessions'
 import { readSwitches } from '../lib/readSwitches'
 import type { Env } from '../index'
 
@@ -40,7 +40,8 @@ app.get('/', async c => {
       check: { organizationId: actor.organization_id ?? null, viewerId: actor.id, sessionId: simpleSession, canSeeStaffIdentity: accountId => canSeeStaffIdentity(actor, accountId) } })
     // ic_fix_stock: counts waiting for approval are tagged, and the page learns which actions this viewer has. Only a viewer who may see stock learns either.
     let answer: Record<string, unknown> = simple
-    if (getInventoryCheckAccess(actor).fields.stock && switches.ic_fix_stock) {
+    // The switch counts as on only once migration 0286 is applied (otherwise this answers exactly as OFF).
+    if (getInventoryCheckAccess(actor).fields.stock && switches.ic_fix_stock && await approvalsAvailable(db)) {
       const pending = await pendingApprovalLines(db, actor, simpleSession ? [] : simple.items.filter(item => typeof item.check_session_id === 'string').map(item => Number(item.id)))
       const adjust = getActionTier(actor, 'inventory', 'adjust') === 'full'
       answer = { ...simple, items: simple.items.map(item => pending.has(`${item.check_session_id}:${item.id}`) ? { ...item, check_pending: true } : item),

@@ -127,18 +127,29 @@ function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, cur
 /** What a submitted count's approval looks like to a viewer who may see stock (the approval row exists only for counts that differ, so it is withheld from everyone else). */
 export type ApprovalAppliedLine = { before: number; target: number; after: number; at: string }
 export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejected'; lines: number; applied: number; submitted_at: string; can_approve: boolean;
-  decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine> }
+  decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine>;
+  /** Stock may already have moved for this approval: it can no longer be rejected, and only the approver who started it continues it, with the same request id. */
+  applying?: boolean; applying_request_id?: string;
+  /** Per product, the stock the counter saw when counting: the figure the count is measured against. */
+  baselines?: Record<string, number> }
 export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
-  decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string }
-export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json'
+  decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string;
+  applying_request_id: string | null; applying_by: number | null; baselines_json?: string }
+export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json,applying_request_id,applying_by'
+export const APPROVAL_DETAIL_COLUMNS = `${APPROVAL_COLUMNS},baselines_json`
 let approvalsSchemaReady = false
-/** 503 until migration 0286 is applied; a positive answer is remembered for the isolate, a miss re-probes. */
+/** True once migration 0286 (the table and its four triggers) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
+export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
+  if (approvalsSchemaReady) return true
+  try {
+    const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_identity',
+      'inventory_check_approvals_decided','inventory_check_approvals_claim','inventory_check_approvals_no_delete')`).get<{ n: number }>()
+    approvalsSchemaReady = ready?.n === 5
+  } catch { approvalsSchemaReady = false }
+  return approvalsSchemaReady
+}
 export async function approvalsReady(db: D1Compat): Promise<void> {
-  if (approvalsSchemaReady) return
-  const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_identity',
-    'inventory_check_approvals_decided','inventory_check_approvals_no_delete')`).get<{ n: number }>()
-  if (ready?.n !== 4) fail(503, 'inventory_check_schema_unavailable')
-  approvalsSchemaReady = true
+  if (!await approvalsAvailable(db)) fail(503, 'inventory_check_schema_unavailable')
 }
 export function appliedLines(json: string): Record<string, ApprovalAppliedLine> {
   try {
@@ -146,18 +157,26 @@ export function appliedLines(json: string): Record<string, ApprovalAppliedLine> 
     return lines && typeof lines === 'object' && !Array.isArray(lines) ? lines as Record<string, ApprovalAppliedLine> : {}
   } catch { return {} }
 }
+export function approvalBaselines(json: string | undefined): Record<string, number> {
+  try {
+    const parsed = JSON.parse(json ?? '{}') as unknown
+    const entries = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.entries(parsed) : []
+    return Object.fromEntries(entries.filter(([, value]) => typeof value === 'number' && Number.isFinite(value))) as Record<string, number>
+  } catch { return {} }
+}
 export function projectApproval(actor: Actor, row: ApprovalRow, detail = false): InventoryCheckApproval {
   const applied = appliedLines(row.applied_json)
   return { status: row.status, lines: row.lines, applied: Object.keys(applied).length, submitted_at: row.submitted_at, can_approve: canApproveInventoryCounts(actor),
     ...(row.decided_at ? { decided_at: row.decided_at, decision_note: row.decision_note } : {}),
     ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
-    ...(detail ? { applied_lines: applied } : {}) }
+    ...(row.status === 'pending' && row.applying_request_id ? { applying: true, ...(row.applying_by === actor.id ? { applying_request_id: row.applying_request_id } : {}) } : {}),
+    ...(detail ? { applied_lines: applied, ...(row.baselines_json ? { baselines: approvalBaselines(row.baselines_json) } : {}) } : {}) }
 }
 /** One query for the approvals of the given sessions, inside the viewer's organization. Callers ask only for viewers who may see stock. */
-export async function approvalRows(db: D1Compat, actor: Actor, ids: string[]): Promise<ApprovalRow[]> {
+export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], detail = false): Promise<ApprovalRow[]> {
   if (!ids.length) return []
   await approvalsReady(db)
-  return db.prepare(`SELECT ${APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
+  return db.prepare(`SELECT ${detail ? APPROVAL_DETAIL_COLUMNS : APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
 /** The page's counts that still wait for approval, as `${session id}:${product id}`: one query for a page of list rows, inside the viewer's organization. Only a count that differs from stock waits; a matching line of the same submission does not. */
@@ -166,13 +185,14 @@ export async function pendingApprovalLines(db: D1Compat, actor: Actor, productId
   await approvalsReady(db)
   const rows = await db.prepare(`SELECT i.session_id,i.product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
     WHERE a.organization_id IS @organization AND a.status='pending' AND i.product_id IN (SELECT value FROM json_each(@ids))
-      AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001`)
+      AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001
+      AND json_extract(a.applied_json,'$.lines."'||i.product_id||'"') IS NULL`)
     .all<{ session_id: string; product_id: number }>({ organization: actor.organization_id, ids: JSON.stringify(productIds) })
   return new Set(rows.map(row => `${row.session_id}:${row.product_id}`))
 }
 async function sessionApproval(db: D1Compat, actor: Actor, id: string, options: { approvals?: boolean }): Promise<{ approval?: InventoryCheckApproval }> {
   if (!options.approvals || !getInventoryCheckAccess(actor).fields.stock) return {}
-  const row = (await approvalRows(db, actor, [id]))[0]
+  const row = (await approvalRows(db, actor, [id], true))[0]
   return row ? { approval: projectApproval(actor, row, true) } : {}
 }
 export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean } = {}) {
@@ -466,6 +486,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
   const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
   const scope = { membership: 'submission' }
+  // What the counter saw is the figure the count is later measured against; a viewer who could not see stock is measured against the stock at submit.
+  const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.line.seen ?? item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify(scope), now,
     members: JSON.stringify(members), baseline: JSON.stringify(baselines), count: productIds.length, signature: snapshot.signature }
   const stock = buildInventoryCheckStockQuery({ branchId, productIds })
@@ -493,8 +515,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
         json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',0),
         json_object('state',json_extract(value,'$.state'),'counted_quantity',json_extract(value,'$.counted'),'reason',json_extract(value,'$.reason'),'revision',1),
         json_object('sessionRevision',0,'itemRevision',1),@now FROM json_each(@members)`, params },
-    ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at)
-      VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now)`, params: { ...params, differing } }] : []),
+    ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
+      VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now,@seenJson)`, params: { ...params, differing, seenJson } }] : []),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
   return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }

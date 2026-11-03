@@ -31,7 +31,7 @@ function seed(db) {
 const insertPending = (db, id = 's1', extra = '') => db.prepare(`INSERT INTO ${T}(session_id,organization_id,branch_id,lines,submitted_by,submitted_at${extra ? ',' + extra.split('=')[0] : ''}) VALUES(?,1,1,2,7,'2026-11-02T01:00:00Z'${extra ? ',' + extra.split('=')[1] : ''})`).run(id)
 const decide = (db, status = 'approved') => db.prepare(`UPDATE ${T} SET status=?,decided_by=9,decided_by_name='admin',decided_at='2026-11-02T02:00:00Z',decision_request_id='dec-12345678',applied_json='{"lines":{"5":{"before":3,"target":5,"after":5,"at":"x"}}}' WHERE session_id='s1'`).run(status)
 
-check('the table is new, adds one table, one index and three triggers, and changes no history row', () => {
+check('the table is new, adds one table, one index and four triggers, and changes no history row', () => {
   const db = chain(); seed(db)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sqlite_master WHERE name=?').get(T).n, 0, 'absent before')
   const before = Object.fromEntries(HISTORY.map(table => [table, dump(db, table)]))
@@ -41,11 +41,12 @@ check('the table is new, adds one table, one index and three triggers, and chang
   const added = objects(db).filter(row => !beforeObjects.some(old => old.name === row.name))
   assert.deepEqual(added, [
     { type: 'table', name: T },
+    { type: 'trigger', name: 'inventory_check_approvals_claim' },
     { type: 'trigger', name: 'inventory_check_approvals_decided' },
     { type: 'trigger', name: 'inventory_check_approvals_identity' },
     { type: 'trigger', name: 'inventory_check_approvals_no_delete' },
     { type: 'index', name: 'inventory_check_approvals_pending' },
-  ].sort((a, b) => a.name.localeCompare(b.name)), 'exactly the table, its index and its three triggers')
+  ].sort((a, b) => a.name.localeCompare(b.name)), 'exactly the table, its index and its four triggers')
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${T}`).get().n, 0, 'no approval row is created by the migration (existing submissions stay as they are)')
 })
 
@@ -88,9 +89,31 @@ check('a pending row gains applied entries and is decided once; a decided row ne
 
 check('the identity columns never change, even on a pending row', () => {
   const db = chain(); seed(db); db.exec(sql); insertPending(db)
-  for (const set of ["session_id='s9'", 'organization_id=2', 'branch_id=2', 'lines=3', 'submitted_by=8', "submitted_at='2026-11-03T00:00:00Z'"]) {
+  for (const set of ["session_id='s9'", 'organization_id=2', 'branch_id=2', 'lines=3', 'submitted_by=8', "submitted_at='2026-11-03T00:00:00Z'", "baselines_json='{\"5\":99}'"]) {
     assert.throws(() => db.prepare(`UPDATE ${T} SET ${set} WHERE session_id='s1'`).run(), /inventory_check_approval_immutable/, set)
   }
+})
+
+check('applying is claimed before stock moves: the claim names a request and an approver, never changes hands, forbids rejecting, and is released only while nothing is planned or applied', () => {
+  const db = chain(); seed(db); db.exec(sql); insertPending(db)
+  const row = () => ({ ...db.prepare(`SELECT applying_request_id,applying_by,plan_json,applied_json,status FROM ${T}`).get() })
+  assert.deepEqual(row(), { applying_request_id: null, applying_by: null, plan_json: '{}', applied_json: '{}', status: 'pending' }, 'a new approval is unclaimed, with an empty plan')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET applying_request_id='only-the-id'`).run(), /CHECK|constraint/i, 'a claim names the request AND the approver')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET plan_json='[1]'`).run(), /CHECK|constraint/i, 'the plan is an object')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET baselines_json='nope'`).run(), /CHECK|constraint/i, 'the baselines are JSON')
+  db.prepare(`UPDATE ${T} SET applying_request_id='approve-request-01',applying_by=9,plan_json='{"5":{"before":3,"target":5}}'`).run()
+  db.prepare(`UPDATE ${T} SET plan_json='{"5":{"before":3,"target":6}}'`).run()
+  assert.throws(() => db.prepare(`UPDATE ${T} SET applying_request_id='approve-request-02'`).run(), /inventory_check_approval_immutable/, 'the claim never changes request')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET applying_by=10`).run(), /inventory_check_approval_immutable/, 'nor hands')
+  assert.throws(() => db.prepare(`UPDATE ${T} SET applying_request_id=NULL,applying_by=NULL`).run(), /inventory_check_approval_immutable/, 'and is not released while a plan is stored')
+  assert.throws(() => db.exec("UPDATE inventory_check_approvals SET status='rejected',decided_by=9,decided_at='x',decision_request_id='x'"), /inventory_check_approval_immutable/, 'a claimed approval is never rejected')
+  db.prepare(`UPDATE ${T} SET plan_json='{}',applying_request_id=NULL,applying_by=NULL`).run()
+  assert.deepEqual(row(), { applying_request_id: null, applying_by: null, plan_json: '{}', applied_json: '{}', status: 'pending' }, 'released: nothing planned, nothing applied')
+  db.prepare(`UPDATE ${T} SET applying_request_id='approve-request-01',applying_by=9,plan_json='{"5":{"before":3,"target":5}}'`).run()
+  db.prepare(`UPDATE ${T} SET applied_json='{"lines":{"5":{"before":3,"target":5,"after":5,"at":"x"}}}',plan_json='{}'`).run()
+  assert.throws(() => db.prepare(`UPDATE ${T} SET applying_request_id=NULL,applying_by=NULL`).run(), /inventory_check_approval_immutable/, 'and never once a line was applied')
+  decide(db)
+  assert.equal(row().status, 'approved', 'a claimed approval is decided by being approved')
 })
 
 check('a row is deleted only while the restore maintenance flag is set', () => {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Lane 6.0.1045 (ic_fix_stock): a submitted count is approved on the REAL Worker, with the REAL stock writer, on the Free plan under Miniflare.
 // Proves what the faithful-double test cannot: that the Set sessions' commit really takes the approval's lines (lowering through the stock-session
-// Set conversion, raising through the lot-level Set writer), that stock ends at the counted number minus damaged units in every ledger, that one
+// removal, raising through the lot-level Set writer), that stock ends at the counted number minus damaged units in every ledger, that the count is applied
+// as a VARIANCE (a sale after the count survives it), that a lost answer is repeated without applying twice, that one
 // request stays inside the Free plan's 50 D1 calls, that rejecting writes nothing, and that the permission refusals hold on the real route stack.
 //
 // Run: node scripts/test-inventory-check-approvals-world-native.cjs
@@ -46,8 +47,8 @@ async function main() {
 
     // Stocked products with a received date at branch 1 (the seed keeps every ledger consistent), away from the shapes other tests use.
     const rows = await world.all(`SELECT b.variant_product_id AS pid, b.id AS batch FROM branch_batch_stock s JOIN product_batches b ON b.id = s.batch_id
-      JOIN products p ON p.id = b.variant_product_id AND p.is_active = 1 AND (p.id - 1000) % 8 NOT IN (1, 2) WHERE s.branch_id = 1 AND s.quantity >= 6 ORDER BY b.id LIMIT 8 OFFSET 2400`)
-    assert.ok(rows.length >= 8, 'the seed has enough stocked products')
+      JOIN products p ON p.id = b.variant_product_id AND p.is_active = 1 AND (p.id - 1000) % 8 NOT IN (1, 2) WHERE s.branch_id = 1 AND s.quantity >= 6 ORDER BY b.id LIMIT 12 OFFSET 2400`)
+    assert.ok(rows.length >= 12, 'the seed has enough stocked products')
     const [LOW, RAISE, SAME, REJECT_A, REJECT_B] = rows.map(row => row.pid)
     const stock = async pid => ({
       ordinary: (await world.all('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=1', pid))[0].quantity,
@@ -144,6 +145,83 @@ async function main() {
       assert.deepEqual(await snapshot([REJECT_A, REJECT_B]), stockBefore, 'rejecting writes no stock')
       const row = (await world.all('SELECT status,decided_by,decision_note,applied_json FROM inventory_check_approvals WHERE session_id=?', id))[0]
       assert.deepEqual({ ...row }, { status: 'rejected', decided_by: 903, decision_note: 'Recount tomorrow', applied_json: '{}' })
+    })
+
+    const approveAll = async (id, request, label) => {
+      const answers = []
+      for (let step = 0; step < 8; step++) {
+        const answer = await as('lead', 'POST', `/api/inventory-checks/sessions/${id}/approval`, { decision: 'approve', requestId: request })
+        assert.equal(answer.status, 200, `${label} step ${step}: ${answer.text.slice(0, 400)}`)
+        assert.ok(answer.calls <= FREE_CALL_LIMIT, `${label} step ${step} used ${answer.calls} D1 calls (limit ${FREE_CALL_LIMIT})`)
+        answers.push(answer.calls)
+        if (answer.json.done) return answers
+      }
+      throw new Error(`${label} did not finish`)
+    }
+    const sell = async pid => assert.equal((await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 1, type: 'remove', reason: 'sold after the count', client_request_id: key('sale') })).status, 200)
+    const breakTwo = async pid => assert.equal((await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'broken in store', conditionTag: 'damaged', client_request_id: key('damage') })).status, 200)
+
+    await check('the count is applied as a VARIANCE on the real Worker: a sale after the count survives it (counted 26 over 24, one sold: 25), damaged units are never touched, a count below them is refused', async () => {
+      const [VAR_RAISE, VAR_LOW, BELOW] = rows.slice(8, 11).map(row => row.pid)
+      await breakTwo(VAR_LOW); await breakTwo(BELOW)
+      const start = await snapshot([VAR_RAISE, VAR_LOW, BELOW]), totalOf = pid => start[pid].ordinary + start[pid].damaged
+      const submit = lines => as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines })
+      const made = await submit([
+        { productId: VAR_RAISE, countedQuantity: totalOf(VAR_RAISE) + 2, seenQuantity: totalOf(VAR_RAISE), checked: false },
+        { productId: VAR_LOW, countedQuantity: totalOf(VAR_LOW) - 3, seenQuantity: totalOf(VAR_LOW), checked: false }])
+      assert.equal(made.status, 201, made.text.slice(0, 300))
+      await sell(VAR_RAISE); await sell(VAR_LOW)
+      const calls = await approveAll(made.json.item.id, key('approve'), 'variance')
+      const raised = await stock(VAR_RAISE), lowered = await stock(VAR_LOW)
+      assert.equal(raised.ordinary, start[VAR_RAISE].ordinary + 2 - 1, 'counted 26 over the 24 it saw, one sold meanwhile: 25, not 26')
+      assert.equal(lowered.ordinary, start[VAR_LOW].ordinary - 1 - 3, 'the sale and the missing units both leave')
+      assert.equal(lowered.damaged, 2, 'damaged units are never touched'); assert.equal(lowered.lots, lowered.ordinary); assert.equal(raised.lots, raised.ordinary)
+      const below = await submit([{ productId: BELOW, countedQuantity: 1, seenQuantity: totalOf(BELOW), checked: false }])
+      const refused = await as('lead', 'POST', `/api/inventory-checks/sessions/${below.json.item.id}/approval`, { decision: 'approve', requestId: key('below') })
+      assert.equal(refused.status, 409); assert.equal(refused.json.code, 'inventory_check_count_below_damaged'); assert.deepEqual(refused.json.productIds, [BELOW])
+      assert.deepEqual(await stock(BELOW), start[BELOW], 'nothing was written')
+      assert.equal((await as('lead', 'POST', `/api/inventory-checks/sessions/${below.json.item.id}/approval`, { decision: 'reject', requestId: key('below-reject') })).status, 200, 'and it can still be rejected')
+      console.log('  D1 calls per variance step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
+    })
+
+    await check('a lost answer on the real stock writers (a removal, then a lot-level raise): the approval is claimed, cannot be rejected, and each repeat replays the write that landed instead of applying it twice', async () => {
+      const [LOST_LOW, LOST_RAISE] = [rows[11].pid, rows[5].pid].sort((a, b) => a - b)
+      const start = await snapshot([LOST_LOW, LOST_RAISE])
+      const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [
+        { productId: LOST_LOW, countedQuantity: start[LOST_LOW].ordinary - 2, seenQuantity: start[LOST_LOW].ordinary, checked: false },
+        { productId: LOST_RAISE, countedQuantity: start[LOST_RAISE].ordinary + 2, seenQuantity: start[LOST_RAISE].ordinary, checked: false }] })
+      assert.equal(made.status, 201, made.text.slice(0, 300))
+      const id = made.json.item.id, request = key('approve'), url = `/api/inventory-checks/sessions/${id}/approval`
+      const step = () => as('lead', 'POST', url, { decision: 'approve', requestId: request })
+      const lose = async () => {
+        db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
+        try { const lost = await step(); assert.equal(lost.status, 503, lost.text.slice(0, 300)); assert.equal(lost.json.code, 'inventory_check_outcome_unknown'); return lost.calls }
+        finally { db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
+      }
+      const receipts = async () => (await world.all('SELECT COUNT(*) AS n FROM stock_mutation_receipts WHERE request_id LIKE ?', `${request}-%`))[0].n
+      const calls = [await lose()]
+      assert.equal((await stock(LOST_LOW)).ordinary, start[LOST_LOW].ordinary - 2, 'the removal did land'); assert.equal(await receipts(), 1)
+      const claim = (await world.all('SELECT applying_request_id,applying_by,status,applied_json FROM inventory_check_approvals WHERE session_id=?', id))[0]
+      assert.deepEqual({ ...claim }, { applying_request_id: request, applying_by: 903, status: 'pending', applied_json: '{}' })
+      const reject = await as('lead', 'POST', url, { decision: 'reject', requestId: key('reject') })
+      assert.equal(reject.status, 409); assert.equal(reject.json.code, 'inventory_check_approval_in_progress')
+      const other = await as('admin', 'POST', url, { decision: 'approve', requestId: key('other') })
+      assert.equal(other.status, 409); assert.equal(other.json.code, 'inventory_check_approval_in_progress', 'only the approver who started continues: the stock writers receipts are per approver')
+      await sell(LOST_LOW)
+      const replayed = await step()
+      assert.equal(replayed.status, 200, replayed.text.slice(0, 300)); assert.deepEqual([replayed.json.applied, replayed.json.done], [1, false]); calls.push(replayed.calls)
+      assert.equal((await stock(LOST_LOW)).ordinary, start[LOST_LOW].ordinary - 3, 'recorded from the replay: the removal was not applied again, and the sale was not undone')
+      calls.push(await lose())
+      assert.equal((await stock(LOST_RAISE)).ordinary, start[LOST_RAISE].ordinary + 2, 'the raise did land'); assert.equal(await receipts(), 2)
+      const finished = await step()
+      assert.equal(finished.status, 200, finished.text.slice(0, 300)); assert.deepEqual([finished.json.applied, finished.json.done], [1, true]); calls.push(finished.calls)
+      assert.equal((await stock(LOST_RAISE)).ordinary, start[LOST_RAISE].ordinary + 2, 'the raise was not applied again')
+      assert.ok(calls.every(count => count <= FREE_CALL_LIMIT), `D1 calls per step: ${calls.join(', ')}`)
+      const movements = await world.all("SELECT product_id,COUNT(*) AS n FROM inventory_movements WHERE reason LIKE '%Inventory check approved%' AND product_id IN (?,?) GROUP BY product_id ORDER BY product_id", LOST_LOW, LOST_RAISE)
+      assert.deepEqual(movements.map(row => row.n), [1, 1], 'exactly one movement per line')
+      const row = (await world.all('SELECT status,decision_request_id,plan_json FROM inventory_check_approvals WHERE session_id=?', id))[0]
+      assert.deepEqual({ ...row }, { status: 'approved', decision_request_id: request, plan_json: '{}' })
+      console.log('  D1 calls per step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
     })
 
     await check('with ic_fix_stock off the same route does not exist and a new count creates no approval', async () => {

@@ -4,7 +4,7 @@ import { readInventoryCheckStock } from './inventoryCheckStock'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
 import {
-  APPROVAL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalsReady, authorityGuard, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
+  APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
   object, projectApproval, requestId as requestIdOf, schemaReady, sessionRow,
   type Actor, type ApprovalAppliedLine, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
@@ -12,13 +12,18 @@ import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stock
 
 /*
  * Counts approval (ic_fix_stock, lane 6.0.1045). A submitted count that differs from stock waits here as ONE approval row; stock is untouched until
- * a person holding "approve counts" approves it. Approval sets each differing product's ordinary stock to the counted figure minus its damaged units
- * (Set excludes damaged units: count 12 with 2 damaged sets 10), through the same stock-session writer the Set sessions use, so every change has
- * its movement, history and undo exactly like a hand-made Set. Rejecting changes nothing.
+ * a person holding "approve counts" approves it. Approval applies what the count FOUND, never an absolute figure: the variance (counted minus the stock
+ * the counter saw, recorded at submit) is added to the ordinary stock of the moment of approval, never below zero. A sale between the count and the
+ * approval therefore survives it (saw 5, a sale leaves 4, counted 3: stock becomes 2, not 3); with nothing moved it equals counted minus damaged
+ * units (count 12 with 2 damaged sets 10). Damaged units are not part of the count's effect and are never touched.
  *
- * One request applies at most the plan's lines per request (Free: 1) and answers { applied, remaining, done }; the client repeats the SAME request id
- * until done. Every line is idempotent twice over: its stock request id derives from the decision request id, and a line already at its target is
- * recorded without writing, so a lost answer is repaired by repeating the request. A line is recorded in the approval row only after its stock write landed.
+ * Exactly once. Stock is claimed BEFORE it is written: one guarded update names the request id and the approver that continue the approval, and stores
+ * the figures every line is about to be sent with (plan_json). A repeat after a lost answer sends the identical request, which the stock writers replay
+ * instead of applying twice (their receipts are per approver and request id, so only the claiming approver continues). A claimed approval can no longer
+ * be rejected: stock may already have moved. A line the stock writer refused before writing anything is planned again from live stock on the next request.
+ *
+ * One request applies at most the plan's lines per request (Free: 1) and answers { applied, remaining, done }; the client repeats the request until done.
+ * A line is recorded in the approval row only after its stock write landed.
  */
 
 const EPSILON = 0.000000001
@@ -26,11 +31,22 @@ const fail = (status: InventoryCheckSessionError['status'], code: string, detail
 
 export type ApprovalStockWriter = (lines: StockInCommitLine[]) => Promise<StockInCommitLineResult[]>
 type ItemFacts = { product_id: number; baseline_quantity: number | null; counted_quantity: number | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number }
-type Planned = { item: ItemFacts; ordinary: number; damaged: number; total: number; target: number; settled: boolean; drifted: boolean; lotId: number | null }
+/** What one line is sent with, stored before the write so a repeat is identical. */
+type Plan = { before: number; target: number; counted: number; damaged: number; lot?: number }
+type Open = { item: ItemFacts; plan: Plan }
+type EngineRow = ApprovalRow & { plan_json: string }
 
-/** What Set writes for a count: damaged units are not part of Set, and a target is never below zero. */
-export const approvalTarget = (counted: number, damaged: number): number => Math.max(0, counted - Math.max(0, damaged))
+/** The ordinary stock a count leaves: the stock of now, moved by what the count found against what the counter saw; never below zero. */
+export const approvalTarget = (live: number, counted: number, seen: number): number => Math.max(0, live + counted - seen)
 const whole = (value: number): boolean => Math.abs(value - Math.round(value)) <= EPSILON
+const settled = (plan: Plan): boolean => Math.abs(plan.before - plan.target) <= EPSILON
+
+function plansOf(json: string): Record<string, Plan> {
+  try {
+    const parsed = JSON.parse(json) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, Plan> : {}
+  } catch { return {} }
+}
 
 /** Can anyone else in the organization decide a count? Only then is a person kept from approving their own; a sole approver must still be able to. */
 async function anotherApproverExists(db: D1Compat, actor: Actor): Promise<boolean> {
@@ -41,19 +57,25 @@ async function anotherApproverExists(db: D1Compat, actor: Actor): Promise<boolea
   return people.some(person => canApproveInventoryCounts(person) && getActionTier(person, 'inventory', 'adjust') === 'full')
 }
 
+/** The stock request ids (of this approver) the stock writers already hold a receipt for: whatever has one may have been written, so it is only ever repeated as it was sent. */
+async function receiptsOf(db: D1Compat, actorId: number, requestIds: string[]): Promise<Set<string>> {
+  if (!requestIds.length) return new Set()
+  const rows = await db.prepare('SELECT request_id FROM stock_mutation_receipts WHERE actor_id=@actorId AND request_id IN (SELECT value FROM json_each(@ids))')
+    .all<{ request_id: string }>({ actorId, ids: JSON.stringify(requestIds) })
+  return new Set(rows.map(row => row.request_id))
+}
+
 export async function decideInventoryCheckApproval(db: D1Compat, principal: InventoryCheckPrincipal, sessionId: string, input: unknown, writeStock: ApprovalStockWriter) {
   const body = object(input)
   const decision = body.decision === 'approve' || body.decision === 'reject' ? body.decision : fail(400, 'inventory_check_invalid_request')
   const key = requestIdOf(body.requestId)
   const note = body.note == null ? null : typeof body.note === 'string' ? body.note.trim() || null : fail(400, 'inventory_check_invalid_note')
   if (note !== null && note.length > 500) fail(400, 'inventory_check_invalid_note')
-  if (body.confirmDrift !== undefined && typeof body.confirmDrift !== 'boolean') fail(400, 'inventory_check_invalid_request')
-  const confirmDrift = body.confirmDrift === true
   const actor = await currentInventoryCheckActor(db, principal); await schemaReady(db); await approvalsReady(db)
   if (!canApproveInventoryCounts(actor)) fail(403, 'inventory_check_approve_required')
   const session = await sessionRow(db, actor, sessionId)
-  const row = await db.prepare(`SELECT ${APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
-    .get<ApprovalRow>({ id: sessionId, organization: actor.organization_id })
+  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS},plan_json FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`)
+    .get<EngineRow>({ id: sessionId, organization: actor.organization_id })
   if (!row) return fail(404, 'inventory_check_approval_not_found')
   if (row.status !== 'pending') {
     if (row.decision_request_id === key && (decision === 'approve') === (row.status === 'approved')) return { approval: projectApproval(actor, row, true), applied: 0, remaining: 0, done: true, replayed: true }
@@ -71,9 +93,10 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
 
   if (decision === 'reject') {
     if (Object.keys(applied).length) fail(409, 'inventory_check_approval_partly_applied')
+    if (row.applying_request_id) fail(409, 'inventory_check_approval_in_progress')
     const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval', id: sessionId, decision, note }))
     await record(db, actor, [
-      guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied)`, 'inventory_check_conflict', base),
+      guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied AND applying_request_id IS NULL)`, 'inventory_check_conflict', base),
       decidedUpdate('rejected', base), guard('changes()=1', 'inventory_check_conflict', {}),
       { sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base },
       eventStatement(actor, { sessionId, action: 'observe', key, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'rejected', lines: row.lines }, result: { sessionRevision: session.revision }, now }),
@@ -82,95 +105,133 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   }
 
   if (getActionTier(actor, 'inventory', 'adjust') !== 'full') fail(403, 'inventory_check_adjust_required')
-  const plan = remaining.length ? await preflight(db, session.branch_id, remaining, confirmDrift) : []
-  const todo = plan.filter(entry => !entry.settled)
-  const results = todo.length ? await writeStock(todo.map(entry => stockLine(entry, key, session.branch_id))) : []
+  // Only the approver who started applying continues it, and always under the request id that started it: the stock writers' receipts are per approver and request id.
+  if (row.applying_request_id && row.applying_by !== actor.id) fail(409, 'inventory_check_approval_in_progress')
+  const stockKey = row.applying_request_id ?? key
+  const stored = plansOf(row.plan_json)
+  const sent = await receiptsOf(db, actor.id, remaining.filter(item => stored[String(item.product_id)]).map(item => `${stockKey}-${item.product_id}`))
+  const fresh = remaining.filter(item => !(stored[String(item.product_id)] && sent.has(`${stockKey}-${item.product_id}`)))
+  const planned = fresh.length ? await planLines(db, session.branch_id, fresh, approvalBaselines(row.baselines_json)) : new Map<string, Plan>()
+  const open: Open[] = remaining.map(item => ({ item, plan: planned.get(String(item.product_id)) ?? stored[String(item.product_id)] }))
+  const todo = open.filter(entry => !settled(entry.plan))
+  const plansOfTodo = (entries: Open[]): string => JSON.stringify(Object.fromEntries(entries.map(entry => [String(entry.item.product_id), entry.plan])))
+  const claim = { ...base, stockKey, newPlan: plansOfTodo(todo), oldPlan: row.plan_json }
+  const claimMine = `(applying_request_id IS NULL OR (applying_request_id=@stockKey AND applying_by=@actorId))`
+  if (todo.length && (!row.applying_request_id || claim.newPlan !== row.plan_json)) {
+    await record(db, actor, [
+      { sql: `UPDATE inventory_check_approvals SET applying_request_id=@stockKey,applying_by=@actorId,plan_json=@newPlan
+        WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied AND plan_json=@oldPlan AND ${claimMine}`, params: claim },
+      guard('changes()=1', 'inventory_check_conflict', {}),
+    ])
+  }
+
+  const results = todo.length ? await writeStock(todo.map(entry => stockLine(entry, stockKey, session.branch_id))) : []
   const resultOf = new Map(results.map(result => [String(result.key), result]))
-  const landed: Planned[] = [], failed: Array<{ productId: number; code: string | null; error: string }> = []
-  for (const entry of plan) {
-    if (entry.settled) { landed.push(entry); continue }
+  const landed: Open[] = [], failed: Array<{ productId: number; code: string | null; error: string }> = []
+  for (const entry of open) {
+    if (settled(entry.plan)) { landed.push(entry); continue }
     const result = resultOf.get(String(entry.item.product_id))
     if (result?.ok === true) landed.push(entry)
     else if (result && result.code !== 'deferred') failed.push({ productId: entry.item.product_id, code: typeof result.code === 'string' ? result.code : null, error: String(result.error ?? 'refused') })
   }
-  if (!landed.length && failed.length) fail(409, 'inventory_check_stock_write_refused', { failed, remaining: remaining.length })
   const left = remaining.length - landed.length
   const finish = left === 0
-  if (!landed.length && !finish) fail(409, 'inventory_check_stock_write_refused', { failed: [], remaining: remaining.length })
+  if (!landed.length && !finish) {
+    await releaseUntouched(db, actor, claim, applied, todo.map(entry => `${stockKey}-${entry.item.product_id}`))
+    fail(409, 'inventory_check_stock_write_refused', { failed, remaining: remaining.length })
+  }
 
   const nextApplied: Record<string, ApprovalAppliedLine & { settled?: true }> = { ...applied }
-  for (const entry of landed) nextApplied[String(entry.item.product_id)] = { before: entry.ordinary, target: entry.target, after: entry.target, at: now, ...(entry.settled ? { settled: true as const } : {}) }
-  const next = { ...base, newApplied: JSON.stringify({ lines: nextApplied }) }
+  for (const entry of landed) nextApplied[String(entry.item.product_id)] = { before: entry.plan.before, target: entry.plan.target, after: entry.plan.target, at: now, ...(settled(entry.plan) ? { settled: true as const } : {}) }
+  const landedIds = new Set(landed.map(entry => entry.item.product_id))
+  const next = { ...base, stockKey, newApplied: JSON.stringify({ lines: nextApplied }), planAfter: plansOfTodo(todo.filter(entry => !landedIds.has(entry.item.product_id))) }
   const statements: Statement[] = [
-    guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied)`, 'inventory_check_conflict', base),
+    guard(`EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied AND ${claimMine})`, 'inventory_check_conflict', next),
   ]
   for (const entry of landed) {
     const { item } = entry, flip = item.state === 'issue', productId = item.product_id
     const params = { ...base, productId }
     if (flip) statements.push({ sql: `UPDATE inventory_check_items SET state='done',reason=NULL,revision=revision+1,updated_by=@actorId,updated_at=@now
       WHERE session_id=@id AND product_id=@productId AND branch_id=@branchId AND state='issue'`, params }, guard('changes()=1', 'inventory_check_conflict', {}))
-    statements.push(eventStatement(actor, { sessionId, productId, action: 'observe', key: `${key}-${productId}`,
-      hash: await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, key })),
+    statements.push(eventStatement(actor, { sessionId, productId, action: 'observe', key: `${stockKey}-${productId}`,
+      hash: await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, key: stockKey })),
       before: { state: item.state, counted_quantity: item.counted_quantity, reason: item.reason, revision: item.revision },
-      after: { state: 'done', counted_quantity: item.counted_quantity, reason: null, revision: flip ? item.revision + 1 : item.revision, approval: 'applied', stock_before: entry.ordinary, stock_after: entry.target },
+      after: { state: 'done', counted_quantity: item.counted_quantity, reason: null, revision: flip ? item.revision + 1 : item.revision, approval: 'applied', stock_before: entry.plan.before, stock_after: entry.plan.target },
       result: { sessionRevision: session.revision, itemRevision: flip ? item.revision + 1 : item.revision }, now }))
   }
   statements.push({ sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base })
   if (finish) {
     const hash = await inventoryCheckDigest(JSON.stringify({ action: 'approval', id: sessionId, decision, note }))
-    statements.push(decidedUpdate('approved', next), guard('changes()=1', 'inventory_check_conflict', {}),
-      eventStatement(actor, { sessionId, action: 'observe', key, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'approved', lines: row.lines }, result: { sessionRevision: session.revision }, now }))
+    statements.push(decidedUpdate('approved', { ...next, key: stockKey }), guard('changes()=1', 'inventory_check_conflict', {}),
+      eventStatement(actor, { sessionId, action: 'observe', key: stockKey, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'approved', lines: row.lines }, result: { sessionRevision: session.revision }, now }))
   } else {
-    statements.push({ sql: `UPDATE inventory_check_approvals SET applied_json=@newApplied WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied`, params: next }, guard('changes()=1', 'inventory_check_conflict', {}))
+    statements.push({ sql: `UPDATE inventory_check_approvals SET applied_json=@newApplied,plan_json=@planAfter WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied AND ${claimMine}`, params: next },
+      guard('changes()=1', 'inventory_check_conflict', {}))
   }
   await record(db, actor, statements)
   return await respond(db, actor, sessionId, landed.length, left, finish, failed)
 }
 
-/** Read the live stock of the lines still to apply and refuse, before any write, everything the approval cannot do safely. */
-async function preflight(db: D1Compat, branchId: number, remaining: ItemFacts[], confirmDrift: boolean): Promise<Planned[]> {
-  const stock = new Map((await readInventoryCheckStock(db, { branchId, productIds: remaining.map(item => item.product_id) })).map(row => [row.product_id, row]))
-  const inconsistent: number[] = [], fractional: number[] = [], drifts: Array<{ productId: number; baseline: number; current: number }> = []
-  const plan: Planned[] = []
-  for (const item of remaining) {
-    const row = stock.get(item.product_id)
+/** Read the live stock of the lines still to apply and plan each one, refusing before any write everything the approval cannot do safely. */
+async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], baselines: Record<string, number>): Promise<Map<string, Plan>> {
+  const stock = new Map((await readInventoryCheckStock(db, { branchId, productIds: lines.map(item => item.product_id) })).map(row => [row.product_id, row]))
+  const inconsistent: number[] = [], unseen: number[] = [], belowDamaged: number[] = [], fractional: number[] = []
+  const plans = new Map<string, Plan>()
+  for (const item of lines) {
+    const row = stock.get(item.product_id), id = String(item.product_id)
     if (!row || !row.consistent || row.quantity == null || row.recorded_ordinary_quantity == null) { inconsistent.push(item.product_id); continue }
-    const damaged = row.recorded_damaged_quantity ?? 0, target = approvalTarget(item.counted_quantity as number, damaged)
+    const seen = baselines[id], counted = item.counted_quantity as number, damaged = row.recorded_damaged_quantity ?? 0
+    if (seen === undefined) { unseen.push(item.product_id); continue }
+    if (counted + EPSILON < damaged) { belowDamaged.push(item.product_id); continue }
+    const target = approvalTarget(row.recorded_ordinary_quantity, counted, seen)
     if (!whole(target)) { fractional.push(item.product_id); continue }
-    const ordinary = row.recorded_ordinary_quantity, settled = Math.abs(ordinary - target) <= EPSILON
-    const drifted = !settled && Math.abs(row.quantity - (item.baseline_quantity as number)) > EPSILON
-    if (drifted) drifts.push({ productId: item.product_id, baseline: item.baseline_quantity as number, current: row.quantity })
-    plan.push({ item, ordinary, damaged, total: row.quantity, target: Math.round(target), settled, drifted, lotId: null })
+    plans.set(id, { before: row.recorded_ordinary_quantity, target: Math.round(target), counted, damaged })
   }
   if (inconsistent.length) fail(409, 'inventory_check_stock_inconsistent', { productIds: inconsistent })
+  if (unseen.length) fail(409, 'inventory_check_baseline_missing', { productIds: unseen })
+  if (belowDamaged.length) fail(409, 'inventory_check_count_below_damaged', { productIds: belowDamaged })
   if (fractional.length) fail(409, 'inventory_check_target_not_whole', { productIds: fractional })
-  if (drifts.length && !confirmDrift) fail(409, 'inventory_check_stock_drifted', { lines: drifts })
-  const raising = plan.filter(entry => !entry.settled && entry.target > entry.ordinary)
+  const raising = [...plans.entries()].filter(([, plan]) => plan.target > plan.before)
   if (raising.length) {
-    const lots = await db.prepare(`SELECT variant_product_id AS product_id,id FROM product_batches WHERE is_active=1
-      AND variant_product_id IN (SELECT value FROM json_each(@ids)) ORDER BY synthetic ASC,received_at DESC,id DESC`)
-      .all<{ product_id: number; id: number }>({ ids: JSON.stringify(raising.map(entry => entry.item.product_id)) })
+    // A raise tops up the newest received date, one that already holds this branch's stock first.
+    const lots = await db.prepare(`SELECT b.variant_product_id AS product_id,b.id FROM product_batches b WHERE b.is_active=1
+      AND b.variant_product_id IN (SELECT value FROM json_each(@ids))
+      ORDER BY EXISTS(SELECT 1 FROM branch_batch_stock s WHERE s.batch_id=b.id AND s.branch_id=@branchId) DESC,b.synthetic ASC,b.received_at DESC,b.id DESC`)
+      .all<{ product_id: number; id: number }>({ ids: JSON.stringify(raising.map(([id]) => Number(id))), branchId })
     const newest = new Map<number, number>()
     for (const lot of lots) if (!newest.has(lot.product_id)) newest.set(lot.product_id, lot.id)
-    const missing = raising.filter(entry => !newest.has(entry.item.product_id)).map(entry => entry.item.product_id)
+    const missing = raising.map(([id]) => Number(id)).filter(id => !newest.has(id))
     if (missing.length) fail(409, 'inventory_check_no_lot', { productIds: missing })
-    for (const entry of raising) entry.lotId = newest.get(entry.item.product_id) as number
+    for (const [id, plan] of raising) plan.lot = newest.get(Number(id))
   }
-  return plan
+  return plans
 }
 
-function stockLine(entry: Planned, key: string, branchId: number): StockInCommitLine {
-  const productId = entry.item.product_id
-  const reason = `Inventory check approved: counted ${entry.item.counted_quantity}${entry.damaged > 0 ? `, ${entry.damaged} damaged` : ''}`
-  const common = { type: 'set', productId, quantity: entry.target, reason, branchId, client_request_id: `${key}-${productId}` }
-  // Lowering uses the stock-session Set conversion (a FIFO removal); raising tops up the newest received date through the lot-level Set writer, which needs no supplier or cost.
-  return { key: String(productId), wire: 'adjust', body: entry.target > entry.ordinary
-    ? { ...common, setScope: 'branch', batchId: entry.lotId, expectedBranchQuantity: entry.ordinary } : common }
+/**
+ * The stock writers refused every line of this request. If none of them holds a receipt, nothing was written, so a claim made only for this request is
+ * released (the approval can be rejected again, and the lines are planned afresh); otherwise it stays: stock may have moved.
+ */
+async function releaseUntouched(db: D1Compat, actor: Actor, claim: Record<string, unknown>, applied: Record<string, unknown>, requestIds: string[]): Promise<void> {
+  if (Object.keys(applied).length || (await receiptsOf(db, actor.id, requestIds)).size) return
+  try {
+    await record(db, actor, [{ sql: `UPDATE inventory_check_approvals SET applying_request_id=NULL,applying_by=NULL,plan_json='{}'
+      WHERE session_id=@id AND status='pending' AND applied_json='{}' AND applying_request_id=@stockKey AND applying_by=@actorId`, params: claim }])
+  } catch { /* the claim stays; the next request plans again */ }
+}
+
+function stockLine(entry: Open, stockKey: string, branchId: number): StockInCommitLine {
+  const { item, plan } = entry, productId = item.product_id
+  const common = { productId, reason: `Inventory check approved: counted ${plan.counted}${plan.damaged > 0 ? `, ${plan.damaged} damaged` : ''}`, branchId, client_request_id: `${stockKey}-${productId}` }
+  // Lowering removes the difference (first-in first-out); raising tops up one received date through the lot-level Set writer, which needs no supplier or cost
+  // and refuses if the branch's stock moved since it was planned.
+  return { key: String(productId), wire: 'adjust', body: plan.target > plan.before
+    ? { ...common, type: 'set', quantity: plan.target, setScope: 'branch', batchId: plan.lot, expectedBranchQuantity: plan.before }
+    : { ...common, type: 'remove', quantity: plan.before - plan.target } }
 }
 
 const decidedUpdate = (status: 'approved' | 'rejected', params: Record<string, unknown>): Statement => ({
-  sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key${status === 'approved' ? ',applied_json=@newApplied' : ''}
-    WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied`, params })
+  sql: `UPDATE inventory_check_approvals SET status='${status}',decided_by=@actorId,decided_by_name=@actorName,decided_at=@now,decision_note=@note,decision_request_id=@key${status === 'approved' ? ",applied_json=@newApplied,plan_json='{}'" : ''}
+    WHERE session_id=@id AND status='pending' AND applied_json=@oldApplied${status === 'rejected' ? ' AND applying_request_id IS NULL' : ''}`, params })
 
 async function record(db: D1Compat, actor: Actor, statements: Statement[]): Promise<void> {
   try { await db.batchOnce([authorityGuard(actor), ...statements]) }
@@ -183,7 +244,7 @@ async function record(db: D1Compat, actor: Actor, statements: Statement[]): Prom
 }
 
 async function respond(db: D1Compat, actor: Actor, sessionId: string, applied: number, remaining: number, done: boolean, failed: Array<{ productId: number; code: string | null; error: string }> = []) {
-  const row = await db.prepare(`SELECT ${APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`).get<ApprovalRow>({ id: sessionId, organization: actor.organization_id })
+  const row = await db.prepare(`SELECT ${APPROVAL_DETAIL_COLUMNS} FROM inventory_check_approvals WHERE session_id=@id AND organization_id IS @organization`).get<ApprovalRow>({ id: sessionId, organization: actor.organization_id })
   if (!row) return fail(503, 'inventory_check_outcome_unknown')
   return { approval: projectApproval(actor, row, true), applied, remaining, done, ...(failed.length ? { failed } : {}) }
 }

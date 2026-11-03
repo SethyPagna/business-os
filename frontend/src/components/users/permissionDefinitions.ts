@@ -327,7 +327,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       {
         key: 'inventory_check_approve', tKey: 'perm_inventory_check_approve', label: 'Approve counts', sensitivity: 'high', extraOf: 'inventory_checks',
         shortTKey: 'perm_short_approve_counts', short: 'Approve counts',
-        hintTKey: 'perm_hint_approve_counts', hint: 'Sets stock to the counted number. Also needs Adjust / receive stock at Full.',
+        hintTKey: 'perm_hint_approve_counts', hint: 'Applies what a count found to stock. Also needs Adjust / receive stock at Full.',
       },
     ],
   },

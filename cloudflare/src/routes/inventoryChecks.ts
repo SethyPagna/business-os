@@ -3,12 +3,12 @@ import { getCookie } from 'hono/cookie'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { readSwitch, readSwitches } from '../lib/readSwitches'
+import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
 import { decideInventoryCheckApproval } from '../lib/inventoryCheckApprovals'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
-import { createInventoryCheckSession, createInventoryCheckSubmission, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
+import { approvalsAvailable, createInventoryCheckSession, createInventoryCheckSubmission, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession } from '../lib/inventoryCheckSessions'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -20,27 +20,28 @@ app.onError((error,c) => {
   const details = error instanceof InventoryCheckSessionError && error.details ? error.details : {}
   return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' ? { outcome: 'unknown' } : {}) }, status)
 })
+/** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
+const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
 async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const token = getCookie(c, 'bos_session')
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
   return { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
 }
-app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await readSwitch(c.env, 'ic_fix_stock') })))
+app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
 app.post('/sessions', async c => {
   const result = await createInventoryCheckSession(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { simple: await readSwitch(c.env, 'ic_simple') })
   return c.json(result, result.created ? 201 : 200)
 })
 // The owner's way to count (ic_simple): pick products, type counts in the rows, submit once. With the switch off the route does not exist.
 app.post('/submissions', async c => {
-  const switches = await readSwitches(c.env, ['ic_simple', 'ic_fix_stock'])
-  if (!switches.ic_simple) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
-  const result = await createInventoryCheckSubmission(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { approvals: switches.ic_fix_stock })
+  if (!await readSwitch(c.env, 'ic_simple')) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
+  const result = await createInventoryCheckSubmission(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { approvals: await fixStockOn(c) })
   return c.json(result, result.created ? 201 : 200)
 })
-app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await readSwitch(c.env, 'ic_fix_stock') })))
+app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await fixStockOn(c) })))
 // Approve or reject a submitted count (ic_fix_stock). Approving repeats with the same requestId until it answers done: true (one request applies the plan's lines per request).
 app.post('/sessions/:id/approval', async c => {
-  if (!await readSwitch(c.env, 'ic_fix_stock')) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
+  if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
   // The stock writer is the Set sessions' own commit; it is loaded only when a decision reaches stock, so every refusal and a rejection never touch it.
   const writeStock = async (lines: StockInCommitLine[]) => (await import('./stockInCommit')).runStockInCommit(c as unknown as InventoryContext, lines)
   return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock))

@@ -2,11 +2,16 @@
 --
 -- A count submitted from the list (0259 tables, closed session scope.membership = 'submission') whose figures differ from stock changes
 -- nothing by itself: it creates ONE approval row, status 'pending'. An administrator holding "approve counts" approves it (stock is then set
--- to counted minus damaged units, line by line, through the existing Set writer) or rejects it (nothing changes). The row records who
+-- by what the count found, line by line, through the existing stock writers) or rejects it (nothing changes). The row records who
 -- submitted and who decided, when, and per product the figures before and after. New table only: no existing table, row or trigger changes.
 --
+-- A count is applied as the VARIANCE it found: counted minus the stock the counter SAW when counting (baselines_json, recorded at submit), added to the
+-- ordinary stock of the moment of approval, never below zero. A sale between the count and the approval therefore survives it.
+-- Applying is claimed before any stock is written: applying_request_id / applying_by name the one request (and person) continuing it, and plan_json
+-- holds the exact figures each line was sent with, so a repeat after a lost answer sends the identical request and the stock writers replay it.
+--
 -- PRE:  the three 0259 tables exist; inventory_check_approvals does not. A failed check reads a malformed JSON path and aborts the file.
--- POST: the table exists with its index and three triggers; it holds no row; the three 0259 tables are unchanged (the companion test
+-- POST: the table exists with its index and four triggers; it holds no row; the three 0259 tables are unchanged (the companion test
 --       counts them before and after).
 -- Append-only, LF-only, generic (no client data), idempotent only through the PRE check (a second run aborts on the existing table).
 -- Rollback-safe: the previous Worker never names the table, so it runs unchanged on the new schema.
@@ -14,7 +19,8 @@
 --
 -- Immutable once decided, like the history it belongs to:
 --   * the identity columns can never change; a decided row (approved or rejected) can never change again;
---   * a pending row may only gain applied_json entries (the per-product results of a partly applied approval) or be decided;
+--   * a pending row may only gain applied_json entries (the per-product results of a partly applied approval), take or release its claim, or be decided;
+--   * a claimed row (stock may already have moved) can never be rejected, and its claim never changes hands; it is released only while nothing is planned or applied;
 --   * rows are never deleted, except while the restore maintenance flag is set (the same carve-out as 0268).
 --
 -- RECOVERY: schema only, nothing to restore.
@@ -38,23 +44,33 @@ CREATE TABLE inventory_check_approvals (
   decision_note TEXT CHECK(decision_note IS NULL OR length(decision_note)<=500),
   decision_request_id TEXT,
   applied_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(applied_json) AND json_type(applied_json)='object'),
+  baselines_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(baselines_json) AND json_type(baselines_json)='object'),
+  applying_request_id TEXT,
+  applying_by INTEGER,
+  plan_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(plan_json) AND json_type(plan_json)='object'),
   FOREIGN KEY(session_id) REFERENCES inventory_check_sessions(id),
   CHECK((status='pending' AND decided_by IS NULL AND decided_at IS NULL AND decision_request_id IS NULL)
-    OR (status<>'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL))
+    OR (status<>'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL)),
+  CHECK((applying_request_id IS NULL) = (applying_by IS NULL))
 );
 CREATE INDEX inventory_check_approvals_pending ON inventory_check_approvals(organization_id, status, submitted_at DESC);
 
 CREATE TRIGGER inventory_check_approvals_identity BEFORE UPDATE OF
-  session_id,organization_id,branch_id,lines,submitted_by,submitted_at ON inventory_check_approvals
+  session_id,organization_id,branch_id,lines,submitted_by,submitted_at,baselines_json ON inventory_check_approvals
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 CREATE TRIGGER inventory_check_approvals_decided BEFORE UPDATE ON inventory_check_approvals
 WHEN OLD.status <> 'pending'
+BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
+CREATE TRIGGER inventory_check_approvals_claim BEFORE UPDATE ON inventory_check_approvals
+WHEN OLD.applying_request_id IS NOT NULL AND (NEW.status = 'rejected'
+  OR NOT ((NEW.applying_request_id IS OLD.applying_request_id AND NEW.applying_by IS OLD.applying_by)
+    OR (NEW.applying_request_id IS NULL AND NEW.plan_json = '{}' AND json_extract(NEW.applied_json,'$.lines') IS NULL)))
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 CREATE TRIGGER inventory_check_approvals_no_delete BEFORE DELETE ON inventory_check_approvals
 WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 
-SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'trigger') = 3
+SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'trigger') = 4
   AND (SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'inventory_check_approvals' AND type = 'index' AND name = 'inventory_check_approvals_pending') = 1
   AND (SELECT COUNT(*) FROM inventory_check_approvals) = 0
 THEN 1 ELSE json_extract('[]','$[inventory_check_approvals_0286_post]') END;
