@@ -1,6 +1,6 @@
 import type { Browser, BrowserContext, Page, Route } from '@playwright/test'
 import { PROJECT_CONTEXT_USE } from '../../playwright.config'
-import { collectPageHealth, type PageHealth } from './harness'
+import { ADMIN_ORIGIN, collectPageHealth, type PageHealth } from './harness'
 import { E2E_ACCOUNTS, signIn } from './session'
 import { accessFor, roleUser, workerUser, type RoleAccess, type RoleDef } from './roleMatrix'
 import { projectAcquisitionCosts } from './costRedaction'
@@ -83,7 +83,20 @@ export async function openAsRole(browser: Browser, projectName: string, role: Ro
     if (!body.user) return route.fulfill({ response })
     return route.fulfill({ response, json: { ...body, user: roleUser(role, body.user) } })
   }
-  await page.route('**/api/auth/login', (route) => (route.request().method() === 'POST' ? withRole(route) : route.fallback()))
+  // The login response also carries the session cookie. Playwright is not documented to apply a fulfilled response's Set-Cookie,
+  // so the cookie the real response names is set on the context explicitly; if the browser applied it too, it is the same value.
+  await page.route('**/api/auth/login', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const response = await route.fetch()
+    const [pair] = (response.headersArray().find((header) => header.name.toLowerCase() === 'set-cookie')?.value || '').split(';')
+    const eq = pair.indexOf('=')
+    if (response.ok() && eq > 0) {
+      await context.addCookies([{ name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim(), url: ADMIN_ORIGIN, httpOnly: true, sameSite: 'Lax' }])
+    }
+    const body = await response.json() as Record<string, unknown> & { user?: { id: number; username: string; name: string } }
+    if (!body.user) return route.fulfill({ response })
+    return route.fulfill({ response, json: { ...body, user: roleUser(role, body.user) } })
+  })
   await page.route('**/api/auth/bootstrap', withRole)
   await page.route('**/api/auth/me', withRole)
 

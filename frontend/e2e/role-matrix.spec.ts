@@ -6,7 +6,7 @@ import { pageErrorsExcludingKnown, ADMIN_ORIGIN } from './support/harness'
 import { APP_ROOT } from './support/session'
 import { costKeysIn } from './support/costRedaction'
 import {
-  ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost,
+  ADMIN_ROUTES, HUB_PAGES, ROLES, accessFor, deriveRole, expectedAccountPages, expectedHubSections, expectedLanding, expectedNavIds, grant, seesCost,
   type RoleAccess, type RoleDef,
 } from './support/roleMatrix'
 import { isPhoneProject, openAsRole, type RoleSession } from './support/roleSession'
@@ -43,6 +43,12 @@ const EN = en as unknown as Record<string, unknown>
 const text = (key: string, fallback: string): string => { const value = EN[key]; return typeof value === 'string' && value && value !== key ? value : fallback }
 const squash = (value: string): string => value.replace(/\s+/g, ' ').trim()
 const sorted = (values: readonly string[]): string[] => [...values].sort()
+/**
+ * test.fail(), through one door. A test.fail case also "passes" when it dies for the wrong reason (a bad locator, a timeout), which
+ * would falsely confirm a defect. E2E_ROLE_MATRIX_RAW=1 switches every annotation off so the real failure message of each can be
+ * read and checked against the reason given.
+ */
+const knownDefect = (condition: boolean, reason: string): void => { test.fail(condition && process.env.E2E_ROLE_MATRIX_RAW !== '1', reason) }
 /** A few seconds: used after the page has settled, where "absent" must fail fast instead of waiting 15 s. */
 const BRIEF = { timeout: 5_000 }
 
@@ -61,7 +67,7 @@ async function settle(page: Page, pageId: string): Promise<Locator> {
   const slot = activeSlot(page)
   await expect(slot.locator('.business-os-initial-shell'), `${pageId} has left its loader`).toHaveCount(0, { timeout: 30_000 })
   // Bounded: a page that polls never goes idle, and a settle must not borrow the 45 s navigation budget.
-  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined)
+  await page.waitForLoadState('networkidle', { timeout: 4_000 }).catch(() => undefined)
   return slot
 }
 
@@ -146,7 +152,7 @@ for (const role of ROLES) {
  */
 const KNOWN_EMPTY_DOORS: Array<{ roles: string[]; page: string; reason: string }> = [
   {
-    roles: ['employee', 'cost-viewer'],
+    roles: ['employee', 'locked-employee', 'cost-viewer'],
     page: 'promotions',
     reason: 'AppContext.tsx:2530 opens the Promotions door for can(products,view), but PromotionsPage.tsx:539/547/670 render a section only for customer_portal, promotions, or products edit+price, so the Employee default is offered an empty page',
   },
@@ -207,7 +213,7 @@ for (const known of KNOWN_EMPTY_DOORS) {
     const role = ROLES.find((entry) => entry.id === roleId) as RoleDef
     test(`${role.label}: the ${known.page} page the role is offered has something on it`, async ({ browser }, testInfo) => {
       test.setTimeout(120_000)
-      test.fail(true, known.reason)
+      knownDefect(true, known.reason)
       const session = await begin(browser, testInfo.project.name, role)
       const { page } = session
       try {
@@ -219,6 +225,28 @@ for (const known of KNOWN_EMPTY_DOORS) {
       } finally { await session.close() }
     })
   }
+}
+
+// The Dashboard under the payload the Worker really sends each role. compat.ts:34-35 mounts acquisitionCostResponses on /dashboard and
+// /dashboard/*, so a role without product_cost_view gets its cost-shaped keys projected away (stock_value_usd among them), and
+// Dashboard.tsx isDashboardSummaryPayload (:727-735) requires stock_value_usd to be finite. The case asks the plain question: does the
+// Dashboard load for each role that may open it? The admin and every cost holder are the controls.
+const DASHBOARD_FAILED = /did not finish loading|returned incomplete (summary|analytics) data|incomplete data|could not be loaded for this range/i
+for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('dashboard'))) {
+  test(`${role.label}: the Dashboard loads with the payload the Worker sends this role`, async ({ browser }, testInfo) => {
+    test.setTimeout(120_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page } = session
+    try {
+      const slot = await open(page, '/', 'dashboard')
+      // The startup read fills the cards a moment after the shell settles.
+      await page.waitForTimeout(1_500)
+      const shown = squash(await slot.innerText())
+      expect(shown.length, 'the Dashboard has content').toBeGreaterThan(0)
+      expect(shown.match(DASHBOARD_FAILED)?.[0] ?? null, `the Dashboard shows a load failure (page text: "${shown.slice(0, 240)}")`).toBeNull()
+      finish(session)
+    } finally { await session.close() }
+  })
 }
 
 // =====================================================================================================================
@@ -264,6 +292,14 @@ for (const role of ROLES) {
           const shown = (await menu.getByRole('button').allInnerTexts()).map(squash)
           expect.soft(sorted(shown), 'Manage menu entries').toEqual(sorted(entries.filter(([, on]) => on).map(([label]) => label)))
           await page.keyboard.press('Escape')
+          await expect(menu, 'the Manage menu closed').toBeHidden()
+        }
+        if (grant(access, 'products', 'view')) {
+          // A product's detail sheet hides Edit by omission when products:edit is off.
+          await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
+          const productDetail = page.getByRole('dialog').last()
+          await expect(productDetail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
+          await expect.soft(productDetail.getByRole('button', { name: text('edit', 'Edit'), exact: true }), 'Edit on a product = products:edit').toHaveCount(grant(access, 'products', 'edit') ? 1 : 0, BRIEF)
         }
       }
 
@@ -277,9 +313,157 @@ for (const role of ROLES) {
         await slot.getByText('20260914-101500').first().click()
         const footer = page.locator('[data-sale-detail-footer-actions]')
         await expect(footer, 'the sale detail opened').toBeVisible({ timeout: 15_000 })
-        await expect.soft(page.getByRole('button', { name: text('sale_customer_edit_entry', 'Edit customer'), exact: true }), 'Edit customer = sales:customer').toHaveCount(grant(access, 'sales', 'customer') ? 1 : 0, BRIEF)
-        await expect.soft(page.getByRole('button', { name: text('return', 'Return'), exact: true }), 'Return = returns:add').toHaveCount(grant(access, 'returns', 'add') ? 1 : 0, BRIEF)
-        await expect.soft(page.getByText(text('update_status', 'Update status'), { exact: true }), 'Update status = sales:status').toHaveCount(grant(access, 'sales', 'status') ? 1 : 0, BRIEF)
+        // Scoped to the open detail so a same-named row action cannot inflate a count.
+        const detail = (await page.getByRole('dialog').count()) ? page.getByRole('dialog').last() : page.locator(APP_ROOT)
+        await expect.soft(detail.getByRole('button', { name: text('sale_customer_edit_entry', 'Edit customer'), exact: true }), 'Edit customer = sales:customer').toHaveCount(grant(access, 'sales', 'customer') ? 1 : 0, BRIEF)
+        await expect.soft(detail.getByRole('button', { name: text('return', 'Return'), exact: true }), 'Return = returns:add').toHaveCount(grant(access, 'returns', 'add') ? 1 : 0, BRIEF)
+        await expect.soft(detail.getByText(text('update_status', 'Update status'), { exact: true }), 'Update status = sales:status').toHaveCount(grant(access, 'sales', 'status') ? 1 : 0, BRIEF)
+      }
+      finish(session)
+    } finally { await session.close() }
+  })
+}
+
+// -- Promotions: New rule ------------------------------------------------------------------------------------------------
+// PromotionsPage.tsx:547-560: the Rules section reads for the View tier; New rule needs promotions:manage. The toolbar renders before the
+// rule list, so it needs no fixture read.
+for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return expectedHubSections(access, 'promotions').some((section) => section.id === 'rules') })) {
+  test(`${role.label}: the Promotions rules offer New rule only with promotions:manage`, async ({ browser }, testInfo) => {
+    test.setTimeout(120_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    try {
+      const slot = await open(page, '/promotions', 'promotions')
+      await expect(slot.getByRole('heading', { name: text('promo_rules_section', 'Promotion rules') }), 'the Rules section rendered').toBeVisible({ timeout: 30_000 })
+      await expect(slot.getByRole('button', { name: text('promo_new_rule', 'New rule') }), 'New rule = promotions:manage').toHaveCount(grant(access, 'promotions', 'manage') ? 1 : 0, BRIEF)
+      finish(session)
+    } finally { await session.close() }
+  })
+}
+
+// -- Settings: Save ------------------------------------------------------------------------------------------------------
+// Settings.tsx:1209-1219: Save at the Full tier, a read-only "View" badge at the View tier. The tier is read with the app's own
+// getPermissionTier, not copied.
+for (const role of ROLES.filter((entry) => accessFor(entry).canAccessPage('settings'))) {
+  test(`${role.label}: Settings offers Save only at the Full tier`, async ({ browser }, testInfo) => {
+    test.setTimeout(120_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    try {
+      const slot = await open(page, '/settings', 'settings')
+      const save = slot.getByRole('button', { name: text('save', 'Save'), exact: true })
+      await expect(save.or(slot.getByText(text('view_only', 'View'), { exact: true })).first(), 'the Settings header rendered').toBeVisible({ timeout: 30_000 })
+      expect(await save.count() > 0, `Save is shown iff the tier is full (tier: ${access.getPermissionTier('settings')})`).toBe(access.getPermissionTier('settings') === 'full')
+      finish(session)
+    } finally { await session.close() }
+  })
+}
+
+// -- Products: Add variant ----------------------------------------------------------------------------------------------
+// Every shipped role that holds products:add holds products:variant too, so the defect needs a role one override away.
+const MANAGER = ROLES.find((entry) => entry.id === 'manager') as RoleDef
+const VARIANT_OFF = deriveRole(MANAGER, 'manager-no-variant', 'Manager with Add variant switched off', { 'products:variant': false })
+for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') }), VARIANT_OFF]) {
+  test(`${role.label}: a product's detail offers Add variant only with products:variant`, async ({ browser }, testInfo) => {
+    test.setTimeout(150_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    const wantVariant = grant(access, 'products', 'variant')
+    // APP BUG, kept as a case: Products.tsx:5829 passes onAddVariant when canAddProduct (products:add) alone holds. The grant table has a
+    // separate products:variant row (utils/permissionActions.ts, "requires products:add") that no UI source reads, so a role with Add
+    // but not Variant is offered the button and the Worker (routes/products.ts POST /variant) refuses it.
+    knownDefect(grant(access, 'products', 'add') && !wantVariant, 'Products.tsx:5829 gates Add variant on products:add alone; products:variant is never read by the UI')
+    try {
+      const slot = await open(page, '/products', 'products')
+      await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
+      const detail = page.getByRole('dialog').last()
+      await expect(detail, 'the product detail opened').toBeVisible({ timeout: 15_000 })
+      await expect(detail.getByRole('button', { name: text('add_variant', 'Add variant'), exact: true }), 'Add variant = products:add and products:variant').toHaveCount(wantVariant ? 1 : 0, BRIEF)
+    } finally { await session.close() }
+  })
+}
+
+// -- Products: bulk Delete ----------------------------------------------------------------------------------------------
+for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') })) {
+  test(`${role.label}: selecting products offers a bulk Delete only with products:delete and products:bulk_delete`, async ({ browser }, testInfo) => {
+    test.setTimeout(150_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    const wantBulkDelete = grant(access, 'products', 'delete') && grant(access, 'products', 'bulk_delete')
+    // APP BUG, kept as a case: Products.tsx:5347 draws the bulk toolbar's Delete for any non-empty selection, and selection is open to
+    // every role. Neither products:delete nor products:bulk_delete is consulted anywhere in the UI (utils/permissionActions.ts
+    // bulk_delete has no reader), and canRemoveProduct (:1498) reaches only the Conflicts tab. The Worker then refuses the delete.
+    knownDefect(!wantBulkDelete, 'Products.tsx:5347 shows the bulk Delete for any selection; products:delete and products:bulk_delete are never consulted')
+    try {
+      const slot = await open(page, '/products', 'products')
+      await expect(slot.getByText(PRODUCT_NAME).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })
+      await slot.getByRole('checkbox', { name: text('select_all', 'Select all') }).first().check()
+      const toolbar = slot.locator('.bulk-toolbar')
+      await expect(toolbar, 'selecting rows opens the bulk toolbar').toBeVisible({ timeout: 10_000 })
+      await expect(toolbar.getByRole('button', { name: text('delete_short', 'Delete'), exact: true }), 'bulk Delete = products:delete and products:bulk_delete').toHaveCount(wantBulkDelete ? 1 : 0, BRIEF)
+    } finally { await session.close() }
+  })
+}
+
+// -- Returns ------------------------------------------------------------------------------------------------------------
+// /returns is the Sales hub with its Returns section open (pathRouting.ts, SalesHubPage.tsx initialSection). The toolbar renders
+// before, and independently of, the returns list.
+const RETURNS_ROLES = ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('sales') && grant(access, 'returns', 'view') })
+for (const role of RETURNS_ROLES) {
+  test(`${role.label}: the Returns toolbar offers Add Return only with returns:add`, async ({ browser }, testInfo) => {
+    test.setTimeout(150_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    const wantAdd = grant(access, 'returns', 'add')
+    // APP BUG, kept as a case: Returns.tsx:1745 draws the Add Return button with no check at all. canAddReturn (Returns.tsx:391)
+    // reaches only the detail's take-back control (:2000). Where an administrator has switched returns:add off, the button is still
+    // offered and the Worker then refuses the create.
+    knownDefect(!wantAdd, 'Returns.tsx:1745 renders Add Return with no returns:add check; canAddReturn (:391) only gates the take-back control at :2000')
+    try {
+      const slot = await open(page, '/returns', 'sales')
+      await expect(slot.locator('#returns-search'), 'the Returns section rendered').toBeVisible({ timeout: 30_000 })
+      await expect(page.getByRole('button', { name: text('add_return', 'Add Return'), exact: true }), 'Add Return = returns:add').toHaveCount(wantAdd ? 1 : 0, BRIEF)
+    } finally { await session.close() }
+  })
+
+  test(`${role.label}: the Returns toolbar offers Export only with returns:export`, async ({ browser }, testInfo) => {
+    test.setTimeout(150_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    try {
+      const slot = await open(page, '/returns', 'sales')
+      await expect(slot.locator('#returns-search'), 'the Returns section rendered').toBeVisible({ timeout: 30_000 })
+      // Export rides the mobile header on a phone, so it is looked up page-wide.
+      await expect(page.getByRole('button', { name: text('export', 'Export'), exact: true }), 'Returns Export = returns:export').toHaveCount(grant(access, 'returns', 'export') ? 1 : 0, BRIEF)
+      finish(session)
+    } finally { await session.close() }
+  })
+}
+
+// -- Contacts -----------------------------------------------------------------------------------------------------------
+// CustomersTab.tsx:1083-1150: the toolbar renders before, and independently of, the customer list, so it needs no fixture read.
+for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('contacts') && grant(access, 'contacts', 'view') })) {
+  test(`${role.label}: the Contacts toolbar buttons match the grants`, async ({ browser }, testInfo) => {
+    test.setTimeout(150_000)
+    const session = await begin(browser, testInfo.project.name, role)
+    const { page, access } = session
+    try {
+      const slot = await open(page, '/contacts', 'contacts')
+      await expect(slot.locator('input').first(), 'the Customers tab rendered').toBeVisible({ timeout: 30_000 })
+      const wantImport = grant(access, 'contacts', 'bulk') && grant(access, 'contacts', 'import') && (grant(access, 'contacts', 'add') || grant(access, 'contacts', 'edit'))
+      const wantExport = grant(access, 'contacts', 'export')
+      await expect.soft(slot.getByRole('button', { name: text('add_customer', 'Add Customer'), exact: true }), 'Add Customer = contacts:add').toHaveCount(grant(access, 'contacts', 'add') ? 1 : 0, BRIEF)
+      const manage = slot.getByRole('button', { name: text('manage', 'Manage'), exact: true })
+      await expect.soft(manage, 'Manage = Import or Export (the administrator-only gender restore also lives there)').toHaveCount(wantImport || wantExport ? 1 : 0, BRIEF)
+      if ((wantImport || wantExport) && await manage.count()) {
+        await manage.click()
+        const menu = page.locator('[data-portal-menu-content]').last()
+        await expect(menu).toBeVisible()
+        // "Restore customer gender" is the administrator-only third entry; its rule is not copied here.
+        const shown = (await menu.getByRole('button').allInnerTexts()).map(squash).filter((label) => label !== text('customer_gender_restore', 'Restore customer gender'))
+        expect.soft(sorted(shown), 'Contacts Manage menu entries').toEqual(sorted([...(wantImport ? [text('import_contacts', 'Import')] : []), ...(wantExport ? [text('export', 'Export')] : [])]))
+        await page.keyboard.press('Escape')
+        await expect(menu, 'the Manage menu closed').toBeHidden()
       }
       finish(session)
     } finally { await session.close() }
@@ -318,7 +502,7 @@ for (const role of EDITORS) {
     // APP BUG, kept as a case: Products.tsx:5969 hands ProductForm `onDelete` for every selected product and ProductForm.tsx:2302
     // draws the trash button on `isEditMode && onDelete` alone. canRemoveProduct (Products.tsx:1498) only reaches the Conflicts tab.
     // A role that may edit but not delete (the Employee default) is offered Delete, then collects the Worker's 403.
-    test.fail(!wantDelete, 'Products.tsx:5969 passes onDelete to ProductForm with no products:delete check; ProductForm.tsx:2302 shows Delete on onDelete alone')
+    knownDefect(!wantDelete, 'Products.tsx:5969 passes onDelete to ProductForm with no products:delete check; ProductForm.tsx:2302 shows Delete on onDelete alone')
     try {
       const dialog = await openProductForm(session)
       await expect(dialog.getByRole('button', { name: text('delete', 'Delete'), exact: true }), 'Delete in the product form = products:delete').toHaveCount(wantDelete ? 1 : 0, BRIEF)
@@ -363,6 +547,9 @@ for (const role of ROLES) {
       const leaks: string[] = []
       for (const body of session.bodies) {
         if (body.status >= 400) continue
+        // /api/auth/* carries the role's own permission NAMES (product_cost_view, inventory_check_show_cost, ...), which
+        // isAcquisitionCostKey rightly matches by name; they are grants, not cost data.
+        if (new URL(body.url).pathname.startsWith('/api/auth/')) continue
         let parsed: unknown
         try { parsed = JSON.parse(body.text) } catch { continue }
         const keys = costKeysIn(parsed)
@@ -420,7 +607,7 @@ for (const role of EDITORS) {
 // =====================================================================================================================
 // Owner, 14 Oct 2026 and round 1 (2 Nov, answer 3): a separate "See full phone numbers" grant, off by default for every non-admin
 // role. At b6ebf551d it does not exist (P2.8, claude/p28-phone-permission-20261102, is not in rc/20261104a), so these cases are
-// written against the definition and flip to ordinary passing tests the day the grant lands -- see `test.fail(!phoneGrant, ...)`.
+// written against the definition and flip to ordinary passing tests the day the grant lands -- see `knownDefect(!phoneGrant, ...)`.
 // P2.8 masks in the Worker's shared projection, not in the browser, so what this tier can show is only what the page does with
 // the number it is sent; the forged-call half is the system-tier lane.
 const phoneGrant = PERMISSION_DEFS.find((definition) => /full phone/i.test(definition.label) || /full_phone/.test(definition.key))
@@ -431,7 +618,7 @@ const digitsOf = (value: string): string => value.replace(/\D/g, '')
 const NO_PHONE_GRANT = 'P2.8 (claude/p28-phone-permission-20261102, contacts_full_phone) is not in rc/20261104a: no "See full phone numbers" grant exists in permissionDefinitions.ts, so every role is sent full numbers'
 
 test('the permission catalogue defines a "See full phone numbers" grant, off in every non-admin role', () => {
-  test.fail(!phoneGrant, NO_PHONE_GRANT)
+  knownDefect(!phoneGrant, NO_PHONE_GRANT)
   expect(phoneGrant, 'a "See full phone numbers" grant in permissionDefinitions.ts').toBeDefined()
   for (const role of ROLES.filter((entry) => entry.id !== 'admin')) {
     expect(role.grants[phoneGrant?.key ?? ''], `${role.label} does not hold ${phoneGrant?.key}`).not.toBe(true)
@@ -447,7 +634,7 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     // What the Worker sends this role: the masked form once the grant exists and the role lacks it; at the base, the raw
     // `s.*` row (routes/sales.ts GET /api/sales) to everybody.
     const sent = phoneGrant && !mayReadFull ? PHONE_MASKED : PHONE_FULL
-    test.fail(!mayReadFull && !phoneGrant, NO_PHONE_GRANT)
+    knownDefect(!mayReadFull && !phoneGrant, NO_PHONE_GRANT)
     try {
       await page.route(/\/api\/sales(\/search)?(\?.*)?$/, async (route) => {
         if (route.request().method() !== 'GET') return route.fallback()

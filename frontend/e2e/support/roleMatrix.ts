@@ -19,6 +19,8 @@ import { ROLE_PRESETS } from '../../src/components/users/rolePresetDefaults.ts'
  *
  *   Employee default   cloudflare/src/lib/roleDefaults.ts DEFAULT_ROLE_PERMISSIONS.employee (the one seed the Worker
  *                      writes and the role editor resets to)
+ *   locked employee    the Employee default plus an explicit `section:action: false` for every write action of Products, Sales, Returns and
+ *                      Contacts, read out of PERMISSION_ACTIONS (the way an administrator narrows a role)
  *   Manager default    the same file's .manager: the one non-admin default that reaches Dashboard, Review, Settings, Branches
  *   cashier            the lead key of the POS section of permissionDefinitions.ts, and nothing else
  *   viewer             every section of permissionDefinitions.ts whose middle tier is 'view'
@@ -70,8 +72,25 @@ function define(id: string, label: string, roleCode: string, grants: Grants): Ro
   return { id, label, roleCode, grants, costGranted: grants.product_cost_view === true || grants.all === true }
 }
 
+/**
+ * The Employee default with every write action of the front-line sections switched off the way an administrator does it: an
+ * explicit `section:action: false` override (permissionActions.ts, one-way by design). The actions are read out of
+ * PERMISSION_ACTIONS, not listed here, so a new action is narrowed automatically. View stays on, so every page still opens.
+ * No default role carries such an override, and "a control hidden by an override" is a different code path from "a control the tier
+ * never granted", so without this role a page that forgets the override passes unnoticed.
+ */
+const LOCKED_SECTIONS = ['products', 'sales', 'returns', 'contacts'] as const
+function lockedEmployeeGrants(): Grants {
+  const grants: Grants = { ...DEFAULT_ROLE_PERMISSIONS.employee }
+  for (const sectionKey of LOCKED_SECTIONS) {
+    for (const action of actionsForKey(sectionKey)) if (action.key !== 'view') grants[`${sectionKey}:${action.key}`] = false
+  }
+  return grants
+}
+
 export const ROLES: RoleDef[] = [
   define('employee', 'Employee default', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee }),
+  define('locked-employee', 'Employee with every write action switched off', 'employee', lockedEmployeeGrants()),
   define('manager', 'Manager default', 'manager', { ...DEFAULT_ROLE_PERMISSIONS.manager }),
   define('cashier', 'cashier (POS only)', 'cashier', { [posLead.key]: true }),
   define('viewer', 'viewer (view tier)', 'viewer', Object.fromEntries(
@@ -84,6 +103,11 @@ export const ROLES: RoleDef[] = [
   define('cost-viewer', 'Employee default + View product costs', 'employee', { ...DEFAULT_ROLE_PERMISSIONS.employee, product_cost_view: true }),
   define('admin', 'admin (control)', 'admin', { ...preset('admin') }),
 ]
+
+/** A role one override away from `base`: for the single-purpose cases that must not multiply every other test. */
+export function deriveRole(base: RoleDef, id: string, label: string, patch: Grants): RoleDef {
+  return define(id, label, base.roleCode, { ...base.grants, ...patch })
+}
 
 /** The account object the app holds after sign-in, for `role`, keeping the fixture account's identity. */
 export function roleUser<T extends { id: number; username: string; name: string }>(role: RoleDef, account: T) {
