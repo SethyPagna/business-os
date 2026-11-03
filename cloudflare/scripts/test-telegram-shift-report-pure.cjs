@@ -109,7 +109,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
 })
 const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
-  './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
+  './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
 })
 
@@ -837,7 +837,7 @@ check(`every section title, in all three modes and both families, keeps to one r
 // row's width and a name longer than it are all judged too.
 const probeTelegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
-  './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'), './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
+  './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
 })

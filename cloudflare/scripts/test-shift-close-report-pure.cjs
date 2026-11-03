@@ -359,7 +359,6 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {
-    './phoneMask': require('./harness/phone_real_modules.cjs').phoneModule('./phoneMask'),
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => settingsOnly },
     './businessDateWindow': businessDateWindow,

@@ -153,7 +153,6 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
 const telegram = loadReal('lib/telegram.ts', {
-  './phoneMask': loadReal('lib/phoneMask.ts'),
   './db': dbShim,
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './businessDateWindow': businessDateWindow, './telegramLang': lang, './saleTotals': saleTotals,
