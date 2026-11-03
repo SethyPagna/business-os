@@ -24,7 +24,19 @@
 //   --wrong=courier-only  the acquisition-cost patterns are never passed
 //   --wrong=acquisition-only  the courier pattern is never passed
 const assert = require('node:assert/strict')
+const path = require('node:path')
 const H = require('./harness/al_money_native.cjs')
+
+// The app's own date helpers, bundled from src as they ship (the Worker harness bundles the routes the same way), so the
+// fixture's dates come from the very business-day arithmetic the audit-log window uses and not from a second copy of it.
+function loadApp(file) {
+  const out = require('esbuild').buildSync({ entryPoints: [path.join(__dirname, '..', file)], bundle: true, write: false, format: 'cjs', platform: 'node', logLevel: 'silent' })
+  const mod = { exports: {} }
+  new Function('module', 'exports', out.outputFiles[0].text)(mod, mod.exports)
+  return mod.exports
+}
+const { businessToday } = loadApp('src/lib/businessDateWindow.ts')
+const { resolveAuditWindow } = loadApp('src/lib/auditLogQuery.ts')
 
 const QUERY = 'src/lib/auditLogQuery.ts'
 const ROUTE = 'src/routes/compat.ts'
@@ -41,10 +53,36 @@ if (WRONG && !MUTANTS[WRONG]) throw new Error(`unknown --wrong=${WRONG}; choose 
 const COST_TEXT = /actual.{0,3}cost|actual.{0,3}delivery.{0,3}cost|delivery.{0,3}actual.{0,3}cost/i
 const day = (date, hourUtc = 3) => `${date}T${String(hourUtc).padStart(2, '0')}:00:00.000Z`
 const QUOTE = { gross_usd: 10, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 10, total_khr: 40000 }
+// The product-cost audit row is stamped three business days before the instant it is written, at 04:00 UTC (11:00 in
+// Cambodia), so it is inside the default window of GET /api/system/audit-logs (the last 30 business days, taken from
+// businessToday, UTC+7) whenever the test runs. It used to be the fixed '2026-10-05 04:00:00'; that date stopped being
+// inside the window at 2026-11-03T17:00:00Z, Cambodia midnight, when the 30 days no longer reached 5 Oct, and every run after
+// that instant failed five checks (the row was missing even for the administrator). A fixed date in a read that is windowed
+// on the clock is a fixture with an expiry date. The sale's own date below stays fixed: nothing reads it, and the audit rows
+// its amendments write are stamped when they are written.
+const addDays = (day, days) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
+const productRowStamp = nowMs => `${addDays(businessToday(nowMs), -3)} 04:00:00`
+// Instants (UTC) where the default window of GET /api/system/audit-logs changes hands: Cambodia midnight is 17:00Z.
+const PINNED = [
+  ['2026-11-03T16:00:00Z', 'an hour before Cambodia midnight'],
+  ['2026-11-03T17:00:00Z', 'the first instant of 4 Nov in Cambodia'],
+  ['2026-11-03T18:00:00Z', 'an evening of the UTC day that is already the next business day'],
+  ['2026-11-04T00:10:00Z', 'ten minutes into the next UTC day, 07:10 in Cambodia'],
+  ['2026-12-25T12:00:00Z', 'seven weeks later'],
+]
 
 async function main() {
-  const h = await H.startWorker({ patches: WRONG ? MUTANTS[WRONG] : BASE ? H.basePatches(BASE) : [] })
   const r = H.recorder('ASO')
+  for (const [instant, why] of PINNED) {
+    r.check(`the product-cost audit row is inside the default audit window at ${instant} (${why})`, () => {
+      const nowMs = Date.parse(instant)
+      const stamp = productRowStamp(nowMs)
+      const rowDay = businessToday(Date.parse(`${stamp.replace(' ', 'T')}Z`)) // date(created_at, '+7 hours')
+      const window = resolveAuditWindow({}, nowMs)
+      assert.ok(rowDay >= window.startDate && rowDay <= window.endDate, `row ${stamp} is business day ${rowDay}, outside ${window.startDate}..${window.endDate}`)
+    })
+  }
+  const h = await H.startWorker({ patches: WRONG ? MUTANTS[WRONG] : BASE ? H.basePatches(BASE) : [] })
   try {
     await H.seedProduct(h, 704, 'ASO Cream', 10, 1000, 1)
     await h.db.prepare("INSERT INTO delivery_contacts(id,name,phone) VALUES(1,'ASO Driver','012000777')").run()
@@ -58,7 +96,7 @@ async function main() {
     assert.equal(feeChange.status, 200, JSON.stringify(feeChange.body).slice(0, 300))
     const productCost = JSON.stringify({ field: 'cost_price_usd', cost_price_usd: 3.1415, note: 'cost corrected' })
     await h.db.prepare("INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,old_value,new_value,created_at) VALUES(901,'AL Admin','product_cost_update','product','704',?,?,?,?)")
-      .bind(productCost, JSON.stringify({ cost_price_usd: 3.1415 }), JSON.stringify({ cost_price_usd: 3.1416 }), '2026-10-05 04:00:00').run()
+      .bind(productCost, JSON.stringify({ cost_price_usd: 3.1415 }), JSON.stringify({ cost_price_usd: 3.1416 }), productRowStamp(Date.now())).run()
 
     const OFF = { 'sales:view_courier_cost': false }
     const READS = { sales: 'view', reports: true, audit_log: true }
