@@ -218,6 +218,26 @@ async function scenario(w) {
     assert.deepEqual(report.sale_delivery, r.sale_delivery)
   })
 
+  await check('a branch id is decimal digits only, in the expense half and the sale half alike: hex, exponent, decimal point and sign match nothing', async () => {
+    const one = (await list(`${RANGE}&branch_id=1&source=all`)).json
+    const oneReport = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12&branchId=1&include=sales`, undefined, U.full)).json
+    assert.ok(one.fees.some((f) => f.kind === 'sale_delivery') && one.fees.some((f) => f.kind !== 'sale_delivery'), 'control: branch 1 has courier rows and recorded expenses, so a filter that matches nothing is visible')
+    assert.ok(oneReport.totals.count > 0 && oneReport.sale_delivery.count > 0)
+    for (const same of ['%201', '1%20', '01', '001']) {
+      const r = (await list(`${RANGE}&branch_id=${same}&source=all`)).json
+      assert.deepEqual([ids(r.fees), r.total, r.sale_delivery], [ids(one.fees), one.total, one.sale_delivery], `list branch_id=${same} is branch 1`)
+      const report = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12&branchId=${same}&include=sales`, undefined, U.full)).json
+      assert.deepEqual([report.totals, report.sale_delivery], [oneReport.totals, oneReport.sale_delivery], `report branchId=${same} is branch 1`)
+    }
+    for (const bad of ['0x1', '0X1', '1e0', '1E0', '1.0', '1.', '.1', '%2B1', '-1', '1_0', '1,0', '%D9%A1', 'abc', '1abc', '0', '99999999999999999999']) {
+      const r = (await list(`${RANGE}&branch_id=${bad}&source=all`)).json
+      assert.deepEqual([r.fees.length, r.total, r.sale_delivery.count], [0, 0, 0], `list branch_id=${bad} matches nothing in either half`)
+      assert.equal((await list(`${RANGE}&branch_id=${bad}`)).json.total, 0, `the old list, branch_id=${bad}`)
+      const report = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12&branchId=${bad}&include=sales`, undefined, U.full)).json
+      assert.deepEqual([report.totals.count, report.sale_delivery.count], [0, 0], `report branchId=${bad} matches nothing in either half`)
+    }
+  })
+
   await check('exact time window: sale rows follow createdFrom/createdTo (entry time), like the expense half', async () => {
     const r = (await list('createdFrom=2026-10-10T03:30:00Z&createdTo=2026-10-10T04:30:00Z&source=all')).json
     assert.deepEqual(r.fees.filter((f) => f.kind === 'sale_delivery').map((f) => f.sale_id), [2])
@@ -349,7 +369,8 @@ async function scenarioPlan(patches = []) {
     assert.equal((await count({ branch_id: '2' })).count, direct(2), 'branch 2')
     assert.equal((await count({})).count, direct(1) + direct(2), 'no branch filter: every branch')
     assert.equal((await count({ branchId: '2' })).count, direct(2), 'the camelCase spelling')
-    for (const bad of ['abc', '1abc', '0', '-1', '1.5', '99']) assert.equal((await count({ branch_id: bad })).count, 0, `branch_id=${bad} matches no sale`)
+    for (const same of [' 1', '01']) assert.equal((await count({ branch_id: same })).count, direct(1), `branch_id=${JSON.stringify(same)} is branch 1`)
+    for (const bad of ['abc', '1abc', '0', '-1', '1.5', '99', '0x1', '1e0', '1.0', '+1']) assert.equal((await count({ branch_id: bad })).count, 0, `branch_id=${bad} matches no sale`)
     assert.ok(direct(1) > 0 && direct(2) > 0, 'control: both branches carry courier costs, so a filter that does nothing is visible (each count is below the all-branch count)')
   })
 }
@@ -432,11 +453,11 @@ async function scenarioPlanFees(patches = []) {
     assert.equal((await report('branchId=2')).totals.count, direct(2))
     const firstPage = (await list('branch_id=1&limit=20')).fees.map((fee) => fee.id)
     assert.deepEqual(firstPage, w.all('SELECT id FROM fees WHERE branch_id = 1 ORDER BY fee_date DESC, id DESC LIMIT 20').map((row) => row.id), 'the same first page, in the same order')
-    for (const same of ['1', '%201', '1.0', '1e0']) {
+    for (const same of ['1', '%201', '01']) {
       assert.equal((await list(`branch_id=${same}&limit=1`)).total, direct(1), `list branch_id=${same}`)
       assert.equal((await report(`branchId=${same}`)).totals.count, direct(1), `report branchId=${same}`)
     }
-    for (const bad of ['abc', '1abc', '0', '-1']) {
+    for (const bad of ['abc', '1abc', '0', '-1', '0x1', '1e0', '1.0', '1.', '%2B1']) {
       assert.equal((await list(`branch_id=${bad}&limit=1`)).total, 0, `list branch_id=${bad} matches no expense`)
       assert.equal((await report(`branchId=${bad}`)).totals.count, 0, `report branchId=${bad} matches no expense`)
     }
@@ -466,6 +487,8 @@ async function scenarioPlanFees(patches = []) {
     ['the list branch goes back to a plain equality (the planner walks the branch index again)', { file: 'src/routes/fees.ts', from: "    conditions.push(feeBranchClause(branchId, params))\n", to: "    conditions.push('f.branch_id = @branchId')\n    params.branchId = Number(branchId)\n" }],
     ['the report branch goes back to a plain equality (the planner walks the branch index again)', { file: 'src/routes/fees.ts', from: "  if (query.branchId) clauses.push(feeBranchClause(query.branchId, params))", to: "  if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }" }],
     ['the report takes a window for no window (its windowed branch filter goes back to a plain equality)', { file: 'src/routes/fees.ts', from: "params, range.sql !== '1=1')", to: "params, range.sql === '1=1')" }],
+    ['the expense half reads a branch id with Number() again (hex, exponent and decimal point become branch 1)', { file: 'src/routes/fees.ts', from: "  const id = /^\\d+$/.test(text) ? Number(text) : Number.NaN\n", to: "  const id = text === '' ? Number.NaN : Number(text)\n" }],
+    ['the sale half reads a branch id with Number() again (hex, exponent and decimal point become branch 1)', { file: 'src/routes/feesCatalog.ts', from: "    const branchId = /^\\d+$/.test(branchText) ? Number(branchText) : Number.NaN\n", to: '    const branchId = Number(branchText)\n' }],
     ['the expense branch id is bound as text, which the unary plus no longer coerces', { file: 'src/routes/fees.ts', from: '  params.branchId = id\n', to: '  params.branchId = String(id)\n' }],
     ['a non-numeric expense branch matches every expense', { file: 'src/routes/fees.ts', from: "  if (!Number.isFinite(id)) return '1 = 0'\n", to: "  if (!Number.isFinite(id)) return '1 = 1'\n" }],
     ['a request without source also gets the sale rows (an older client would meet one)', { file: 'src/routes/feesCatalog.ts', from: "  if (source !== 'all' && source !== 'sale') return next()\n", to: '' }],

@@ -398,15 +398,15 @@ export function feeRangePredicate(query: Record<string, string>): { sql: string;
  * The branch filter of the expense statements, written `+f.branch_id = @branchId`. A plain `f.branch_id = ?` lets the planner start from
  * idx_fees_branch_id / idx_fees_branch_created_dt and read, with a table lookup each, every expense of the branch (after the consolidation, nearly
  * all of them) instead of the date or time window that was asked for; the unary plus keeps the equality out of index selection, so the window's index
- * leads and the branch is checked on those rows. The plus also drops the column's integer affinity, so the id is bound as a NUMBER. A value that is
- * not a number matches no expense, as `branch_id = 'abc'` always did.
+ * leads and the branch is checked on those rows. The plus also drops the column's integer affinity, so the id is bound as a NUMBER. Only decimal
+ * digits are an id (Number() would also read `0x1`, `1e0` and `1.0` as branch 1); anything else matches no expense, as `branch_id = 'abc'` always did.
  * `windowed` is false for an aggregate over every expense (the report with no dates): there is no window for the equality to hijack, and the branch
  * index reads just the branch, so the plain equality stays and the planner chooses.
  */
 function feeBranchClause(raw: unknown, params: Record<string, unknown>, windowed = true): string {
   const text = String(raw ?? '').trim()
-  const id = text === '' ? Number.NaN : Number(text)
-  if (!Number.isFinite(id)) return '1 = 0'
+  const id = /^\d+$/.test(text) ? Number(text) : Number.NaN
+  if (!Number.isSafeInteger(id)) return '1 = 0'
   params.branchId = id
   return windowed ? '+f.branch_id = @branchId' : 'f.branch_id = @branchId'
 }
