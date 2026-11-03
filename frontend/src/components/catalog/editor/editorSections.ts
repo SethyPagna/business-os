@@ -167,6 +167,10 @@ export function dirtySectionIds(editedKeys: ReadonlySet<string>): Set<EditorSect
 
 export const EDITOR_SECTION_STORAGE_KEY = 'business-os-website-editor-section-v1'
 type SectionStorage = Pick<Storage, 'getItem' | 'setItem'>
+/** The element ids a tab panel is labelled by: the tab on a wide screen, the picker button below 768 px. */
+export const sectionTabId = (id: EditorSectionId): string => 'portal-tab-' + id
+export const SECTION_PICKER_ID = 'portal-section-picker'
+
 
 function browserStorage(): SectionStorage | null {
   try {

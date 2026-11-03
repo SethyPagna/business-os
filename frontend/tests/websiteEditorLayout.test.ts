@@ -194,11 +194,27 @@ runTest('T-L3c: a refused field is centred inside the page scroller only, never 
   assert.ok(body.indexOf('scrollIntoView') > body.indexOf('if (!scroller)'), 'and only when there is no page scroller')
 })
 
+runTest('T-L5: the markers are in the accessible names, and every section is a tab panel named by what opened it', () => {
+  // CATCHES: an aria-label that replaces the inner text of a closed tab or the picker button, so a screen reader never heard "unsaved changes" or
+  // "seller details missing" (the dot and the triangle were the only carriers).
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /label=\{nameWithMarkers\(ed\(\.\.\.section\.label\), words\)\}/, 'a closed tab is named with its markers')
+  assert.match(nav, /nameWithMarkers = \(name: string, \{ unsaved, seller \}: MarkerWords\)[^\n]*\[name, unsaved, seller\]\.filter\(Boolean\)\.join\(', '\)/, 'name, then the unsaved words, then the seller words')
+  assert.match(nav, /id=\{sectionTabId\(section\.id\)\}[\s\S]*role="tab"[\s\S]*id=\{sectionTabId\(section\.id\)\}[\s\S]*role="tab"/, 'both the open and the closed tab carry the id a panel names itself by')
+  assert.match(nav, /id=\{SECTION_PICKER_ID\}/, 'and so does the picker button')
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  assert.match(surface, /const panel = \(id: EditorSectionId\) => \(\{ role: 'tabpanel', 'aria-labelledby': compact \? SECTION_PICKER_ID : sectionTabId\(id\) \}\)/)
+  for (const id of ['shop', 'contact', 'products', 'posts', 'about', 'faq', 'features']) {
+    assert.match(surface, new RegExp('<div id="portal-section-' + id + '" className=\\{[^\\n]*\\} \\{\\.\\.\\.panel\\(\'' + id + '\'\\)\\}>'), id + ' is a tab panel')
+  }
+})
+
 runTest('T-L4: the section picker is a menu of seven radio items; the chips are a tablist with a roving tabindex', () => {
   const nav = noComments(editorFile('EditorSectionNav.tsx'))
   assert.match(nav, /aria-haspopup="menu"/)
   assert.match(nav, /role="menuitemradio"[\s\S]*aria-checked=/)
-  assert.match(nav, /aria-label=\{`\$\{ed\('web_editor_sections'[^`]*\}: \$\{/, 'the picker\'s name reads "Sections: Shop"')
+  assert.match(nav, /aria-label=\{nameWithMarkers\(`\$\{sectionsLabel\}: \$\{currentLabel\}`, currentMarks\)\}/, 'the picker\'s name reads "Sections: Shop", plus the words of its markers')
+  assert.equal(count(nav, /ed\('web_editor_sections'/g), 1, 'the word "Sections" is asked for once and handed down')
   assert.match(nav, /role="tablist"/)
   assert.match(nav, /role="tab"[\s\S]*tabIndex=\{/, 'a roving tabindex')
   for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 'Escape']) assert.ok(nav.includes(`'${key}'`), `${key} is handled`)

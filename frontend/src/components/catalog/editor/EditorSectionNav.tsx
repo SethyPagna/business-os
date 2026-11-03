@@ -9,7 +9,7 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from 'react'
 import EditorIconButton from './EditorIconButton.tsx'
-import type { EditorSectionDef, EditorSectionIcon, EditorSectionId } from './editorSections.ts'
+import { SECTION_PICKER_ID, sectionTabId, type EditorSectionDef, type EditorSectionIcon, type EditorSectionId } from './editorSections.ts'
 import type { EditorText } from './editorText.ts'
 
 type SectionIcon = ComponentType<{ className?: string; 'aria-hidden'?: boolean }>
@@ -36,41 +36,52 @@ type EditorSectionNavProps = {
   onSelect: (id: EditorSectionId) => void
 }
 
-type MarkerProps = Pick<EditorSectionNavProps, 'ed'> & { dirty: boolean; amber: boolean }
+// The words for the two markers ('' when a marker is off): the dot and the triangle are drawn, never the only carrier of the meaning.
+type MarkerWords = { unsaved: string; seller: string }
+const markerWords = (ed: EditorText, dirty: boolean, amber: boolean): MarkerWords => ({
+  unsaved: dirty ? ed('web_editor_unsaved', 'Unsaved changes', 'មិនទាន់រក្សាទុក') : '',
+  seller: amber ? ed('web_editor_seller_missing', 'Seller details missing', 'ខ្វះព័ត៌មានអ្នកលក់') : '',
+})
+// A control named by an aria-label (the picker button, a closed tab) loses its inner text, so its markers' words join the name: "FAQ, Unsaved changes".
+const nameWithMarkers = (name: string, { unsaved, seller }: MarkerWords): string => [name, unsaved, seller].filter(Boolean).join(', ')
 
 // Two markers that differ in colour AND shape (a blue dot, an amber triangle), each with text for a screen reader.
-function Markers({ ed, dirty, amber }: MarkerProps) {
+function Markers({ unsaved, seller }: MarkerWords) {
   return (
     <>
-      {dirty ? (
+      {unsaved ? (
         <>
           <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-sky-600 dark:bg-sky-400" />
-          <span className="sr-only">{ed('web_editor_unsaved', 'Unsaved changes', 'មិនទាន់រក្សាទុក')}</span>
+          <span className="sr-only">{unsaved}</span>
         </>
       ) : null}
-      {amber ? (
+      {seller ? (
         <>
           <AlertTriangle aria-hidden className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400" />
-          <span className="sr-only">{ed('web_editor_seller_missing', 'Seller details missing', 'ខ្វះព័ត៌មានអ្នកលក់')}</span>
+          <span className="sr-only">{seller}</span>
         </>
       ) : null}
     </>
   )
 }
 
+type InnerProps = EditorSectionNavProps & { sectionsLabel: string }
+
 export default function EditorSectionNav(props: EditorSectionNavProps) {
-  return props.compact ? <SectionPicker {...props} /> : <SectionChips {...props} />
+  const sectionsLabel = props.ed('web_editor_sections', 'Sections', 'ផ្នែក')
+  return props.compact ? <SectionPicker {...props} sectionsLabel={sectionsLabel} /> : <SectionChips {...props} sectionsLabel={sectionsLabel} />
 }
 
 // ---- below 768 px: one button that opens the list of seven ------------------------------------------------------------
 
-function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }: EditorSectionNavProps) {
+function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect, sectionsLabel }: InnerProps) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const current = sections.find((section) => section.id === active) ?? sections[0]
   const currentLabel = ed(...current.label)
   const CurrentIcon = ICONS[current.icon]
+  const currentMarks = markerWords(ed, dirty.has(current.id), sellerMissing && current.id === 'contact')
 
   const closeMenu = (returnFocus: boolean) => {
     setOpen(false)
@@ -117,23 +128,24 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }:
       <div className="relative inline-flex max-w-full align-top">
         <button
           ref={buttonRef}
+          id={SECTION_PICKER_ID}
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label={`${ed('web_editor_sections', 'Sections', 'ផ្នែក')}: ${currentLabel}`}
+          aria-label={nameWithMarkers(`${sectionsLabel}: ${currentLabel}`, currentMarks)}
           className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-semibold leading-snug text-slate-900 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
           onClick={() => (open ? closeMenu(false) : setOpen(true))}
         >
           <CurrentIcon className="h-5 w-5 shrink-0" aria-hidden />
           <span className="whitespace-nowrap">{currentLabel}</span>
           <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
-          <Markers ed={ed} dirty={dirty.has(current.id)} amber={sellerMissing && current.id === 'contact'} />
+          <Markers {...currentMarks} />
         </button>
         {open ? (
           <div
             ref={menuRef}
             role="menu"
-            aria-label={ed('web_editor_sections', 'Sections', 'ផ្នែក')}
+            aria-label={sectionsLabel}
             className="absolute left-0 top-full z-40 mt-1 max-h-[70vh] w-max min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
             onKeyDown={onMenuKeyDown}
           >
@@ -155,7 +167,7 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }:
                 >
                   <Icon className="h-5 w-5 shrink-0" aria-hidden />
                   <span className="min-w-0 flex-1">{ed(...section.label)}</span>
-                  <Markers ed={ed} dirty={dirty.has(section.id)} amber={sellerMissing && section.id === 'contact'} />
+                  <Markers {...markerWords(ed, dirty.has(section.id), sellerMissing && section.id === 'contact')} />
                 </button>
               )
             })}
@@ -172,7 +184,7 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }:
 const CHIP_SIZE = 'min-h-11 [@media(pointer:fine)]:min-h-10'
 const CHIP_LOOK = 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
 
-function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: EditorSectionNavProps) {
+function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect, sectionsLabel }: InnerProps) {
   const chips = useRef(new Map<EditorSectionId, HTMLElement>())
   const focusAfterSelect = useRef(false)
 
@@ -203,10 +215,11 @@ function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: 
   }
 
   return (
-    <div role="tablist" aria-label={ed('web_editor_sections', 'Sections', 'ផ្នែក')} className="flex min-w-0 flex-1 items-center gap-1" onKeyDown={onKeyDown}>
+    <div role="tablist" aria-label={sectionsLabel} className="flex min-w-0 flex-1 items-center gap-1" onKeyDown={onKeyDown}>
       {sections.map((section) => {
         const Icon = ICONS[section.icon]
-        const marks = <Markers ed={ed} dirty={dirty.has(section.id)} amber={sellerMissing && section.id === 'contact'} />
+        const words = markerWords(ed, dirty.has(section.id), sellerMissing && section.id === 'contact')
+        const marks = <Markers {...words} />
         const bind = (node: HTMLElement | null) => {
           if (node) chips.current.set(section.id, node)
           else chips.current.delete(section.id)
@@ -216,6 +229,7 @@ function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: 
             <button
               key={section.id}
               ref={bind}
+              id={sectionTabId(section.id)}
               type="button"
               role="tab"
               aria-selected
@@ -235,13 +249,14 @@ function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: 
           <EditorIconButton
             key={section.id}
             ref={bind}
+            id={sectionTabId(section.id)}
             role="tab"
             aria-selected={false}
             aria-controls={section.domId}
             tabIndex={-1}
             data-editor-section={section.id}
             icon={Icon}
-            label={ed(...section.label)}
+            label={nameWithMarkers(ed(...section.label), words)}
             badge={marks}
             className={`relative inline-flex ${CHIP_SIZE} min-w-11 shrink-0 items-center justify-center gap-1 rounded-full px-2 ${CHIP_LOOK} [@media(pointer:fine)]:min-w-10`}
             onClick={() => onSelect(section.id)}

@@ -31,10 +31,12 @@ import { createEditorText } from './editor/editorText.ts'
 import EditorBar from './editor/EditorBar.tsx'
 import {
   EDITOR_SECTIONS,
+  SECTION_PICKER_ID,
   dirtySectionIds,
   editorFieldTarget,
   landingEditorSection,
   readStoredEditorSection,
+  sectionTabId,
   writeStoredEditorSection,
   type EditorSection,
   type EditorSectionId,
@@ -558,6 +560,8 @@ function CatalogEditorSurfaceContent() {
     setFocusRequest(null)
   }, [focusRequest])
   const failedField = (field: string) => (saveFailure?.field === field ? saveFailure.message : '')
+  // Each section is a tab panel named by what opened it: its tab from 768 px, the picker button below.
+  const panel = (id: EditorSectionId) => ({ role: 'tabpanel', 'aria-labelledby': compact ? SECTION_PICKER_ID : sectionTabId(id) }) as const
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-clip pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
@@ -578,7 +582,7 @@ function CatalogEditorSurfaceContent() {
         subtitle={copy('studioHint', 'Edit the customer-facing website here. The public page remains read-only.')}
       >
         <div className="space-y-5 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.border-slate-300]:border-slate-700 dark:[&_.bg-white]:bg-slate-950/80 dark:[&_.bg-slate-50]:bg-slate-900/60 dark:[&_.bg-slate-100]:bg-slate-800 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500 dark:[&_.input]:border-slate-700 dark:[&_.input]:bg-slate-950 dark:[&_.input]:text-slate-100 dark:[&_.input]:placeholder:text-slate-500 dark:[&_video]:bg-slate-950">
-          <div id="portal-section-shop" className={activeEditorSection === 'shop' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-shop" className={activeEditorSection === 'shop' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('shop')}>
             <div data-testid="portal-business-identity-grid" className="grid min-w-0 gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-business-name" className="block text-sm font-medium text-slate-700">{copy('businessName', 'Business name')}</label>
@@ -842,7 +846,7 @@ function CatalogEditorSurfaceContent() {
             </div>
           </div>
 
-          <div id="portal-section-contact" className={activeEditorSection === 'contact' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-contact" className={activeEditorSection === 'contact' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('contact')}>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-business-phone" className="block text-sm font-medium text-slate-700">{ed('web_editor_phone', 'Phone', 'ទូរស័ព្ទ')}</label>
@@ -1085,7 +1089,7 @@ function CatalogEditorSurfaceContent() {
             </div>
           </div>
 
-          <div id="portal-section-products" className={activeEditorSection === 'products' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-products" className={activeEditorSection === 'products' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('products')}>
             <div>
               {canEditConfig ? (
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayVisibilityGroup', 'Catalog & page visibility')}</div>
@@ -1385,7 +1389,7 @@ function CatalogEditorSurfaceContent() {
             ) : null}
           </div>
 
-          <div id="portal-section-posts" className={activeEditorSection === 'posts' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-posts" className={activeEditorSection === 'posts' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('posts')}>
             <div className="grid gap-3">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{ed('web_editor_group_top_of_page', 'Top of page', 'ខាងលើទំព័រ')}</div>
               {canEditConfig ? (
@@ -1632,7 +1636,7 @@ function CatalogEditorSurfaceContent() {
             ) : null}
           </div>
 
-          <div id="portal-section-about" className={activeEditorSection === 'about' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-about" className={activeEditorSection === 'about' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('about')}>
             <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
               <span className="text-sm font-medium text-slate-700">{copy('showAbout', 'Show about section')}</span>
               <input id="portal-show-about" name="customer_portal_show_about" type="checkbox" checked={!!editorDraft.customer_portal_show_about} onChange={(event) => setDraft('customer_portal_show_about', event.target.checked)} />
@@ -1858,7 +1862,7 @@ function CatalogEditorSurfaceContent() {
             </div>
           </div>
 
-          <div id="portal-section-faq" className={activeEditorSection === 'faq' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-faq" className={activeEditorSection === 'faq' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('faq')}>
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -1916,7 +1920,7 @@ function CatalogEditorSurfaceContent() {
             </div>
           </div>
 
-          <div id="portal-section-features" className={activeEditorSection === 'features' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'}>
+          <div id="portal-section-features" className={activeEditorSection === 'features' ? 'grid min-w-0 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4' : 'hidden'} {...panel('features')}>
             <div className="space-y-5">
               <HintLabel
                 className="text-sm font-semibold text-slate-900"

@@ -802,6 +802,35 @@ test.describe('Website Editor bar (ED-1a)', () => {
     expectNoRuntimeErrors(health)
   })
 
+  test('closed tabs and the picker button carry their markers in the accessible name, and every section is a tab panel named by what opened it', async ({ page, context }) => {
+    // CATCHES: an aria-label that replaces the inner text, so a screen reader never heard "unsaved changes" or "seller details missing" (the blue
+    // dot and the amber triangle were the only carriers), and panels nothing names.
+    const health = collectPageHealth(page)
+    await openEditor(page, context, { seed: { business_legal_name: '', business_registration_number: '' } })
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await openSection(page, 'faq')
+    await page.locator('#portal-faq-title').fill('Questions')
+    await openSection(page, 'shop')
+    const tabs = editor(page).getByRole('tablist').getByRole('tab')
+    await expect(tabs.nth(1), 'Contact: the amber marker is in its name').toHaveAccessibleName('Contact, Seller details missing')
+    await expect(tabs.nth(5), 'FAQ: the dot is in its name').toHaveAccessibleName('FAQ, Unsaved changes')
+    await expect(tabs.nth(5)).toHaveAttribute('title', 'FAQ, Unsaved changes')
+    await expect(tabs.nth(0), 'the open tab is named by its own text').toHaveAccessibleName('Shop')
+    await expect(page.locator('#portal-section-shop')).toHaveAttribute('role', 'tabpanel')
+    await expect(page.locator('#portal-section-shop')).toHaveAttribute('aria-labelledby', 'portal-tab-shop')
+    await expect(page.locator('#portal-tab-faq')).toHaveAttribute('aria-controls', 'portal-section-faq')
+
+    await page.setViewportSize({ width: 390, height: 800 })
+    const picker = editor(page).locator('button[aria-haspopup="menu"]')
+    await expect(picker).toHaveAccessibleName('Sections: Shop')
+    await openSection(page, 'contact')
+    await expect(picker, 'the picker button names the open section and its markers').toHaveAccessibleName('Sections: Contact, Seller details missing')
+    await expect(page.locator('#portal-section-contact')).toHaveAttribute('role', 'tabpanel')
+    await expect(page.locator('#portal-section-contact')).toHaveAttribute('aria-labelledby', 'portal-section-picker')
+    await expect(page.locator('#portal-section-picker')).toBeVisible()
+    expectNoRuntimeErrors(health)
+  })
+
   test('the leave guard\'s Save & Leave saves without the review', async ({ page, context }, testInfo) => {
     test.skip(testInfo.project.name !== DESKTOP_PROJECT, 'the phone bar opens section groups instead of navigating (ios-layout.spec.ts); the guard is the same AppContext code')
     const health = collectPageHealth(page)
