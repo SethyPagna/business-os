@@ -4012,6 +4012,7 @@
   "pos_cash_collect": "Collect (cash)",
   "pos_cash_round_hint": "Physical cash in whole 100៛ notes. The saved sale and the printed receipt keep the exact amount.",
   "riel_cash_not_hundreds": "Cash riel must be whole 100៛ notes.",
+  "sale_payment_rows_mismatch": "The payment rows do not add up to the amount paid. Nothing was recorded. Check the payment and try again.",
   "pos_customer": "Customer",
   "pos_delivery": "Delivery",
   "pos_settings": "POS Settings",

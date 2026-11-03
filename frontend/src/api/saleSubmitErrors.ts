@@ -18,6 +18,9 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // Riel paid in cash is whole 100-riel notes (owner, 27 Oct 2026): a cash tender row, stated riel change, or any other cash
   // writer refused it. The till marks the field before it asks; this restates the Worker's refusal if a stale till still sent it.
   riel_cash_not_hundreds: 'riel_cash_not_hundreds',
+  // A tender whose payment rows do not add up to the paid total it states (MONEY-1 review, 4 Nov 2026): the till builds both from one
+  // set of rows, so this only answers a stale or foreign client; nothing was recorded.
+  sale_payment_rows_mismatch: 'sale_payment_rows_mismatch',
 }
 
 /**

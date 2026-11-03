@@ -1267,6 +1267,18 @@ app.post('/', async (c) => {
       }))
       .filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
     : []
+  // A tender that names its rows must add up to the paid totals it states: the rows are what the shift drawer, the receipt and every payment
+  // reader see, and the aggregate columns are what the sale's status and balance were decided on, so a sale whose rows hold 1,000 riel beside
+  // an aggregate of 150 would be two different sales. USD rows are cents (each row rounded above), so the sum may differ from a four-decimal
+  // aggregate by half a cent per row; riel is whole. A single-row form (no payment_details) is built from the aggregate, so it cannot differ.
+  // An odd riel total is NOT refused here: a bank row may hold any riel (the cash rule above judges cash rows only).
+  if (paymentDetails.length) {
+    const rowsUsd = paymentDetails.reduce((sum, detail) => sum + detail.amount_usd, 0)
+    const rowsKhr = paymentDetails.reduce((sum, detail) => sum + detail.amount_khr, 0)
+    if (Math.abs(rowsUsd - amountPaidUsd) > 0.005 * paymentDetails.length + 1e-6 || Math.abs(rowsKhr - amountPaidKhr) >= 1) {
+      return c.json({ error: 'The payment rows do not add up to the paid total. Review the payment and try again.', code: 'sale_payment_rows_mismatch' }, 400)
+    }
+  }
   // Y10: an awaiting-payment sale with nothing paid records NO payment
   // method -- the old 'Cash' fallback fabricated a method for a sale whose
   // whole point is deciding the payment later (it is entered when the sale

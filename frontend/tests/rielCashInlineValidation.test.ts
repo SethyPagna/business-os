@@ -117,6 +117,13 @@ runTest('POS tender rows: a cash row of 150 riel is refused by the till, a bank 
 runTest('a stale till that still sends the row is answered in the language pack, by the Worker code', () => {
   const t = (key: string) => key === 'riel_cash_not_hundreds' ? en.riel_cash_not_hundreds : undefined
   assert.equal(saleSubmitRefusalText({ code: 'riel_cash_not_hundreds' }, t), en.riel_cash_not_hundreds)
+  // The Worker's rows-versus-total refusal (sale_payment_rows_mismatch) is restated from both packs too, never as the Worker's English.
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  for (const pack of [en as Record<string, string>, km]) {
+    assert.ok(pack.sale_payment_rows_mismatch && pack.sale_payment_rows_mismatch.trim(), 'the refusal has text in the pack')
+    assert.equal(saleSubmitRefusalText({ code: 'sale_payment_rows_mismatch' }, (key) => pack[key]), pack.sale_payment_rows_mismatch)
+  }
+  assert.notEqual(km.sale_payment_rows_mismatch, en.sale_payment_rows_mismatch, 'the Khmer pack is not the English sentence')
 })
 
 runTest('POS and expense form wire the same rule at the field and stop the request', () => {
