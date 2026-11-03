@@ -96,6 +96,9 @@ async function confirmReview(page: Page): Promise<void> {
 async function clickSave(page: Page): Promise<void> {
   await editor(page).evaluate((node) => node.scrollIntoView({ block: 'start' }))
   await expect(saveButton(page)).toBeEnabled()
+  // Scrolling to the top also slides the app header away and the sticky bar with it: a tap aimed before that stops is lost (one full ios run lost
+  // the second Save of E2E-5, the review never opened; the same test passed 4 of 4 alone).
+  await settled(saveButton(page))
   await saveButton(page).click()
   await confirmReview(page)
 }
