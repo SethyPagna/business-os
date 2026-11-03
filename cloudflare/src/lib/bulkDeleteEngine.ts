@@ -7,7 +7,7 @@ import { executeStockTransaction } from './stockTransaction'
 // next chunk is re-enqueued, so a delivery's D1 calls never grow with the job.
 
 import type { Env } from '../index'
-import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
+import { getDb, getImportFencedDb, isImportMaintenanceFenceError, isRetryableD1Error, type D1Compat } from './db'
 import { getPlanLimits } from './planTier'
 import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding } from './sqlBinding'
@@ -232,6 +232,14 @@ async function runProductDeleteChunk(env: Env, db: D1Compat, job: JobRow, allIds
   }
 }
 
+// The cache bump and the broadcast that follow a finished contacts job: one pair for the whole job, carrying the
+// ids that were actually deleted so connected clients drop exactly those rows. Safe to repeat.
+async function publishContactsDelete(env: Env, config: EntityConfig, jobId: string, allIds: number[], failedIds: number[]): Promise<void> {
+  const failed = new Set(failedIds)
+  await bumpVersion(env, config.cacheKey)
+  await broadcast(env, config.cacheKey, { action: 'bulk-delete', ids: allIds.filter((id) => !failed.has(id)), jobId })
+}
+
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   const db = await getImportFencedDb(env)
   const bulkDeleteChunkSize = getPlanLimits(env).bulkDeleteChunkSize
@@ -244,8 +252,20 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
     await bumpVersion(env, 'products')
     await broadcast(env, 'products', { action: 'bulk-delete', jobId })
   }
-  if (terminal) return
   const config = ENTITY_CONFIGS[job.entity_type]
+  if (terminal) {
+    // The last chunk of a contacts job can commit (cursor = end, status completed) and its acknowledgement
+    // be lost: that delivery threw before the cache bump below, and the queue redelivers the message. The
+    // cursor is the truth; the invalidation is repeatable, as the products path above already repeats it.
+    // Nothing is deleted or audited again.
+    if (job.status === 'completed' && job.entity_type !== 'products' && config && job.processed_count > job.failed_count) {
+      let ids: number[] | null = null
+      let failed: number[] = []
+      try { ids = JSON.parse(job.ids_json); failed = JSON.parse(job.failed_ids_json || '[]') } catch { ids = null }
+      if (ids) await publishContactsDelete(env, config, jobId, ids, failed)
+    }
+    return
+  }
   if (!config) { await markFailed(db, jobId, `Unknown entity_type: ${job.entity_type}`); return }
 
   if (job.status === 'pending') {
@@ -318,7 +338,12 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
               SELECT @userId, @userName, 'delete', @entity, j.value, @details, @entity, j.value, NULL FROM json_each(@ids) j ORDER BY j.key`,
         params: { userId: user.id, userName: actorSnapshot(user), entity: config.auditEntity, ids: JSON.stringify(deleteChunk), details: JSON.stringify({ reason: job.reason, bulkJobId: jobId }) },
       }
-      await db.batch([
+      // ONE attempt, never db.batch(): its transparent retry turns a lost acknowledgement (the chunk committed, the
+      // reply did not arrive) into a second attempt that trips the cursor guard below, which is then
+      // indistinguishable from "another delivery already did this chunk" -- the delivery returned with nothing
+      // queued and the job stalled half way. Here a transient failure is thrown instead, the queue redelivers,
+      // and the redelivery reads the committed cursor and carries on from it.
+      await db.batchOnce([
         // A redelivered or concurrent message for an already-advanced cursor,
         // or a Cancel since the job read, aborts the whole chunk: no second
         // delete, no duplicate audit rows.
@@ -343,9 +368,15 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
           await db.prepare(`UPDATE bulk_delete_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP,
             updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status='processing' AND cancel_requested=1`).run({ id: jobId })
         }
-        // Otherwise another delivery already committed this chunk.
+        // Otherwise another delivery already committed this chunk (it queues the continuation).
         return
       }
+      // A transient infrastructure error does not say whether the chunk committed. Never infer a rollback and
+      // never record the ids as failed on that evidence: throw, so the queue redelivers this message and the
+      // delivery after it takes the cursor as the truth. If the chunk had committed, the cursor is past it and
+      // the redelivery works on the next chunk (or, after the last one, repeats the cache bump); if it had not,
+      // the redelivery retries the same chunk. Either way each id is deleted and audited exactly once.
+      if (isRetryableD1Error(error)) throw error
       // A whole chunk failing is treated as those specific ids failing, not
       // the whole job -- record them and move on to the next chunk rather
       // than abandoning everything already-processed.
@@ -366,9 +397,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   // One cache-bump and one broadcast for the whole job, not one per row --
   // the broadcast payload carries the full id list so connected clients
   // can drop exactly the deleted rows locally instead of a full refetch.
-  const succeededIds = allIds.filter((id) => !failedIds.includes(id))
-  await bumpVersion(env, config.cacheKey)
-  await broadcast(env, config.cacheKey, { action: 'bulk-delete', ids: succeededIds, jobId })
+  await publishContactsDelete(env, config, jobId, allIds, failedIds)
 }
 
 const STALLED_BULK_DELETE_REAP_MINUTES = 20
