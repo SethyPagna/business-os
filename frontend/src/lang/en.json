@@ -7503,6 +7503,7 @@
   "plan_tier_hint_paid": "Running on the Cloudflare paid plan: full import batches and automatic backups.",
   "stock_remove_entirely": "Remove entirely",
   "stock_tag_sellable": "Sellable",
+  "stock_condition_label": "Condition",
   "stock_restock_sellable": "Restock as sellable",
   "stock_keep_in_group_as": "Keep in group as",
   "stock_restock_with_tag": "Restock with",

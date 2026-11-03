@@ -128,16 +128,19 @@ runTest('the choice is one compact row, on the surface that offers it', () => {
   // One flex row holding both segments AND the tag dropdown -- not a stacked
   // block that grows the modal on a phone. min-w-0 is what keeps the select
   // from pushing the segments off a 320px screen.
-  assert.match(control, /flex w-full min-w-0 items-center/)
+  assert.match(control, /<ChipRail [^>]*data-stock-condition-row=\{mode\}>/)
+  const railRule = readSource('frontend/src/styles/main.css').match(/:where\(\.chip-rail\) \{[^}]*\}/)?.[0] ?? ''
+  assert.match(railRule, /display:\s*flex[\s\S]*align-items:\s*center[\s\S]*min-width:\s*0/, 'the shared rail is the one flex row with min-w-0 and centered items')
   assert.match(control, /data-stock-condition-row=\{mode\}/)
   // No responsive stacking: the row is the same row on every screen size.
   assert.doesNotMatch(control, /(sm|md|lg):flex-col/)
   assert.doesNotMatch(control, /flex-col[^"]*(sm|md|lg):flex-row/)
   // Owner report (Sep 17): on a narrow screen "Restock as sellable" and
   // "Restock with" were cut off. The row scrolls sideways instead of
-  // truncating, and the segments keep their own width until sm.
-  assert.match(control, /overflow-x-auto/)
-  assert.match(control, /const SEGMENT_BASE = '[^']*shrink-0[^']*whitespace-nowrap[^']*sm:flex-1[^']*sm:truncate/)
+  // truncating, and the segments keep their own width until the row has room to share. R1 (2 Nov 2026): that is
+  // the shared ChipRail (chips never shrink or wrap, the row scrolls; `stretch` shares the spare width).
+  assert.match(control, /<ChipRail label=\{tr\('stock_condition_label', 'Condition', 'ស្ថានភាព'\)\} stretch data-stock-condition-row=\{mode\}>/)
+  assert.doesNotMatch(control, /SEGMENT_BASE|overflow-x-auto/, 'the private segment classes are gone')
 
   // The adjust half of InventoryStockModals was retired into the Stock
   // Session (UI-STOCK-3); the session's line entry is the one stock host now.

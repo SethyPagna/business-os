@@ -14,7 +14,8 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import { fmtDateOnly } from '../../../utils/formatters.ts'
 import { FEE_TYPE_OPTIONS } from '../../fees/FeeForm.tsx'
-import { Button, Chip, Fold, OverflowMenu } from '../../shared/kit'
+import { Button, Fold, OverflowMenu } from '../../shared/kit'
+import { RailChip } from '../../shared/kit/ChipRail.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
@@ -179,12 +180,13 @@ export default function ExpensesReport(p: ReportViewProps) {
       title={title}
       titleControl={p.titleControl}
       hint={{ label: title, text: tr('rpt_hint_expenses', 'Recorded expenses by their expense date, in the currency each was recorded in (no conversion). "Net after expenses" on the Overview subtracts this total from gross profit.') }}
+      secondaryLabel={title}
       secondaryActions={
         <>
           {MODES.map((m) => (
-            <Chip key={m.id} selected={mode === m.id} onClick={() => { setMode(m.id); setSort(null); setOpenRow(null) }}>
+            <RailChip key={m.id} selected={mode === m.id} onClick={() => { setMode(m.id); setSort(null); setOpenRow(null) }}>
               {tr(m.key, m.fallback)}
-            </Chip>
+            </RailChip>
           ))}
         </>
       }

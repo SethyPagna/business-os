@@ -17,6 +17,7 @@ import { Suspense, useEffect, useMemo, useState, type RefObject } from 'react'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { FacebookIcon, InstagramIcon, MessengerIcon } from '../shared/BrandIcons.tsx'
 import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
@@ -440,23 +441,18 @@ function CatalogEditorSurfaceContent() {
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
       <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white px-3 py-2 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto pb-1 xl:pb-0">
+          <ChipRail label={copy('sections', 'Sections')} className="flex-1">
             {editorSections.map(([sectionId, sectionKey, label]) => (
-              <button
+              <RailChip
                 key={sectionId}
-                type="button"
                 data-editor-section={sectionKey}
-                className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${
-                  activeEditorSection === sectionKey
-                    ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                }`}
+                selected={activeEditorSection === sectionKey}
                 onClick={() => setActiveEditorSection(sectionKey)}
               >
                 {label}
-              </button>
+              </RailChip>
             ))}
-          </div>
+          </ChipRail>
           <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
               <button
                 type="button"

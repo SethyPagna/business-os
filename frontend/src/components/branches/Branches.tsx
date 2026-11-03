@@ -26,6 +26,7 @@ import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
@@ -1340,24 +1341,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             className="min-w-0"
           />
         ) : null}
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-gray-200 pt-0.5 dark:border-gray-700">
+        <ChipRail label={tr('branches', 'Branches')} className="border-b border-gray-200 pb-1 pt-0.5 dark:border-gray-700">
           {showDateRange ? <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense /> : null}
-          {showSectionNavigation ? <div className="flex gap-1 overflow-x-auto">
+          {showSectionNavigation ? <div className="flex shrink-0 gap-1" role="group" aria-label={tr('sections', 'Sections')}>
             {[
               { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
               { id: 'transfers' as BranchTab, label: tr('transfer_history', 'Transfer History') },
             ].map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-                  tab === id
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                {label}
-              </button>
+              <RailChip key={id} selected={tab === id} onClick={() => setTab(id)}>{label}</RailChip>
             ))}
           </div> : null}
           {canTransferStock ? (
@@ -1400,7 +1391,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               ) : null}
             </div>
           ) : null}
-        </div>
+        </ChipRail>
       </div>
 
       {tab === 'branches' && statsOpen ? (

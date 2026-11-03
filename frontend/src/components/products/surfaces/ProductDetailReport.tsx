@@ -22,6 +22,7 @@ import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts
 import type { PermissionUser } from '../../../utils/permissions.ts'
 import AttributeSupplierModal from './AttributeSupplierModal.tsx'
 import EntityLink from '../../shared/EntityLink.tsx'
+import ChipRail, { RailChip } from '../../shared/kit/ChipRail.tsx'
 
 // D3 (Part 422; reworked Part 563): the detail page's report sections, per
 // the user's Aug-28 spec -- movement history WITH the running balance, sales
@@ -404,10 +405,10 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
 
   const salesBody: ReactNode = (
     <div>
-      <div className="mb-1.5 inline-flex rounded-lg bg-gray-100 p-0.5 text-xs dark:bg-gray-800">
-        <button type="button" onClick={() => setSalesMode('by_day')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_day' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('daily', 'Daily')}</button>
-        <button type="button" onClick={() => setSalesMode('by_month')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_month' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('monthly', 'Monthly')}</button>
-      </div>
+      <ChipRail label={tr('sales', 'Sales')} className="mb-1.5">
+        <RailChip selected={salesMode === 'by_day'} onClick={() => setSalesMode('by_day')}>{tr('daily', 'Daily')}</RailChip>
+        <RailChip selected={salesMode === 'by_month'} onClick={() => setSalesMode('by_month')}>{tr('monthly', 'Monthly')}</RailChip>
+      </ChipRail>
       <div className="space-y-1">
         {salesRows.map((row) => {
           const apiMode = salesMode === 'by_month' ? 'month' : 'day'

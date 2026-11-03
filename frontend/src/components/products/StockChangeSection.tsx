@@ -27,6 +27,7 @@ import { movementColorClass, translateMovementRowType, translateMovementType } f
 import { MovementBalance } from '../inventory/MovementDetailFloat.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import StatsRangeRow from '../shared/StatsRangeRow'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
@@ -1153,18 +1154,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           always-visible In-vs-Out stats (no Stats expander; the Adjustments
           column is gone -- everything nets to In or Out). */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+        <ChipRail label={tr(t, 'view', 'View')}>
           {views.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setView(option.id)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === option.id ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}
-            >
+            <RailChip key={option.id} selected={view === option.id} onClick={() => setView(option.id)}>
               {option.label}
-            </button>
+            </RailChip>
           ))}
-        </div>
+        </ChipRail>
         {filterSections.length ? (
           <FilterMenu
             label={tr(t, 'filters', 'Filters')}

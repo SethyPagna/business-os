@@ -7503,6 +7503,7 @@
   "plan_tier_hint_paid": "ដំណើរការលើផែនការ Cloudflare បង់ប្រាក់៖ នាំចូលបានច្រើនជួរក្នុងម្តង និងមានការបម្រុងទុកស្វ័យប្រវត្តិ។",
   "stock_remove_entirely": "ដកចេញទាំងស្រុង",
   "stock_tag_sellable": "លក់បាន",
+  "stock_condition_label": "ស្ថានភាព",
   "stock_restock_sellable": "បញ្ចូលជាទំនិញលក់បាន",
   "stock_keep_in_group_as": "រក្សាក្នុងក្រុមជា",
   "stock_restock_with_tag": "បញ្ចូលជាមួយស្លាក",

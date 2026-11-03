@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import Tag from 'lucide-react/dist/esm/icons/tag.js'
 import AppSelect from '../shared/AppSelect'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { STOCK_CONDITION_TAGS } from '../../utils/stockCondition.ts'
 
 // P3-L6. The owner's control, in ONE row on every screen size: "Make it option
@@ -33,13 +34,6 @@ export type StockConditionTagRowProps = {
   /** 'select': ONE dropdown whose first option is the untagged default (Stock Session, S4). */
   variant?: 'row' | 'select'
 }
-
-// The labels read in full on every screen: on a narrow one the segments keep
-// their natural width and the row scrolls sideways instead of truncating; from
-// sm up there is room, so they share the row as before.
-const SEGMENT_BASE = 'h-9 shrink-0 whitespace-nowrap rounded-lg border-2 px-2 text-xs font-medium transition-colors sm:min-w-0 sm:flex-1 sm:truncate'
-const SEGMENT_ON = 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-const SEGMENT_OFF = 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'
 
 export default function StockConditionTagRow({ mode, value, onChange, tr, disabled = false, id, variant = 'row' }: StockConditionTagRowProps) {
   const tagged = Boolean(value)
@@ -79,23 +73,13 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   }
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5" data-stock-condition-row={mode}>
-      <button
-        type="button"
-        disabled={disabled}
-        className={`${SEGMENT_BASE} ${tagged ? SEGMENT_OFF : SEGMENT_ON}`}
-        onClick={() => onChange('')}
-      >
+    <ChipRail label={tr('stock_condition_label', 'Condition', 'ស្ថានភាព')} stretch data-stock-condition-row={mode}>
+      <RailChip selected={!tagged} disabled={disabled} onClick={() => onChange('')}>
         {plainLabel}
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        className={`${SEGMENT_BASE} ${tagged ? SEGMENT_ON : SEGMENT_OFF}`}
-        onClick={() => onChange(selectedTag)}
-      >
+      </RailChip>
+      <RailChip selected={tagged} disabled={disabled} onClick={() => onChange(selectedTag)}>
         {taggedLabel}
-      </button>
+      </RailChip>
       <AppSelect
         id={id}
         value={selectedTag}
@@ -107,6 +91,6 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
         buttonClassName="h-9 px-2 text-xs"
         optionClassName="text-xs"
       />
-    </div>
+    </ChipRail>
   )
 }

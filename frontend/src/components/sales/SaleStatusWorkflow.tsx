@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
@@ -51,18 +52,13 @@ export default function SaleStatusWorkflow({
 
   if (step === 'destination') {
     return (
-      <div data-sale-status-destinations="" className="flex flex-nowrap gap-2 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none]">
+      <ChipRail label={t('status') || 'Status'} className="chip-rail-tall" data-sale-status-destinations="">
         {destinations.map((status) => (
-          <button
-            key={status}
-            type="button"
-            className="min-h-11 shrink-0 whitespace-nowrap rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium leading-relaxed text-gray-800 hover:border-blue-500 hover:bg-blue-50 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-700"
-            onClick={() => { onSelect(status); setStep('review') }}
-          >
+          <RailChip key={status} onClick={() => { onSelect(status); setStep('review') }}>
             {destinationLabel(status)}
-          </button>
+          </RailChip>
         ))}
-      </div>
+      </ChipRail>
     )
   }
 

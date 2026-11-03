@@ -19,13 +19,14 @@ const source = read('src/components/products/Products.tsx')
 const parsed = ts.createSourceFile('Products.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 let productTitle = ''
 function visit(node: ts.Node) {
-  if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some(p => ts.isJsxAttribute(p) && p.name.getText(parsed) === 'aria-label' && p.getText(parsed).includes('product_sections'))) productTitle = node.getText(parsed)
+  if (ts.isJsxElement(node) && node.openingElement.tagName.getText(parsed) === 'ChipRail' && node.openingElement.attributes.properties.some(p => ts.isJsxAttribute(p) && p.name.getText(parsed) === 'label' && p.getText(parsed).includes('product_sections'))) productTitle = node.parent.getText(parsed)
   ts.forEachChild(node, visit)
 }
 visit(parsed)
 assert.ok(productTitle, 'actual Products section-title row found')
 const fixture = `
-import React,{useRef} from 'react';import{createRoot}from'react-dom/client';
+import React from 'react';import{createRoot}from'react-dom/client';
+import ChipRail,{RailChip} from './src/components/shared/kit/ChipRail.tsx';
 import Sidebar from './src/components/navigation/Sidebar.tsx';
 import Contacts from './src/components/contacts/Contacts.tsx';
 import ProductConflicts from './src/components/products/ProductDuplicatesTab.tsx';
@@ -34,7 +35,7 @@ import {useLayeredSectionNav} from './src/utils/sectionNavPreference.ts';
 const q=new URLSearchParams(location.search),kind=q.get('kind')||'products';
 localStorage.setItem('bos:hub:contacts:active','duplicates');window.setFixtureIdentity=setFixtureIdentity;
 location.hash='#hub:'+kind+':duplicates';window.calls=[];
-function ProductHost(){const {t,settings}=useApp();const layeredSectionNav=useLayeredSectionNav(settings?.ui_mobile_section_nav);const tr=(key,fallback)=>t(key)||fallback;const activeProductSection='duplicates';const setActiveProductSection=()=>{};const sectionPillsRef=useRef(null);
+function ProductHost(){const {t,settings}=useApp();const layeredSectionNav=useLayeredSectionNav(settings?.ui_mobile_section_nav);const tr=(key,fallback)=>t(key)||fallback;const activeProductSection='duplicates';const setActiveProductSection=()=>{};
 const productSectionTabs=[{id:'products',key:'products',label:'Products'},{id:'duplicates',key:'possible_duplicates',label:'Conflicts'}];
 return <>{layeredSectionNav?null:${productTitle}}<ProductConflicts t={t} notify={()=>{}} canRemoveProduct={false} onMergeLeadingZero={()=>{}}/></>}
 function Host(){const {user}=useApp();return <div style={{display:'flex',height:'100vh'}}><Sidebar showQuickPreferences={false}/><main key={user.id} style={{padding:12,maxWidth:1000,marginTop:72,flex:1,minWidth:0}}>{kind==='contacts'?<Contacts/>:<ProductHost/>}</main></div>}
