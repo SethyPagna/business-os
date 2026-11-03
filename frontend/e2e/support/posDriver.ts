@@ -87,11 +87,16 @@ export async function setOrderDiscount(page: Page, discount: { percent: string }
   }
 }
 
-/** Fill the first payment row. Leave a currency out to leave that box empty. */
-export async function setTender(page: Page, tender: { method?: string; usd?: string; khr?: string }): Promise<void> {
-  if (tender.method !== undefined) await page.getByLabel(/^payment method 1$/i).fill(tender.method)
-  if (tender.usd !== undefined) await page.getByLabel(/^amount paid usd 1$/i).fill(tender.usd)
-  if (tender.khr !== undefined) await page.getByLabel(/^amount paid khr 1$/i).fill(tender.khr)
+/** Fill a payment row (the first by default). Leave a currency out to leave that box empty. */
+export async function setTender(page: Page, tender: { method?: string; usd?: string; khr?: string }, row = 1): Promise<void> {
+  if (tender.method !== undefined) await page.getByLabel(new RegExp(`^payment method ${row}$`, 'i')).fill(tender.method)
+  if (tender.usd !== undefined) await page.getByLabel(new RegExp(`^amount paid usd ${row}$`, 'i')).fill(tender.usd)
+  if (tender.khr !== undefined) await page.getByLabel(new RegExp(`^amount paid khr ${row}$`, 'i')).fill(tender.khr)
+}
+
+/** "+ Add payment method": a further tender row, opened with the first configured method. */
+export async function addTenderRow(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /add payment method/i }).click()
 }
 
 /** The one-tap tenders: "Exact $" and "Exact ៛". */

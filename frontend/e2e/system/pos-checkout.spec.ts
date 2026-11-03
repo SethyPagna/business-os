@@ -4,7 +4,7 @@ import {
   type MoneyState, type Row, type Seed, type SeedLot, type SeedProduct,
 } from '../support/moneyFixture'
 import {
-  addToCart, attachCustomer, cartLine, closeStatusPicker, completeSale, openPos, openStatusPicker, setDelivery, setLinePrice,
+  addTenderRow, addToCart, attachCustomer, cartLine, closeStatusPicker, completeSale, openPos, openStatusPicker, setDelivery, setLinePrice,
   setOrderDiscount, setTender, showCart, statusOption, tapExact, totalRow,
 } from '../support/posDriver'
 
@@ -114,7 +114,9 @@ test.beforeAll(async ({ request }) => {
   // by name instead of as a confusing money mismatch.
   expect([rose.priceUsd, mint.priceUsd, clay.priceUsd, oat.priceUsd]).toEqual([12.5, 4.75, 3.68, 2.2])
   expect(seed.exchangeRate).toBe(4000)
-  const stats = await adminCall(request, '/api/sales/stats', 'GET')
+  // Two different URLs (limit only decides the 'more pages' flag, never the cohort) so neither read can be answered from the
+  // other's cached copy: this case is about the revenue DEFINITION, not about cache invalidation.
+  const stats = await adminCall(request, '/api/sales/stats?limit=100', 'GET')
   expect(stats.status).toBe(200)
   revenueBaseline = { revenue: Number(stats.body.revenue_usd), pending: Number(stats.body.pending_revenue_usd), withoutNotPaid: Number(stats.body.revenue_without_not_paid_usd), owed: Number(stats.body.not_paid_owed_usd) }
 })
@@ -185,6 +187,8 @@ function expectLines(lines: Row[], allocations: Row[], expected: Array<{ product
       product_id: want.product.id, product_name: want.product.name, quantity: want.qty, branch_id: SHOP,
       applied_price_usd: want.unit, base_price_usd: want.base ?? want.unit, manual_discount_usd: want.manualDiscount ?? 0,
       total_usd: total, total_khr: toKhr(units(String(total)), rate), batch_id: want.lot.id, batch_label: want.lot.code,
+      // The cashier's till never receives cost (redacted); the sale must still snapshot the product's own cost.
+      cost_price_usd: want.product.costUsd,
     })
     const allocation = allocations.filter(row => row.sale_item_id === line.id)
     expect(allocation, `allocation of line ${index + 1}`).toHaveLength(1)
@@ -200,9 +204,9 @@ function expectRungByCashier(sale: Row): void {
 /** The cashier is shown the receipt, and the number on it is the one Sales lists. */
 async function expectReceiptShown(page: Page, sale: Row): Promise<void> {
   const receipt = String(sale.receipt_number)
-  await expect(page.getByText(receipt).first(), 'the receipt handed to the cashier must carry the stored number').toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(receipt).filter({ visible: true }).first(), 'the receipt handed to the cashier must carry the stored number').toBeVisible({ timeout: 30_000 })
   await page.goto(`${MONEY_ORIGIN}/sales`)
-  await expect(page.getByText(receipt).first(), 'the new sale must be listed on Sales under its receipt number').toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(receipt).filter({ visible: true }).first(), 'the new sale must be listed on Sales under its receipt number').toBeVisible({ timeout: 60_000 })
 }
 
 const paymentRows = (sale: Row): unknown => JSON.parse(String(sale.payment_details))
@@ -214,7 +218,7 @@ test('a non-admin cashier meets the opening-cash gate, and registering a shift l
   const before = await readState(request)
   const alreadyOpen = before.shifts.some(shift => shift.user_id === seed.actors.cashier.id && shift.closed_at == null && shift.cancelled_at == null)
   await signInAndOpenPos(page)
-  const gate = page.getByText('Register opening cash')
+  const gate = page.getByText('Register opening cash').first()
   if (alreadyOpen) {
     // A second pass over a database that already holds today's shift: the gate must NOT come back.
     await expect(gate, 'a registered shift must not be asked for again').toBeHidden()
@@ -364,6 +368,25 @@ test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, a
   } finally {
     if (refusedStatus === 200) ledger.push({ name: '150 riel accepted by the Worker (bug path)', net: 4.75 })
   }
+})
+
+test('a 150 riel amount on a bank method is not cash, so the whole-hundred rule does not apply and the Worker takes it', async ({ page, request }) => {
+  const ready = await loadReady(request)
+  await configure(request, { tax: false, rate: 4000 })
+  await signInAs(page, 'cashier', seed)
+  const before = await readState(request)
+  // The mirror of the refused case above: the same $4.71 + 150 riel, but on the "Bank" method. The rule is about riel CASH
+  // (no coin below 100); a transfer can carry any number. Wrong implementation caught: the hundreds rule applied to every method,
+  // which is the easy over-correction when the 150 riel cash row is finally refused.
+  const taken = await postSale(page, saleBody(ready, { rows: [{ method: 'Bank', amount_usd: 4.71, amount_khr: 150 }], usd: 4.71, khr: 150, currency: 'MIXED' }, 'm1-bank-150', { payment_method: 'Bank' }))
+  expect(taken.status, JSON.stringify(taken.body)).toBe(200)
+  const after = await readState(request)
+  ledger.push({ name: 'bank row with 150 riel', net: 4.75 })
+  expect(after.saleIds.length - before.saleIds.length).toBe(1)
+  const sale = after.sales.find(row => !before.saleIds.includes(row.id))!
+  expect(sale).toMatchObject({ sale_status: 'completed', total_usd: 4.75, amount_paid_usd: 4.71, amount_paid_khr: 150, payment_method: 'Bank' })
+  expect(paymentRows(sale)).toEqual([{ method: 'Bank', amount_usd: 4.71, amount_khr: 150 }])
+  expectStockMoved(before, after, [{ product: mint, lot: lotOf(mint, 'M1-MINT-SEP'), qty: 1 }])
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -518,6 +541,37 @@ test('change the cashier actually hands back in riel is floored to 100 and store
   // unfloored, or a USD change invented alongside the riel one.
   expect(rung.sale).toMatchObject({ total_usd: 7.36, amount_paid_usd: 5, amount_paid_khr: 20000, change_usd: 0, change_khr: 10500, change_is_actual: 1, change_exchange_rate: 4000 })
   expectStockMoved(before, rung.after, [{ product: clay, lot, qty: 2 }])
+  await expectReceiptShown(page, rung.sale)
+})
+
+test('a tender split over two payment rows keeps each row on its own method, so cash and bank money are never merged', async ({ page, request }) => {
+  await configure(request, { tax: false, rate: 4000 })
+  const before = await readState(request)
+  await signInAndOpenPos(page)
+  const lot = lotOf(rose, 'M1-ROSE-OCT')
+  await addToCart(page, rose, lot, 1)
+  const want = basket({ lines: [{ unit: '12.50', qty: 1 }], rate: 4000 })
+  expect([want.total, want.totalKhr]).toEqual([12.5, 50000])
+  // $5.00 in cash, and the other $7.50 as 30,000 riel on the bank row: exactly the sale, so no change either way.
+  await setTender(page, { method: 'Cash', usd: '5' })
+  await addTenderRow(page)
+  await setTender(page, { method: 'Bank', khr: '30000' }, 2)
+  await completeSale(page, 'completed')
+  const rung = await expectOneNewSale(page, request, before, { name: 'tender split over two rows', net: want.netSales })
+  // Wrong implementations caught: the second row dropped (the sale is short, so Completed is refused or the cent debt lost);
+  // both rows booked under the first method (bank money counted in the cash drawer at shift close); the bank riel converted
+  // to dollars on the cash row; the two amounts not summed into amount_paid_*.
+  expect(rung.sale).toMatchObject({
+    sale_status: 'completed', total_usd: 12.5, total_khr: 50000, amount_paid_usd: 5, amount_paid_khr: 30000, payment_currency: 'MIXED',
+    payment_method: 'Cash + Bank', change_usd: 0, change_khr: 0, exchange_rate: 4000,
+  })
+  expect(paymentRows(rung.sale)).toEqual([
+    { method: 'Cash', amount_usd: 5, amount_khr: 0 },
+    { method: 'Bank', amount_usd: 0, amount_khr: 30000 },
+  ])
+  expectRungByCashier(rung.sale)
+  expectLines(rung.lines, rung.allocations, [{ product: rose, lot, qty: 1, unit: 12.5 }], 4000)
+  expectStockMoved(before, rung.after, [{ product: rose, lot, qty: 1 }])
   await expectReceiptShown(page, rung.sale)
 })
 
@@ -781,7 +835,7 @@ test('a double click while the server is slow sends one request and records one 
 // 10. Revenue, by the owner's definition
 // ---------------------------------------------------------------------------------------------------------------
 test('the Sales revenue figure is net sales of what this file rang: tax and delivery out, Not Paid in and shown as credit', async ({ request }) => {
-  const stats = await adminCall(request, '/api/sales/stats', 'GET')
+  const stats = await adminCall(request, '/api/sales/stats?limit=101', 'GET')
   expect(stats.status).toBe(200)
   const sum = (items: number[]) => items.reduce((total, value) => total + units(String(value)), 0n)
   const net = toUsd(sum(ledger.map(entry => entry.net)))
