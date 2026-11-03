@@ -121,7 +121,12 @@ async function main() {
         const response = await mf.dispatchFetch(url.href, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) })
         receipt.requests.push({ method: req.method, path: url.pathname, status: response.status }); record()
         res.statusCode = response.status
-        for (const [name, value] of response.headers) res.setHeader(name, value)
+        for (const [name, value] of response.headers) if (name.toLowerCase() !== 'set-cookie') res.setHeader(name, value)
+        // This fixture speaks plain http on loopback. The Worker sets its session cookie Secure (lib/auth.ts setSessionCookie), which Chromium
+        // keeps on http://127.0.0.1 and WebKit refuses -- a WebKit sign-in would answer 200 and every later call 401. Drop the Secure flag on the
+        // way out (production is https and keeps it), and relay EVERY Set-Cookie: a setHeader per header would keep only the last.
+        const cookies = response.headers.getSetCookie()
+        if (cookies.length) res.setHeader('set-cookie', cookies.map(cookie => cookie.replace(/;\s*Secure\b/i, '')))
         return res.end(Buffer.from(await response.arrayBuffer()))
       }
       const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '')
