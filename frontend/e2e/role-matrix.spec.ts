@@ -179,11 +179,11 @@ for (const role of ROLES) {
         } else {
           expect.soft(shown.includes(text('access_denied', 'Access Denied')), `${where} does not show Access Denied to a role that may open it`).toBe(false)
           if (!session.phone && HUB_PAGES.includes(route.page)) {
-            // Desktop shows a hub's sections as pills, and only when there are two or more.
+            // Desktop shows a hub's sections as a row of chips (R1: ChipRail + RailChip, <button class=chip-rail-item> inside .hub-section-pills), and only when there are two or more.
             const sections = expectedHubSections(access, route.page)
             const want = sections.length > 1 ? sorted(sections.map((section) => text(section.key, section.label))) : []
             await expect.poll(
-              async () => sorted((await slot.locator('.hub-section-pill').allInnerTexts()).map(squash)),
+              async () => sorted((await slot.locator('.hub-section-pills .chip-rail-item').allInnerTexts()).map(squash)),
               { message: `${where}: hub section pills`, timeout: 10_000 },
             ).toEqual(want)
           }
