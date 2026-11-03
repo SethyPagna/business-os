@@ -143,6 +143,68 @@ async function main() {
     t.eq('and keeps the number', JSON.parse((await world.first('SELECT address FROM customers WHERE id = ?', soloId)).address).map((option) => [option.label, digitsOf(option.phone)]), [['Cell', '012345000']])
   })
 
+  // P2.8-F: the Edit forms now leave out a phone field the person did not touch; the Worker must read an ABSENT field as unchanged
+  // (and an EMPTY one as a clear), or a notes-only save by an account without the grant would wipe or refuse the numbers.
+  await check('edit: a save that leaves the phone fields out keeps every stored number, even where the unchanged form would be refused', async (t) => {
+    const made = await world.api('POST', '/api/customers', {
+      name: 'Fixture Unlabeled', phone: '091 777 456',
+      address: optionJson([
+        { label: '', name: 'Unl A', phone: '013 345 678', email: null, address: 'Street 1', area: null },
+        { label: '', name: 'Unl B', phone: '013 999 678', email: null, address: 'Street 2', area: null },
+      ]),
+    }, { as: 'admin' })
+    t.ok(`fixture created (status ${made.status})`, made.status === 200 || made.status === 201, made.text.slice(0, 200))
+    const id = made.json.id
+    const unl = () => world.first('SELECT name, phone, phone_normalized, address, notes FROM customers WHERE id = ?', id)
+    const read = async () => ((await world.api('GET', `/api/customers?search=Fixture%20Unlabeled&page=1&pageSize=50&cb=${++reads}`, undefined, { as: 'manager' })).json.items || []).find((row) => Number(row.id) === id)
+    const shown = await read()
+    t.eq('the two options without a label show the same mask', JSON.parse(shown.address).map((option) => option.phone), ['013 *** 678', '013 *** 678'])
+    const before = await unl()
+    // Control: the form as it used to send itself (every field, masks included) is still refused, and writes nothing.
+    const whole = await world.api('PUT', `/api/customers/${id}`, { ...shown, name: 'Fixture Unlabeled', notes: 'whole form' }, { as: 'manager' })
+    t.eq('the unchanged whole form is refused (the refusal stays)', whole.status, 400)
+    t.eq('refusal code', whole.json && whole.json.code, 'masked_phone_input')
+    t.eq('nothing written by the refused save', await unl(), before)
+    // The new form: notes only.
+    const notes = await world.api('PUT', `/api/customers/${id}`, { name: 'Fixture Unlabeled', notes: 'notes only', updated_at: shown.updated_at }, { as: 'manager' })
+    t.ok(`a notes-only save is accepted (status ${notes.status})`, notes.status === 200, notes.text.slice(0, 300))
+    const after = await unl()
+    t.eq('the notes changed (the save really happened)', after.notes, 'notes only')
+    t.eq('primary phone untouched', after.phone, before.phone)
+    t.eq('phone_normalized untouched', after.phone_normalized, before.phone_normalized)
+    t.eq('Contact Options untouched, byte for byte', after.address, before.address)
+    t.eq('their own numbers are still there', phonesOfAddress(after.address), ['013345678', '013999678'])
+    // Only the Contact Options left out: a typed primary phone is saved and the options stay.
+    const typed = await world.api('PUT', `/api/customers/${id}`, { name: 'Fixture Unlabeled', phone: '091 777 457' }, { as: 'manager' })
+    t.ok(`a typed primary phone without the options (status ${typed.status})`, typed.status === 200, typed.text.slice(0, 200))
+    const typedAfter = await unl()
+    t.eq('typed phone saved', digitsOf(typedAfter.phone), '091777457')
+    t.eq('Contact Options still untouched', typedAfter.address, before.address)
+    // An EMPTY phone is a change (it clears the number); only an absent one is "unchanged".
+    const cleared = await world.api('PUT', `/api/customers/${id}`, { name: 'Fixture Unlabeled', phone: '' }, { as: 'manager' })
+    t.ok(`an empty phone is a real value (status ${cleared.status})`, cleared.status === 200, cleared.text.slice(0, 200))
+    t.eq('the empty phone cleared the primary number', digitsOf((await unl()).phone), '')
+    t.eq('and still left the Contact Options alone', (await unl()).address, before.address)
+    // A holder may leave the fields out too.
+    const holder = await world.api('PUT', `/api/customers/${id}`, { name: 'Fixture Unlabeled', notes: 'holder notes' }, { as: 'manager_granted' })
+    t.ok(`a holder's notes-only save (status ${holder.status})`, holder.status === 200, holder.text.slice(0, 200))
+    t.eq('Contact Options still untouched after the holder', (await unl()).address, before.address)
+  })
+  await check('edit: suppliers and delivery contacts read an absent phone field as unchanged too', async (t) => {
+    const supplierBefore = await world.first('SELECT phone, address FROM suppliers WHERE id = ?', ids.supplier)
+    const supplier = await world.api('PUT', `/api/suppliers/${ids.supplier}`, { name: 'Fixture Supplies', notes: 'notes only' }, { as: 'manager' })
+    t.ok(`supplier status ${supplier.status}`, supplier.status === 200, supplier.text.slice(0, 200))
+    const supplierAfter = await world.first('SELECT phone, address, notes FROM suppliers WHERE id = ?', ids.supplier)
+    t.eq('supplier notes saved', supplierAfter.notes, 'notes only')
+    t.eq('supplier phone and options untouched', [supplierAfter.phone, supplierAfter.address], [supplierBefore.phone, supplierBefore.address])
+    const deliveryBefore = await world.first('SELECT phone, address FROM delivery_contacts WHERE id = ?', ids.delivery)
+    const delivery = await world.api('PUT', `/api/delivery-contacts/${ids.delivery}`, { name: 'Fixture Courier', notes: 'notes only' }, { as: 'manager' })
+    t.ok(`delivery status ${delivery.status}`, delivery.status === 200, delivery.text.slice(0, 200))
+    const deliveryAfter = await world.first('SELECT phone, address, notes FROM delivery_contacts WHERE id = ?', ids.delivery)
+    t.eq('delivery notes saved', deliveryAfter.notes, 'notes only')
+    t.eq('delivery phone and options untouched', [deliveryAfter.phone, deliveryAfter.address], [deliveryBefore.phone, deliveryBefore.address])
+  })
+
   await check('duplicates: dismissing or undismissing a group by a masked value is refused and writes nothing', async (t) => {
     const count = async () => (await world.first('SELECT COUNT(*) AS n FROM contact_duplicate_dismissals')).n
     const before = await count()

@@ -10,6 +10,7 @@
 // PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-native.cjs runs each).
 const { createReporter } = require('./harness/real_worker_world.cjs')
 const { bootPhoneWorld, PHONES, leaksIn, snippetOf } = require('./harness/phone_leak_world.cjs')
+const { disguises } = require('./harness/phone_disguises.cjs')
 
 const sub = (needle, replacement) => (source) => {
   if (!source.includes(needle)) throw new Error(`mutant anchor missing: ${needle}`)
@@ -35,6 +36,11 @@ const MUTANTS = {
   'reports sales export matches the phone by substring': ['routes/reports.ts', sub('const cohort = salesExportCohort(snapshot, search, phoneSearchAccessOf(user))', 'const cohort = salesExportCohort(snapshot, search, { fullPhone: true })')],
   'non-ASCII digits are not folded': ['lib/phoneMask.ts', sub('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false')],
   'delivery picker reads a numeric courier name': ['routes/sales.ts', sub("const nameColumn = probe.kind === 'none' ? \"lower(COALESCE(name,''))\" : `lower(${nameWithoutPhoneSql('name')})`", "const nameColumn = \"lower(COALESCE(name,''))\"")],
+  // P2.8-F: the 0-to-o retry of a word that mixes letters and digits must read the raw non-phone text and nothing else.
+  'sales zero-to-o retry reaches the phone column': ['routes/sales.ts', sub('restrictedWordHaystacks(word, flatHaystackWithoutPhones, wordsInSearch)', '[flatHaystackWithoutPhones, ...restrictedWordHaystacks(word, flatHaystack, wordsInSearch).slice(1)]')],
+  'returns zero-to-o retry reaches the folded copy': ['routes/returns.ts', sub('restrictedWordHaystacks(word, digitWordHaystack, wordsInSearch)', '[digitWordHaystack, ...restrictedWordHaystacks(word, flatHaystack, wordsInSearch).slice(1)]')],
+  'zero-to-o retry removed (a mixed word is lost again)': ['lib/phoneSearchGuard.ts', sub("? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]", '? [rawHaystack] : [rawHaystack]')],
+  'zero-to-o retry also for a digit-only word': ['lib/phoneSearchGuard.ts', sub('/\\p{L}/u.test(word) && word.includes', 'word.includes')],
   'reports returns search reads a numeric name': ['routes/reports.ts', sub("const hideNumericName = kind === 'returns' && !phoneSearchAccessOf(user).fullPhone", 'const hideNumericName = false')],
 }
 
@@ -61,6 +67,24 @@ async function main() {
 
   // A courier saved under its own number (its name is a number, its area is the only readable word).
   await world.run("INSERT INTO delivery_contacts (id, name, phone, area) VALUES (9201, ?, '', 'South Zone')", '014 333 777')
+
+  // P2.8-F: Sales and Returns words that mix letters and digits (the cashier "No1", the customer "sokha2"), and the same fold pointing at
+  // hidden numbers: a phone saved glued to letters, a folded copy that still holds one, a number typed with a letter O.
+  const insertSale = (receipt, cashier, name, phone, folded, hoursAgo) => world.run(
+    `INSERT INTO sales (receipt_number, customer_id, customer_name, customer_phone, total_usd, total_khr, sale_status, payment_method, cashier_name, search_normalized, branch_id, branch_name, created_at)
+     VALUES (?, NULL, ?, ?, 5, 20000, 'completed', 'Cash', ?, ?, ?, 'Main', datetime('now', ?))`,
+    receipt, name, phone, cashier, folded, world.ids.branch, `-${hoursAgo} hour`,
+  )
+  await insertSale('P28-0004', 'No1', 'Walk-in', '', 'p28-0004 n01 walk in main', 4)
+  await insertSale('P28-0005', 'Admin', 'Fixture Legacy', 'Tel099456789', 'p28-0005 admin fixture legacy tel099456789 main', 5)
+  await insertSale('P28-0006', 'Admin', 'O1988375', '', 'p28-0006 admin 01988375 main', 6)
+  const insertReturn = (number, name, saleReceipt, folded) => world.run(
+    `INSERT INTO returns (return_number, customer_id, customer_name, sale_id, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, search_normalized, created_at)
+     VALUES (?, ?, ?, (SELECT id FROM sales WHERE receipt_number = ?), 'customer', 'completed', 1, 4000, ?, ?, datetime('now'))`,
+    number, world.ids.customer2, name, saleReceipt, saleReceipt, folded,
+  )
+  await insertReturn('P28-RET-3', 'sokha2', 'P28-0004', 'p28-ret-3 s0kha2')
+  await insertReturn('P28-RET-4', 'Fixture Sophea', 'P28-0004', 'p28-ret-4 fixture sophea tel010222333')
 
   // ---- positive controls: the holder reads through the same boxes, or a green run proves nothing -----------------------
   await check('positive control: the holder finds contacts, sales and returns by a number fragment', async (t) => {
@@ -323,6 +347,68 @@ async function main() {
     t.eq('receipt', receiptsIn((await report('sales', 'p28-0002', 'sales_only')).text), ['P28-0002'])
     t.ok('customer name', receiptsIn((await report('sales', 'dara', 'sales_only')).text).includes('P28-0001'))
     t.eq('holder: same receipt result', receiptsIn((await report('sales', 'p28-0002', 'admin')).text), ['P28-0002'])
+  })
+
+  // ---- P2.8-F: a word that mixes letters and digits finds its row without the grant; the same fold never reaches a number ----------------
+  await check('P2.8-F positive control: the holder finds the same rows by the mixed words', async (t) => {
+    t.eq('sales No1', receiptsIn((await get(`/api/sales?search=${enc('No1')}`, 'admin')).text), ['P28-0004'])
+    t.ok('returns sokha2', has((await get(`/api/returns?search=${enc('sokha2')}`, 'admin')).text, 'P28-RET-3'))
+    t.eq('sales tel0994 (a phone saved glued to letters)', receiptsIn((await get(`/api/sales?search=${enc('tel0994')}`, 'admin')).text), ['P28-0005'])
+    t.ok('returns tel0102 (the folded copy holds the number)', has((await get(`/api/returns?search=${enc('tel0102')}`, 'admin')).text, 'P28-RET-4'))
+  })
+  await check('no grant: Sales finds a cashier named No1, Returns a customer named sokha2, and the totals and the reports agree', async (t) => {
+    for (const q of ['No1', 'no1', 'NO1']) {
+      t.eq(`sales ${q}`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), ['P28-0004'])
+      t.eq(`sales totals ${q}`, (await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count, 1)
+    }
+    t.eq('the same rows as the holder', receiptsIn((await get(`/api/sales?search=${enc('No1')}`, 'sales_only')).text), receiptsIn((await get(`/api/sales?search=${enc('No1')}`, 'admin')).text))
+    for (const q of ['sokha2', 'Sokha2']) t.ok(`returns ${q}`, has((await get(`/api/returns?search=${enc(q)}`, 'sales_only')).text, 'P28-RET-3'))
+    t.eq('reports > sales No1 (a raw match, as before)', receiptsIn((await get(`/api/reports/business-summary/sales?startDate=2000-01-01&endDate=2100-01-01&q=${enc('No1')}`, 'sales_only')).text), ['P28-0004'])
+  })
+  await check('no grant: the retry never reaches a phone, the folded copy, or a digit fragment', async (t) => {
+    for (const q of ['tel0994', 'tel09945', 'TEL0994', 'tel099456789']) {
+      const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
+      t.eq(`sales ${q}`, receiptsIn(r.text), [])
+      t.eq(`sales ${q} leaks`, leaksIn(r.text), [])
+      t.eq(`sales totals ${q}`, (await get(`/api/sales/stats?search=${enc(q)}`, 'sales_only')).json?.total_count, 0)
+    }
+    for (const q of ['tel0102', 'tel010222333', 'TEL0102']) {
+      const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
+      t.ok(`returns ${q}: P28-RET-4 must not be found`, !has(r.text, 'P28-RET-4'), snippetOf(r.text))
+    }
+    for (const q of ['01988', 'o1988', 'O1988']) t.eq(`sales ${q}: a number typed with a letter O stays unreadable by its digits`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
+    t.eq('positive control: the holder reads it', receiptsIn((await get(`/api/sales?search=${enc('01988')}`, 'admin')).text), ['P28-0006'])
+  })
+
+  // The security review's 42 spellings of a fragment (harness/phone_disguises.cjs) on the search surfaces, without the grant.
+  await check('no grant: the reviewer\'s 42 spellings of a digit fragment find nothing on every surface (the holder finds the plain fragment)', async (t) => {
+    const range = 'startDate=2026-01-01&endDate=2027-12-31'
+    const SURFACES = [
+      { name: 'customers list', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Dara') },
+      { name: 'POS picker', frag: '654', as: 'manager', holder: 'manager_granted', url: (q) => `/api/customers?fields=sales_picker&search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Dara') },
+      { name: 'suppliers list', frag: '333', as: 'manager', holder: 'manager_granted', url: (q) => `/api/suppliers?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Supplies') },
+      { name: 'delivery contacts list', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/delivery-contacts?search=${enc(q)}&page=1&pageSize=50`, hit: (r) => has(r.text, 'Fixture Courier') },
+      { name: 'delivery picker', frag: '555', as: 'manager', holder: 'manager_granted', url: (q) => `/api/sales/delivery-options?search=${enc(q)}`, hit: (r) => has(r.text, 'Fixture Courier') },
+      { name: 'sales list', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales?search=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
+      { name: 'sales totals', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/sales/stats?search=${enc(q)}`, hit: (r) => Number(r.json && r.json.total_count) > 0 },
+      { name: 'returns list', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/returns?search=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
+      { name: 'reports sales', frag: '654', as: 'cashier', holder: 'cashier_granted', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
+      { name: 'reports sales export', frag: '654', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/sales?${range}&q=${enc(q)}&intent=export`, hit: (r) => receiptsIn(r.text).includes('P28-0001') },
+      { name: 'reports returns', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/reports/business-summary/returns?${range}&q=${enc(q)}`, hit: (r) => has(r.text, 'P28-RET-2') },
+      { name: 'audit log', frag: '222', as: 'sales_only', holder: 'admin', url: (q) => `/api/system/audit-logs?search=${enc(q)}&pageSize=50`, hit: (r) => ((r.json && r.json.items) || []).length > 0 },
+    ]
+    for (const surface of SURFACES) {
+      t.ok(`${surface.name}: positive control, the holder (${surface.holder}) finds the plain fragment ${surface.frag}`, surface.hit(await get(surface.url(surface.frag), surface.holder)))
+      let tried = 0
+      for (const [label, q] of disguises(surface.frag)) {
+        tried += 1
+        const r = await get(surface.url(q), surface.as)
+        t.ok(`${surface.name} ${label}: status ${r.status}`, r.status === 200, r.text.slice(0, 120))
+        t.ok(`${surface.name} ${label}: must find nothing`, !surface.hit(r), snippetOf(r.text) || r.text.slice(0, 120))
+        t.eq(`${surface.name} ${label} leaks`, leaksIn(r.text), [])
+      }
+      t.ok(`${surface.name}: tried the reviewer's 42 spellings`, tried >= 42, String(tried))
+    }
   })
 
   // ---- source guard: no search call site can forget the access argument -----------------------------------------------------
