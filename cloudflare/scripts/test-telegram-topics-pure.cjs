@@ -67,7 +67,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 // AND telegram.ts's own settings reads at the SAME per-test database.
 const dbHolder = { current: { getDb: () => { throw new Error('no DB in this test') } } }
 const dbProxy = { getDb: (env) => dbHolder.current.getDb(env) }
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': dbProxy, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': dbProxy, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': dbProxy })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', { './db': dbProxy, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') })

@@ -41,7 +41,7 @@ const tsPath = path.join(tmpDir, 'salesAnalytics.ts')
 fs.writeFileSync(tsPath, stripped)
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
-const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
+const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts', 'saleStatusResolution.ts', 'financialPrecision.ts']
 for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 // The atomic report reader is behind the report_atomic switch; this test is about that reader, so the switch is ON.
 const switchFiles = installSwitchSiblings(tmpDir)

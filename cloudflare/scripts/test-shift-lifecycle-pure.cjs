@@ -127,7 +127,7 @@ async function main() {
   })
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
     './db': dbModule,
     './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,

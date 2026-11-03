@@ -1,7 +1,8 @@
 'use strict'
 // The REAL lib/saleStatusResolution.ts (with its financialPrecision import), bundled once, for the tests that load a route or
-// lib with a hand-wired module map. The routes that write a riel cash amount (fees, shifts, sales, exchange...) ask this module's
-// riel cash rule (owner, 27 Oct 2026: riel cash is whole 100-riel notes, any riel by a bank method), so every such map wires it here.
+// lib with a hand-wired module map. Two asks of it: the riel cash rule (fees, shifts, sales, exchange... refuse cash riel that is
+// not whole 100-riel notes, owner 27 Oct 2026) and the coverage answer salesAnalytics uses for what a Not Paid sale still owes
+// (a riel tender short by under 100 riel is paid). Every such map wires this one file.
 const path = require('node:path')
 const { buildSync } = require('esbuild')
 

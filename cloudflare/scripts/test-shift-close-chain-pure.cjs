@@ -123,7 +123,7 @@ const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrec
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const reconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': { getDb: () => db },
   './nativeSaleChange': nativeSaleChange,

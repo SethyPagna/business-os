@@ -133,7 +133,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
   './db': { getDb: () => db },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   './reportMoneyPrecision': reportMoneyPrecision,
