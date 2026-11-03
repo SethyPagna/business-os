@@ -109,7 +109,9 @@ check('Expenses export covers visible, filtered-all, and all-record scopes with 
   }])
   assert.match(feesTransportSource, /export async function getAllFeesForExport/)
   assert.match(feesTransportSource, /const PAGE = 500/)
-  assert.match(feesTransportSource, /offset \+= PAGE/)
+  // E1-F: every request carries the rows already loaded as its offset (the same number `offset += PAGE` gave), so a switch flipped
+  // mid-export keeps paging; the cursor itself is pinned in feesExportCursor.test.ts.
+  assert.match(feesTransportSource, /offset: all\.length/)
   assert.match(feesPageSource, /openFeeExport\('visible'\)/)
   assert.match(feesPageSource, /openFeeExport\('filtered'\)/)
   assert.match(feesPageSource, /openFeeExport\('all'\)/)
