@@ -1275,8 +1275,9 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
     }
   }
 
+  // Below md the install band spans the screen, so the buttons ride above it (--install-band-clearance is its top edge, 0 when none).
   return (
-    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
+    <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[max(calc(5rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]' : 'bottom-[max(calc(0.75rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
       <button
         type="button"
         className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"

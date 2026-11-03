@@ -12,7 +12,8 @@ import { E2E_ACCOUNTS, signIn } from './support/session'
  *    320x568 up) and at the end of the page (every size, landscape and a short desktop window included);
  *    under 360 px the band is one short row.
  *  - Desktop sign-in: the band sits in the normal corner and moves nothing. Desktop staff app: the band
- *    leaves the two scroll buttons at the bottom right uncovered and clickable.
+ *    leaves the two scroll buttons at the bottom right uncovered and clickable; so does a signed-in phone
+ *    (390x844, 360x800), where a tap at a button's centre must reach the button, not the band.
  *
  * ERRORS GUARDED: reserving room for a fixed band by shrinking the box the sign-in card is centred in pushed
  * the card up under the toggles at 320x568 (6.0.1051 review B1); a 106 px band hid "Forgot password?" on the
@@ -84,6 +85,19 @@ async function expectBandClearOfForm(page: Page, language: Language, when: strin
   return bandBox
 }
 
+/** Neither scroll button is under the band, and a tap at the centre of each reaches that button. */
+async function expectScrollButtonsReachable(page: Page, bandBox: Box): Promise<void> {
+  for (const name of ['Scroll to top', 'Scroll to bottom']) {
+    const buttonBox = await boxOf(page.getByRole('button', { name, exact: true }), name)
+    expect(overlapArea(bandBox, buttonBox), `the band over "${name}"`).toBe(0)
+    const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label') ?? null, {
+      x: buttonBox.x + buttonBox.width / 2,
+      y: buttonBox.y + buttonBox.height / 2,
+    })
+    expect(hit, `"${name}" is what a tap at its centre reaches`).toBe(name)
+  }
+}
+
 test.describe('sign-in with the install band', () => {
   test.describe.configure({ timeout: 120_000 })
   test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts: desktop has its own tests below')
@@ -149,17 +163,23 @@ test.describe('desktop with the install band', () => {
     await signIn(page, E2E_ACCOUNTS.cashierA)
     await page.evaluate(FIRE_INSTALL_PROMPT)
     const bandBox = await boxOf(installBand(page, 'en'), 'the install band')
-
-    for (const name of ['Scroll to top', 'Scroll to bottom']) {
-      const button = page.getByRole('button', { name, exact: true })
-      const buttonBox = await boxOf(button, name)
-      expect(overlapArea(bandBox, buttonBox), `the band over "${name}"`).toBe(0)
-      const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label') ?? null, {
-        x: buttonBox.x + buttonBox.width / 2,
-        y: buttonBox.y + buttonBox.height / 2,
-      })
-      expect(hit, `"${name}" is what a click at its centre reaches`).toBe(name)
-    }
+    await expectScrollButtonsReachable(page, bandBox)
     expect(bandBox.x + bandBox.width, 'the band stays inside the viewport').toBeLessThanOrEqual(1440)
   })
+})
+
+test.describe('signed-in app on a phone with the install band', () => {
+  test.describe.configure({ timeout: 120_000 })
+  test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts: desktop has its own test above')
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 800 }]) {
+    test(`${viewport.width}x${viewport.height}: the band leaves the scroll buttons uncovered and tappable`, async ({ page }, info) => {
+      await page.setViewportSize(viewport)
+      await signIn(page, E2E_ACCOUNTS.cashierA)
+      if (info.project.name === 'android-chromium') await page.evaluate(FIRE_INSTALL_PROMPT)
+      const bandBox = await boxOf(installBand(page, 'en'), 'the install band')
+      await expectScrollButtonsReachable(page, bandBox)
+      expect(bandBox.x + bandBox.width, 'the band stays inside the viewport').toBeLessThanOrEqual(viewport.width)
+    })
+  }
 })

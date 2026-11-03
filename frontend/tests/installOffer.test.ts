@@ -671,6 +671,15 @@ await check('under 360 px the band is one short row; the signed-in stack leaves 
   assert.match(app, /\$\{bottomStackClass\(inlineMobileNavigation \? [A-Z_]+ : [A-Z_]+\)\} md:pr-14`/, 'the signed-in stack stops short of the scroll buttons on desktop')
 })
 
+await check('on a phone the scroll buttons ride above the band, and the desktop corner is untouched', async () => {
+  const { INSTALL_BAND_CLEARANCE_VAR } = await import('../src/utils/useInstallBandClearance.ts')
+  const app = read('src/App.tsx')
+  const aboveBand = `calc(var(${INSTALL_BAND_CLEARANCE_VAR},0px)+0.5rem)`
+  assert.ok(app.includes(`'bottom-[max(calc(5rem+env(safe-area-inset-bottom)),${aboveBand})]'`), 'above the bottom nav, or above the band if that is higher')
+  assert.ok(app.includes(`'bottom-[max(calc(0.75rem+env(safe-area-inset-bottom)),${aboveBand})]'`), 'with no bottom nav, or above the band if that is higher')
+  assert.ok(app.includes('md:bottom-[calc(1rem+env(safe-area-inset-bottom))]'), 'from md the band is offset sideways instead, so the buttons keep their corner')
+})
+
 await check('the staff loading screens say Leang Cosmetics Admin', () => {
   const titles = [...appSource.matchAll(/<h1 className="business-os-initial-title">([^<]*)<\/h1>/g)].map(([, title]) => title)
   assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
