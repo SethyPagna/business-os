@@ -6,7 +6,7 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
  * draft-chip.spec.ts -- a minimized draft must stay visible and restorable on a phone.
  *
  * WHAT THIS PROVES, against the built app and the fixture server:
- *  - at 360x800 a draft parked from the Add products session (the existing
+ *  - at 360x800 a draft parked from the Adjust stock session (the existing
  *    Minimize control) shows one count chip in BOTH navigation modes -- the
  *    default "pages" mode used to show no chip at all -- and the chip stays on
  *    screen when the header scrolls away;
@@ -26,14 +26,20 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 test.use({ serviceWorkers: 'block' })
 
 const TYPED = 'Typed reason 123'
-const REASON_FIELD = /Physical count/
+// The session's reason box (#stock-session-reason) is labelled inside the input: its placeholder is just "Reason".
+// It used to read "e.g. Physical count, Damaged goods..." (reason_placeholder); the compact one-row layout of
+// 30 Sep 2026 (owner rule "labels live inside inputs") replaced that example text with the field name.
+const REASON_FIELD = 'Reason'
 
+// The Products header button that opens the stock session reads "Adjust stock". It read "Add products" until
+// 9 Oct 2026 (a95501074, "share Adjust stock entry across product sections"); tests/ownerStockEntryPoints.test.ts
+// pins the new name. The session it opens is unchanged: Add mode, the Reason field, Minimize.
 async function parkDraft(page: Page): Promise<void> {
   await signIn(page, E2E_ACCOUNTS.cashierA, 'admin123')
   await gotoAdminPage(page, '/products')
-  await page.getByRole('button', { name: 'Add products', exact: true }).click()
+  await page.getByRole('button', { name: 'Adjust stock', exact: true }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByPlaceholder(REASON_FIELD).fill(TYPED)
+  await dialog.getByPlaceholder(REASON_FIELD, { exact: true }).fill(TYPED)
   // The draft is written on a debounce; minimize flushes it, so no wait is needed beyond the click.
   await dialog.getByRole('button', { name: 'Minimize', exact: true }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -114,7 +120,7 @@ for (const mode of ['pages', 'sections'] as const) {
       await inViewport(page, list)
       await list.locator('button[title^="Restore"]').click()
       const dialog = page.getByRole('dialog')
-      await expect(dialog.getByPlaceholder(REASON_FIELD)).toHaveValue(TYPED)
+      await expect(dialog.getByPlaceholder(REASON_FIELD, { exact: true })).toHaveValue(TYPED)
       await expect(chip).toHaveCount(0)
       expectNoRuntimeErrors(health)
     })
@@ -159,7 +165,7 @@ test.describe('desktop 1280x800', () => {
     await expect(pill).toBeVisible()
 
     await pill.click()
-    await expect(page.getByRole('dialog').getByPlaceholder(REASON_FIELD)).toHaveValue(TYPED)
+    await expect(page.getByRole('dialog').getByPlaceholder(REASON_FIELD, { exact: true })).toHaveValue(TYPED)
     await expect(pill).toHaveCount(0)
     expectNoRuntimeErrors(health)
   })
