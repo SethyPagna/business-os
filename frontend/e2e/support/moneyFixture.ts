@@ -44,6 +44,8 @@ export type MoneyState = {
   audits: Row[]
   foreignKeyCheck: Row[]
   outboundRefusals: Array<{ method: string; url: string }>
+  /** Every POST /api/sales the fixture's relay received, in arrival order (counted server-side, so it is the same in every browser engine). */
+  salePosts: Array<{ at: string; client_request_id: string | null; body: any }>
 }
 
 /** A system spec must be unable to reach production even by a mistyped override. */
@@ -90,6 +92,15 @@ export async function selectRows(request: APIRequestContext, sql: string, params
   const response = await repeatableRead(() => request.post(`${MONEY_ORIGIN}/__fixture/select`, { data: { sql, params }, timeout: READ_TIMEOUT_MS }))
   expect(response.status(), await response.text()).toBe(200)
   return (await response.json() as { rows: Row[] }).rows
+}
+
+/**
+ * Make the fixture hold one route's requests for `ms` before the Worker sees them (0 clears it). The delay is applied by the fixture's relay,
+ * not by the browser, so it works in every engine; always clear it in a finally block.
+ */
+export async function setLatency(request: APIRequestContext, route: { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; ms: number }): Promise<void> {
+  const response = await request.post(`${MONEY_ORIGIN}/__fixture/latency`, { data: route })
+  expect(response.status(), await response.text()).toBe(200)
 }
 
 /** A real /api/* request as the administrator, through the real route (settings, reports, role edits). */

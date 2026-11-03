@@ -229,6 +229,11 @@ async function startMoneyFixture(options = {}) {
 
     const productIds = SEED.products.map(p => p.id).join(',')
     const lotIds = SEED.products.flatMap(p => p.lots.map(l => l.id)).join(',')
+    // Every POST /api/sales the relay receives, in arrival order, and an optional delay for it. The browser cannot be trusted to count its own
+    // requests: WebKit did not route the till's POST through page.route, so the page-side count read 0 while one sale was recorded. The relay
+    // sees every request from every engine, which is what "exactly one sale per tap" has to be judged on.
+    const salePosts = []
+    let latency = null
     async function state(saleId) {
       const scoped = Number.isFinite(saleId) && saleId > 0
       const q = (sql, ...values) => db.prepare(sql).bind(...values)
@@ -253,6 +258,7 @@ async function startMoneyFixture(options = {}) {
         saleIds: saleIds.map(r => r.id), sales, lines, allocations, stock, lots, movements, shifts, settings, audits,
         foreignKeyCheck: await all('PRAGMA foreign_key_check'),
         outboundRefusals: info.outboundRefusals,
+        salePosts,
       }
     }
     const readBody = req => new Promise((resolve, reject) => { const chunks = []; req.on('data', c => chunks.push(c)); req.on('end', () => resolve(Buffer.concat(chunks))); req.on('error', reject) })
@@ -265,6 +271,15 @@ async function startMoneyFixture(options = {}) {
         if (url.pathname === '/__fixture/shutdown' && req.method === 'POST') { res.end('Closing own disposable fixture'); setImmediate(() => close().then(() => process.exit(0))); return }
         if (url.pathname === '/__fixture/ready') return json(res, { ready: true, sourceHead: info.sourceHead, trackedChanges: info.trackedChanges, frontendBuild: info.frontendBuild, migrations: info.migrations.length, organizationId: org.id, seed: SEED })
         if (url.pathname === '/__fixture/state' && req.method === 'GET') return json(res, await state(Number(url.searchParams.get('sale'))))
+        if (url.pathname === '/__fixture/latency' && req.method === 'POST') {
+          const body = JSON.parse((await readBody(req)).toString() || '{}')
+          const ms = Number(body.ms)
+          if (!Number.isFinite(ms) || ms < 0 || ms > 10_000) throw new Error('latency ms must be between 0 and 10000')
+          if (ms === 0) { latency = null; return json(res, { latency: null }) }
+          if (!/^\/api\//.test(String(body.path)) || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(body.method)) throw new Error('latency applies to one /api/ route and method')
+          latency = { method: body.method, path: String(body.path), ms }
+          return json(res, { latency })
+        }
         if (url.pathname === '/__fixture/select' && req.method === 'POST') {
           const body = JSON.parse((await readBody(req)).toString() || '{}')
           const sql = String(body.sql || '').trim().replace(/;\s*$/, '')
@@ -279,6 +294,12 @@ async function startMoneyFixture(options = {}) {
         }
         if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) {
           const body = await readBody(req)
+          if (req.method === 'POST' && url.pathname === '/api/sales') {
+            let parsed = null
+            try { parsed = JSON.parse(body.toString()) } catch { /* a non-JSON body is recorded as null */ }
+            salePosts.push({ at: new Date().toISOString(), client_request_id: parsed?.client_request_id ?? null, body: parsed })
+          }
+          if (latency && req.method === latency.method && url.pathname === latency.path) await new Promise(resolve => setTimeout(resolve, latency.ms))
           const response = await mf.dispatchFetch(url.href, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) })
           res.statusCode = response.status
           for (const [name, value] of response.headers) if (name.toLowerCase() !== 'set-cookie') res.setHeader(name, value)

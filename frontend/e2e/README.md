@@ -230,13 +230,14 @@ build under test, `E2E_EXPECTED_BUILD_SHA`.
 | endpoint | use |
 | --- | --- |
 | `GET /__fixture/ready` | `{ sourceHead, trackedChanges, frontendBuild, organizationId, seed }`; the spec checks provenance with it |
-| `GET /__fixture/state[?sale=id]` | raw rows: `saleIds, sales, lines, allocations, stock, lots, movements, shifts, settings, audits, foreignKeyCheck, outboundRefusals` |
+| `GET /__fixture/state[?sale=id]` | raw rows, read in one batch (one consistent snapshot): `saleIds, sales, lines, allocations, stock, lots, movements, shifts, settings, audits, foreignKeyCheck, outboundRefusals, salePosts` (`salePosts` = every `POST /api/sales` the fixture's relay received, counted server-side so it is the same in every browser engine) |
 | `POST /__fixture/select` | `{ sql, params }` → `{ rows }`, exactly one read-only `SELECT`, for any table the snapshot does not carry |
 | `POST /__fixture/admin-call` | `{ path, method, body }` → `{ status, body }`, a real `/api/*` request as the administrator (change the rate, switch tax on, read a report) |
+| `POST /__fixture/latency` | `{ method, path, ms }` holds one `/api/` route for `ms` (0 clears it) before the Worker sees it; the delay is the fixture's, not the browser's, so it works in Chromium and WebKit alike. Clear it in a `finally` |
 | `POST /__fixture/shutdown` | stops the process |
 
 Client side: `support/moneyFixture.ts` (`loadReady`, `readState`, `selectRows`,
-`adminCall`, `ensureSettings`, `stockQty`, `lotQty`, `signInAs`) and
+`adminCall`, `setLatency`, `ensureSettings`, `stockQty`, `lotQty`, `signInAs`) and
 `support/posDriver.ts` (the till's gestures: `addToCart` from a chosen lot,
 `setLinePrice`, `setOrderDiscount`, `setTender`, `tapExact`, `attachCustomer`,
 `setDelivery`, `completeSale`). They hold no expected number: a spec derives those

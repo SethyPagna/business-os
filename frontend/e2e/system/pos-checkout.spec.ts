@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import {
-  MONEY_ORIGIN, adminCall, assertLoopback, ensureSettings, loadReady, lotQty, readState, signInAs, stockQty,
+  MONEY_ORIGIN, adminCall, assertLoopback, ensureSettings, loadReady, lotQty, readState, setLatency, signInAs, stockQty,
   type MoneyState, type Row, type Seed, type SeedLot, type SeedProduct,
 } from '../support/moneyFixture'
 import {
@@ -836,23 +836,25 @@ test('a double click while the server is slow sends one request and records one 
   await signInAndOpenPos(page)
   const lot = lotOf(oat, 'M1-OAT-SEP')
   await addToCart(page, oat, lot, 1)
-  const sent: unknown[] = []
-  // The server answers after 2.5 s, which is the window a nervous cashier taps again in.
-  await page.route('**/api/sales', async route => {
-    if (route.request().method() === 'POST') { sent.push(route.request().postDataJSON()); await new Promise(resolve => setTimeout(resolve, 2_500)) }
-    await route.continue()
-  })
-  await tapExact(page, 'usd')
-  await openStatusPicker(page)
-  await statusOption(page, 'completed').dblclick()
-  const rung = await expectOneNewSale(page, request, before, { name: 'double click', net: 2.2 })
+  // The fixture holds the create request for 2.5 s before the Worker sees it: the window a nervous cashier taps again in. The delay AND the
+  // count are the fixture's (every engine's request goes through its relay); the browser's own page.route did not see the till's POST in WebKit.
+  await setLatency(request, { method: 'POST', path: '/api/sales', ms: 2_500 })
+  let rung: Awaited<ReturnType<typeof expectOneNewSale>>
+  try {
+    await tapExact(page, 'usd')
+    await openStatusPicker(page)
+    await statusOption(page, 'completed').dblclick()
+    rung = await expectOneNewSale(page, request, before, { name: 'double click', net: 2.2 })
+  } finally {
+    await setLatency(request, { method: 'POST', path: '/api/sales', ms: 0 })
+  }
   // Wrong implementations caught: a second POST (two sales, stock out twice), or a retry that mints a fresh request id.
-  expect(sent, 'the till must send ONE create request for one sale').toHaveLength(1)
+  const sent = rung.after.salePosts.slice(before.salePosts.length)
+  expect(sent.map(post => post.client_request_id), 'the till must send ONE create request for one sale').toHaveLength(1)
   expect(rung.sale).toMatchObject({ total_usd: 2.2, total_khr: 8800, amount_paid_usd: 2.2, sale_status: 'completed' })
   expectStockMoved(before, rung.after, [{ product: oat, lot, qty: 1 }])
   // The network-drop-after-commit retry: the same body again must hand back the SAME sale and add nothing.
-  await page.unroute('**/api/sales')
-  const replay = await postSale(page, sent[0])
+  const replay = await postSale(page, sent[0].body)
   expect(replay.status, JSON.stringify(replay.body)).toBe(200)
   expect(replay.body).toMatchObject({ duplicate: true, id: rung.id })
   const after = await readState(request)
