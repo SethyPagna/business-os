@@ -263,7 +263,7 @@ try {
       assert.ok(dimension(classesOf(select.className), 'h') >= 44, `${lang}: ${label} is a 44 px target (Khmer needs the room)`)
     }
     const filterRow = surface.find((node) => node.hasAttribute('data-products-image-only-filters'), 'filter row')
-    assert.ok(classesOf(filterRow.className).includes('overflow-x-auto') && classesOf(filterRow.className).includes('min-w-0'), `${lang}: the filter row scrolls inside itself instead of widening the page`)
+    assert.ok(classesOf(filterRow.className).includes('chip-rail'), `${lang}: the filter row is the shared rail (main.css: nowrap, overflow-x auto, min-width 0), so it scrolls inside itself instead of widening the page`)
     await surface.unmount()
   }
   console.log('productsImageOnlyFilters.test.ts passed')

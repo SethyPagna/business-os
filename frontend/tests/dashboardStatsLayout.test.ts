@@ -46,12 +46,11 @@ assert.doesNotMatch(
 )
 
 assert.match(statsRangeRow, /data-stats-range-controls/, 'the shared control row exposes one stable toolbar surface')
-assert.match(statsRangeRow, /flex-nowrap/, 'the shared Stats/date/action row does not wrap')
+assert.match(statsRangeRow, /<ChipRail label=\{rangeLabel/,'the scrolling Stats/date/action row is one shared rail that does not wrap')
 assert.match(statsRangeRow, /data-date-presets/, 'date presets render immediately below the control row')
-assert.match(statsRangeRow, /overflow-x-auto/, 'date presets remain one horizontally scrollable rail')
-assert.match(statsRangeRow, /stats-date-presets/, 'the preset rail has a dedicated touch-scroll hook')
+assert.match(statsRangeRow, /<ChipRail label=\{presetLabel\} className="mt-1" data-date-presets>/,'date presets remain one horizontally scrollable rail, the shared one')
 assert.match(mainCss, /\.page-scroll[\s\S]{0,520}touch-action: pan-x pan-y/, 'the page scroll surface permits nested horizontal touch gestures')
-assert.match(mainCss, /\.stats-date-presets[\s\S]{0,200}touch-action: pan-x/, 'the preset rail explicitly owns horizontal touch panning')
+assert.match(mainCss, /:where\(\.chip-rail\)[\s\S]{0,900}touch-action: manipulation/,'the shared rail pans natively on touch and leaves a vertical swipe to the page')
 assert.match(
   datePicker,
   /const width = Math\.max\(0, Math\.min\(336, viewportWidth - margin \* 2\)\)[\s\S]*?const left = Math\.min\(Math\.max\(margin, preferredLeft\)[\s\S]*?createPortal\([\s\S]*?className="fixed[^"\n]*overflow-y-auto/,

@@ -2,6 +2,7 @@ import { Suspense, useState } from 'react'
 import PackageOpen from 'lucide-react/dist/esm/icons/package-open.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import InfoHint from '../shared/InfoHint'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
 type TranslateFn = (key: string) => string | undefined
@@ -38,9 +39,9 @@ export default function SupplierInvoicesSection({ t }: SupplierInvoicesSectionPr
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [view, setView] = useState<InvoiceView>('stock_in')
 
-  const chips: Array<{ key: InvoiceView; label: string; icon: typeof PackageOpen; activeColor: string }> = [
-    { key: 'stock_in', label: tr('stock_in_invoices', 'Stock-In Invoices'), icon: PackageOpen, activeColor: 'text-blue-600' },
-    { key: 'ap', label: tr('ap_invoices', 'Supplier AP Invoices'), icon: Receipt, activeColor: 'text-teal-600' },
+  const chips: Array<{ key: InvoiceView; label: string; icon: typeof PackageOpen }> = [
+    { key: 'stock_in', label: tr('stock_in_invoices', 'Stock-In Invoices'), icon: PackageOpen },
+    { key: 'ap', label: tr('ap_invoices', 'Supplier AP Invoices'), icon: Receipt },
   ]
 
   return (
@@ -49,24 +50,17 @@ export default function SupplierInvoicesSection({ t }: SupplierInvoicesSectionPr
           the selected report's own filter row, the same shape ReviewLogsPage
           uses for its sections. Both ledgers stay complete; the chip just
           picks which one fills the area. */}
-      <div className="flex items-center gap-2 overflow-x-auto">
-        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+      <div className="flex items-center gap-2">
+        <ChipRail label={tr('sections', 'Sections')} className="min-w-0">
           {chips.map((chip) => {
             const Icon = chip.icon
-            const isActive = view === chip.key
             return (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => setView(chip.key)}
-                aria-pressed={isActive}
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {chip.label}
-              </button>
+              <RailChip key={chip.key} selected={view === chip.key} onClick={() => setView(chip.key)} icon={<Icon className="h-3.5 w-3.5" />}>
+                {chip.label}
+              </RailChip>
             )
           })}
-        </div>
+        </ChipRail>
         <InfoHint
           label={tr('supplier_invoices', 'Supplier invoices')}
           text={tr('supplier_invoices_hint', 'Both supplier ledgers in one place. Stock-In lists what was received (product lines, received date, cost, remaining). AP lists the old billing documents (invoice number, due date, VAT, paid, outstanding). They are separate records with no shared invoice number, so each keeps its own full detail rather than being forced into one table.')}

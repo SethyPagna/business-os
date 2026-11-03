@@ -365,7 +365,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   assert.match(hub, /titleControl: reportControlRow/, 'every report receives the shared compound title')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
   assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
-  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
+  assert.match(frame, /secondaryActions \? <ChipRail label=\{secondaryLabel\}>\{secondaryActions\}<\/ChipRail> : null/, 'mode and history controls remain on the secondary rail, the shared ChipRail')
   // The branch select rides the shared control row's filters slot, not its own line.
   assert.ok(/const filterSelects = \([\s\S]{0,120}showsBranchHistoryFilter\(branchRows\) \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
   // Part 586: the selects no longer sit inline on wide screens at all -- they
@@ -385,7 +385,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   const shell = read('src/components/sales/SalesHubPage.tsx')
   assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
   const nav = read('src/components/shared/HubSectionNav.tsx')
-  assert.ok(nav.includes('hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto'), 'the chip row is viewport bounded and scrolls inside its own box (owner choice, 5 Oct 2026)')
+  assert.ok(nav.includes('className="hub-section-pills chip-rail-tall">'), 'the chip row is the shared ChipRail: viewport bounded and scrolling inside its own box (owner choice, 5 Oct 2026; pinned in chipRail.test.ts)')
   const sidebar = read('src/components/navigation/Sidebar.tsx')
   assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
   assert.ok(sidebar.includes('flex min-h-16 min-w-0 flex-col items-center justify-center'), 'mobile leaf tiles keep a 64px touch target with icon above title')
@@ -490,8 +490,8 @@ test('Part 560: StatsStrip owns one stable date/action row and a one-row preset 
   // Stats is folded and scroll in one non-wrapping rail on narrow screens.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
-  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('overflow-x-auto'), 'presets are restored in a single scroll rail')
-  assert.ok(rangeRow.includes('flex-nowrap'), 'date controls and presets never wrap')
+  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('<ChipRail label={presetLabel}'), 'presets are restored in a single scroll rail (the shared ChipRail: no wrap, overflow-x auto, pinned in chipRail.test.ts)')
+  assert.ok(rangeRow.includes('<ChipRail label={rangeLabel') && rangeRow.includes('data-stats-range-controls'), 'date controls and presets never wrap: the scrolling layout is one ChipRail')
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.match(strip, /<StatsRangeRow range=\{range\} onRangeChange=\{onRangeChange\}/, 'StatsStrip owns the shared date row when its range contract is supplied')
   assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
@@ -523,15 +523,16 @@ test('preset buttons execute the shared date-only and timestamp range callbacks'
   const compiled = transformSync(read('src/components/shared/StatsRangeRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     if (id.includes('DateTimeRangePicker')) return () => null
+    if (id.includes('ChipRail')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
     if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
     return require(id)
   }, mod, mod.exports)
   for (const showTime of [false, true]) {
     let changed: ReturnType<typeof statsPresetRange> | null = null
     const tree = mod.exports.default({ range: statsPresetRange('all'), t: (key: string) => key, showTime, onRangeChange: (value: ReturnType<typeof statsPresetRange>) => { changed = value } })
-    assert.equal(tree.props.children[0].props.children[1].props.continuous, false, 'shared row does not silently change existing consumers')
+    assert.equal(tree.props.children[0].props.children.props.children[1].props.continuous, false, 'shared row does not silently change existing consumers')
     const continuousTree = mod.exports.default({ range: statsPresetRange('today'), t: (key: string) => key, showTime, continuous: true, onRangeChange: () => {} })
-    assert.equal(continuousTree.props.children[0].props.children[1].props.continuous, true, 'explicit continuous semantics reach the actual picker')
+    assert.equal(continuousTree.props.children[0].props.children.props.children[1].props.continuous, true,'explicit continuous semantics reach the actual picker')
     const rail = tree.props.children[1]
     const buttons = rail.props.children
     assert.deepEqual(buttons.map((button: { key: string }) => button.key), STATS_PRESETS.map(({ id }) => id))

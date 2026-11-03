@@ -112,7 +112,7 @@ const picker = readFileSync(resolve(root, 'components/shared/DateTimeRangePicker
 assert.match(picker, /<TimeEntryInput/)
 assert.match(picker, /fmtDateOnly/)
 assert.match(picker, /STATS_PRESETS\.map/)
-assert.match(picker, /flex-nowrap[^"\n]*overflow-x-auto/)
+assert.match(picker, /<ChipRail label=\{quickRangeLabel\('quick_range', 'Quick range'\)\}>/, 'the quick ranges scroll in the shared ChipRail (nowrap, overflow-x auto: chipRail.test.ts)')
 const entry = readFileSync(resolve(root, 'components/shared/DateEntryInput.tsx'), 'utf8')
 assert.match(entry, /data-temporal-input-label/)
 const reportCss = readFileSync(resolve(root, 'components/sales/reports/reports-surface.css'), 'utf8')

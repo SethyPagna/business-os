@@ -62,7 +62,7 @@ const fixtureSource = String.raw`
           without pulling in the whole hub (permissions, API calls, view
           model). */}
       <section className="reports-mobile-controls" style={{ marginTop: 8 }} data-reports-fixture>
-        <div className="reports-mobile-presets">{['Today', 'Yesterday', 'Last seven days', 'Last thirty days', 'This month', 'All time'].map((label) => <button className="reports-mobile-preset" key={label}>{label}</button>)}</div>
+        <div className="chip-rail" data-chip-rail="">{['Today', 'Yesterday', 'Last seven days', 'Last thirty days', 'This month', 'All time'].map((label) => <button className="chip-rail-item" key={label}>{label}</button>)}</div>
         <div className="reports-mobile-primary">
           <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime continuous showQuickRanges={false}
             triggerClassName="reports-mobile-range flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2" />
@@ -226,7 +226,7 @@ try {
   }
 
   await setViewport(320, 480)
-  for (const selector of ['.stats-date-presets', '.reports-mobile-presets']) {
+  for (const selector of ['[data-date-presets]', '[data-reports-fixture] .chip-rail']) {
     const rail = await evaluate<any>(`(() => {
       const rail = document.querySelector('${selector}')
       rail.scrollLeft = rail.scrollWidth

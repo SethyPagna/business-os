@@ -57,6 +57,7 @@ import { buildStockHealthSegments } from './stockHealthSummary'
 import { buildInventoryProductsSearchParams } from './inventoryProductsQuery.ts'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import type { ExportRange } from '../shared/ExportRangeDialog.tsx'
@@ -2304,14 +2305,11 @@ ${inventoryFeesFormulaText}`,
         </div>
       ) : null}
       {showInventoryTabs ? (
-      <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {([['movements', t('movements') || 'Movements'], ['rfid', 'RFID']] as [string, string][]).map(([id,label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab===id ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
-            {label}
-          </button>
+      <ChipRail label={tr('sections', 'Sections')} className="mb-4">
+        {([['movements', t('movements') || 'Movements'], ['rfid', 'RFID']] as [string, string][]).map(([id, label]) => (
+          <RailChip key={id} selected={tab === id} onClick={() => setTab(id)}>{label}</RailChip>
         ))}
-      </div>
+      </ChipRail>
       ) : null}
 
       {/* Merged toolbar row: Import/Export/History each take an equal share

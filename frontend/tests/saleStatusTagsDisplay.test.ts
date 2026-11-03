@@ -123,6 +123,7 @@ const workflowModule = loadTsx('src/components/sales/SaleStatusWorkflow.tsx', (i
   if (id === 'react') return { useState: (initial: unknown) => [initial, () => {}], useEffect: () => {} }
   if (id === 'react/jsx-runtime') return { jsx: element, jsxs: element, Fragment: 'Fragment' }
   if (id.endsWith('StatusBadge.tsx')) return badge
+  if (id.endsWith('ChipRail.tsx')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
   return undefined
 })
 type Node = { type: unknown; props: Row }

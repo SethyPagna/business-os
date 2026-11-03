@@ -484,6 +484,7 @@ const mod = { exports: {} as any }
 const railCode = transformSync(read('shared/StatsRangeRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
 new Function('require', 'module', 'exports', railCode)((id: string) => {
   if (id.includes('DateTimeRangePicker')) return () => null
+  if (id.includes('ChipRail')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
   if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
   return require(id)
 }, mod, mod.exports)

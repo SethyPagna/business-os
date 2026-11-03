@@ -26,6 +26,7 @@ import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 import { sessionDurationRefusalMessage, SESSION_DURATION_PASSWORD_REQUIRED, type SessionDurationOutcome, type SessionDurationRefusal } from '../../utils/sessionDurationChange.ts'
 import SessionDurationPasswordDialog from './SessionDurationPasswordDialog.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -158,12 +159,6 @@ interface AvatarPreviewProps {
   avatarPath?: string | null
 }
 
-interface ProfileSectionButtonProps {
-  active: boolean
-  children: ReactNode
-  onClick: () => void
-}
-
 interface AvatarCropOptions {
   src: string
   zoom?: number
@@ -251,23 +246,6 @@ function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
         </div>
       )}
     />
-  )
-}
-
-function ProfileSectionButton({ active, children, onClick }: ProfileSectionButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        'flex h-8 flex-shrink-0 items-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium transition-colors',
-        active
-          ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-900/30 dark:text-blue-300'
-          : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300',
-      ].join(' ')}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -1215,23 +1193,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
             </div>
 
             <div className="flex min-w-0 items-center gap-1.5">
-              <div className="-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 [scrollbar-width:thin]">
-                <ProfileSectionButton active={activeSection === 'personal'} onClick={() => setActiveSection('personal')}>
-                  {tr('personal_details', 'Personal details')}
-                </ProfileSectionButton>
-                <ProfileSectionButton active={activeSection === 'login_methods'} onClick={() => setActiveSection('login_methods')}>
-                  {tr('sign_in_methods', 'Sign-in methods')}
-                </ProfileSectionButton>
-                <ProfileSectionButton active={activeSection === 'security'} onClick={() => setActiveSection('security')}>
-                  {tr('security', 'Security')}
-                </ProfileSectionButton>
-                <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
-                  {tr('organization', 'Organization')}
-                </ProfileSectionButton>
-                <ProfileSectionButton active={activeSection === 'shifts'} onClick={() => setActiveSection('shifts')}>
-                  {tr('shift_summary_title', 'Shifts')}
-                </ProfileSectionButton>
-              </div>
+              <ChipRail label={tr('sections', 'Sections')} className="flex-1">
+                {([
+                  ['personal', tr('personal_details', 'Personal details')],
+                  ['login_methods', tr('sign_in_methods', 'Sign-in methods')],
+                  ['security', tr('security', 'Security')],
+                  ['organization', tr('organization', 'Organization')],
+                  ['shifts', tr('shift_summary_title', 'Shifts')],
+                ] as const).map(([id, label]) => (
+                  <RailChip key={id} selected={activeSection === id} onClick={() => setActiveSection(id)}>{label}</RailChip>
+                ))}
+              </ChipRail>
               {/* align="right" so the history menu + its hover preview open
                   INWARD from the bar's right edge instead of spilling off
                   the modal's right side, and flex-shrink-0 so the scrollable

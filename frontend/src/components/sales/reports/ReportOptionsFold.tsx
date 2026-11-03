@@ -18,7 +18,8 @@ import type { ReactNode, RefObject } from 'react'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import { Chip, Fold, IconButton } from '../../shared/kit'
+import { Fold, IconButton } from '../../shared/kit'
+import ChipRail, { RailChip } from '../../shared/kit/ChipRail.tsx'
 import { DEFAULT_REPORT_OPTIONS, type ReportCurrency, type ReportOptions, type ReportStyle } from './reportModel.ts'
 import type { Tr } from './reportTypes.ts'
 
@@ -39,11 +40,11 @@ export interface ReportOptionsFoldProps {
   resetDisabled?: boolean
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+function Group({ title, rail = false, children }: { title: string; rail?: boolean; children: React.ReactNode }) {
   return (
     <div className="reports-filter-group space-y-1">
       <div className="text-[length:var(--ui-size-meta)] font-medium text-[var(--ui-ink-2)]">{title}</div>
-      <div className="flex flex-wrap gap-1">{children}</div>
+      {rail ? <ChipRail label={title}>{children}</ChipRail> : <div className="flex flex-wrap gap-1">{children}</div>}
     </div>
   )
 }
@@ -76,19 +77,19 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
         {/* No InfoHint here on purpose: a hint would need a new rpt_* key in
             both language packs, and the two labelled+iconed chips already say
             what they do. The lang packs are the fleet's hottest merge file. */}
-        <Group title={tr('display', 'Display settings')}>
-          <Chip selected={style === 'excel'} onClick={() => onStyleChange('excel')}>
-            <span className="inline-flex items-center gap-1"><Table2 className="h-3 w-3" />{tr('rpt_style_excel', 'Excel style')}</span>
-          </Chip>
-          <Chip selected={style === 'receipt'} onClick={() => onStyleChange('receipt')}>
-            <span className="inline-flex items-center gap-1"><Receipt className="h-3 w-3" />{tr('rpt_style_receipt', 'Receipt style')}</span>
-          </Chip>
+        <Group rail title={tr('display', 'Display settings')}>
+          <RailChip selected={style === 'excel'} icon={<Table2 className="h-3 w-3" />} onClick={() => onStyleChange('excel')}>
+            {tr('rpt_style_excel', 'Excel style')}
+          </RailChip>
+          <RailChip selected={style === 'receipt'} icon={<Receipt className="h-3 w-3" />} onClick={() => onStyleChange('receipt')}>
+            {tr('rpt_style_receipt', 'Receipt style')}
+          </RailChip>
         </Group>
-        <Group title={tr('rpt_currency', 'Currency')}>
+        <Group rail title={tr('rpt_currency', 'Currency')}>
           {currencies.map((c) => (
-            <Chip key={c.id} selected={options.currency === c.id} onClick={() => onChange({ currency: c.id })}>
+            <RailChip key={c.id} selected={options.currency === c.id} onClick={() => onChange({ currency: c.id })}>
               {c.label}
-            </Chip>
+            </RailChip>
           ))}
         </Group>
       </div>

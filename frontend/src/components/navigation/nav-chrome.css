@@ -205,57 +205,10 @@ body.lang-km .bos-nav-chrome {
 
 /* ------------------------------------------------------ hub chip row -----
 
-   The SECOND layer of the same two-layer navigation: the section chips a hub
-   renders in its own body (Products | Stock Changes | Stock-in Sessions |
-   Conflicts, and the equivalent on every other hub). It is what a large
-   screen shows INSTEAD of the compact top bar -- the "merge into one row"
-   rule -- and what compact "sections" mode shows as well, so it has to wear
-   the same language as the bar above, or the two layers read as two apps.
-
-   As it shipped: a `bg-gray-100` well, `text-gray-500` resting chips, and an
-   active chip that was `bg-white` plus whichever hue that hub had picked for
-   itself -- sky on Branches, rose/indigo/amber on Promotions, blue/teal/rose
-   on Review. The reported "it all seems to just use grey, and background
-   white" with a different accent per page underneath it.
-
-   Selected state keys off `aria-pressed`, which BOTH call sites already set
-   (shared/HubSectionNav.tsx, and the identical row products/Products.tsx
-   renders for its own four sections) -- so the state the assistive tree reads
-   and the state the eye reads cannot come apart. Both rows dropped their
-   colour utilities, so nothing here fights for specificity.
-
-   Measured (flat fallbacks; navChrome.test.ts recomputes these):
-     light   resting #5c564c on the well #ede7dc .......... 5.91:1
-             active  #6b5122 on the chip  #fffdf8 ......... 7.65:1
-     dark    resting #d4d4d4 on the well #1e1b13 ......... 11.61:1
-             active  #e8cd8d on the chip  #352e1e .......... 8.76:1
-   Active also differs by ground and by a gold underline, so the open chip is
-   not carried by hue alone. */
-
-.hub-section-pills {
-  background-color: var(--nav-panel);
-  border: 1px solid var(--nav-panel-line);
-}
-
-.hub-section-pill {
-  background-color: transparent;
-  border: 1px solid transparent;
-  color: var(--nav-ink-2);
-}
-
-.hub-section-pill:hover {
-  background-color: var(--nav-surface);
-  color: var(--nav-ink);
-}
-
-/* The open section. Ground + ink + a gold underline; `inset` keeps the rule
-   inside the chip's own rounded box instead of colliding with the well. */
-.hub-section-pill[aria-pressed='true'] {
-  background-color: var(--nav-chip-open);
-  border-color: var(--nav-accent-line);
-  color: var(--nav-accent-strong);
-  box-shadow: inset 0 -2px 0 0 var(--nav-accent);
-}
+   The chips a hub renders in its own body (Products | Stock Changes | ... on
+   every hub) are the shared ChipRail (kit/ChipRail.tsx), styled once by the
+   `.chip-rail*` rules in main.css in this chrome's own brass language. Only
+   the rule under the row is chrome-owned, below. */
 
 /* The md+ rule under the chip row -- the line that separates the switcher
    from the body. Grey-200 before; the chrome's own line now. */

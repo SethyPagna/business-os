@@ -1,12 +1,12 @@
-import { Fragment, useEffect, useRef, type ComponentType, type ReactNode, type SVGProps } from 'react'
+import { Fragment, useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import { sealRootHubSection } from './hubNavigation.ts'
-import { useActivePillScroll } from './useActivePillScroll.ts'
-// The chip row below is chrome, and wears the same design language as the
-// compact top bar / pages layer -- one stylesheet, so a hub can never drift
-// away from the navigation it belongs to. Sidebar imports it too; Vite emits
-// it once.
+import ChipRail, { RailChip } from './kit/ChipRail.tsx'
+// The chip row below is the shared ChipRail (kit/ChipRail.tsx): the same chips, scrolling and
+// selected state as the date presets, so no row of choices can drift from another. Only the
+// rule under the row (`hub-section-rule`) still wears the navigation chrome's tokens, which
+// nav-chrome.css declares; Sidebar imports it too and Vite emits it once.
 import '../navigation/nav-chrome.css'
 
 // Mobile pages mode renders the selected body directly. Its section menu and
@@ -78,11 +78,9 @@ export default function HubSectionNav({
   pageId,
   children,
 }: HubSectionNavProps) {
-  const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
+  const { settings, page, t } = useAppCore() as { settings?: Record<string, unknown>; page: string; t?: (key: string) => string }
   const layered = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   const visible = sections.filter((section) => !section.hidden)
-  const rowRef = useRef<HTMLDivElement>(null)
-  useActivePillScroll(rowRef, active)
   useEffect(() => { writeStoredActive(storageKey, active) }, [storageKey, active])
   useEffect(() => {
     if (pageId && visible.some((section) => section.id === active)) sealRootHubSection(pageId, active, page)
@@ -108,30 +106,25 @@ export default function HubSectionNav({
           `sections` lang key is still live as the Settings toggle's option
           label. */}
       <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-        {/* `bos-nav-chrome` is what declares the --nav-* tokens on this
-            element, so the row carries the design language without any
-            colour utility left on it to fight the stylesheet for
-            specificity -- the same arrangement Sidebar's chrome uses. */}
-        <div ref={rowRef} className="bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain rounded-xl p-1 [scrollbar-width:none] md:inline-flex">
+        <ChipRail label={(typeof t === 'function' && t('sections')) || 'Sections'} className="hub-section-pills chip-rail-tall">
           {visible.map((section) => {
             const Icon = section.icon
             const isActive = active === section.id
             return (
               <div key={section.id} className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
+              <RailChip
+                selected={isActive}
                 onClick={() => onChange(section.id)}
-                aria-pressed={isActive}
-                className="hub-section-pill inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-center text-[13px] font-semibold leading-relaxed transition-colors md:h-8 md:min-h-0 md:py-0"
+                icon={Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+                badge={section.badge}
               >
-                {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
-                {section.badge}
-              </button>
+                {section.label}
+              </RailChip>
               {isActive && pageId === 'contacts' && section.id === 'duplicates' ? <span data-section-title-action-host="contacts:duplicates" data-section-title-action-location="sections" className="flex shrink-0 items-center" /> : null}
               </div>
             )
           })}
-        </div>
+        </ChipRail>
         <div className="bos-nav-chrome hub-section-rule mt-2 hidden md:block" aria-hidden="true" />
       </div>
       {content}

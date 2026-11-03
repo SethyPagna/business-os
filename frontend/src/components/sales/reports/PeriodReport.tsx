@@ -10,7 +10,8 @@ import { getReportPeriods } from '../../../api/reportsTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import { fmtDateOnly } from '../../../utils/formatters.ts'
-import { Chip, Fold, IconButton, OverflowMenu } from '../../shared/kit'
+import { Fold, IconButton, OverflowMenu } from '../../shared/kit'
+import { RailChip } from '../../shared/kit/ChipRail.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
@@ -154,12 +155,13 @@ export default function PeriodReport(p: ReportViewProps) {
       title={tr(view.labelKey, view.fallback)}
       titleControl={p.titleControl}
       hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_periods', 'One row per business day, week (Monday–Sunday) or month in the range. Same revenue definition as everywhere else; rows add up to the Overview.') }}
+      secondaryLabel={tr(view.labelKey, view.fallback)}
       secondaryActions={
         <>
           {GRANULARITIES.map((x) => (
-            <Chip key={x.id} selected={g === x.id} onClick={() => p.onOptionsChange({ granularity: x.id })}>
+            <RailChip key={x.id} selected={g === x.id} onClick={() => p.onOptionsChange({ granularity: x.id })}>
               {tr(x.key, x.fallback)}
-            </Chip>
+            </RailChip>
           ))}
         </>
       }

@@ -23,8 +23,9 @@ const load = (id: string) => {
   // hubSectionNav.test.ts, here the two inputs are driven directly.
   if (id.includes('sectionNavPreference')) return { useMobileSectionNavMode: () => mode, useLayeredSectionNav: () => compact && mode === 'pages' }
   if (id.includes('hubNavigation')) return { sealRootHubSection: () => {} }
-  // Scrolls the open chip into view inside an effect; effects are inert in this render.
-  if (id.includes('useActivePillScroll')) return { useActivePillScroll: () => {} }
+  // The shared chip row (reveals the open chip inside an effect; effects are inert in this render). Its tags stay
+  // strings, so the tree this test measures is the row's own element, not ChipRail's internals.
+  if (id.includes('ChipRail')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
   // Vite resolves a component's `import './x.css'` to a side-effect module
   // with no exports; it contributes nothing to the tree this test measures,
   // so it stays inert here instead of reading as an unexpected dependency.

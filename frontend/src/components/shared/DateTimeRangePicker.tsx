@@ -8,6 +8,7 @@ import ChevronsLeft from 'lucide-react/dist/esm/icons/chevrons-left.js'
 import ChevronsRight from 'lucide-react/dist/esm/icons/chevrons-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
+import ChipRail, { RailChip } from './kit/ChipRail.tsx'
 import DateEntryInput, { TimeEntryInput } from './DateEntryInput.tsx'
 import { useDialogKeyboard } from './useDialogKeyboard.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
@@ -490,20 +491,13 @@ export default function DateTimeRangePicker({
               available before the manual Start / End fields. */}
           {showQuickRanges ? <div className="mb-2 border-b border-slate-100 pb-2 dark:border-slate-700/60" data-date-time-range-presets>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
-            <div className="flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1">
+            <ChipRail label={quickRangeLabel('quick_range', 'Quick range')}>
               {quickRanges.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyQuickRange(preset.id)}
-                  className={`shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
-                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
-                >
+                <RailChip key={preset.id} selected={activePreset === preset.id} onClick={() => applyQuickRange(preset.id)}>
                   {preset.label}
-                </button>
+                </RailChip>
               ))}
-            </div>
+            </ChipRail>
           </div> : null}
 
           {/* Start | → | End endpoint boxes (see renderEndpointBox above). */}
@@ -562,7 +556,6 @@ export default function DateTimeRangePicker({
                   options={monthOptions}
                   onChange={(next) => setViewMonth(Number(next))}
                   ariaLabel={t('month') || 'Month'}
-                  showChevron={false}
                   buttonClassName="justify-center !px-1.5 !py-0.5 text-center !text-xs font-semibold"
                 />
                 <AppSelect
@@ -570,7 +563,6 @@ export default function DateTimeRangePicker({
                   options={yearOptions}
                   onChange={(next) => setViewYear(Number(next))}
                   ariaLabel={t('year') || 'Year'}
-                  showChevron={false}
                   buttonClassName="justify-center !px-1.5 !py-0.5 text-center !text-xs font-semibold"
                 />
               </span>
