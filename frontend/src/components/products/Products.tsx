@@ -1506,6 +1506,8 @@ function ProductsFullEditor() {
   // Add variant creates a product row, so the Worker (POST /variant) demands the variant action AND Add. The variant row lists Add as
   // a requirement (utils/permissionActions.ts), so this one can() answers both: Add alone (the old gate) is not enough.
   const canAddVariant = can('products', 'variant')
+  // Moving a product's stock to another branch posts to POST /api/branches/transfer, which reads branches:transfer.
+  const canTransferBranchStock = can('branches', 'transfer')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   // Same action the per-product image uploader is gated on: wiring photos
   // in bulk is the same authority as attaching one by hand, just applied
@@ -4905,6 +4907,16 @@ function ProductsFullEditor() {
   const productColumnKeys = useMemo(() => productColumns.map((column) => column.key), [productColumns])
   const canEditPrices = canChangeProductPrices(user)
   const canEditSupplier = canChangeProductSupplier(user)
+  // The selection toolbar's actions, each behind the grant of the call it makes (they used to be drawn for every role and 403 for most):
+  // bulk info and pricing are PUT /api/products/:id (Edit, and price or cost for the pricing panel), stock and out-of-stock are inventory
+  // adjustments, the branch move is a branch transfer.
+  const bulkEditOptions = [
+    { id: 'info', label: productChipLabels.info, allowed: canEditProduct },
+    { id: 'pricing', label: productChipLabels.pricing, allowed: canEditProduct && (canEditPrices || canEditCosts) },
+    { id: 'stock', label: productChipLabels.stock, allowed: canAdjustInventoryStock },
+    { id: 'branch', label: productChipLabels.branch, allowed: canTransferBranchStock },
+    { id: 'out', label: productChipLabels.out, allowed: canAdjustInventoryStock, onClick: handleBulkOutOfStock },
+  ].filter((option) => option.allowed)
   const soleBranchName = String(soleActiveBranch(branches)?.name || '')
   const chooserColumns = useMemo(() => productChooserColumns(productColumnDefs, t), [productColumnDefs, t])
   const columnChooser = (
@@ -5360,16 +5372,10 @@ function ProductsFullEditor() {
                 ) : null}
             </div>
           </div>
-          {hasSelected ? (
+          {hasSelected && bulkEditOptions.length ? (
             <div className="border-t border-primary-100/80 px-3 py-2.5 dark:border-primary-900/40">
-              <div className="grid grid-cols-5 gap-1">
-                {[
-                  { id: 'info', label: productChipLabels.info },
-                  { id: 'pricing', label: productChipLabels.pricing },
-                  { id: 'stock', label: productChipLabels.stock },
-                  { id: 'branch', label: productChipLabels.branch },
-                  { id: 'out', label: productChipLabels.out, onClick: handleBulkOutOfStock },
-                ].map(opt => (
+              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${bulkEditOptions.length}, minmax(0, 1fr))` }}>
+                {bulkEditOptions.map(opt => (
                   <button key={opt.id}
                     disabled={bulkActionBusy || !hasSelected}
                     onClick={() => {
@@ -5436,9 +5442,12 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
-              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
-            </div>
+            {/* A changed supplier needs products:supplier (the Employee default has it off); the Worker refuses the whole save otherwise. */}
+            {canEditSupplier ? (
+              <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
+                <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
+              </div>
+            ) : null}
             <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
               <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>

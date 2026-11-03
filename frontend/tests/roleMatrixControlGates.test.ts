@@ -119,6 +119,21 @@ test('PRODUCTS: every way into the product form from a list needs products:edit,
   assert.ok(modal.includes('{onEdit || onAddVariant || onAdjustStock ? ('), 'a read-only role gets no empty action strip')
 })
 
+test('PRODUCTS: the selection toolbar draws only the actions whose grant the role holds, and the bulk supplier field needs products:supplier', () => {
+  for (const flag of [
+    "{ id: 'info', label: productChipLabels.info, allowed: canEditProduct }",
+    "{ id: 'pricing', label: productChipLabels.pricing, allowed: canEditProduct && (canEditPrices || canEditCosts) }",
+    "{ id: 'stock', label: productChipLabels.stock, allowed: canAdjustInventoryStock }",
+    "{ id: 'branch', label: productChipLabels.branch, allowed: canTransferBranchStock }",
+    "{ id: 'out', label: productChipLabels.out, allowed: canAdjustInventoryStock, onClick: handleBulkOutOfStock }",
+  ]) assert.ok(productsSource.includes(flag), flag)
+  assert.ok(productsSource.includes("const canTransferBranchStock = can('branches', 'transfer')"))
+  assert.ok(productsSource.includes('].filter((option) => option.allowed)'))
+  assert.ok(productsSource.includes('{hasSelected && bulkEditOptions.length ? ('), 'no empty option row')
+  assert.ok(productsSource.includes('{bulkEditOptions.map(opt => ('), 'the row draws the filtered list, not the five fixed buttons')
+  assert.match(productsSource, /\{canEditSupplier \? \(\s*<div><label[^>]*>\{tr\('supplier', 'Supplier'\)\}<\/label>\s*<input[^>]*bulkEditForm\.supplier/)
+})
+
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
   const returns = read('../src/components/returns/Returns.tsx')
   assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)

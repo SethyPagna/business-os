@@ -406,7 +406,7 @@ for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry)
 
 // -- Products: bulk Delete ----------------------------------------------------------------------------------------------
 for (const role of ROLES.filter((entry) => { const access = accessFor(entry); return access.canAccessPage('products') && grant(access, 'products', 'view') })) {
-  test(`${role.label}: selecting products offers a bulk Delete only with products:delete and products:bulk_delete`, async ({ browser }, testInfo) => {
+  test(`${role.label}: selecting products offers each bulk action only with its grant (Delete: products:delete and products:bulk_delete)`, async ({ browser }, testInfo) => {
     test.setTimeout(240_000)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
@@ -420,6 +420,19 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
       const toolbar = slot.locator('.bulk-toolbar')
       await expect(toolbar, 'selecting rows opens the bulk toolbar').toBeVisible({ timeout: 10_000 })
       await expect(toolbar.getByRole('button', { name: text('delete_short', 'Delete'), exact: true }), 'bulk Delete = products:delete and products:bulk_delete').toHaveCount(wantBulkDelete ? 1 : 0, BRIEF)
+      // The rest of the toolbar rides the grant of the call each action makes: Info = PUT /:id (edit), Price = PUT /:id with a price or a cost,
+      // Stock and Out = inventory adjustments, Branch = POST /api/branches/transfer.
+      const canEdit = grant(access, 'products', 'edit')
+      const bulkActions: Array<[string, string, boolean]> = [
+        ['basic_info_short', 'Info', canEdit],
+        ['pricing_short', 'Price', canEdit && (access.isAdmin || grant(access, 'products', 'price') || access.hasPermission('product_cost_edit'))],
+        ['stock_short', 'Stock', grant(access, 'inventory', 'adjust')],
+        ['branch_short', 'Branch', grant(access, 'branches', 'transfer')],
+        ['out_short', 'Out', grant(access, 'inventory', 'adjust')],
+      ]
+      for (const [key, fallback, allowed] of bulkActions) {
+        await expect.soft(toolbar.getByRole('button', { name: text(key, fallback), exact: true }), `bulk ${fallback} is offered iff the role holds its grant`).toHaveCount(allowed ? 1 : 0, BRIEF)
+      }
     } finally { await session.close() }
   })
 }
