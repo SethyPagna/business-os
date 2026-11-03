@@ -145,20 +145,6 @@ for (const role of ROLES) {
 // =====================================================================================================================
 // 2. Direct URLs
 // =====================================================================================================================
-/**
- * App defects this matrix found, kept as live cases rather than loosened away. Each is excluded from the route sweep's blank-page
- * check (so one defect does not turn the whole sweep red) and has its own test below, marked test.fail with the reason. When the
- * app is fixed that test passes, Playwright reports "expected to fail but passed", and the entry is deleted.
- */
-const KNOWN_EMPTY_DOORS: Array<{ roles: string[]; page: string; reason: string }> = [
-  {
-    roles: ['employee', 'locked-employee', 'cost-viewer'],
-    page: 'promotions',
-    reason: 'AppContext.tsx:2530 opens the Promotions door for can(products,view), but PromotionsPage.tsx:539/547/670 render a section only for customer_portal, promotions, or products edit+price, so the Employee default is offered an empty page',
-  },
-]
-const isKnownEmptyDoor = (roleId: string, page: string): boolean => KNOWN_EMPTY_DOORS.some((entry) => entry.page === page && entry.roles.includes(roleId))
-
 for (const role of ROLES) {
   test(`${role.label}: a direct URL to each of the ${ADMIN_ROUTES.length} admin routes renders, or lands on a page the role may open, never blank or a crash`, async ({ browser }, testInfo) => {
     test.setTimeout(420_000)
@@ -175,7 +161,7 @@ for (const role of ROLES) {
 
         const shown = squash(await slot.innerText())
         const controls = await slot.locator('button, input, select, textarea, a, table, img').count()
-        if (!isKnownEmptyDoor(role.id, route.page)) expect.soft(shown.length > 0 || controls > 0, `${where} is not a blank page`).toBe(true)
+        expect.soft(shown.length > 0 || controls > 0, `${where} is not a blank page`).toBe(true)
         expect.soft(shown, `${where} did not hit the page error boundary`).not.toContain('Page failed to load')
 
         if (denied) {
@@ -206,25 +192,6 @@ for (const role of ROLES) {
       finish(session)
     } finally { await session.close() }
   })
-}
-
-for (const known of KNOWN_EMPTY_DOORS) {
-  for (const roleId of known.roles) {
-    const role = ROLES.find((entry) => entry.id === roleId) as RoleDef
-    test(`${role.label}: the ${known.page} page the role is offered has something on it`, async ({ browser }, testInfo) => {
-      test.setTimeout(240_000)
-      knownDefect(true, known.reason)
-      const session = await begin(browser, testInfo.project.name, role)
-      const { page } = session
-      try {
-        const route = ADMIN_ROUTES.find((entry) => entry.page === known.page) as { page: string; path: string }
-        const slot = await open(page, route.path, known.page)
-        const shown = squash(await slot.innerText())
-        const controls = await slot.locator('button, input, select, textarea, a, table, img').count()
-        expect(shown.length > 0 || controls > 0, `the ${known.page} page is blank (text "${shown}", ${controls} controls)`).toBe(true)
-      } finally { await session.close() }
-    })
-  }
 }
 
 // The Dashboard under the payload the Worker really sends each role. compat.ts:34-35 mounts acquisitionCostResponses on /dashboard and
