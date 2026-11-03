@@ -202,6 +202,17 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(row(s, 502).getAttribute('data-scan-hit'), '', 'the row is ringed for a moment')
     assert.ok(!calls.some(call => call[0] === 'count' && call[1] === 502 && call.length > 2 && call[2] !== '4' && call[2] !== ''), 'a scan enters no value')
   }],
+  ['a count waiting for approval carries a Pending tag beside its status, never instead of it, and only that product has it', async () => {
+    const surface = await mount({ products: [{ ...listed[1], check_pending: true }, listed[0], { ...listed[5], check_pending: false }] })
+    const tag = (id: number) => allInRow(surface, id, 'data-check-pending')
+    assert.equal(tag(502).length, 1, 'the waiting product has one tag')
+    assert.equal(tag(501).length, 0, 'a product with nothing waiting has none')
+    assert.equal(tag(506).length, 0, 'an explicit false draws none')
+    assert.equal(inRow(surface, 502, 'data-check-status-text').getAttribute('data-check-status-text'), 'issue', 'the status chip is still there')
+    assert.equal(tag(502)[0].getAttribute('aria-label'), 'Waiting for approval'); assert.equal(tag(502)[0].getAttribute('role'), 'img')
+    assert.match(flat(tag(502)[0]), /Pending/)
+    assert.match(flat(cell(surface, 502, 'status')), /Issue.*Pending/, 'tag follows the status in the same cell')
+  }],
   ['the selection bar: select-all, how many, mark / clear as icons, and a Submit that says why it cannot go', async () => {
     const barCalls: string[] = []
     const props = (extra: Record<string, unknown> = {}) => ({ pageState: 'none', selectedCount: 0, blocked: '', busy: false, canMarkChecked: true, t: base.t,

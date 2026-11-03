@@ -72,6 +72,8 @@ export interface PermissionDefinition {
   lead?: true
   // A second lead key drawn as its own row under the module's main row, with its own None / Full cells.
   subRow?: true
+  // The sub-row this switch belongs to: it is an extra of THAT row (cleared when that row is set to None), not of the module's main row.
+  extraOf?: string
   // The switch chip's word (`short` is the English pack text) and, for a grant that needs a warning, the
   // tooltip that goes with it.
   shortTKey?: string
@@ -321,6 +323,12 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal' as const,
         ...(['price', 'sales', 'customers', 'cost'].includes(field) ? { retired: true } : {}),
       })),
+      // Approving a submitted count sets stock, so it is its own grant (admin by default), never implied by counting. The server also needs the stock field and Adjust at Full.
+      {
+        key: 'inventory_check_approve', tKey: 'perm_inventory_check_approve', label: 'Approve counts', sensitivity: 'high', extraOf: 'inventory_checks',
+        shortTKey: 'perm_short_approve_counts', short: 'Approve counts',
+        hintTKey: 'perm_hint_approve_counts', hint: 'Sets stock to the counted number. Also needs Adjust / receive stock at Full.',
+      },
     ],
   },
   {

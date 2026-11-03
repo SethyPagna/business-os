@@ -3,10 +3,11 @@ import { getCookie } from 'hono/cookie'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryCheckAccess } from '../lib/inventoryCheckAccess'
+import { InventoryCheckQueryError, validateInventoryCheckQuery, getInventoryCheckAccess, canApproveInventoryCounts } from '../lib/inventoryCheckAccess'
+import { getActionTier } from '../lib/permissions'
 import { readInventoryCheckProducts, readInventoryCheckProductsSimple, InventoryCheckProductsLimitError } from '../lib/inventoryCheckProducts'
-import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError } from '../lib/inventoryCheckSessions'
-import { readSwitch } from '../lib/readSwitches'
+import { canSeeStaffIdentity, currentInventoryCheckActor, getInventoryCheckSession, getInventoryCheckSessionBranch, inventoryCheckDigest, InventoryCheckSessionError, pendingApprovalLines } from '../lib/inventoryCheckSessions'
+import { readSwitches } from '../lib/readSwitches'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -23,7 +24,8 @@ app.get('/', async c => {
   const principal = { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
   const actor = await currentInventoryCheckActor(db, principal), raw = c.req.queries()
   for (const [key, values] of Object.entries(raw)) if (values.length !== 1) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', key)
-  if (await readSwitch(c.env, 'ic_simple')) {
+  const switches = await readSwitches(c.env, ['ic_simple', 'ic_fix_stock'])
+  if (switches.ic_simple) {
     // The owner's list (ic_simple): a closed query (state, reason, customerRanking, dates and sales sorts are refused as 400 by the validator), no sales stats.
     const { sessionId: rawSimpleSession, ...simpleQuery } = c.req.query()
     const simpleSession = rawSimpleSession?.trim() || undefined
@@ -36,9 +38,17 @@ app.get('/', async c => {
     }
     const simple = await readInventoryCheckProductsSimple(db, actor, simpleQuery, { lowStock: await loadLowStockConfig(c.env),
       check: { organizationId: actor.organization_id ?? null, viewerId: actor.id, sessionId: simpleSession, canSeeStaffIdentity: accountId => canSeeStaffIdentity(actor, accountId) } })
+    // ic_fix_stock: counts waiting for approval are tagged, and the page learns which actions this viewer has. Only a viewer who may see stock learns either.
+    let answer: Record<string, unknown> = simple
+    if (getInventoryCheckAccess(actor).fields.stock && switches.ic_fix_stock) {
+      const pending = await pendingApprovalLines(db, actor, simpleSession ? [] : simple.items.filter(item => typeof item.check_session_id === 'string').map(item => Number(item.id)))
+      const adjust = getActionTier(actor, 'inventory', 'adjust') === 'full'
+      answer = { ...simple, items: simple.items.map(item => pending.has(`${item.check_session_id}:${item.id}`) ? { ...item, check_pending: true } : item),
+        capabilities: { fixStock: true, approveCounts: adjust && canApproveInventoryCounts(actor) } }
+    }
     const after = await currentInventoryCheckActor(db, principal)
     if (JSON.stringify(after) !== JSON.stringify(actor)) throw new InventoryCheckSessionError(403, 'inventory_check_authority_changed')
-    return c.json(simple)
+    return c.json(answer)
   }
   const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, ...query } = c.req.query()
   const sessionId = rawSession?.trim() || undefined, state = rawState?.trim() === 'all' ? undefined : rawState?.trim() || undefined

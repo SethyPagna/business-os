@@ -63,9 +63,9 @@ for (const { file, src } of withMutations) {
 
 const inventoryChecks = fs.readFileSync(path.join(routesDir, 'inventoryChecks.ts'), 'utf8')
 assert.deepEqual([...inventoryChecks.matchAll(/\bapp\.(post|patch|put|delete)\('([^']+)'/g)].map(match => [match[1], match[2]]), [
-  ['post', '/sessions'], ['post', '/submissions'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
+  ['post', '/sessions'], ['post', '/submissions'], ['post', '/sessions/:id/approval'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
 ])
-for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
+for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'decideInventoryCheckApproval', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
   ok(inventoryChecks.includes(`await ${writer}(getDb(c.env), await principal(c),`), `Inventory mutation delegates to authenticated ${writer}`)
 }
 const inventoryWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckSessions.ts'), 'utf8')
@@ -78,6 +78,12 @@ ok(/INSERT INTO inventory_check_events\(session_id,product_id,actor_id,actor_nam
 ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 4 && (inventoryWriter.match(/await commit\(db, principal, actor,/g) || []).length === 4,
   'all four Inventory mutation writers include their event in the atomic commit')
 ok(inventoryWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'Inventory event and mutation share the authority-guarded transaction')
+// The counts approval (6.0.1045) records through its own writer: every decision and every applied line commits its immutable event with the approval row, under the same authority guard.
+const approvalWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckApprovals.ts'), 'utf8')
+ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 3 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 2,
+  'the approval writer includes its line, approve and reject events in the atomic record')
+ok(approvalWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'the approval event and decision share the authority-guarded transaction')
+ok(/status='pending' AND applied_json=@oldApplied/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read')
 const inventoryMigration = fs.readFileSync(path.join(routesDir, '../../migrations/0259_inventory_check_sessions.sql'), 'utf8')
 ok(/UNIQUE\(actor_id,request_id\)/.test(inventoryMigration) && /inventory_check_events_no_update BEFORE UPDATE/.test(inventoryMigration)
   && /inventory_check_events_no_delete BEFORE DELETE/.test(inventoryMigration), 'Inventory audit is request-unique and immutable')

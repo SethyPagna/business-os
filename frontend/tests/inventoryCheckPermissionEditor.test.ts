@@ -67,6 +67,28 @@ try {
   await surface.click(levelDot('inventory_checks', 'none'))
   assert.deepEqual(changed, { inventory: true })
   assert.equal(getInventoryCheckAccess({ permissions: JSON.stringify(changed) }).canView, false)
+  // Approve counts (ic_fix_stock, 6.0.1045): a switch of the count sessions row, off unless granted, implied by nothing, cleared with the row.
+  const approve = PERMISSION_SECTIONS.flatMap(permissionSection => permissionSection.permissions).find(permission => permission.key === 'inventory_check_approve')!
+  assert.ok(approve, 'the grant is defined')
+  assert.deepEqual([approve.extraOf, approve.sensitivity, Object.hasOwn(approve, 'defaultFromFull'), Object.hasOwn(approve, 'retired')], ['inventory_checks', 'high', false, false])
+  const countingAction = (await import('../src/utils/permissionActions.ts')).PERMISSION_ACTIONS.inventory_checks.find(action => action.key === 'check')!
+  assert.equal(countingAction.label, 'Count and submit', 'the counting grant is named for what it does')
+  await surface.render({ ...props, permissions: { inventory: true, inventory_checks: true, inventory_check_show_stock: true } })
+  await openSessions()
+  const approveSwitch = () => surface.find(node => node.getAttribute('data-perm-grant') === 'inventory_check_approve', 'approve switch')
+  assert.ok(within(approveSwitch(), section()), 'it sits on the count sessions row')
+  assert.equal(surface.findAll(node => node.getAttribute('data-perm-grant') === 'inventory_check_approve' && within(node, moduleRow('inventory'))).length, 0, 'and not on Inventory')
+  assert.equal(approveSwitch().getAttribute('aria-checked'), 'false', 'counting plus the stock field do not imply approving')
+  assert.match(approveSwitch().getAttribute('title') ?? '', /Approve counts.*Also needs Adjust/, 'its tooltip names the other right it needs')
+  await surface.click(approveSwitch())
+  assert.deepEqual(changed, { inventory: true, inventory_checks: true, inventory_check_show_stock: true, inventory_check_approve: true }, 'turning it on writes only that key')
+  assert.equal(getInventoryCheckAccess({ permissions: JSON.stringify(changed) }).canCheck, true)
+  await surface.render({ ...props, permissions: { inventory: true, inventory_checks: true, inventory_check_approve: true } })
+  await surface.click(levelDot('inventory_checks', 'none'))
+  assert.deepEqual(changed, { inventory: true }, 'taking the count sessions row to None takes its extra with it')
+  await surface.render({ ...props, permissions: { inventory: true } })
+  await surface.click(levelDot('inventory_checks', 'full'))
+  assert.deepEqual(changed, { inventory: true, inventory_checks: true }, 'Full on the row gives the main access only, never the extra')
   await surface.unmount()
   console.log('PASS Inventory permission editor writes plain on/off count grants: nothing inherited from Inventory, Review preserved')
 } finally { await harness.close() }

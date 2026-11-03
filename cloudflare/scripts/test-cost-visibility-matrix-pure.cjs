@@ -145,7 +145,7 @@ check('SERVER: Inventory costs need both grants, use the strict whitelist and ne
   assert.equal(projected.cost_needs_review, true)
   assert.ok(!Object.hasOwn(projected, 'cost_review_key'))
   const model = read('cloudflare/src/lib/inventoryCheckProducts.ts')
-  assert.match(model, /if \(access.fields.cost\) columns.push\('p.cost_price_usd', 'p.cost_price_khr'/)
+  assert.match(model, /if \(access.fields.cost(?: && !simple)?\) columns.push\('p.cost_price_usd', 'p.cost_price_khr'/)
   assert.match(model, /projectInventoryCheckProduct\(/)
   const writer = read('cloudflare/src/lib/inventoryCheckSessions.ts')
   assert.match(writer, /SELECT id,name,image_path,unit,parent_id,is_group FROM products/)

@@ -109,4 +109,26 @@ await exports.changeInventoryCheckSession(capture(), 'close', 4, 'close-a')
 assert.equal(calls.at(-1)?.body.action, 'close')
 assert.equal(calls.at(-1)?.body.expectedRevision, 4)
 assert.throws(() => exports.saveInventoryCheckObservation(capture(), 0, { state: 'done' }, 0, 1, 'invalid'), /product are required/)
+// Counts approval (6.0.1045): a decision goes to the open session's approval path, with its request id and drift confirmation as given, through the same write fences.
+current = { branchId: '1', sessionId: 'sub 1', epoch: 10 }
+await exports.decideInventoryCheckApproval(capture(), { decision: 'approve', requestId: 'approve-aaaa', confirmDrift: true })
+assert.equal(calls.at(-1)?.method, 'POST')
+assert.equal(calls.at(-1)?.path, '/api/inventory-checks/sessions/sub%201/approval')
+assert.deepEqual(calls.at(-1)?.body, { decision: 'approve', requestId: 'approve-aaaa', confirmDrift: true })
+assert.equal(routes.at(-1)?.channel, 'inventoryChecks:sub 1'); assert.equal(routes.at(-1)?.options.isWrite, true); assert.equal(routes.at(-1)?.local, null)
+await exports.decideInventoryCheckApproval(capture(), { decision: 'reject', requestId: 'reject-bbbb' })
+assert.deepEqual(calls.at(-1)?.body, { decision: 'reject', requestId: 'reject-bbbb' }, 'nothing is added to a rejection')
+const decideScope = capture()
+current = { ...current, epoch: 11 }
+const beforeStale = calls.length
+await assert.rejects(exports.decideInventoryCheckApproval(decideScope, { decision: 'approve', requestId: 'approve-cccc' }), (error: any) => error.code === 'inventory_check_scope_changed' && error.outcome === 'not_dispatched')
+assert.equal(calls.length, beforeStale, 'a decision for a session that is no longer open is never sent')
+current = { branchId: '1', sessionId: '', epoch: 12 }
+assert.throws(() => exports.decideInventoryCheckApproval(capture(), { decision: 'approve', requestId: 'approve-dddd' }), /session is required/)
+// The owner's submission goes to the list-level path and never from inside a session.
+current = { branchId: '1', sessionId: '', epoch: 13 }
+await exports.submitInventoryCheckCounts(capture(), { branchId: 1, requestId: 'submit-eeee', lines: [{ productId: 7, countedQuantity: 2, seenQuantity: 3, checked: false }] })
+assert.equal(calls.at(-1)?.path, '/api/inventory-checks/submissions'); assert.equal(calls.at(-1)?.body.lines[0].productId, 7)
+current = { branchId: '1', sessionId: 's', epoch: 14 }
+assert.throws(() => exports.submitInventoryCheckCounts(capture(), { branchId: 1, requestId: 'submit-ffff', lines: [] }), /not inside a session|submitted from the list/)
 console.log('PASS Inventory transport uncached reads, receipt payloads, zero, actor/authority/context fences, A-B-A, lost ACK and immutable request payload')

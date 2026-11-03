@@ -1,5 +1,7 @@
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
+import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import FilterMenu, { type FilterOption, type FilterSection } from '../shared/FilterMenu.tsx'
 import type { InventoryCheckSession } from '../../api/inventoryChecksTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
@@ -19,6 +21,20 @@ export function SessionStatusChip({ status, t }: { status: InventoryCheckSession
   const open = status === 'open'
   return <span data-session-status={status} className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-relaxed ${open ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
     {open ? label(t, 'open', 'Open') : label(t, 'shift_status_closed', 'Closed')}
+  </span>
+}
+
+const APPROVAL_CHIP = {
+  pending: { key: 'inventory_check_approval_pending', fallback: 'Waiting for approval', tone: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', Icon: Hourglass },
+  approved: { key: 'inventory_check_approval_approved', fallback: 'Approved', tone: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300', Icon: Check },
+  rejected: { key: 'inventory_check_approval_rejected', fallback: 'Rejected', tone: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300', Icon: X },
+} as const
+
+/** Where a submitted count stands with its approver: waiting (the pending tag), approved or rejected. */
+export function ApprovalChip({ status, t }: { status: keyof typeof APPROVAL_CHIP; t: Translator }) {
+  const { key, fallback, tone, Icon } = APPROVAL_CHIP[status]
+  return <span data-approval-status={status} className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold leading-relaxed ${tone}`}>
+    <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />{label(t, key, fallback)}
   </span>
 }
 
@@ -56,6 +72,7 @@ export default function InventoryCheckSessionsList({ items, onOpen, t }: { items
     {items.map(item => <li key={item.id} data-inventory-check-session={item.id} className="min-w-0">
       <button type="button" className="flex min-h-10 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs" onClick={() => onOpen(item)}>
         <SessionStatusChip status={item.status} t={t} />
+        {item.approval ? <ApprovalChip status={item.approval.status} t={t} /> : null}
         <span className="font-semibold">{fmtDateTime24(item.started_at)}</span>
         {item.branch_name ? <span className="detail-scroll-text min-w-0 leading-relaxed">{item.branch_name}</span> : null}
         {item.creator_name ? <span className="text-gray-500" title={label(t, 'inventory_check_created_by', 'Created by')}>@{item.creator_name}</span> : null}

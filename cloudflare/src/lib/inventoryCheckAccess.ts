@@ -1,4 +1,4 @@
-import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
+import { getActionTier, getMergedPermissions, hasPermission, isAdminControlUser, type PermissionUser } from './permissions'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess'
 
 export const INVENTORY_CHECK_FIELDS = ['price', 'barcode', 'category', 'brand', 'stock', 'received', 'sales', 'customers', 'cost'] as const
@@ -28,6 +28,12 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
     canViewCustomerDetails: fields.customers && getActionTier(user, 'contacts', 'view') !== 'none',
     fields,
   }
+}
+
+/** Approving or rejecting a submitted count (ic_fix_stock) is its own extra, admin by default and never implied by counting. It needs the stock field (the figures being approved) on top of the extra; setting stock also needs Adjust at Full, which the stock writer enforces. */
+export function canApproveInventoryCounts(user: PermissionUser): boolean {
+  const access = getInventoryCheckAccess(user)
+  return access.canView && access.fields.stock && hasPermission(user, 'inventory_check_approve')
 }
 
 const IDENTITY_FIELDS = ['id', 'name', 'image_path', 'image_url', 'unit', 'parent_id', 'is_group', 'is_grouped_cached', 'checkable', 'matches_filters'] as const

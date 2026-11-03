@@ -28,6 +28,8 @@ export type InventoryCheckProduct = {
   check_at?: string | null
   check_session_id?: string | null
   check_branch_id?: number | null
+  /** This count differs from stock and waits for an administrator's approval (ic_fix_stock; sent only to a viewer who may see stock). */
+  check_pending?: boolean
 }
 
 export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'

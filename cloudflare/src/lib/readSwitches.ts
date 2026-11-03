@@ -34,6 +34,16 @@ export function parseReadSwitches(raw: string | null | undefined): ReadSwitches 
   return { epoch, switches }
 }
 
+/** Several switches from ONE system_flags read (they live in one row). Each is true only when explicitly `on`; a read error means every one is off. */
+export async function readSwitches<N extends ReadSwitchName>(env: { DB: D1Database }, names: readonly N[]): Promise<Record<N, boolean>> {
+  let parsed = OFF
+  try {
+    const row = await getDb(env).prepare('SELECT value FROM system_flags WHERE key = @key').get<{ value: string }>({ key: READ_SWITCH_KEY })
+    parsed = parseReadSwitches(row?.value)
+  } catch { /* off */ }
+  return Object.fromEntries(names.map(name => [name, parsed.switches[name]?.state === 'on'])) as Record<N, boolean>
+}
+
 /** True only when the switch is explicitly `on`. A missing row, a read error or `shadow` is the old path. */
 export async function readSwitch(env: { DB: D1Database }, name: ReadSwitchName): Promise<boolean> {
   try {

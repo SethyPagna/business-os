@@ -1,7 +1,7 @@
 import type { D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { resolveLowStockConfig, type LowStockConfig } from './lowStockSettings'
-import { getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
+import { canApproveInventoryCounts, getInventoryCheckAccess, projectInventoryCheckProduct, validateInventoryCheckQuery } from './inventoryCheckAccess'
 import { buildInventoryCheckStockQuery, readInventoryCheckStock, resetInventoryCheckStockSchemaMemo, type InventoryCheckStockRow } from './inventoryCheckStock'
 import { buildInventoryCheckProductMembershipQuery } from './inventoryCheckProducts'
 import { hasPermission, isAdminControlUser } from './permissions'
@@ -12,23 +12,23 @@ import { localDateExpr } from './businessDateWindow'
 export type InventoryCheckPrincipal = { id: number; tokenHash: string }
 export type InventoryCheckReceipt = { requestId: string; eventId: number; action: string; sessionId: string; sessionRevision: number; itemRevision?: number; replayed: boolean }
 export type InventoryCheckSession = { id: string; branch_id: number; created_by: number; title: string; status: 'open' | 'closed'; revision: number; started_at: string; updated_at: string; closed_at: string | null; scope: Record<string, unknown>; can_edit: boolean; progress: { total: number; unstarted: number; done: number; issue: number } }
-export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null }
+export type InventoryCheckSessionListItem = InventoryCheckSession & { branch_name: string | null; creator_name?: string | null; approval?: InventoryCheckApproval }
 export type InventoryCheckObservation = { product_id: number; branch_id: number; product_snapshot: Record<string, unknown>; current_product_available: boolean; current_product_name: string | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number; counted_quantity?: number | null; baseline_quantity?: number | null; current_quantity?: number | null; stock_changed?: boolean | null; baseline?: Record<string, unknown>; current_stock?: Record<string, unknown> }
-type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
-type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
+export type Actor = SessionUser & { tokenHash: string; product_cost_review_key_available?: number }
+export type SessionRow = Omit<InventoryCheckSession, 'scope' | 'can_edit' | 'progress'> & { organization_id: number | null; scope_json: string }
 type ItemRow = { session_id: string; product_id: number; branch_id: number; product_snapshot_json: string; current_product_available?: number; current_product_name?: string | null; baseline_quantity: number | null; baseline_json: string; state: InventoryCheckObservation['state']; counted_quantity: number | null; reason: string | null; revision: number; updated_by: number | null; updated_at: string | null }
 type EventRow = { id: number; session_id: string; product_id: number | null; actor_id: number; actor_name: string | null; action: string; request_id: string; request_hash: string; before_json: string; after_json: string; result_json: string; created_at: string }
-type Statement = { sql: string; params?: Record<string, unknown> }
+export type Statement = { sql: string; params?: Record<string, unknown> }
 
 export class InventoryCheckSessionError extends Error {
   constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string, readonly details?: Record<string, unknown>) { super(code); this.name = 'InventoryCheckSessionError' }
 }
 const fail = (status: InventoryCheckSessionError['status'], code: string, details?: Record<string, unknown>): never => { throw new InventoryCheckSessionError(status, code, details) }
-const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : fail(400, 'inventory_check_invalid_request')
+export const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : fail(400, 'inventory_check_invalid_request')
 const revision = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : fail(400, 'inventory_check_revision_required')
 const positive = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : fail(400, 'inventory_check_invalid_id')
-const requestId = (value: unknown): string => typeof value === 'string' && /^[A-Za-z0-9_-]{8,120}$/.test(value) ? value : fail(400, 'inventory_check_request_id_required')
-const parse = (value: string): Record<string, unknown> => object(JSON.parse(value))
+export const requestId = (value: unknown): string => typeof value === 'string' && /^[A-Za-z0-9_-]{8,120}$/.test(value) ? value : fail(400, 'inventory_check_request_id_required')
+export const parse = (value: string): Record<string, unknown> => object(JSON.parse(value))
 export async function inventoryCheckDigest(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
@@ -50,7 +50,7 @@ export async function currentInventoryCheckActor(db: D1Compat, principal: Invent
 // Positive-only per-isolate memos: a miss re-probes, so a migration that lands later is seen on the next request.
 let checkSchemaReady = false
 let physicalSignature: string | undefined
-async function schemaReady(db: D1Compat): Promise<void> {
+export async function schemaReady(db: D1Compat): Promise<void> {
   if (checkSchemaReady) return
   const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (
     'inventory_check_sessions','inventory_check_items','inventory_check_events','inventory_check_events_no_update',
@@ -60,7 +60,7 @@ async function schemaReady(db: D1Compat): Promise<void> {
   checkSchemaReady = true
 }
 export const guard = (expression: string, code: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN ${expression} THEN 1 ELSE json_extract('[]','$[${code}]') END`, params })
-function authorityGuard(actor: Actor): Statement {
+export function authorityGuard(actor: Actor): Statement {
   return guard(`EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actorId
     AND u.is_active=1 AND u.deleted_at IS NULL AND COALESCE(u.must_change_password,0)=0
     AND u.username IS @actorName AND u.organization_id IS @organization AND u.role_id IS @roleId
@@ -72,7 +72,7 @@ function authorityGuard(actor: Actor): Statement {
     permissions: actor.permissions, roleCode: actor.role_code ?? null, rolePermissions: actor.role_permissions ?? null, tokenHash: actor.tokenHash,
   })
 }
-async function sessionRow(db: D1Compat, actor: Actor, id: string): Promise<SessionRow> {
+export async function sessionRow(db: D1Compat, actor: Actor, id: string): Promise<SessionRow> {
   const row = await db.prepare('SELECT * FROM inventory_check_sessions WHERE id=@id AND organization_id IS @organization').get<SessionRow>({ id, organization: actor.organization_id })
   return row || fail(404, 'inventory_check_session_not_found')
 }
@@ -124,7 +124,58 @@ function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, cur
       current_quantity: current?.quantity ?? null, stock_changed: row.baseline_quantity == null || current?.quantity == null ? null : Math.abs(row.baseline_quantity-current.quantity)>1e-9,
       baseline: stockProjection(parse(row.baseline_json)), ...(current ? { current_stock: stockProjection(current) } : {}) } : {}) }
 }
-export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string) {
+/** What a submitted count's approval looks like to a viewer who may see stock (the approval row exists only for counts that differ, so it is withheld from everyone else). */
+export type ApprovalAppliedLine = { before: number; target: number; after: number; at: string }
+export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejected'; lines: number; applied: number; submitted_at: string; can_approve: boolean;
+  decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine> }
+export type ApprovalRow = { session_id: string; status: 'pending' | 'approved' | 'rejected'; lines: number; submitted_by: number; submitted_at: string;
+  decided_by: number | null; decided_by_name: string | null; decided_at: string | null; decision_note: string | null; decision_request_id: string | null; applied_json: string }
+export const APPROVAL_COLUMNS = 'session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,decision_request_id,applied_json'
+let approvalsSchemaReady = false
+/** 503 until migration 0286 is applied; a positive answer is remembered for the isolate, a miss re-probes. */
+export async function approvalsReady(db: D1Compat): Promise<void> {
+  if (approvalsSchemaReady) return
+  const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_identity',
+    'inventory_check_approvals_decided','inventory_check_approvals_no_delete')`).get<{ n: number }>()
+  if (ready?.n !== 4) fail(503, 'inventory_check_schema_unavailable')
+  approvalsSchemaReady = true
+}
+export function appliedLines(json: string): Record<string, ApprovalAppliedLine> {
+  try {
+    const lines = (JSON.parse(json) as { lines?: unknown }).lines
+    return lines && typeof lines === 'object' && !Array.isArray(lines) ? lines as Record<string, ApprovalAppliedLine> : {}
+  } catch { return {} }
+}
+export function projectApproval(actor: Actor, row: ApprovalRow, detail = false): InventoryCheckApproval {
+  const applied = appliedLines(row.applied_json)
+  return { status: row.status, lines: row.lines, applied: Object.keys(applied).length, submitted_at: row.submitted_at, can_approve: canApproveInventoryCounts(actor),
+    ...(row.decided_at ? { decided_at: row.decided_at, decision_note: row.decision_note } : {}),
+    ...(row.decided_by != null && canSeeStaffIdentity(actor, row.decided_by) ? { decided_by_name: row.decided_by_name } : {}),
+    ...(detail ? { applied_lines: applied } : {}) }
+}
+/** One query for the approvals of the given sessions, inside the viewer's organization. Callers ask only for viewers who may see stock. */
+export async function approvalRows(db: D1Compat, actor: Actor, ids: string[]): Promise<ApprovalRow[]> {
+  if (!ids.length) return []
+  await approvalsReady(db)
+  return db.prepare(`SELECT ${APPROVAL_COLUMNS} FROM inventory_check_approvals WHERE organization_id IS @organization
+    AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
+}
+/** The page's counts that still wait for approval, as `${session id}:${product id}`: one query for a page of list rows, inside the viewer's organization. Only a count that differs from stock waits; a matching line of the same submission does not. */
+export async function pendingApprovalLines(db: D1Compat, actor: Actor, productIds: number[]): Promise<Set<string>> {
+  if (!productIds.length) return new Set()
+  await approvalsReady(db)
+  const rows = await db.prepare(`SELECT i.session_id,i.product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id
+    WHERE a.organization_id IS @organization AND a.status='pending' AND i.product_id IN (SELECT value FROM json_each(@ids))
+      AND i.baseline_quantity IS NOT NULL AND i.counted_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>0.000000001`)
+    .all<{ session_id: string; product_id: number }>({ organization: actor.organization_id, ids: JSON.stringify(productIds) })
+  return new Set(rows.map(row => `${row.session_id}:${row.product_id}`))
+}
+async function sessionApproval(db: D1Compat, actor: Actor, id: string, options: { approvals?: boolean }): Promise<{ approval?: InventoryCheckApproval }> {
+  if (!options.approvals || !getInventoryCheckAccess(actor).fields.stock) return {}
+  const row = (await approvalRows(db, actor, [id]))[0]
+  return row ? { approval: projectApproval(actor, row, true) } : {}
+}
+export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean } = {}) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
   const items = await db.prepare(`SELECT i.*,CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN 1 ELSE 0 END AS current_product_available,
@@ -135,7 +186,8 @@ export async function getInventoryCheckSession(db: D1Compat, principal: Inventor
   actor = await currentInventoryCheckActor(db, principal)
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
   const byId = new Map(current.map(row => [row.product_id, row]))
-  return { item: await projectSession(db, actor, session), items: items.map(item => projectObservation(actor, item, session.created_by === actor.id, byId.get(item.product_id))) }
+  const approval = await sessionApproval(db, actor, session.id, options)
+  return { item: await projectSession(db, actor, session), items: items.map(item => projectObservation(actor, item, session.created_by === actor.id, byId.get(item.product_id))), ...approval }
 }
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 function businessDay(value: unknown): string | null {
@@ -151,7 +203,7 @@ function sessionListFilters(query: Record<string, string>) {
   if (startDate && endDate && startDate > endDate) fail(400, 'inventory_check_invalid_filter')
   return { status, mine, startDate, endDate }
 }
-export async function listInventoryCheckSessions(db: D1Compat, principal: InventoryCheckPrincipal, query: Record<string, string>) {
+export async function listInventoryCheckSessions(db: D1Compat, principal: InventoryCheckPrincipal, query: Record<string, string>, options: { approvals?: boolean } = {}) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const page = pageNumber(query.page, 1, 100000), pageSize = pageNumber(query.pageSize, 20, 100)
   const branchId = query.branchId ? positive(Number(query.branchId)) : null
@@ -174,6 +226,10 @@ export async function listInventoryCheckSessions(db: D1Compat, principal: Invent
     const session = await projectSession(db, actor, row, { total: Number(row.item_total), unstarted: Number(row.item_unstarted), done: Number(row.item_done), issue: Number(row.item_issue) })
     items.push({ ...session, branch_name: row.branch_name ?? null, ...(canSeeStaffIdentity(actor, row.created_by) ? { creator_name: row.creator_username ?? null } : {}) })
   }
+  if (options.approvals && getInventoryCheckAccess(actor).fields.stock) {
+    const byId = new Map((await approvalRows(db, actor, items.map(item => item.id))).map(row => [row.session_id, row]))
+    for (const item of items) { const row = byId.get(item.id); if (row) item.approval = projectApproval(actor, row) }
+  }
   return { items, page, pageSize, total: Number((count.results?.[0] as { total: number })?.total || 0) }
 }
 function pageNumber(value: unknown, fallback: number, max: number): number {
@@ -191,7 +247,7 @@ function receiptResponse(event: EventRow, replayed: boolean): InventoryCheckRece
   return { requestId: event.request_id, eventId: event.id, action: event.action, sessionId: event.session_id,
     sessionRevision: Number(result.sessionRevision), ...(typeof result.itemRevision === 'number' ? { itemRevision: result.itemRevision } : {}), replayed }
 }
-function eventStatement(actor: Actor, args: { sessionId: string; productId?: number; action: string; key: string; hash: string; before: unknown; after: unknown; result: Record<string, unknown>; now: string }): Statement {
+export function eventStatement(actor: Actor, args: { sessionId: string; productId?: number; action: string; key: string; hash: string; before: unknown; after: unknown; result: Record<string, unknown>; now: string }): Statement {
   return { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
     VALUES(@sessionId,@productId,@actorId,@actorName,@action,@key,@hash,@before,@after,@result,@now)`, params: {
     sessionId: args.sessionId, productId: args.productId ?? null, actorId: actor.id, actorName: actorSnapshot(actor), action: args.action,
@@ -364,9 +420,11 @@ function submissionLine(value: unknown): SubmissionLine {
  * The owner's way to count (ic_simple): products picked on the list, a count typed in each row, one Submit. The whole submission is recorded
  * at once as a closed count session: a matching count is Done, a differing one an Issue with its note. Stock is never written here.
  * A viewer without the stock field cannot compare, so every line of theirs is recorded Done (as marking Done has always been for them).
+ * `approvals` (ic_fix_stock): a submission with at least one count that differs from stock also creates ONE pending approval in the same atomic commit.
  */
-export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig) {
+export async function createInventoryCheckSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown, lowStock: LowStockConfig, options: { approvals?: boolean } = {}) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
+  if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor)
   const branchId = positive(body.branchId), key = requestId(body.requestId)
   if (!Array.isArray(body.lines) || body.lines.length < 1 || body.lines.length > 500) return fail(400, 'inventory_check_product_ids_required')
@@ -378,7 +436,7 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   if (!access.fields.stock && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
   const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit', branchId, title, lines }))
   const existing = await receipt(db, actor, key, hash)
-  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), receipt: receiptResponse(existing, true), created: false }
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), ...(await sessionApproval(db, actor, existing.session_id, options)), receipt: receiptResponse(existing, true), created: false }
   const settings = await db.prepare(LOW_STOCK_ROWS_SQL).all<{key:string;value:string}>()
   const settingsSignature = JSON.stringify(settings.map(row=>({key:row.key,value:row.value})))
   lowStock = resolveLowStockConfig(Object.fromEntries(settings.map(row=>[row.key,row.value])))
@@ -405,6 +463,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     state: item.state, counted: item.line.counted, reason: item.reason,
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   if (members.some(member => !member.product || !member.baseline)) fail(409, 'inventory_check_baseline_changed')
+  // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
+  const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
   const scope = { membership: 'submission' }
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify(scope), now,
     members: JSON.stringify(members), baseline: JSON.stringify(baselines), count: productIds.length, signature: snapshot.signature }
@@ -433,9 +493,11 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
         json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',0),
         json_object('state',json_extract(value,'$.state'),'counted_quantity',json_extract(value,'$.counted'),'reason',json_extract(value,'$.reason'),'revision',1),
         json_object('sessionRevision',0,'itemRevision',1),@now FROM json_each(@members)`, params },
+    ...(differing > 0 ? [{ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at)
+      VALUES(@id,@organization,@branchId,'pending',@differing,@actorId,@now)`, params: { ...params, differing } }] : []),
   ]
   const saved = await commit(db, principal, actor, statements, key, hash)
-  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
 }
 export async function patchInventoryCheckObservation(db: D1Compat, principal: InventoryCheckPrincipal, id: string, productId: number, input: unknown) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
@@ -512,11 +574,12 @@ export async function inventoryCheckSessionHistory(db: D1Compat, principal: Inve
   actor = await currentInventoryCheckActor(db, principal)
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
   const access = getInventoryCheckAccess(actor), showCount = access.fields.stock || session.created_by === actor.id
+  const approvalKeys = access.fields.stock ? ['approval', 'stock_before', 'stock_after', 'lines'] : []
   return { items: rows.map(row => {
     const project = (json: string) => {
       const parsed = JSON.parse(json) as Record<string, unknown> | null
       if (!parsed) return null
-      return Object.fromEntries(['state','reason','revision','status','members', ...(showCount ? ['counted_quantity'] : [])].filter(key => Object.hasOwn(parsed,key)).map(key => [key, parsed[key]]))
+      return Object.fromEntries(['state','reason','revision','status','members', ...approvalKeys, ...(showCount ? ['counted_quantity'] : [])].filter(key => Object.hasOwn(parsed,key)).map(key => [key, parsed[key]]))
     }
     const productName = projectInventoryCheckProduct({ name: row.product_name }, access).name
     return { id: row.id, session_id: row.session_id, product_id: row.product_id, product_name: typeof productName === 'string' ? productName : null, actor_id: row.actor_id,

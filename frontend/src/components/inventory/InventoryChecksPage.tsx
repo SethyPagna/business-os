@@ -10,7 +10,7 @@ import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
@@ -30,6 +30,8 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { countMatchesStock, finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
+import InventoryCheckApprovalPanel from './InventoryCheckApprovalPanel.tsx'
+import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
 import InventoryCheckHistoryFloat, { type InventoryCheckHistoryResult } from './InventoryCheckHistoryFloat.tsx'
 import InventoryCheckSessionsList, { InventoryCheckSessionFilterMenu, ProgressRing, SessionCounts, SessionStatusChip, initialSessionFilters, sessionDisplayName, type SessionListFilters } from './InventoryCheckSessionsList.tsx'
@@ -58,7 +60,7 @@ type ProductsResult = {
   facets?: { brands?: string[]; categories?: string[] }
   facetsLimited?: { brands: boolean; categories: boolean }
   /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
-  capabilities?: { fixStock?: boolean }
+  capabilities?: { fixStock?: boolean; approveCounts?: boolean }
 }
 /** creatorName rides along from the Sessions list: the single-session read does not send it. */
 type Selection = { branchId: string; sessionId: string; creatorName?: string | null; bootstrapIntent?: ControlIntent }
@@ -76,6 +78,15 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_product_not_eligible: { key: 'inventory_check_error_product_not_eligible', fallback: 'A product on this page cannot be checked. Reload and try again.' },
   inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you marked a product checked. The list was reloaded: mark those products again.' },
   inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
+  inventory_check_stock_inconsistent: { key: 'inventory_check_error_stock_inconsistent', fallback: 'A product\'s stock records do not add up. Correct them before approving.' },
+  inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number minus damaged units is not a whole number. Reject this count and recount.' },
+  inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
+  inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
+  inventory_check_approve_required: { key: 'inventory_check_error_approve_required', fallback: 'You do not have permission to approve counts.' },
+  inventory_check_adjust_required: { key: 'inventory_check_error_adjust_required', fallback: 'Approving also needs permission to adjust stock.' },
+  inventory_check_self_approval: { key: 'inventory_check_error_self_approval', fallback: 'You submitted this count, so another approver must approve it.' },
+  inventory_check_approval_decided: { key: 'inventory_check_error_approval_decided', fallback: 'This count was already decided. The page was reloaded.' },
+  inventory_check_approval_partly_applied: { key: 'inventory_check_error_partly_applied', fallback: 'Part of this count was already applied, so it cannot be rejected. Approve it to finish.' },
 }
 function knownRefusal(cause: unknown) {
   const code = (cause as { code?: unknown } | null)?.code
@@ -214,6 +225,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const summaryScope = useRef('')
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
+  const [approval, setApproval] = useState<InventoryCheckApproval | null>(null)
   const [sessions, setSessions] = useState<{ items: InventoryCheckSession[]; total: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -242,6 +254,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const attempts = useRef(new Map<number, Attempt>())
   const createAttempt = useRef<{ title: string; productIds: number[]; scope: QueryParams; requestId: string } | null>(null)
   const lifecycleAttempt = useRef<{ action: 'close' | 'resume'; revision: number; requestId: string } | null>(null)
+  // One request id for the whole of one approval, however many requests it takes: it is what makes every repeat safe.
+  const decideAttempt = useRef<{ decision: 'approve' | 'reject'; requestId: string } | null>(null)
   // The owner's way to count: what has been picked and typed on the list, held here (in memory only) until it is submitted. Keyed by product id,
   // so it survives paging and filtering; the snapshot (name, stock seen) is what the review and the server's "marked checked" test read.
   const [drafts, setDrafts] = useState<Record<string, DraftEntry>>({})
@@ -327,7 +341,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const publish = () => live && !abort.signal.aborted && current()
     setSessionError('')
     void readInventoryCheckSession(sessionId, abort.signal).then(selected => {
-      if (publish()) { setSession(selected.item); setItems(selected.items); setSessionLoadedFor(sessionId) }
+      if (publish()) { setSession(selected.item); setItems(selected.items); setApproval(selected.approval ?? null); setSessionLoadedFor(sessionId) }
     }).catch(() => { if (publish()) setSessionError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) })
     return () => { live = false; abort.abort() }
   }, [sessionId, sessionReload])
@@ -364,9 +378,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     if (gunScan.origin === 'field') notify(tr('scan_moved_to_search', 'Barcode moved to search'), 'info')
   }, [gunScan])
 
+  // Another branch remounts the list and drops the picked products and typed counts: ask first, with the shared review.
+  async function selectOrAsk(next: Selection) {
+    if (Object.keys(draftsRef.current).length > 0) {
+      const confirmed = await askToConfirm({ title: tr('inventory_check_discard_counts_title', 'Discard counts not submitted?'),
+        message: tr('inventory_check_discard_counts_message', 'The products you picked and the counts you typed will be cleared.'), confirmLabel: t('discard'), danger: true })
+      if (!confirmed || !current()) return
+    }
+    onSelect(next)
+  }
   function changeFilters(patch: Partial<InventoryCheckFilters>) {
     if (controlsLocked) return
-    if (patch.branchId !== undefined && patch.branchId !== branchId) { onSelect({ branchId: patch.branchId, sessionId: '' }); return }
+    if (patch.branchId !== undefined && patch.branchId !== branchId) { void selectOrAsk({ branchId: patch.branchId, sessionId: '' }); return }
     setFilters(previous => ({ ...previous, ...patch })); setPage(1); setScan(null)
   }
   function changeSessionFilters(patch: Partial<SessionListFilters>) {
@@ -376,7 +399,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // Clears search, dates and every Filters-menu choice (Sort included). A chosen branch is a selection, so clearing it re-selects "all branches".
   function clearFilters() {
     if (controlsLocked) return
-    if (branchId && branches.length > 1) { onSelect({ branchId: '', sessionId: '' }); return }
+    if (branchId && branches.length > 1) { void selectOrAsk({ branchId: '', sessionId: '' }); return }
     if (section === 'sessions') { setSessionFilters(initialSessionFilters); setSessionRange(statsPresetRange('all')) } else {
       setFilters(previous => ({ ...initialFilters, branchId: previous.branchId }))
       setQuery(''); setAppliedQuery(''); setScan(null)
@@ -584,6 +607,50 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
+  // Counts approval (ic_fix_stock): approving sets stock, so the person must hold the extra, may adjust stock and be online.
+  const canDecide = fresh && !!approval && approval.can_approve && data?.capabilities?.approveCounts === true && canWriteToServer
+  async function decideApproval(decision: 'approve' | 'reject') {
+    if (!current() || !sessionId || !approval || approval.status !== 'pending' || inFlight.current) return
+    if (!decideAttempt.current || decideAttempt.current.decision !== decision) {
+      const confirmed = await askToConfirm({
+        title: decision === 'approve' ? tr('inventory_check_approve_title', 'Approve these counts?') : tr('inventory_check_reject_title', 'Reject these counts?'),
+        message: decision === 'approve' ? tr('inventory_check_approve_message', 'Stock will be set to each counted number minus damaged units.') : tr('inventory_check_reject_message', 'Stock stays as it is.'),
+        items: [{ label: tr('inventory_check_differences', 'Differences'), value: approval.lines - approval.applied }],
+        confirmLabel: decision === 'approve' ? tr('inventory_check_approve', 'Approve') : tr('inventory_check_reject', 'Reject'),
+        danger: decision === 'reject',
+      })
+      if (!confirmed || !current() || inFlight.current) return
+      decideAttempt.current = { decision, requestId: createClientRequestId('inventory_check_approval') }
+    }
+    const attempt = decideAttempt.current
+    inFlight.current = true; setBusy(true); setWriteError('')
+    try {
+      const flow = await runApprovalFlow({
+        send: extra => decideInventoryCheckApproval(writeScope, { decision, requestId: attempt.requestId, ...extra }),
+        confirmDrift: () => askToConfirm({ title: tr('inventory_check_drift_title', 'Stock changed since the count'),
+          message: tr('inventory_check_drift_message', 'Some products have different stock now than when they were counted. Set them to the counted numbers anyway?'),
+          confirmLabel: tr('inventory_check_apply_anyway', 'Apply anyway'), danger: true }),
+        onProgress: result => { if (current()) setApproval(result.approval) },
+        isCurrent: current,
+      })
+      if (!current()) return
+      if (flow.outcome === 'done') {
+        decideAttempt.current = null
+        notify(tr(decision === 'approve' ? 'inventory_check_approved_done' : 'inventory_check_rejected_done', decision === 'approve' ? 'Counts approved. Stock updated.' : 'Counts rejected. Stock unchanged.'), 'success')
+      } else if (flow.outcome === 'stalled') {
+        setWriteError(tr('inventory_check_error_write_refused', 'Stock could not be updated for some products. Try again.'))
+      } else decideAttempt.current = null // declined: the next Approve is a fresh decision with its own review
+      reloadAll()
+    } catch (cause) {
+      const unknown = (cause as { outcome?: string })?.outcome === 'unknown'
+      const refusal = unknown ? undefined : knownRefusal(cause)
+      if (!unknown) decideAttempt.current = null
+      if (current()) {
+        setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+        reloadAll()
+      }
+    } finally { inFlight.current = false; if (current()) setBusy(false) }
+  }
   // The owner's summary: check counts only. A session shows its own counts in the session bar, and the old contract sends none.
   const checkInfo = !sessionId && !!data?.simple
   const summary = fresh && checkInfo ? data?.summary : undefined
@@ -746,6 +813,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           <span className="min-w-0 break-words">{error || sessionError}</span>
           <IconAction label={t('retry')} onClick={reloadAll}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
         </div> : null}
+        {sessionId && fresh && approval && session?.scope?.membership === 'submission'
+          ? <InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} busy={busy} t={t} onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} /> : null}
         {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
           : listMode ? <InventoryCheckListRows products={visibleProducts} drafts={drafts} selecting={selecting} locked={busy || !!submitAttempt.current} canViewStock={access.fields.stock} canViewCounts={canViewCounts}

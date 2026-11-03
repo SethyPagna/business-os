@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { act } from 'react'
 import { createHarness, propsOf } from './mountedComponentHarness.ts'
-import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
+import type { InventoryCheckApproval, InventoryCheckApprovalDecision, InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
@@ -43,6 +43,11 @@ const sessionReads: Array<Record<string, unknown>> = []
 const creates: unknown[][] = []
 const submissions: Array<{ scope: unknown; input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> } }> = []
 let submitFailure: 'none' | 'known' | 'unknown' | 'stale' = 'none'
+// Counts approval (ic_fix_stock): what the server says about the open submission, what this viewer may do, and the scripted answers to a decision.
+let sessionApproval: InventoryCheckApproval | null = null
+let capabilities: { fixStock?: boolean; approveCounts?: boolean } | null = null
+const decisions: Array<{ scope: unknown; input: { decision: string; requestId: string; confirmDrift?: boolean } }> = []
+let decideScript: Array<InventoryCheckApprovalDecision | Error> = []
 const notices: Array<[string, string]> = []
 let saveFailure: 'none' | 'known' | 'unknown' = 'none'
 let failRead = false
@@ -59,10 +64,11 @@ const bootstrapReads: Array<{ params: Record<string, unknown>; resolve: (value: 
 // What the ic_simple server answers: rows with check facts, and the check counts and filter options only with page 1 or a changed scope (a page step asks for summary=0).
 const issueFacts = { check_status: 'issue', check_counted_quantity: 37, check_note: 'All-session issue reason', check_by: 'alice', check_at: '2026-10-19 02:30:00', check_session_id: 'check-1', check_branch_id: 1 }
 const summary = { not_checked: 17, in_check: 2, ok: 5, issue: 1, total: 25 }
+let branchList = [{ id: 1, name: 'Test branch' }]
 const response = (params: Record<string, unknown> = {}) => oldServer
   ? { items: [product], total: 1, page: 1, pageSize: 20, branches: [{ id: 1, name: 'Test branch' }], facets: { brands: ['Off-page brand'], categories: ['Off-page category'], reasons: ['Off-page reason'] }, facetsLimited: { brands: true, categories: false, reasons: false }, stats: { total_products: 1, stock_quantity: 8, qty_sold: 4, unique_customer_count: 2 }, issues: [] }
-  : { items: [params.checkState === 'issue' ? { ...product, ...issueFacts } : product], total: 1, page: 1, pageSize: 20, simple: true, branches: [{ id: 1, name: 'Test branch' }],
-    ...(params.summary === 0 ? {} : { summary, facets: { brands: ['Off-page brand'], categories: ['Off-page category'] }, facetsLimited: { brands: true, categories: false } }) }
+  : { items: [params.checkState === 'issue' ? { ...product, ...issueFacts } : product], total: 1, page: 1, pageSize: 20, simple: true, branches: branchList,
+    ...(params.summary === 0 ? {} : { summary, facets: { brands: ['Off-page brand'], categories: ['Off-page category'] }, facetsLimited: { brands: true, categories: false } }), ...(capabilities ? { capabilities } : {}) }
 const app = {
   user: { id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_cost: false } as Record<string, boolean> },
   page: 'inventory', authReady: true, canWriteToServer: true, t: (key: string) => SORT_WORDS[key] ?? key,
@@ -92,7 +98,15 @@ const doubles = {
       return { ...response(params), items: productOverride ?? (emptyPastLastPage && Number(params.page) > Math.ceil(productTotal / Number(params.pageSize)) ? [] : response(params).items), total: productOverride?.length ?? productTotal }
     },
     readInventoryCheckSessions: async (params: Record<string, unknown>) => { sessionReads.push(params); return { items: [selected], total: 1, page: 1, pageSize: 20 } },
-    readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation] }),
+    readInventoryCheckSession: async () => ({ item: selected, items: memberOverride ?? [observation], ...(sessionApproval ? { approval: sessionApproval } : {}) }),
+    decideInventoryCheckApproval: async (scope: unknown, input: { decision: string; requestId: string; confirmDrift?: boolean }) => {
+      decisions.push({ scope, input })
+      const next = decideScript.shift()
+      if (!next) throw new Error('no scripted answer')
+      if (next instanceof Error) throw next
+      sessionApproval = next.approval
+      return next
+    },
     readInventoryCheckHistory: async () => ({ items: [{ id: 2, session_id: 'check-1', product_id: null, product_name: null, actor_id: 7, actor_name: 'alice', action: 'create', created_at: historyTimestamp, before: null, after: { status: 'open' } }, { id: 1, session_id: 'check-1', product_id: 12, product_name: 'Test variant', actor_id: 7, actor_name: 'alice', action: 'observe', created_at: historyTimestamp, before: { state: 'unstarted' }, after: { state: 'issue', reason: 'History reason' } }], total: 2, page: 1, pageSize: 20 }),
     createInventoryCheckSession: async (...args: unknown[]) => { creates.push(args); return { item: selected, receipt: {} } },
     submitInventoryCheckCounts: async (scope: unknown, input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> }) => {
@@ -531,6 +545,7 @@ try {
   assert.deepEqual(notices.at(-1), ['Counts submitted', 'success'])
   assert.equal(selectedText(), '', 'the counts that were sent are cleared')
   assert.equal(noWork(), 0, 'and the guard is released')
+
   assert.equal(counting.findAll(node => node.getAttribute('data-check-select') !== null && (node as unknown as { checked?: boolean }).checked === true).length, 0)
 
   // an answer that never came: the same request is sent again, the same lines, and the rows stay as they were
@@ -568,6 +583,27 @@ try {
   assert.equal(counting.button('sessions').getAttribute('aria-pressed'), 'true', 'with nothing pending the section changes')
   await counting.unmount()
 
+  // changing the branch with counts not submitted asks first (the shared review, never a native confirm): Cancel keeps everything, Discard clears and switches
+  branchList = [{ id: 1, name: 'Test branch' }, { id: 2, name: 'Second branch' }]
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  const branchSwitching = await mount()
+  await chooseFilter(branchSwitching, 'branchId', 'Test branch')
+  assert.ok(!branchSwitching.text().includes('Discard counts not submitted?') && productRequests.at(-1)?.branchId === '1', 'with nothing picked the branch changes at once, without asking')
+  const switchRow = () => branchSwitching.find(node => node.getAttribute('data-inventory-check-row') === '12', 'row 12')
+  await branchSwitching.call(branchSwitching.find(node => node.getAttribute('data-check-select') !== null && switchRow().contains(node), 'pick 12'), 'onChange', [{ target: { checked: true } }])
+  await branchSwitching.type(branchSwitching.find(node => node.getAttribute('data-check-count') !== null && switchRow().contains(node), 'count 12'), '6')
+  const requestsBeforeSwitch = productRequests.length
+  await chooseFilter(branchSwitching, 'branchId', 'Second branch')
+  assert.ok(branchSwitching.text().includes('Discard counts not submitted?'), 'a branch change with counts not submitted asks first')
+  assert.equal(productRequests.length, requestsBeforeSwitch, 'nothing is read for the other branch before the answer'); assert.equal(noWork(), 1)
+  await branchSwitching.click(exactButtons(branchSwitching, 'Cancel').at(-1)!)
+  assert.ok(!branchSwitching.text().includes('Discard counts not submitted?') && noWork() === 1 && productRequests.length === requestsBeforeSwitch, 'Cancel keeps the picks and the branch')
+  await chooseFilter(branchSwitching, 'branchId', 'Second branch')
+  await confirmInDialog(branchSwitching, 'discard')
+  assert.equal(productRequests.at(-1)?.branchId, '2', 'Discard switches to the other branch'); assert.equal(noWork(), 0, 'and the counts are gone')
+  await branchSwitching.unmount()
+  branchList = [{ id: 1, name: 'Test branch' }]
+
   // a viewer who may not see stock counts blind: no check button, no stock seen, nothing inferred
   app.user = { ...app.user, id: 9, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS, inventory_check_show_stock: false } }
   window.history.replaceState(null, '', '/inventory#hub:inventory:products')
@@ -590,6 +626,128 @@ try {
   await reader.unmount()
   productOverride = null
   app.user = { ...app.user, id: 7, permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } }
+
+  // Counts approval (ic_fix_stock): the panel on a submitted count, and approving, repeating, confirming moved stock and rejecting it.
+  const pendingApproval: InventoryCheckApproval = { status: 'pending', lines: 2, applied: 0, submitted_at: '2026-10-19T02:30:00Z', can_approve: true, applied_lines: {} }
+  const answerOf = (applied: number, remaining: number, over: Partial<InventoryCheckApproval> = {}): InventoryCheckApprovalDecision =>
+    ({ approval: { ...pendingApproval, status: remaining === 0 ? 'approved' : 'pending', applied: 2 - remaining, ...(remaining === 0 ? { decided_at: '2026-10-19T03:00:00Z', decided_by_name: 'boss' } : {}), ...over }, applied, remaining, done: remaining === 0 })
+  const submittedItems: InventoryCheckSessionItem[] = [
+    { product_id: 12, state: 'issue', revision: 1, counted_quantity: 12, reason: 'Count differs from stock', baseline_quantity: 7, current_quantity: 7, current_stock: { recorded_damaged_quantity: 2 }, product_snapshot: { ...product, id: 12, name: 'Serum A' } },
+    { product_id: 13, state: 'issue', revision: 1, counted_quantity: 3, reason: 'Count differs from stock', baseline_quantity: 5, current_quantity: 5, product_snapshot: { ...product, id: 13, name: 'Cream B' } },
+    { product_id: 14, state: 'done', revision: 1, counted_quantity: 5, reason: null, baseline_quantity: 5, current_quantity: 5, product_snapshot: { ...product, id: 14, name: 'Soap C' } },
+  ]
+  const savedSession = selected
+  selected = { ...selected, status: 'closed', scope: { membership: 'submission' }, created_by: 7, progress: { total: 3, done: 1, issue: 2, unstarted: 0 } }
+  memberOverride = submittedItems; sessionApproval = pendingApproval; capabilities = { fixStock: true, approveCounts: true }
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  app.user = { ...app.user, id: 7, role_code: 'admin', permissions: { all: true } as unknown as Record<string, boolean> }
+  selected = { ...selected, approval: pendingApproval }
+  const approving = await mount()
+  await approving.click(approving.button('sessions'))
+  const sessionRow = approving.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'submitted session row')
+  const rowChip = sessionRow.querySelectorAll('[data-approval-status]')
+  assert.equal(rowChip.length, 1, 'the Count sessions list tags a submitted count with its approval state')
+  assert.equal(rowChip[0].getAttribute('data-approval-status'), 'pending'); assert.ok(rowChip[0].textContent.includes('Waiting for approval'))
+  selected = { ...selected, approval: { ...pendingApproval, status: 'approved' } }
+  await approving.click(approving.button('products')); await approving.click(approving.button('sessions'))
+  assert.equal(approving.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'row again').querySelectorAll('[data-approval-status="approved"]').length, 1, 'and shows it once decided')
+  selected = { ...selected, approval: undefined }
+  await approving.click(approving.button('products')); await approving.click(approving.button('sessions'))
+  assert.equal(approving.find(node => node.getAttribute('data-inventory-check-session') === 'check-1', 'row without approval').querySelectorAll('[data-approval-status]').length, 0, 'a session with no approval carries no tag')
+  await clickSessionRow(approving)
+  const panelOf = () => approving.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'approval panel')
+  const approvalAction = (name: string) => approving.findAll(node => node.getAttribute('data-approval-action') === name)[0]
+  assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'pending')
+  assert.ok(approving.text().includes('Waiting for approval'), 'the submitted count is tagged pending')
+  assert.ok(panelOf().textContent.includes('Set to 10'), 'count 12 with 2 damaged units is Set to 10')
+  assert.ok(approvalAction('approve') && approvalAction('reject'), 'someone who may decide sees both actions')
+  const decidedBefore = decisions.length
+
+  // Cancel in the review sends nothing; confirming sends one request per stock line with the SAME request id until the server says done
+  await approving.click(approvalAction('approve'))
+  assert.ok(approving.text().includes('Approve these counts?'), 'approving shows the shared review first')
+  await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL', 'review').parentNode!.parentNode!))
+  assert.equal(decisions.length, decidedBefore, 'Cancel sends nothing')
+  decideScript = [answerOf(1, 1), answerOf(1, 0)]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.equal(decisions.length, decidedBefore + 2, 'the Free plan writes one line per request, so approving took two requests')
+  assert.deepEqual(decisions.slice(decidedBefore).map(call => call.input.decision), ['approve', 'approve'])
+  assert.equal(decisions[decidedBefore].input.requestId, decisions[decidedBefore + 1].input.requestId, 'every repeat of one approval carries the same request id')
+  assert.match(decisions[decidedBefore].input.requestId, /^inventory_check_approval_/)
+  assert.ok(decisions.slice(decidedBefore).every(call => call.input.confirmDrift === undefined), 'nothing is confirmed that was not asked')
+  assert.deepEqual(notices.at(-1), ['Counts approved. Stock updated.', 'success'])
+  assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'approved', 'the panel shows the decision after the reload')
+  assert.equal(approvalAction('approve'), undefined, 'a decided count has no actions')
+
+  // Stock moved since the count: asked once, Cancel stops with nothing changed, Apply anyway repeats with confirmDrift
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+  const drift = Object.assign(new Error('stock moved'), { status: 409, code: 'inventory_check_stock_drifted', outcome: 'not_dispatched' })
+  const driftBefore = decisions.length
+  decideScript = [drift]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.ok(approving.text().includes('Stock changed since the count'), 'moved stock is put to the approver')
+  await approving.click(approving.button('Cancel', approving.find(node => node.tagName === 'DL' || node.textContent.includes('Some products have different stock'), 'drift dialog')))
+  assert.equal(decisions.length, driftBefore + 1, 'declining sends nothing more')
+  assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'pending')
+  decideScript = [drift, answerOf(2, 0)]
+  await approving.click(approvalAction('approve'))
+  assert.ok(approving.text().includes('Approve these counts?'), 'after declining, approving again is a fresh decision with its own review')
+  await confirmInDialog(approving, 'Approve')
+  await confirmInDialog(approving, 'Apply anyway')
+  const confirmed = decisions.slice(driftBefore + 1)
+  assert.ok(confirmed.length >= 2 && confirmed.at(-1)?.input.confirmDrift === true, 'Apply anyway repeats the same request with confirmDrift')
+  assert.equal(confirmed.at(-1)?.input.requestId, confirmed[0].input.requestId)
+  assert.notEqual(confirmed[0].input.requestId, decisions[driftBefore].input.requestId, 'a declined decision is dropped, not resumed')
+
+  // An answer that never came keeps the request id: the next Approve repeats it without a second review
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+  const lostBefore = decisions.length
+  decideScript = [Object.assign(new Error('answer lost'), { outcome: 'unknown' })]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.ok(approving.text().includes('Save not confirmed'), 'an unconfirmed decision says so')
+  decideScript = [answerOf(2, 0)]
+  await approving.click(approvalAction('approve'))
+  assert.equal(decisions.length, lostBefore + 2, 'the retry needs no second review')
+  assert.equal(decisions[lostBefore + 1].input.requestId, decisions[lostBefore].input.requestId, 'and carries the same request id')
+
+  // A definite refusal is said in words and drops the request id
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+  decideScript = [Object.assign(new Error('records'), { status: 409, code: 'inventory_check_stock_inconsistent', outcome: 'not_dispatched' })]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.ok(approving.text().includes('stock records do not add up'), 'a known refusal has its own sentence')
+
+  // Reject
+  sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
+  const rejectBefore = decisions.length
+  decideScript = [{ ...answerOf(0, 0), approval: { ...pendingApproval, status: 'rejected', decided_at: '2026-10-19T03:00:00Z', decided_by_name: 'boss' } }]
+  await approving.click(approvalAction('reject'))
+  assert.ok(approving.text().includes('Reject these counts?'))
+  await confirmInDialog(approving, 'Reject')
+  assert.equal(decisions[rejectBefore].input.decision, 'reject'); assert.equal(decisions.length, rejectBefore + 1)
+  assert.equal(panelOf().getAttribute('data-inventory-check-approval'), 'rejected')
+  assert.deepEqual(notices.at(-1), ['Counts rejected. Stock unchanged.', 'success'])
+  await approving.unmount()
+
+  // Someone without the right (or without the server's go-ahead) sees the decision and its figures, and no way to make it
+  for (const [label, approval, caps] of [['no extra', { ...pendingApproval, can_approve: false }, { fixStock: true, approveCounts: false }], ['no capability', pendingApproval, { fixStock: true }],
+    ['the approval says no even though the list capability says yes', { ...pendingApproval, can_approve: false }, { fixStock: true, approveCounts: true }]] as const) {
+    sessionApproval = approval; capabilities = caps
+    window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+    const watcher = await mount()
+    await openSession(watcher)
+    assert.equal(watcher.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'panel').getAttribute('data-inventory-check-approval'), 'pending', label)
+    assert.equal(watcher.findAll(node => node.getAttribute('data-approval-action') !== null).length, 0, label + ': no Approve or Reject')
+    await watcher.unmount()
+  }
+  // A viewer the server tells nothing about (no stock field) sees no panel at all
+  sessionApproval = null; capabilities = null
+  window.history.replaceState(null, '', '/inventory#hub:inventory:products')
+  const unaware = await mount()
+  await openSession(unaware)
+  assert.equal(unaware.findAll(node => node.getAttribute('data-inventory-check-approval') !== null).length, 0, 'no approval in the answer, no panel')
+  await unaware.unmount()
+  selected = savedSession; memberOverride = null
+  app.user = { ...app.user, id: 7, role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...COUNT_FIELDS } }
 
   oldServer = true
   const older = await mount()

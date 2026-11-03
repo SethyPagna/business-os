@@ -170,7 +170,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
 
   inventory_checks: [
     { key: 'view', tKey: 'perm_act_inventory_checks_view', label: 'View all count sessions', shortTKey: 'perm_short_all_sessions', short: 'All sessions', review: 'block' },
-    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Record own inventory checks', shortTKey: 'perm_short_count', short: 'Count', review: 'block' },
+    { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Count and submit', shortTKey: 'perm_short_count', short: 'Count', review: 'block' },
   ],
 
   // cloudflare/src/routes/branches.ts
