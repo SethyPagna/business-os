@@ -96,8 +96,8 @@ run('the search joins the tabs: the surface lends a slot, the products section d
   assert.match(section, /navSlot\.element \? createPortal\(<>\{searchControls\}\{desktopFiltersPanel\}<\/>, navSlot\.element\) : null/, 'nothing is drawn until the slot exists (no inline flash)')
   assert.match(section, /\) : \(\s*<div className="sticky top-16 z-20 -mx-1 mb-5 space-y-2 rounded-\[22px\]/, 'without a slot the old card is kept')
   assert.match(section, /searchDocked \? 'absolute right-0 top-full z-50 mt-2 w-\[min\(56rem,calc\(100vw-3rem\)\)\]/, 'docked, the desktop Filters panel floats under the bar instead of growing the sticky tab row')
-  const ui = code(read('../src/components/catalog/catalogUi.tsx'))
-  assert.match(ui, /createContext<PortalNavSearchSlot>\(\{ expected: false, element: null \}\)/, 'the default is no slot')
+  const slot = code(read('../src/components/catalog/portalNavSearchSlot.ts'))
+  assert.match(slot, /createContext<PortalNavSearchSlot>\(\{ expected: false, element: null \}\)/, 'the default is no slot')
 })
 
 if (failed) {

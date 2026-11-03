@@ -248,7 +248,7 @@ function AboutCover({ src, imageFetchPriority, onFailed }: { src: string; imageF
         fetchPriority={imageFetchPriority}
         onLoad={(event) => { event.currentTarget.dataset.loaded = 'true'; setLoaded(true) }}
         onError={onFailed}
-        className="portal-cover-image pointer-events-none mx-auto block h-auto max-h-[min(72vh,680px)] w-full object-contain"
+        className="portal-cover-image pointer-events-none mx-auto block h-auto max-h-[min(calc(72*var(--app-vh)),680px)] w-full object-contain"
       />
     </div>
   )

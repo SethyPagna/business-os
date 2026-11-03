@@ -38,7 +38,7 @@ run('the cover is an in-flow image kept whole: contain, auto height, a cap on ve
   assert.match(cover, /<img[\s\S]*className="[^"]*\bobject-contain\b[^"]*"/, 'the whole picture, never cropped')
   assert.match(cover, /\bh-auto\b/, 'its own proportions')
   assert.match(cover, /\bw-full\b/)
-  assert.match(cover, /\bmax-h-\[min\(72vh,680px\)\]/, 'the only cap, for a very wide screen')
+  assert.match(cover, /\bmax-h-\[min\(calc\(72\*var\(--app-vh\)\),680px\)\]/, 'the only cap, for a very wide screen')
   assert.doesNotMatch(cover, /object-cover|object-fill|absolute|inset-0|h-20|h-28|overflow-hidden/, 'no crop, no stretch, no thin strip, no overlay')
 })
 

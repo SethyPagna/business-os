@@ -31,6 +31,7 @@ import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './
 import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
 import { dismissPortalAnnouncement, readDismissedPortalAnnouncement, resolvePortalAnnouncement } from './portalAnnouncement.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { buildPortalContactFloat, buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl, portalFloatClearanceRem } from './portalSocialLinks.ts'
 import { PORTAL_SOCIAL_ICONS, PortalContactFloat, PortalSocialText } from './PortalSocialRow.tsx'
@@ -820,10 +821,7 @@ export default function PublicCatalogPage() {
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(readDismissedPortalAnnouncement)
   const [announcementDay, setAnnouncementDay] = useState(todayStr)
   const [announcementHeight, setAnnouncementHeight] = useState(0)
-  useEffect(() => {
-    const timer = window.setInterval(() => setAnnouncementDay(todayStr()), 5 * 60 * 1000)
-    return () => window.clearInterval(timer)
-  }, [])
+  useEffect(() => startVisibleInterval(() => setAnnouncementDay(todayStr()), 5 * 60 * 1000), [])
   const announcement = useMemo(() => {
     const found = resolvePortalAnnouncement(displayConfig, pageLanguage, announcementDay)
     return found && found.version !== dismissedAnnouncement ? found : null

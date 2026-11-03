@@ -7155,6 +7155,7 @@
   "portal_legal_editor_registration": "Business registration number",
   "portal_legal_editor_registration_hint": "Ministry of Commerce or tax registration number, if you have one.",
   "portal_legal_store_map_consent_p": "Whether you chose to load the store map on this device.",
+  "portal_legal_store_announcement_p": "Which shop announcement you closed on this device, so it does not come back until the shop changes it.",
   "shift_report": "Shift Report",
   "shift_report_hint": "Registered opening and closing cash is report-only. Business results come from sales, costs, delivery, expenses, refunds and Not Paid.",
   "shift_no_current": "No current shift",
