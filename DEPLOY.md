@@ -251,14 +251,36 @@ find out you did not.
 
 ### What `PLAN_TIER` changes inside the app
 
-`cloudflare/src/lib/planTier.ts` is the only file that reads it, and the only
-place either plan's numbers are written down. It resolves the tier once per
-isolate and hands every plan-sensitive call site a limit from one table:
-import chunk rows, import preflight rows, stock-action units and rows,
-stock-action and historical-sales concurrency, bulk-delete chunk size, backup
-asset count, whether the 6-hourly scheduled backup runs at all, images deleted
-per reset, import-job retention depth, ephemeral delete batch, and the catalog
-integrity scan ceiling. Free is smaller on every one of them.
+`cloudflare/src/lib/planTier.ts` reads `PLAN_TIER` (through
+`resolvePlanTier`) and holds a Free table and a Paid table of plan-sized
+numbers. It resolves the tier once per isolate and hands each call site its
+limit as `getPlanLimits(env).<field>`. The tables hold: import chunk rows,
+import preflight rows, stock-action units and rows, historical-sales
+concurrency, bulk-delete chunk size, backup asset count, whether the 6-hourly
+scheduled backup runs at all, images deleted per reset, import-job retention
+depth, ephemeral delete batch, the catalog integrity scan ceiling, stock-in
+lines per request, D1 queries per invocation (50 on Free, 1000 on Paid), the
+storefront AI chat budgets, and two cache lifetimes. Free is smaller on every
+ceiling; the two lifetimes run the other way (Free keeps them longer, to read
+fewer rows). The tables also record D1's daily row limits and maximum database
+size as reported facts, plus one stock-action concurrency number; no code reads
+those four yet, so changing them does nothing.
+
+It is **not** the only place. `lib/branchCutoverOperator.ts` still reads
+`PLAN_TIER` itself, and other plan-sized numbers still sit as plain constants
+in the files that use them (import windows, report and export page sizes, the
+Inventory Check cap, stock-session and merge limits, the quota table in
+`lib/quotaGuard.ts`, audit-retention batch sizes, and more). The rule is that
+every one of them moves into `planTier.ts`. Until it does,
+`cloudflare/scripts/test-plan-literals-pure.cjs` lists the ones it can detect
+and fails when a new one appears, or when a cleanup leaves its entry behind. It
+cannot see a bare constant with no plan marker, so a clean run is not a
+complete inventory.
+
+**To change a limit that is in the table:** edit the Free or Paid table in
+`planTier.ts`, update the same number in `scripts/test-plan-tier-pure.cjs` (it
+pins both tables), and deploy. For a limit that is not in a table yet, add a
+field to both tables with its reader rather than editing the constant.
 
 Two operations are **refused** on free rather than run in a degraded shape,
 because a half-done version of either is worse than not starting:
