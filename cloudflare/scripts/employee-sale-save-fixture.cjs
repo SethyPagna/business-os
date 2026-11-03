@@ -62,12 +62,21 @@ async function main() {
   }
   await run("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)")
   await run("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'Warehouse',0,1)")
+  // Products, lots and both stock ledgers go through the permitted stock-transaction path: migration 0243 aborts any direct write to
+  // products, product_batches, branch_stock and branch_batch_stock (stock_transaction_required) unless a stock_transaction_permit flag
+  // equal to the epoch exists, and the Worker holds it only inside one atomic batch (cloudflare/src/lib/stockTransaction.ts). So does
+  // this seed: permit, the inserts, release -- one db.batch, so a failure rolls the permit back with the rows.
+  const stockWrites = [db.prepare("INSERT INTO system_flags(key,value) SELECT 'stock_transaction_permit',value FROM system_flags WHERE key='stock_schema_epoch'")]
+  const stage = (sql, ...values) => stockWrites.push(db.prepare(sql).bind(...values))
   for (const p of products) {
-    await run('INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(?,?,?,?,100,?,?,1.2345,4938,1)', p.id, p.name, `8850000000${p.id}`, `E2E-${p.id}`, p.price, p.price * 4000)
-    await run('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,100)', p.id)
-    await run("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(?,?,?,?,'2026-09-01',1,1)", p.id + 500, p.id, `e2e-batch-${p.id}`, `E2E-${p.id}`)
-    await run('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,100)', p.id + 500)
+    stage('INSERT INTO products(id,name,barcode,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(?,?,?,?,100,?,?,1.2345,4938,1)', p.id, p.name, `8850000000${p.id}`, `E2E-${p.id}`, p.price, p.price * 4000)
+    stage('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,100)', p.id)
+    stage("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number) VALUES(?,?,?,?,'2026-09-01',1,1)", p.id + 500, p.id, `e2e-batch-${p.id}`, `E2E-${p.id}`)
+    stage('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,100)', p.id + 500)
   }
+  stockWrites.push(db.prepare("DELETE FROM system_flags WHERE key='stock_transaction_permit'"))
+  await db.batch(stockWrites)
+  if ((await all("SELECT 1 AS left FROM system_flags WHERE key='stock_transaction_permit'")).length) throw new Error('The seed left a stock_transaction_permit behind')
   await run("INSERT INTO settings(key,value) VALUES('exchange_rate','4000') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
   await run("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
   async function dispatch(url, method, body, cookie) {
@@ -112,7 +121,12 @@ async function main() {
         const response = await mf.dispatchFetch(url.href, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) })
         receipt.requests.push({ method: req.method, path: url.pathname, status: response.status }); record()
         res.statusCode = response.status
-        for (const [name, value] of response.headers) res.setHeader(name, value)
+        for (const [name, value] of response.headers) if (name.toLowerCase() !== 'set-cookie') res.setHeader(name, value)
+        // This fixture speaks plain http on loopback. The Worker sets its session cookie Secure (lib/auth.ts setSessionCookie), which Chromium
+        // keeps on http://127.0.0.1 and WebKit refuses -- a WebKit sign-in would answer 200 and every later call 401. Drop the Secure flag on the
+        // way out (production is https and keeps it), and relay EVERY Set-Cookie: a setHeader per header would keep only the last.
+        const cookies = response.headers.getSetCookie()
+        if (cookies.length) res.setHeader('set-cookie', cookies.map(cookie => cookie.replace(/;\s*Secure\b/i, '')))
         return res.end(Buffer.from(await response.arrayBuffer()))
       }
       const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '')
