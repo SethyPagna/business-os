@@ -644,8 +644,9 @@ await check('the sign-in screen keeps the form clear of the band on phones, and 
   const centred = /className="(mx-auto flex min-h-[^"]*items-center justify-center[^"]*)"/.exec(login)?.[1] ?? ''
   const reserve = `var(${INSTALL_BAND_CLEARANCE_VAR},0px)`
   assert.ok(shell.includes(`pb-[calc(1.5rem+${reserve})]`), 'the shell pads its bottom by the band height')
-  assert.ok(shell.includes('md:pb-6'), 'from md the band is a corner card, so the padding goes back')
-  assert.ok(centred.includes(`min-h-[calc(100*var(--app-vh)_-_3rem_-_${reserve})]`), 'the centred form fits above the band, so the page does not scroll for it')
+  assert.ok(shell.includes('pt-[4.75rem]'), 'phones reserve the theme and language row, so the form can never rise under it')
+  assert.ok(shell.includes('md:py-6'), 'from md the band is a corner card, so both paddings go back')
+  assert.ok(centred.includes(`min-h-[calc(100*var(--app-vh)_-_6.25rem_-_${reserve})]`), 'the centred form fits between the toggles row and the band (4.75rem + 1.5rem), so the page is one screen tall when it fits')
   assert.ok(centred.includes('md:min-h-[calc(100*var(--app-vh)_-_3rem)]'), 'desktops keep the full-height centring')
   assert.match(read('src/components/shared/InstallPromptBand.tsx'), /useInstallBandClearance\(bandRef, route !== null\)/, 'the band publishes its height only while it is shown')
 })

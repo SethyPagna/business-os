@@ -29,6 +29,8 @@ const noRouteOutsideBrowser = () => null
 
 const STAFF_APP_ICON = '/icon-192.png'
 const SHOP_APP_ICON = '/leang-cosmetics-icon-192-v2.png'
+// The desktop stack shares its bottom-right corner with the scroll buttons (1rem in, 2rem wide); stay left of them.
+const BESIDE_SCROLL_BUTTONS = 'md:mr-14 md:w-auto'
 
 export default function InstallPromptBand({ translate }: { translate: InstallPromptTranslate }) {
   // The admin host installs the staff app; every other host is the shop, which names itself.
@@ -56,7 +58,7 @@ export default function InstallPromptBand({ translate }: { translate: InstallPro
   return (
     <div
       ref={bandRef}
-      className="pointer-events-auto flex w-full items-center gap-3 rounded-2xl border border-blue-300 bg-blue-50 px-3 py-2.5 text-blue-900 shadow-lg dark:border-blue-700 dark:bg-blue-950/90 dark:text-blue-100"
+      className={`pointer-events-auto flex w-full items-center gap-3 rounded-2xl border border-blue-300 bg-blue-50 px-3 py-2.5 text-blue-900 shadow-lg dark:border-blue-700 dark:bg-blue-950/90 dark:text-blue-100 ${staffApp ? BESIDE_SCROLL_BUTTONS : ''}`}
       role="status"
     >
       <img
