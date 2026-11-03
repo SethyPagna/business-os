@@ -72,6 +72,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(text(seen.find(node => node.getAttribute('data-approval-target') === '1', 'target 1')), 'Set to 8', 'counted 12 over the 9 seen, ordinary now 5: 5 + 12 - 9')
     await seen.render({ ...base, items: [item(2, 'Cream B', 0, 5, { current_quantity: 3 })], approval: { ...pending, baselines: { 2: 5 } } })
     assert.equal(text(seen.find(node => node.getAttribute('data-approval-target') === '2', 'floored')), 'Set to 0', 'max(0, 3 + 0 - 5)')
+    assert.match(text(lineOf(seen, 2)), /Stock ran out, short by 2/, 'the shortage the stock could not take is stated on the line: wanted 3 + 0 - 5 = -2')
     await seen.render({ ...base, items: [item(2, 'Cream B', 3, 5, { current_quantity: undefined })] })
     assert.equal(seen.findAll(node => node.getAttribute('data-approval-target') !== null).length, 0, 'no stock now: no invented figure')
     assert.ok(lineOf(seen, 2), 'the line itself is still listed')
@@ -94,10 +95,12 @@ const cases: Array<[string, () => Promise<void>]> = [
   }],
   ['approved and rejected counts say so, who decided and when, and keep their lines', async () => {
     const approved = await mount({ approval: { ...pending, status: 'approved', applied: 2, decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss',
-      applied_lines: { 1: { before: 5, target: 10, after: 10, at: 'x' }, 2: { before: 4, target: 3, after: 3, at: 'x' } } } })
+      applied_lines: { 1: { before: 5, target: 10, after: 10, at: 'x' }, 2: { before: 1, target: 0, after: 0, at: 'x', clamped: true, wanted: -4 } } } })
     assert.equal(approved.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'approved')
     assert.match(text(approved.find(node => node.getAttribute('data-approval-decided') !== null, 'who and when')), /@boss/)
     assert.match(text(lineOf(approved, 1)), /Set to 10/)
+    assert.doesNotMatch(text(lineOf(approved, 1)), /short by/, 'a line the stock took fully carries no note')
+    assert.match(text(lineOf(approved, 2)), /Stock ran out, short by 4/, 'a decided line says what the stock could not take'); assert.match(text(lineOf(approved, 2)), /Set to 0/)
     assert.equal(approved.findAll(node => node.getAttribute('data-approval-progress') !== null).length, 0, 'progress is for a count still being applied')
     await approved.render({ ...base, approval: { ...pending, status: 'rejected', decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss' } })
     assert.equal(approved.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'rejected')

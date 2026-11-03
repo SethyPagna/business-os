@@ -24,7 +24,22 @@ export function approvalResult(item: InventoryCheckSessionItem, approval: Invent
   const seen = baselineOf(item, approval)
   const damaged = finite(item.current_stock?.recorded_damaged_quantity) ? item.current_stock.recorded_damaged_quantity : 0
   const now = finite(item.current_stock?.recorded_ordinary_quantity) ? item.current_stock.recorded_ordinary_quantity : finite(item.current_quantity) ? item.current_quantity - damaged : null
-  return finite(counted) && finite(seen) && now !== null ? Math.max(0, now + counted - seen) : null
+  return finite(counted) && finite(seen) && now !== null ? Math.max(0, approvalWanted(now, counted, seen)) : null
+}
+
+/** The figure the count asks for before the floor at zero; below zero means the stock cannot take the whole shortage the count found. */
+export const approvalWanted = (now: number, counted: number, seen: number): number => now + counted - seen
+
+/** How far a line falls short because the stock ran out: recorded on a decided line, worked out for a pending one; null when the stock takes the whole count. */
+export function approvalShortfall(item: InventoryCheckSessionItem, approval: InventoryCheckApproval): number | null {
+  const done = approval.applied_lines?.[String(item.product_id)]
+  if (done) return done.clamped && finite(done.wanted) ? -done.wanted : null
+  const damaged = finite(item.current_stock?.recorded_damaged_quantity) ? item.current_stock.recorded_damaged_quantity : 0
+  const now = finite(item.current_stock?.recorded_ordinary_quantity) ? item.current_stock.recorded_ordinary_quantity : finite(item.current_quantity) ? item.current_quantity - damaged : null
+  const seen = baselineOf(item, approval)
+  if (!finite(item.counted_quantity) || !finite(seen) || now === null) return null
+  const wanted = approvalWanted(now, item.counted_quantity, seen)
+  return wanted < -EPSILON ? -wanted : null
 }
 
 /** The figure the count is measured against: the stock recorded at submit, as the approval holds it (the line's own baseline when the approval has none). */
@@ -79,11 +94,13 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         const id = String(item.product_id)
         const done = approval.applied_lines?.[id]
         const target = done ? done.after : approvalResult(item, approval)
+        const short = approvalShortfall(item, approval)
         return <li key={id} data-approval-line={id} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
           <span className="tabular-nums">{label(t, 'inventory_check_approval_counted', 'Counted')} {item.counted_quantity}</span>
           <span data-approval-baseline={id} className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_system', 'System')} {baselineOf(item, approval)}</span>
           {pending && finite(item.current_quantity) ? <span className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_now', 'Now')} {item.current_quantity}</span> : null}
+          {short === null ? null : <span data-approval-clamped={id} className="tabular-nums text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_clamped', 'Stock ran out, short by')} {short}</span>}
           {target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
         </li>
       })}

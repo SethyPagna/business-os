@@ -7901,6 +7901,8 @@
   "inventory_check_counts_in_progress": "Counts not submitted",
   "inventory_check_error_count_pending": "A product in this count already waits for approval. Wait for that count to be decided, then count it again.",
   "inventory_check_error_count_superseded": "Another count already covered a product in this one. Reject this count and recount.",
+  "inventory_check_error_product_retired": "A product in this count was merged or removed. Reject this count and count the product that replaced it.",
+  "inventory_check_approval_clamped": "Stock ran out, short by",
   "inventory_check_error_stock_adjusted": "Stock was changed by hand after this count. Reject this count and recount.",
   "inventory_check_error_stock_changed": "Stock changed after you counted. The list was reloaded: count those products again.",
   "inventory_check_error_invalid_note": "A note is too long. Shorten it and submit again.",

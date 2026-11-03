@@ -7,7 +7,9 @@ import {
 import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../types/inventoryChecks.ts'
 
 /** What approving a line wrote (or, for a line already at its figure, found): ordinary stock before and after, and the target. */
-export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true }
+export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true
+  /** The stock ran out before the whole shortage the count found could be removed: stock was set to 0 and `wanted` (below zero) is the figure the count asked for. */
+  clamped?: true; wanted?: number }
 /** A submitted count's approval (ic_fix_stock). Sent only to a viewer who may see stock. */
 export type InventoryCheckApproval = {
   status: 'pending' | 'approved' | 'rejected'

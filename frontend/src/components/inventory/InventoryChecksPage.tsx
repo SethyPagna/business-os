@@ -79,6 +79,7 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you counted. The list was reloaded: count those products again.' },
   inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
   inventory_check_stock_inconsistent: { key: 'inventory_check_error_stock_inconsistent', fallback: 'A product\'s stock records do not add up. Correct them before approving.' },
+  inventory_check_product_retired: { key: 'inventory_check_error_product_retired', fallback: 'A product in this count was merged or removed. Reject this count and count the product that replaced it.' },
   inventory_check_count_pending: { key: 'inventory_check_error_count_pending', fallback: 'A product in this count already waits for approval. Wait for that count to be decided, then count it again.' },
   inventory_check_count_superseded: { key: 'inventory_check_error_count_superseded', fallback: 'Another count already covered a product in this one. Reject this count and recount.' },
   inventory_check_stock_adjusted: { key: 'inventory_check_error_stock_adjusted', fallback: 'Stock was changed by hand after this count. Reject this count and recount.' },

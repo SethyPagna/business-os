@@ -147,6 +147,15 @@ const injectPending = (sessionId, productId, { submittedAt = new Date().toISOStr
 const movement = (productId, type, { reason = 'test', secondsAfterNow = 1 } = {}) => db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,created_at) VALUES(?,?,1,'One',?,1,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
   .run(productId, 'Product', type, reason, ADMIN, `+${secondsAfterNow} seconds`)
 
+/** A product merged into another the way a merge leaves it: its stock moved to the survivor, the product and its received dates retired. */
+const mergeInto = (from, into) => {
+  const quantity = ordinary(from)
+  db.exec(`UPDATE branch_stock SET quantity=quantity+${quantity} WHERE product_id=${into} AND branch_id=1; UPDATE branch_stock SET quantity=0 WHERE product_id=${from} AND branch_id=1;
+    UPDATE branch_batch_stock SET quantity=quantity+${quantity} WHERE batch_id=${into} AND branch_id=1; UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=${from} AND branch_id=1;
+    UPDATE products SET stock_quantity=stock_quantity+${quantity} WHERE id=${into}; UPDATE products SET stock_quantity=0 WHERE id=${from}; UPDATE products SET is_active=0 WHERE id=${from};
+    UPDATE product_batches SET is_active=0 WHERE variant_product_id=${from}`)
+}
+
 /** Count of 910002 -> 3 (lower by 2), 910003 -> 12 with 2 damaged (raise: Set 10), 910004 -> 9 (raise by 4); 910001 matches. */
 const standard = () => submit([line(910001, 5, { checked: true }), line(910002, 3), line(910003, 12), line(910004, 9)])
 
@@ -705,6 +714,56 @@ async function main() {
     movement(910002, 'sale'); movement(910002, 'add'); movement(910002, 'in'); movement(910004, 'set'); movement(910002, 'remove', { reason: 'Inventory check approved: counted 3' })
     moveStock(910002, 4)
     assert.equal((await decide(kept.body.item.id, { requestId: 'n2-approve-006' })).status, 200); assert.equal(ordinary(910002), 2, '4 + (3 - 5)')
+  })
+
+  await check('N4: a merged or retired product is refused, not recorded as done; a shortage the stock could not take is recorded as clamped, never hidden', async () => {
+    // Merged before approval: the lowering line used to be planned against the retired product's empty stock, "settled" and approved while the survivor kept its stock.
+    reset(); setSwitches('on', 'on')
+    const made = await submit([line(910004, 3, { seenQuantity: 5 })], { requestId: 'n4-merged-0001' })
+    mergeInto(910004, 910005)
+    const merged = await decide(made.body.item.id, { requestId: 'n4-approve-001' })
+    assert.equal(merged.status, 409, JSON.stringify(merged.body)); assert.equal(merged.body.code, 'inventory_check_product_retired'); assert.deepEqual(merged.body.productIds, [910004])
+    assert.equal(ordinary(910005), 10, 'the survivor is untouched'); assert.equal(writer.calls.length, 0)
+    assert.equal(approvalRow().status, 'pending'); assert.equal(approvalRow().applying_request_id, null, 'nothing was claimed')
+    assert.equal(approvalRow().applied_json, '{}', 'and nothing was recorded as done')
+    assert.equal((await decide(made.body.item.id, { decision: 'reject', requestId: 'n4-reject-0001' })).status, 200, 'so it can still be rejected')
+    // A raise on a retired product is refused the same way, before the missing received date is looked for.
+    reset(); setSwitches('on', 'on')
+    const raised = await submit([line(910004, 9, { seenQuantity: 5 })], { requestId: 'n4-raised-0001' })
+    mergeInto(910004, 910005)
+    const raisedRefused = await decide(raised.body.item.id, { requestId: 'n4-approve-002' })
+    assert.equal(raisedRefused.status, 409); assert.equal(raisedRefused.body.code, 'inventory_check_product_retired')
+
+    // A product that is only inactive (not merged) is retired too; an active product is not.
+    reset(); setSwitches('on', 'on')
+    const inactive = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-inactive-001' })
+    moveStock(910002, 0); db.exec('UPDATE products SET is_active=0 WHERE id=910002') // a product holding stock cannot be deactivated, so it is emptied first
+    assert.equal((await decide(inactive.body.item.id, { requestId: 'n4-approve-003' })).body.code, 'inventory_check_product_retired')
+    db.exec('UPDATE products SET is_active=1 WHERE id=910002')
+    assert.equal((await decide(inactive.body.item.id, { requestId: 'n4-approve-003' })).status, 200, 'active again: the same approval goes through')
+
+    // The max(0, ...) clamp: a sale left less than the count found missing. Stock goes to 0 and the part that could not be removed is recorded on the line, in the event and in the answer.
+    reset(); setSwitches('on', 'on')
+    const clamped = await submit([line(910002, 0, { seenQuantity: 5 }), line(910003, 12, { seenQuantity: 7 })], { requestId: 'n4-clamped-001' }); moveStock(910002, 1)
+    const done = await decide(clamped.body.item.id, { requestId: 'n4-approve-004' })
+    assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(ordinary(910002), 0)
+    const stored = JSON.parse(approvalRow().applied_json).lines
+    assert.deepEqual({ before: stored['910002'].before, target: stored['910002'].target, clamped: stored['910002'].clamped, wanted: stored['910002'].wanted }, { before: 1, target: 0, clamped: true, wanted: -4 })
+    assert.equal(stored['910003'].clamped, undefined, 'a line the stock could take fully is not marked'); assert.equal(stored['910003'].wanted, undefined)
+    assert.equal(done.body.approval.applied_lines['910002'].clamped, true); assert.equal(done.body.approval.applied_lines['910002'].wanted, -4)
+    const event = db.prepare("SELECT after_json FROM inventory_check_events WHERE product_id=910002 AND request_id LIKE 'n4-approve-004-%'").get()
+    assert.equal(JSON.parse(event.after_json).clamped, true); assert.equal(JSON.parse(event.after_json).wanted, -4)
+    // Nothing left to remove at all (the sale took every unit): settled, and still not silent.
+    reset(); setSwitches('on', 'on')
+    const empty = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-empty-00001' }); moveStock(910002, 0)
+    assert.equal((await decide(empty.body.item.id, { requestId: 'n4-approve-005' })).status, 200)
+    const settled = JSON.parse(approvalRow().applied_json).lines['910002']
+    assert.deepEqual({ settled: settled.settled, clamped: settled.clamped, wanted: settled.wanted }, { settled: true, clamped: true, wanted: -2 })
+    // A count the stock took fully (live 4, saw 5, counted 3: 2) is not marked.
+    reset(); setSwitches('on', 'on')
+    const plain = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-plain-00001' }); moveStock(910002, 4)
+    assert.equal((await decide(plain.body.item.id, { requestId: 'n4-approve-006' })).status, 200)
+    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines['910002']).sort(), ['after', 'at', 'before', 'target'])
   })
 
   console.log(`${groups} groups passed`)

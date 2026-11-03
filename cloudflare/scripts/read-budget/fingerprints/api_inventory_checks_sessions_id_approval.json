@@ -53,8 +53,8 @@
    "B| WITH wanted AS (SELECT id,stock_quantity FROM products WHERE id IN (SELECT value FROM json_each(?1))), ordi"
   ],
   [
-   "a5705bebb09d",
-   "B| SELECT 'superseded' AS kind,CAST(j.key AS INTEGER) AS product_id FROM inventory_check_approvals a, json_eac"
+   "3dfb4686d0ed",
+   "B| SELECT 'retired' AS kind,id AS product_id FROM products WHERE id IN (SELECT value FROM json_each(?1)) AND +"
   ],
   [
    "144f554bef20",

@@ -125,7 +125,7 @@ function projectObservation(actor: Actor, row: ItemRow, ownSession: boolean, cur
       baseline: stockProjection(parse(row.baseline_json)), ...(current ? { current_stock: stockProjection(current) } : {}) } : {}) }
 }
 /** What a submitted count's approval looks like to a viewer who may see stock (the approval row exists only for counts that differ, so it is withheld from everyone else). */
-export type ApprovalAppliedLine = { before: number; target: number; after: number; at: string }
+export type ApprovalAppliedLine = { before: number; target: number; after: number; at: string; settled?: true; clamped?: true; wanted?: number }
 export type InventoryCheckApproval = { status: 'pending' | 'approved' | 'rejected'; lines: number; applied: number; submitted_at: string; can_approve: boolean;
   decided_at?: string; decision_note?: string | null; decided_by_name?: string | null; applied_lines?: Record<string, ApprovalAppliedLine>;
   /** Stock may already have moved for this approval: it can no longer be rejected, and only the approver who started it continues it, with the same request id. */

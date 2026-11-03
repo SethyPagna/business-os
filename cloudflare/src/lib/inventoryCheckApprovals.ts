@@ -34,12 +34,14 @@ export type ApprovalStockWriter = (lines: StockInCommitLine[]) => Promise<StockI
 export type ApprovalDecided = (decided: { decision: 'approve' | 'reject'; sessionId: string; note: string | null }) => Promise<void>
 type ItemFacts = { product_id: number; baseline_quantity: number | null; counted_quantity: number | null; state: 'unstarted' | 'done' | 'issue'; reason: string | null; revision: number }
 /** What one line is sent with, stored before the write so a repeat is identical. */
-type Plan = { before: number; target: number; counted: number; damaged: number; lot?: number }
+type Plan = { before: number; target: number; counted: number; damaged: number; lot?: number; clamped?: true; wanted?: number }
 type Open = { item: ItemFacts; plan: Plan }
 type EngineRow = ApprovalRow & { plan_json: string }
 
-/** The ordinary stock a count leaves: the stock of now, moved by what the count found against what the counter saw; never below zero. */
-export const approvalTarget = (live: number, counted: number, seen: number): number => Math.max(0, live + counted - seen)
+/** The ordinary stock a count leaves: the stock of now, moved by what the count found against what the counter saw. This is the figure WANTED; it can be below zero. */
+export const approvalWanted = (live: number, counted: number, seen: number): number => live + counted - seen
+/** What is applied: the figure wanted, never below zero. A plan records when the floor held it back (clamped, with the figure wanted), so a shortage the stock could not take is never silent. */
+export const approvalTarget = (live: number, counted: number, seen: number): number => Math.max(0, approvalWanted(live, counted, seen))
 const whole = (value: number): boolean => Math.abs(value - Math.round(value)) <= EPSILON
 const settled = (plan: Plan): boolean => Math.abs(plan.before - plan.target) <= EPSILON
 
@@ -145,7 +147,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   }
 
   const nextApplied: Record<string, ApprovalAppliedLine & { settled?: true }> = { ...applied }
-  for (const entry of landed) nextApplied[String(entry.item.product_id)] = { before: entry.plan.before, target: entry.plan.target, after: entry.plan.target, at: now, ...(settled(entry.plan) ? { settled: true as const } : {}) }
+  for (const entry of landed) nextApplied[String(entry.item.product_id)] = { before: entry.plan.before, target: entry.plan.target, after: entry.plan.target, at: now, ...(settled(entry.plan) ? { settled: true as const } : {}), ...clampOf(entry.plan) }
   const landedIds = new Set(landed.map(entry => entry.item.product_id))
   const next = { ...base, stockKey, newApplied: JSON.stringify({ lines: nextApplied }), planAfter: plansOfTodo(todo.filter(entry => !landedIds.has(entry.item.product_id))) }
   const statements: Statement[] = [
@@ -159,7 +161,7 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
     statements.push(eventStatement(actor, { sessionId, productId, action: 'observe', key: `${stockKey}-${productId}`,
       hash: await inventoryCheckDigest(JSON.stringify({ action: 'approval-line', id: sessionId, productId, key: stockKey })),
       before: { state: item.state, counted_quantity: item.counted_quantity, reason: item.reason, revision: item.revision },
-      after: { state: 'done', counted_quantity: item.counted_quantity, reason: null, revision: flip ? item.revision + 1 : item.revision, approval: 'applied', stock_before: entry.plan.before, stock_after: entry.plan.target },
+      after: { state: 'done', counted_quantity: item.counted_quantity, reason: null, revision: flip ? item.revision + 1 : item.revision, approval: 'applied', stock_before: entry.plan.before, stock_after: entry.plan.target, ...clampOf(entry.plan) },
       result: { sessionRevision: session.revision, itemRevision: flip ? item.revision + 1 : item.revision }, now }))
   }
   statements.push({ sql: 'UPDATE inventory_check_sessions SET updated_at=@now WHERE id=@id', params: base })
@@ -175,6 +177,9 @@ export async function decideInventoryCheckApproval(db: D1Compat, principal: Inve
   if (finish) await announce(onDecided, { decision, sessionId, note })
   return await respond(db, actor, sessionId, landed.length, left, finish, failed)
 }
+
+/** A shortage the floor held back: the line says so (and what the count wanted), wherever it is recorded. */
+const clampOf = (plan: Plan): { clamped?: true; wanted?: number } => plan.clamped ? { clamped: true, wanted: plan.wanted } : {}
 
 /** An announcement never fails the decision it announces. */
 async function announce(onDecided: ApprovalDecided | undefined, decided: Parameters<ApprovalDecided>[0]): Promise<void> {
@@ -193,7 +198,7 @@ async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], bas
   } }, { branchId, productIds: ids })
   const stock = new Map(rows.map(row => [row.product_id, row]))
   const since = (kind: string): number[] => (facts?.results ?? []).filter(value => (value as { kind: string }).kind === kind).map(value => Number((value as { product_id: number }).product_id))
-  const superseded = since('superseded'), adjusted = since('adjusted')
+  const retired = since('retired'), superseded = since('superseded'), adjusted = since('adjusted')
   const inconsistent: number[] = [], unseen: number[] = [], belowDamaged: number[] = [], fractional: number[] = []
   const plans = new Map<string, Plan>()
   for (const item of lines) {
@@ -202,10 +207,11 @@ async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], bas
     const seen = baselines[id], counted = item.counted_quantity as number, damaged = row.recorded_damaged_quantity ?? 0
     if (seen === undefined) { unseen.push(item.product_id); continue }
     if (counted + EPSILON < damaged) { belowDamaged.push(item.product_id); continue }
-    const target = approvalTarget(row.recorded_ordinary_quantity, counted, seen)
+    const wanted = approvalWanted(row.recorded_ordinary_quantity, counted, seen), target = Math.max(0, wanted)
     if (!whole(target)) { fractional.push(item.product_id); continue }
-    plans.set(id, { before: row.recorded_ordinary_quantity, target: Math.round(target), counted, damaged })
+    plans.set(id, { before: row.recorded_ordinary_quantity, target: Math.round(target), counted, damaged, ...(wanted < -EPSILON ? { clamped: true as const, wanted } : {}) })
   }
+  if (retired.length) fail(409, 'inventory_check_product_retired', { productIds: retired })
   if (inconsistent.length) fail(409, 'inventory_check_stock_inconsistent', { productIds: inconsistent })
   if (unseen.length) fail(409, 'inventory_check_baseline_missing', { productIds: unseen })
   if (belowDamaged.length) fail(409, 'inventory_check_count_below_damaged', { productIds: belowDamaged })
@@ -237,7 +243,9 @@ async function planLines(db: D1Compat, branchId: number, lines: ItemFacts[], bas
  *    This approval's own writes are told by their reason and are not counted.
  */
 const sinceCountStatement = (branchId: number, productIds: number[], count: { sessionId: string; submittedAt: string }): Statement => ({
-  sql: `SELECT 'superseded' AS kind,CAST(j.key AS INTEGER) AS product_id FROM inventory_check_approvals a, json_each(a.applied_json,'$.lines') j
+  sql: `SELECT 'retired' AS kind,id AS product_id FROM products WHERE id IN (SELECT value FROM json_each(@ids)) AND +is_active=0
+    UNION
+    SELECT 'superseded',CAST(j.key AS INTEGER) FROM inventory_check_approvals a, json_each(a.applied_json,'$.lines') j
       WHERE a.branch_id=@branchId AND a.session_id<>@sessionId AND CAST(j.key AS INTEGER) IN (SELECT value FROM json_each(@ids)) AND json_extract(j.value,'$.at')>@submittedAt
     UNION
     SELECT 'adjusted',product_id FROM inventory_movements WHERE branch_id=@branchId AND product_id IN (SELECT value FROM json_each(@ids))
