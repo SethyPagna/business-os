@@ -7,6 +7,7 @@
 //   S3  lib/lowStockSettings        lowStockInflight, keyed by env (shared by every request of the isolate); read FIRST by S2
 //   S4  lib/coreDataInvariants      coreInvariantsPromise: the once-per-isolate check (unstamped builds)
 //   S5  lib/coreDataInvariants      buildGateEntry.promise: the once-per-build gate, awaited by EVERY /api request of a stamped build
+//   S6  lib/stockSession            sessionColumnCache: a WeakMap keyed by env.DB that kept the pending PRAGMA probe
 //
 // Probe C3, as in test-read-switches-cross-request-native.cjs, on the REAL Worker: request A starts the work and answers while it is still
 // pending (its D1 statements are slowed to 3 s, the work is never awaited); request B then asks for the same thing and must answer promptly.
@@ -27,6 +28,8 @@ import { loadDashboardStockOverview as __hgOverview } from './lib/dashboardStock
 import { loadLowStockConfig as __hgLowStock } from './lib/lowStockSettings'
 import { bumpVersion as __hgBump } from './lib/cache'
 import * as __hgCore from './lib/coreDataInvariants'
+import * as __hgStock from './lib/stockSession'
+import { getDb as __hgGetDb } from './lib/db'
 `
 const ANCHOR = 'installReviewAlerts()\n'
 const ROUTES = `
@@ -67,6 +70,13 @@ function __hgCounted(env: any, slowMs: number, pattern: RegExp) {
 }
 const __hgParam = (c: any, name: string) => new URL(c.req.url).searchParams.get(name)
 
+// The stock-session column probe is cached per env.DB, so a scenario keeps ONE env object across its requests (a real isolate has one) and
+// each scenario gets its own (a cold cache). The delay is carried by an AsyncLocalStorage value, so only the request that set it is slow.
+const __hgDelay = new __hgALS<number>()
+const __hgColumnEnvs: Record<string, any> = {}
+const __hgColumnEnv = (env: any, scenario: string) => __hgColumnEnvs[scenario] ??= { ...env, DB: __hgDb(env.DB, (sql) => (/pragma_table_info/.test(sql) ? (__hgDelay.getStore() ?? 0) : 0)) }
+const __hgProbeStatements = () => __hgSeen.filter((sql) => /pragma_table_info/.test(sql)).length
+
 app.get('/api/__hg/portal-fire', async (c) => {
   const started = __hgArm()
   void app.fetch(new Request(new URL('/api/portal/catalog/products/search?query=' + __hgParam(c, 'query'), c.req.url)), __hgSlowProducts(c.env), c.executionCtx).catch(() => {})
@@ -93,6 +103,20 @@ app.get('/api/__hg/lowstock-three', async (c) => {
   __hgSeen.length = 0
   const configs = await Promise.all([__hgLowStock(env), __hgLowStock(env), __hgLowStock(env)])
   return c.json({ settingsReads: __hgSettingsReads(), same: configs.every((config) => JSON.stringify(config) === JSON.stringify(configs[0])) })
+})
+
+app.get('/api/__hg/columns-fire', async (c) => {
+  const env = __hgColumnEnv(c.env, String(__hgParam(c, 'scenario')))
+  const started = __hgArm()
+  void __hgDelay.run(Number(__hgParam(c, 'slow') || 3000), () => (__hgStock as any).sessionColumns(env, __hgGetDb(env))).catch(() => {})
+  await Promise.race([started, __hgSleep(5000)])
+  return c.json({ fired: true })
+})
+app.get('/api/__hg/columns', async (c) => {
+  const env = __hgColumnEnv(c.env, String(__hgParam(c, 'scenario')))
+  const before = __hgProbeStatements()
+  const columns = await __hgDelay.run(Number(__hgParam(c, 'slow') || 0), () => (__hgStock as any).sessionColumns(env, __hgGetDb(env)))
+  return c.json({ products: columns.get('products')?.size ?? 0, probes: __hgProbeStatements() - before })
 })
 
 // The core-data checks. mode=once is the unstamped path (ensureCoreDataInvariantsOnce), mode=gate the stamped one; build= names the build so
@@ -197,6 +221,27 @@ async function main() {
       await wait(3200)
     })
 
+    // ---- S6: the stock-session column probe
+    await check('S6 guard: while request A probes the columns (slow, still alive), request B takes the finished map and probes nothing', async (t) => {
+      const a = get('/api/__hg/columns?scenario=guard&slow=400')
+      await wait(150)
+      const b = await get('/api/__hg/columns?scenario=guard')
+      const ra = await a
+      t.eq('A answered', ra.status, 200)
+      t.eq('B answered with the products columns, no probe of its own', { status: b.status, probes: json(b)?.probes, columns: json(b)?.products > 5 }, { status: 200, probes: 0, columns: true })
+    })
+    await check('S6 C3: request A starts the column probe and answers; request B answers within the wait plus its own probe, never hangs', async (t) => {
+      const a = await get('/api/__hg/columns-fire?scenario=c3')
+      t.eq('A answered', a.status, 200)
+      const b = await get('/api/__hg/columns?scenario=c3')
+      t.ok('B answers the columns', b.status === 200 && json(b)?.products > 5, b)
+      t.ok('B gave A the wait first (the marker is fresh)', b.ms >= 800, b.ms)
+      t.ok('B is not held by the 3 s probe of A', b.ms < 4500, b.ms)
+      t.eq('B probed for itself', json(b)?.probes, 1)
+      const next = await get('/api/__hg/columns?scenario=c3', { limitMs: 5000 })
+      t.ok('the next caller answers from the finished map', next.status === 200 && json(next)?.probes === 0 && next.ms < 1500, next)
+    })
+
     // ---- the core-data checks, last: on the old code a stranded check stops every later request of the isolate
     for (const [site, mode, label] of [['S4', 'once', 'once-per-isolate core-data check'], ['S5', 'gate', 'once-per-build core-data gate']]) {
       await check(`${site} guard: while request A runs the ${label} (slow, still alive), request B takes its finished result and reads nothing`, async (t) => {
@@ -228,7 +273,7 @@ async function main() {
   } finally {
     await world.dispose()
   }
-  finish('no pending work is shared across requests (portal build, Dashboard overview, low-stock config, core-data checks)')
+  finish('no pending work is shared across requests (portal build, Dashboard overview, low-stock config, stock-session columns, core-data checks)')
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
