@@ -401,6 +401,57 @@ async function main() {
     assert.equal(done.status, 200, JSON.stringify(done.body))
   })
 
+  await check('role matrix (PERM-UI): with the matching grant off the Worker refuses product Delete, bulk Delete, Add variant and Edit with 403 and no state change, and the same calls pass the gate for a role that holds them', async () => {
+    fresh()
+    const REASON = 'role matrix'
+    const statusOf = async (method, url, body) => {
+      const init = { method, headers: { 'Content-Type': 'application/json' } }
+      if (body !== undefined) init.body = JSON.stringify(body)
+      planTier.__resetPlanTierCacheForTests()
+      return (await app.request(url, init, { DB: {}, PLAN_TIER: state.tier }, { waitUntil: () => {}, passThroughOnException: () => {} })).status
+    }
+    const calls = {
+      remove: () => statusOf('DELETE', '/api/products/' + M1, { reason: REASON }),
+      bulkRemove: () => statusOf('POST', '/api/products/bulk-delete-jobs', { ids: [M1], reason: REASON }),
+      bulkCancel: () => statusOf('POST', '/api/products/bulk-delete-jobs/job-1/cancel'),
+      variant: () => statusOf('POST', '/api/products/variant', { name: 'Glow Serum 30ml Mini', selling_price_usd: 4 }),
+      // request() carries the raw D1 binding this harness adds, so a permitted edit really saves (200) instead of failing past the gate.
+      edit: async () => (await request('PUT', '/api/products/' + KEEP, { name: 'Glow Serum 30ml Edited', expected_updated_at: one('SELECT updated_at FROM products WHERE id = ?', KEEP).updated_at })).status,
+    }
+    // [label, who, the call the missing grant must stop]: a Manager seed (Products Full) with exactly one switch off, plus the Review tier.
+    const refused = [
+      ['products:delete off', asRole(61, 'manager', { 'products:delete': false }), 'remove'],
+      ['products:bulk_delete off (Delete still on)', asRole(62, 'manager', { 'products:bulk_delete': false }), 'bulkRemove'],
+      ['products:bulk_delete off, cancelling a job', asRole(62, 'manager', { 'products:bulk_delete': false }), 'bulkCancel'],
+      ['Review tier (bulk delete is Refused, never queued)', asRole(63, 'manager', { products: 'review' }), 'bulkRemove'],
+      ['products:variant off (Add still on)', asRole(64, 'manager', { 'products:variant': false }), 'variant'],
+      ['products:add off (Variant still on)', asRole(65, 'manager', { 'products:add': false }), 'variant'],
+      ['products:edit off', asRole(66, 'manager', { 'products:edit': false }), 'edit'],
+      ['the Employee default', EMPLOYEE_USER, 'bulkRemove'],
+      ['the Employee default', EMPLOYEE_USER, 'variant'],
+      ['the Employee default', EMPLOYEE_USER, 'remove'],
+      ['the Employee default with Edit switched off', asRole(67, 'employee', { 'products:edit': false }), 'edit'],
+    ]
+    for (const [label, who, call] of refused) {
+      state.user = who
+      const before = dump()
+      assert.equal(await calls[call](), 403, label + ': ' + call)
+      assert.equal(dump(), before, label + ': ' + call + ' left the database untouched')
+    }
+    // Discriminating: the identical calls are NOT stopped by the gate for a role that holds the grants, so the 403s above are the grants, not a broken route.
+    for (const [label, who, call] of [
+      ['Manager default', MANAGER_USER, 'remove'], ['administrator', ADMIN, 'bulkRemove'], ['administrator', ADMIN, 'bulkCancel'],
+      ['Manager default', MANAGER_USER, 'variant'],
+    ]) {
+      fresh()
+      state.user = who
+      assert.notEqual(await calls[call](), 403, label + ': ' + call + ' passes the permission gate')
+    }
+    fresh()
+    state.user = MANAGER_USER
+    assert.equal(await calls.edit(), 200, 'Manager default: edit saves')
+  })
+
   console.log(failed ? '\\n' + failed + ' check(s) failed' : '\\nall checks passed')
   process.exitCode = failed ? 1 : 0
 }
