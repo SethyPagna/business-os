@@ -9,6 +9,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
+import { actionsForKey } from '../src/utils/permissionActions.ts'
+import { effectivePermissions } from '../src/utils/permissions.ts'
 import { ROLES, accessFor, deriveRole, type RoleDef } from '../e2e/support/roleMatrix.ts'
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -90,6 +92,20 @@ test('PRODUCTS: the bulk toolbar draws Delete only with products:delete AND prod
   assert.ok(productsSource.includes("const canBulkDeleteProducts = canRemoveProduct && can('products', 'bulk_delete')"))
   assert.equal(productsSource.split('onClick={handleBulkDelete}').length - 1, 1, 'one bulk Delete button')
   assert.match(productsSource, /\{hasSelected && canBulkDeleteProducts \? \(\s*<button[^>]*onClick=\{handleBulkDelete\}/)
+})
+
+test('PRODUCTS: Add variant (the detail button and the group row menu) needs products:variant, which itself requires products:add', () => {
+  assert.ok(productsSource.includes("const canAddVariant = can('products', 'variant')"))
+  assert.ok(productsSource.includes('onAddVariant={canAddVariant ? () =>'))
+  assert.ok(productsSource.includes("...(canAddVariant ? [{ label: tr('add_variant', 'Add variant')"), 'the group row menu offers it behind the same grant')
+  assert.equal(productsSource.split('setVariantModal(').length - 1, 4, 'setVariantModal is called by the two openers (detail button, group row menu) and the two closers: a new opener must be gated and listed here')
+  // The grant table is what makes one can() enough: variant requires Add.
+  const variant = actionsForKey('products').find((action) => action.key === 'variant')
+  assert.deepEqual(variant?.requires?.map((requirement) => requirement.key), ['products:add'])
+  const add = (patch: Record<string, boolean>) => effectivePermissions({ role_code: 'manager', permissions: { products: true, ...patch } }).can('products', 'variant')
+  assert.equal(add({}), true)
+  assert.equal(add({ 'products:variant': false }), false, 'Variant off, Add on: the old gate (Add alone) offered it')
+  assert.equal(add({ 'products:add': false }), false, 'Add off, Variant on: the Worker needs both')
 })
 
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {

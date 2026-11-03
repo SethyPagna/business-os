@@ -394,10 +394,8 @@ for (const role of [...ROLES.filter((entry) => { const access = accessFor(entry)
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantVariant = grant(access, 'products', 'variant')
-    // APP BUG, kept as a case: Products.tsx:5829 passes onAddVariant when canAddProduct (products:add) alone holds. The grant table has a
-    // separate products:variant row (utils/permissionActions.ts, "requires products:add") that no UI source reads, so a role with Add
-    // but not Variant is offered the button and the Worker (routes/products.ts POST /variant) refuses it.
-    knownDefect(grant(access, 'products', 'add') && !wantVariant, 'Products.tsx:5829 gates Add variant on products:add alone; products:variant is never read by the UI')
+    // FIXED (PERM-UI, 3 Nov): onAddVariant was passed when products:add alone held. The grant table has a separate products:variant row
+    // ("requires products:add") that no UI source read, so a role with Add but not Variant was offered a button the Worker refuses.
     try {
       const slot = await open(page, '/products', 'products')
       await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()
