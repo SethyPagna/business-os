@@ -254,6 +254,34 @@ async function main() {
       console.log('  D1 calls per step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
     })
 
+    await check('N1 on the real Worker: when the approver who started an approval is gone, another approver takes it over from the stock receipts and finishes it: the stock changes once, inside the Free call limit', async () => {
+      const pid = rows[7].pid, start = await stock(pid), total = start.ordinary + start.damaged
+      const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: pid, countedQuantity: total - 2, seenQuantity: total, checked: false }] })
+      assert.equal(made.status, 201, made.text.slice(0, 300))
+      const id = made.json.item.id, url = `/api/inventory-checks/sessions/${id}/approval`, request = key('approve')
+      // The lead starts it and the removal lands, but the answer is lost before the approval records it.
+      db.exec("CREATE TRIGGER test_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'test_lost_answer'); END")
+      try { const lost = await as('lead', 'POST', url, { decision: 'approve', requestId: request }); assert.equal(lost.status, 503, lost.text.slice(0, 300)) } finally { db.exec('DROP TRIGGER IF EXISTS test_lost_answer') }
+      assert.equal((await stock(pid)).ordinary, start.ordinary - 2, 'the removal did land')
+      const claimer = (await world.all('SELECT applying_by FROM inventory_check_approvals WHERE session_id=?', id))[0].applying_by
+      await db.prepare('UPDATE users SET is_active=0 WHERE id=?').bind(claimer).run()
+      try {
+        const takeKey = key('take'), calls = []
+        const take = await as('admin', 'POST', url, { decision: 'approve', requestId: takeKey })
+        assert.equal(take.status, 200, take.text.slice(0, 300)); assert.deepEqual([take.json.takeover, take.json.applied, take.json.remaining, take.json.done], [true, 1, 0, false]); calls.push(take.calls)
+        assert.equal((await stock(pid)).ordinary, start.ordinary - 2, 'a takeover moves no stock')
+        const finished = await as('admin', 'POST', url, { decision: 'approve', requestId: takeKey })
+        assert.equal(finished.status, 200, finished.text.slice(0, 300)); assert.deepEqual([finished.json.done, finished.json.approval.status], [true, 'approved']); calls.push(finished.calls)
+        const after = await stock(pid)
+        assert.equal(after.ordinary, start.ordinary - 2, 'one shortage, applied once'); assert.equal(after.lots, after.ordinary); assert.equal(after.cache, start.cache - 2)
+        assert.equal((await world.all("SELECT COUNT(*) AS n FROM inventory_movements WHERE product_id=? AND reason LIKE '%Inventory check approved%'", pid))[0].n, 1, 'exactly one movement')
+        const row = (await world.all('SELECT status,takeovers,applying_by FROM inventory_check_approvals WHERE session_id=?', id))[0]
+        assert.deepEqual([row.status, row.takeovers, row.applying_by !== claimer], ['approved', 1, true])
+        assert.ok(calls.every(count => count <= FREE_CALL_LIMIT), `D1 calls per step: ${calls.join(', ')}`)
+        console.log('  D1 calls per takeover step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
+      } finally { await db.prepare('UPDATE users SET is_active=1 WHERE id=?').bind(claimer).run() }
+    })
+
     await check('Fix stock is held on both real stock write routes while its count waits for approval, opens no receipt, and goes through once the count is rejected', async () => {
       const pid = rows[6].pid, start = await stock(pid), total = start.ordinary + start.damaged
       const made = await as('counter', 'POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submit'), lines: [{ productId: pid, countedQuantity: total - 1, seenQuantity: total, checked: false }] })

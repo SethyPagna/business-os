@@ -80,8 +80,8 @@ ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 4 && (
 ok(inventoryWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'Inventory event and mutation share the authority-guarded transaction')
 // The counts approval (6.0.1045) records through its own writer: every decision and every applied line commits its immutable event with the approval row, under the same authority guard.
 const approvalWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckApprovals.ts'), 'utf8')
-ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 3 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 4,
-  'the approval writer includes its line, approve and reject events in the atomic record (the claim and its release are the other two records: they carry no event because they change no count)')
+ok((approvalWriter.match(/eventStatement\(actor, \{/g) || []).length === 5 && (approvalWriter.match(/await record\(db, actor,/g) || []).length === 6,
+  'the approval writer includes its line, approve, reject, takeover and close events in the atomic record (the claim and its release are the other two records: they carry no event because they change no count)')
 ok(approvalWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'the approval event and decision share the authority-guarded transaction')
 ok(/status='pending' AND applied_json=@oldApplied/.test(approvalWriter) && /inventory_check_conflict/.test(approvalWriter), 'a decision applies only to the approval state it read')
 const inventoryMigration = fs.readFileSync(path.join(routesDir, '../../migrations/0259_inventory_check_sessions.sql'), 'utf8')

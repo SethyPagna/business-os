@@ -94,7 +94,7 @@ import { executeStockTransaction, stockTransactionStatementCount, StockTransacti
 const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 
 /** A claim younger than this is treated as a request that is still running. */
-const STOCK_MUTATION_STALE_SECONDS = 120
+export const STOCK_MUTATION_STALE_SECONDS = 120
 
 type StockMutationKind = 'adjust' | 'receive'
 

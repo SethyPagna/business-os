@@ -6,7 +6,9 @@ import { getDb } from '../lib/db'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { readSwitch } from '../lib/readSwitches'
 import type { Env } from '../index'
-import { decideInventoryCheckApproval } from '../lib/inventoryCheckApprovals'
+import { decideInventoryCheckApproval, type ApprovalDecided } from '../lib/inventoryCheckApprovals'
+import { getPlanLimits } from '../lib/planTier'
+import { STOCK_MUTATION_STALE_SECONDS } from '../lib/stockMutationReceipt'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
@@ -52,14 +54,19 @@ app.post('/submissions', async c => {
   return c.json(result, result.created ? 201 : 200)
 })
 app.get('/sessions/:id', async c => c.json(await getInventoryCheckSession(getDb(c.env), await principal(c), c.req.param('id'), { approvals: await fixStockOn(c) })))
-// Approve or reject a submitted count (ic_fix_stock). Approving repeats with the same requestId until it answers done: true (one request applies the plan's lines per request).
+// Approve, reject or close a submitted count (ic_fix_stock). Approving repeats with the same requestId until it answers done: true (one request applies the plan's lines per request).
+// Closing ends an approval that cannot be finished: no stock moves, the lines applied stay applied, the rest are recorded as not applied.
 app.post('/sessions/:id/approval', async c => {
   if (!await fixStockOn(c)) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
   // The stock writer is the Set sessions' own commit; it is loaded only when a decision reaches stock, so every refusal and a rejection never touch it.
   const writeStock = async (lines: StockInCommitLine[]) => (await import('./stockInCommit')).runStockInCommit(c as unknown as InventoryContext, lines)
-  const onDecided = ({ decision, sessionId, note }: { decision: 'approve' | 'reject'; sessionId: string; note: string | null }) =>
-    announceCount(c.env, c.get('user'), { kind: decision === 'approve' ? 'approved' : 'rejected', sessionId, reason: decision === 'reject' ? note : null })
-  return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, onDecided))
+  // A close that applied nothing reads as a rejection (the reason is its note or "Closed"); one that applied something reads as an approval.
+  const onDecided: ApprovalDecided = ({ decision, sessionId, note, applied }) => {
+    const rejected = decision === 'reject' || (decision === 'close' && !applied)
+    return announceCount(c.env, c.get('user'), { kind: rejected ? 'rejected' : 'approved', sessionId, reason: rejected ? note ?? (decision === 'close' ? 'Closed' : null) : null })
+  }
+  const limits = { takeoverSeconds: getPlanLimits(c.env).inventoryCheckApprovalTakeoverSeconds, receiptStaleSeconds: STOCK_MUTATION_STALE_SECONDS }
+  return c.json(await decideInventoryCheckApproval(getDb(c.env), await principal(c), c.req.param('id'), await c.req.json().catch(()=>null), writeStock, limits, onDecided))
 })
 app.get('/sessions/:id/history', async c => c.json(await inventoryCheckSessionHistory(getDb(c.env), await principal(c), c.req.param('id'), c.req.query())))
 app.patch('/sessions/:id/items/:productId', async c => {

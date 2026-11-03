@@ -20,7 +20,8 @@
 -- Immutable once decided, like the history it belongs to:
 --   * the identity columns can never change; a decided row (approved or rejected) can never change again;
 --   * a pending row may only gain applied_json entries (the per-product results of a partly applied approval), take or release its claim, or be decided;
---   * a claimed row (stock may already have moved) can never be rejected, and its claim never changes hands; it is released only while nothing is planned or applied;
+--   * a claimed row (stock may already have moved) can never be REJECTED, only closed (closed_json: no stock moves, the lines applied stay applied and the rest are recorded as not applied);
+--   * its claim changes hands only by a counted takeover (takeovers + 1, planned afresh), and is released only while nothing is planned or applied;
 --   * rows are never deleted, except while the restore maintenance flag is set (the same carve-out as 0268).
 --
 -- RECOVERY: schema only, nothing to restore.
@@ -47,11 +48,15 @@ CREATE TABLE inventory_check_approvals (
   baselines_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(baselines_json) AND json_type(baselines_json)='object'),
   applying_request_id TEXT,
   applying_by INTEGER,
+  applying_at TEXT,
+  takeovers INTEGER NOT NULL DEFAULT 0 CHECK(takeovers>=0),
+  closed_json TEXT CHECK(closed_json IS NULL OR (json_valid(closed_json) AND json_type(closed_json)='object')),
   plan_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(plan_json) AND json_type(plan_json)='object'),
   FOREIGN KEY(session_id) REFERENCES inventory_check_sessions(id),
   CHECK((status='pending' AND decided_by IS NULL AND decided_at IS NULL AND decision_request_id IS NULL)
     OR (status<>'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL AND decision_request_id IS NOT NULL)),
-  CHECK((applying_request_id IS NULL) = (applying_by IS NULL))
+  CHECK((applying_request_id IS NULL) = (applying_by IS NULL) AND (applying_request_id IS NULL) = (applying_at IS NULL)),
+  CHECK(closed_json IS NULL OR status<>'pending')
 );
 CREATE INDEX inventory_check_approvals_pending ON inventory_check_approvals(organization_id, status, submitted_at DESC);
 
@@ -62,9 +67,11 @@ CREATE TRIGGER inventory_check_approvals_decided BEFORE UPDATE ON inventory_chec
 WHEN OLD.status <> 'pending'
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 CREATE TRIGGER inventory_check_approvals_claim BEFORE UPDATE ON inventory_check_approvals
-WHEN OLD.applying_request_id IS NOT NULL AND (NEW.status = 'rejected'
-  OR NOT ((NEW.applying_request_id IS OLD.applying_request_id AND NEW.applying_by IS OLD.applying_by)
-    OR (NEW.applying_request_id IS NULL AND NEW.plan_json = '{}' AND json_extract(NEW.applied_json,'$.lines') IS NULL)))
+WHEN (NEW.takeovers IS NOT OLD.takeovers AND NOT (NEW.takeovers = OLD.takeovers + 1 AND OLD.applying_request_id IS NOT NULL AND NEW.applying_by IS NOT OLD.applying_by))
+  OR (OLD.applying_request_id IS NOT NULL AND ((NEW.status = 'rejected' AND NEW.closed_json IS NULL)
+    OR NOT ((NEW.applying_request_id IS OLD.applying_request_id AND NEW.applying_by IS OLD.applying_by)
+      OR (NEW.applying_request_id IS NULL AND NEW.plan_json = '{}' AND json_extract(NEW.applied_json,'$.lines') IS NULL)
+      OR (NEW.status = 'pending' AND NEW.applying_request_id IS NOT NULL AND NEW.applying_by IS NOT OLD.applying_by AND NEW.takeovers = OLD.takeovers + 1 AND NEW.plan_json = '{}'))))
 BEGIN SELECT RAISE(ABORT,'inventory_check_approval_immutable'); END;
 CREATE TRIGGER inventory_check_approvals_no_delete BEFORE DELETE ON inventory_check_approvals
 WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')

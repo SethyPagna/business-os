@@ -704,8 +704,19 @@ try {
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.equal(decisions[claimedBefore].input.requestId, 'inventory_check_approval_claimed01', 'the repeat carries the claimed id, not a new one')
   sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
-  assert.equal(approvalAction('approve'), undefined, 'another approver cannot continue'); assert.equal(approvalAction('reject'), undefined)
+  assert.ok(approvalAction('approve'), 'another approver may try: the server takes the approval over when its approver is gone'); assert.equal(approvalAction('reject'), undefined); assert.ok(approvalAction('close'), 'or close it')
   assert.ok(approving.text().includes('Being applied by another approver'))
+  // A takeover moves no stock by design: the flow goes on with the repeat, under one request id, and finishes.
+  const takeBefore = decisions.length
+  decideScript = [{ ...answerOf(0, 2, { applying: true, applying_request_id: 'inventory_check_approval_take0001' }), takeover: true }, answerOf(2, 0)]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.equal(decisions.length, takeBefore + 2, 'the takeover request and the repeat'); assert.equal(decisions[takeBefore].input.requestId, decisions[takeBefore + 1].input.requestId)
+  assert.deepEqual(notices.at(-1), ['Counts approved. Stock updated.', 'success'])
+  // While the other approver is still active the server refuses, and the person is told what to do.
+  sessionApproval = { ...pendingApproval, applying: true }; await approving.click(approving.button('Leave session')); await openSession(approving)
+  decideScript = [Object.assign(new Error('busy'), { status: 409, code: 'inventory_check_approval_in_progress', outcome: 'not_dispatched' })]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.ok(approving.text().includes('Another approver is applying this count. If they cannot continue, close the remaining lines.'), 'and what to do')
 
   // An answer that never came keeps the request id: the next Approve repeats it without a second review
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)
@@ -723,6 +734,31 @@ try {
   decideScript = [Object.assign(new Error('records'), { status: 409, code: 'inventory_check_stock_inconsistent', outcome: 'not_dispatched' })]
   await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
   assert.ok(approving.text().includes('stock records do not add up'), 'a known refusal has its own sentence')
+
+  // A count that cannot be finished: the lines that can be applied are, the refused one is named on its row, and Close ends the rest without moving stock under its own request id
+  const started = { applying: true, applying_request_id: 'inventory_check_approval_claimed01' }
+  sessionApproval = { ...pendingApproval, ...started, applied: 1, applied_lines: { 12: { before: 7, target: 10, after: 10, at: '2026-10-19T02:40:00Z' } } }; await approving.click(approving.button('Leave session')); await openSession(approving)
+  const refusedBefore = decisions.length
+  decideScript = [{ ...answerOf(1, 1, started), refused: [{ productId: 13, code: 'inventory_check_count_below_damaged' }] }]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.equal(decisions.length, refusedBefore + 1, 'nothing but refused lines is left, so the flow stops instead of asking again')
+  assert.ok(approving.text().includes('Some lines cannot be applied'), 'said once'); assert.ok(approving.text().includes('close the remaining lines instead'), 'and the way out, because part of it was already applied')
+  assert.ok(approving.findAll(node => node.getAttribute('data-approval-refused') === '13')[0]?.textContent.includes('Cannot apply: Count below damaged units'), 'the reason is on the line it belongs to')
+  decideScript = [Object.assign(new Error('refused'), { status: 409, code: 'inventory_check_count_below_damaged', outcome: 'not_dispatched', refused: [{ productId: 13, code: 'inventory_check_count_below_damaged' }] })]
+  await approving.click(approvalAction('approve')); await confirmInDialog(approving, 'Approve')
+  assert.ok(approving.text().includes('less than the product') && approving.text().includes('close the remaining lines instead'), 'the same refusal as an answer carries the hint too')
+  assert.ok(approving.findAll(node => node.getAttribute('data-approval-refused') === '13').length === 1, 'and the line is named again')
+  const closeBefore = decisions.length
+  decideScript = [{ ...answerOf(0, 0, { closed: { lines: { 13: 'inventory_check_count_below_damaged' } }, applied: 1 }), done: true }]
+  await approving.click(approvalAction('close'))
+  assert.ok(approving.text().includes('Close the remaining lines?'), 'closing shows the shared review first')
+  assert.equal(decisions.length, closeBefore, 'nothing is sent before it is confirmed')
+  await confirmInDialog(approving, 'Close')
+  assert.equal(decisions.length, closeBefore + 1); assert.equal(decisions[closeBefore].input.decision, 'close'); assert.notEqual(decisions[closeBefore].input.requestId, 'inventory_check_approval_claimed01', 'a close is its own decision with its own request id')
+  assert.deepEqual(notices.at(-1), ['Count closed. Closing did not change stock.', 'success'])
+  assert.equal(approving.find(node => node.getAttribute('data-approval-status') !== null, 'closed tag').getAttribute('data-approval-status'), 'closed')
+  assert.ok(approving.findAll(node => node.getAttribute('data-approval-not-applied') === '13')[0]?.textContent.includes('Not applied: Count below damaged units'), 'the closed count says what was not applied and why')
+  assert.equal(approvalAction('approve'), undefined, 'a closed count has no actions'); assert.equal(approvalAction('close'), undefined)
 
   // Reject
   sessionApproval = pendingApproval; await approving.click(approving.button('Leave session')); await openSession(approving)

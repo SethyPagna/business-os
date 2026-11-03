@@ -1,9 +1,10 @@
+import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InventoryCheckApproval, InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
-import { ApprovalChip } from './InventoryCheckSessionsList.tsx'
+import { ApprovalChip, approvalChipStatus } from './InventoryCheckSessionsList.tsx'
 
 type Translator = (key: string) => string | null | undefined
 const label = (t: Translator, key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -48,39 +49,62 @@ export function baselineOf(item: InventoryCheckSessionItem, approval: InventoryC
   return finite(recorded) ? recorded : item.baseline_quantity
 }
 
+const REASONS: Record<string, { key: string; fallback: string }> = {
+  inventory_check_product_retired: { key: 'inventory_check_reason_product_retired', fallback: 'Product merged or removed' },
+  inventory_check_stock_inconsistent: { key: 'inventory_check_reason_stock_inconsistent', fallback: 'Stock records do not add up' },
+  inventory_check_baseline_missing: { key: 'inventory_check_reason_baseline_missing', fallback: 'No starting stock recorded' },
+  inventory_check_count_below_damaged: { key: 'inventory_check_reason_count_below_damaged', fallback: 'Count below damaged units' },
+  inventory_check_target_not_whole: { key: 'inventory_check_reason_target_not_whole', fallback: 'Not a whole number' },
+  inventory_check_count_superseded: { key: 'inventory_check_reason_count_superseded', fallback: 'Another count covered it' },
+  inventory_check_stock_adjusted: { key: 'inventory_check_reason_stock_adjusted', fallback: 'Stock changed by hand after the count' },
+  inventory_check_no_lot: { key: 'inventory_check_reason_no_lot', fallback: 'No received date to add to' },
+}
+/** Why a line is not applied, in a few words: its refusal code, or the plain fact that nobody applied it. */
+export function reasonLabel(t: Translator, code: string): string {
+  const reason = Object.hasOwn(REASONS, code) ? REASONS[code] : undefined
+  return reason ? label(t, reason.key, reason.fallback) : label(t, 'inventory_check_approval_not_applied', 'Not applied')
+}
+
 export type InventoryCheckApprovalPanelProps = {
   approval: InventoryCheckApproval
   items: readonly InventoryCheckSessionItem[]
   /** The viewer holds the extra, can adjust stock and the page can save. */
   canDecide: boolean
+  /** The viewer holds the extra and the page can save: closing moves no stock, so adjusting stock is not needed. */
+  canClose?: boolean
   busy: boolean
+  /** Lines the last request could not apply, by product id, each with its refusal code. */
+  refused?: Readonly<Record<string, string>>
   onApprove: () => void
   onReject: () => void
+  onClose?: () => void
   t: Translator
 }
 
 /**
  * The decision on a submitted count, shown above the session's rows: where it stands, what approving will leave per product
  * (the stock of now moved by what the count found) and, for someone who may decide, Approve and Reject. Once stock may have moved for it
- * there is no Reject, and only the approver who started it can finish it.
+ * there is no Reject: it is finished by approving again (another approver takes it over when the one who started it is gone) or ended by Close,
+ * which moves no stock, keeps the lines already applied and records the rest as not applied with the reason.
  */
-export default function InventoryCheckApprovalPanel({ approval, items, canDecide, busy, onApprove, onReject, t }: InventoryCheckApprovalPanelProps) {
+export default function InventoryCheckApprovalPanel({ approval, items, canDecide, canClose = false, busy, refused, onApprove, onReject, onClose, t }: InventoryCheckApprovalPanelProps) {
   const lines = approvalLines(items)
   const pending = approval.status === 'pending'
   const who = approval.decided_by_name ? `@${approval.decided_by_name}` : ''
   const when = approval.decided_at ? fmtDateTime24(approval.decided_at) : ''
-  const approve = label(t, 'inventory_check_approve', 'Approve'), reject = label(t, 'inventory_check_reject', 'Reject')
+  const approve = label(t, 'inventory_check_approve', 'Approve'), reject = label(t, 'inventory_check_reject', 'Reject'), close = label(t, 'inventory_check_close', 'Close')
   const claimedByAnother = pending && approval.applying === true && !approval.applying_request_id
+  const closable = pending && (approval.applying === true || approval.applied > 0)
   return <section data-inventory-check-approval={approval.status} aria-label={label(t, 'inventory_check_approval', 'Count approval')}
     className="min-w-0 rounded-lg border border-gray-200 bg-white p-2 text-xs dark:border-zinc-700 dark:bg-zinc-900">
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-      <ApprovalChip status={approval.status} t={t} />
+      <ApprovalChip status={approvalChipStatus(approval)} t={t} />
       <span className="tabular-nums">{label(t, 'inventory_check_differences', 'Differences')} {approval.lines}</span>
       {pending && approval.applied > 0 ? <span data-approval-progress className="tabular-nums text-gray-600 dark:text-gray-300">{approval.applied}/{approval.lines}</span> : null}
       {who || when ? <span data-approval-decided className="text-gray-600 dark:text-gray-300">{[who, when].filter(Boolean).join(' · ')}</span> : null}
       <span className="min-w-0 flex-1" />
       {claimedByAnother ? <span data-approval-in-progress className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_in_progress', 'Being applied by another approver')}</span> : null}
-      {canDecide && pending && !claimedByAnother ? <>
+      {canDecide && pending ? <>
         <button type="button" data-approval-action="approve" className="btn-primary inline-flex min-h-10 shrink-0 items-center gap-1 px-3 text-xs disabled:opacity-60" disabled={busy} onClick={onApprove}>
           <Check className="h-4 w-4" aria-hidden="true" />{approve}
         </button>
@@ -88,6 +112,9 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
           <X className="h-5 w-5" aria-hidden="true" />
         </button>}
       </> : null}
+      {closable && (canClose || canDecide) && onClose ? <button type="button" data-approval-action="close" className={`${toolbarIconButtonClassName} disabled:opacity-50`} aria-label={close} title={close} disabled={busy} onClick={onClose}>
+        <Ban className="h-5 w-5" aria-hidden="true" />
+      </button> : null}
     </div>
     {lines.length ? <ul className="mt-1 min-w-0 divide-y divide-gray-100 dark:divide-zinc-800" data-approval-lines>
       {lines.map(item => {
@@ -95,12 +122,15 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         const done = approval.applied_lines?.[id]
         const target = done ? done.after : approvalResult(item, approval)
         const short = approvalShortfall(item, approval)
+        const notApplied = approval.closed?.lines[id], cannot = pending ? refused?.[id] : undefined
         return <li key={id} data-approval-line={id} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
           <span className="tabular-nums">{label(t, 'inventory_check_approval_counted', 'Counted')} {item.counted_quantity}</span>
           <span data-approval-baseline={id} className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_system', 'System')} {baselineOf(item, approval)}</span>
           {pending && finite(item.current_quantity) ? <span className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_now', 'Now')} {item.current_quantity}</span> : null}
           {short === null ? null : <span data-approval-clamped={id} className="tabular-nums text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_clamped', 'Stock ran out, short by')} {short}</span>}
+          {notApplied ? <span data-approval-not-applied={id} className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_not_applied', 'Not applied')}: {reasonLabel(t, notApplied)}</span> : null}
+          {cannot ? <span data-approval-refused={id} className="text-red-700 dark:text-red-300">{label(t, 'inventory_check_approval_cannot_apply', 'Cannot apply')}: {reasonLabel(t, cannot)}</span> : null}
           {target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
         </li>
       })}

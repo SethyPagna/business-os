@@ -66,8 +66,12 @@ cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { r
 const productsRoute = load(path.join(__dirname, '../src/routes/inventoryCheckProducts.ts')).default
 const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.ts')).default
 const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
+const { __resetPlanTierCacheForTests } = load(path.join(__dirname, '../src/lib/planTier.ts'))
 
-let db, failApprovalRecord = false, beforeBatch = null
+let db, failApprovalRecord = false, beforeBatch = null, planEnv = {}
+// The Telegram alerts the route announces: a spy on the same global hook the Worker installs.
+const alerts = []
+globalThis[Symbol.for('business-os.review-alert.v1')] = { announce: async (_env, event) => { alerts.push(event) }, nameBeforeChange: async () => null }
 function binding() {
   function prepare(sql) {
     return { sql, values: [], bind(...values) { return { ...this, values } }, async all() {
@@ -109,7 +113,7 @@ function reset() {
   }
   // 910003 carries two damaged units: its stock now is 5 ordinary + 2 damaged = 7 (damaged units are not part of Set).
   db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910003,1,2)").run()
-  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null
+  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null; planEnv = {}; __resetPlanTierCacheForTests(); alerts.length = 0
 }
 const setSwitches = (simple, fix) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
@@ -121,7 +125,7 @@ const setSwitches = (simple, fix) => {
 }
 async function send(route, method, url, body, actor = ADMIN) {
   const tasks = []
-  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding() }, { waitUntil: task => tasks.push(task) })
+  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), ...planEnv }, { waitUntil: task => tasks.push(task) })
   await Promise.allSettled(tasks)
   return { status: response.status, body: await response.json() }
 }
@@ -136,7 +140,8 @@ const ordinary = id => db.prepare('SELECT quantity FROM branch_stock WHERE produ
 const moveStock = (id, quantity) => { for (const sql of [`UPDATE branch_stock SET quantity=${quantity} WHERE product_id=${id} AND branch_id=1`, `UPDATE branch_batch_stock SET quantity=${quantity} WHERE batch_id=${id} AND branch_id=1`, `UPDATE products SET stock_quantity=${quantity} WHERE id=${id}`]) db.exec(sql) }
 const line = (productId, countedQuantity, extra = {}) => ({ productId, countedQuantity, ...extra })
 let groups = 0
-const check = async (name, run) => { await run(); groups++; console.log(`PASS ${name}`) }
+// ONLY=<text> runs the groups whose name contains it (diagnosis only; the gate runs them all).
+const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; await run(); groups++; console.log(`PASS ${name}`) }
 /** A pending approval for one product created behind the API's back, as data from before a rule existed (or a racing submission) would be. */
 const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5 } = {}) => {
   db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,1,1,?,'','closed',0,'{\"membership\":\"submission\"}',?,?,?)").run(sessionId, COUNTER, submittedAt, submittedAt, submittedAt)
@@ -146,6 +151,25 @@ const injectPending = (sessionId, productId, { submittedAt = new Date().toISOStr
 /** A stock movement of the products ledger (the real writers record one for every change); the double writer records none, so a test adds the ones it needs. */
 const movement = (productId, type, { reason = 'test', secondsAfterNow = 1 } = {}) => db.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,reason,user_id,created_at) VALUES(?,?,1,'One',?,1,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
   .run(productId, 'Product', type, reason, ADMIN, `+${secondsAfterNow} seconds`)
+
+/** An approval claimed by ADMIN whose answer was lost: the stock write landed (the writer double keeps its receipt) but the approval never recorded it. Returns the session id. */
+const strandedClaim = async (requestId, lines = [line(910002, 3, { seenQuantity: 5 })]) => {
+  const made = await submit(lines, { requestId: `${requestId}-sub`.slice(0, 20).padEnd(12, '0') })
+  failApprovalRecord = true
+  const lost = await decide(made.body.item.id, { requestId }); failApprovalRecord = false
+  assert.equal(lost.status, 503, JSON.stringify(lost.body)); assert.equal(approvalRow().applying_by, ADMIN)
+  return made.body.item.id
+}
+/** A claim written behind the API's back (what a stalled request leaves): its key, the plan it sent and how long ago it last made progress. */
+const injectClaim = (sessionId, { by = ADMIN, key = 'n1-claim-key-01', plan = {}, idleSeconds = 0 } = {}) => db.prepare("UPDATE inventory_check_approvals SET applying_request_id=?,applying_by=?,applying_at=strftime('%Y-%m-%dT%H:%M:%fZ','now',?),plan_json=? WHERE session_id=?")
+  .run(key, by, `-${idleSeconds} seconds`, JSON.stringify(plan), sessionId)
+const idle = seconds => db.prepare("UPDATE inventory_check_approvals SET applying_at=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)").run(`-${seconds} seconds`)
+/** The stock writers' receipt of one line: written = 1 when the write landed, 0 for a request that claimed the id and has not written. */
+const receipt = (actor, requestId, { written = 1, ageSeconds = 0 } = {}) => db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,created_at) VALUES(?,?,'adjust','{}',?,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
+  .run(actor, requestId, written, written ? 200 : null, written ? '{}' : null, `-${ageSeconds} seconds`)
+const deactivate = id => db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(id)
+const eventOf = requestId => { const event = db.prepare('SELECT before_json,after_json FROM inventory_check_events WHERE request_id=?').get(requestId); return event && { before: JSON.parse(event.before_json), after: JSON.parse(event.after_json) } }
+const planOf = (before, target, counted) => ({ before, target, counted, damaged: 0 })
 
 /** A product merged into another the way a merge leaves it: its stock moved to the survivor, the product and its received dates retired. */
 const mergeInto = (from, into) => {
@@ -425,13 +449,18 @@ async function main() {
     assert.equal((await decide(blind.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 2)
   })
 
-  await check('what cannot be applied safely is refused before any write: inconsistent stock, a fractional target, a raise with no received date', async () => {
+  await check('what cannot be applied safely is refused before any write, line by line: inconsistent stock, a fractional target, a raise with no received date', async () => {
     reset(); setSwitches('on', 'on')
     let made = await standard(); let id = made.body.item.id
     db.exec('UPDATE products SET stock_quantity=99 WHERE id=910002')
+    // One bad line no longer keeps the rest from being applied: the two healthy lines land, the answer names the refused one, and the next request has nothing it can apply.
+    const partly = await decide(id, {})
+    assert.equal(partly.status, 200, JSON.stringify(partly.body)); assert.equal(partly.body.applied, 2); assert.equal(partly.body.remaining, 1); assert.equal(partly.body.done, false)
+    assert.deepEqual(partly.body.refused, [{ productId: 910002, code: 'inventory_check_stock_inconsistent' }])
+    assert.equal(writer.calls.length, 2, 'the healthy lines were written'); assert.deepEqual(writer.calls.map(call => call.productId), [910003, 910004])
     let refused = await decide(id, {})
     assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_stock_inconsistent'); assert.deepEqual(refused.body.productIds, [910002])
-    assert.equal(writer.calls.length, 0, 'not even the healthy lines were written')
+    assert.deepEqual(refused.body.refused, [{ productId: 910002, code: 'inventory_check_stock_inconsistent' }]); assert.equal(writer.calls.length, 2)
     reset(); setSwitches('on', 'on')
     made = await submit([line(910002, 2.5)]); id = made.body.item.id
     refused = await decide(id, {})
@@ -764,6 +793,175 @@ async function main() {
     const plain = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-plain-00001' }); moveStock(910002, 4)
     assert.equal((await decide(plain.body.item.id, { requestId: 'n4-approve-006' })).status, 200)
     assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines['910002']).sort(), ['after', 'at', 'before', 'target'])
+  })
+
+  await check('N1: a line that cannot be applied is refused on its own, and the answer says which; the others are applied', async () => {
+    // Damaged units tagged after line 1 (the probe): that line is refused with its reason every time, the other lines are not held back by it.
+    reset(); setSwitches('on', 'on')
+    const made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 1, { seenQuantity: 5 }), line(910005, 4, { seenQuantity: 5 })], { requestId: 'n1-line-by-line' })
+    db.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910004,1,2)').run()
+    const first = await decide(made.body.item.id, { requestId: 'n1-line-approve' })
+    assert.equal(first.status, 200, JSON.stringify(first.body)); assert.equal(first.body.applied, 2); assert.equal(first.body.remaining, 1); assert.equal(first.body.done, false)
+    assert.deepEqual(first.body.refused, [{ productId: 910004, code: 'inventory_check_count_below_damaged' }])
+    assert.deepEqual([ordinary(910002), ordinary(910004), ordinary(910005)], [3, 5, 4], 'the healthy lines landed, the refused one did not move')
+    const second = await decide(made.body.item.id, { requestId: 'n1-line-approve' })
+    assert.equal(second.status, 409); assert.equal(second.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(second.body.productIds, [910004])
+    assert.deepEqual(second.body.refused, [{ productId: 910004, code: 'inventory_check_count_below_damaged' }])
+    assert.equal(approvalRow().status, 'pending'); assert.equal(writer.calls.length, 2, 'asking again writes nothing')
+    // Mixed reasons are all named, the most fundamental first.
+    reset(); setSwitches('on', 'on')
+    const mixed = await submit([line(910002, 3, { seenQuantity: 5 }), line(910003, 1, { seenQuantity: 7 }), line(910004, 2.5, { seenQuantity: 5 })], { requestId: 'n1-mixed-0001' })
+    const refusedAll = await decide(mixed.body.item.id, { requestId: 'n1-mixed-approve' })
+    db.exec('UPDATE products SET stock_quantity=99 WHERE id=910002') // inconsistent from now on
+    const again = await decide(mixed.body.item.id, { requestId: 'n1-mixed-approve' })
+    assert.equal(refusedAll.status, 200, 'the line that can be applied goes first')
+    assert.equal(again.status, 409); assert.deepEqual(again.body.refused.map(entry => entry.code), ['inventory_check_count_below_damaged', 'inventory_check_target_not_whole'])
+    assert.equal(again.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(again.body.productIds, [910003])
+  })
+
+  await check('N1: an approval whose claimer is gone is taken over by another approver: the receipts say what landed, the rest is sent under the new approver\'s own key, never the old one', async () => {
+    // The claimer is deactivated after the write landed but before it was recorded: the takeover records the line from the receipt; the repeat finishes without writing again.
+    reset(); setSwitches('on', 'on')
+    let id = await strandedClaim('n1-approve-admin')
+    assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
+    deactivate(ADMIN)
+    const takeover = await decide(id, { requestId: 'n1-approve-lead' }, LEAD)
+    assert.equal(takeover.status, 200, JSON.stringify(takeover.body)); assert.equal(takeover.body.takeover, true); assert.equal(takeover.body.applied, 1); assert.equal(takeover.body.remaining, 0); assert.equal(takeover.body.done, false)
+    assert.equal(writer.calls.length, 1, 'a takeover moves no stock')
+    assert.equal(approvalRow().applying_by, LEAD); assert.equal(approvalRow().applying_request_id, 'n1-approve-lead'); assert.equal(approvalRow().takeovers, 1); assert.equal(approvalRow().plan_json, '{}')
+    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines), ['910002'], 'the landed line is recorded from its receipt')
+    assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910002").get().state, 'done')
+    const audit = eventOf('n1-approve-lead-takeover')
+    assert.deepEqual({ from: audit.before.claimed_by, to: audit.after.claimed_by, reason: audit.after.reason, landed: audit.after.landed }, { from: ADMIN, to: LEAD, reason: 'inactive', landed: [910002] }, 'the takeover is in the audit trail')
+    const finished = await decide(id, { requestId: 'n1-approve-lead' }, LEAD)
+    assert.equal(finished.status, 200); assert.equal(finished.body.done, true); assert.equal(finished.body.approval.status, 'approved')
+    assert.equal(ordinary(910002), 3, 'one shortage, applied once'); assert.equal(writer.calls.length, 1)
+
+    // A partly applied approval: the lines that did not land are sent by the new approver under HIS request id (receipts are per approver; the old key would be a second write).
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    const made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 9, { seenQuantity: 5 })], { requestId: 'n1-two-lines-01' }); id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'n1-two-admin-01' })).status, 200); assert.equal(ordinary(910002), 3)
+    deactivate(ADMIN)
+    const step = await decide(id, { requestId: 'n1-two-lead-001' }, LEAD)
+    assert.equal(step.status, 200); assert.equal(step.body.takeover, true); assert.equal(step.body.applied, 0); assert.equal(step.body.remaining, 1)
+    const next = await decide(id, { requestId: 'n1-two-lead-001' }, LEAD)
+    assert.equal(next.status, 200); assert.equal(next.body.applied, 1)
+    assert.equal(writer.calls.length, 2); assert.match(writer.calls[1].client_request_id, /^n1-two-lead-001-910004$/, 'the new key, not n1-two-admin-01')
+    assert.equal((await decide(id, { requestId: 'n1-two-lead-001' }, LEAD)).body.done, true); assert.deepEqual([ordinary(910002), ordinary(910004)], [3, 9])
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM stock_mutation_receipts WHERE actor_id=? AND request_id LIKE 'n1-two-lead-001-%'").get(LEAD).n, 1)
+
+    // A claimer who is merely idle: the window is the plan's (Paid 5 minutes, Free 15); before it nobody else can take the approval, after it anyone can.
+    for (const [tier, window] of [['paid', 300], ['free', 900]]) {
+      reset(); setSwitches('on', 'on'); planEnv = { PLAN_TIER: tier }; __resetPlanTierCacheForTests()
+      id = await strandedClaim('n1-idle-admin')
+      idle(window - 5)
+      const early = await decide(id, { requestId: 'n1-idle-lead-1' }, LEAD)
+      assert.equal(early.status, 409, `${tier}: ${JSON.stringify(early.body)}`); assert.equal(early.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().applying_by, ADMIN); assert.equal(approvalRow().takeovers, 0)
+      assert.equal((await decide(id, { requestId: 'n1-idle-admin' })).status, 200, `${tier}: the claimer still continues his own approval`)
+      reset(); setSwitches('on', 'on'); planEnv = { PLAN_TIER: tier }; __resetPlanTierCacheForTests()
+      id = await strandedClaim('n1-idle-admin')
+      idle(window + 5)
+      const late = await decide(id, { requestId: 'n1-idle-lead-1' }, LEAD)
+      assert.equal(late.status, 200, `${tier}: ${JSON.stringify(late.body)}`); assert.equal(late.body.takeover, true); assert.equal(eventOf('n1-idle-lead-1-takeover').after.reason, 'idle')
+    }
+
+    // A claimer who lost the right or must change his password is gone at once; one who is active and allowed is not.
+    reset(); setSwitches('on', 'on')
+    id = await strandedClaim('n1-perm-admin-1')
+    db.prepare('UPDATE users SET role_id=900001 WHERE id=?').run(ADMIN)
+    assert.equal((await decide(id, { requestId: 'n1-perm-lead-01' }, LEAD)).status, 200); assert.equal(eventOf('n1-perm-lead-01-takeover').after.reason, 'permission')
+    reset(); setSwitches('on', 'on')
+    id = await strandedClaim('n1-pass-admin-1')
+    db.prepare('UPDATE users SET must_change_password=1 WHERE id=?').run(ADMIN)
+    assert.equal((await decide(id, { requestId: 'n1-pass-lead-01' }, LEAD)).status, 200); assert.equal(eventOf('n1-pass-lead-01-takeover').after.reason, 'inactive')
+
+    // A write that is still running (a receipt without a write, younger than the writers' crash window) is never taken over; an older one wrote nothing and is replanned.
+    reset(); setSwitches('on', 'on')
+    id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-flight-sub-1' })).body.item.id
+    injectClaim(id, { key: 'n1-flight-key-01', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-flight-key-01-910002', { written: 0, ageSeconds: 10 }); deactivate(ADMIN)
+    const running = await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)
+    assert.equal(running.status, 409); assert.equal(running.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().applying_by, ADMIN)
+    db.prepare("UPDATE stock_mutation_receipts SET created_at=strftime('%Y-%m-%d %H:%M:%S','now','-200 seconds')").run()
+    const crashed = await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)
+    assert.equal(crashed.status, 200, JSON.stringify(crashed.body)); assert.equal(crashed.body.takeover, true); assert.equal(crashed.body.applied, 0, 'it wrote nothing, so it is planned again')
+    assert.equal((await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)).status, 200); assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
+    assert.equal(writer.calls[0].client_request_id, 'n1-flight-lead-1-910002')
+  })
+
+  await check('N1: a claimed approval that cannot be finished can be closed by any approver: no stock moves, what landed stays applied, the rest is recorded as not applied with its reason', async () => {
+    // Damaged units tagged after line 1 (the probe): refused every time, cannot be rejected after line 1 landed; Close ends it.
+    reset(); setSwitches('on', 'on'); writer.cap = 1
+    let made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 1, { seenQuantity: 5 })], { requestId: 'n1-close-sub-01' }); let id = made.body.item.id
+    assert.equal((await decide(id, { requestId: 'n1-close-first' })).status, 200)
+    db.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910004,1,2)').run()
+    const stuck = await decide(id, { requestId: 'n1-close-first' })
+    assert.equal(stuck.status, 409); assert.equal(stuck.body.code, 'inventory_check_count_below_damaged')
+    assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-close-reject' })).status, 409, 'rejecting after a line landed is still refused')
+    const tables = () => stockRows().slice(0, 5), before = tables(), writes = writer.calls.length
+    const closed = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'Damaged units were tagged' }, LEAD)
+    assert.equal(closed.status, 200, JSON.stringify(closed.body)); assert.equal(closed.body.done, true); assert.equal(closed.body.approval.status, 'approved', 'something was applied')
+    assert.deepEqual(closed.body.approval.closed, { lines: { 910004: 'inventory_check_count_below_damaged' } }); assert.equal(closed.body.approval.applied, 1)
+    assert.deepEqual(tables(), before, 'no stock table changed')
+    assert.equal(writer.calls.length, writes, 'closing writes no stock'); assert.deepEqual([ordinary(910002), ordinary(910004)], [3, 5])
+    const row = approvalRow()
+    assert.deepEqual({ status: row.status, by: row.decided_by, key: row.decision_request_id, note: row.decision_note, plan: row.plan_json }, { status: 'approved', by: LEAD, key: 'n1-close-lead-1', note: 'Damaged units were tagged', plan: '{}' })
+    assert.deepEqual(Object.keys(JSON.parse(row.applied_json).lines), ['910002']); assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910004").get().state, 'issue', 'the line not applied is still a difference')
+    const audit = eventOf('n1-close-lead-1')
+    assert.deepEqual({ approval: audit.after.approval, closed: audit.after.closed, applied: audit.after.applied, notApplied: audit.after.not_applied }, { approval: 'approved', closed: true, applied: 1, notApplied: { 910004: 'inventory_check_count_below_damaged' } })
+    assert.equal(alerts.at(-1).kind, 'approved'); assert.equal(alerts.filter(alert => alert.kind !== 'created').length, 1)
+    // Decided and idempotent: the same close again is the same answer, any other decision is refused.
+    const replay = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1' }, LEAD)
+    assert.equal(replay.status, 200); assert.equal(replay.body.replayed, true); assert.equal(alerts.filter(alert => alert.kind !== 'created').length, 1, 'a replay announces nothing')
+    assert.equal((await decide(id, { decision: 'approve', requestId: 'n1-close-lead-1' }, LEAD)).status, 409); assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-close-lead-1' }, LEAD)).status, 409)
+    assert.equal((await decide(id, { decision: 'close', requestId: 'n1-close-lead-2' }, LEAD)).status, 409, 'closed once')
+    // The product is free to be counted again (its count no longer waits).
+    assert.equal((await submit([line(910004, 3, { seenQuantity: 7 })], { requestId: 'n1-close-recount' })).status, 201)
+
+    // A product merged after line 1 (lowering shortage lost its lot before: no_lot / retired) closes the same way, by the approver himself.
+    for (const [name, code, prepare] of [
+      ['retired', 'inventory_check_product_retired', () => mergeInto(910004, 910005)],
+      ['no lot', 'inventory_check_no_lot', () => { for (const sql of ['UPDATE branch_stock SET quantity=0 WHERE product_id=910004', 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=910004', 'UPDATE products SET stock_quantity=0 WHERE id=910004', 'UPDATE product_batches SET is_active=0 WHERE variant_product_id=910004']) db.exec(sql) }],
+    ]) {
+      reset(); setSwitches('on', 'on'); writer.cap = 1
+      made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 9, { seenQuantity: 5 })], { requestId: 'n1-strand-sub-01' }); id = made.body.item.id
+      assert.equal((await decide(id, { requestId: 'n1-strand-first' })).status, 200)
+      prepare()
+      const refused = await decide(id, { requestId: 'n1-strand-first' })
+      assert.equal(refused.status, 409, `${name}: ${JSON.stringify(refused.body)}`); assert.equal(refused.body.code, code)
+      assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-strand-reject' })).status, 409, `${name}: cannot be rejected`)
+      const ended = await decide(id, { decision: 'close', requestId: 'n1-strand-close' })
+      assert.equal(ended.status, 200, `${name}: ${JSON.stringify(ended.body)}`); assert.deepEqual(ended.body.approval.closed, { lines: { 910004: code } }); assert.equal(approvalRow().status, 'approved')
+      assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
+    }
+
+    // The claimer is deactivated after the write landed (its receipt exists) but before it was recorded: closing RECORDS that line as applied, never as not applied.
+    reset(); setSwitches('on', 'on')
+    id = await strandedClaim('n1-lost-admin-1'); deactivate(ADMIN)
+    const landedClose = await decide(id, { decision: 'close', requestId: 'n1-lost-close-1' }, LEAD)
+    assert.equal(landedClose.status, 200, JSON.stringify(landedClose.body)); assert.equal(landedClose.body.approval.status, 'approved'); assert.deepEqual(landedClose.body.approval.closed, { lines: {} })
+    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines), ['910002']); assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
+    assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910002").get().state, 'done')
+
+    // A write still running blocks a close; one that crashed (older than the writers' window) wrote nothing: closed with nothing applied, recorded as rejected.
+    reset(); setSwitches('on', 'on')
+    id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-fl-close-sub1' })).body.item.id
+    injectClaim(id, { key: 'n1-fl-close-key1', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-fl-close-key1-910002', { written: 0, ageSeconds: 10 })
+    const busy = await decide(id, { decision: 'close', requestId: 'n1-fl-close-lead' }, LEAD)
+    assert.equal(busy.status, 409); assert.equal(busy.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().status, 'pending')
+    db.prepare("UPDATE stock_mutation_receipts SET created_at=strftime('%Y-%m-%d %H:%M:%S','now','-200 seconds')").run()
+    const idleClose = await decide(id, { decision: 'close', requestId: 'n1-fl-close-lead' }, LEAD)
+    assert.equal(idleClose.status, 200, JSON.stringify(idleClose.body)); assert.equal(idleClose.body.approval.status, 'rejected', 'nothing was applied'); assert.deepEqual(idleClose.body.approval.closed, { lines: { 910002: 'inventory_check_not_applied' } })
+    assert.equal(ordinary(910002), 5); assert.equal(writer.calls.length, 0); assert.equal(alerts.at(-1).kind, 'rejected'); assert.equal(alerts.at(-1).reason, 'Closed')
+
+    // An approval nobody has touched closes too (as not applied); it needs only the right to approve, not to adjust stock, and the counter cannot.
+    reset(); setSwitches('on', 'on')
+    id = (await standard()).body.item.id
+    const denied = await decide(id, { decision: 'close', requestId: 'n1-deny-close-1' }, COUNTER)
+    assert.equal(denied.status, 403); assert.equal(denied.body.code, 'inventory_check_approve_required'); assert.equal(approvalRow().status, 'pending')
+    const plain = await decide(id, { decision: 'close', requestId: 'n1-plain-close-1', note: 'No longer wanted' }, NO_ADJUST)
+    assert.equal(plain.status, 200, JSON.stringify(plain.body)); assert.equal(plain.body.approval.status, 'rejected'); assert.equal(Object.keys(plain.body.approval.closed.lines).length, 3)
+    assert.deepEqual(Object.values(plain.body.approval.closed.lines), ['inventory_check_not_applied', 'inventory_check_not_applied', 'inventory_check_not_applied']); assert.equal(writer.calls.length, 0)
+    assert.equal(alerts.at(-1).kind, 'rejected'); assert.equal(alerts.at(-1).reason, 'No longer wanted', 'its note is the reason')
   })
 
   console.log(`${groups} groups passed`)

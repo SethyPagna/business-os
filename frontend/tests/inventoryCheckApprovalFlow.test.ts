@@ -43,6 +43,21 @@ const cases: Array<[string, () => Promise<void>]> = [
     const { result, sent } = await run([answer(1, 2), answer(1, 1, { failed }), answer(1, 0)])
     assert.equal(result.outcome, 'stalled'); assert.equal(sent.length, 2, 'it does not keep asking after a refusal'); assert.deepEqual(result.last?.failed, failed)
   }],
+  ['a takeover moves no stock on purpose: the flow carries on with the repeat that continues under the new approver', async () => {
+    const { result, sent } = await run([answer(0, 2, { takeover: true }), answer(1, 1), answer(1, 0)])
+    assert.equal(result.outcome, 'done'); assert.equal(sent.length, 3)
+    const alone = await run([answer(1, 0, { takeover: true })])
+    assert.equal(alone.result.outcome, 'done', 'a takeover that recorded the last line is done')
+  }],
+  ['lines the approval cannot apply stop the flow once nothing else is left, with every reason; while other lines can still be applied it goes on', async () => {
+    const refused = [{ productId: 7, code: 'inventory_check_count_below_damaged' }]
+    const stuck = await run([answer(1, 2, { refused: [...refused, { productId: 8, code: 'inventory_check_no_lot' }] }), answer(1, 0)])
+    assert.equal(stuck.result.outcome, 'refused'); assert.equal(stuck.sent.length, 1, 'only refused lines are left: asking again changes nothing'); assert.deepEqual(stuck.result.last?.refused?.map(entry => entry.productId), [7, 8])
+    const more = await run([answer(1, 2, { refused }), answer(1, 1, { refused }), answer(1, 0)])
+    assert.equal(more.result.outcome, 'refused', 'the refused line is still left after the others landed'); assert.equal(more.sent.length, 2)
+    const going = await run([answer(1, 3, { refused }), answer(1, 2, { refused }), answer(2, 0)])
+    assert.equal(going.result.outcome, 'done', 'other lines remain besides the refused one, so it carries on'); assert.equal(going.sent.length, 3)
+  }],
   ['a request that moved nothing stops the flow instead of asking forever', async () => {
     const { result, sent } = await run([answer(0, 3), answer(1, 0)])
     assert.equal(result.outcome, 'stalled'); assert.equal(sent.length, 1)

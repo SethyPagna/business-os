@@ -77,12 +77,22 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(seen.findAll(node => node.getAttribute('data-approval-target') !== null).length, 0, 'no stock now: no invented figure')
     assert.ok(lineOf(seen, 2), 'the line itself is still listed')
   }],
-  ['a claimed approval has no Reject; the approver who started it can finish it, anyone else sees who has it', async () => {
-    const mine = await mount({ approval: { ...pending, applying: true, applying_request_id: 'inventory_check_approval_claimed' } })
+  ['a claimed approval has no Reject; the approver who started it can finish it, another approver sees who has it and may take it over or close it', async () => {
+    const mine = await mount({ approval: { ...pending, applying: true, applying_request_id: 'inventory_check_approval_claimed' }, onClose: () => { calls.push('close') } })
     assert.ok(action(mine, 'approve'), 'finishing it stays possible'); assert.equal(action(mine, 'reject'), undefined, 'stock may already have moved: it cannot be rejected')
-    await mine.render({ ...base, approval: { ...pending, applying: true } })
-    assert.equal(action(mine, 'approve'), undefined, 'another approver cannot continue'); assert.equal(action(mine, 'reject'), undefined)
+    assert.ok(action(mine, 'close'), 'and it can be closed'); assert.equal(action(mine, 'close').getAttribute('aria-label'), 'Close', 'the secondary action is icon-only with its name')
+    calls.length = 0; await mine.click(action(mine, 'close')); assert.deepEqual(calls, ['close'])
+    await mine.render({ ...base, onClose: () => { calls.push('close') }, approval: { ...pending, applying: true } })
+    assert.ok(action(mine, 'approve'), 'another approver may try: the server takes the approval over when its approver is gone and says so when not'); assert.equal(action(mine, 'reject'), undefined); assert.ok(action(mine, 'close'))
     assert.match(text(mine.find(node => node.getAttribute('data-approval-in-progress') !== null, 'who has it')), /Being applied by another approver/)
+    // Closing moves no stock, so the right to approve is enough; it is offered only once Reject is gone (something was applied or claimed).
+    await mine.render({ ...base, canDecide: false, canClose: true, onClose: () => { calls.push('close') }, approval: { ...pending, applying: true } })
+    assert.equal(action(mine, 'approve'), undefined); assert.ok(action(mine, 'close'), 'without the right to adjust stock a person can still close')
+    await mine.render({ ...base, canDecide: false, canClose: false, onClose: () => { calls.push('close') }, approval: { ...pending, applying: true } })
+    assert.equal(action(mine, 'close'), undefined, 'and not without the right to approve')
+    await mine.render({ ...base, onClose: () => { calls.push('close') }, approval: { ...pending, applied: 1 } })
+    assert.ok(action(mine, 'close'), 'a partly applied count is closable'); await mine.render({ ...base, onClose: () => { calls.push('close') }, approval: pending })
+    assert.equal(action(mine, 'close'), undefined, 'an untouched count is rejected, not closed')
     await mine.render({ ...base, approval: pending })
     assert.equal(mine.findAll(node => node.getAttribute('data-approval-in-progress') !== null).length, 0, 'an unclaimed approval carries no note')
   }],
@@ -92,6 +102,22 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.equal(text(panel.find(node => node.getAttribute('data-approval-progress') !== null, 'progress')), '1/2')
     assert.equal(text(panel.find(node => node.getAttribute('data-approval-target') === '1', 'applied target')), 'Set to 10')
     assert.ok(action(panel, 'approve'), 'the rest can still be approved')
+  }],
+  ['a closed count says what was not applied and why; a refusal shows its reason on the line it belongs to', async () => {
+    const closed: InventoryCheckApproval = { ...pending, status: 'approved', applied: 1, decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss', applied_lines: { 2: { before: 4, target: 2, after: 2, at: 'x' } },
+      closed: { lines: { 1: 'inventory_check_count_below_damaged' } } }
+    const panel = await mount({ approval: closed })
+    assert.equal(panel.find(node => node.getAttribute('data-approval-status') !== null, 'chip').getAttribute('data-approval-status'), 'closed'); assert.match(text(panel.find(node => node.getAttribute('data-inventory-check-approval') !== null, 'panel')), /Closed/)
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-not-applied') === '1', 'not applied 1')), /Not applied: Count below damaged units/)
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-not-applied') === '2').length, 0, 'an applied line carries no such note')
+    assert.equal(action(panel, 'approve'), undefined); assert.equal(action(panel, 'close'), undefined)
+    await panel.render({ ...base, approval: { ...closed, closed: { lines: { 1: 'inventory_check_not_applied' } } } })
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-not-applied') === '1', 'plain')), /Not applied: Not applied/, 'a line nobody applied says only that')
+    await panel.render({ ...base, approval: { ...pending, applying: true, applied: 1, applied_lines: { 2: { before: 4, target: 2, after: 2, at: 'x' } } }, refused: { 1: 'inventory_check_product_retired' }, onClose: () => {} })
+    assert.match(text(panel.find(node => node.getAttribute('data-approval-refused') === '1', 'refused 1')), /Cannot apply: Product merged or removed/)
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-refused') === '2').length, 0)
+    await panel.render({ ...base, approval: { ...pending, status: 'rejected' }, refused: { 1: 'inventory_check_product_retired' } })
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-refused') !== null).length, 0, 'a decided count shows no refusals')
   }],
   ['approved and rejected counts say so, who decided and when, and keep their lines', async () => {
     const approved = await mount({ approval: { ...pending, status: 'approved', applied: 2, decided_at: '2026-11-02T03:00:00Z', decided_by_name: 'boss',

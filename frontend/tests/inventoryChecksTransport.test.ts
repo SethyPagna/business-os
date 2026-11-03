@@ -121,6 +121,9 @@ assert.deepEqual(calls.at(-1)?.body, { decision: 'approve', requestId: 'approve-
 assert.equal(routes.at(-1)?.channel, 'inventoryChecks:sub 1'); assert.equal(routes.at(-1)?.options.isWrite, true); assert.equal(routes.at(-1)?.local, null)
 await exports.decideInventoryCheckApproval(capture(), { decision: 'reject', requestId: 'reject-bbbb' })
 assert.deepEqual(calls.at(-1)?.body, { decision: 'reject', requestId: 'reject-bbbb' }, 'nothing is added to a rejection')
+await exports.decideInventoryCheckApproval(capture(), { decision: 'close', requestId: 'close-bbbb' })
+assert.equal(calls.at(-1)?.method, 'POST'); assert.equal(calls.at(-1)?.path, '/api/inventory-checks/sessions/sub%201/approval')
+assert.deepEqual(calls.at(-1)?.body, { decision: 'close', requestId: 'close-bbbb' }, 'a close goes to the same decision path with its own request id')
 const decideScope = capture()
 current = { ...current, epoch: 11 }
 const beforeStale = calls.length

@@ -191,6 +191,12 @@ export type PlanLimits = {
 
   stockInLinesPerRequest: number
 
+  // lib/inventoryCheckApprovals.ts: how long an Inventory Check approval that has been claimed (stock may already have moved for it) can sit without
+  // progress before ANOTHER approver may take it over and finish it. A claimer who is deactivated or has lost the right can always be replaced at once;
+  // this window is for a claimer who is merely gone. It is a lease, so like the other lifetimes Free is the LONGER one: a Free request applies one line and a
+  // slow phone is normal there. Paid 5 min, Free 15 min.
+  inventoryCheckApprovalTakeoverSeconds: number
+
   // ---- Read-cost lifetimes (G39 efficiency) -------------------------------
   //
   // These are LIFETIMES, so unlike every ceiling above, Free's number is the
@@ -283,6 +289,7 @@ const PAID_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 24,
+  inventoryCheckApprovalTakeoverSeconds: 5 * 60,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833_000_000,
@@ -309,6 +316,7 @@ const FREE_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,

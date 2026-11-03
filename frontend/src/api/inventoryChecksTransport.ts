@@ -26,6 +26,8 @@ export type InventoryCheckApproval = {
   applying?: boolean
   /** Sent to that approver only: the request id every repeat of the approval must carry. */
   applying_request_id?: string
+  /** The approval was ended by a close: lines applied stay applied (status approved), these were NOT applied, each with the reason (a refusal code or inventory_check_not_applied). */
+  closed?: { lines: Record<string, string> }
   /** Session detail only: per product, the stock the counter saw. The count is measured against it. */
   baselines?: Record<string, number>
 }
@@ -37,6 +39,10 @@ export type InventoryCheckApprovalDecision = {
   done: boolean
   replayed?: boolean
   failed?: Array<{ productId: number; code: string | null; error: string }>
+  /** Lines this request could not apply, each with the reason; the others were applied. */
+  refused?: Array<{ productId: number; code: string }>
+  /** The request took the approval over from an approver who is gone; it moved no stock, repeating it continues. */
+  takeover?: true
 }
 
 export type InventoryCheckSession = {
@@ -182,8 +188,8 @@ export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, inpu
   return write(scope, `${base}/submissions`, 'POST', input)
 }
 
-/** Approve or reject the open session's submitted count. Approving is repeated with the SAME requestId until the answer says done. */
-export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject'; requestId: string }): Promise<InventoryCheckApprovalDecision> {
+/** Approve, reject or close the open session's submitted count. Approving is repeated with the SAME requestId until the answer says done; closing ends an approval that cannot be finished (no stock moves). */
+export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject' | 'close'; requestId: string }): Promise<InventoryCheckApprovalDecision> {
   if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
   return write(scope, `${sessionPath(scope.context.sessionId)}/approval`, 'POST', input)
 }

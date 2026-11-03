@@ -1,4 +1,5 @@
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
+import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Hourglass from 'lucide-react/dist/esm/icons/hourglass.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -28,7 +29,11 @@ const APPROVAL_CHIP = {
   pending: { key: 'inventory_check_approval_pending', fallback: 'Waiting for approval', tone: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', Icon: Hourglass },
   approved: { key: 'inventory_check_approval_approved', fallback: 'Approved', tone: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300', Icon: Check },
   rejected: { key: 'inventory_check_approval_rejected', fallback: 'Rejected', tone: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300', Icon: X },
+  closed: { key: 'inventory_check_approval_closed', fallback: 'Closed', tone: 'bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-gray-200', Icon: Ban },
 } as const
+
+/** The tag an approval wears: a close reads as Closed whatever status it was recorded with. */
+export const approvalChipStatus = (approval: { status: 'pending' | 'approved' | 'rejected'; closed?: unknown }): keyof typeof APPROVAL_CHIP => approval.closed ? 'closed' : approval.status
 
 /** Where a submitted count stands with its approver: waiting (the pending tag), approved or rejected. */
 export function ApprovalChip({ status, t }: { status: keyof typeof APPROVAL_CHIP; t: Translator }) {
@@ -72,7 +77,7 @@ export default function InventoryCheckSessionsList({ items, onOpen, t }: { items
     {items.map(item => <li key={item.id} data-inventory-check-session={item.id} className="min-w-0">
       <button type="button" className="flex min-h-10 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-2 text-left text-xs" onClick={() => onOpen(item)}>
         <SessionStatusChip status={item.status} t={t} />
-        {item.approval ? <ApprovalChip status={item.approval.status} t={t} /> : null}
+        {item.approval ? <ApprovalChip status={approvalChipStatus(item.approval)} t={t} /> : null}
         <span className="font-semibold">{fmtDateTime24(item.started_at)}</span>
         {item.branch_name ? <span className="detail-scroll-text min-w-0 leading-relaxed">{item.branch_name}</span> : null}
         {item.creator_name ? <span className="text-gray-500" title={label(t, 'inventory_check_created_by', 'Created by')}>@{item.creator_name}</span> : null}
