@@ -1496,6 +1496,10 @@ function ProductsFullEditor() {
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
   const canRemoveProduct = can('products', 'delete')
+  // Bulk delete is its own switch on top of Delete (Refused, never queued -- utils/permissionActions.ts), and the Worker's bulk job
+  // route (POST /bulk-delete-jobs, above BULK_DELETE_JOB_THRESHOLD rows) reads it. A smaller selection is deleted row by row, which the
+  // Worker allows with Delete alone, so the button holds the line for both paths: no "Bulk delete" grant, no bulk Delete.
+  const canBulkDeleteProducts = canRemoveProduct && can('products', 'bulk_delete')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   // Same action the per-product image uploader is gated on: wiring photos
   // in bulk is the same authority as attaching one by hand, just applied
@@ -5333,7 +5337,7 @@ function ProductsFullEditor() {
                     <span className="detail-scroll-text whitespace-nowrap">{productSelectedLabel}</span>
                   </span>
                 ) : null}
-                {hasSelected ? (
+                {hasSelected && canBulkDeleteProducts ? (
                   <button
                     type="button"
                     disabled={bulkActionBusy}

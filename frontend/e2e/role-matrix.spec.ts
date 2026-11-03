@@ -415,10 +415,8 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantBulkDelete = grant(access, 'products', 'delete') && grant(access, 'products', 'bulk_delete')
-    // APP BUG, kept as a case: Products.tsx:5347 draws the bulk toolbar's Delete for any non-empty selection, and selection is open to
-    // every role. Neither products:delete nor products:bulk_delete is consulted anywhere in the UI (utils/permissionActions.ts
-    // bulk_delete has no reader), and canRemoveProduct (:1498) reaches only the Conflicts tab. The Worker then refuses the delete.
-    knownDefect(!wantBulkDelete, 'Products.tsx:5347 shows the bulk Delete for any selection; products:delete and products:bulk_delete are never consulted')
+    // FIXED (PERM-UI, 3 Nov): the bulk toolbar drew Delete for any non-empty selection, and selection is open to every role; neither
+    // products:delete nor products:bulk_delete was read by the UI. The button now needs both.
     try {
       const slot = await open(page, '/products', 'products')
       await expect(slot.getByText(PRODUCT_NAME).filter({ visible: true }).first(), 'the fixture catalogue rendered').toBeVisible({ timeout: 30_000 })

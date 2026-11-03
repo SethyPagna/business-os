@@ -86,6 +86,12 @@ test('PRODUCTS: the product form is handed onDelete only with products:delete (t
   assert.ok(read('../src/components/products/forms/ProductForm.tsx').includes('{isEditMode && onDelete ? ('), 'the form still keys its Delete on the callback, so the host is the gate')
 })
 
+test('PRODUCTS: the bulk toolbar draws Delete only with products:delete AND products:bulk_delete', () => {
+  assert.ok(productsSource.includes("const canBulkDeleteProducts = canRemoveProduct && can('products', 'bulk_delete')"))
+  assert.equal(productsSource.split('onClick={handleBulkDelete}').length - 1, 1, 'one bulk Delete button')
+  assert.match(productsSource, /\{hasSelected && canBulkDeleteProducts \? \(\s*<button[^>]*onClick=\{handleBulkDelete\}/)
+})
+
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
   const returns = read('../src/components/returns/Returns.tsx')
   assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)
