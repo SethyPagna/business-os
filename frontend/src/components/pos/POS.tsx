@@ -63,8 +63,6 @@ import {
   posV1BasketTotals,
   parsePosInternalAmount,
   posV1Tender,
-  posRielCashRowIds,
-  posExactRielTender,
   frozenPosPreview,
   resolveWholesaleAutoRule,
   applyWholesaleAutoPricing,
@@ -87,6 +85,7 @@ import type { QueryParams } from '../../api/query.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
+import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {

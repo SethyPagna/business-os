@@ -1,4 +1,5 @@
-import { formatMoneyNumber, formatPriceNumber } from '../../../utils/pricing.ts'
+import { formatPriceNumber } from '../../../utils/pricing.ts'
+import { formatMoneyNumber } from '../../../utils/displayMoney.ts'
 import { knownCost } from '../../../utils/costDisplay.ts'
 
 interface BranchStockRecord {

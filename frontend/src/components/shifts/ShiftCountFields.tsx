@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftRielCountInvalid, type ShiftCountBlocker } from '../../api/shiftTransport.ts'
+import { shiftRielCountInvalid, type ShiftCountIssue } from './shiftCountRules.ts'
 
 /**
  * The two-currency drawer count, as ONE shared control.
@@ -93,7 +93,7 @@ export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel
 }
 
 /** The pack key that names a blocker, for the row under the pair. */
-export function shiftCountBlockerKey(blocker: ShiftCountBlocker): string {
+export function shiftCountBlockerKey(blocker: ShiftCountIssue): string {
   return blocker === 'both_blank' ? 'shift_count_needed' : blocker === 'riel_cash' ? 'riel_cash_not_hundreds' : 'shift_count_invalid'
 }
 

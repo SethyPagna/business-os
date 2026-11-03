@@ -11,8 +11,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { transformSync } from 'esbuild'
 import {
-  formatMoneyNumber, formatPriceNumber, normalizePriceValue, normalizeSellingPrice, roundDisplayMoney, roundUpToDecimals, toFiniteNumber,
+  formatPriceNumber, normalizePriceValue, normalizeSellingPrice, roundUpToDecimals, toFiniteNumber,
 } from '../src/utils/pricing.ts'
+import { formatMoneyNumber, roundDisplayMoney } from '../src/utils/displayMoney.ts'
 
 let failed = 0
 function runTest(name: string, fn: () => void) {
@@ -103,13 +104,21 @@ runTest('the no-provider fallback in AppContextCore reads the exact decimal too:
   const holder = { exports: null as unknown as (value: unknown) => number }
   new Function('module', js)(holder)
   const fallback = holder.exports
-  for (const value of [10.075, 2.155, 1.005, 23.775, 1.115, 0.005, 4.7475, 8.345, 0.285, 1.255, 7.835, 2.161, 2.165, 2.1649, -2.165, -0.004, 0, 3, 250_000_000_000.126]) {
+  for (const value of [10.075, 2.155, 1.005, 23.775, 1.115, 0.005, 4.7475, 8.345, 0.285, 1.255, 7.835, 2.161, 2.165, 2.1649, -2.165, -0.004, 0, 3, 250_000_000_000.126, 1e-9, 12345678.905]) {
     assert.equal(fallback(value), roundDisplayMoney(value), `fallback(${value})`)
   }
   assert.equal(fallback(10.075), 10.08, 'the float rounding this replaced read 10.07')
   assert.equal(fallback('abc'), 0)
   assert.ok(!Object.is(fallback(-0.004), -0), 'never -0')
-  for (let cents = 0; cents <= 2000; cents += 1) assert.equal(fallback(cents / 100 + 0.005), roundDisplayMoney(cents / 100 + 0.005), `grid ${cents}`)
+  // Every exact half-cent tie as the decimal a response carries it ("1.465"), not as float arithmetic's 1.4649999999999999.
+  for (let cents = 0; cents <= 2000; cents += 1) {
+    const tie = Number(`${(cents / 100).toFixed(2)}5`)
+    assert.equal(fallback(tie), roundDisplayMoney(tie), `grid ${tie}`)
+    assert.equal(fallback(-tie), roundDisplayMoney(-tie), `grid -${tie}`)
+  }
+  assert.equal(fallback(1e-7), 0, 'an exponent form still answers')
+  assert.equal(fallback(0.004), 0)
+  assert.equal(fallback(0.005), 0.01)
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

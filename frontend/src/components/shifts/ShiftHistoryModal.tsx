@@ -28,14 +28,13 @@ import {
   SHIFT_SEARCH_DEBOUNCE_MS,
   SHIFT_SEARCH_MAX_LENGTH,
   shiftClosingCounts,
-  shiftCountPairBlocker,
-  shiftRielCountInvalid,
   shiftOpeningCounts,
   shiftLocalDateTimeFromMs,
   shiftLocalDateTimeToIso,
   type Shift,
   type ShiftAmendment,
 } from '../../api/shiftTransport.ts'
+import { shiftCountIssue, shiftRielCountInvalid } from './shiftCountRules.ts'
 
 type Props = {
   branchId?: number | null
@@ -539,7 +538,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const editRielInvalid = !!edit && (shiftRielCountInvalid(edit.openingKhr, selected?.opening_float_khr)
     || (!!edit.closedAt && (shiftRielCountInvalid(edit.closingKhr, selected?.closing_counted_khr) || shiftRielCountInvalid(edit.additionalKhr, selected?.additional_cash_khr))))
   const editCountBlocker = edit
-    ? shiftCountPairBlocker(edit.openingUsd, edit.openingKhr, { blankMeansUncounted: true, storedKhr: selected?.opening_float_khr })
+    ? shiftCountIssue(edit.openingUsd, edit.openingKhr, { blankMeansUncounted: true, storedKhr: selected?.opening_float_khr })
     : null
   const editReason = !edit ? null
     : !edit.openedAt ? t('shift_opened_at_required')

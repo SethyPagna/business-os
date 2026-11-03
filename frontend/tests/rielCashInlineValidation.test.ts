@@ -9,8 +9,8 @@ import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { settlementRowsIssue, type SettlementRow } from '../src/components/sales/saleSettlement.ts'
 import { exchangePaymentIssue } from '../src/components/returns/helpers/returnExchange.ts'
-import { shiftCountPairBlocker, shiftRielCountInvalid } from '../src/api/shiftTransport.ts'
-import { posRielCashRowIds } from '../src/components/pos/posCore.ts'
+import { shiftCountIssue, shiftRielCountInvalid } from '../src/components/shifts/shiftCountRules.ts'
+import { posRielCashRowIds } from '../src/components/pos/posRielCash.ts'
 import { parsePaymentMethodKinds } from '../src/utils/paymentMethodKind.ts'
 import { saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
 
@@ -78,14 +78,17 @@ runTest('the settlement editor marks the riel field inline, translated, and only
 })
 
 runTest('shift counts: the riel field is marked and the submit row blocked; a stored count left as it is passes', () => {
-  assert.equal(shiftCountPairBlocker('', '39950', { blankMeansUncounted: true }), 'riel_cash')
-  assert.equal(shiftCountPairBlocker('', '39900', { blankMeansUncounted: true }), null)
-  assert.equal(shiftCountPairBlocker('', '39950', { blankMeansUncounted: true, storedKhr: 39950 }), null)
+  assert.equal(shiftCountIssue('', '39950', { blankMeansUncounted: true }), 'riel_cash')
+  assert.equal(shiftCountIssue('', '39900', { blankMeansUncounted: true }), null)
+  assert.equal(shiftCountIssue('', '39950', { blankMeansUncounted: true, storedKhr: 39950 }), null)
+  // A blank or invalid entry is still reported first, as before the riel rule.
+  assert.equal(shiftCountIssue('', '', {}), 'both_blank')
+  assert.equal(shiftCountIssue('-1', '39950', { blankMeansUncounted: true }), 'invalid')
   assert.equal(shiftRielCountInvalid('12350', 39950), true)
   assert.equal(shiftRielCountInvalid(''), false)
   const pair = load('../src/components/shifts/ShiftCountFields.tsx', {
     AppContext: { useApp: () => ({ t: (key: string) => key === 'riel_cash_not_hundreds' ? en.riel_cash_not_hundreds : key }) },
-    shiftTransport: { shiftRielCountInvalid },
+    shiftCountRules: { shiftRielCountInvalid },
   })
   const html = (extra: Record<string, unknown>) => render(React.createElement(pair.default, { label: 'Counted', usd: '', khr: '39950', onUsd: () => {}, onKhr: () => {}, usdLabel: 'USD', khrLabel: 'KHR', ...extra }))
   assert.ok(html({}).includes(en.riel_cash_not_hundreds))

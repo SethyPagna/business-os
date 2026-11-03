@@ -6,7 +6,7 @@
 // tender (shortfallCovered), and the Collect hint says the same figure.
 // DISCRIMINATING: $9.99 at 4,000 is 39,960៛ -- DOWN is 39,900 (60 short, paid), UP is 40,000 (40 over); a bank row keeps 39,960.
 import assert from 'node:assert/strict'
-import { posExactRielTender } from '../src/components/pos/posCore.ts'
+import { posExactRielTender } from '../src/components/pos/posRielCash.ts'
 import { cashierCollectKhr } from '../src/utils/rielRounding.ts'
 import { paymentCoversSaleTotal, rielCashAmountValid } from '../src/utils/saleStatusResolution.ts'
 

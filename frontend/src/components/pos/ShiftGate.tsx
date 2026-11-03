@@ -8,7 +8,8 @@ import { isAdminControlUser, type PermissionUser } from '../../utils/permissions
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftRielCountInvalid, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRules.ts'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
@@ -558,7 +559,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
 
   // Registration is optional per currency. Blank means uncounted/unknown;
   // explicit 0 is a measured zero. Invalid non-blank values still block.
-  const startBlocker = shiftCountPairBlocker(floatUsd, floatKhr, { blankMeansUncounted: true })
+  const startBlocker = shiftCountIssue(floatUsd, floatKhr, { blankMeansUncounted: true })
 
   /**
    * A shift LEFT OPEN on an earlier business day, answered only by

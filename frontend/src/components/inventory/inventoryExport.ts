@@ -1,4 +1,4 @@
-import { formatMoneyNumber } from '../../utils/pricing.ts'
+import { formatMoneyNumber } from '../../utils/displayMoney.ts'
 // N13: the movement CSV names the RECORD a group belongs to, through the same
 // two functions the drill header above it uses. A spreadsheet that carries
 // Branch / Reason / User but not the receipt cannot be matched back to a sale,

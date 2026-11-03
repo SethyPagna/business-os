@@ -35,7 +35,7 @@ if (process.env.TELEGRAM_MUTATION === 'float_round') {
 }
 const telegram = load(telegramText)
 const saleTotals = load(bundle(path.join(__dirname, '..', 'src', 'lib', 'saleTotals.ts')))
-const { roundDisplayMoney } = load(bundle(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'pricing.ts')))
+const { roundDisplayMoney } = load(bundle(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'displayMoney.ts')))
 
 const ties = [10.075, 2.155, 1.005, 23.775, 1.115, 0.005, 4.7475, 8.345, 0.285, 1.255, 7.835]
 const line = (value) => telegram.formatSaleTelegramLines({ receiptNumber: 'R1', items: [{ name: 'Tea', quantity: 1, unitPriceUsd: value, basePriceUsd: value, lineTotalUsd: value }],
