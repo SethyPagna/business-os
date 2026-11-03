@@ -88,8 +88,13 @@ test('PRODUCTS: the product form is handed onDelete only with products:delete (t
   assert.ok(read('../src/components/products/forms/ProductForm.tsx').includes('{isEditMode && onDelete ? ('), 'the form still keys its Delete on the callback, so the host is the gate')
 })
 
-test('PRODUCTS: the bulk toolbar draws Delete only with products:delete AND products:bulk_delete', () => {
-  assert.ok(productsSource.includes("const canBulkDeleteProducts = canRemoveProduct && can('products', 'bulk_delete')"))
+test('PRODUCTS: the bulk toolbar draws Delete only with products:delete AND products:bulk_delete (the row requires Delete, so one can() answers both)', () => {
+  assert.ok(productsSource.includes("const canBulkDeleteProducts = can('products', 'bulk_delete')"))
+  assert.deepEqual(actionsForKey('products').find((action) => action.key === 'bulk_delete')?.requires?.map((requirement) => requirement.key), ['products:delete'])
+  const bulk = (patch: Record<string, boolean>) => effectivePermissions({ role_code: 'manager', permissions: { products: true, ...patch } }).can('products', 'bulk_delete')
+  assert.equal(bulk({}), true)
+  assert.equal(bulk({ 'products:delete': false }), false, 'Delete off, Bulk delete on: the Worker job route refuses it too')
+  assert.equal(bulk({ 'products:bulk_delete': false }), false)
   assert.equal(productsSource.split('onClick={handleBulkDelete}').length - 1, 1, 'one bulk Delete button')
   assert.match(productsSource, /\{hasSelected && canBulkDeleteProducts \? \(\s*<button[^>]*onClick=\{handleBulkDelete\}/)
 })

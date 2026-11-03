@@ -1499,10 +1499,10 @@ function ProductsFullEditor() {
   // Edit product opens the product form, so every way into the form from a list (the detail's Edit, the group menu's Add image) needs
   // it: PUT /api/products/:id answers 403 without it. A Review-tier role keeps it -- its edit is queued for approval.
   const canEditProduct = can('products', 'edit')
-  // Bulk delete is its own switch on top of Delete (Refused, never queued -- utils/permissionActions.ts), and the Worker's bulk job
-  // route (POST /bulk-delete-jobs, above BULK_DELETE_JOB_THRESHOLD rows) reads it. A smaller selection is deleted row by row, which the
-  // Worker allows with Delete alone, so the button holds the line for both paths: no "Bulk delete" grant, no bulk Delete.
-  const canBulkDeleteProducts = canRemoveProduct && can('products', 'bulk_delete')
+  // Bulk delete is its own switch (Refused, never queued -- utils/permissionActions.ts). Its row `requires` Delete, so this one can() answers both:
+  // the Worker's bulk job (POST /bulk-delete-jobs, above BULK_DELETE_JOB_THRESHOLD rows) reads Bulk delete and Delete, and a smaller
+  // selection is deleted row by row, which needs Delete. No Delete or no Bulk delete: no bulk Delete.
+  const canBulkDeleteProducts = can('products', 'bulk_delete')
   // Add variant creates a product row, so the Worker (POST /variant) demands the variant action AND Add. The variant row lists Add as
   // a requirement (utils/permissionActions.ts), so this one can() answers both: Add alone (the old gate) is not enough.
   const canAddVariant = can('products', 'variant')

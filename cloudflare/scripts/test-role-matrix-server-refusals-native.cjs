@@ -12,6 +12,8 @@
 //   Manager Dashboard GET /api/dashboard/startup as the seeded Manager: 200, every key Dashboard.tsx isDashboardSummaryPayload
 //                     reads is present, and the cost-derived keys are absent (the Worker's projection) -- the shape the page now accepts.
 //                     The Employee default (no `dashboard`) is refused.
+//   Bulk delete      POST /api/{products,customers,suppliers}/bulk-delete-jobs and /:id/cancel with the single-delete grant off (PERM-UI review E1):
+//                     403, no job row, nothing deleted. A job deletes exactly what DELETE /:id deletes, so it needs the same grant.
 // The Products controls (Delete, bulk Delete, Add variant, Edit) are pinned in test-employee-products-default-native.cjs.
 //
 // Roles are built from the seeds (lib/roleDefaults.ts), not copied. Each refusal has a discriminating twin: the same call passes the
@@ -50,13 +52,24 @@ const MUTANTS = {
   'settings-tier-ignored': [{ file: 'src/routes/settings.ts', from: `    return !hasPermission(user, 'settings')
   })`, to: `    return false
   })` }],
+  'products-bulk-delete-ignores-delete': [{ file: 'src/routes/products.ts', from: `return getActionTier(user, 'products', 'delete') === 'none' ? 'none' : tier`, to: `return tier` }],
+  'contacts-bulk-delete-job-ignores-delete': [{ file: 'src/routes/contacts.ts', from: `if (getActionTier(user, 'contacts', 'delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+
+    const body = (await`, to: `if (false) {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+
+    const body = (await` }],
+  'contacts-bulk-delete-cancel-ignores-delete': [{ file: 'src/routes/contacts.ts', from: `|| getActionTier(user, 'contacts', 'delete') !== 'full') {`, to: `|| false) {` }],
   'dashboard-cost-keys-leak': [{ file: 'src/routes/compat.ts', from: `app.use('/dashboard', acquisitionCostResponses)
 app.use('/dashboard/*', acquisitionCostResponses)
 `, to: '' }],
 }
 let failed = 0
 async function check(name, fn) {
-  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.log(`FAIL ${name}\n  ${String(error && error.stack || error).split('\n').slice(0, 8).join('\n  ')}`) }
+  try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.log(`FAIL ${name}\n  ${String(error && error.stack || error).split('\n').slice(0, 24).join('\n  ')}`) }
 }
 const DENIED = 'You do not have permission to perform this action'
 
@@ -74,6 +87,10 @@ async function main() {
     const manager = await h.addEmployee(2005, 'rm-manager', DEFAULTS.manager)
     const managerWithCost = await h.addEmployee(2006, 'rm-manager-cost', { ...DEFAULTS.manager, product_cost_view: true })
     const employee = await h.addEmployee(2007, 'rm-employee', DEFAULTS.employee)
+    const productsNoDelete = await h.addEmployee(2009, 'rm-products-no-delete', { products: true, 'products:delete': false })
+    const productsFull = await h.addEmployee(2010, 'rm-products-full', { products: true })
+    const contactsNoDelete = await h.addEmployee(2011, 'rm-contacts-no-delete', { contacts: true, contacts_suppliers: true, 'contacts:delete': false })
+    const contactsFull = await h.addEmployee(2012, 'rm-contacts-full', { contacts: true, contacts_suppliers: true })
     const count = async (table) => (await h.one(`SELECT COUNT(*) AS n FROM ${table}`)).n
     const as = (cookie) => ({ cookie })
 
@@ -129,6 +146,51 @@ async function main() {
       for (const key of COST_SUMMARY_KEYS) assert.ok(Object.hasOwn(costed.body.summary, key), `discriminating: ${key} reaches a Manager who holds product_cost_view`)
       const refused = await h.call('GET', '/api/dashboard/startup', undefined, 'employee dashboard', as(employee))
       assert.equal(refused.status, 403, JSON.stringify(refused.body))
+    })
+
+    await check('Bulk delete: a role whose single Delete is off is refused the bulk-delete job and its cancel for products, customers and suppliers (403, no job, nothing deleted); a role holding both runs it', async () => {
+      await h.db.batch([
+        h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)').bind(7201, 'RM Bulk Customer A', '0127201'),
+        h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)').bind(7202, 'RM Bulk Customer B', '0127202'),
+        h.db.prepare('INSERT INTO customers(id,name,phone) VALUES(?,?,?)').bind(7203, 'RM Bulk Customer C', '0127203'),
+        h.db.prepare('INSERT INTO suppliers(id,name) VALUES(?,?)').bind(7301, 'RM Bulk Supplier A'),
+        h.db.prepare('INSERT INTO suppliers(id,name) VALUES(?,?)').bind(7302, 'RM Bulk Supplier B'),
+        h.db.prepare('INSERT INTO suppliers(id,name) VALUES(?,?)').bind(7303, 'RM Bulk Supplier C'),
+      ])
+      for (const id of [7101, 7102, 7103]) await H.seedProduct(h, id, 'RM Bulk Product ' + id, 5, 0)
+      // [route, table, the two rows the refused calls aim at, the row the permitted twin deletes]
+      const KINDS = [
+        { path: '/api/products', table: 'products', ids: [7101, 7102], twin: 7103, noDelete: productsNoDelete, full: productsFull, alive: (id) => `SELECT COUNT(*) AS n FROM products WHERE id = ${id} AND is_active = 1` },
+        { path: '/api/customers', table: 'customers', ids: [7201, 7202], twin: 7203, noDelete: contactsNoDelete, full: contactsFull, alive: (id) => `SELECT COUNT(*) AS n FROM customers WHERE id = ${id}` },
+        { path: '/api/suppliers', table: 'suppliers', ids: [7301, 7302], twin: 7303, noDelete: contactsNoDelete, full: contactsFull, alive: (id) => `SELECT COUNT(*) AS n FROM suppliers WHERE id = ${id}` },
+      ]
+      const problems = []
+      for (const kind of KINDS) {
+        const alive = async (ids) => { let n = 0; for (const id of ids) n += (await h.db.prepare(kind.alive(id)).first()).n; return n }
+        const jobsBefore = await count('bulk_delete_jobs')
+        const refused = await h.call('POST', kind.path + '/bulk-delete-jobs', { ids: kind.ids, reason: 'role matrix' }, kind.table + ' bulk job, single Delete off', as(kind.noDelete))
+        if (refused.status !== 403) problems.push(`${kind.table}: bulk-delete-jobs with Delete off answered ${refused.status} ${JSON.stringify(refused.body)}, expected 403`)
+        else if (refused.body.error !== DENIED) problems.push(`${kind.table}: the refusal says ${JSON.stringify(refused.body.error)}`)
+        if (await count('bulk_delete_jobs') !== jobsBefore) problems.push(`${kind.table}: the refused call still recorded a job`)
+        if (await alive(kind.ids) !== kind.ids.length) problems.push(`${kind.table}: the refused call deleted rows`)
+
+        // A pending job (started by another role): the role without Delete may not cancel it either.
+        const jobId = 'rm-pending-' + kind.table
+        await h.db.prepare("INSERT INTO bulk_delete_jobs(id, entity_type, status, reason, ids_json, total_count) VALUES(?, ?, 'pending', 'role matrix', ?, ?)")
+          .bind(jobId, kind.table, JSON.stringify(kind.ids), kind.ids.length).run()
+        const flag = async () => (await h.db.prepare('SELECT cancel_requested AS n FROM bulk_delete_jobs WHERE id = ?').bind(jobId).first()).n
+        const noCancel = await h.call('POST', kind.path + '/bulk-delete-jobs/' + jobId + '/cancel', {}, kind.table + ' cancel, single Delete off', as(kind.noDelete))
+        if (noCancel.status !== 403) problems.push(`${kind.table}: cancel with Delete off answered ${noCancel.status} ${JSON.stringify(noCancel.body)}, expected 403`)
+        if (await flag() !== 0) problems.push(`${kind.table}: the cancel with Delete off still flagged the job`)
+
+        // Discriminating twin: a role holding Delete and Bulk delete is not stopped by the gate, so the 403s above are the grant.
+        const cancelled = await h.call('POST', kind.path + '/bulk-delete-jobs/' + jobId + '/cancel', {}, kind.table + ' cancel, holds both', as(kind.full))
+        if (cancelled.status !== 200 || await flag() !== 1) problems.push(`${kind.table}: a role holding both could not cancel (${cancelled.status} ${JSON.stringify(cancelled.body)})`)
+        const jobsTwin = await count('bulk_delete_jobs')
+        const accepted = await h.call('POST', kind.path + '/bulk-delete-jobs', { ids: [kind.twin], reason: 'role matrix twin' }, kind.table + ' bulk job, holds both', as(kind.full))
+        if (accepted.status !== 202 || await count('bulk_delete_jobs') !== jobsTwin + 1) problems.push(`${kind.table}: a role holding both was refused the job (${accepted.status} ${JSON.stringify(accepted.body)})`)
+      }
+      assert.deepEqual(problems, [], 'The bulk-delete job runs without the single-delete grant:\n  ' + problems.join('\n  '))
     })
   } finally {
     await h.mf.dispose()
