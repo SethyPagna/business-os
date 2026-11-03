@@ -295,8 +295,8 @@ test('a riel cash tender in whole hundreds is recorded as riel, not converted to
 test('a 150 riel cash row is refused by the till and no sale is recorded', async ({ page, request }) => {
   // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the till offers Completed and sends the 150 riel cash row, and
   // POST /api/sales answers 200 -- no multiple-of-100 check on the cash path (frontend/src/components/pos/posCore.ts:24, cloudflare/src/routes/sales.ts:1259).
-  // Remove this line when the rule (owner 27 Oct #15) is enforced; the case then has to pass.
-  test.fail(true, 'owner rule 27 Oct #15 not enforced: till and POST /api/sales accept a 150 riel cash row (posCore.ts:24, sales.ts:1259)')
+  // The case is declared expected-red only while that signature (a 200 and one new sale) is observed in the run itself, below. Anything
+  // else that goes wrong (a timeout, a missing control) stays plainly red, and once the rule is enforced the case simply passes.
   await configure(request, { tax: false, rate: 4000 })
   const before = await readState(request)
   await signInAndOpenPos(page)
@@ -317,6 +317,7 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   await page.waitForTimeout(1_000)
   const after = await readState(request)
   try {
+    test.fail(response?.status() === 200 && after.saleIds.length - before.saleIds.length === 1, 'owner rule 27 Oct #15 not enforced: till and POST /api/sales accept a 150 riel cash row (posCore.ts:24, sales.ts:1259)')
     // Wrong implementation caught: the 150 riel accepted (owner, 27 Oct: riel cash that is not a whole 100 is invalid on every cash path).
     if (response) expect(response.status(), 'a cash riel amount that is not a multiple of 100 must be refused').toBeGreaterThanOrEqual(400)
     expect(after.saleIds, 'no sale may be recorded').toEqual(before.saleIds)
@@ -328,10 +329,17 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   }
 })
 
+/**
+ * One id per run. The Worker answers a repeated client_request_id with the sale it already holds (that is the replay rule the double-click
+ * case relies on), so a fixed id would turn the second run against the same database into "no sale created" and could pass or fail a
+ * case for the wrong reason.
+ */
+const RUN_ID = Date.now().toString(36)
+
 /** A complete POST /api/sales body for one Mint Balm from the Shop lot, with the tender the case supplies. */
 function saleBody(ready: { organizationId: number }, tender: { rows: Array<{ method: string; amount_usd: number; amount_khr: number }>; usd: number; khr: number; currency: string }, requestId: string, more: Record<string, unknown> = {}) {
   return {
-    branch_id: SHOP, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, client_request_id: requestId,
+    branch_id: SHOP, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, client_request_id: `${requestId}-${RUN_ID}`,
     items: [{ product_id: mint.id, quantity: 1, branch_id: SHOP, batch_id: lotOf(mint, 'M1-MINT-SEP').id, client_line_key: 'line-1', pricing_source: 'selling',
       pricing_quote: { gross_usd: 4.75, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 4.75, total_khr: 19000 } }],
     subtotal_usd: 4.75, total_usd: 4.75, total_khr: 19000,
@@ -351,8 +359,7 @@ test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, a
   // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the whole-hundred control below is taken (200), and so is the
   // 150 riel cash row (200, a sale is created) -- the Worker normalises every payment row to whole riel and checks nothing more
   // (cloudflare/src/routes/sales.ts:1259; lib/paymentMethodRegistry.ts:273 isCashPaymentMethod already tells cash from digital).
-  // Remove this line when the rule (owner 27 Oct #15) is enforced in the Worker; the case then has to pass.
-  test.fail(true, 'owner rule 27 Oct #15 not enforced in the Worker: POST /api/sales takes a 150 riel cash row (sales.ts:1259)')
+  // Declared expected-red only while the signature (the 150 riel row answered 200) is observed below; once the rule is enforced it passes.
   const ready = await loadReady(request)
   await configure(request, { tax: false, rate: 4000 })
   await signInAs(page, 'cashier', seed)
@@ -369,6 +376,7 @@ test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, a
   try {
     const refused = await postSale(page, saleBody(ready, { rows: [{ method: 'Cash', amount_usd: 4.71, amount_khr: 150 }], usd: 4.71, khr: 150, currency: 'MIXED' }, 'm1-riel-150'))
     refusedStatus = refused.status
+    test.fail(refused.status === 200, 'owner rule 27 Oct #15 not enforced in the Worker: POST /api/sales takes a 150 riel cash row (sales.ts:1259)')
     // Wrong implementation caught: backend validation missing -- the till refuses, the API takes it (frontend rule without backend enforcement).
     expect(refused.status, `the Worker must refuse a 150 riel cash row: ${JSON.stringify(refused.body)}`).toBe(400)
     const after = await readState(request)
@@ -639,6 +647,11 @@ test('a dollar discount comes off before tax is charged, so tax is on the smalle
 })
 
 test('the summary the cashier reads foots: subtotal - discount + tax is the total, each line at the nearest cent', async ({ page, request }) => {
+  // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the Tax line reads "$2.17" for a stored tax of 2.161 (total 23.77), so
+  // the summary lines add to 23.78. fmtUSD formats with normalizePriceValue, which rounds UP (frontend/src/AppContext.tsx:2760 ->
+  // frontend/src/utils/pricing.ts:22 roundUpToDecimals); owner rule 24 Sep: displayed money rounds to the NEAREST cent, only selling
+  // prices round up. Declared expected-red only while that signature (the line reads $2.17) is observed below; once the display follows
+  // the rule the case passes with no edit, and a timeout or a missing line stays plainly red.
   await configure(request, { tax: true, rate: 4000 })
   await signInAndOpenPos(page)
   await addToCart(page, rose, lotOf(rose, 'M1-ROSE-AUG'), 2)
@@ -649,6 +662,8 @@ test('the summary the cashier reads foots: subtotal - discount + tax is the tota
   // = 23.77 foots. Shown rounded UP ($2.17) the lines add to $23.78 and disagree with the total beside them by a cent.
   // Wrong implementation caught: a display formatter that rounds up (utils/pricing.ts roundUpToDecimals via fmtUSD).
   const taxLine = page.getByText(/^Tax \(10%\)/).locator('xpath=..')
+  const shownTax = await taxLine.innerText({ timeout: 15_000 })
+  test.fail(/\$2\.17(?!\d)/.test(shownTax), 'displayed money rounds UP, owner rule 24 Sep says nearest: Tax $2.161 reads $2.17 (AppContext.tsx:2760, pricing.ts:22)')
   await expect(taxLine).toContainText('$2.16')
   await expect(taxLine).not.toContainText('$2.17')
 })

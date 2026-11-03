@@ -218,7 +218,7 @@ build under test, `E2E_EXPECTED_BUILD_SHA`.
 | administrator | `m1_admin`, role `admin`, every permission |
 | cashier | `m1_cashier`, role `employee`, permissions `pos` + `sales`, **not** an administrator: its device `m1-cashier-device` is pre-approved in `trusted_devices` (the browser presents it as `localStorage.businessos_device_id`), and `shift_admin_exempt` spares only administrators, so the till shows the opening-cash gate until the cashier registers a shift |
 | branches | `Shop` (id 1, default, sells) and `Warehouse` (id 2, stock only) |
-| products | M1 Rose Serum $12.50 (two Shop lots, Aug and Oct, plus a Warehouse lot), M1 Mint Balm $4.75, M1 Clay Mask $3.68, M1 Oat Soap $2.20; each with a lot and stock in **both** branches, costs different from prices |
+| products | M1 Rose Serum $12.50 (two Shop lots, Aug and Oct, plus a Warehouse lot), M1 Mint Balm $4.75, M1 Clay Mask $3.68, M1 Oat Soap $2.20; each with a lot and stock in **both** branches, costs different from prices. Shop lots hold 300 to 500 pieces so one fixture serves many passes of a spec; Warehouse lots are small |
 | rate | `exchange_rate` 4,000 ៛ per $; `change_exchange_rate` unset (change uses the main rate) |
 | tax | stored at 10 % but **off**; a spec switches it on through the real Settings route |
 | customer | M1 Dara Sok, membership `M1-0001`, 300 loyalty points (3 redeemable units at 100 points = $1) |
@@ -241,6 +241,13 @@ Client side: `support/moneyFixture.ts` (`loadReady`, `readState`, `selectRows`,
 `setLinePrice`, `setOrderDiscount`, `setTender`, `tapExact`, `attachCustomer`,
 `setDelivery`, `completeSale`). They hold no expected number: a spec derives those
 from the seed and the owner's rules and compares them with the database.
+
+Two things a till spec has to know. A cashier's lot pill reads the lot's received DATE
+(`dd/mm/yyyy`, owner rule Z1a, `utils/batchLabel.ts`), never its code, so `addToCart` taps
+the pill by `lotLabel(lot)`; the product's lot in the OTHER branch shows beside it, greyed,
+often with the same date, so only an enabled pill counts. And `POST /api/sales` answers a
+repeated `client_request_id` with the sale it already holds, so a spec that posts its own
+body must make the id unique per run (the pos-checkout spec appends a run id).
 
 A second cashier, another branch or a different shop policy is a change to `SEED`
 in the fixture module, made once, not a second fixture.

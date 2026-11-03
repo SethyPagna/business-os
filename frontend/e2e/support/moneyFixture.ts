@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, type APIRequestContext, type APIResponse, type Page } from '@playwright/test'
 
 /**
  * e2e/support/moneyFixture.ts -- the client half of cloudflare/scripts/e2e-money-fixture.cjs.
@@ -64,16 +64,27 @@ export async function loadReady(request: APIRequestContext): Promise<Ready> {
   return ready
 }
 
+/**
+ * A read that is safe to repeat (GET state, a read-only SELECT) is repeated once if the socket it reused was closed under it:
+ * that is a stale keep-alive connection, not an answer. Anything that changes data is never retried this way.
+ */
+async function repeatableRead(send: () => Promise<APIResponse>): Promise<APIResponse> {
+  try { return await send() } catch (error) {
+    if (!/ECONNRESET|socket hang up|EPIPE/i.test(String((error as Error)?.message))) throw error
+    return await send()
+  }
+}
+
 /** Raw database rows. `saleId` restricts sales, lines and allocations to one sale; omit it for all of them. */
 export async function readState(request: APIRequestContext, saleId?: number): Promise<MoneyState> {
-  const response = await request.get(`${MONEY_ORIGIN}/__fixture/state${saleId ? `?sale=${saleId}` : ''}`)
+  const response = await repeatableRead(() => request.get(`${MONEY_ORIGIN}/__fixture/state${saleId ? `?sale=${saleId}` : ''}`))
   expect(response.status()).toBe(200)
   return await response.json() as MoneyState
 }
 
 /** One read-only SELECT, for the table the snapshot does not carry. */
 export async function selectRows(request: APIRequestContext, sql: string, params: unknown[] = []): Promise<Row[]> {
-  const response = await request.post(`${MONEY_ORIGIN}/__fixture/select`, { data: { sql, params } })
+  const response = await repeatableRead(() => request.post(`${MONEY_ORIGIN}/__fixture/select`, { data: { sql, params } }))
   expect(response.status(), await response.text()).toBe(200)
   return (await response.json() as { rows: Row[] }).rows
 }

@@ -71,24 +71,26 @@ const SEED = {
     cashier: { id: 811, username: 'm1_cashier', name: 'M1 Cashier', roleCode: 'employee', deviceId: 'm1-cashier-device', permissions: { pos: true, sales: true } },
   },
   // Prices are exact cents and costs differ from prices, so a spec can tell a price from a cost.
+  // Shop lots hold hundreds of pieces on purpose: a case that rings a sale spends stock, and a fixture that runs dry after a few
+  // passes forces a three-minute restart in the middle of a debugging session. The Warehouse lots stay small (stock only).
   // `lots`: one product_batches row each, with its quantity in ONE branch (a product's stock in a branch is the
   // sum of its lots there, and branch_stock agrees with that sum at seed time).
   products: [
     { id: 301, name: 'M1 Rose Serum', barcode: '8852000000301', priceUsd: 12.5, costUsd: 5.1, lots: [
-      { id: 3011, branchId: 1, code: 'M1-ROSE-AUG', receivedAt: '2026-08-01', quantity: 30 },
-      { id: 3012, branchId: 1, code: 'M1-ROSE-OCT', receivedAt: '2026-10-01', quantity: 30 },
+      { id: 3011, branchId: 1, code: 'M1-ROSE-AUG', receivedAt: '2026-08-01', quantity: 300 },
+      { id: 3012, branchId: 1, code: 'M1-ROSE-OCT', receivedAt: '2026-10-01', quantity: 300 },
       { id: 3013, branchId: 2, code: 'M1-ROSE-WH', receivedAt: '2026-09-01', quantity: 20 },
     ] },
     { id: 302, name: 'M1 Mint Balm', barcode: '8852000000302', priceUsd: 4.75, costUsd: 2.05, lots: [
-      { id: 3021, branchId: 1, code: 'M1-MINT-SEP', receivedAt: '2026-09-01', quantity: 50 },
+      { id: 3021, branchId: 1, code: 'M1-MINT-SEP', receivedAt: '2026-09-01', quantity: 500 },
       { id: 3022, branchId: 2, code: 'M1-MINT-WH', receivedAt: '2026-09-01', quantity: 10 },
     ] },
     { id: 303, name: 'M1 Clay Mask', barcode: '8852000000303', priceUsd: 3.68, costUsd: 1.4, lots: [
-      { id: 3031, branchId: 1, code: 'M1-CLAY-SEP', receivedAt: '2026-09-01', quantity: 50 },
+      { id: 3031, branchId: 1, code: 'M1-CLAY-SEP', receivedAt: '2026-09-01', quantity: 500 },
       { id: 3032, branchId: 2, code: 'M1-CLAY-WH', receivedAt: '2026-09-01', quantity: 5 },
     ] },
     { id: 304, name: 'M1 Oat Soap', barcode: '8852000000304', priceUsd: 2.2, costUsd: 0.8, lots: [
-      { id: 3041, branchId: 1, code: 'M1-OAT-SEP', receivedAt: '2026-09-01', quantity: 40 },
+      { id: 3041, branchId: 1, code: 'M1-OAT-SEP', receivedAt: '2026-09-01', quantity: 500 },
       { id: 3042, branchId: 2, code: 'M1-OAT-WH', receivedAt: '2026-09-01', quantity: 8 },
     ] },
   ],
@@ -279,6 +281,10 @@ async function startMoneyFixture(options = {}) {
         res.setHeader('content-type', MIME[path.extname(candidate)] || 'application/octet-stream'); res.setHeader('cache-control', 'no-store'); fs.createReadStream(candidate).pipe(res)
       } catch (error) { json(res, { error: error.message }, 500); console.error(error) }
     })
+    // Node closes an idle keep-alive socket after 5 s; a client that reuses it in that instant is answered ECONNRESET (seen in the
+    // first desktop run, on a read of /__fixture/state between two slow gestures). Hold idle sockets far longer than any gap a case leaves.
+    server.keepAliveTimeout = 120_000
+    server.headersTimeout = 125_000
     await new Promise(resolve => server.listen(port, '127.0.0.1', resolve))
   } catch (error) {
     await close().catch(() => undefined)
