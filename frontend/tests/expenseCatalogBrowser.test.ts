@@ -22,7 +22,7 @@ const fixtureSource = String.raw`
   const pack = lang === 'km' ? km : en
   document.body.className = lang === 'km' ? 'lang-km' : ''
   const t = (key) => pack[key] || key
-  const log = window.__log = { calls: [], notes: [], changed: 0 }
+  const log = window.__log = { calls: [], notes: [], changed: 0, audit: [] }
   const builtin = ['tax', 'delivery', 'change', 'expense', 'other'].map((value) => ({ value, name: value, builtin: true, id: null, registered: true, archived: false }))
   const labels = [
     { label: 'Packing tape', uses: 3, fee_type: 'other', registered: true, archived: false, id: 1, type_counts: [{ fee_type: 'other', uses: 3 }] },
@@ -38,6 +38,7 @@ const fixtureSource = String.raw`
     let body = null
     try { body = init.body ? JSON.parse(init.body) : null } catch { body = null }
     if (url.pathname.startsWith('/api/fees')) log.calls.push({ method, path: url.pathname + url.search, body })
+    if (url.pathname === '/api/system/audit-logs') { log.audit.push(url.search); return json({ logs: [], total: 0, page: 1, pageSize: 100 }) }
     if (method === 'GET' && url.pathname === '/api/fees/labels') return json({ labels })
     if (method === 'GET' && url.pathname === '/api/fees/types') return json({ types: [...builtin, ...customTypes] })
     if (method === 'GET' && url.pathname === '/api/fees/labels/impact') return json({ linked_records: 3, target_exists: false })
@@ -47,7 +48,7 @@ const fixtureSource = String.raw`
   }
   createRoot(document.getElementById('root')).render(
     <AppContext.Provider value={{ ...FALLBACK_APP_CONTEXT, t, language: lang }}>
-      <ExpenseLabelManagerModal canEdit={() => true} onClose={() => {}} onChanged={() => { log.changed += 1 }} notify={(message, type) => log.notes.push([message, type])} t={t} />
+      <ExpenseLabelManagerModal canEdit={() => true} canViewRecords={params.get('records') === '1'} onClose={() => {}} onChanged={() => { log.changed += 1 }} notify={(message, type) => log.notes.push([message, type])} t={t} />
     </AppContext.Provider>,
   )
 `
@@ -71,7 +72,22 @@ const opened = async (width: number, query: string) => {
 }
 const lastDialog = `[...document.querySelectorAll('[role=dialog]')].pop()`
 
-await browser.run('PASS the manager adds, archives and restores labels, adds types, fixes the built-in ones and never deletes', async () => {
+// Records: a registered label or custom type offers its own history to a viewer of the audit trail, and to nobody else.
+async function recordsScenario() {
+  await opened(420, 'lang=en')
+  assert.equal(await evaluate<number>(`document.querySelectorAll('[data-expense-records]').length`), 0, 'no Records entry without the audit_log tier')
+  await opened(420, 'lang=en&records=1')
+  assert.deepEqual(await evaluate<string[]>(`[...document.querySelectorAll('[data-expense-records="label"]')].map((b) => b.getAttribute('aria-label'))`), ['Records Packing tape', 'Records Landlord', 'Records Old courier'])
+  await clickButton('Records Landlord')
+  await pause(200)
+  assert.deepEqual(await evaluate<string[]>('__log.audit'), ['?entity=fee_label&entityId=2&page=1&pageSize=100'], 'the history asked for is that label\'s own catalog row')
+  assert.equal(await evaluate<string>(`document.body.dataset.fixtureError || ''`), '', 'the float opened without an error')
+  await evaluate(`document.querySelector('[data-expense-catalog-tab="types"]').click()`)
+  await pause(200)
+  assert.deepEqual(await evaluate<string[]>(`[...document.querySelectorAll('[data-expense-records="type"]')].map((b) => b.getAttribute('aria-label'))`), ['Records Rent'], 'only the registered custom type; the built-in ones have no catalog row')
+}
+
+await browser.run('PASS the manager adds, archives and restores labels, adds types, fixes the built-in ones, offers Records only to an audit viewer and never deletes', async () => {
   await opened(420, 'lang=en')
   assert.deepEqual(await evaluate<string[]>(`[...document.querySelectorAll('[data-reason-row]')].map((row) => row.querySelector('.detail-scroll-text').textContent)`), ['Packing tape', 'Landlord', 'Old courier'])
   assert.equal(await evaluate<boolean>(`document.querySelectorAll('[data-reason-row]')[2].className.includes('opacity-60')`), true, 'the archived label is faded')
@@ -122,4 +138,5 @@ await browser.run('PASS the manager adds, archives and restores labels, adds typ
   assert.equal(await evaluate<boolean>(`document.documentElement.scrollWidth <= 360`), true, 'no horizontal overflow at 360 px in Khmer')
   assert.equal(await evaluate<string>(`document.querySelector('[data-expense-catalog-tab="types"]').textContent`), 'ប្រភេទ', 'the Types tab reads in Khmer')
   await khmerRoom('expense catalog', '[role=dialog]', 3)
+  await recordsScenario()
 })

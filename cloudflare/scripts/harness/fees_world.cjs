@@ -5,7 +5,6 @@
 //   const w = createFeesWorld()
 //   w.sql.exec('INSERT ...')                      // seed through the raw handle
 //   const r = await w.request('GET', '/api/fees/types', undefined, w.users.full)
-//   w.setSwitch('on')                             // the sale-linked list switch (system_flags.read_switches)
 //   w.load('lib/salesAnalytics.ts')               // any real module, loaded through the same overrides
 // `patches` rewrite a source file in memory (mutation controls); nothing on disk changes.
 const assert = require('node:assert/strict')
@@ -106,14 +105,9 @@ function createFeesWorld({ patches = [], overrides = {}, through } = {}) {
   }
 
   const sql = raw.db
-  const setSwitch = (token) => {
-    sql.prepare('DELETE FROM system_flags WHERE key = ?').run('read_switches')
-    if (token) sql.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run('read_switches', JSON.stringify({ switches: { expenses_sale_rows: token } }))
-    load('lib/readSwitches.ts').resetReadSwitchMemo()
-  }
   const all = (query, ...params) => sql.prepare(query).all(...params)
   const get = (query, ...params) => sql.prepare(query).get(...params)
-  return { raw, sql, request, users, load, setSwitch, all, get, broadcasts, telegrams, env: {} }
+  return { raw, sql, request, users, load, all, get, broadcasts, telegrams, env: {} }
 }
 
 module.exports = { createFeesWorld }

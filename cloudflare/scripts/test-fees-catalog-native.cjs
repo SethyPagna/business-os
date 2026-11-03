@@ -57,12 +57,18 @@ async function scenarioTypes(w) {
     }
     assert.equal(w.get('SELECT COUNT(*) n FROM fee_types').n, before)
   })
-  await check('types: an expense saves under the catalog spelling; an unknown type is still "other"', async () => {
+  await check('types: an expense saves under the catalog spelling; a name the catalog does not know is refused (it used to save as "other")', async () => {
     const created = await w.request('POST', '/api/fees', { client_request_id: 'cat-type-0001', fee_type: 'shop RENT', label: 'Landlord', amount_usd: 100, fee_date: '2026-10-10', branch_id: 1 }, U.full)
     assert.equal(created.status, 201, JSON.stringify(created.json))
     assert.equal(created.json.fee.fee_type, 'Shop rent')
+    const countBefore = w.get('SELECT COUNT(*) n FROM fees').n
     const unknown = await w.request('POST', '/api/fees', { client_request_id: 'cat-type-0002', fee_type: 'not a type', amount_usd: 1, fee_date: '2026-10-10', branch_id: 1 }, U.full)
-    assert.equal(unknown.json.fee.fee_type, 'other', 'old behaviour kept for an unregistered name')
+    assert.deepEqual([unknown.status, unknown.json.code], [400, 'fee_type_unknown'], JSON.stringify(unknown.json))
+    assert.equal(w.get('SELECT COUNT(*) n FROM fees').n, countBefore, 'nothing was written')
+    const other = await w.request('POST', '/api/fees', { client_request_id: 'cat-type-0004', fee_type: 'Other', amount_usd: 1, fee_date: '2026-10-10', branch_id: 1 }, U.full)
+    assert.deepEqual([other.status, other.json.fee.fee_type], [201, 'other'], 'the built-in other still saves')
+    const blank = await w.request('POST', '/api/fees', { client_request_id: 'cat-type-0005', amount_usd: 1, fee_date: '2026-10-10', branch_id: 1 }, U.full)
+    assert.deepEqual([blank.status, blank.json.fee.fee_type], [201, 'other'], 'no type at all still defaults to other, as before')
   })
   await check('types: rename rewrites the exact expenses, bumps their version, audits each one and the type', async () => {
     const id = Number(w.get("SELECT id FROM fees WHERE fee_type = 'Shop rent'").id)
@@ -83,7 +89,7 @@ async function scenarioTypes(w) {
     const summary = auditRows(w, "entity = 'fee_type' AND action = 'rename'")
     assert.deepEqual([JSON.parse(summary[0].details).from, JSON.parse(summary[0].details).to, JSON.parse(summary[0].details).changed], ['Shop rent', 'Premises', 1])
     // the expenses the rename did not name are untouched
-    assert.equal(w.get("SELECT COUNT(*) n FROM fees WHERE fee_type = 'other'").n, 1)
+    assert.equal(w.get("SELECT COUNT(*) n FROM fees WHERE fee_type = 'other'").n, 2, 'only the two built-in other expenses stay: the rename touched nothing else')
   })
   await check('types: rename refusals (built-in, unknown, clash with a type, clash with a legacy type) change nothing', async () => {
     insertFee(w, { fee_type: 'Legacy mix', label: 'Misc' })
@@ -117,6 +123,8 @@ async function scenarioTypes(w) {
     assert.equal(kept.json.fee.fee_type, 'Premises', 'history stays editable')
     const filtered = await w.request('GET', '/api/fees?fee_type=premises', undefined, U.full)
     assert.deepEqual(filtered.json.fees.map((f) => f.id), [id], 'an archived type still filters')
+    const addArchived = await w.request('POST', '/api/fees/types', { name: 'PREMISES' }, U.full)
+    assert.deepEqual([addArchived.status, addArchived.json.code], [409, 'type_archived'], 'adding the name of an archived type says so (and the page has Khmer text for it)')
     const restored = await w.request('POST', '/api/fees/types/restore', { name: 'premises' }, U.full)
     assert.deepEqual([restored.status, restored.json.archived], [200, false])
     assert.deepEqual(auditRows(w, "entity = 'fee_type' AND action IN ('archive','restore')").map((a) => a.action), ['archive', 'restore'])
@@ -161,6 +169,7 @@ async function scenarioLabels(w) {
     await w.request('POST', '/api/fees/types/archive', { name: 'Legacy mix' }, U.full)
     const archivedType = await w.request('POST', '/api/fees/labels', { label: 'Fresh', fee_type: 'Legacy mix' }, U.full)
     assert.deepEqual([archivedType.status, archivedType.json.code], [400, 'fee_type_invalid'])
+    assert.match(archivedType.json.error, /archived or does not exist/)
     await w.request('POST', '/api/fees/types/restore', { name: 'Legacy mix' }, U.full)
     assert.equal(w.get('SELECT COUNT(*) n FROM fee_labels').n, before)
   })
@@ -243,10 +252,13 @@ async function scenarioLabels(w) {
     assert.equal(auditRows(w, "entity = 'fee' AND entity_id = ?", String(b)).length, 0, 'an expense that did not change has no record')
     assert.equal(w.get("SELECT fee_type FROM fee_labels WHERE name = 'Bike courier'").fee_type, 'delivery')
     const bad = await w.request('POST', '/api/fees/labels/classify', { label: 'Bike courier', fee_type: 'bogus' }, U.full)
-    assert.deepEqual([bad.status, bad.json.error], [400, 'Invalid expense type'])
+    assert.deepEqual([bad.status, bad.json.code], [400, 'fee_type_invalid'], 'a classify refusal carries a code the page can translate')
+    assert.match(bad.json.error, /archived or does not exist/, 'and the sentence covers an archived or unknown type, not a length')
+    const noLabel = await w.request('POST', '/api/fees/labels/classify', { label: '  ', fee_type: 'tax' }, U.full)
+    assert.deepEqual([noLabel.status, noLabel.json.code], [400, 'label_required'])
     await w.request('POST', '/api/fees/types/archive', { name: 'Utilities' }, U.full)
     const archivedType = await w.request('POST', '/api/fees/labels/classify', { label: 'Bike courier', fee_type: 'Utilities' }, U.full)
-    assert.equal(archivedType.status, 400)
+    assert.deepEqual([archivedType.status, archivedType.json.code], [400, 'fee_type_invalid'])
     await w.request('POST', '/api/fees/types/restore', { name: 'Utilities' }, U.full)
     const custom = await w.request('POST', '/api/fees/labels/classify', { label: 'Bike courier', fee_type: 'utilities' }, U.full)
     assert.deepEqual([custom.status, custom.json.fee_type, feeRow(w, a).fee_type], [200, 'Utilities', 'Utilities'])
@@ -274,6 +286,132 @@ async function scenarioLabels(w) {
     await w.request('POST', '/api/fees/types/archive', { name: 'Utilities' }, U.full)
     assert.equal((await w.request('GET', '/api/fees/labels', undefined, U.full)).json.labels.find((l) => l.label === 'Lease').fee_type, 'other')
     await w.request('POST', '/api/fees/types/restore', { name: 'Utilities' }, U.full)
+  })
+}
+
+// B2 (review of b90dbca6d): a type renamed after a form was opened, a stale draft or a retried request must be REFUSED, never booked as "other".
+async function scenarioStaleType(patches = []) {
+  const w = createFeesWorld({ patches })
+  seedBranch(w)
+  const U = w.users
+  await check('B2: add Rent, rename it to Premises, then POST "Rent": 400 fee_type_unknown and nothing is written', async () => {
+    assert.equal((await w.request('POST', '/api/fees/types', { name: 'Rent' }, U.full)).status, 201)
+    const first = await w.request('POST', '/api/fees', { client_request_id: 'stale-0001', fee_type: 'Rent', amount_usd: 300, fee_date: '2026-10-10', branch_id: 1 }, U.full)
+    assert.deepEqual([first.status, first.json.fee.fee_type], [201, 'Rent'])
+    assert.equal((await w.request('POST', '/api/fees/types/rename', { from: 'Rent', to: 'Premises' }, U.full)).status, 200)
+    const snapshot = JSON.stringify([w.all('SELECT * FROM fees ORDER BY id'), w.all('SELECT * FROM fee_operation_receipts ORDER BY 1'), w.get('SELECT COUNT(*) n FROM audit_logs').n])
+    const stale = await w.request('POST', '/api/fees', { client_request_id: 'stale-0002', fee_type: 'Rent', amount_usd: 300, fee_date: '2026-10-11', branch_id: 1 }, U.full)
+    assert.deepEqual([stale.status, stale.json.code], [400, 'fee_type_unknown'], JSON.stringify(stale.json))
+    assert.match(stale.json.error, /renamed/)
+    assert.equal(JSON.stringify([w.all('SELECT * FROM fees ORDER BY id'), w.all('SELECT * FROM fee_operation_receipts ORDER BY 1'), w.get('SELECT COUNT(*) n FROM audit_logs').n]), snapshot, 'no expense, no receipt, no audit row')
+    assert.equal(w.get("SELECT COUNT(*) n FROM fees WHERE fee_type = 'other'").n, 0, 'nothing was booked as other')
+    const retry = await w.request('POST', '/api/fees', { client_request_id: 'stale-0002', fee_type: 'Premises', amount_usd: 300, fee_date: '2026-10-11', branch_id: 1 }, U.full)
+    assert.deepEqual([retry.status, retry.json.fee.fee_type], [201, 'Premises'], 'the same request with the current name saves')
+  })
+  await check('B2: an edit that names a stale type is refused; an expense keeps the type it already has, also an unregistered legacy one', async () => {
+    const id = Number(w.get("SELECT id FROM fees WHERE fee_type = 'Premises' ORDER BY id LIMIT 1").id)
+    const row = feeRow(w, id)
+    const stale = await w.request('PUT', `/api/fees/${id}`, { fee_type: 'Rent', amount_usd: 301, expectedUpdatedAt: row.updated_at }, U.full)
+    assert.deepEqual([stale.status, stale.json.code], [400, 'fee_type_unknown'])
+    assert.equal(feeRow(w, id).amount_usd, 300, 'the refused edit changed nothing')
+    const legacy = insertFee(w, { fee_type: 'Old import type', label: 'Misc', amount_usd: 4 })
+    const legacyRow = feeRow(w, legacy)
+    const same = await w.request('PUT', `/api/fees/${legacy}`, { fee_type: 'old IMPORT type', label: 'Misc 2', amount_usd: 5, expectedUpdatedAt: legacyRow.updated_at }, U.full)
+    assert.deepEqual([same.status, same.json.fee.fee_type, same.json.fee.label], [200, 'Old import type', 'Misc 2'], 'an edit that leaves the type alone no longer turns a legacy type into other')
+    const other = await w.request('PUT', `/api/fees/${legacy}`, { fee_type: 'Nonsense', expectedUpdatedAt: feeRow(w, legacy).updated_at }, U.full)
+    assert.deepEqual([other.status, other.json.code], [400, 'fee_type_unknown'])
+  })
+  await check('B2: a stale type in a list filter finds nothing; it no longer shows the other expenses', async () => {
+    insertFee(w, { fee_type: 'other', label: 'Plain' })
+    const stale = await w.request('GET', '/api/fees?fee_type=Rent', undefined, U.full)
+    assert.deepEqual([stale.status, stale.json.total], [200, 0])
+    assert.ok((await w.request('GET', '/api/fees?fee_type=other', undefined, U.full)).json.total >= 1)
+  })
+  await check('B2: a label default or a classify naming a stale type is refused with a code', async () => {
+    for (const [url, body] of [['/api/fees/labels', { label: 'Fresh', fee_type: 'Rent' }], ['/api/fees/labels/classify', { label: 'Misc 2', fee_type: 'Rent' }]]) {
+      const r = await w.request('POST', url, body, U.full)
+      assert.deepEqual([r.status, r.json.code], [400, 'fee_type_invalid'], url)
+    }
+  })
+}
+
+// N7 (review): a label saved with a double space, a tab or edge spaces lists once and must answer to rename, classify and archive (they used to 404:
+// the list folded the spaces in JS while the SQL match did not). N5: every act on a label, also on one only expenses knew, is recorded under the
+// label's own catalog id. N8: the device on the per-expense rows is the one that sent the request, not the freshest session.
+async function scenarioOldSpacing(patches = []) {
+  const w = createFeesWorld({ patches })
+  seedBranch(w)
+  const U = w.users
+  const spaced = (label, extra = {}) => insertFee(w, { fee_type: 'expense', label, ...extra })
+  await check('N7: labels with double, edge, tab and no-break spaces list as ONE entry with the collapsed spelling', async () => {
+    spaced('Wax  paper'); spaced('wax paper'); spaced('  Wax paper '); spaced('Wax\tpaper'); spaced('Wax\u00a0paper')
+    const entries = (await w.request('GET', '/api/fees/labels', undefined, U.full)).json.labels.filter((l) => l.label.toLowerCase().replace(/\s+/g, ' ') === 'wax paper')
+    assert.equal(entries.length, 1, JSON.stringify(entries))
+    assert.deepEqual([entries[0].uses, /\s{2}|^\s|\s$|\t|\u00a0/.test(entries[0].label)], [5, false])
+    const impact = (await w.request('GET', '/api/fees/labels/impact?from=Wax%20%20paper&to=Parchment', undefined, U.full)).json
+    assert.equal(impact.linked_records, 5, 'the preview counts every spelling')
+  })
+  await check('N7: rename moves every spelling (and audits each one that changed); an expense already spelled right is not rewritten', async () => {
+    const r = await w.request('POST', '/api/fees/labels/replace', { from: 'Wax  paper', to: 'Parchment' }, U.full)
+    assert.deepEqual([r.status, r.json.changed, r.json.merged, r.json.label], [200, 5, false, 'Parchment'], JSON.stringify(r.json))
+    assert.equal(w.get("SELECT COUNT(*) n FROM fees WHERE label = 'Parchment'").n, 5)
+    assert.equal(auditRows(w, "entity = 'fee' AND details LIKE '%label_rename%'").length, 5)
+  })
+  await check('N7: archive and classify answer to a double-spaced label; the catalog row is registered under the collapsed name', async () => {
+    const a = spaced('Foam   sheet'); spaced('foam sheet', { fee_type: 'delivery' })
+    const archived = await w.request('POST', '/api/fees/labels/archive', { label: 'Foam sheet' }, U.full)
+    assert.deepEqual([archived.status, archived.json.archived, archived.json.label], [200, true, 'Foam sheet'], JSON.stringify(archived.json))
+    assert.equal(w.get("SELECT name FROM fee_labels WHERE name_key = 'foam sheet'").name, 'Foam sheet')
+    assert.ok((await w.request('GET', '/api/fees/labels?include_archived=1', undefined, U.full)).json.labels.some((l) => l.label === 'Foam sheet' && l.archived && l.uses === 2))
+    await w.request('POST', '/api/fees/labels/restore', { label: 'foam sheet' }, U.full)
+    const c = await w.request('POST', '/api/fees/labels/classify', { label: 'Foam  sheet', fee_type: 'tax' }, U.full)
+    assert.deepEqual([c.status, c.json.changed], [200, 2])
+    assert.equal(feeRow(w, a).fee_type, 'tax')
+  })
+  await check('N7: the key in JS and in SQL are one function (random whitespace, case and accents)', async () => {
+    const { feeNameKey, feeNameKeySql } = w.load('routes/fees.ts')
+    const samples = ['Tape', '  tape ', 'TAPE  ROLL', 'a\tb', 'a\nb', 'a\r\n b', 'a\u00a0\u00a0b', '\u00a0edge\u00a0', 'Caf\u00e9 \u00c9', 'x'.padEnd(60, ' ') + 'y', '', ' ', 'a' + ' '.repeat(100) + 'b']
+    for (const text of samples) {
+      const viaSql = w.sql.prepare('SELECT ' + feeNameKeySql('?') + ' AS k').get(text).k
+      assert.equal(viaSql, feeNameKey(text), JSON.stringify(text))
+    }
+  })
+  await check('N5: acts on a label only expenses knew are recorded under the new catalog row id (no entity_id NULL)', async () => {
+    spaced('Glue'); spaced('Twine'); spaced('Rope'); spaced('Cord'); spaced('Cord')
+    await w.request('POST', '/api/fees/labels/archive', { label: 'Glue' }, U.full)
+    await w.request('POST', '/api/fees/labels/restore', { label: 'Glue' }, U.full)
+    await w.request('POST', '/api/fees/labels/classify', { label: 'Twine', fee_type: 'tax' }, U.full)
+    await w.request('POST', '/api/fees/labels/replace', { from: 'Rope', to: 'Hemp' }, U.full)
+    await w.request('POST', '/api/fees/labels/replace', { from: 'Cord', to: 'Glue' }, U.full)
+    const id = (name) => Number(w.get('SELECT id FROM fee_labels WHERE name = ?', name).id)
+    const forLabel = (name) => auditRows(w, "entity = 'fee_label' AND entity_id = ?", String(id(name))).map((a) => a.action)
+    assert.deepEqual(forLabel('Glue'), ['archive', 'restore'], 'archive then restore of Glue')
+    assert.deepEqual(forLabel('Twine'), ['classify'])
+    assert.deepEqual(forLabel('Hemp'), ['replace'], 'the rename is recorded under the row that now carries the new name')
+    const cord = Number(w.get("SELECT id FROM fee_labels WHERE name_key = 'cord'").id)
+    assert.deepEqual(auditRows(w, "entity = 'fee_label' AND entity_id = ?", String(cord)).map((a) => a.action), ['replace'], 'a merge is recorded under the archived source row')
+    assert.equal(w.get("SELECT COUNT(*) n FROM audit_logs WHERE entity = 'fee_label' AND entity_id IS NULL").n, 0, 'no label act is recorded without its entity')
+    assert.equal(w.get("SELECT COUNT(*) n FROM audit_logs WHERE entity = 'fee_label' AND record_id IS NULL").n, 0)
+  })
+  await check('N8: the device on the per-expense rows is the one that sent THIS request, not the freshest session', async () => {
+    w.sql.prepare("INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, last_seen_at, expires_at) VALUES (?, 'h', 'Old phone', 'UTC', '2099-01-01 00:00:00', '2100-01-01')").run(U.full.id)
+    const hookKey = Symbol.for('business-os.request-device.v1')
+    const id = spaced('Sponge')
+    try {
+      globalThis[hookKey] = { current: () => ({ userId: U.full.id, deviceName: 'Counter tablet', deviceTz: 'Asia/Phnom_Penh' }) }
+      const r = await w.request('POST', '/api/fees/labels/replace', { from: 'Sponge', to: 'Scourer' }, U.full)
+      assert.equal(r.status, 200, JSON.stringify(r.json))
+      const row = auditRows(w, "entity = 'fee' AND entity_id = ?", String(id))[0]
+      assert.deepEqual([row.device_name, row.device_tz], ['Counter tablet', 'Asia/Phnom_Penh'])
+      const summary = auditRows(w, "entity = 'fee_label' AND action = 'replace'").at(-1)
+      assert.deepEqual([summary.device_name, summary.device_tz], ['Counter tablet', 'Asia/Phnom_Penh'], 'the same device as the label row')
+      globalThis[hookKey] = { current: () => ({ userId: U.admin.id, deviceName: 'Someone else', deviceTz: 'UTC' }) }
+      const id2 = spaced('Brush')
+      await w.request('POST', '/api/fees/labels/replace', { from: 'Brush', to: 'Bristle' }, U.full)
+      assert.equal(auditRows(w, "entity = 'fee' AND entity_id = ?", String(id2))[0].device_name, 'Old phone', 'a request of another account does not lend its device (the old fallback)')
+    } finally {
+      delete globalThis[hookKey]
+    }
   })
 }
 
@@ -318,12 +456,12 @@ async function scenarioPermissions(w) {
 }
 
 // The previous schema (migration 0292 not applied yet): this Worker must still serve the five types and the labels on expenses,
-// save an expense under a built-in type and treat any other name as "other", exactly as the base did.
+// save an expense under a built-in type and refuse any other name (there is no custom type before the migration).
 async function scenarioBeforeMigration() {
   const w = createFeesWorld({ through: 291 })
   seedBranch(w)
   const U = w.users
-  await check('before migration 0292: types, labels and the list answer; an unknown type is "other"; the sale rows still work', async () => {
+  await check('before migration 0292: types, labels and the list answer; an unknown type is refused; the sale rows still work', async () => {
     assert.equal(w.get("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('fee_types','fee_labels')").n, 0)
     const types = await w.request('GET', '/api/fees/types?uses=1', undefined, U.full)
     assert.deepEqual([types.status, types.json.types.map((t) => t.value)], [200, ['tax', 'delivery', 'change', 'expense', 'other']])
@@ -331,9 +469,10 @@ async function scenarioBeforeMigration() {
     const labels = await w.request('GET', '/api/fees/labels', undefined, U.full)
     assert.deepEqual([labels.status, labels.json.labels.map((l) => [l.label, l.uses, l.registered])], [200, [['Tape', 1, false]]])
     const created = await w.request('POST', '/api/fees', { client_request_id: 'pre-0292-0001', fee_type: 'Rent', amount_usd: 1, fee_date: '2026-10-10', branch_id: 1 }, U.full)
-    assert.deepEqual([created.status, created.json.fee.fee_type], [201, 'other'])
+    assert.deepEqual([created.status, created.json.code], [400, 'fee_type_unknown'])
     assert.equal((await w.request('GET', '/api/fees?fee_type=Rent', undefined, U.full)).status, 200)
-    w.setSwitch('on')
+    const builtin = await w.request('POST', '/api/fees', { client_request_id: 'pre-0292-0002', fee_type: 'tax', amount_usd: 1, fee_date: '2026-10-10', branch_id: 1 }, U.full)
+    assert.deepEqual([builtin.status, builtin.json.fee.fee_type], [201, 'tax'])
     assert.equal((await w.request('GET', '/api/fees?source=all&from=2026-10-01&to=2026-10-31', undefined, U.full)).status, 200)
   })
 }
@@ -345,14 +484,21 @@ async function scenarioBeforeMigration() {
   await scenarioTypes(w)
   await scenarioLabels(w)
   await scenarioPermissions(w)
+  await scenarioStaleType()
+  await scenarioOldSpacing()
 
   // ---- mutation controls: the plausible wrong implementations must turn a check red --------------------------------
   const mutants = [
     ['rename forgets the per-expense audit row', { file: 'src/routes/feesCatalog.ts', from: "    feeRowsAuditStatement(user, 'label', merge ? 'label_merge' : 'label_rename', toName, rows.auditWhere, { fromKey, toName }),\n", to: '' }],
-    ['a rename matches by prefix, so "Boxes extra" moves too', { file: 'src/routes/feesCatalog.ts', from: "const rows = { where: \"lower(trim(COALESCE(label,''))) = @fromKey AND", to: "const rows = { where: \"lower(trim(COALESCE(label,''))) LIKE @fromKey || '%' AND" }],
+    ['a rename matches by prefix, so "Boxes extra" moves too', { file: 'src/routes/feesCatalog.ts', from: "const rows = { where: `${LABEL_KEY_SQL} = @fromKey AND", to: "const rows = { where: `${LABEL_KEY_SQL} LIKE @fromKey || '%' AND" }],
     ['the permission gate is dropped from type add', { file: 'src/routes/feesCatalog.ts', from: "app.post('/types', async (c) => {\n  const user = c.get('user')\n  if (!canManage(user)) return c.json(NO_PERMISSION, 403)", to: "app.post('/types', async (c) => {\n  const user = c.get('user')" }],
     ['an archived type is silently coerced to other instead of refused', { file: 'src/routes/fees.ts', from: "  return { ok: false, code: 'fee_type_archived' }", to: "  return { ok: true, type: 'other' }" }],
     ['a built-in name can be added as a custom type', { file: 'src/routes/feesCatalog.ts', from: "if ((FEE_TYPES as readonly string[]).includes(key)) return fail(c, 409, 'type_exists', 'That is a built-in expense type.')\n  const existing", to: "const existing" }],
+    ['an unknown type is saved as other again (a renamed type is booked under the wrong type)', { file: 'src/routes/fees.ts', from: ": { ok: false, code: 'fee_type_unknown' }", to: ": { ok: true, type: 'other' }" }],
+    ['an edit that leaves a legacy type alone turns it into other', { file: 'src/routes/fees.ts', from: "return current != null && feeNameKey(current) === feeNameKey(text) ? { ok: true, type: current as FeeType } : ", to: 'return ' }],
+    ['the label key forgets repeated whitespace (old double-spaced labels answer 404 again)', { file: 'src/routes/feesCatalog.ts', from: "const LABEL_KEY_SQL = feeNameKeySql('label')\n", to: "const LABEL_KEY_SQL = \"lower(trim(COALESCE(label,'')))\"\n" }],
+    ['the per-expense audit row takes the freshest session instead of the request device', { file: 'src/routes/feesCatalog.ts', from: 'a_request_user_id: device ? device.userId : null,', to: 'a_request_user_id: null,' }],
+    ['a classify of an unregistered label is recorded without its entity id', { file: 'src/routes/feesCatalog.ts', from: "'classify', 'fee_label', null, { label: name, fee_type: feeType, changed: changing }, undefined, labelEntityIn(key)),", to: "'classify', 'fee_label', null, { label: name, fee_type: feeType, changed: changing })," }],
     ['archive hard-deletes the label row', { file: 'src/routes/feesCatalog.ts', from: "{ sql: 'UPDATE fee_labels SET archived_at = @archivedAt, updated_at = @now WHERE name_key = @key', params: { archivedAt: archiving ? now : null, now, key } },", to: "{ sql: 'DELETE FROM fee_labels WHERE name_key = @key AND @archivedAt IS NOT NULL', params: { archivedAt: archiving ? now : null, now, key } }," }],
   ]
   quiet = true
@@ -364,6 +510,8 @@ async function scenarioBeforeMigration() {
       await scenarioTypes(m)
       await scenarioLabels(m)
       await scenarioPermissions(m)
+      await scenarioStaleType([patch])
+      await scenarioOldSpacing([patch])
     } catch {
       red = true
     }

@@ -71,6 +71,8 @@ const FEE_BRANCH_INVALID_BODY = { error: 'Every expense must use an active selli
 const FEE_SALE_INVALID_BODY = { error: 'Choose an existing sale recorded at a selling branch.', code: 'fee_sale_invalid' } as const
 const FEE_SALE_BRANCH_MISMATCH_BODY = { error: 'The linked sale and expense must use the same branch.', code: 'fee_sale_branch_mismatch' } as const
 const FEE_TYPE_ARCHIVED_BODY = { error: 'That expense type is archived. Choose an active type.', code: 'fee_type_archived' } as const
+const FEE_TYPE_UNKNOWN_BODY = { error: 'That expense type does not exist (it may have been renamed). Choose a type from the list.', code: 'fee_type_unknown' } as const
+const feeTypeRefusal = (code: 'fee_type_archived' | 'fee_type_unknown') => (code === 'fee_type_unknown' ? FEE_TYPE_UNKNOWN_BODY : FEE_TYPE_ARCHIVED_BODY)
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -162,11 +164,25 @@ function normalizeFeeType(value: unknown): FeeType {
   return FEE_TYPES.includes(normalized) ? (normalized as FeeType) : 'other'
 }
 
-// The catalog key of a label or a type name: trimmed, single-spaced, lower-cased in ASCII only. SQLite's lower() folds
-// ASCII alone, so this key is byte-equal to `lower(trim(column))` for any text, which is how the labels already
-// match expense rows.
+// The catalog key of a label or a type name: edge and repeated whitespace (space, tab, line breaks, no-break space) collapsed to
+// one space, lower-cased in ASCII only because SQLite's lower() folds ASCII alone. feeNameKeySql() is the same normalisation as an
+// SQL expression, so a stored value and a typed name always meet on one key. Plain `lower(trim(column))` is NOT that: it keeps
+// repeated and embedded whitespace, so an old label saved as "Bike  courier" was listed but answered 404 to a rename.
+const NAME_KEY_SPACE = /[ \t\n\r\u00a0]+/g
+/** The name with edge whitespace dropped and every run of whitespace made one space; the case stays as written. */
+export function collapseFeeName(value: string): string {
+  return value.replace(NAME_KEY_SPACE, ' ').replace(/^ | $/g, '')
+}
 export function feeNameKey(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+  return collapseFeeName(value).replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
+/** feeNameKey() as SQL over a text column (NULL reads as empty). The doubling replace runs 7 times: runs of up to 128 spaces collapse. */
+export function feeNameKeySql(column: string): string {
+  let expression = `COALESCE(${column}, '')`
+  for (const code of [9, 10, 13, 160]) expression = `replace(${expression}, char(${code}), ' ')`
+  for (let pass = 0; pass < 7; pass += 1) expression = `replace(${expression}, '  ', ' ')`
+  return `lower(trim(${expression}))`
 }
 
 export const FEE_TYPE_NAME_MAX_CHARS = 40
@@ -185,34 +201,38 @@ type CatalogTypeRow = { name: string; archived_at: string | null }
 export async function findCustomFeeType(db: ReturnType<typeof getDb>, name: string): Promise<CatalogTypeRow | null> {
   try {
     return (await db.prepare('SELECT name, archived_at FROM fee_types WHERE name_key = @key').get<CatalogTypeRow>({ key: feeNameKey(name) })) ?? null
-  } catch {
-    return null
+  } catch (error) {
+    // Before migration 0292 there is no custom type; any other failure is a real one and must not read as "no such type".
+    if (/no such table/i.test(String((error as Error)?.message || ''))) return null
+    throw error
   }
 }
 
-export type FeeTypeResolution = { ok: true; type: FeeType } | { ok: false; code: 'fee_type_archived' }
+export type FeeTypeResolution = { ok: true; type: FeeType } | { ok: false; code: 'fee_type_archived' | 'fee_type_unknown' }
 
 /**
  * The type an expense is saved with. A built-in name saves as itself; an ACTIVE custom type saves under its catalog
  * spelling; an archived custom type is refused for a new choice but kept when the expense already has it (history stays
- * editable); anything else is 'other', as before.
+ * editable). A name that is neither built-in nor in the catalog (a type renamed or removed since the form was opened, a stale
+ * draft, a retried request) is refused as fee_type_unknown: saving it as 'other' would book the expense under the wrong type
+ * without a word. An expense that already carries that very text keeps it.
  */
 export async function resolveFeeType(db: ReturnType<typeof getDb>, value: unknown, current: string | null = null): Promise<FeeTypeResolution> {
   const builtin = normalizeFeeType(value)
   const text = String(value ?? '').trim()
   if (builtin !== 'other' || !text || text.toLowerCase() === 'other') return { ok: true, type: builtin }
   const custom = await findCustomFeeType(db, text)
-  if (!custom) return { ok: true, type: 'other' }
+  if (!custom) return current != null && feeNameKey(current) === feeNameKey(text) ? { ok: true, type: current as FeeType } : { ok: false, code: 'fee_type_unknown' }
   if (!custom.archived_at || (current != null && feeNameKey(current) === feeNameKey(custom.name))) return { ok: true, type: custom.name }
   return { ok: false, code: 'fee_type_archived' }
 }
 
-/** The type a list filter names: built-in, any custom spelling (archived included, so its expenses stay findable), else 'other'. */
+/** The type a list filter names: built-in, any custom spelling (archived included, so its expenses stay findable), else the text itself (matches only expenses that carry exactly it; never the 'other' ones). */
 export async function resolveFeeTypeFilter(db: ReturnType<typeof getDb>, value: unknown): Promise<FeeType> {
   const builtin = normalizeFeeType(value)
   const text = String(value ?? '').trim()
   if (builtin !== 'other' || !text || text.toLowerCase() === 'other') return builtin
-  return (await findCustomFeeType(db, text))?.name ?? 'other'
+  return (await findCustomFeeType(db, text))?.name ?? (text as FeeType)
 }
 
 function normalizeText(value: unknown, maxLength = 500): string | null {
@@ -553,7 +573,7 @@ app.post('/', async (c) => {
   if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
 
   const typeResolution = await resolveFeeType(db, body.fee_type ?? body.feeType)
-  if (!typeResolution.ok) return c.json(FEE_TYPE_ARCHIVED_BODY, 400)
+  if (!typeResolution.ok) return c.json(feeTypeRefusal(typeResolution.code), 400)
   const feeType = typeResolution.type
   const label = normalizeFeeLabel(body.label)
   let version: 1 | undefined, amountUsd: number, amountKhr: number
@@ -727,7 +747,7 @@ app.put('/:id', async (c) => {
   let feeType: FeeType = existing.fee_type
   if (body.fee_type !== undefined || body.feeType !== undefined) {
     const typeResolution = await resolveFeeType(db, body.fee_type ?? body.feeType, existing.fee_type)
-    if (!typeResolution.ok) return c.json(FEE_TYPE_ARCHIVED_BODY, 400)
+    if (!typeResolution.ok) return c.json(feeTypeRefusal(typeResolution.code), 400)
     feeType = typeResolution.type
   }
   const label = body.label !== undefined ? normalizeFeeLabel(body.label) : existing.label

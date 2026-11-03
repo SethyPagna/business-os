@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Archive from 'lucide-react/dist/esm/icons/archive.js'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import Modal from '../shared/Modal.tsx'
 import ReasonListEditor from '../shared/ReasonListEditor.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -23,12 +25,18 @@ import { feeTypeDisplayName } from './FeeForm.tsx'
 import ExpenseTypesSection from './ExpenseTypesSection.tsx'
 import { catalogFailureText } from './expenseCatalogErrors.ts'
 
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'expense-catalog-records-float')
+
 type Props = {
   canEdit: () => boolean
   onClose: () => void
   onChanged: () => void | Promise<void>
   notify: (message: string, type?: string) => void
   t: (key: string) => string | undefined
+  /** The viewer may read the audit trail (audit_log at the full tier), so a registered label or type offers its Records. */
+  canViewRecords?: boolean
+  fmtUSD?: (value: number | string) => string
+  fmtKHR?: (value: number | string) => string
 }
 
 type Tab = 'labels' | 'types'
@@ -37,8 +45,10 @@ type LabelEntry = Omit<FeeLabelSuggestion, 'id'>
 
 // Labels and types of an expense, managed in two sections of one dialog. A label is added here (or by typing it on an expense),
 // renamed or merged, given a default type, and archived; a type is added, renamed and archived. Nothing is deleted.
-export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, notify, t }: Props) {
+export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, notify, t, canViewRecords = false, fmtUSD = String, fmtKHR = String }: Props) {
   const [tab, setTab] = useState<Tab>('labels')
+  // The history of one label or type: the audit rows of that catalog row (acts on it, rename, archive), the same rows as the Audit Log page.
+  const [records, setRecords] = useState<{ entity: 'fee_label' | 'fee_type'; id: number; subject: string } | null>(null)
   const [typesOpened, setTypesOpened] = useState(false)
   const [labels, setLabels] = useState<FeeLabelSuggestion[]>([])
   const [types, setTypes] = useState<FeeTypeEntry[]>([])
@@ -195,6 +205,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
     const mapped = labels.map((entry) => ({
       ...entry,
       id: entry.label.toLocaleLowerCase(),
+      catalogId: entry.id,
       muted: entry.archived === true,
       meta: [
         `${entry.uses} ${tr('records', 'records')}`,
@@ -244,6 +255,18 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
             emptyText={tr('no_expense_labels', 'No expense labels yet.')}
             renderExtra={(entry) => (
               <>
+                {canViewRecords && entry.catalogId != null ? (
+                  <button
+                    type="button"
+                    className={iconButton}
+                    data-expense-records="label"
+                    onClick={() => setRecords({ entity: 'fee_label', id: entry.catalogId as number, subject: entry.label })}
+                    aria-label={`${tr('field_history', 'Records')} ${entry.label}`}
+                    title={tr('field_history', 'Records')}
+                  >
+                    <History className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : null}
                 <AppSelect
                   value={entry.fee_type}
                   ariaLabel={`${tr('fee_type', 'Type')}: ${entry.label}`}
@@ -277,11 +300,26 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
               t={t}
               onChanged={onTypesChanged}
               onDirtyChange={setTypesDirty}
+              canViewRecords={canViewRecords}
+              onOpenRecords={setRecords}
             />
           </div>
         ) : null}
       </div>
       {confirmDialog}
+      {records ? (
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity={records.entity}
+            entityId={records.id}
+            subject={records.subject}
+            onClose={() => setRecords(null)}
+            t={(key) => t(key) || key}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
     </Modal>
   )
 }

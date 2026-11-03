@@ -69,7 +69,8 @@ check('inventory reasons and expense labels use preview + exact normalized repla
   assert.match(inventory, /lower\(trim\(COALESCE\(reason,''\)\)\) = @from/)
   assert.match(fees, /labels\/impact/)
   assert.match(fees, /labels\/replace/)
-  assert.match(fees, /lower\(trim\(COALESCE\(label,''\)\)\) = @from/)
+  assert.match(fees, /WHERE \$\{LABEL_KEY_SQL\} = @from/, 'the label impact count matches rows on the shared normalised key')
+  assert.match(fees, /const LABEL_KEY_SQL = feeNameKeySql\('label'\)/, 'and that key is the one the list groups by (repeated whitespace folded)')
 })
 
 check('return reason presets share one settings row and exact linked replacement is opt-in', () => {

@@ -277,8 +277,8 @@ export function auditChangeColumns(change: AuditFieldChange | null | undefined):
 // only to a row whose actor IS the authenticated user: a row written for
 // another account, or outside a request, keeps the freshest-session fallback.
 const REQUEST_DEVICE_HOOK_KEY = 'business-os.request-device.v1'
-type RequestDevice = { userId: number; deviceName: string | null; deviceTz: string | null }
-function currentRequestDevice(): RequestDevice | null {
+export type RequestDevice = { userId: number; deviceName: string | null; deviceTz: string | null }
+export function currentRequestDevice(): RequestDevice | null {
   try {
     const hook = (globalThis as unknown as Record<symbol, { current?: () => RequestDevice | undefined } | undefined>)[Symbol.for(REQUEST_DEVICE_HOOK_KEY)]
     const device = hook?.current?.()
@@ -397,13 +397,15 @@ export function buildAuditStatement(
   entityId: string | number | null,
   details: unknown = null,
   change?: AuditFieldChange | null,
-  options: { entityIdFromLastInsert?: boolean } = {},
+  options: { entityIdFromLastInsert?: boolean; entityIdSubquery?: { sql: string; params: Record<string, unknown> } } = {},
 ): { sql: string; params: Record<string, unknown> } {
   const detailsStr = details != null
     ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
     : null
   const changeColumns = auditChangeColumns(change)
-  const idSql = options.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entity_id'
+  // entityIdSubquery: the entity's id is looked up inside the batch (a row an earlier statement of it may have just registered). Its SQL is a
+  // constant written in code; the values travel as parameters.
+  const idSql = options.entityIdSubquery ? options.entityIdSubquery.sql : options.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entity_id'
   const requestDevice = currentRequestDevice()
   return {
     sql: `
@@ -429,7 +431,8 @@ export function buildAuditStatement(
       user_name: userName,
       action,
       entity,
-      ...(options.entityIdFromLastInsert ? {} : { entity_id: entityId }),
+      ...(options.entityIdFromLastInsert || options.entityIdSubquery ? {} : { entity_id: entityId }),
+      ...(options.entityIdSubquery ? options.entityIdSubquery.params : {}),
       details: detailsStr,
       table_name: entity,
       old_value: changeColumns.old_value,

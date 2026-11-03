@@ -13,8 +13,11 @@ const CODE_TEXT: Record<string, [key: string, fallback: string]> = {
   type_builtin: ['expense_err_type_builtin', 'Built-in types cannot be changed.'],
   type_not_found: ['expense_err_type_not_found', 'That type is not in the list.'],
   type_name_invalid: ['expense_err_type_invalid', 'A type name is 1 to 40 characters.'],
-  fee_type_invalid: ['expense_err_type_invalid', 'A type name is 1 to 40 characters.'],
+  // fee_type_invalid answers a label default or a classify that names a type which is archived or gone; it is not about length.
+  fee_type_invalid: ['expense_err_type_unavailable', 'That type is archived or no longer exists. Choose a type from the list.'],
   fee_type_archived: ['expense_err_type_archived', 'That type is archived. Choose an active type.'],
+  fee_type_unknown: ['expense_err_type_unknown', 'That type no longer exists (it may have been renamed). Choose the current name from the list.'],
+  type_archived: ['expense_err_type_name_archived', 'That type is archived. Restore it instead.'],
 }
 
 /** The translated sentence for a refusal the catalog is known to send, or null for anything else. */

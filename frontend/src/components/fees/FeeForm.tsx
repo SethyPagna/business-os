@@ -18,8 +18,8 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
+import { FEE_TYPE_NAME_MAX_CHARS } from '../../utils/feeTypeName.ts'
 import {
-  FEE_TYPE_NAME_MAX_CHARS,
   discardPendingFeeCreate,
   feeTypeChoices,
   feeTypeIsChoosable,
@@ -561,6 +561,12 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
             options={feeTypeChoices(feeTypes, form.fee_type).map((opt) => ({ value: opt.value, label: feeTypeDisplayName(opt.value, t) }))}
             onChange={(value) => set('fee_type', value as FeeType)}
           />
+          {/* A type renamed or archived since the form opened (or since a draft was saved): it stays visible, and the Worker refuses to book it. */}
+          {feeTypes && form.fee_type && form.fee_type !== fee?.fee_type && !feeTypeIsChoosable(feeTypes, form.fee_type) ? (
+            <p data-fee-type-gone="" role="alert" className="mt-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+              {t('expense_type_gone_hint') || 'This type is archived or was renamed. Choose a type from the list.'}
+            </p>
+          ) : null}
         </div>
         <div>
           <label htmlFor="fee-label" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

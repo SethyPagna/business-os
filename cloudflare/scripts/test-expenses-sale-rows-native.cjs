@@ -1,5 +1,6 @@
 'use strict'
-// The Expenses list that also shows the courier cost recorded on sales (6.0.1053), behind the read switch `expenses_sale_rows`.
+// The Expenses list that also shows the courier cost recorded on sales (6.0.1053). The page asks for it (`source=all`) and it is on by
+// default: this is the owner's feature, not an optimisation, so there is no switch. A request without `source` is the old list.
 //
 // What the owner asked: "show expenses attached to sales here as well ... all expenses like delivery etc, not cost of goods".
 // The canonical Expenses definition (Telegram shift report / day summary / overview, shift reconciliation) is every fees row plus
@@ -9,7 +10,10 @@
 //     recognized delivery cost and the sum of the rows; fee half + sale half is the Telegram "Expenses" total;
 //   - what is NOT an expense stays out: cost of goods, the waived shop-paid delivery FEE, a cancelled sale, a $0 or NULL cost,
 //     the sale-side twin of a delivery fee;
-//   - switch off / no `source` = the exact old list (compared with a verbatim copy of the base handler over a matrix);
+//   - no `source` (and `source=recorded`) = the exact old list (compared with a verbatim copy of the base handler over a matrix), so an
+//     older client never meets a sale row;
+//   - the three figures the page shows are named and equal their counterparts: Recorded expenses = Reports overview expenses, Courier
+//     cost (USD and riel apart) = courierPayoutsWhere, Total = Telegram "Expenses";
 //   - no courier cost for a caller without `sales:view_courier_cost`: no row, no count, no amount anywhere in the body;
 //   - paging by the merge keeps the true total and every row exactly once;
 //   - mutation controls: each plausible wrong implementation turns a check red.
@@ -100,12 +104,11 @@ async function scenario(w) {
     assert.match(plan, /idx_sales_courier_cost/)
   })
 
-  await check('switch OFF: source=all answers the exact old list (verbatim base handler as oracle) over a matrix of filters', async () => {
-    w.setSwitch(null)
+  await check('no source (and source=recorded) answers the exact old list (verbatim base handler as oracle) over a matrix of filters', async () => {
     const matrix = [RANGE, `${RANGE}&limit=2&offset=1`, `${RANGE}&fee_type=delivery`, `${RANGE}&fee_type=other&search=tape`, `${RANGE}&branch_id=2`, `${RANGE}&sale_id=4`, `${RANGE}&search=ice`, 'limit=3', 'createdFrom=2026-10-10T00:00:00Z&createdTo=2026-10-11T00:00:00Z']
     for (const qs of matrix) {
       const expected = clone(await oldList(w, Object.fromEntries(new URLSearchParams(qs))))
-      for (const extra of ['', '&source=all', '&source=sale', '&source=recorded']) {
+      for (const extra of ['', '&source=recorded', '&source=bogus']) {
         const got = await list(qs + extra)
         assert.equal(got.status, 200, qs + extra)
         assert.deepEqual(got.json, expected, `${qs}${extra}`)
@@ -113,18 +116,8 @@ async function scenario(w) {
     }
   })
 
-  await check('switch ON without source (and source=recorded): still the exact old list; an older client never meets a sale row', async () => {
-    w.setSwitch('on')
-    for (const qs of [RANGE, `${RANGE}&limit=2&offset=2`, `${RANGE}&fee_type=delivery`]) {
-      const expected = clone(await oldList(w, Object.fromEntries(new URLSearchParams(qs))))
-      assert.deepEqual((await list(qs)).json, expected, qs)
-      assert.deepEqual((await list(`${qs}&source=recorded`)).json, expected, qs)
-    }
-  })
-
   let all
-  await check('switch ON, source=all: expenses plus the sale courier rows, each tagged and linked to its sale', async () => {
-    w.setSwitch('on')
+  await check('source=all: expenses plus the sale courier rows, each tagged and linked to its sale', async () => {
     const r = await list(`${RANGE}&source=all&limit=100`)
     assert.equal(r.status, 200, JSON.stringify(r.json))
     all = r.json
@@ -188,6 +181,25 @@ async function scenario(w) {
     const { sale_delivery: block, ...rest } = withSales
     assert.deepEqual(rest, report)
     assert.deepEqual(block, all.sale_delivery)
+  })
+
+  await check('THE THREE FIGURES the page shows are named and each equals its counterpart: Recorded expenses = Reports overview, Courier cost = courierPayoutsWhere (USD and riel apart), Total = Telegram "Expenses"', async () => {
+    const r2 = (n) => Math.round(n * 100) / 100
+    const overview = (await w.request('GET', `/api/reports/overview?startDate=2026-10-10&endDate=2026-10-12`, undefined, U.admin)).json
+    const strip = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12&include=sales`, undefined, U.full)).json
+    const recorded = { usd: strip.totals.amount_usd, khr: strip.totals.amount_khr }
+    assert.deepEqual(recorded, { usd: overview.expenses.totals.amount_usd, khr: overview.expenses.totals.amount_khr }, 'Recorded expenses = the Reports overview expenses line (recorded only)')
+    const { courierPayoutsWhere, composeShiftFigures, FEE_SPLIT_COLUMNS } = w.load('lib/shiftReconciliation.ts')
+    const { whereActiveSales } = w.load('lib/salesAnalytics.ts')
+    const active = whereActiveSales('sales', { startDate: '2026-10-10', endDate: '2026-10-12' })
+    const canonical = await courierPayoutsWhere(w.env, [active.sql], active.params)
+    assert.deepEqual({ usd: strip.sale_delivery.usd, khr: strip.sale_delivery.khr }, canonical, 'Courier cost (shop-paid delivery) = courierPayoutsWhere, dollars and riel kept apart')
+    assert.ok(strip.sale_delivery.usd > 0 && strip.sale_delivery.khr > 0, 'control: the fixture has both a dollar and a riel courier cost, so "apart" is observable')
+    const split = w.get(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date >= '2026-10-10' AND fee_date <= '2026-10-12'`)
+    const telegram = composeShiftFigures({ opening: null, counted: null, totals: {}, expenses: split, deliveryFees: { usd: split.delivery_usd, khr: split.delivery_khr }, courier: canonical })
+    assert.equal(r2(recorded.usd + strip.sale_delivery.usd), r2(telegram.delivery_cost.usd + telegram.other_expenses.usd), 'Total (USD) = Telegram Expenses')
+    assert.equal(recorded.khr + strip.sale_delivery.khr, telegram.delivery_cost.khr + telegram.other_expenses.khr, 'Total (riel) = Telegram Expenses')
+    assert.notEqual(recorded.usd + strip.sale_delivery.usd, recorded.usd, 'control: the Total differs from the Recorded expenses, so the two labels are not the same number')
   })
 
   await check('branch filter narrows both halves the way the reports do (branch_id=1)', async () => {
@@ -280,16 +292,11 @@ async function scenario(w) {
     assert.equal((await list(`${RANGE}&source=ALL`)).json.sale_delivery, undefined, 'only the exact words switch the sale half on')
   })
 
-  await check('the switch is the only way in: removing it returns the old list with no sale block', async () => {
-    w.setSwitch(null)
-    const r = (await list(`${RANGE}&source=all`)).json
-    assert.equal(r.sale_delivery, undefined)
-    assert.ok(r.fees.every((f) => f.kind === undefined))
-    const report = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12&include=sales`, undefined, U.full)).json
-    assert.equal(report.sale_delivery, undefined)
-    w.setSwitch('shadow:0.1')
-    assert.equal((await list(`${RANGE}&source=all`)).json.sale_delivery, undefined, 'shadow is not on')
-    w.setSwitch('on')
+  await check('the report without include=sales is the plain report: no sale block, byte for byte what an older client reads', async () => {
+    const plain = (await w.request('GET', `/api/fees/report?startDate=2026-10-10&endDate=2026-10-12`, undefined, U.full)).json
+    assert.equal(plain.sale_delivery, undefined)
+    assert.equal((await list(RANGE)).json.sale_delivery, undefined)
+    assert.ok((await list(RANGE)).json.fees.every((f) => f.kind === undefined))
   })
 }
 
@@ -305,7 +312,8 @@ async function scenario(w) {
     ['cancelled sales are included in the sale half', { file: 'src/lib/salesAnalytics.ts', from: "clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)", to: "clauses.push('1=1')" }],
     ['the permission check is dropped from the list', { file: 'src/routes/feesCatalog.ts', from: "  const showSales = canViewCourierCost(c.get('user'))\n  try {", to: "  const showSales = true\n  try {" }],
     ['the permission check is dropped from the report block', { file: 'src/routes/feesCatalog.ts', from: "  const showSales = canViewCourierCost(c.get('user'))\n  let saleDelivery", to: "  const showSales = true\n  let saleDelivery" }],
-    ['the switch is ignored', { file: 'src/routes/feesCatalog.ts', from: "  if (!(await readSwitch(c.env, SALE_ROWS_SWITCH))) return next()\n  const db = getDb(c.env)", to: "  const db = getDb(c.env)" }],
+    ['a request without source also gets the sale rows (an older client would meet one)', { file: 'src/routes/feesCatalog.ts', from: "  if (source !== 'all' && source !== 'sale') return next()\n", to: '' }],
+    ['the report block is added to every report, not only include=sales', { file: 'src/routes/feesCatalog.ts', from: "  if (c.req.query('include') !== 'sales') return next()\n", to: '' }],
     ['the merge drops the offset (page 2 repeats page 1)', { file: 'src/routes/feesCatalog.ts', from: "      fees: merged.slice(offset, offset + limit),", to: "      fees: merged.slice(0, limit)," }],
     ['the total forgets the sale rows', { file: 'src/routes/feesCatalog.ts', from: "      total: fees.total + saleTotals.count,", to: "      total: fees.total," }],
     ['a type filter other than delivery still lists the sale rows', { file: 'src/routes/feesCatalog.ts', from: "if (type && type !== 'all' && await resolveFeeTypeFilter(db, type) !== 'delivery') return null", to: "" }],

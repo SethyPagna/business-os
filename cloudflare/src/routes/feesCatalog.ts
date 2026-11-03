@@ -1,10 +1,9 @@
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { buildAuditStatement } from '../lib/audit'
+import { buildAuditStatement, currentRequestDevice } from '../lib/audit'
 import { getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { readSwitch } from '../lib/readSwitches'
 import { canViewCourierCost } from '../lib/courierCostAccess'
 import { whereActiveSales, type SalesFilters } from '../lib/salesAnalytics'
 import { courierPayoutExpressions } from '../lib/shiftReconciliation'
@@ -12,7 +11,9 @@ import { localDateExpr } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import {
   FEE_TYPES,
+  collapseFeeName,
   feeNameKey,
+  feeNameKeySql,
   feeRangePredicate,
   feesAccess,
   normalizeFeeLabel,
@@ -36,7 +37,9 @@ type Ctx = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 type Db = ReturnType<typeof getDb>
 type Statement = { sql: string; params: Record<string, unknown> }
 
-const SALE_ROWS_SWITCH = 'expenses_sale_rows' as const
+// The same key as feeNameKey(), computed in SQL: a stored label and a typed one meet on it (fees.ts explains why lower(trim()) is not enough).
+const LABEL_KEY_SQL = feeNameKeySql('label')
+const LABEL_KEY_SQL_F = feeNameKeySql('f.label')
 const NO_PERMISSION = { error: 'You do not have permission to perform this action' } as const
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -66,14 +69,6 @@ async function typeCatalog(db: Db): Promise<TypeCatalogRow[]> {
   }
 }
 
-async function labelCatalog(db: Db): Promise<LabelCatalogRow[]> {
-  try {
-    return (await db.prepare('SELECT id, name, name_key, fee_type, archived_at FROM fee_labels ORDER BY id').all<LabelCatalogRow>()) || []
-  } catch {
-    return []
-  }
-}
-
 async function catalogTypeByKey(db: Db, key: string): Promise<TypeCatalogRow | null> {
   try {
     return (await db.prepare('SELECT id, name, name_key, archived_at FROM fee_types WHERE name_key = @key').get<TypeCatalogRow>({ key })) ?? null
@@ -93,15 +88,16 @@ async function catalogLabelByKey(db: Db, key: string): Promise<LabelCatalogRow |
 const countRows = async (db: Db, sql: string, params: Record<string, unknown>): Promise<number> =>
   Number((await db.prepare(sql).get<{ n: number }>(params))?.n || 0)
 
-/** The spelling the expenses of a label already use (the most common one), or null when none carries it. */
+/** The spelling the expenses of a label already use (the most common one, whitespace collapsed), or null when none carries it. */
 async function rowsSpelling(db: Db, key: string): Promise<string | null> {
-  const row = await db.prepare(`SELECT TRIM(label) AS label FROM fees WHERE lower(trim(COALESCE(label,''))) = @key
+  const row = await db.prepare(`SELECT TRIM(label) AS label FROM fees WHERE ${LABEL_KEY_SQL} = @key
     GROUP BY TRIM(label) ORDER BY COUNT(*) DESC, TRIM(label) LIMIT 1`).get<{ label: string }>({ key })
-  return row?.label || null
+  const spelling = collapseFeeName(row?.label || '')
+  return spelling || null
 }
 
 const labelRowCount = (db: Db, key: string) =>
-  countRows(db, "SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @key", { key })
+  countRows(db, `SELECT COUNT(*) AS n FROM fees WHERE ${LABEL_KEY_SQL} = @key`, { key })
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Statements that ride in the same batch as the change they record.
@@ -112,6 +108,8 @@ const labelRowCount = (db: Db, key: string) =>
  * (entity 'fee', action 'update') row an edit of the expense writes, so the expense's own Records shows the rename.
  */
 function feeRowsAuditStatement(user: SessionUser, field: 'label' | 'fee_type', via: string, to: string, where: string, whereParams: Record<string, unknown>): Statement {
+  // The device is the one that sent THIS request, exactly as buildAuditStatement does; only an act outside a request falls back to the freshest session.
+  const device = currentRequestDevice()
   return {
     sql: `
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
@@ -122,7 +120,8 @@ function feeRowsAuditStatement(user: SessionUser, field: 'label' | 'fee_type', v
         json_object('via', @a_via, 'before', json_object('${field}', f.${field}), 'after', json_object('${field}', @a_to)),
         'fee', f.id,
         json_object('${field}', f.${field}), json_object('${field}', @a_to),
-        s.device_name, s.device_tz
+        CASE WHEN @a_request_user_id IS NOT NULL AND @a_request_user_id = @a_user_id THEN @a_request_device_name ELSE s.device_name END,
+        CASE WHEN @a_request_user_id IS NOT NULL AND @a_request_user_id = @a_user_id THEN @a_request_device_tz ELSE s.device_tz END
       FROM fees f
       LEFT JOIN users u ON u.id = @a_user_id
       LEFT JOIN (
@@ -131,9 +130,20 @@ function feeRowsAuditStatement(user: SessionUser, field: 'label' | 'fee_type', v
         ORDER BY last_seen_at DESC, id DESC LIMIT 1
       ) AS s ON 1 = 1
       WHERE ${where}`,
-    params: { ...whereParams, a_user_id: user.id, a_user_name: actorSnapshot(user), a_via: via, a_to: to },
+    params: {
+      ...whereParams, a_user_id: user.id, a_user_name: actorSnapshot(user), a_via: via, a_to: to,
+      a_request_user_id: device ? device.userId : null, a_request_device_name: device ? device.deviceName : null, a_request_device_tz: device ? device.deviceTz : null,
+    },
   }
 }
+
+/**
+ * buildAuditStatement's option for the audit row of an act on a label: the entity id is looked up by key inside the batch of the act. An act
+ * on a label only expenses knew registers it first (ensureLabelStatement), so the id is not known before the batch runs.
+ */
+const labelEntityIn = (key: string) => ({
+  entityIdSubquery: { sql: '(SELECT id FROM fee_labels WHERE name_key = @audit_label_key)', params: { audit_label_key: key } },
+})
 
 /** Registers a label found only on expenses, so it can carry an archive flag or a default type. Does nothing when it is already registered. */
 const ensureLabelStatement = (user: SessionUser, name: string, key: string, feeType: string | null, now: string): Statement => ({
@@ -236,7 +246,7 @@ app.post('/types/rename', async (c) => {
   if (toKey !== fromKey) {
     const clash = await catalogTypeByKey(db, toKey)
     if (clash) return fail(c, 409, 'type_exists', 'That type already exists.')
-    if (await countRows(db, 'SELECT COUNT(*) AS n FROM fees WHERE lower(trim(fee_type)) = @key', { key: toKey }) > 0) {
+    if (await countRows(db, `SELECT COUNT(*) AS n FROM fees WHERE ${feeNameKeySql('fee_type')} = @key`, { key: toKey }) > 0) {
       return fail(c, 409, 'type_exists', 'Expenses already use that name. Add it as a type first.')
     }
   }
@@ -299,8 +309,8 @@ const LABELS_ON_EXPENSES_SQL = `
   SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses
   FROM fees f
   WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
-  GROUP BY lower(trim(f.label)), f.fee_type
-  ORDER BY lower(trim(f.label)), uses DESC, f.fee_type
+  GROUP BY ${LABEL_KEY_SQL_F}, f.fee_type
+  ORDER BY ${LABEL_KEY_SQL_F}, uses DESC, f.fee_type
 `
 const LABEL_CATALOG_SQL = `
   SELECT l.id, l.name, l.name_key, l.fee_type, l.archived_at,
@@ -329,7 +339,7 @@ app.get('/labels', async (c) => {
   }
   const catalog = new Map<string, LabelEntry>()
   for (const row of rows || []) {
-    const label = String(row.label || '').trim()
+    const label = collapseFeeName(String(row.label || ''))
     if (!label) continue
     const key = feeNameKey(label)
     const entry = catalog.get(key) || { label, uses: 0, fee_type: 'other', type_counts: [], id: null, registered: false, archived: false }
@@ -368,7 +378,7 @@ app.get('/labels/impact', async (c) => {
   const targetRegistered = await catalogLabelByKey(db, feeNameKey(to))
   const typeCounts = await db.prepare(`
     SELECT fee_type, COUNT(*) AS uses FROM fees
-    WHERE lower(trim(COALESCE(label,''))) = @from
+    WHERE ${LABEL_KEY_SQL} = @from
     GROUP BY fee_type ORDER BY uses DESC, fee_type
   `).all<{ fee_type: string; uses: number }>({ from: feeNameKey(from) })
   return c.json({
@@ -383,7 +393,7 @@ app.get('/labels/type-impact', async (c) => {
   if (!label) return c.json({ error: 'Label is required' }, 400)
   const rows = await getDb(c.env).prepare(`
     SELECT fee_type, COUNT(*) AS uses FROM fees
-    WHERE lower(trim(COALESCE(label,''))) = @label
+    WHERE ${LABEL_KEY_SQL} = @label
     GROUP BY fee_type ORDER BY uses DESC, fee_type
   `).all<{ fee_type: string; uses: number }>({ label: feeNameKey(label) })
   const typeCounts = (rows || []).map((row) => ({ fee_type: String(row.fee_type || 'other'), uses: Number(row.uses) || 0 }))
@@ -399,14 +409,14 @@ function typedLabel(value: unknown): { label: string } | { code: string; error: 
   return { label }
 }
 
+const TYPE_NOT_CHOOSABLE = 'That expense type is archived or does not exist. Choose an active type from the list.'
+
 /** An existing type chosen for a label or an expense: built-in or ACTIVE custom. The spelling to store, or null. */
 async function chosenType(db: Db, value: unknown): Promise<string | null> {
   const text = typeof value === 'string' ? value.trim() : ''
   if (!text) return null
   const resolved = await resolveFeeType(db, text)
-  if (!resolved.ok) return null
-  const key = feeNameKey(text)
-  return resolved.type === 'other' && key !== 'other' ? null : resolved.type
+  return resolved.ok ? resolved.type : null
 }
 
 app.post('/labels', async (c) => {
@@ -420,7 +430,7 @@ app.post('/labels', async (c) => {
   let feeType: string | null = null
   if (body.fee_type !== undefined && body.fee_type !== null && body.fee_type !== '') {
     feeType = await chosenType(db, body.fee_type)
-    if (!feeType) return fail(c, 400, 'fee_type_invalid', 'Invalid expense type')
+    if (!feeType) return fail(c, 400, 'fee_type_invalid', TYPE_NOT_CHOOSABLE)
   }
   const existing = await catalogLabelByKey(db, key)
   if (existing) return fail(c, 409, existing.archived_at ? 'label_archived' : 'label_exists', existing.archived_at ? 'That label is archived. Restore it instead.' : 'That label already exists.')
@@ -471,7 +481,7 @@ app.post('/labels/replace', async (c) => {
   const sourceName = sourceRow ? sourceRow.name : ((await rowsSpelling(db, fromKey)) ?? from)
   if (sameKey && toName === sourceName && sourceRow) return c.json({ success: true, changed: 0, merged: false, label: toName })
   const now = new Date().toISOString()
-  const rows = { where: "lower(trim(COALESCE(label,''))) = @fromKey AND COALESCE(label,'') <> @toName", auditWhere: "lower(trim(COALESCE(f.label,''))) = @fromKey AND COALESCE(f.label,'') <> @toName" }
+  const rows = { where: `${LABEL_KEY_SQL} = @fromKey AND COALESCE(label,'') <> @toName`, auditWhere: `${LABEL_KEY_SQL_F} = @fromKey AND COALESCE(f.label,'') <> @toName` }
   const statements: Statement[] = []
   if (!sourceRow) statements.push(ensureLabelStatement(user, sourceName, fromKey, null, now))
   if (merge && !targetRow) statements.push(ensureLabelStatement(user, toName, toKey, null, now))
@@ -481,7 +491,8 @@ app.post('/labels/replace', async (c) => {
     merge
       ? { sql: 'UPDATE fee_labels SET archived_at = @now, updated_at = @now WHERE name_key = @fromKey', params: { now, fromKey } }
       : { sql: 'UPDATE fee_labels SET name = @toName, name_key = @toKey, updated_at = @now WHERE name_key = @fromKey', params: { toName, toKey, now, fromKey } },
-    buildAuditStatement(user.id, user.username || null, 'replace', 'fee_label', sourceRow?.id ?? null, { from: sourceName, to: toName, merged: merge, changed: sourceUses }),
+    // A rename moves the catalog row to its new key; a merge archives the source row under its old one.
+    buildAuditStatement(user.id, user.username || null, 'replace', 'fee_label', null, { from: sourceName, to: toName, merged: merge, changed: sourceUses }, undefined, labelEntityIn(merge ? fromKey : toKey)),
   )
   try {
     await db.batch(statements)
@@ -499,22 +510,22 @@ app.post('/labels/classify', async (c) => {
   const db = getDb(c.env)
   const body = await readBody(c)
   const typed = typedLabel(body.label)
-  if ('code' in typed) return c.json({ error: 'Label is required' }, 400)
+  if ('code' in typed) return fail(c, 400, typed.code, typed.error)
   const feeType = await chosenType(db, body.fee_type ?? body.feeType)
-  if (!feeType) return c.json({ error: 'Invalid expense type' }, 400)
+  if (!feeType) return fail(c, 400, 'fee_type_invalid', TYPE_NOT_CHOOSABLE)
   const key = feeNameKey(typed.label)
   const [row, uses] = await Promise.all([catalogLabelByKey(db, key), labelRowCount(db, key)])
   if (!row && uses === 0) return fail(c, 404, 'label_not_found', 'That label no longer exists.')
   const now = new Date().toISOString()
   const name = row ? row.name : ((await rowsSpelling(db, key)) ?? typed.label)
-  const changing = await countRows(db, "SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @key AND fee_type <> @feeType", { key, feeType })
-  const where = "lower(trim(COALESCE(f.label,''))) = @key AND f.fee_type <> @feeType"
+  const changing = await countRows(db, `SELECT COUNT(*) AS n FROM fees WHERE ${LABEL_KEY_SQL} = @key AND fee_type <> @feeType`, { key, feeType })
+  const where = `${LABEL_KEY_SQL_F} = @key AND f.fee_type <> @feeType`
   await db.batch([
     ensureLabelStatement(user, name, key, feeType, now),
     feeRowsAuditStatement(user, 'fee_type', 'label_classify', feeType, where, { key, feeType }),
-    { sql: "UPDATE fees SET fee_type = @feeType, updated_at = @now WHERE lower(trim(COALESCE(label,''))) = @key AND fee_type <> @feeType", params: { key, feeType, now } },
+    { sql: `UPDATE fees SET fee_type = @feeType, updated_at = @now WHERE ${LABEL_KEY_SQL} = @key AND fee_type <> @feeType`, params: { key, feeType, now } },
     { sql: 'UPDATE fee_labels SET fee_type = @feeType, updated_at = @now WHERE name_key = @key', params: { feeType, now, key } },
-    buildAuditStatement(user.id, user.username || null, 'classify', 'fee_label', row?.id ?? null, { label: name, fee_type: feeType, changed: changing }),
+    buildAuditStatement(user.id, user.username || null, 'classify', 'fee_label', null, { label: name, fee_type: feeType, changed: changing }, undefined, labelEntityIn(key)),
   ])
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label: name, fee_type: feeType }))
   return c.json({ success: true, changed: changing, label: name, fee_type: feeType })
@@ -539,7 +550,7 @@ for (const action of ['archive', 'restore'] as const) {
     await db.batch([
       ensureLabelStatement(user, name, key, null, now),
       { sql: 'UPDATE fee_labels SET archived_at = @archivedAt, updated_at = @now WHERE name_key = @key', params: { archivedAt: archiving ? now : null, now, key } },
-      buildAuditStatement(user.id, user.username || null, archiving ? 'archive' : 'restore', 'fee_label', row?.id ?? null, { label: name, linked_records: uses }),
+      buildAuditStatement(user.id, user.username || null, archiving ? 'archive' : 'restore', 'fee_label', null, { label: name, linked_records: uses }, undefined, labelEntityIn(key)),
     ])
     c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: `label_${action}`, label: name }))
     return c.json({ success: true, label: name, archived: archiving, changed: 1 })
@@ -686,7 +697,6 @@ export function mergeExpenseRows(expenses: MergeRow[], sales: MergeRow[]): Merge
 app.get('/', async (c, next) => {
   const source = c.req.query('source')
   if (source !== 'all' && source !== 'sale') return next()
-  if (!(await readSwitch(c.env, SALE_ROWS_SWITCH))) return next()
   const db = getDb(c.env)
   const query = c.req.query()
   const limit = Math.min(Math.max(toNumber(query.limit, 100), 1), 500)
@@ -722,7 +732,6 @@ app.get('/', async (c, next) => {
 // GET /api/fees/report?include=sales: the unchanged fees report (fees.ts answers it first) plus the sale courier-cost block for the same range and branch.
 app.get('/report', async (c, next) => {
   if (c.req.query('include') !== 'sales') return next()
-  if (!(await readSwitch(c.env, SALE_ROWS_SWITCH))) return next()
   await next()
   if (c.res.status !== 200) return
   const body = await c.res.clone().json<Record<string, unknown>>().catch(() => null)

@@ -10,9 +10,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
+import { BUILTIN_FEE_TYPES, FEE_TYPE_NAME_MAX_CHARS } from '../src/utils/feeTypeName.ts'
 import {
-  BUILTIN_FEE_TYPES,
-  FEE_TYPE_NAME_MAX_CHARS,
   feeTypeChoices,
   feeTypeIsChoosable,
   normalizeFeeCreateBody,
@@ -70,6 +69,11 @@ check('a known catalog refusal is translated by its code; an unknown one keeps t
   const tr = (key: string, fallback: string) => `[${key}]`
   assert.equal(catalogRefusalText({ code: 'label_exists' }, tr), '[expense_err_label_exists]')
   assert.equal(catalogRefusalText({ code: 'fee_type_archived' }, tr), '[expense_err_type_archived]')
+  // The three refusals of a type are three different sentences: archived, gone (renamed since the form opened), and a name that is archived when added.
+  assert.equal(catalogRefusalText({ code: 'fee_type_unknown' }, tr), '[expense_err_type_unknown]')
+  assert.equal(catalogRefusalText({ code: 'type_archived' }, tr), '[expense_err_type_name_archived]')
+  assert.equal(catalogRefusalText({ code: 'fee_type_invalid' }, tr), '[expense_err_type_unavailable]', 'a label default or classify naming an archived or missing type is not a length error')
+  assert.notEqual(catalogRefusalText({ code: 'fee_type_invalid' }, tr), catalogRefusalText({ code: 'type_name_invalid' }, tr))
   assert.equal(catalogRefusalText({ code: 'toString' }, tr), null, 'a prototype name is not a code')
   assert.equal(catalogRefusalText(new Error('boom'), tr), null)
   assert.equal(catalogFailureText(Object.assign(new Error('English sentence'), { code: 'type_exists' }), tr, 'expense_type_add_failed', 'x'), '[expense_type_add_failed]: [expense_err_type_exists]')
@@ -137,6 +141,53 @@ check('the form offers the live type list and keeps a restored draft\'s custom t
   assert.match(form, /getFeeTypes\(\)/)
   assert.doesNotMatch(form, /FEE_TYPE_OPTIONS\.some\(\(option\) => option\.value === draft\.fee_type\)/, 'a draft with a custom type is no longer reset')
   assert.match(form, /feeTypeIsChoosable\(feeTypes, match\.fee_type\)/, 'a label only adopts a type that is still a choice')
+})
+check('the name limit and the built-in type list live outside the transport, so the page and form load in a host that replaces the transport with a fake', () => {
+  assert.match(read('../src/utils/feeTypeName.ts'), /export const FEE_TYPE_NAME_MAX_CHARS = 40/)
+  assert.match(read('../src/utils/feeTypeName.ts'), /export const BUILTIN_FEE_TYPES: readonly BuiltinFeeType\[\] = \['tax', 'delivery', 'change', 'expense', 'other'\]/)
+  assert.match(page, /import \{ BUILTIN_FEE_TYPES \} from '\.\.\/\.\.\/utils\/feeTypeName\.ts'/)
+  assert.doesNotMatch(transport, /export const BUILTIN_FEE_TYPES/, 'one definition')
+  // The host test builds its fake transport from `export function|class` names only: nothing a component imports from the transport may be a const.
+  const transportExportsByKind = new Set((transport.match(/^export const (\w+)/gm) || []).map((line) => line.replace('export const ', '')))
+  for (const source of [page, form, manager, typesSection]) {
+    const imported = [...source.matchAll(/import \{([^}]*)\} from '(?:\.\.\/)+api\/feesTransport\.ts'/g)].flatMap((match) => match[1].split(',').map((name) => name.trim().replace(/^type\s+/, '').replace(/\s+as\s+\w+$/, '')).filter(Boolean))
+    for (const name of imported) assert.ok(!transportExportsByKind.has(name), `${name} is a const exported by the transport: a host that fakes the transport cannot copy it`)
+  }
+  assert.match(form, /import \{ FEE_TYPE_NAME_MAX_CHARS \} from '\.\.\/\.\.\/utils\/feeTypeName\.ts'/)
+  assert.match(typesSection, /import \{ FEE_TYPE_NAME_MAX_CHARS \} from '\.\.\/\.\.\/utils\/feeTypeName\.ts'/)
+  assert.match(transport, /import \{ BUILTIN_FEE_TYPES, FEE_TYPE_NAME_MAX_CHARS, type BuiltinFeeType \} from '\.\.\/utils\/feeTypeName\.ts'/)
+  assert.doesNotMatch(transport, /export const FEE_TYPE_NAME_MAX_CHARS/, 'one definition')
+  assert.doesNotMatch(form + typesSection, /FEE_TYPE_NAME_MAX_CHARS,\n[^}]*from '\.\.\/\.\.\/api\/feesTransport\.ts'/, 'no component imports the constant from the transport')
+})
+check('a type renamed or archived since the form opened stays visible with a hint to choose the current name', () => {
+  assert.match(form, /feeTypes && form\.fee_type && form\.fee_type !== fee\?\.fee_type && !feeTypeIsChoosable\(feeTypes, form\.fee_type\)/)
+  assert.match(form, /data-fee-type-gone=""/)
+  assert.match(form, /feeTypeChoices\(feeTypes, form\.fee_type\)/, 'the stale name is still an option, so the select shows what the draft holds')
+})
+check('a label or type row offers its Records only to a viewer of the audit trail, and only once it has a catalog row', () => {
+  assert.match(manager, /canViewRecords && entry\.catalogId != null/)
+  assert.match(manager, /setRecords\(\{ entity: 'fee_label', id: entry\.catalogId as number/)
+  assert.match(typesSection, /canViewRecords && onOpenRecords && item\.catalogId != null/)
+  assert.match(typesSection, /onOpenRecords\(\{ entity: 'fee_type', id: item\.catalogId as number/)
+  assert.match(manager, /\{records \? \(\s*<Suspense fallback=\{null\}>\s*<EntityRecordsFloat\s+entity=\{records\.entity\}\s+entityId=\{records\.id\}/, 'the float opens for the row that was asked for')
+  assert.match(manager, /canViewRecords=\{canViewRecords\}\s+onOpenRecords=\{setRecords\}/, 'the Types section opens the same float')
+  assert.match(page, /canViewRecords=\{getPermissionTier\('audit_log'\) === 'full'\}/, 'the audit tier that answers for everyone, as on every other Records entry')
+  assert.doesNotMatch(manager + typesSection, /<button[^>]*data-expense-records[^>]*disabled/, 'a Records entry is not greyed out: it is absent when not allowed')
+})
+check('the strip names its three figures: Recorded expenses, Courier cost (dollars and riel apart), and the Total', () => {
+  const pack = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  assert.match(page, /key: 'recorded',\s+label: tr\('expense_recorded_stat', 'Recorded expenses'\),\s+value: fmtMoney\(amountUsd, amountKhr\)/, 'Recorded expenses = the recorded sum alone')
+  assert.match(page, /const courierText = `\$\{fmtUSD\(saleUsd\)\} \+ \$\{fmtKHR\(saleKhr\)\}`/, 'dollars and riel are formatted apart')
+  assert.match(page, /key: 'courier',\s+label: courierName,\s+value: courierText/)
+  assert.match(page, /const courierName = tr\('expense_sale_delivery_stat', 'Courier cost \(shop-paid delivery\)'\)/)
+  assert.match(page, /\.\.\.\(sale \? \[/, 'without courier-cost authority there is no second card repeating the Total')
+  assert.ok(page.indexOf("key: 'recorded'") < page.indexOf("key: 'courier'") && page.indexOf("key: 'courier'") < page.indexOf("key: 'total'"), 'in reading order: recorded, courier, total')
+  assert.match(page, /expense_recorded_hint/)
+  assert.match(page, /expense_courier_hint/)
+  assert.equal(pack.expense_sale_delivery_stat, 'Courier cost (shop-paid delivery)')
+  assert.equal(pack.expense_recorded_stat, 'Recorded expenses')
+  assert.match(pack.stats_fees_total_with_sales_hint, /Telegram/, 'the Total says whose figure it equals')
+  assert.match(pack.expense_recorded_hint, /Reports overview/, 'Recorded expenses says whose figure it equals')
 })
 check('the page asks for sale rows and totals, tags them, and gives them a read-only surface', () => {
   assert.match(page, /source: 'all',\s*fee_type: typeFilter/, 'the list asks for stored expenses plus sale courier rows')

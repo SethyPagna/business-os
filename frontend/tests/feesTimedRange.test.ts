@@ -37,6 +37,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, { compil
   if (id.includes('moneyPrecision')) return require('../src/utils/moneyPrecision.ts')
   if (id.includes('businessTimeBounds')) return require('../src/utils/businessTimeBounds.ts')
   if (id.includes('syncProblemLifecycle')) return {}
+  if (id.includes('feeTypeName')) return require('../src/utils/feeTypeName.ts')
   if (id.includes('directMutationRefusal')) return require('../src/utils/directMutationRefusal.ts')
   if (id === './retryRecordScope.ts') return retryRecordScope
   throw new Error(id)

@@ -35,8 +35,8 @@ import {
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
 import { cacheInvalidate, isWriteConflictError } from '../../api/http.ts'
+import { BUILTIN_FEE_TYPES } from '../../utils/feeTypeName.ts'
 import {
-  BUILTIN_FEE_TYPES,
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
   feeDeleteStaleKind,
@@ -389,7 +389,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     days?: Array<{ date?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_category?: Array<{ label?: string; fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
-    // The courier cost recorded on sales in the same range; null when the caller may not read it, absent while the Worker's switch is off.
+    // The courier cost recorded on sales in the same range; null when the caller may not read it, absent from an older Worker.
     sale_delivery?: { count?: number; usd?: number; khr?: number } | null
   }
   const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
@@ -433,7 +433,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     const saleCount = Number(sale?.count) || 0
     const saleUsd = Number(sale?.usd) || 0
     const saleKhr = Number(sale?.khr) || 0
-    const saleLine = sale ? [{ label: tr('expense_sale_delivery_stat', 'Courier cost on sales'), value: `${saleCount} · ${fmtMoney(saleUsd, saleKhr)}` }] : []
+    const courierName = tr('expense_sale_delivery_stat', 'Courier cost (shop-paid delivery)')
+    // Dollars and riel kept apart: a courier is paid in either, and the two are never one converted number here.
+    const courierText = `${fmtUSD(saleUsd)} + ${fmtKHR(saleKhr)}`
+    const saleLine = sale ? [{ label: courierName, value: `${saleCount} · ${courierText}` }] : []
     return [
       {
         key: 'fees',
@@ -458,15 +461,34 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           value: `${Number(row.count) || 0} · ${fmtMoney(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
         })),
       },
+      // Three figures, each named for what it is and equal to one counterpart: Recorded expenses = the Reports overview expenses line,
+      // Courier cost = what the reports add for delivery the shop paid, Total = the Telegram report's Expenses. Shown only when the viewer may read
+      // courier cost; without it the Total is the recorded figure alone and a second card would repeat it.
+      ...(sale ? [
+        {
+          key: 'recorded',
+          label: tr('expense_recorded_stat', 'Recorded expenses'),
+          value: fmtMoney(amountUsd, amountKhr),
+          hint: tr('expense_recorded_hint', 'Expenses saved in the range. The same figure as Expenses on the Reports overview.'),
+          details: [],
+        },
+        {
+          key: 'courier',
+          label: courierName,
+          value: courierText,
+          hint: tr('expense_courier_hint', 'Courier cost recorded on the sales in the range (delivery the shop paid for), dollars and riel apart. Cost of goods is not included.'),
+          details: [{ label: tr('sales', 'Sales'), value: String(saleCount) }],
+        },
+      ] : []),
       {
         key: 'total',
         label: tr('total', 'Total'),
         value: fmtMoney(Math.round((amountUsd + saleUsd) * 100) / 100, amountKhr + saleKhr),
         tone: 'accent',
         hint: sale
-          ? tr('stats_fees_total_with_sales_hint', 'Recorded expenses plus the courier cost recorded on sales in the range. Cost of goods is not included. The breakdown lists the days with the most spend.')
+          ? tr('stats_fees_total_with_sales_hint', 'Recorded expenses plus the courier cost. The same figure as Expenses in the Telegram report. Cost of goods is not included. The breakdown lists the days with the most spend.')
           : tr('stats_fees_total_hint', 'Sum of expense amounts in the range. Expenses are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most spend.'),
-        details: [...(sale ? [{ label: tr('expense_recorded_stat', 'Recorded expenses'), value: fmtMoney(amountUsd, amountKhr) }, ...saleLine] : []), ...days.slice(0, 8).map((day) => {
+        details: [...days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
             label: m ? `${m[3]}/${m[2]}/${m[1]}` : String(day.date || ''),
@@ -475,7 +497,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         })],
       },
     ]
-  }, [fmtMoney, stripData, t, tr])
+  }, [fmtKHR, fmtMoney, fmtUSD, stripData, t, tr])
 
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)
@@ -1176,6 +1198,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             onChanged={refreshAfterCatalogChange}
             notify={notify}
             t={t}
+            canViewRecords={getPermissionTier('audit_log') === 'full'}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
           />
         </Suspense>
       ) : null}

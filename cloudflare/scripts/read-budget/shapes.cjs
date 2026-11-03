@@ -102,7 +102,7 @@ function getEntries(ctx) {
     // fees / shifts
     ['fees list', `/api/fees?page=1&pageSize=20&${R(M, T)}`], ['fees/report', `/api/fees/report?${R(M, T)}`], ['fees/labels', '/api/fees/labels'], ['fees/labels/impact', '/api/fees/labels/impact?label=Fee%201'],
     ['fees/labels/type-impact', '/api/fees/labels/type-impact?type=other'], ['fees/:id', '/api/fees/1'],
-    // 6.0.1053: the catalog reads of the Expenses page, and the two shapes that also read the courier cost recorded on sales (switch expenses_sale_rows is seeded ON).
+    // 6.0.1053: the catalog reads of the Expenses page, and the two shapes that also read the courier cost recorded on sales (the page asks for them by default: there is no switch).
     ['fees/types', '/api/fees/types'], ['fees/types with uses and archived (manager)', '/api/fees/types?uses=1&include_archived=1'], ['fees/types/impact', '/api/fees/types/impact?name=Rent'],
     ['fees/labels with archived (manager)', '/api/fees/labels?include_archived=1'],
     ['fees list with sale delivery rows (source=all)', `/api/fees?page=1&pageSize=20&source=all&${R(M, T)}`], ['fees/report with sale delivery (include=sales)', `/api/fees/report?${R(M, T)}&include=sales`],

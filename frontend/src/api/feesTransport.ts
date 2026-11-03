@@ -4,6 +4,7 @@ import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { directMutationRefusedBeforeWrite } from '../utils/directMutationRefusal.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
+import { BUILTIN_FEE_TYPES, FEE_TYPE_NAME_MAX_CHARS, type BuiltinFeeType } from '../utils/feeTypeName.ts'
 import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
@@ -15,11 +16,6 @@ import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from
 // 4,240 historical expense entries carry fee_type='expense', and manual
 // entry offers it too. The column is free text in D1; this union is the
 // frontend's vocabulary.
-/** The longest custom type name (migration 0292 and the Worker's normalizeFeeTypeName). */
-export const FEE_TYPE_NAME_MAX_CHARS = 40
-
-export type BuiltinFeeType = 'tax' | 'delivery' | 'change' | 'expense' | 'other'
-export const BUILTIN_FEE_TYPES: readonly BuiltinFeeType[] = ['tax', 'delivery', 'change', 'expense', 'other']
 // The five built-in names plus any custom type an administrator added (routes/feesCatalog.ts): the Worker decides which are valid.
 export type FeeType = BuiltinFeeType | (string & {})
 

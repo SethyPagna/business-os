@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Archive from 'lucide-react/dist/esm/icons/archive.js'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import ReasonListEditor from '../shared/ReasonListEditor.tsx'
 import type { ConfirmRequest } from '../shared/useConfirmDialog.tsx'
+import { FEE_TYPE_NAME_MAX_CHARS } from '../../utils/feeTypeName.ts'
 import {
-  FEE_TYPE_NAME_MAX_CHARS,
   addFeeType,
   getFeeTypeImpact,
   getFeeTypes,
@@ -27,12 +28,15 @@ type Props = {
   t: (key: string) => string | undefined
   onChanged: () => void | Promise<void>
   onDirtyChange: (dirty: boolean) => void
+  /** The viewer may read the audit trail (audit_log at the full tier): a registered type then offers its Records. */
+  canViewRecords?: boolean
+  onOpenRecords?: (target: { entity: 'fee_type'; id: number; subject: string }) => void
 }
 
 // A list row is the type as the Worker sent it, keyed by its lower-cased name (the catalog id is not the list key).
 type TypeEntry = Omit<FeeTypeEntry, 'id'>
 
-export default function ExpenseTypesSection({ canEdit, askToConfirm, notify, tr, t, onChanged, onDirtyChange }: Props) {
+export default function ExpenseTypesSection({ canEdit, askToConfirm, notify, tr, t, onChanged, onDirtyChange, canViewRecords = false, onOpenRecords }: Props) {
   const [types, setTypes] = useState<FeeTypeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -138,6 +142,7 @@ export default function ExpenseTypesSection({ canEdit, askToConfirm, notify, tr,
     const mapped = types.map((entry) => ({
       ...entry,
       id: entry.name.toLocaleLowerCase(),
+      catalogId: entry.id,
       label: feeTypeDisplayName(entry.name, t),
       muted: entry.archived,
       meta: [
@@ -165,16 +170,30 @@ export default function ExpenseTypesSection({ canEdit, askToConfirm, notify, tr,
       onRename={(item, to) => rename(item, to)}
       onDirtyChange={onDirtyChange}
       renderExtra={(item) => (item.builtin || !item.registered ? null : (
-        <button
-          type="button"
-          className={iconButton}
-          disabled={busy}
-          onClick={() => void setArchived(item, !item.archived)}
-          aria-label={`${item.archived ? tr('restore', 'Restore') : tr('expense_archive', 'Archive')} ${item.name}`}
-          title={item.archived ? tr('restore', 'Restore') : tr('expense_archive', 'Archive')}
-        >
-          {item.archived ? <ArchiveRestore className="h-3.5 w-3.5" aria-hidden="true" /> : <Archive className="h-3.5 w-3.5" aria-hidden="true" />}
-        </button>
+        <>
+          {canViewRecords && onOpenRecords && item.catalogId != null ? (
+            <button
+              type="button"
+              className={iconButton}
+              data-expense-records="type"
+              onClick={() => onOpenRecords({ entity: 'fee_type', id: item.catalogId as number, subject: item.name })}
+              aria-label={`${tr('field_history', 'Records')} ${item.name}`}
+              title={tr('field_history', 'Records')}
+            >
+              <History className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={iconButton}
+            disabled={busy}
+            onClick={() => void setArchived(item, !item.archived)}
+            aria-label={`${item.archived ? tr('restore', 'Restore') : tr('expense_archive', 'Archive')} ${item.name}`}
+            title={item.archived ? tr('restore', 'Restore') : tr('expense_archive', 'Archive')}
+          >
+            {item.archived ? <ArchiveRestore className="h-3.5 w-3.5" aria-hidden="true" /> : <Archive className="h-3.5 w-3.5" aria-hidden="true" />}
+          </button>
+        </>
       ))}
     />
   )

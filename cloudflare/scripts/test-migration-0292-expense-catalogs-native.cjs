@@ -57,6 +57,26 @@ check('the post-check aborts the file when an object is missing (it does not pas
   noSalesColumns.exec('CREATE TABLE fees (id INTEGER PRIMARY KEY); CREATE TABLE sales (id INTEGER PRIMARY KEY, created_at TEXT);')
   assert.throws(() => noSalesColumns.exec(sql), /JSON path/, 'the pre-check refuses a database without the courier-cost columns')
 })
+check('the post-check also demands the key columns and the unique name_key: a table of the same name without them aborts the file', () => {
+  const base = 'CREATE TABLE fees (id INTEGER PRIMARY KEY); CREATE TABLE sales (id INTEGER PRIMARY KEY, created_at TEXT, delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL);'
+  const labels = 'CREATE TABLE fee_labels (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_key TEXT UNIQUE, fee_type TEXT, archived_at TEXT);'
+  // control: with both tables whole, the same file passes (so the throws below are the check, not the setup)
+  const whole = new Database(':memory:')
+  whole.exec(`${base} ${labels} CREATE TABLE fee_types (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_key TEXT UNIQUE, archived_at TEXT);`)
+  assert.doesNotThrow(() => whole.exec(sql))
+  for (const [why, types] of [
+    ['no name_key column', 'CREATE TABLE fee_types (id INTEGER PRIMARY KEY, name TEXT, archived_at TEXT);'],
+    ['no archived_at column', 'CREATE TABLE fee_types (id INTEGER PRIMARY KEY, name TEXT, name_key TEXT UNIQUE);'],
+    ['name_key is not unique', 'CREATE TABLE fee_types (id INTEGER PRIMARY KEY, name TEXT, name_key TEXT, archived_at TEXT);'],
+  ]) {
+    const squatted = new Database(':memory:')
+    squatted.exec(`${base} ${labels} ${types}`)
+    assert.throws(() => squatted.exec(sql), /JSON path/, why)
+  }
+  const noFeeType = new Database(':memory:')
+  noFeeType.exec(`${base} CREATE TABLE fee_labels (id INTEGER PRIMARY KEY, name TEXT, name_key TEXT UNIQUE, archived_at TEXT); CREATE TABLE fee_types (id INTEGER PRIMARY KEY, name TEXT, name_key TEXT UNIQUE, archived_at TEXT);`)
+  assert.throws(() => noFeeType.exec(sql), /JSON path/, 'a label table without its default-type column')
+})
 check('the previous Worker\'s statements run unchanged on the new schema', () => {
   db.exec("INSERT INTO fees (fee_type, label, amount_usd, fee_date, created_at) VALUES ('delivery', 'Courier', 3, '2026-10-11', '2026-10-11 02:00:00')")
   assert.equal(db.prepare("SELECT COUNT(*) n FROM fees WHERE fee_date >= '2026-10-01'").get().n, 2)

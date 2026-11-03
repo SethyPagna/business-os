@@ -16,10 +16,13 @@
 -- only the sales that carry one, so a long window reads those sales and not every sale in it.
 --
 -- PRE: fees and sales exist, and sales carries created_at and both courier-cost columns.
--- POST: both tables and the index exist. No row of fees or sales is touched, and the tables start empty.
+-- POST: both tables carry their key columns (and their unique name_key), and the index exists. No row of fees or sales is touched,
+-- and the tables start empty.
 -- A failed check reads a malformed JSON path and aborts the file.
--- Idempotent: IF NOT EXISTS. Backward compatible: the previous Worker never reads these tables, and this Worker treats a
--- missing table as "no custom types, no registered labels" until the migration is applied.
+-- Idempotent: IF NOT EXISTS. Compatible for READS only: the previous Worker never reads these tables, and this Worker's lists and
+-- reads treat a missing table as "no custom types, no registered labels". Adding, renaming, archiving and classifying a label or a
+-- type need the tables and answer 500 until this file is applied, so the deploy of this Worker runs migrations (run_migrations=true).
+-- Roll back the Worker first; the tables can stay.
 -- Pinned by scripts/test-migration-0292-expense-catalogs-native.cjs.
 --
 -- RECOVERY: nothing to restore.
@@ -59,4 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_courier_cost ON sales (created_at)
   WHERE delivery_actual_cost_usd IS NOT NULL OR delivery_actual_cost_khr IS NOT NULL;
 
 SELECT CASE WHEN (SELECT COUNT(*) FROM sqlite_master WHERE name IN ('fee_types','fee_labels','idx_sales_courier_cost')) = 3
+  AND (SELECT COUNT(*) FROM pragma_table_info('fee_types') WHERE name IN ('id','name','name_key','archived_at')) = 4
+  AND (SELECT COUNT(*) FROM pragma_table_info('fee_labels') WHERE name IN ('id','name','name_key','fee_type','archived_at')) = 5
+  AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('sqlite_autoindex_fee_types_1','sqlite_autoindex_fee_labels_1')) = 2
 THEN 1 ELSE json_extract('[]','$[expense_catalogs_0292_post]') END;
