@@ -243,6 +243,54 @@ export async function signIn(page: Page, account: E2EAccount, password = 'e2e-pa
 }
 
 /**
+ * Sign in for a TIMED measurement (perf-budget.spec.ts): the same prerequisites
+ * as signIn, with the clock around the click only.
+ *
+ * WHY THIS EXISTS (gate run 41677711258 and 41687438601, android-chromium): the
+ * till budget sampled three cold contexts and an attempt in each run failed
+ * with `#app-root ... element(s) not found` after 30 s, then passed on the
+ * retry, so the leg was reported "flaky". The captured page was still the login
+ * form, the username box holding "cashier_a" + "e2e-password" and the password
+ * box empty. The trace of that attempt shows why: the org bootstrap had
+ * answered, but the form acts on it a render later and only then asks
+ * GET /api/organizations/search?q=Leang%20Beauty -- which in the trace comes
+ * AFTER the Login click. The old sampler typed and clicked the moment
+ * #login-username was visible, so on a loaded runner (two workers, three cold
+ * contexts per test) the fills and the click landed inside that re-render.
+ * Login.tsx:765 refuses to submit without an organization while the Login
+ * button stays live, which is the same prerequisite submitLogin waits for.
+ *
+ * So: wait for the organization the way submitLogin does, type and VERIFY both
+ * fields (fillCredential retypes a value that did not stick), and only then
+ * start the clock. What is timed is still the app's own login -> shell cost;
+ * nothing the app does is skipped or faked, and the budgets are untouched.
+ * If the shell still does not come up, say what the form was showing instead
+ * of a bare timeout on #app-root.
+ */
+export async function signInForTiming(page: Page, account: E2EAccount = E2E_ACCOUNTS.cashierA, password = 'e2e-password'): Promise<number> {
+  await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
+  await expect(page.locator(USERNAME_FIELD)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(organizationReady(page), {
+    message: 'the organization bootstrap must land before the timed Login',
+    timeout: 30_000,
+  }).toBe(true)
+  await fillCredential(page, USERNAME_FIELD, account.username)
+  await fillCredential(page, PASSWORD_FIELD, password)
+  const started = Date.now()
+  // A generous action timeout: a contended click that times out would read as a
+  // broken test rather than as the slow sample it is.
+  await page.getByRole('button', { name: /^Login$/ }).click({ timeout: 60_000 })
+  try {
+    await expect(page.locator(APP_ROOT)).toBeVisible({ timeout: 30_000 })
+  } catch (error) {
+    const typed = await page.locator(USERNAME_FIELD).inputValue({ timeout: 1_000 }).catch(() => '(no username box)')
+    const shown = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 240)
+    throw new Error(`timed sign-in of ${account.username} never reached the shell; the username box holds "${typed}" and the page says: ${shown}\n${String(error)}`)
+  }
+  return Date.now() - started
+}
+
+/**
  * Go to an admin page by its REAL URL (frontend/src/app/pathRouting.ts
  * ADMIN_PATH_BY_PAGE: '/pos', '/products', '/sales', ...).
  *
