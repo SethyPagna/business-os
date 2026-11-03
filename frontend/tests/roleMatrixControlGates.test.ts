@@ -139,6 +139,25 @@ test('PRODUCTS: the selection toolbar draws only the actions whose grant the rol
   assert.match(productsSource, /\{canEditSupplier \? \(\s*<div><label[^>]*>\{tr\('supplier', 'Supplier'\)\}<\/label>\s*<input[^>]*bulkEditForm\.supplier/)
 })
 
+test('PRODUCTS: the bulk Branch move skips (and counts) the rows that need Adjust / receive when the role lacks it, in the review and in the mover', () => {
+  // A product with no stock anywhere is moved by a zero-quantity add, POST /api/inventory/adjust, which the Worker refuses without Adjust.
+  assert.equal(productsSource.split('buildProductBranchMovePlan(').length - 1, 2, 'the review and the mover each plan the move')
+  assert.equal(productsSource.split('{ canInitialize: canAdjustInventoryStock }').length - 1, 2, 'both plan with the role\'s Adjust answer')
+  assert.ok(productsSource.includes("if (plan?.action === 'skip') skippedCount += 1"), 'the review counts what it will skip')
+  assert.ok(productsSource.includes("...(skippedCount ? [{ label: tr('bulk_branch_skipped_label', 'Skipped (no stock)'), value: skippedCount }] : [])"), 'the review shows the skipped count')
+  assert.ok(productsSource.includes("if (movePlan?.action === 'skip') {"), 'the mover leaves a skipped row out of the stock calls')
+  assert.ok(productsSource.includes("tr('bulk_branch_skipped_note',"), 'the result says how many were skipped, translated')
+  const adjustCalls = productsSource.split('Initialize product branch stock').length - 1
+  assert.equal(adjustCalls, 1, 'the zero-quantity add has one caller: the initialize branch of the mover')
+  // Both packs carry both strings, not an English placeholder in km.
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+  for (const key of ['bulk_branch_skipped_label', 'bulk_branch_skipped_note']) {
+    assert.ok(en[key] && km[key] && en[key] !== km[key], `${key} is translated in both packs`)
+    assert.equal(en[key].includes('{count}'), km[key].includes('{count}'), `${key} keeps its placeholder in both packs`)
+  }
+})
+
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
   const returns = read('../src/components/returns/Returns.tsx')
   assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)

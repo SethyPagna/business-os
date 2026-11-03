@@ -63,6 +63,9 @@ const MUTANTS = {
 
     const body = (await` }],
   'contacts-bulk-delete-cancel-ignores-delete': [{ file: 'src/routes/contacts.ts', from: `|| getActionTier(user, 'contacts', 'delete') !== 'full') {`, to: `|| false) {` }],
+  'inventory-adjust-gate-dropped': [{ file: 'src/routes/inventory.ts', from: `  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review support for this action is not built yet.' }, 403)`, to: `  if (false) {
+    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review support for this action is not built yet.' }, 403)` }],
   'dashboard-cost-keys-leak': [{ file: 'src/routes/compat.ts', from: `app.use('/dashboard', acquisitionCostResponses)
 app.use('/dashboard/*', acquisitionCostResponses)
 `, to: '' }],
@@ -191,6 +194,29 @@ async function main() {
         if (accepted.status !== 202 || await count('bulk_delete_jobs') !== jobsTwin + 1) problems.push(`${kind.table}: a role holding both was refused the job (${accepted.status} ${JSON.stringify(accepted.body)})`)
       }
       assert.deepEqual(problems, [], 'The bulk-delete job runs without the single-delete grant:\n  ' + problems.join('\n  '))
+    })
+
+    await check('Bulk Branch move (E4): the zero-quantity add that initialises a branch for a product with no stock is POST /api/inventory/adjust, which the Worker refuses (403, nothing written) without Adjust / receive stock', async () => {
+      await H.seedProduct(h, 7401, 'RM Branch Move Product', 5, 0)
+      const noAdjust = await h.addEmployee(2013, 'rm-branch-move-no-adjust', { branches: true })
+      const adjustOff = await h.addEmployee(2015, 'rm-branch-move-adjust-off', { branches: true, inventory: true, 'inventory:adjust': false })
+      const withAdjust = await h.addEmployee(2014, 'rm-branch-move-adjust', { branches: true, inventory: true })
+      const adjustBody = { productId: 7401, productName: 'RM Branch Move Product', type: 'add', quantity: 0, branchId: 2, reason: 'Bulk branch change' }
+      const rows = async () => JSON.stringify([
+        (await h.db.prepare('SELECT COUNT(*) AS n FROM branch_stock WHERE product_id = 7401').first()).n,
+        await count('inventory_movements'),
+        await count('action_history'),
+      ])
+      const before = await rows()
+      // Two ways to lack Adjust: no Inventory section at all (the router-wide gate) and Inventory Full with Adjust / receive switched off.
+      for (const [label, who] of [['no Inventory grant', noAdjust], ['Inventory Full, Adjust / receive off', adjustOff]]) {
+        const refused = await h.call('POST', '/api/inventory/adjust', adjustBody, 'branches:transfer, ' + label, as(who))
+        assert.equal(refused.status, 403, label + ': the zero-quantity add -> ' + refused.status + ' ' + JSON.stringify(refused.body))
+        assert.equal(await rows(), before, label + ': the refused add changed nothing')
+      }
+      // Discriminating twin: a role holding Adjust is not stopped by the permission gate (it may still be refused for the missing request id).
+      const passed = await h.call('POST', '/api/inventory/adjust', adjustBody, 'branches:transfer with inventory:adjust', as(withAdjust))
+      assert.notEqual(passed.status, 403, 'the same call passes the permission gate for a role holding Adjust (got ' + passed.status + ' ' + JSON.stringify(passed.body) + ')')
     })
   } finally {
     await h.mf.dispose()

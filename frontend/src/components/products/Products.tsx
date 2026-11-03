@@ -2947,9 +2947,12 @@ function ProductsFullEditor() {
     // follows, so the review shows from -> to and not only the destination.
     const { buildProductBranchMovePlan } = await loadProductWriteHelpers()
     const sourceBranchNames = new Set<string>()
+    let skippedCount = 0
     for (const id of selectedVisibleIds) {
-      const plan = buildProductBranchMovePlan(productsById.get(Number(id)) || {}, branchId)
+      const plan = buildProductBranchMovePlan(productsById.get(Number(id)) || {}, branchId, { canInitialize: canAdjustInventoryStock })
       if (plan?.action === 'transfer') sourceBranchNames.add(String(branchesById.get(String(plan.fromBranchId))?.name || `#${plan.fromBranchId}`))
+      // No stock anywhere and no Adjust / receive: the Worker would refuse the zero-quantity add, so the row is left out, not failed.
+      if (plan?.action === 'skip') skippedCount += 1
     }
     if (!(await askToConfirm({
       title: tr('bulk_change_branch', 'Change Branch'),
@@ -2957,13 +2960,15 @@ function ProductsFullEditor() {
         { label: tr('products', 'Products'), value: selectedVisibleCount },
         { label: tr('source_branch', 'Source Branch'), value: [...sourceBranchNames].join(', ') || '—' },
         { label: tr('destination_branch', 'Destination branch'), value: branch.name },
+        ...(skippedCount ? [{ label: tr('bulk_branch_skipped_label', 'Skipped (no stock)'), value: skippedCount }] : []),
       ],
       confirmLabel: tr('bulk_change_branch', 'Change Branch'),
     }))) return
     setBulkActionBusy(true)
     try {
-      const { done, failed, failedIds, transfers } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
-      setSelectedIds(new Set(failedIds))
+      const { done, failed, failedIds, skippedIds, transfers } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
+      // A failed row and a skipped one both stay selected, so the person sees which products did not move.
+      setSelectedIds(new Set([...failedIds, ...skippedIds]))
       if (done > 0 && transfers.length) {
         // REVERT-SET: Undo transfers exactly the moved units back; Redo moves
         // exactly those again -- a transfer both ways, never add/remove
@@ -2974,11 +2979,15 @@ function ProductsFullEditor() {
           redo: () => replayRecordedTransfers(transfers, 'redo', 'Redo bulk branch change'),
         })
       }
+      const movedMessage = failed
+        ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
+        : `${done} product(s) branch updated to "${branch.name}"`
+      const skippedMessage = skippedIds.length
+        ? tr('bulk_branch_skipped_note', '{count} product(s) with no stock were skipped -- adding them to a branch needs Adjust / receive stock.').replace('{count}', String(skippedIds.length))
+        : ''
       notify(
-        failed
-          ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
-          : `${done} product(s) branch updated to "${branch.name}"`,
-        failed ? 'warning' : 'success',
+        skippedMessage && !done && !failed ? skippedMessage : [movedMessage, skippedMessage].filter(Boolean).join(' '),
+        failed || skippedIds.length ? 'warning' : 'success',
       )
     } finally {
       setBulkActionBusy(false)
@@ -4472,7 +4481,7 @@ function ProductsFullEditor() {
   const moveProductsToBranch = useCallback(async (productIds: EntityId[] = [], branchId: unknown, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
-      return { done: 0, failed: 0, failedIds: [] as number[], updatedIds: [] as number[], transfers: [] as RecordedStockTransfer[] }
+      return { done: 0, failed: 0, failedIds: [] as number[], updatedIds: [] as number[], skippedIds: [] as number[], transfers: [] as RecordedStockTransfer[] }
     }
     const {
       buildProductBranchMovePlan,
@@ -4483,14 +4492,18 @@ function ProductsFullEditor() {
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     const transfers: RecordedStockTransfer[] = []
+    const skippedIds: number[] = []
 
     const moveRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
       const product = latestMap.get(Number(productId))
       if (!product) {
         throw new Error('Product not found')
       }
-      const movePlan = buildProductBranchMovePlan(product, numericBranchId)
-      if (movePlan?.action === 'transfer') {
+      const movePlan = buildProductBranchMovePlan(product, numericBranchId, { canInitialize: canAdjustInventoryStock })
+      if (movePlan?.action === 'skip') {
+        // No stock anywhere and no Adjust / receive: initialising the branch is a POST /api/inventory/adjust the Worker refuses (403).
+        skippedIds.push(Number(productId))
+      } else if (movePlan?.action === 'transfer') {
         await runProductStockMutation(
           () => productApi.transferStock(buildProductTransferStockPayload(product, movePlan, {
             productId,
@@ -4518,8 +4531,16 @@ function ProductsFullEditor() {
     const summary = summarizeProductRun(moveRun)
 
     await load(true)
-    return { ...summary, transfers }
-  }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
+    // A skipped row ran no call: it is neither done nor failed.
+    const skipped = new Set(skippedIds)
+    return {
+      ...summary,
+      done: summary.done - skippedIds.length,
+      updatedIds: summary.updatedIds.filter((id) => !skipped.has(id)),
+      skippedIds,
+      transfers,
+    }
+  }, [canAdjustInventoryStock, fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return

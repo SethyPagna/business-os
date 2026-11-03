@@ -1138,6 +1138,8 @@
   "bulk_add_batch_note": "ទំនិញនីមួយៗត្រូវបានទទួល តាមថ្ងៃចូលខាងក្រោម។",
   "bulk_add_stock": "បញ្ចូលស្តុក",
   "bulk_change_branch": "ផ្លាស់ប្ដូរសាខា",
+  "bulk_branch_skipped_label": "រំលង (គ្មានស្តុក)",
+  "bulk_branch_skipped_note": "បានរំលង {count} ផលិតផលគ្មានស្តុក -- ការបន្ថែមទៅសាខាត្រូវការសិទ្ធិ «កែតម្រូវ / ទទួលស្តុក»។",
   "bulk_delete": "លុបដែលបានជ្រើស",
   "bulk_delete_confirm": "លុប {n} ទំនាក់ទំនងដែលបានជ្រើស?",
   "bulk_delete_partial_fail": "{n} សាខាមិនអាចលុបបាន។",
