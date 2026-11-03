@@ -205,6 +205,11 @@ runTest('T-L4: the section picker is a menu of seven radio items; the chips are 
   // The open tab is a different element from a closed one, so selecting by key remounts the tab reached: focus must follow the commit.
   assert.match(nav, /focusAfterSelect\.current = true\s*onSelect\(target\.id\)/, 'an arrow key selects, then focus moves once the new tab is mounted')
   assert.match(nav, /useEffect\(\(\) => \{\s*if \(!focusAfterSelect\.current\) return\s*focusAfterSelect\.current = false\s*chips\.current\.get\(active\)\?\.focus\(\)\s*\}, \[active\]\)/)
+  // The menu hangs from its button, so it moves with the bar however the page shifts (a scroll, a collapsing app header, a resize). Fixed to the
+  // screen it closed on every scroll event, and a late one shut it as it opened.
+  assert.match(nav, /role="menu"[\s\S]*className="absolute left-0 top-full /, 'the menu is absolute under its button')
+  assert.doesNotMatch(nav, /\bfixed\b/, 'and not fixed to the screen')
+  assert.doesNotMatch(nav, /addEventListener\('(?:scroll|resize)'/, 'so there is no scroll or resize handler to close it')
   assert.match(nav, /web_editor_unsaved/, 'a dirty dot has sr-only text')
   assert.match(nav, /web_editor_seller_missing/, 'the amber Contact marker has sr-only text')
   assert.match(nav, /amber/, 'and differs in colour from the dirty dot')

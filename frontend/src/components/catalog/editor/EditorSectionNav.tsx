@@ -64,46 +64,31 @@ export default function EditorSectionNav(props: EditorSectionNavProps) {
 
 // ---- below 768 px: one button that opens the list of seven ------------------------------------------------------------
 
-type MenuPlace = { top: number; left: number; minWidth: number }
-
 function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }: EditorSectionNavProps) {
-  const [place, setPlace] = useState<MenuPlace | null>(null)
+  const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const open = place !== null
   const current = sections.find((section) => section.id === active) ?? sections[0]
   const currentLabel = ed(...current.label)
   const CurrentIcon = ICONS[current.icon]
 
-  const openMenu = () => {
-    const rect = buttonRef.current?.getBoundingClientRect()
-    if (rect) setPlace({ top: rect.bottom + 4, left: rect.left, minWidth: rect.width })
-  }
   const closeMenu = (returnFocus: boolean) => {
-    setPlace(null)
+    setOpen(false)
     if (returnFocus) buttonRef.current?.focus()
   }
 
-  // The menu is fixed to the screen at the button's place, so a scroll or a resize would leave it behind: either closes it, as does a press elsewhere.
+  // The menu hangs from the button (absolute, inside a relative wrapper), so it moves with the bar however the page shifts under it: a scroll, a
+  // header that collapses, a resize. (Fixed to the screen at the button's measured place, it closed on every scroll event, and a collapsing app
+  // header moves the bar without firing one.) A press elsewhere closes it.
   useEffect(() => {
     if (!open) return undefined
-    const away = (event: Event) => {
-      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return
-      setPlace(null)
-    }
     const outside = (event: PointerEvent) => {
       if (event.target instanceof Node && (menuRef.current?.contains(event.target) || buttonRef.current?.contains(event.target))) return
-      setPlace(null)
+      setOpen(false)
     }
-    window.addEventListener('scroll', away, true)
-    window.addEventListener('resize', away)
     window.addEventListener('pointerdown', outside, true)
     menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
-    return () => {
-      window.removeEventListener('scroll', away, true)
-      window.removeEventListener('resize', away)
-      window.removeEventListener('pointerdown', outside, true)
-    }
+    return () => window.removeEventListener('pointerdown', outside, true)
   }, [open])
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -129,53 +114,54 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect }:
 
   return (
     <div className="min-w-0 flex-1">
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`${ed('web_editor_sections', 'Sections', 'ផ្នែក')}: ${currentLabel}`}
-        className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-semibold leading-snug text-slate-900 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-        onClick={() => (open ? closeMenu(false) : openMenu())}
-      >
-        <CurrentIcon className="h-5 w-5 shrink-0" aria-hidden />
-        <span className="whitespace-nowrap">{currentLabel}</span>
-        <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
-        <Markers ed={ed} dirty={dirty.has(current.id)} amber={sellerMissing && current.id === 'contact'} />
-      </button>
-      {place ? (
-        <div
-          ref={menuRef}
-          role="menu"
-          aria-label={ed('web_editor_sections', 'Sections', 'ផ្នែក')}
-          style={{ top: place.top, left: place.left, minWidth: place.minWidth }}
-          className="fixed z-40 max-h-[70vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
-          onKeyDown={onMenuKeyDown}
+      <div className="relative inline-flex max-w-full align-top">
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={`${ed('web_editor_sections', 'Sections', 'ផ្នែក')}: ${currentLabel}`}
+          className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-semibold leading-snug text-slate-900 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+          onClick={() => (open ? closeMenu(false) : setOpen(true))}
         >
-          {sections.map((section) => {
-            const Icon = ICONS[section.icon]
-            const checked = section.id === active
-            return (
-              <button
-                key={section.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={checked}
-                data-editor-section={section.id}
-                className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-1 text-left text-sm font-medium leading-snug ${checked ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-                onClick={() => {
-                  closeMenu(true)
-                  onSelect(section.id)
-                }}
-              >
-                <Icon className="h-5 w-5 shrink-0" aria-hidden />
-                <span className="min-w-0 flex-1">{ed(...section.label)}</span>
-                <Markers ed={ed} dirty={dirty.has(section.id)} amber={sellerMissing && section.id === 'contact'} />
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+          <CurrentIcon className="h-5 w-5 shrink-0" aria-hidden />
+          <span className="whitespace-nowrap">{currentLabel}</span>
+          <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+          <Markers ed={ed} dirty={dirty.has(current.id)} amber={sellerMissing && current.id === 'contact'} />
+        </button>
+        {open ? (
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={ed('web_editor_sections', 'Sections', 'ផ្នែក')}
+            className="absolute left-0 top-full z-40 mt-1 max-h-[70vh] min-w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+            onKeyDown={onMenuKeyDown}
+          >
+            {sections.map((section) => {
+              const Icon = ICONS[section.icon]
+              const checked = section.id === active
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={checked}
+                  data-editor-section={section.id}
+                  className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-1 text-left text-sm font-medium leading-snug ${checked ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                  onClick={() => {
+                    closeMenu(true)
+                    onSelect(section.id)
+                  }}
+                >
+                  <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">{ed(...section.label)}</span>
+                  <Markers ed={ed} dirty={dirty.has(section.id)} amber={sellerMissing && section.id === 'contact'} />
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

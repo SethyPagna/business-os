@@ -563,6 +563,30 @@ test.describe('Website Editor bar (ED-1a)', () => {
     expectNoRuntimeErrors(health)
   })
 
+  test('E2E-1: a scroll while the picker is open does not close it; the menu follows the button', async ({ page, context }) => {
+    // CATCHES: a menu that closes on any scroll event. A scroll event is delivered a frame late, so one from just before the tap (a finger
+    // still gliding the page) closed the menu the instant it opened; with a sticky bar the button rarely moves at all.
+    const health = collectPageHealth(page)
+    await openEditor(page, context)
+    await page.setViewportSize({ width: 390, height: 800 })
+    const picker = editor(page).locator('button[aria-haspopup="menu"]')
+    await picker.click()
+    const menu = editor(page).getByRole('menu')
+    await expect(menu).toBeVisible()
+    await page.locator('.page-scroll').evaluate((node) => { node.scrollTop = 40 })
+    await page.waitForTimeout(300)
+    await expect(menu, 'a scroll does not close the open menu').toBeVisible()
+    const gap = await page.evaluate(() => {
+      const button = document.querySelector('#portal-editor-bar button[aria-haspopup="menu"]') as HTMLElement
+      const list = document.querySelector('#portal-editor-top [role="menu"]') as HTMLElement
+      return list.getBoundingClientRect().top - button.getBoundingClientRect().bottom
+    })
+    expect(Math.abs(gap - 4), 'and it stays 4 px under the button it belongs to').toBeLessThanOrEqual(1)
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    expectNoRuntimeErrors(health)
+  })
+
   test('E2E-1: from 768 px the sections are tabs, the open one shows its word and the arrow keys move between them', async ({ page, context }) => {
     const health = collectPageHealth(page)
     await openEditor(page, context)
