@@ -37,14 +37,19 @@ const SRC = path.join(__dirname, '..', 'src')
 const realDb = openDb(loadAll())
 const statements = []
 let slowMs = 0
-const later = (value) => (slowMs ? new Promise((resolve) => setTimeout(() => resolve(value), slowMs)) : value)
+// The next `hangLeft` rail queries of a build (GROUP BY value) never answer: a builder whose request ended mid-build.
+let hangLeft = 0
+const later = (value, sql) => {
+  if (hangLeft > 0 && /GROUP BY value/.test(sql)) { hangLeft -= 1; return new Promise(() => {}) }
+  return slowMs ? new Promise((resolve) => setTimeout(() => resolve(value), slowMs)) : value
+}
 const db = {
   prepare(sql) {
     statements.push(sql)
     const statement = realDb.prepare(sql)
     return {
-      all: (params) => later(statement.all(params)),
-      get: (params) => later(statement.get(params)),
+      all: (params) => later(statement.all(params), sql),
+      get: (params) => later(statement.get(params), sql),
       run: (params) => statement.run(params),
       bind(params) { statement.bind(params); return this },
     }
@@ -78,6 +83,8 @@ function loadReal(relPath, overrides = {}) {
 let clockMs = Date.UTC(2026, 9, 20, 12)
 Date.now = () => clockMs
 
+// buildShareStaleMs: the age at which a cold-search slot counts as lost (routes/portal.ts takePortalColdSlot) and a waiter stops trusting a marker.
+const planLimits = { portalAiDailyMax: 100, portalAiVisitorDailyMax: 10, buildShareStaleMs: 800 }
 const dbModule = { getDb: () => db }
 const searchMatch = loadReal('lib/searchMatch.ts')
 const portalText = loadReal('lib/portalText.ts')
@@ -99,7 +106,7 @@ const portalRoute = loadReal('routes/portal.ts', {
     checkRateLimit: async () => ({ allowed: true }), getClientNetworkKey: (request) => request.headers.get('cf-connecting-ip') || 'unknown-ip',
     peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, releaseRateLimitSlot: async () => {},
   },
-  '../lib/planTier': { getPlanLimits: () => ({ portalAiDailyMax: 100, portalAiVisitorDailyMax: 10 }) },
+  '../lib/planTier': { getPlanLimits: () => planLimits },
   '../lib/businessDateWindow': { BUSINESS_UTC_OFFSET_MINUTES: 420, businessToday: () => '2026-01-01' },
   '../lib/portalAbuseKey': { portalAbuseKey: async () => 'k' },
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
@@ -212,6 +219,7 @@ async function check(name, fn) {
     // A failed check must not leave a fault switched on for the next one.
     kvThrows = false
     slowMs = 0
+    hangLeft = 0
     limiterLimit = Infinity
     write(() => realDb.prepare(`DELETE FROM system_flags WHERE key = 'maintenance'`).run())
   }
@@ -262,6 +270,64 @@ async function run() {
     loadReal('lib/buildShare.ts', { './planTier': { getPlanLimits: () => shareLimits } })
     try { await run() } finally { delete globalThis[SHARE_KEY] }
   }
+
+  // Cold-search slots (HANG-2 review B1, E1). A slot is released in a finally; a request that never finishes never reaches it, so a slot
+  // expires at buildShareStaleMs, and only the request that runs the build itself holds one.
+  const realWait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const MAX_SLOTS = PORTAL_COLD_SEARCH_MAX_CONCURRENT
+  const search = (word) => shop(`/catalog/products/search?query=${word}`)
+  // Until every hanging build has reached its rail query (a request needs a few statements to get there).
+  const midBuild = async () => {
+    for (let waited = 0; hangLeft > 0 && waited < 5000; waited += 10) await realWait(10)
+    assert.equal(hangLeft, 0, 'the builders are mid-build')
+  }
+
+  await check('B1: the slot of a cold search that never finishes expires at buildShareStaleMs, not before and not never', async () => {
+    hangLeft = MAX_SLOTS
+    try {
+      for (let n = 0; n < MAX_SLOTS; n += 1) void search(`hung${n}`) // these never settle: their rail query never answers
+      await midBuild()
+      const refused = await search('slotafter')
+      assert.equal(refused.status, 503, 'while the four could still be alive the cap holds')
+      assert.equal(refused.json.code, 'portal_search_busy')
+      clockMs += planLimits.buildShareStaleMs - 1
+      assert.equal((await search('slotafter')).status, 503, 'one millisecond short of the age: still counted')
+      clockMs += 1
+      assert.equal((await search('slotafter')).status, 200, 'at the age: free again')
+    } finally {
+      clockMs += planLimits.buildShareStaleMs // whatever happened, the slots left hanging above must not close the next case
+    }
+  })
+
+  await check('E1: waiters behind one slow live builder take no slot: more identical searches than the cap are all answered', async () => {
+    await withBuildShare(async () => {
+      slowMs = 20
+      statements.length = 0
+      const results = await Promise.all(Array.from({ length: MAX_SLOTS + 4 }, () => search('crowd')))
+      slowMs = 0
+      assert.deepEqual(results.map((r) => r.status), Array.from({ length: MAX_SLOTS + 4 }, () => 200))
+      assert.equal(statements.filter((sql) => sql.includes('GROUP BY value')).length, 1, 'and the producer ran once')
+      statements.length = 0
+    })
+  })
+
+  await check('B1/E1: a waiter whose builder died builds for itself and takes a slot for it', async () => {
+    await withBuildShare(async () => {
+      hangLeft = 1 // the first builder hangs for good: its marker stays and its slot is held
+      try {
+        void search('fallback')
+        await midBuild()
+        slowMs = 100 // the fallback builds below last long enough to overlap
+        const results = await Promise.all(Array.from({ length: 5 }, () => search('fallback')))
+        slowMs = 0
+        const statuses = results.map((r) => r.status).sort()
+        // Each waiter gives the dead builder the wait, then builds for itself: with the dead builder's slot that is four slots, so the fifth and sixth answer busy.
+        assert.deepEqual(statuses, [200, 200, 200, 503, 503], statuses.join())
+      } finally {
+        clockMs += planLimits.buildShareStaleMs
+      }
+    })
+  })
 
   await check('P3-1: concurrent misses for one entry run the producer once; the others wait for its finished body', async () => {
     await withBuildShare(async () => {

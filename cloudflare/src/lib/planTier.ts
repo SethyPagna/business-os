@@ -225,6 +225,9 @@ export type PlanLimits = {
   //   buildShareWaitMs   the longest one request waits; also how long a finished result stays in the buildShare memo (the longest any
   //                      waiter waits). Paid 1,000, Free 2,000.
   //   buildShareStaleMs  the age at which a marker is taken for a dead builder (cancelled, killed) and ignored. Paid 3,000, Free 5,000.
+  //                      A cold-search slot (routes/portal.ts, the per-isolate cap on searches that run their own build) counts as lost
+  //                      at the same age: its release sits in a `finally` that a request whose context ended never reaches, and a build
+  //                      older than this is the one a waiter has already stopped trusting.
   buildSharePollMs: number
   buildShareWaitMs: number
   buildShareStaleMs: number

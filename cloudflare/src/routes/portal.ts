@@ -1463,8 +1463,6 @@ export function coalescePortalBuild<T>(request: { env: Env }, key: string, build
   return started
 }
 
-let portalColdSearches = 0
-
 // A cold search is the one storefront request whose cost an anonymous visitor
 // picks (every query string is its own entry), so it is limited per network
 // before any D1 work, through the PORTAL_SEARCH_LIMITER binding (no D1, no KV).
@@ -1480,6 +1478,29 @@ async function portalSearchRateLimited(c: PortalContext): Promise<boolean> {
     return false
   }
 }
+
+// The per-isolate cap on cold searches (PORTAL_COLD_SEARCH_MAX_CONCURRENT). A slot belongs to a request that runs the expensive build ITSELF:
+// the first builder of an entry, a request with no entry key, or a waiter whose builder died or timed out and which now builds for itself. A
+// request that waits for another request's finished body does the cheap thing and takes none (it used to, and five identical searches behind
+// one slow builder answered 503 for the last two).
+// A slot is released in a `finally`, which a request whose context ends mid-build never reaches (the 6.0.1169 review, B1: four such searches
+// left every later search of the isolate answering portal_search_busy for good). So a slot carries its start time and one older than
+// buildShareStaleMs counts as free: the same age at which a waiter stops trusting that builder's marker (lib/buildShare.ts). A lost
+// `finally` costs at most that long; a build that really runs longer than it simply stops being counted.
+type PortalColdSlot = { at: number }
+const portalColdSlots = new Set<PortalColdSlot>()
+
+function takePortalColdSlot(env: Env): PortalColdSlot | null {
+  const now = Date.now()
+  const lostAfterMs = getPlanLimits(env).buildShareStaleMs
+  for (const slot of portalColdSlots) if (now - slot.at >= lostAfterMs) portalColdSlots.delete(slot)
+  if (portalColdSlots.size >= PORTAL_COLD_SEARCH_MAX_CONCURRENT) return null
+  const slot: PortalColdSlot = { at: now }
+  portalColdSlots.add(slot)
+  return slot
+}
+
+class PortalSearchBusy extends Error {}
 
 // A restore deletes and reinserts every table over minutes; nothing read
 // while it holds maintenance may be stored. Absent table = no maintenance (the
@@ -1529,24 +1550,27 @@ async function servePortalPublic(
   const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'body', route, canonical.search, versions.body)
   let body = key ? await readPortalEdge<Record<string, unknown>>(key) : null
   if (!body) {
-    // Every miss runs its own producer (a build in flight belongs to another request), so every cold search is counted.
     const cold = route === 'search'
-    if (cold) {
-      if (await portalSearchRateLimited(c)) {
-        return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
-          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '60' })
+    if (cold && await portalSearchRateLimited(c)) {
+      return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
+        { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '60' })
+    }
+    // The slot is taken where the work starts, so only the request that does it holds one (see takePortalColdSlot).
+    const build = async () => {
+      const slot = cold ? takePortalColdSlot(c.env) : null
+      if (cold && !slot) throw new PortalSearchBusy()
+      try {
+        return await buildPortalBody(c, key, canonical.params, produce)
+      } finally {
+        if (slot) portalColdSlots.delete(slot)
       }
-      if (portalColdSearches >= PORTAL_COLD_SEARCH_MAX_CONCURRENT) {
-        return c.json({ error: 'The store is busy. Try again in a moment.', code: 'portal_search_busy' }, 503,
-          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '2' })
-      }
-      portalColdSearches += 1
     }
     try {
-      const build = () => buildPortalBody(c, key, canonical.params, produce)
       body = key ? await coalescePortalBuild(c, key.url, build) : await build()
-    } finally {
-      if (cold) portalColdSearches -= 1
+    } catch (error) {
+      if (!(error instanceof PortalSearchBusy)) throw error
+      return c.json({ error: 'The store is busy. Try again in a moment.', code: 'portal_search_busy' }, 503,
+        { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '2' })
     }
   }
   const value = overlay ? await overlay(body, versions) : body

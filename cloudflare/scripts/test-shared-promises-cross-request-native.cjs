@@ -91,7 +91,9 @@ const __hgProbeStatements = () => __hgSeen.filter((sql) => /pragma_table_info/.t
 app.get('/api/__hg/portal-fire', async (c) => {
   const started = __hgArm()
   void app.fetch(new Request(new URL('/api/portal/catalog/products/search?query=' + __hgParam(c, 'query'), c.req.url)), __hgSlowProducts(c.env), c.executionCtx).catch(() => {})
-  await Promise.race([started, __hgSleep(5000)])
+  // settle=ms: a search that reaches no slow statement (it waits behind another request's build) is given that long instead.
+  const settle = Number(__hgParam(c, 'settle') || 0)
+  await Promise.race([settle ? __hgSleep(settle) : started, __hgSleep(5000)])
   return c.json({ fired: true })
 })
 // A storefront search that stays on its request until it is done, through a counting env: \`slow\` ms on its first statement that names products.
@@ -240,6 +242,39 @@ async function main() {
       t.ok('the next visitor answers', portalAnswers(next), next)
     })
 
+    // ---- S7: the cold-search slots (the per-isolate cap of PORTAL_COLD_SEARCH_MAX_CONCURRENT = 4 searches that run their own build)
+    // A slot is released in a `finally`; a request whose context ends mid-build never reaches it. Each search below ends its request while its
+    // products statement still waits (the same event as S1 C3), then a fresh distinct search shows whether the isolate still has a slot.
+    // PAID_STALE_MS is the Paid buildShareStaleMs (lib/planTier.ts, pinned by test-plan-tier-pure): the age at which a slot counts as lost.
+    const PAID_STALE_MS = 3000
+    const slotsFree = () => wait(PAID_STALE_MS + 700)
+    const busyCode = (r) => json(r)?.code
+    await check('S7 E1: five identical searches behind a slow live builder are all answered (the waiters take no slot)', async (t) => {
+      await slotsFree()
+      const a = get('/api/__hg/portal-run?query=slotburst&slow=600')
+      await wait(150)
+      const rest = await Promise.all(Array.from({ length: 5 }, () => get(search('slotburst'))))
+      const ra = await a
+      t.eq('the builder answered', { status: ra.status, inner: json(ra)?.status }, { status: 200, inner: 200 })
+      t.eq('the five waiters', rest.map((r) => r.status), [200, 200, 200, 200, 200])
+    })
+
+    await check('S7 B1: four cold searches whose requests end mid-build keep the cap while they could be alive, and the storefront answers again once their slots expire', async (t) => {
+      await slotsFree()
+      for (let n = 1; n <= 4; n += 1) t.eq(`killed search ${n} fired`, (await get(`/api/__hg/portal-fire?query=slotd${n}`)).status, 200)
+      const during = await get(search('slotbusy'))
+      t.eq('while the four could still be alive the cap holds', { status: during.status, code: busyCode(during) }, { status: 503, code: 'portal_search_busy' })
+      await slotsFree()
+      const after = await get(search('slotafter'))
+      t.ok('after the slots expire a fresh distinct search answers', portalAnswers(after), after)
+    })
+    await check('S7 B1b: four killed searches for the SAME query leave one slot, not four (the waiters hold none)', async (t) => {
+      await slotsFree()
+      t.eq('the builder fired', (await get('/api/__hg/portal-fire?query=slotsame')).status, 200)
+      for (let n = 1; n <= 3; n += 1) t.eq(`killed waiter ${n} fired`, (await get('/api/__hg/portal-fire?query=slotsame&settle=250')).status, 200)
+      const fresh = await get(search('slotsamefresh'))
+      t.ok('a fresh distinct search answers at once', portalAnswers(fresh), fresh)
+    })
     await check('S2 guard: while request A computes the Dashboard overview (slow, alive), request B takes the finished value and reads no products', async (t) => {
       t.eq('a key nobody computed yet', (await get('/api/__hg/new-overview-key')).status, 200)
       const a = get('/api/__hg/dashboard-run?slow=500')
