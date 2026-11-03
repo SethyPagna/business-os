@@ -1,4 +1,4 @@
-// F5 (Records/Performance/2026-09-25 I1): app start and settings reads.
+// F5: app start and settings reads.
 //
 // GET /api/auth/bootstrap ran the session lookup, THEN the settings read:
 // two sequential D1 round trips before the app could paint. The settings

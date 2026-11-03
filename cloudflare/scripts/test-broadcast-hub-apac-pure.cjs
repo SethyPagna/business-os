@@ -52,8 +52,8 @@ const CALL = /\bbroadcast\((?:c\.env|ctx\.env|env)\b/
 const isComment = (line) => /^\s*(?:\/\/|\*|\/\*)/.test(line)
 
 // ---- Routes: nothing awaits a broadcast directly. -------------------------
-// Named, not fixed here: products.ts is owned by another lane (U-broadcast
-// lane report, 26 Sep 2026). A stale entry is reported, not failed, so that
+// Named, not fixed here: products.ts is owned by another lane
+// (26 Sep 2026). A stale entry is reported, not failed, so that
 // lane's fix does not turn this test red. (The create-fold's blocking broadcast
 // that lived here moved to lib/createFold.ts with the helper, 13 Oct 2026; it is
 // the PENDING entry below.)

@@ -5,8 +5,7 @@
 //
 // The fix is a DENYLIST (lib/settingsVisibility.ts), never an allowlist, because the POS, receipts, sales, returns,
 // shifts, inventory, notifications bell, theme and storefront-loyalty displays all read the same map. Every key
-// named below as VISIBLE has a non-Settings reader in frontend/src (see Records/Lanes/2026-10-13/
-// CLAUDE-SEC-SETTINGS-RESET.md for the sweep table). A key is withheld from an account only when that account has
+// named below as VISIBLE has a non-Settings reader in frontend/src. A key is withheld from an account only when that account has
 // no Settings access (tier full or view) and, for the website assistant's two private keys, no `customer_portal`
 // grant either.
 //

@@ -1,5 +1,5 @@
 // Companion for cloudflare/migrations/0229_branch_identity_backfill.sql
-// (cutover lane LA, design G12-HISTORY-UNDO-DESIGN.md section 2).
+// (cutover lane LA).
 //
 // Real chain, real SQLite (node:sqlite at D1's limits: expression depth 100,
 // 100 bound variables). The file is applied the way D1 applies a migration: in

@@ -1,7 +1,7 @@
 'use strict'
 // Staff session lifetime and sign-in throttling through the REAL Worker
-// (src/index.ts bundled onto Miniflare, every migration applied). Findings S1
-// and S3 of Records/Lanes/2026-10-13/OPUS-SECURITY-AUDIT-WHOLE-APP.md.
+// (src/index.ts bundled onto Miniflare, every migration applied). Security
+// findings S1 and S3.
 //
 //   S1a  "Until I close the browser" is a browser-session cookie.
 //   S1b  A renewal never makes the window longer than the chosen duration.

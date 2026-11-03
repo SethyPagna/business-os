@@ -861,7 +861,7 @@ export async function presentResetTables(
 // custom_tables rows describe dynamically-created tables that a "custom tables"
 // feature used to create via `CREATE TABLE "ct_<name>" (...)` DDL per row. That
 // feature's route/UI was removed (it was fully built but never wired into any
-// navigation, so no user could ever reach it -- see AUDIT-PROGRESS.md). This
+// navigation, so no user could ever reach it). This
 // helper is kept as a defensive factory-reset safety net: wiping the
 // custom_tables metadata row without dropping its backing table would leave
 // orphaned tables sitting in D1 forever, invisible to the app, so this still

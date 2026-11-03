@@ -13,7 +13,7 @@ import './stockSessionYearLabels.test.ts'
 // in components/stock-session, the line writer in utils/stockSessionDraft.ts)
 // and UI-STOCK-3 repointed these pins to it; what the session deliberately
 // changed (a Review step instead of a confirm popup, "Add" instead of "Add &
-// next", no separate "Total cost" strip) is listed in the UI-STOCK-3 report.
+// next", no separate "Total cost" strip) is deliberate.
 
 let failed = 0
 
@@ -266,7 +266,7 @@ runTest('the lot picker reads the product lots at the session branch', () => {
 runTest('queueing a line and completing the session are visibly different actions', () => {
   // The line button reads "Add" (owner, 30 Sep), a text button, no icon.
   // Editing a queued line currently reads "Save" although it writes nothing;
-  // the old "Update line" rule is handed to UI-STOCK-2 (UI-STOCK-3 HANDOFF).
+  // the old "Update line" rule is handed to UI-STOCK-2.
   assert.match(lineEntrySource, /\{editing \? tr\('[a-z_]+', '[^']+'\) : tr\('add', 'Add'\)\}/)
   assert.doesNotMatch(modalSource, /tr\('save', 'Save'\)/, 'the float itself labels nothing Save')
   assert.match(modalSource, /tr\('complete_session', 'Complete Session'\)/, 'the commit says Complete Session, on the Review step')

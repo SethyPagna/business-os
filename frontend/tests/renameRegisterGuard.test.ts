@@ -1,8 +1,6 @@
 // Pins the owner's rename register so a renamed label cannot drift back.
 //
-// The register (old -> new, both languages, date, scope, deliberate
-// exceptions) is Records/Lanes/2026-10-05/RENAME-CONSISTENCY-REPORT.md. The
-// 5 Oct sweep found every rename had landed on the screens someone looked at
+// The 5 Oct sweep found every rename had landed on the screens someone looked at
 // and nowhere else: a Khmer value still carrying the old word, an English
 // fallback that only shows when a pack lookup misses, a Worker refusal that
 // reaches the user verbatim. verify:i18n cannot see any of that, because the

@@ -93,7 +93,7 @@ runTest('the Stock Changes header Adjust is one button that opens the session in
 })
 
 // UI-STOCK-2 rewrote the float as the Stock Session; UI-STOCK-3 repointed the
-// pins below (retired pins are listed in the UI-STOCK-3 lane report).
+// pins below.
 runTest('the Stock Session carries an add / remove / set switch; each line freezes its mode', () => {
   assert.match(draftSource, /export type StockMode = 'add' \| 'remove' \| 'set'/)
   assert.match(modalSource, /export type \{ StockMode \}/, 'the float still exports StockMode for its hosts')

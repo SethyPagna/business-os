@@ -1,8 +1,8 @@
-// The D1 size alarm (TARGET-ARCHITECTURE 1.2 and Q-A3, MASTER-PLAN A4). Pure: no network, no clock of its own.
+// The D1 size alarm. Pure: no network, no clock of its own.
 //
 // Cloudflare Free caps one D1 database at 500 MB and refuses writes past it, so sales would stop. Every D1 call the ops export makes
 // reports the database size in its meta (`size_after`, bytes), so the daily consistency run reads it for free: no query is added.
-//   ALARM  the size is at or above 400 MB (80% of the cap). Fails the run. TARGET-ARCHITECTURE decides the hot/cold split then.
+//   ALARM  the size is at or above 400 MB (80% of the cap). Fails the run. The owner then decides the hot/cold split.
 //   WATCH  the 12-month projection is above 450 MB. Passes the run, shows in the encrypted report and the public log.
 //   OK     neither.
 // The projection needs a growth rate. A run keeps no history of its own (the repository is public and a read-only job commits
