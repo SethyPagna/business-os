@@ -3,6 +3,20 @@
 # The same `release.cjs gates` step as Deploy, on a clean runner, so a busy
 # laptop cannot turn a green commit red. Runs ONLY when someone presses
 # "Run workflow". No secrets and no environment: it never reaches production.
+#
+# A second job, "Browser suite", runs the Playwright app tier (frontend/e2e on
+# the built dist, served by a fixture server on loopback: no Worker, no database,
+# no network beyond 127.0.0.x) for the three projects in parallel, beside the
+# safety job and never ahead of it. It is REPORT-ONLY by default:
+#   - its failure shows as a red job, an annotation and a job summary, but does
+#     not fail this run (job-level continue-on-error, taken from the input
+#     `e2e_blocking`). Step-level continue-on-error would turn the job green.
+#   - deploy.yml never reads this workflow: it re-runs `release.cjs gates`
+#     itself, and that runs only the unit files, so this job cannot block a deploy.
+# To make it blocking: dispatch with `-f e2e_blocking=true` for one run, or change
+# the input's `default:` to true for good (and update the pin in
+# cloudflare/scripts/test-gate-e2e-job-pure.cjs, which names this line). The
+# real-Worker tier (frontend/e2e/system) is not run here.
 name: Gate
 
 on:
@@ -13,6 +27,11 @@ on:
         required: true
         default: main
         type: string
+      e2e_blocking:
+        description: Browser suite blocks this run when it fails (off = report-only)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -85,5 +104,118 @@ jobs:
         with:
           name: gate-records
           path: ${{ runner.temp }}/records
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Browser suite: one runner per Playwright project, in parallel with `gate`
+  # (no `needs`, and nothing needs it). Read-only token, no secrets, loopback only.
+  e2e:
+    name: Browser suite (${{ matrix.project }})
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # THE switch. false (the default input) = report-only: this job can be red
+    # while the run stays green. true = a red leg fails the run.
+    continue-on-error: ${{ inputs.e2e_blocking != true }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      E2E_PROJECT: ${{ matrix.project }}
+      E2E_BROWSER: ${{ matrix.browser }}
+      E2E_BLOCKING: ${{ inputs.e2e_blocking }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Names must equal the `projects` in frontend/playwright.config.ts
+        # (the pure test cloudflare/scripts/test-gate-e2e-job-pure.cjs checks it).
+        include:
+          - project: desktop-chromium
+            browser: chromium
+          - project: android-chromium
+            browser: chromium
+          - project: ios-webkit
+            browser: webkit
+    steps:
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout: ops/scripts/deploy-kit
+
+      - name: Check out the commit to test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: release
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Show the commit
+        working-directory: release
+        run: |
+          $sha = git rev-parse HEAD
+          $subject = git log -1 --format=%s
+          Write-Output "Testing $sha  $subject"
+          if (-not (Test-Path frontend/playwright.config.ts)) {
+            Write-Output '::error::This commit has no frontend/playwright.config.ts, so there is no browser suite to run.'
+            exit 1
+          }
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: release/frontend/package-lock.json
+
+      - name: Install packages (frontend)
+        working-directory: release/frontend
+        run: npm ci --no-audit --no-fund
+
+      # Only the engine this project drives: Chromium for the two Chromium
+      # projects, WebKit for the iPhone one.
+      - name: Install the test browser
+        working-directory: release/frontend
+        run: npx playwright install $env:E2E_BROWSER
+
+      # The suite tests the BUILT app (dist), never the dev server.
+      - name: Build the app
+        working-directory: release/frontend
+        run: npm run build
+
+      # Two workers per 4 CPUs (one per 2): ios-webkit starves first when the
+      # runner is overloaded. CI=true (set by Actions) gives retries: 1, so a
+      # red that passes on retry is reported as flaky, not failed. The JSON file
+      # sits NEXT TO the report folder because the HTML reporter empties its own.
+      - name: Browser suite (app tier, fixture server on loopback)
+        working-directory: release/frontend
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/e2e/${{ matrix.project }}/report
+          PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e/${{ matrix.project }}/results.json
+        run: |
+          $cpus = [Environment]::ProcessorCount
+          $env:E2E_WORKERS = [string][Math]::Max(1, [Math]::Floor($cpus / 2))
+          Write-Output "Browser suite $env:E2E_PROJECT: $env:E2E_WORKERS worker(s) on $cpus CPU(s)"
+          npx playwright test "--project=$env:E2E_PROJECT" "--reporter=list,html,json"
+          exit $LASTEXITCODE
+
+      - name: Summary line
+        if: always()
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e/${{ matrix.project }}/results.json
+        run: |
+          $sha = git -C release rev-parse HEAD
+          node kit/ops/scripts/deploy-kit/e2e-summary.cjs --project $env:E2E_PROJECT --sha $sha --results $env:E2E_RESULTS --blocking $env:E2E_BLOCKING
+
+      - name: Keep the browser report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e/${{ matrix.project }}
           retention-days: 14
           if-no-files-found: ignore
