@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
 import { nativeChangeAmounts, roundMoney2 } from '../src/utils/moneyPrecision.ts'
+import { rielCashAmountValid } from '../src/utils/saleStatusResolution.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (relative: string) => fs.readFileSync(path.resolve(here, relative), 'utf8')
@@ -91,11 +92,18 @@ for (const id of ['fee-amount-usd', 'fee-amount-khr']) {
   assert.match(input, /step="any"/, 'native input must permit the raw decimal and historical value before submit normalization')
 }
 const saveSource = stripTypeScriptTypes(formSource.slice(formSource.indexOf('  const handleSave = async () => {'), formSource.indexOf('  const discardPending = () => {')))
-const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState, authority, isDraftAuthorityCurrent, setAuthorityRefused } = scope; ${saveSource}; return handleSave()`)
-async function submitAmounts(usd: string, khr: string, existing: any = null, pending: any = null) {
+const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, rielCashInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState, authority, isDraftAuthorityCurrent, setAuthorityRefused } = scope; ${saveSource}; return handleSave()`)
+// The riel cash rule (owner, 27 Oct 2026: an expense is drawer cash, so riel is whole 100 notes) is the form's own derived flag; the
+// rounding and payload cases below isolate handleSave from it (their odd riel figures are about rounding), and the rule has its own
+// cases further down, run through the form's real expression.
+const rielCashInvalidLine = formSource.match(/const rielCashInvalid = ([^\n]+)/)
+assert.ok(rielCashInvalidLine, 'FeeForm derives rielCashInvalid in one expression')
+const rielCashInvalidOf = new Function('money', 'amountKhr', 'rielCashAmountValid', `return ${rielCashInvalidLine[1]}`) as (money: any, amountKhr: number, valid: typeof rielCashAmountValid) => boolean
+async function submitAmounts(usd: string, khr: string, existing: any = null, pending: any = null, enforceRielRule = false) {
   const form = { fee_type: 'expense', label: 'Physical expense', amount_usd: usd, amount_khr: khr, fee_date: '2026-09-13', sale_id: '', branch_id: '2', notes: 'Unchanged details' }
   const money = feeFormMoney(form, existing), payloads: any[] = []
   await runSave({ savingRef: { current: false }, setTouched() {}, amountsInvalid: !money.valid || (money.amountUsd <= 0 && money.amountKhr <= 0), dateInvalid: false,
+    rielCashInvalid: enforceRielRule ? rielCashInvalidOf(money, money.amountKhr, rielCashAmountValid) : false,
     form, pendingCreate: pending, fee: existing, money, amountUsd: money.amountUsd, amountKhr: money.amountKhr, setSaving() {}, onSave(payload: any) { payloads.push(payload) },
     savedRef: { current: false }, dirtyRef: { current: true }, restoredDraftRef: { current: null }, clearWorkDraft() {}, draftKey: 'fixture', onClose() {}, actorId: 7,
     getPendingFeeCreate() { return pending }, setPendingCreate() {}, setForm() {}, feeCreateBodyToFormState: formHelpers.feeCreateBodyToFormState,
@@ -136,5 +144,18 @@ const backendFees = read('../../cloudflare/src/routes/fees.ts')
 const nativeUpdateMoney = new Function('body', 'existing', 'toNumber', 'nativeChangeAmounts', `${extractFunction(backendFees, 'round2')}\n${extractFunction(backendFees, 'feeMoneyVersion')}\n${extractFunction(backendFees, 'feeMoney')}\nconst version=feeMoneyVersion(body); return { amount_usd: feeMoney(body,'usd',version,existing.amount_usd), amount_khr: feeMoney(body,'khr',version,existing.amount_khr) }`)
 assert.deepEqual(nativeUpdateMoney(noOp, historical, Number, nativeChangeAmounts), historical, 'actual backend PUT absence branches preserve historical money on no-op/metadata edit')
 assert.deepEqual(nativeUpdateMoney(edited, historical, Number, nativeChangeAmounts), { amount_usd: 1.23, amount_khr: 20.25 })
+
+// The riel cash rule through the form's own flag: whole 100 notes are sent, anything else is not, and a stored amount left unchanged is kept.
+assert.equal((await submitAmounts('0', '200', null, null, true))[0].amount_khr, 200, 'whole hundreds are sent')
+assert.equal((await submitAmounts('1', '100.4', null, null, true))[0].amount_khr, 100, 'the amount the Worker stores (rounded once) is what is asked')
+assert.equal((await submitAmounts('1', '99.5', null, null, true))[0].amount_khr, 100, 'a figure that rounds to a whole 100 note is a whole 100 note')
+for (const odd of ['150', '1', '149.4', '100.5'])
+  assert.deepEqual(await submitAmounts('1', odd, null, null, true), [], `riel ${odd} is not a whole 100 note: nothing is sent`)
+assert.equal((await submitAmounts('1', '0', null, null, true))[0].amount_usd, 1, 'dollars alone are untouched')
+const legacyRiel = { amount_usd: 1, amount_khr: 150 }
+assert.equal(Object.hasOwn((await submitAmounts('1', '150', legacyRiel, null, true))[0], 'amount_khr'), false, 'a stored 150 riel left unchanged is not asked again')
+assert.deepEqual(await submitAmounts('1', '250', legacyRiel, null, true), [], 'changing it to another non-hundred is refused')
+assert.equal((await submitAmounts('1', '300', legacyRiel, null, true))[0].amount_khr, 300, 'changing it to whole hundreds is sent')
+assert.match(formSource, /if \(!pendingCreate && rielCashInvalid\) return/, 'a frozen retry is never re-judged by the new rule')
 
 console.log('PASS fee picker, exact recovery and busy modal lifecycle contract')
