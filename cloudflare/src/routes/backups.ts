@@ -100,7 +100,7 @@ app.post('/maintenance/clear', async (c) => {
   if (passwordDenied) return passwordDenied
   // Caches filled while the database was half-restored must not outlive the hold: the data epoch moves first, and if it cannot
   // move the hold stays (CACHE-LIFECYCLE R2, R4).
-  try { await rotateDataEpoch(c.env) } catch (error) {
+  try { await rotateDataEpoch(c.env, { settle: true }) } catch (error) {
     console.error('[backups] data epoch not rotated; maintenance stays on', (error as Error)?.message || error)
     return c.json({ cleared: false, code: 'data_epoch_not_rotated', error: 'The cache epoch could not be rotated, so maintenance was not cleared. Try again.' }, 503)
   }
@@ -282,8 +282,9 @@ app.post('/', async (c) => {
         return c.json({ job_id: job.id, item: job, error: message, code: 'restore_audit_not_recorded', data_restored: true }, 503)
       }
       // The hold is released only after the epoch moved (CACHE-LIFECYCLE R2, R4): a read served during the restore may have filled
-      // a cache, and from this point nothing stored before it is reachable. If the epoch cannot move, maintenance stays on.
-      try { await rotateDataEpoch(c.env) } catch (error) {
+      // a cache, and from this point nothing stored before it is reachable. If the epoch cannot move, maintenance stays on. The rotation
+      // settles (waits one memo period) so that every isolate keys under the new epoch before reads are admitted again.
+      try { await rotateDataEpoch(c.env, { settle: true }) } catch (error) {
         const message = 'Backup data was restored, but the cache epoch could not be rotated. Maintenance stays on: clear maintenance, then retry the same restore.'
         await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
         const job = await storeSystemJob(c.env, { id: crypto.randomUUID(), status: 'failed', progress: 100,

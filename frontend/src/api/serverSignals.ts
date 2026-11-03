@@ -13,6 +13,7 @@ import { __resetDataEpochForTests, observeDataEpoch } from './dataEpoch.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
+// Three of the longest server memos (Free, 15 s); pinned against planTier.ts readSwitchMemoSeconds in cloudflare/scripts/test-plan-tier-pure.cjs.
 export const SIGNAL_TTL_MS = 45_000
 export const SERVER_BUILD_EVENT = 'sync:server-build'
 const BUILD_TOKEN = /^[A-Za-z0-9._-]{1,64}$/

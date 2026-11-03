@@ -63,7 +63,9 @@ function actualGate() {
     && node.expression.expression.getText(source) === 'app.use'
     && node.expression.arguments[1]?.getText(source).includes('getMaintenance(c.env)'))
   assert.ok(statement)
-  return new Function(...Object.keys(maintenance), `return ${statement.expression.arguments[1].getText(source)}`)(...Object.values(maintenance))
+  // The gate reads the data epoch before it answers 503 (X-BOS-Epoch rides on that answer, 6.0.1048); the database is not under test here.
+  const scope = { ...maintenance, readDataEpoch: async () => null }
+  return new Function(...Object.keys(scope), `return ${statement.expression.arguments[1].getText(source)}`)(...Object.values(scope))
 }
 const backupCalls = []
 function backups(user = { id: 7, username: 'owner', grants: ['backup', 'backup_restore'] }) {

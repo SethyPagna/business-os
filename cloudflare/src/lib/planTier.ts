@@ -215,6 +215,14 @@ export type PlanLimits = {
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
 
+  // lib/readSwitches.ts: how long one isolate remembers the one system_flags read that carries the in-app read switches AND the
+  // data epoch (X-BOS-Switches, X-BOS-Epoch, every cache key). A kill switch or a restore's new epoch reaches every isolate within
+  // one window, so this is also the longest a flip or an epoch rotation takes to be seen, and what a restore waits before it
+  // releases maintenance (dataEpoch.ts). Paid 5 s (freshness is cheap there), Free 15 s (one statement per isolate per window is
+  // the whole cost, and Free's read wall is hard). The client's own windows (frontend api/dataEpoch.ts ECHO_WINDOW_MS, api/
+  // serverSignals.ts SIGNAL_TTL_MS) are sized from the Free value; scripts/test-plan-tier-pure.cjs pins that they still cover it.
+  readSwitchMemoSeconds: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -285,6 +293,7 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  readSwitchMemoSeconds: 5,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -311,6 +320,7 @@ const FREE_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  readSwitchMemoSeconds: 15,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

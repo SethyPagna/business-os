@@ -16,7 +16,7 @@ function load(relative, requireFor = require) {
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, requireFor, mod, filename, path.dirname(filename))
   return mod.exports
 }
-const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no database') } } : id === './analytics' ? { recordAnalytics() {} } : require(id)))
+const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no database') } } : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? load('lib/planTier.ts') : require(id)))
 
 let clock = 1_000_000
 const store = sw.createReadSwitchStore({ now: () => clock })
@@ -26,7 +26,7 @@ function check(name, fn) { fn(); passed += 1; console.log(`PASS ${name}`) }
 function flip(token, setBy = 1) {
   const previous = sw.parseReadSwitches(raw)
   raw = sw.serializeReadSwitches(raw, { name: 'probe', entry: sw.parseFlipState(token) }, { epoch: previous.epoch + 1, setAt: new Date(clock).toISOString(), setBy })
-  store.prime(sw.parseReadSwitches(raw))
+  store.prime({}, sw.parseReadSwitches(raw))
   return store.salt()
 }
 
@@ -42,8 +42,8 @@ check('the salt follows the stored epoch only: the same state under a new epoch 
 check('two states under one epoch share a salt (the epoch is the only input), so the route must raise the epoch on every state change', () => {
   const a = sw.createReadSwitchStore({ now: () => clock })
   const b = sw.createReadSwitchStore({ now: () => clock })
-  a.prime(sw.parseReadSwitches(JSON.stringify({ epoch: 4, switches: { probe: 'on' } })))
-  b.prime(sw.parseReadSwitches(JSON.stringify({ epoch: 4, switches: { probe: 'off' } })))
+  a.prime({}, sw.parseReadSwitches(JSON.stringify({ epoch: 4, switches: { probe: 'on' } })))
+  b.prime({}, sw.parseReadSwitches(JSON.stringify({ epoch: 4, switches: { probe: 'off' } })))
   assert.equal(a.salt(), b.salt())
 })
 check('a salt is only offered for a fresh readable memo (null is "compute uncached, store nothing")', () => {

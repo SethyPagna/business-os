@@ -167,7 +167,7 @@ function loadRuntimeRoute(products, extra = {}) {
     // 6.0.1041: the read-switch routes added three imports. The plan-tier routes under test never reach them; the switch module is the real one.
     '../lib/audit': { buildAuditStatement: () => ({ sql: 'SELECT 1', params: {} }), changedFields: () => null },
     '../lib/maintenance': { getMaintenance: async () => null },
-    '../lib/readSwitches': load('lib/readSwitches.ts', { './db': { getDb: () => db }, './analytics': { recordAnalytics: () => {} } }),
+    '../lib/readSwitches': load('lib/readSwitches.ts', { './db': { getDb: () => db }, './analytics': { recordAnalytics: () => {} }, './planTier': planTier }),
     '../index': {},
   })
   const app = new Hono()

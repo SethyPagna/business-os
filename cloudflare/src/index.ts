@@ -65,7 +65,7 @@ import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { apiCacheHygiene } from './lib/apiCacheHygiene'
-import { readSwitchHeader } from './lib/readSwitches'
+import { readDataEpoch, readSwitchHeader } from './lib/readSwitches'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
@@ -149,6 +149,8 @@ export type Env = {
   // an unset value must never be treated as 'free', and why the tier is
   // never inferred from which bindings happen to be present.
   PLAN_TIER?: 'free' | 'paid'
+  // Milliseconds a rotation of the data epoch waits before a maintenance hold is released (lib/dataEpoch.ts). Test worlds only.
+  EPOCH_SETTLE_MS?: string
   // Slug (or public_id) of the one organization this deployment serves --
   // see routes/organizations.ts's getDefaultOrganization for why this is a
   // preference with a fallback rather than a hard requirement. Optional:
@@ -497,6 +499,8 @@ app.use('/api/*', async (c, next) => {
     const maintenance = await getMaintenance(c.env)
     const operatorStep = maintenance?.mode === 'branch-cutover' && isBranchCutoverOperatorPath(c.req.path)
     if (maintenance && !operatorStep && isMaintenanceGatedRequest(c.req.method, c.req.path, maintenance.mode)) {
+      // X-BOS-Epoch rides on this answer too (readSwitchHeader reads the memo): make sure the memo has the epoch, one shared statement per period.
+      await readDataEpoch(c.env)
       return c.json({
         error: maintenance.mode === 'restore'
           ? 'A backup restore is in progress. The system is read-only until it finishes.'

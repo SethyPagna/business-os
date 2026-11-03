@@ -95,8 +95,10 @@ await runTest('worker upgrades retain one prior cache generation and never overw
   assert.match(swRuntimeSource, /cacheNamesToRetain/)
   assert.match(swRuntimeSource, /CACHE_METADATA_URL/)
   assert.match(swRuntimeSource, /previous\.replace\('business-os-app-shell-', 'business-os-static-'\)/)
-  // 6.0.1048 (CACHE-LIFECYCLE R6/G4): a build mismatch only raises the bar. Every debounced draft is flushed first, dirty work gets the warning, and nothing reloads.
-  assert.match(appContextSource, /flushPendingWorkDrafts\(\)[\s\S]*sync:app-update-available[\s\S]*if \(hasDirtyWork\(\)\) \{[\s\S]*An app update is ready/)
+  // 6.0.1048 (CACHE-LIFECYCLE R6/G4): a build mismatch only raises the bar. Every debounced draft is flushed first and nothing reloads; the bar itself
+  // refuses a restart over unsaved work and says so, so the handler has no toast of its own.
+  assert.match(appContextSource, /flushPendingWorkDrafts\(\)[\s\S]*sync:app-update-available/)
+  assert.doesNotMatch(appContextSource, /An app update is ready/)
 })
 
 await runTest('UX exposes security and update states; no vault or queue-conflict banner is left', () => {

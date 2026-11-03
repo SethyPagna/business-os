@@ -20,6 +20,7 @@ function load(relative, dependencies = {}) {
   new Function('require', 'module', 'exports', outputText)((name) => {
     if (name in dependencies) return dependencies[name]
     if (name === 'hono') return { Hono }
+    if (name === 'node:async_hooks') return require(name)
     return poisoned
   }, module, module.exports)
   return module.exports

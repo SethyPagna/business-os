@@ -3,13 +3,18 @@
 // database a new epoch, so the first response that carries a different tag tells this tab that what it cached describes another
 // database state: it drops its memory caches and its search index and refreshes the page it is showing. Drafts and carts stay.
 //
-// The epoch is random, never ordered, and an isolate that has not yet refreshed its own 15 s memo can answer with the previous tag
-// right after a rotation. A tag this tab already left is therefore an echo, not a second change: reacting to it would reset the
-// caches again and again while the isolates converge.
+// The epoch is random, never ordered, and an isolate that has not yet refreshed its own memo (15 s on Free, 5 s on Paid) can answer with the previous tag
+// right after a rotation. A tag this tab left a moment ago is therefore an echo, not a second change: reacting to it would reset the
+// caches again and again while the isolates converge. "A moment" is ECHO_WINDOW_MS: after it, the same tag is a database that went back
+// to an earlier state (a Time Travel restore), which is a change like any other. A response that carries an echo describes the old
+// state, so the read that produced it is not stored (epochEchoCount, read by api/http.ts).
 
 export const DATA_EPOCH_EVENT = 'sync:data-epoch'
 const TAG = /^[0-9a-f]{8}$/
 const REMEMBERED_RETIRED_TAGS = 8
+// Twice the longest server memo (Free, 15 s): the memo plus the settle a restore waits. The browser cannot read the plan, so the Free
+// figure sizes it; cloudflare/scripts/test-plan-tier-pure.cjs fails if planTier.ts readSwitchMemoSeconds outgrows it.
+export const ECHO_WINDOW_MS = 30_000
 
 export type EpochDecision = 'first' | 'same' | 'changed' | 'echo' | 'invalid'
 
@@ -19,19 +24,20 @@ export function isEpochTag(value: unknown): value is string {
 
 export function createEpochTracker(initial: unknown = null) {
   let current: string | null = isEpochTag(initial) ? initial : null
-  const retired: string[] = []
+  let retired: Array<{ tag: string; until: number }> = []
   return {
     current: (): string | null => current,
     /** Adopts a stored tag from an earlier session when nothing newer has been seen; never replaces one already in use. */
     seed(stored: unknown): void {
       if (current === null && isEpochTag(stored)) current = stored
     },
-    observe(tag: unknown): EpochDecision {
+    observe(tag: unknown, now: number = Date.now()): EpochDecision {
       if (!isEpochTag(tag)) return 'invalid'
       if (current === null) { current = tag; return 'first' }
       if (tag === current) return 'same'
-      if (retired.includes(tag)) return 'echo'
-      retired.push(current)
+      retired = retired.filter((entry) => entry.until > now)
+      if (retired.some((entry) => entry.tag === tag)) return 'echo'
+      retired.push({ tag: current, until: now + ECHO_WINDOW_MS })
       if (retired.length > REMEMBERED_RETIRED_TAGS) retired.shift()
       current = tag
       return 'changed'
@@ -40,6 +46,7 @@ export function createEpochTracker(initial: unknown = null) {
 }
 
 let tracker = createEpochTracker()
+let echoes = 0
 
 function announce(epoch: string, source: 'header' | 'bootstrap'): void {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
@@ -50,8 +57,12 @@ function announce(epoch: string, source: 'header' | 'bootstrap'): void {
 export function observeDataEpoch(tag: unknown, source: 'header' | 'bootstrap'): EpochDecision {
   const decision = tracker.observe(tag)
   if (decision === 'changed') announce(tag as string, source)
+  if (decision === 'echo') echoes += 1
   return decision
 }
+
+/** How many echoes this tab has seen. A read that began at a different count was answered while a lagging isolate was still on the old epoch: it is not stored. */
+export const epochEchoCount = (): number => echoes
 
 /** The tag the earlier session stored, so a restore that happened while the browser was closed is still noticed. */
 export function seedDataEpoch(stored: unknown): void {
@@ -62,4 +73,5 @@ export const currentDataEpoch = (): string | null => tracker.current()
 
 export function __resetDataEpochForTests(initial: unknown = null): void {
   tracker = createEpochTracker(initial)
+  echoes = 0
 }

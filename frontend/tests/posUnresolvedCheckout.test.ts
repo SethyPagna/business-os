@@ -38,7 +38,8 @@ const ordersInitializer = (find((node) => ts.isCallExpression(node) && node.expr
 const readPosDraft = find((node) => ts.isVariableDeclaration(node) && node.name.getText(posTree) === 'readPosDraft').getText(posTree)
 // 6.0.1048: the till reads its orders through readPosOrders (the guarded reader: a cart a newer build wrote is not read).
 const readPosOrders = find((node) => ts.isVariableDeclaration(node) && node.name.getText(posTree) === 'readPosOrders').getText(posTree)
-const { pickReadablePosOrders, announceNewerRecord } = await import('../src/utils/persistedRecordSchema.ts')
+const { announceNewerRecord } = await import('../src/utils/persistedRecordSchema.ts')
+const { pickReadablePosOrders } = await import('../src/utils/posOrdersSchema.ts')
 const helpers = ['posStorage', 'readPosStorage'].map((name) => find((node) => ts.isFunctionDeclaration(node) && node.name?.getText(posTree) === name).getText(posTree)).join('\n')
 type Order = { id: string; checkoutRequestId?: string; cart?: unknown[] }
 function tillOrders(user: { id: number; organization_id: number | null }): Order[] {

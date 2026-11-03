@@ -1348,8 +1348,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
       setSyncServerUnreachable(true)
       // The app never restarts on its own (owner rule, CACHE-LIFECYCLE R6): a build mismatch raises the "Restart now" bar and does
-      // nothing else, whether or not work is open. restartIntoLatestApp() is the one way through and it refuses while unfinished
-      // work is open; every debounced draft is saved now so a restart the user chooses later loses nothing.
+      // nothing else, whether or not work is open. The bar is the one way through: restartIntoLatestApp() refuses while unfinished work
+      // is open and says so there. Every debounced draft is saved now so a restart the user chooses later loses nothing.
       flushPendingWorkDrafts()
       window.dispatchEvent(new CustomEvent('sync:app-update-available', {
         detail: {
@@ -1359,13 +1359,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           ts: Date.now(),
         },
       }))
-      if (hasDirtyWork()) {
-        setNotification({
-          message: 'An app update is ready. Save or discard unfinished work before reloading.',
-          type: 'warning',
-          id: Date.now(),
-        })
-      }
     }
     const onConflict = (e: Event) => {
       const detail = eventDetail<WriteConflictDetail>(e)

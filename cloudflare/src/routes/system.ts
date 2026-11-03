@@ -54,6 +54,19 @@ const SALE_NOT_PAID_STOCK_RECOVERY_RESET_GUARD_KEY = 'sale_not_paid_stock_recove
 
 type ResetStatement = { sql: string; params?: Record<string, unknown> }
 
+// CACHE-LIFECYCLE R2: a reset changes what every cache entry, ETag and open page describes, so the database gets a new data epoch. It runs once
+// the wipe has committed and before the pages are told: a device that refreshes on the broadcast already sees the new epoch and drops what it
+// holds. The wipe cannot be undone by a failed rotation, so a failure is reported and the route still answers what it did.
+async function rotateEpochAfterReset(env: Env, source: string): Promise<void> {
+  try {
+    const { rotateDataEpoch } = await import('../lib/dataEpoch')
+    await rotateDataEpoch(env)
+  } catch (error) {
+    // The wipe has committed: nothing after it may turn the answer into a failure, reporting included.
+    try { await reportError(env.SENTRY_DSN, error, { source: 'worker', location: `${source}: data epoch rotation` }) } catch { /* reporting never fails a reset */ }
+  }
+}
+
 // sale_record_events is immutable outside restore/reset. Keep its short-lived
 // reset authority inside the same D1 transaction as every destructive delete:
 // no request can observe the flag and a failure rolls the flag and deletes back.
@@ -449,6 +462,7 @@ app.post('/reset-data', async (c) => {
         imageDeleteErrors: imageDeleteErrors.length || undefined,
       })
 
+      await rotateEpochAfterReset(c.env, 'reset-data')
       c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
       if (includeMovements || includeSales) {
@@ -650,6 +664,7 @@ app.post('/reset-data', async (c) => {
     // cached/displayed numbers here would be actively misleading, not just
     // momentarily behind. Previously this route never broadcast or
     // invalidated the products search cache at all.
+    await rotateEpochAfterReset(c.env, 'reset-data')
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', mode }))
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
@@ -761,6 +776,7 @@ app.post('/reset-section', async (c) => {
       mode: `section:${section}`,
     })
 
+    await rotateEpochAfterReset(c.env, 'reset-section')
     if (config.broadcastChannel) {
       c.executionCtx.waitUntil(broadcast(c.env, config.broadcastChannel, { action: 'reset', section }))
       c.executionCtx.waitUntil(bumpVersion(c.env, config.broadcastChannel))
@@ -1354,6 +1370,8 @@ app.post('/factory-reset', async (c) => {
       r2Errors: r2Errors.length || undefined,
       adminUserCreated: invariants.adminUserCreated,
     })
+
+    await rotateEpochAfterReset(c.env, 'factory-reset')
 
     return c.json({
       success: true,

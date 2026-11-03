@@ -11,17 +11,19 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { transformSync } from 'esbuild'
 import {
-  KNOWN_MONEY_PRECISION,
   NEWER_RECORD_EVENT,
-  POS_ORDERS_SCHEMA,
   WORK_DRAFT_SCHEMA,
   __resetNewerRecordNoticesForTests,
-  inspectPosOrdersRecord,
   inspectWorkDraftRecord,
-  pickReadablePosOrders,
-  posOrdersWriteTargets,
   takeNewerRecordNotices,
 } from '../src/utils/persistedRecordSchema.ts'
+import {
+  KNOWN_MONEY_PRECISION,
+  POS_ORDERS_SCHEMA,
+  inspectPosOrdersRecord,
+  pickReadablePosOrders,
+  posOrdersWriteTargets,
+} from '../src/utils/posOrdersSchema.ts'
 import { __productSearchIndexTest, ensureProductSearchIndex, searchProductIndex } from '../src/api/productSearchIndex.ts'
 import { SEARCH_CORE_VERSION } from '../src/utils/searchCore.ts'
 
@@ -182,8 +184,8 @@ await runTest('drafts: a newer draft is not read, overwritten, auto-saved over o
 
 await runTest('MUTANT: a reader that treats an unknown draft version as the old one is caught by the same scenario', async () => {
   const mutant = await loadDraftModules((source) => source.replace(
-    "const isNewerSchema = (value: unknown, known: number): boolean => typeof value === 'number' && Number.isFinite(value) && value > known",
-    'const isNewerSchema = (_value: unknown, _known: number): boolean => false',
+    "export const isNewerSchema = (value: unknown, known: number): boolean => typeof value === 'number' && Number.isFinite(value) && value > known",
+    'export const isNewerSchema = (_value: unknown, _known: number): boolean => false',
   ))
   await assert.rejects(() => draftScenario(mutant), /not read under this build/, 'the scenario must fail on a reader that reads every version as the old one')
 })

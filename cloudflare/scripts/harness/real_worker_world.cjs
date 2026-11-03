@@ -56,7 +56,9 @@ const staticAssetsStub = async (request) => (new URL(request.url).pathname === '
   ? Response.json({ revision: 'world', hash: WORLD_BUILD_HASH, builtAt: '2026-11-02T00:00:00.000Z' })
   : new Response('not found', { status: 404 }))
 
-async function bootWorld({ adminPassword, transformEntry, staticAssets = false }) {
+// `bindings` adds to the Worker's bindings. EPOCH_SETTLE_MS is 0 here: a rotation that precedes the end of a maintenance hold waits one memo
+// period in production (lib/dataEpoch.ts), which no test other than the one that measures it should pay.
+async function bootWorld({ adminPassword, transformEntry, staticAssets = false, bindings: extraBindings = {} }) {
   assert.ok(adminPassword, 'adminPassword seeds the built-in admin account')
   const { Miniflare, Log, LogLevel } = require('miniflare')
   const script = await bundleWorker(transformEntry)
@@ -68,7 +70,7 @@ async function bootWorld({ adminPassword, transformEntry, staticAssets = false }
     ...(staticAssets ? { serviceBindings: { STATIC_ASSETS: staticAssetsStub } } : {}),
     bindings: {
       PLAN_TIER: 'paid', BUSINESS_OS_PUBLIC_URL: 'https://leangbeauty.com', BUSINESS_OS_ADMIN_URL: 'https://admin.leangbeauty.com',
-      BUSINESS_OS_ADMIN_PASSWORD: adminPassword, BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty',
+      BUSINESS_OS_ADMIN_PASSWORD: adminPassword, BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty', EPOCH_SETTLE_MS: '0', ...extraBindings,
     },
     log: new Log(LogLevel.ERROR),
   })

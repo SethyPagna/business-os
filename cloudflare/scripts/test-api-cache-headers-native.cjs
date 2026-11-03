@@ -147,6 +147,7 @@ async function main() {
         const maintenance = await send('POST', '/api/customers', { body: JSON.stringify({ name: 'Maintenance signal probe' }) })
         t.eq('maintenance status', maintenance.status, 503)
         t.eq('the maintenance 503 carries X-BOS-Build', maintenance.build, WORLD_BUILD_HASH)
+        t.ok('the maintenance 503 carries X-BOS-Epoch', /^[0-9a-f]{8}$/.test(maintenance.epoch || ''), `got ${maintenance.epoch}`)
       } finally {
         await world.run("DELETE FROM system_flags WHERE key = 'maintenance'")
         await world.run("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'")
@@ -155,6 +156,23 @@ async function main() {
         const r = await send('GET', route, { as: null })
         t.eq(`${route}: no X-BOS-Build`, r.build, null)
         t.eq(`${route}: no X-BOS-Epoch`, r.epoch, null)
+      }
+    })
+
+    // N6 (6.0.1048 review): a restore holds writes for minutes, so the answer every device sees most is the maintenance 503, and a device that
+    // is told nothing about the epoch misses the rotation the restore ends with. The check above has a memo another request just filled; here
+    // the isolate's memo has expired (15 s) and the 503 itself is the first request to need the epoch.
+    await check('the maintenance 503 carries X-BOS-Epoch even when the isolate memo has expired', async (t) => {
+      await new Promise((resolve) => setTimeout(resolve, 15600))
+      await world.run("INSERT INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'")
+      await world.run('INSERT INTO system_flags (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', 'maintenance', MAINTENANCE_STATE)
+      try {
+        const maintenance = await send('POST', '/api/customers', { body: JSON.stringify({ name: 'Maintenance expired-memo probe' }) })
+        t.eq('maintenance status', maintenance.status, 503)
+        t.ok('X-BOS-Epoch is 8 hex characters', /^[0-9a-f]{8}$/.test(maintenance.epoch || ''), `got ${maintenance.epoch}`)
+      } finally {
+        await world.run("DELETE FROM system_flags WHERE key = 'maintenance'")
+        await world.run("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'")
       }
     })
 

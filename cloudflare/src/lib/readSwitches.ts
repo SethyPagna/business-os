@@ -1,6 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context, Next } from 'hono'
 import { getDb } from './db'
 import { recordAnalytics } from './analytics'
+import { getPlanLimits } from './planTier'
 import type { Env } from '../index'
 
 // Kill switches for read optimizations. One system_flags row holds them all; a name that is absent, unknown or
@@ -23,7 +25,8 @@ export const DATA_EPOCH_KEY = 'data_epoch'
 export const SWITCH_ROWS_SQL = 'SELECT key, value FROM system_flags WHERE key IN (@switches, @epoch)'
 export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH_KEY }
 export const KNOWN_READ_SWITCHES = ['probe'] as const
-export const READ_SWITCH_MEMO_MS = 15_000
+/** How long one isolate remembers the flags read: planTier.ts readSwitchMemoSeconds (Free 15 s, Paid 5 s). */
+export const readSwitchMemoMs = (env: Env): number => getPlanLimits(env).readSwitchMemoSeconds * 1000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1
 export const SWITCH_HEADER = 'X-BOS-Switches'
 
@@ -155,30 +158,48 @@ export async function epochTag(epoch: string | null): Promise<string | null> {
 }
 
 // dataEpoch: undefined = not read yet (a flip primed the memo before any read), null = read and absent or malformed.
-type Memo = { at: number; value: ReadSwitches; dataEpoch: string | null | undefined; epochTag: string | null; readable: boolean; seq: number }
+type Memo = { at: number; value: ReadSwitches; dataEpoch: string | null | undefined; epochTag: string | null; readable: boolean; seq: number; ttlMs: number }
 type StoreOptions = { now?: () => number; ttlMs?: number }
+// What the callers of ONE request share. A Worker isolate serves many requests at once and a promise belongs to the request that
+// created it: awaiting another request's promise can hang for good when that request has already answered (6.0.1048 review B1). So a
+// pending read is shared inside one request only (the notification bell's sections cost one statement, not three), and across
+// requests only the finished result, the memo, is shared.
+type RequestScope = { pending: Promise<Memo> | null }
 
 export function createReadSwitchStore(options: StoreOptions = {}) {
   const now = options.now || Date.now
-  const ttlMs = options.ttlMs ?? READ_SWITCH_MEMO_MS
+  const ttlFor = (env: Env): number => options.ttlMs ?? readSwitchMemoMs(env)
+  const requests = new AsyncLocalStorage<RequestScope>()
   let memo: Memo | null = null
   let seq = 0
-  let inflight: Promise<ReadSwitches> | null = null
+  // A reset raises it: a read that started at or below it describes the world before the reset and stores nothing.
+  let floor = 0
 
-  const fresh = (at: number): boolean => memo !== null && at - memo.at >= 0 && at - memo.at < ttlMs
+  const fresh = (at: number): boolean => memo !== null && at - memo.at >= 0 && at - memo.at < memo.ttlMs
 
-  async function load(env: Env): Promise<ReadSwitches> {
+  function dropPending(): void {
+    const scope = requests.getStore()
+    if (scope) scope.pending = null
+  }
+
+  async function load(env: Env, needEpoch: boolean): Promise<Memo> {
     const startedAt = now()
-    if (memo && fresh(startedAt)) return memo.value
-    // Callers that arrive while a read is running share it: a cold isolate answering several cached sections at once (the notification
-    // bell has three) reads the flags once, not once each. A reset or a prime drops the shared read so the next caller starts a new one.
-    if (inflight) return inflight
-    const run: Promise<ReadSwitches> = readFlags(env, startedAt).finally(() => { if (inflight === run) inflight = null })
-    inflight = run
+    const have = memo
+    if (have && fresh(startedAt) && (!needEpoch || have.dataEpoch !== undefined)) return have
+    // A flip's value is the newest word on the switches: an epoch read that only has to fill in the epoch keeps it.
+    const keep = have && fresh(startedAt) && have.dataEpoch === undefined ? have : null
+    const scope = requests.getStore()
+    if (scope?.pending) return scope.pending
+    const run = readFlags(env, startedAt, keep)
+    if (scope) {
+      scope.pending = run
+      const clear = (): void => { if (scope.pending === run) scope.pending = null }
+      run.then(clear, clear)
+    }
     return run
   }
 
-  async function readFlags(env: Env, startedAt: number): Promise<ReadSwitches> {
+  async function readFlags(env: Env, startedAt: number, keep: Memo | null): Promise<Memo> {
     const mine = ++seq
     let value: ReadSwitches
     let dataEpoch: string | null = null
@@ -196,35 +217,40 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
       readable = false
       recordAnalytics(env, { kind: 'switch_read', labels: ['fallback'] })
     }
-    // Whatever started last wins: a read that began before a prime() or a later read describes an older world.
-    if (!memo || mine > memo.seq) memo = { at: startedAt, value, dataEpoch, epochTag: tag, readable, seq: mine }
-    return memo.value
+    const ttlMs = ttlFor(env)
+    const next: Memo = keep && readable
+      ? { at: keep.at, value: keep.value, dataEpoch, epochTag: tag, readable, seq: mine, ttlMs }
+      : { at: startedAt, value, dataEpoch, epochTag: tag, readable, seq: mine, ttlMs }
+    // Whatever started last wins: a read that began before a prime() or a later read, or before a reset, describes an older world.
+    if (mine > floor && (!memo || mine > memo.seq)) memo = next
+    return memo && memo.seq > mine ? memo : next
   }
 
   return {
+    /** Runs one request: callers inside it share a pending read. Outside one, every caller reads for itself. */
+    inRequest<T>(run: () => T): T { return requests.run({ pending: null }, run) },
     async read(env: Env, name: string): Promise<ReadSwitchReading> {
-      const switches = await load(env)
+      const switches = (await load(env, false)).value
       const entry = isKnownReadSwitch(name) ? switches.switches[name] : OFF
       if (isKnownReadSwitch(name)) noteConsulted(name, entry.state)
       return { ...entry, epoch: switches.epoch, on: entry.state === 'on' }
     },
-    /** The state a committed flip just wrote, so this isolate answers with it before the next refresh. */
+    /** The data epoch: null while there is none or the store could not be read. */
     async epoch(env: Env): Promise<string | null> {
-      if (memo && memo.dataEpoch === undefined) memo = null
-      await load(env)
-      return memo && memo.readable ? memo.dataEpoch ?? null : null
+      const reading = await load(env, true)
+      return reading.readable ? reading.dataEpoch ?? null : null
     },
     /** The epoch tag from the memo as it stands: no read, null unless the memo is fresh and readable. */
     epochTagNow(): string | null { return memo && memo.readable && fresh(now()) ? memo.epochTag : null },
-    /** A flip knows the switches, not the data epoch: the epoch half is left unread, so the next epoch read asks the database (a restore may have rotated it since the last read). */
-    prime(value: ReadSwitches): void { inflight = null; memo = { at: now(), value, dataEpoch: undefined, epochTag: null, readable: true, seq: ++seq } },
+    /** The state a committed flip just wrote, so this isolate answers with it before the next refresh. A flip knows the switches, not the data epoch: that half is left unread, so the next epoch read asks the database (a restore may have rotated it since the last read) and keeps the flip's value. */
+    prime(env: Env, value: ReadSwitches): void { dropPending(); memo = { at: now(), value, dataEpoch: undefined, epochTag: null, readable: true, seq: ++seq, ttlMs: ttlFor(env) } },
     peek(): ReadSwitches | null { return memo ? memo.value : null },
     header(): string | null {
       if (!memo || !memo.readable || !fresh(now())) return null
       return `e=${memo.value.epoch};${KNOWN_READ_SWITCHES.map((name) => `${name}=${memo!.value.switches[name].state === 'on' ? 1 : 0}`).join(';')}`
     },
     salt(): string | null { return memo && memo.readable && fresh(now()) ? `sw${memo.value.epoch}` : null },
-    reset(): void { memo = null; inflight = null },
+    reset(): void { dropPending(); memo = null; floor = ++seq },
   }
 }
 
@@ -250,12 +276,13 @@ const store = createReadSwitchStore()
 
 export const readSwitchState = (env: Env, name: string): Promise<ReadSwitchReading> => store.read(env, name)
 export const readSwitch = async (env: Env, name: string): Promise<boolean> => (await store.read(env, name)).on
-export const primeReadSwitches = (value: ReadSwitches): void => store.prime(value)
+export const primeReadSwitches = (env: Env, value: ReadSwitches): void => store.prime(env, value)
 export const switchHeaderValue = (): string | null => store.header()
 export const switchKeySalt = (): string | null => store.salt()
 export const readDataEpoch = (env: Env): Promise<string | null> => store.epoch(env)
 export const epochTagNow = (): string | null => store.epochTagNow()
 export const resetReadSwitchMemo = (): void => store.reset()
+export const runInReadScope = <T>(run: () => T): T => store.inRequest(run)
 
 // The frontend build hash of the assets bound to THIS Worker version, for X-BOS-Build. Read once per isolate from the bound assets
 // (business-os-build.json; its hash equals __FRONTEND_BUILD_HASH__ and the precache manifest's), so the header names the assets
@@ -264,7 +291,8 @@ export const resetReadSwitchMemo = (): void => store.reset()
 const BUILD_PATHS = ['/business-os-build.json', '/business-os-precache.json'] as const
 const BUILD_RETRY_MS = 60_000
 const BUILD_HASH = /^[A-Za-z0-9._-]{1,64}$/
-let builtHash: { at: number; hash: string | null; pending: Promise<string | null> | null } | null = null
+const BUILD_PENDING_MS = 10_000
+let builtHash: { at: number; hash: string | null; pending: boolean } | null = null
 
 async function readBuildHash(env: Env): Promise<string | null> {
   const assets = env?.STATIC_ASSETS
@@ -280,14 +308,16 @@ async function readBuildHash(env: Env): Promise<string | null> {
   return null
 }
 
+// While another request is reading it, a response goes without X-BOS-Build instead of waiting on a promise that belongs to that
+// request (it may have answered already and never settle). A read that never settles is given up after BUILD_PENDING_MS.
 export async function frontendBuildHash(env: Env, at: number = Date.now()): Promise<string | null> {
   if (builtHash?.hash) return builtHash.hash
-  if (builtHash?.pending) return builtHash.pending
-  if (builtHash && at - builtHash.at < BUILD_RETRY_MS) return null
-  const pending = readBuildHash(env)
-  builtHash = { at, hash: null, pending }
-  const hash = await pending
-  builtHash = { at, hash, pending: null }
+  if (builtHash?.pending && at - builtHash.at < BUILD_PENDING_MS) return null
+  if (builtHash && !builtHash.pending && at - builtHash.at < BUILD_RETRY_MS) return null
+  const attempt = { at, hash: null as string | null, pending: true }
+  builtHash = attempt
+  const hash = await readBuildHash(env)
+  if (builtHash === attempt) builtHash = { at, hash, pending: false }
   return hash
 }
 
@@ -308,7 +338,7 @@ function applySignalHeaders(headers: Headers, build: string | null): void {
 // X-BOS-Epoch are the memo as it stands (a memo older than the refresh period, or never loaded, says nothing) and X-BOS-Build
 // is the isolate's one asset read. Every /api/* response carries them, errors and the maintenance 503 included.
 export async function readSwitchHeader(c: Context, next: Next): Promise<void> {
-  await next()
+  await runInReadScope(() => next())
   let build: string | null = null
   try { build = await frontendBuildHash(c.env as Env) } catch { /* the header is omitted */ }
   try {

@@ -21,10 +21,13 @@ const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
 const epochOf = async (world) => (await world.first("SELECT value FROM system_flags WHERE key = 'data_epoch'"))?.value
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const MEMO_MS = 15500
+// The world waits this long between the rotation that precedes a release and the release (production: one memo period, lib/dataEpoch.ts).
+const SETTLE_MS = 2000
+const nowMs = () => Date.now()
 
 async function main() {
   const adminPassword = randomBytes(12).toString('base64url')
-  const world = await bootWorld({ adminPassword })
+  const world = await bootWorld({ adminPassword, bindings: { EPOCH_SETTLE_MS: String(SETTLE_MS) } })
   const { check, finish } = createReporter()
   const cacheState = (response) => (/cache;desc="(\w+)"/.exec(response.headers.get('server-timing') || '') || [])[1]
   const heldNow = async () => !!(await world.first("SELECT value FROM system_flags WHERE key = 'maintenance'"))
@@ -41,13 +44,13 @@ async function main() {
     await world.run('DELETE FROM cache_versions')
     for (const row of snapshot.d1) await world.run('INSERT INTO cache_versions (namespace, version, updated_at) VALUES (?, ?, ?)', row.namespace, row.version, row.updated_at)
   }
-  const rotations = async () => world.query('SELECT epoch, held, products FROM epoch_probe ORDER BY id')
+  const rotations = async () => world.query('SELECT epoch, held, products, at FROM epoch_probe ORDER BY id')
 
   try {
-    await world.run('CREATE TABLE epoch_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, epoch TEXT NOT NULL, held INTEGER NOT NULL, products INTEGER NOT NULL)')
+    await world.run('CREATE TABLE epoch_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, epoch TEXT NOT NULL, held INTEGER NOT NULL, products INTEGER NOT NULL, at INTEGER NOT NULL)')
     await world.run(`CREATE TRIGGER epoch_probe_rotation AFTER UPDATE ON system_flags WHEN NEW.key = 'data_epoch'
-      BEGIN INSERT INTO epoch_probe (epoch, held, products)
-        SELECT NEW.value, EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'), (SELECT COUNT(*) FROM products); END`)
+      BEGIN INSERT INTO epoch_probe (epoch, held, products, at)
+        SELECT NEW.value, EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'), (SELECT COUNT(*) FROM products), CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER); END`)
 
     const before = await world.api('POST', '/api/products', { name: 'EpochProbe Before', barcode: '8800000000011', category: 'EpochCategoryBefore' })
     const exported = await world.api('POST', '/api/backups', { type: 'export-cloudflare' })
@@ -76,6 +79,7 @@ async function main() {
 
     await check('the restore rotates the epoch before it deletes anything and again before it releases the hold, and nothing rotates it after', async (t) => {
       const response = await world.api('POST', '/api/backups', { type: 'import-folder', sourceDir: backupName, currentPassword: adminPassword })
+      const answeredAt = nowMs()
       t.eq('status', response.status, 200)
       t.eq('the later product is gone', await names(), ['EpochProbe Before'])
       t.eq('maintenance released', await heldNow(), false)
@@ -86,6 +90,9 @@ async function main() {
       t.eq('rotation 2: under the hold, after the data was restored (one product), before the release', [seen[1]?.held, seen[1]?.products], [1, 1])
       t.ok('the two rotations and the old epoch are three different values', new Set([epochBeforeRestore, seen[0]?.epoch, seen[1]?.epoch]).size === 3, [epochBeforeRestore, seen[0]?.epoch, seen[1]?.epoch])
       t.eq('the last rotation is the final epoch (nothing rotated it after the release)', seen[1]?.epoch, final)
+      // N2 (6.0.1048 review): the release waits for every isolate to learn the new epoch. The request answers after the release, so the time from
+      // rotation 2 to the answer includes the wait; without it the rest of the request takes well under a second.
+      t.ok(`the hold is released at least ${SETTLE_MS} ms after the rotation that precedes it`, answeredAt - seen[1]?.at >= SETTLE_MS - 100, answeredAt - seen[1]?.at)
     })
 
     await check('with the version tokens put back (a lost bump), the pre-restore entry is still unreachable and the answer is the restored one', async (t) => {
@@ -130,8 +137,11 @@ async function main() {
       t.eq('maintenance still on after the refused clear', await heldNow(), true)
       await world.run('DROP TRIGGER epoch_lock_refuse')
       const before = await epochOf(world)
+      const clearStarted = nowMs()
       const cleared = await world.api('POST', '/api/backups/maintenance/clear', { force: true, currentPassword: adminPassword })
+      const clearTook = nowMs() - clearStarted
       t.eq('once the epoch can move, the clear works: status', cleared.status, 200)
+      t.ok(`the forced clear waits ${SETTLE_MS} ms between the rotation and the release`, clearTook >= SETTLE_MS - 100, clearTook)
       t.eq('maintenance off', await heldNow(), false)
       t.ok('and the epoch moved', (await epochOf(world)) !== before)
     })

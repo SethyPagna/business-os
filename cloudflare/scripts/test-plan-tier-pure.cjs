@@ -140,6 +140,7 @@ const PAID = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
+  readSwitchMemoSeconds: 5,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -165,6 +166,7 @@ const FREE = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
+  readSwitchMemoSeconds: 15,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -191,7 +193,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
 // reads fewer D1 rows, so on these Free is deliberately the LARGER number.
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -232,6 +234,30 @@ check('a free deployment stays inside the platform ceilings it is sized against'
   assert.equal(free.d1QueriesPerInvocation, 50, 'documented assumption: the conservative of the two published figures')
   assert.equal(free.d1MaxDatabaseBytes, 500 * 1024 * 1024)
   assert.equal(free.scheduledBackupEnabled, false, 'a full D1 backup cannot run inside a 10ms cron invocation')
+})
+
+// 6.0.1048 (owner rule, 3 Nov): a Free-sized number is a field here, never a literal at the call site. The switch/epoch memo was one.
+check('the switch/epoch memo is a plan field with no literal left at its call sites', async () => {
+  const read = (...parts) => fs.readFileSync(path.join(cloudflareRoot, ...parts), 'utf8').replace(/\r\n/g, '\n')
+  assert.equal(PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds, 15)
+  assert.equal(PLAN_LIMITS_BY_TIER.paid.readSwitchMemoSeconds, 5)
+  const switches = read('src', 'lib', 'readSwitches.ts')
+  assert.match(switches, /getPlanLimits\(env\)\.readSwitchMemoSeconds/, 'the module reads the plan field')
+  assert.doesNotMatch(switches, /READ_SWITCH_MEMO_MS|ttlMs\s*=\s*[0-9]|MEMO_MS\s*=\s*[0-9]/, 'no bare window left in the module')
+  assert.match(read('src', 'lib', 'dataEpoch.ts'), /readSwitchMemoMs\(env\) \+ EPOCH_SETTLE_MARGIN_MS/, 'the restore settle follows the plan window')
+  assert.match(read('src', 'routes', 'runtime.ts'), /memoSeconds: getPlanLimits\(env\)\.readSwitchMemoSeconds/, 'the listing reports the plan window')
+})
+
+// The browser cannot read the plan, so its two windows are sized from the LARGEST server memo (Free). This keeps them honest.
+check('the client windows cover the longest server memo: the echo window outlasts memo + settle, the signal lifetime is three memos', async () => {
+  const frontend = (...parts) => fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', ...parts), 'utf8')
+  const number = (source, name) => Number(new RegExp(`${name} = ([0-9_]+)`).exec(source)[1].replace(/_/g, ''))
+  const longest = Math.max(...Object.values(PLAN_LIMITS_BY_TIER).map((limits) => limits.readSwitchMemoSeconds)) * 1000
+  assert.equal(longest, PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000, 'Free holds the longest memo; the client windows are sized from it')
+  const echo = number(frontend('dataEpoch.ts'), 'ECHO_WINDOW_MS')
+  const signal = number(frontend('serverSignals.ts'), 'SIGNAL_TTL_MS')
+  assert.ok(echo >= 2 * longest, `ECHO_WINDOW_MS ${echo} must cover memo + settle (2 x ${longest})`)
+  assert.ok(signal >= 3 * longest, `SIGNAL_TTL_MS ${signal} must cover three memos (${3 * longest})`)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

@@ -23,11 +23,19 @@ async function check(name, fn) {
   try { await fn(); passed += 1 } catch (err) { process.exitCode = 1; console.error(`FAIL ${name}\n  ${err && err.message ? err.message.split('\n').join('\n  ') : err}`) }
 }
 
+function loadPlanTier() {
+  const file = path.join(ROOT, 'cloudflare', 'src', 'lib', 'planTier.ts')
+  const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, require, mod, file, path.dirname(file))
+  return mod.exports
+}
+
 function loadSwitches() {
   const file = path.join(ROOT, 'cloudflare', 'src', 'lib', 'readSwitches.ts')
   const { outputText } = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file })
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : require(id)), mod, file, path.dirname(file))
+  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(mod.exports, (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? loadPlanTier() : require(id)), mod, file, path.dirname(file))
   return mod.exports
 }
 

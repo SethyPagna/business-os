@@ -112,10 +112,13 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // enough that a doubling -- the kind of regression a raw "under 1.85MB"
 // ceiling would miss for a long time -- fails immediately.
 // Re-measured 6.0.303: portalMotion.ts joined catalog-public-core (6.0.187) and the closure was already 19 bytes under the old limit.
-// Re-measured 6.0.1048 (committed HEAD 6.0.1042 measured 970,659 bytes / 31 chunks, 2.7 KB under the old limit): the data-epoch tracker, the
-// epoch reset, the build/epoch header reads and the versioned draft envelope add 6,993 bytes to the closure and no chunk. The search index
-// stays out of it (epochReset.ts loads it on demand); serverSignals, dataEpoch and readBudgetShed join api-http-core, which imports them.
-const CATALOG_PRODUCTS_BASELINE_BYTES = 977_652
+// 6.0.1048: the baseline above stays, and the ceiling is the old one plus what the cache-lifecycle client code really weighs. Committed HEAD
+// 6.0.1042 measured 970,659 bytes / 31 chunks, 2.7 KB under the old ceiling; the data-epoch tracker with its echo window, the epoch reset, the
+// build/epoch header reads and the versioned draft envelope add 6,657 bytes and no chunk (977,316). Raising the baseline instead would have
+// raised the +10% with it by 10 times the growth. The search index stays out of the closure (epochReset.ts loads it on demand), and the POS cart
+// rules (utils/posOrdersSchema.ts) stay out of it; serverSignals, dataEpoch and readBudgetShed join api-http-core, which imports them.
+const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
+const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -130,8 +133,8 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
   assert.ok(entry, 'missing exact catalog-products chunk in dist/assets')
   const { chunks, bytes } = closureBytesAndCount(graph, [entry as string])
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE,
-    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES,
+    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(
     chunks <= Math.ceil(CATALOG_PRODUCTS_BASELINE_CHUNKS * BUDGET_TOLERANCE),

@@ -22,6 +22,7 @@ import {
   getSyncToken,
 } from './httpState.ts'
 import { recordServerSignals } from './serverSignals.ts'
+import { epochEchoCount } from './dataEpoch.ts'
 import {
   READ_BUDGET_PAUSED_KEY, READ_BUDGET_PAUSED_MESSAGE, isReadBudgetCode, noteReadBudgetShed, observeReadBudgetZone, readBudgetHold,
   readBudgetSentence, retryAfterSeconds, type ReadBudgetPause,
@@ -45,7 +46,7 @@ type LooseRecord = Record<string, any>
 type ApiRuntimeError = Error & LooseRecord
 type CacheEntry = { data: any; ts: number; scope: ActorReadScope }
 type CacheState = { data: any; stale: boolean }
-type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope }
+type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope; echoes: number }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
 // `epoch` is _readEpoch when the read started; see apiFetchOnce's read dedupe.
 type InflightRead = InflightWrite & { epoch: number }
@@ -362,7 +363,8 @@ async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<
 }
 
 function cacheReadResult(token: ReadCacheToken, data: any): boolean {
-  if (!token.valid || !isActorReadScopeCurrent(token.scope)) return false
+  // A response that carried a retired data epoch tag came from an isolate still on the old epoch: its body is not stored (api/dataEpoch.ts).
+  if (!token.valid || token.echoes !== epochEchoCount() || !isActorReadScopeCurrent(token.scope)) return false
   cacheSet(token.channel, data)
   return true
 }
@@ -1814,7 +1816,7 @@ async function routeOnce<T = any>(
     // Invalidation detaches cache ownership, without canceling the original
     // caller or adding automatic retries. Detached background/local work keeps
     // the token alive until its final cache write boundary has passed.
-    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope }
+    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope, echoes: epochEchoCount() }
     return trackCacheRead(token, async () => {
       if (readServerBaseUrl) {
         const bypassCache = typeof options === 'object' && options.bypassCache === true

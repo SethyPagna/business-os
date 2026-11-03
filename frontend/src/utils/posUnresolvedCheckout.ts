@@ -1,6 +1,6 @@
 import { isActorSessionQuarantined } from '../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, normalizeOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../api/offlineQueueOwnership.ts'
-import { inspectPosOrdersRecord } from './persistedRecordSchema.ts'
+import { inspectPosOrdersRecord } from './posOrdersSchema.ts'
 
 // A POS checkout whose request was sent with no confirmed answer yet. A
 // confirmed sign-out, or another organization signing in on the device, clears

@@ -125,7 +125,7 @@ await runTest('G4: a build mismatch raises the Restart bar for a clean tab and f
     assert.equal(out.flushes, 1, `dirty=${dirty}: drafts saved`)
     assert.equal(out.bars.length, 1, `dirty=${dirty}: exactly one bar announcement`)
     assert.deepEqual({ reason: out.bars[0].reason, version: out.bars[0].version }, { reason: 'runtime_mismatch', version: 'build-served' })
-    assert.equal(out.notifications.length, dirty ? 1 : 0, 'the unsaved-work warning only when there is unsaved work')
+    assert.equal(out.notifications.length, 0, 'no toast of its own: the bar refuses a restart over unsaved work and says so there')
   }
 })
 

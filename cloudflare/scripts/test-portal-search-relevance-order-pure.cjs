@@ -123,13 +123,14 @@ const portalRoute = loadReal('routes/portal.ts', {
   // about (it must lead WITHIN a tier and never above one), so stubbing
   // productPromotedSql to '0' would delete the assertion.
   '../lib/promotionRulesSql': promotionRulesSql,
-  '../lib/cache': {
+  '../lib/cache': { isUnsafeVersion: () => false, deploymentId: () => 'dev',
     cachedJsonResponse: async (_req, _ctx, _version, _ttl, producer) => producer(),
     getVersionWithFallback: async () => '0',
   },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/permissions': { hasPermission: () => true },
   '../lib/audit': { audit: async () => {} },
+  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32) },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1', getClientNetworkKey: () => '127.0.0.1', peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {} }, '../lib/planTier': { getPlanLimits: () => ({ portalAiDailyMax: 100, portalAiVisitorDailyMax: 10 }) }, '../lib/businessDateWindow': { BUSINESS_UTC_OFFSET_MINUTES: 420, businessToday: () => '2026-01-01' },
   '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),

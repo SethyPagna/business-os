@@ -15,13 +15,16 @@ import {
   cacheClearAll,
   cacheGet,
   cacheSet,
+  route,
   setSyncServerUrl,
 } from '../src/api/http.ts'
 import {
   DATA_EPOCH_EVENT,
+  ECHO_WINDOW_MS,
   __resetDataEpochForTests,
   createEpochTracker,
   currentDataEpoch,
+  epochEchoCount,
   observeDataEpoch,
   seedDataEpoch,
 } from '../src/api/dataEpoch.ts'
@@ -120,6 +123,51 @@ await runTest('flapping between isolates (A, B, A, B, A, B) is exactly one chang
   const decisions = [EPOCH_B, EPOCH_A, EPOCH_B, EPOCH_A, EPOCH_B].map((tag) => tracker.observe(tag))
   assert.deepEqual(decisions, ['changed', 'echo', 'same', 'echo', 'same'])
 })
+
+await runTest('N2: a retired tag is an echo for ECHO_WINDOW_MS after the change that retired it, and a change like any other after that', () => {
+  const t0 = 1_000_000
+  const tracker = createEpochTracker(EPOCH_A)
+  assert.equal(tracker.observe(EPOCH_B, t0), 'changed')
+  assert.equal(tracker.observe(EPOCH_A, t0 + 1), 'echo', 'right after the change')
+  assert.equal(tracker.observe(EPOCH_A, t0 + ECHO_WINDOW_MS - 1), 'echo', 'up to the end of the window')
+  assert.equal(tracker.current(), EPOCH_B, 'an echo never becomes the current tag')
+  // Time Travel put the database back to an earlier state: the old tag is the truth again, and the tab must reset for it.
+  assert.equal(tracker.observe(EPOCH_A, t0 + ECHO_WINDOW_MS + 1), 'changed', 'after the window the same tag is a change')
+  assert.equal(tracker.current(), EPOCH_A)
+  assert.equal(tracker.observe(EPOCH_B, t0 + ECHO_WINDOW_MS + 2), 'echo', 'and the tag it just left is an echo in its turn')
+  // The window starts at the change that retired the tag, not at the first echo.
+  const late = createEpochTracker(EPOCH_A)
+  assert.equal(late.observe(EPOCH_B, t0), 'changed')
+  assert.equal(late.observe(EPOCH_C, t0 + 40_000), 'changed')
+  assert.equal(late.observe(EPOCH_A, t0 + 40_001), 'changed', 'A was retired 40 s ago: no longer an echo')
+  assert.equal(late.observe(EPOCH_C, t0 + 40_002), 'echo', 'C was retired a moment ago')
+})
+
+await runTest('N2: a read answered by an isolate still on the old epoch (an echo) is not stored; the same read with the current tag is', () => onPage(async (page) => {
+  installDataEpochReset()
+  page.epochHeader.value = EPOCH_A
+  await apiFetch('GET', '/api/baseline')
+  page.epochHeader.value = EPOCH_B
+  await apiFetch('GET', '/api/changed')
+  await tick()
+  assert.equal(epochEchoCount(), 0)
+  // control: the current tag
+  const fresh = await route('echoes:fresh', () => apiFetch('GET', '/api/fresh'), null)
+  assert.notEqual(fresh, null)
+  assert.notEqual(cacheGet('echoes:fresh'), null, 'control: a read answered with the current tag is stored')
+  // the echo
+  page.epochHeader.value = EPOCH_A
+  const stale = await route('echoes:stale', () => apiFetch('GET', '/api/stale'), null)
+  assert.notEqual(stale, null, 'the caller still gets the answer')
+  assert.equal(epochEchoCount(), 1)
+  assert.equal(cacheGet('echoes:stale'), null, 'but it is not stored')
+  assert.notEqual(cacheGet('echoes:fresh'), null, 'and what was stored from a current answer stays')
+  assert.equal(epochEvents(page).length, 1, 'still one change')
+  // the next read, answered with the current tag again, is stored
+  page.epochHeader.value = EPOCH_B
+  await route('echoes:next', () => apiFetch('GET', '/api/next'), null)
+  assert.notEqual(cacheGet('echoes:next'), null, 'a read that began after the echo and got the current tag is stored')
+}))
 
 await runTest('a stored tag from the earlier session is adopted once and never replaces one already in use', () => {
   const tracker = createEpochTracker()

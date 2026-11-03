@@ -5,12 +5,12 @@
    "SELECT key, value FROM settings"
   ],
   [
-   "d5a7bcc37603",
-   "SELECT key, value FROM system_flags WHERE key IN (?1, ?2)"
-  ],
-  [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5a7bcc37603",
+   "SELECT key, value FROM system_flags WHERE key IN (?1, ?2)"
   ]
  ]
 }

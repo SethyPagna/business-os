@@ -19,7 +19,7 @@ function load(relative, requireFor) {
   return mod.exports
 }
 const audit = load('lib/audit.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : require(id)))
-const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : require(id)))
+const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? load('lib/planTier.ts', require) : require(id)))
 
 const db = openDb(loadAll())
 const MAINTENANCE = JSON.stringify({ mode: 'restore', token: 't', backupKey: 'k', startedAt: '2026-01-01T00:00:00.000Z', startedBy: 'x', phase: 'deleting', updatedAt: '2026-01-01T00:00:00.000Z' })

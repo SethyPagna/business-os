@@ -5,7 +5,7 @@ import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getMaintenance } from '../lib/maintenance'
 import {
-  KNOWN_READ_SWITCHES, READ_SWITCH_MEMO_MS, buildFlipStatements, formatSwitchToken, isKnownReadSwitch, parseFlipState,
+  KNOWN_READ_SWITCHES, buildFlipStatements, formatSwitchToken, isKnownReadSwitch, parseFlipState,
   parseReadSwitches, primeReadSwitches, serializeReadSwitches, splitSwitchRows, SWITCH_ROWS_PARAMS, SWITCH_ROWS_SQL, type ReadSwitches,
 } from '../lib/readSwitches'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
@@ -231,13 +231,13 @@ const SWITCH_FLIP_FIELDS = ['name', 'state', 'expectedEpoch']
 async function storedSwitches(db: ReturnType<typeof getDb>): Promise<string | null> {
   return splitSwitchRows(await db.prepare(SWITCH_ROWS_SQL).all<{ key: string; value: string }>(SWITCH_ROWS_PARAMS)).switchesRaw
 }
-function switchListing(current: ReadSwitches) {
+function switchListing(env: Env, current: ReadSwitches) {
   return {
     epoch: current.epoch,
     setAt: current.setAt,
     setBy: current.setBy,
     switches: KNOWN_READ_SWITCHES.map((name) => ({ name, state: current.switches[name].state, rate: current.switches[name].rate })),
-    memoSeconds: READ_SWITCH_MEMO_MS / 1000,
+    memoSeconds: getPlanLimits(env).readSwitchMemoSeconds,
   }
 }
 
@@ -246,8 +246,8 @@ app.use('/read-switches', requireAuth)
 app.get('/read-switches', async (c) => {
   if (!isAdminControlUser(c.get('user'))) return c.json({ success: false, error: 'No permission', code: 'forbidden' }, 403)
   const current = parseReadSwitches(await storedSwitches(getDb(c.env)))
-  primeReadSwitches(current)
-  return c.json({ success: true, ...switchListing(current) })
+  primeReadSwitches(c.env, current)
+  return c.json({ success: true, ...switchListing(c.env, current) })
 })
 
 app.put('/read-switches', async (c) => {
@@ -269,8 +269,8 @@ app.put('/read-switches', async (c) => {
   const from = formatSwitchToken(current.switches[name])
   const to = formatSwitchToken(target)
   if (from === to) {
-    primeReadSwitches(current)
-    return c.json({ success: true, changed: false, ...switchListing(current) })
+    primeReadSwitches(c.env, current)
+    return c.json({ success: true, changed: false, ...switchListing(c.env, current) })
   }
 
   const epoch = current.epoch + 1
@@ -288,8 +288,8 @@ app.put('/read-switches', async (c) => {
     }
   }
   const written = parseReadSwitches(value)
-  primeReadSwitches(written)
-  return c.json({ success: true, changed: true, ...switchListing(written) })
+  primeReadSwitches(c.env, written)
+  return c.json({ success: true, changed: true, ...switchListing(c.env, written) })
 })
 
 export default app

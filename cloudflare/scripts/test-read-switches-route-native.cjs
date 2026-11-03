@@ -49,7 +49,8 @@ async function main() {
     await check('the admin read lists every known switch OFF at epoch 0 when there is no row, and shows the header it just primed', async (t) => {
       const r = await world.api('GET', URL)
       t.eq('status', r.status, 200)
-      t.eq('body', r.json && { epoch: r.json.epoch, setAt: r.json.setAt, setBy: r.json.setBy, switches: r.json.switches, memoSeconds: r.json.memoSeconds }, { epoch: 0, setAt: null, setBy: null, switches: [{ name: 'probe', state: 'off', rate: 0 }], memoSeconds: 15 })
+      // memoSeconds is the plan's window (planTier.ts readSwitchMemoSeconds); this world runs PLAN_TIER=paid, so 5. Free (15) is pinned in test-plan-tier-pure.
+      t.eq('body', r.json && { epoch: r.json.epoch, setAt: r.json.setAt, setBy: r.json.setBy, switches: r.json.switches, memoSeconds: r.json.memoSeconds }, { epoch: 0, setAt: null, setBy: null, switches: [{ name: 'probe', state: 'off', rate: 0 }], memoSeconds: 5 })
       t.eq('header', r.headers.get('x-bos-switches'), 'e=0;probe=0')
       t.eq('a read writes nothing', await stored(), null)
     })

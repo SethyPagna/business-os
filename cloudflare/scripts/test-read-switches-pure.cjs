@@ -19,10 +19,13 @@ function load(relative, requireFor = require) {
 
 const events = []
 const db = load('lib/db.ts', (id) => (id === './importMaintenanceFence' ? { getImportFencedDb() {}, withImportMaintenanceWriteFence() {}, isImportMaintenanceFenceError: () => false, ImportMaintenanceFenceError: class extends Error {} } : require(id)))
-const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics: (_env, event) => events.push(event) } : require(id)))
+// The memo window is the plan's (planTier.ts readSwitchMemoSeconds), so the plan module is the real one and its tier cache is shared with the store.
+const planTier = load('lib/planTier.ts')
+const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics: (_env, event) => events.push(event) } : id === './planTier' ? planTier : require(id)))
 
 function fakeEnv(rows, epoch = null) {
-  const state = { sql: [], binds: [], attempts: 0, rows, epoch, fail: null }
+  // Free by default: its 15 s window is the one every timing below was written against; the plan check names Paid explicitly.
+  const state = { sql: [], binds: [], attempts: 0, rows, epoch, fail: null, PLAN_TIER: 'free' }
   const all = async () => {
     state.attempts += 1
     if (state.fail) throw state.fail
@@ -194,7 +197,7 @@ async function main() {
     assert.equal(store.salt(), 'sw1')
     const seen = [store.salt()]
     for (const [epoch, token] of [[2, 'off'], [3, 'on']]) {
-      store.prime(sw.parseReadSwitches(stored({ epoch, switches: { probe: token } })))
+      store.prime(env, sw.parseReadSwitches(stored({ epoch, switches: { probe: token } })))
       seen.push(store.salt())
     }
     assert.deepEqual(seen, ['sw1', 'sw2', 'sw3'])
@@ -229,18 +232,22 @@ async function main() {
     assert.equal(await rotates.epoch(env), 'fedcba9876543210fedcba9876543210', 'a rotation is seen by the next refresh')
   })
 
-  await check('callers that arrive while the flags are being read share that read: a cold isolate answering N cached sections reads once, not N times', async () => {
+  await check('callers of ONE request that arrive while the flags are being read share that read: a cold isolate answering N cached sections reads once, not N times', async () => {
     clock = 5_900_000
     const env = fakeEnv(stored({ epoch: 2, switches: { probe: 'off' } }), '0123456789abcdef0123456789abcdef')
     const store = newStore()
-    const answers = await Promise.all([store.epoch(env), store.epoch(env), store.read(env, 'probe'), store.epoch(env), store.read(env, 'probe')])
+    const answers = await store.inRequest(() => Promise.all([store.epoch(env), store.epoch(env), store.read(env, 'probe'), store.epoch(env), store.read(env, 'probe')]))
     assert.equal(env.attempts, 1, 'five concurrent callers, one statement')
     assert.deepEqual(answers.map((a) => (typeof a === 'string' ? a : a.epoch)), ['0123456789abcdef0123456789abcdef', '0123456789abcdef0123456789abcdef', 2, '0123456789abcdef0123456789abcdef', 2])
     await store.epoch(env)
     assert.equal(env.attempts, 1, 'the fresh memo answers the next caller')
     clock += 15_000
-    await Promise.all([store.epoch(env), store.epoch(env), store.epoch(env)])
+    await store.inRequest(() => Promise.all([store.epoch(env), store.epoch(env), store.epoch(env)]))
     assert.equal(env.attempts, 2, 'the next period is one more statement, shared again')
+    // Control: outside a request nothing is shared, so the check above is not passing by accident.
+    clock += 15_000
+    await Promise.all([store.epoch(env), store.epoch(env), store.epoch(env)])
+    assert.equal(env.attempts, 5, 'three callers in no request: three statements')
     // A reset drops the shared read: the caller after it starts a new one and never joins a read that began before the reset.
     const slow = fakeEnv(null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     const gate = new Promise((resolve) => { slow.release = resolve })
@@ -255,6 +262,74 @@ async function main() {
     assert.equal(await before, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     assert.equal(await after, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'a caller after a reset reads the world as it is now')
     assert.equal(slow.attempts, 2)
+  })
+
+  await check('B1 (review of 6.0.1048): a read another request started and never finished cannot hold this request: it reads for itself and answers', async () => {
+    clock = 6_200_000
+    const never = fakeEnv(stored({ epoch: 1, switches: {} }), 'cccccccccccccccccccccccccccccccc')
+    never.DB = { prepare() { return { bind() { return { all: () => new Promise(() => {}) } } } } }
+    const store = newStore()
+    // Request A starts the read without waiting for it and answers (the 401 path of the bootstrap, a Promise.all that rejected early, a cancelled request).
+    store.inRequest(() => { void store.epoch(never); return 'answered' })
+    const fine = fakeEnv(stored({ epoch: 1, switches: {} }), 'dddddddddddddddddddddddddddddddd')
+    const hung = () => new Promise((resolve) => setTimeout(() => resolve('HUNG'), 500))
+    const raced = await Promise.race([store.inRequest(() => store.epoch(fine)), hung()])
+    assert.equal(raced, 'dddddddddddddddddddddddddddddddd', 'request B is not held by request A read')
+    assert.equal(fine.attempts, 1)
+    // The same through the other doors: a switch read, and a later period with A's read still never finished.
+    const read = await Promise.race([store.inRequest(() => store.read(fine, 'probe')), hung()])
+    assert.notEqual(read, 'HUNG')
+    clock += 15_000
+    const later = await Promise.race([store.inRequest(() => store.epoch(fine)), hung()])
+    assert.equal(later, 'dddddddddddddddddddddddddddddddd')
+  })
+
+  await check('N1: a read that started before a reset stores nothing; the memo stays empty until a caller after the reset reads', async () => {
+    clock = 6_300_000
+    const slow = fakeEnv(null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const realPrepare = slow.DB.prepare
+    slow.DB.prepare = (sql) => { const statement = realPrepare(sql); return { bind: (...values) => { const bound = statement.bind(...values); return { all: async () => { const answer = await bound.all(); await gate; return answer } } } } }
+    const store = newStore()
+    const before = store.epoch(slow)
+    store.reset()
+    release()
+    assert.equal(await before, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'the caller of the old read still gets its answer')
+    assert.equal(store.peek(), null, 'the old read stored nothing')
+    assert.equal(store.epochTagNow(), null)
+    const fresh = fakeEnv(null, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+    assert.equal(await store.epoch(fresh), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+    assert.equal(fresh.attempts, 1)
+  })
+
+  await check('N9: the next epoch read after a flip keeps the flip value; only the epoch half is read', async () => {
+    clock = 6_400_000
+    const store = newStore()
+    // The database still says epoch 1 / off: only a kept primed value can make the memo say 2 / on afterwards.
+    const env = fakeEnv(stored({ epoch: 1, switches: { probe: 'off' } }), 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+    store.prime(env, sw.parseReadSwitches(stored({ epoch: 2, switches: { probe: 'on' } })))
+    assert.equal(await store.epoch(env), 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+    assert.equal(env.attempts, 1)
+    assert.equal(store.peek().epoch, 2, 'the flip survived the epoch read')
+    assert.equal((await store.read(env, 'probe')).on, true)
+    assert.equal(env.attempts, 1, 'and answers the next switch read without another statement')
+    assert.equal(store.header(), 'e=2;probe=1')
+  })
+
+  await check('B1: X-BOS-Build never waits on another request read: pending means the header is left off; a read that never settles is given up', async () => {
+    const isolated = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? planTier : require(id)))
+    isolated.resetBuildHash()
+    let calls = 0
+    const hungAssets = { STATIC_ASSETS: { fetch: () => { calls += 1; return new Promise(() => {}) } } }
+    void isolated.frontendBuildHash(hungAssets, 1_000)
+    const raced = await Promise.race([isolated.frontendBuildHash(hungAssets, 1_001), new Promise((resolve) => setTimeout(() => resolve('HUNG'), 300))])
+    assert.equal(raced, null, 'a second request gets no header at once, not a wait')
+    assert.equal(calls, 1, 'and does not start a second read while the first is pending')
+    const healthy = { STATIC_ASSETS: { fetch: async () => Response.json({ hash: 'build-abc' }) } }
+    assert.equal(await isolated.frontendBuildHash(healthy, 1_000 + 10_001), 'build-abc', 'a read pending for longer than the limit is given up and read again')
+    assert.equal(await isolated.frontendBuildHash(hungAssets, 1_000 + 10_002), 'build-abc', 'the hash is remembered')
+    isolated.resetBuildHash()
   })
 
   await check('F2 (review of 6.0.1041): priming a flip never makes an old data epoch look fresh; the next epoch read goes to the database', async () => {
@@ -277,7 +352,7 @@ async function main() {
     clock += 10 * 60_000
     env.epoch = NEW
     env.rows = stored({ epoch: 2, switches: { probe: 'on' } })
-    store.prime(sw.parseReadSwitches(env.rows))
+    store.prime(env, sw.parseReadSwitches(env.rows))
     assert.equal(store.epochTagNow(), null, 'no tag of the old epoch is announced after a prime')
     assert.equal(await store.epoch(env), NEW, 'the epoch is read again, not carried over from ten minutes ago')
     assert.equal(env.attempts, 2)
@@ -295,7 +370,7 @@ async function main() {
     const slow = { DB: { prepare() { return { bind() { return { all: () => new Promise((resolve) => { release = () => resolve({ results: [{ value: stored({ epoch: 1, switches: { probe: 'off' } }) }], meta: {} }) }) } } } } } }
     const late = store.read(slow, 'probe')
     clock += 50
-    store.prime(sw.parseReadSwitches(stored({ epoch: 2, switches: { probe: 'on' } })))
+    store.prime(env, sw.parseReadSwitches(stored({ epoch: 2, switches: { probe: 'on' } })))
     release()
     await late
     assert.equal(store.peek().epoch, 2, 'the primed flip survives the older read')
@@ -320,7 +395,7 @@ async function main() {
   await check('the middleware adds the header from the memo, adds no I/O, and survives an immutable response', async () => {
     clock = 8_000_000
     const events2 = []
-    const isolated = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics: (_e, ev) => events2.push(ev) } : require(id)))
+    const isolated = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics: (_e, ev) => events2.push(ev) } : id === './planTier' ? planTier : require(id)))
     const env = fakeEnv(stored({ epoch: 3, switches: { probe: 'on' } }))
     const noHeader = { res: new Response('x') }
     await isolated.readSwitchHeader(noHeader, async () => {})
@@ -344,7 +419,39 @@ async function main() {
     assert.equal(typeof sw.readSwitchState, 'function')
     assert.deepEqual([...sw.KNOWN_READ_SWITCHES], ['probe'])
     assert.equal(sw.READ_SWITCH_KEY, 'read_switches')
-    assert.equal(sw.READ_SWITCH_MEMO_MS, 15000)
+    assert.equal(sw.READ_SWITCH_MEMO_MS, undefined, 'the window is not a literal in the module: it is a plan field')
+    sw.resetReadSwitchMemo()
+  })
+
+  await check('the memo window is the deployment plan\'s: Free 15 s, Paid 5 s, for reads, primes and the restore settle', async () => {
+    const dataEpoch = load('lib/dataEpoch.ts', (id) => (id === './db' ? db : id === './readSwitches' ? sw : id === './dataEpochSql' ? load('lib/dataEpochSql.ts') : require(id)))
+    for (const [tier, seconds] of [['free', 15], ['paid', 5]]) {
+      planTier.__resetPlanTierCacheForTests()
+      clock = 9_000_000
+      const store = newStore()
+      const env = fakeEnv(stored({ epoch: 1, switches: { probe: 'on' } }))
+      env.PLAN_TIER = tier
+      assert.equal(sw.readSwitchMemoMs(env), seconds * 1000, tier)
+      assert.equal(dataEpoch.epochSettleMs(env), seconds * 1000 + 500, `${tier}: a restore waits one memo period plus the margin`)
+      assert.equal(dataEpoch.epochSettleMs({ ...env, EPOCH_SETTLE_MS: '0' }), 0, 'the override still wins')
+      await store.read(env, 'probe')
+      assert.equal(env.attempts, 1)
+      clock += seconds * 1000 - 1
+      await store.read(env, 'probe')
+      assert.equal(env.attempts, 1, `${tier}: inside the window`)
+      assert.equal(store.header(), 'e=1;probe=1')
+      clock += 1
+      assert.equal(store.header(), null, `${tier}: the window closes exactly at the plan's number`)
+      await store.read(env, 'probe')
+      assert.equal(env.attempts, 2, `${tier}: one statement per window`)
+      store.prime(env, sw.parseReadSwitches(stored({ epoch: 2, switches: { probe: 'off' } })))
+      clock += seconds * 1000 - 1
+      assert.equal(store.header(), 'e=2;probe=0', `${tier}: a primed flip lives the plan's window`)
+      clock += 1
+      assert.equal(store.header(), null)
+    }
+    planTier.__resetPlanTierCacheForTests()
+    planTier.getPlanLimits({ PLAN_TIER: 'free' })
     sw.resetReadSwitchMemo()
   })
 
