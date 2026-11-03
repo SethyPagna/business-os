@@ -498,6 +498,9 @@ function CatalogEditorSurfaceContent() {
     savedTimer.current = setTimeout(() => setSavedFlash(false), SAVED_FLASH_MS)
   }
   const barState = saveBarState({ dirty: editorDirty, saving: editorSaving, blockedReason: saveBlockedReason, savedFlash })
+  // The write runs the latest savePortalDraft (as the leave guard does), not the one from the render that opened the review.
+  const savePortalDraftRef = useRef(savePortalDraft)
+  savePortalDraftRef.current = savePortalDraft
   // Save (and Ctrl/Cmd+S) review first, then write. The leave guard's "Save & Leave" calls savePortalDraft directly and skips this.
   const requestSave = async () => {
     if (barState !== 'changed') return
@@ -511,7 +514,7 @@ function CatalogEditorSurfaceContent() {
       confirmLabel: ed('web_editor_save', 'Save', 'រក្សាទុក'),
     })
     if (!confirmed) return
-    const result = await savePortalDraft()
+    const result = await savePortalDraftRef.current()
     if (result.ok) flashSaved()
   }
   const requestSaveRef = useRef(requestSave)

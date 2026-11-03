@@ -281,7 +281,7 @@ await runTest('T-S9: only the bar opens the review; the guard\'s Save & Leave re
   assert.match(surfaceSource, /useConfirmDialog\(t\)/, 'the surface owns the shared review dialog')
   const request = between(surfaceSource, 'const requestSave = async', '\n  }\n')
   assert.match(request, /askToConfirm\(\{[\s\S]*title: ed\('web_editor_review_title'[\s\S]*items:[\s\S]*confirmLabel: ed\('web_editor_save'/, 'title, items and the Save label')
-  assert.ok(request.indexOf('askToConfirm(') < request.indexOf('await savePortalDraft()'), 'the save runs only after the review answered')
+  assert.ok(request.indexOf('askToConfirm(') < request.indexOf('await savePortalDraftRef.current()'), 'the save runs only after the review answered, and it runs the latest savePortalDraft')
   assert.match(request, /if \(!confirmed\) return/, 'Cancel does nothing')
   assert.match(surfaceSource, /onSave=\{requestSave\}/, 'the bar saves through the review')
   assert.doesNotMatch(surfaceSource, /onSave=\{savePortalDraft\}/, 'never straight to the write')
