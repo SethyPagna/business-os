@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { ADMIN_ORIGIN, seedDeviceSettings } from './support/harness'
-import { E2E_ACCOUNTS, signIn } from './support/session'
+import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 
 /**
  * install-band-layout.spec.ts -- the install band shares the screen with other things.
@@ -98,6 +98,29 @@ async function expectScrollButtonsReachable(page: Page, bandBox: Box): Promise<v
   }
 }
 
+const tillProduct = (JSON.parse(readFileSync(new URL('./fixtures/admin-products.json', import.meta.url), 'utf8')) as { items: Array<Record<string, unknown>> }).items[0]
+const completeSale = (page: Page): Locator => page.getByRole('button', { name: /^Complete Sale$/ })
+const scrollButtons = (page: Page): Locator => page.getByRole('button', { name: /^Scroll to (top|bottom)$/ })
+
+/** Signs in as a cashier, puts one line in the open order and opens the till. */
+async function openTillWithCart(page: Page): Promise<void> {
+  await signIn(page, E2E_ACCOUNTS.cashierA)
+  const cartLine = { ...tillProduct, cart_line_id: `${tillProduct.id}:selling:2:0:D0:1:abcde`, quantity: 1, price_mode: 'selling', branch_id: 2 }
+  await page.evaluate(({ line, userId }) => {
+    localStorage.setItem(`businessos_pos_orders_${userId}`, JSON.stringify([{ id: 'order-1', name: 'Order 1', cart: [line], money_precision_version: 1 }]))
+  }, { line: cartLine, userId: E2E_ACCOUNTS.cashierA.id })
+  await gotoAdminPage(page, '/pos')
+}
+
+/** A tap at the centre and at the right edge of the button reaches that button, not something floating over it. */
+async function expectTapsReach(page: Page, button: Locator, name: string): Promise<void> {
+  const box = await boxOf(button, name)
+  for (const [where, x] of [['centre', box.x + box.width / 2], ['right edge', box.x + box.width - 2]] as const) {
+    const hit = await page.evaluate((point) => document.elementFromPoint(point.x, point.y)?.closest('button')?.textContent?.trim() ?? null, { x, y: box.y + box.height / 2 })
+    expect(hit, `a tap at the ${where} of "${name}" reaches it`).toBe(name)
+  }
+}
+
 test.describe('sign-in with the install band', () => {
   test.describe.configure({ timeout: 120_000 })
   test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts: desktop has its own tests below')
@@ -158,6 +181,16 @@ test.describe('desktop with the install band', () => {
     await expectBandClearOfForm(page, 'en', 'end of the page')
   })
 
+  test('till: no band and no scroll buttons over the cart, and Complete Sale takes a tap at its centre and right edge', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openTillWithCart(page)
+    await expect(completeSale(page)).toBeEnabled({ timeout: 30_000 })
+    await page.evaluate(FIRE_INSTALL_PROMPT)
+    await expect(installBand(page, 'en'), 'the till is never covered by the offer').toHaveCount(0)
+    await expect(scrollButtons(page), 'the scroll buttons would sit on the cart panel').toHaveCount(0)
+    await expectTapsReach(page, completeSale(page), 'Complete Sale')
+  })
+
   test('staff app: the band leaves the scroll buttons uncovered and clickable', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await signIn(page, E2E_ACCOUNTS.cashierA)
@@ -180,6 +213,37 @@ test.describe('signed-in app on a phone with the install band', () => {
       const bandBox = await boxOf(installBand(page, 'en'), 'the install band')
       await expectScrollButtonsReachable(page, bandBox)
       expect(bandBox.x + bandBox.width, 'the band stays inside the viewport').toBeLessThanOrEqual(viewport.width)
+    })
+  }
+})
+
+test.describe('till cart on a phone with the install prompt available', () => {
+  test.describe.configure({ timeout: 120_000 })
+  test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts: desktop has its own test above')
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 360, height: 800 }]) {
+    test(`${viewport.width}x${viewport.height}: no band, no scroll buttons, and Complete Sale takes a tap at its centre and right edge`, async ({ page }, info) => {
+      // WebKit on an iPhone offers the Share steps by itself; Chromium on Android waits for the browser's prompt.
+      const offerPrompt = async () => { if (info.project.name === 'android-chromium') await page.evaluate(FIRE_INSTALL_PROMPT) }
+      await page.setViewportSize(viewport)
+      await openTillWithCart(page)
+      const cartTab = page.getByRole('button', { name: /^Cart/ })
+      await cartTab.click()
+      await expect(completeSale(page)).toBeEnabled({ timeout: 30_000 })
+      await offerPrompt()
+      await expect(installBand(page, 'en'), 'the till is never covered by the offer').toHaveCount(0)
+      await expect(scrollButtons(page), 'the scroll buttons would sit on Complete Sale and the payment rows').toHaveCount(0)
+      await expectTapsReach(page, completeSale(page), 'Complete Sale')
+
+      // The Products tab is still the till: no band there either, but the buttons come back (nothing is pinned under them).
+      await cartTab.locator('xpath=preceding-sibling::button').click()
+      await expect(scrollButtons(page)).toHaveCount(2)
+      await expect(installBand(page, 'en')).toHaveCount(0)
+
+      // Control: the offer really is available, so the empty counts above are the till's doing. It shows once the till is left.
+      await gotoAdminPage(page, '/')
+      await offerPrompt()
+      await expect(installBand(page, 'en')).toBeVisible({ timeout: 15_000 })
     })
   }
 })

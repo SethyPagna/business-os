@@ -54,7 +54,13 @@ function configureWindow(device: Device): EventTarget {
   return target
 }
 
-type Scenario = { win: EventTarget; mountBand(language?: Language): Promise<MountedSurface>; arm(): Promise<void> }
+type Scenario = {
+  win: EventTarget
+  mountBand(language?: Language): Promise<MountedSurface>
+  arm(): Promise<void>
+  /** What the till does while it is the page in use: declare its pinned bottom bar. Unmounting ends the declaration. */
+  declareBottomBar(props: { active: boolean; visible: boolean }): Promise<MountedSurface>
+}
 
 async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Promise<void> {
   const harness = await createHarness()
@@ -71,6 +77,11 @@ async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Pr
         try {
           surfaces.push(await harness.mount({ component: 'utils/standaloneNavigation.ts', exportName: 'installBeforeInstallPromptCapture', app: {}, doubles: {} }))
         } finally { console.error = quiet }
+      },
+      async declareBottomBar(props) {
+        const surface = await harness.mount({ component: 'utils/bottomActionBar.ts', exportName: 'useBottomActionBar', props, app: {}, doubles: {} })
+        surfaces.push(surface)
+        return surface
       },
       async mountBand(language = 'en') {
         const surface = await harness.mount({
@@ -118,6 +129,33 @@ await check('nothing shows until the browser fires beforeinstallprompt', async (
     await band.settle()
     assert.match(band.text(), /Install Leang Cosmetics/)
     assert.ok(hasButtonWithText(band, 'Install'))
+  })
+})
+
+await check('a page with a bottom-pinned action (the till) is never covered by the offer; the offer is back when it is left', async () => {
+  for (const visible of [true, false]) {
+    await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
+      await s.arm()
+      const band = await s.mountBand()
+      await dispatch(s.win, promptEvent('accepted'))
+      await band.settle()
+      assert.ok(hasButtonWithText(band, 'Install'), 'offered before the till opens')
+      const till = await s.declareBottomBar({ active: true, visible })
+      await band.settle()
+      assert.equal(band.text(), '', `the till is the page in use (bar ${visible ? 'on screen' : 'on the other tab'}): no band`)
+      await till.unmount()
+      await band.settle()
+      assert.ok(hasButtonWithText(band, 'Install'), 'the offer is back after the till is left')
+    })
+  }
+  await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
+    await s.arm()
+    const band = await s.mountBand()
+    await dispatch(s.win, promptEvent('accepted'))
+    await band.settle()
+    await s.declareBottomBar({ active: false, visible: true })
+    await band.settle()
+    assert.ok(hasButtonWithText(band, 'Install'), 'a till kept alive in the background (not the page in use) declares nothing')
   })
 })
 

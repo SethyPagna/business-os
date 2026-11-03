@@ -428,6 +428,7 @@ const compileBand = (install: InstallModule): ComponentModule => compileComponen
   '../../app/pathRouting.ts': pathRouting,
   '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
   '../../utils/useInstallBandClearance.ts': { useInstallBandClearance: () => {} },
+  '../../utils/bottomActionBar.ts': { hasBottomActionBar: () => false, subscribeBottomActionBar: () => () => {} },
 })
 
 async function renderBand(device: Device, language: Language, afterLoad?: (win: EventTarget, install: InstallModule) => void): Promise<string> {
@@ -678,6 +679,19 @@ await check('on a phone the scroll buttons ride above the band, and the desktop 
   assert.ok(app.includes(`'bottom-[max(calc(5rem+env(safe-area-inset-bottom)),${aboveBand})]'`), 'above the bottom nav, or above the band if that is higher')
   assert.ok(app.includes(`'bottom-[max(calc(0.75rem+env(safe-area-inset-bottom)),${aboveBand})]'`), 'with no bottom nav, or above the band if that is higher')
   assert.ok(app.includes('md:bottom-[calc(1rem+env(safe-area-inset-bottom))]'), 'from md the band is offset sideways instead, so the buttons keep their corner')
+})
+
+await check('the till declares its pinned Complete Sale bar; the band and the scroll buttons obey it', () => {
+  assert.ok(
+    read('src/components/pos/POS.tsx').includes("useBottomActionBar({ active: isActive, visible: isDesktopViewport || mobileView === 'cart' })"),
+    'the till is the page in use (band stays away) and its cart is on screen beside the products or on the Cart tab (buttons step aside)',
+  )
+  assert.ok(
+    read('src/components/shared/InstallPromptBand.tsx').includes('hasBottomActionBar() ? null : installBandRoute(staffApp)'),
+    'the band is not offered over a declared bar',
+  )
+  const app = read('src/App.tsx')
+  assert.ok(app.includes('const coversPinnedAction = useBottomActionBarVisible()') && app.includes('if (coversPinnedAction) return null'), 'the scroll buttons are not drawn over a visible bar')
 })
 
 await check('the staff loading screens say Leang Cosmetics Admin', () => {

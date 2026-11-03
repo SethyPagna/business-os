@@ -22,6 +22,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { restoreUnresolvedPosCheckouts } from '../../utils/posUnresolvedCheckout.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { useBottomActionBar } from '../../utils/bottomActionBar.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -1169,6 +1170,9 @@ export default function POS() {
     mq.addEventListener('change', handleChange)
     return () => mq.removeEventListener('change', handleChange)
   }, [])
+  // Complete Sale is pinned to the bottom of the cart: the install band stays away for the whole till, and the
+  // scroll buttons while that cart is on screen (always beside the products from md up; the Cart tab on a phone).
+  useBottomActionBar({ active: isActive, visible: isDesktopViewport || mobileView === 'cart' })
   const clampCartWidth = useCallback((px: number) => {
     if (!mainPanelsRef.current) return Math.min(CART_WIDTH_MAX_PX, Math.max(CART_WIDTH_MIN_PX, px))
     // Leave the products panel at least this wide so it never gets

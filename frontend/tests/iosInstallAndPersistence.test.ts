@@ -148,7 +148,8 @@ check('G5 the install hint is excluded from standalone mode, and from desktop fo
   assert.match(standaloneNavigation, /function isInstalledOnThisDevice\(\): boolean \{\s*return isStandaloneDisplayMode\(\) \|\| readDeviceTimestamp\(APP_INSTALLED_KEY\) > 0/, 'one definition of "already installed"')
   assert.match(standaloneNavigation, /if \(isInstallBandDismissed\(\) \|\| isInstalledOnThisDevice\(\)\) return null/, 'the band never shows in the installed app')
   assert.match(standaloneNavigation, /if \(route\) return staffApp \|\| handheld \? route : null/, 'a desktop shop never gets the band')
-  assert.match(installBand, /useSyncExternalStore\(subscribeInstallOffer, \(\) => installBandRoute\(staffApp\),/, 'the band reads the one install-offer store, for its own host')
+  assert.match(installBand, /useSyncExternalStore\(subscribeOfferOrBottomBar, \(\) => \(hasBottomActionBar\(\) \? null : installBandRoute\(staffApp\)\),/, 'the band reads the one install-offer store, for its own host, unless a till bar is declared')
+  assert.match(installBand, /const offer = subscribeInstallOffer\(listener\)/, 'and still follows that store')
 })
 
 check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {

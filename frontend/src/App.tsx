@@ -24,6 +24,7 @@ import { refreshAppData } from './utils/appRefresh.ts'
 import { optionalAppOperation, restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
 import { reportClientCrash } from './utils/clientCrashReport.ts'
 import { installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
+import { useBottomActionBarVisible } from './utils/bottomActionBar.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
@@ -1262,6 +1263,7 @@ function useMobileHeaderAutoHide(page: string): boolean {
 }
 
 function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisible: boolean }) {
+  const coversPinnedAction = useBottomActionBarVisible()
   const scrollTo = (direction: ScrollDirection) => {
     const target = getScrollTarget(window)
     const top = getScrollToPosition(target, direction)
@@ -1275,6 +1277,8 @@ function GlobalScrollControls({ mobileBottomNavVisible }: { mobileBottomNavVisib
     }
   }
 
+  // The till's Complete Sale bar (and the payment rows above it) lies where these sit; its own panels scroll.
+  if (coversPinnedAction) return null
   // Below md the install band spans the screen, so the buttons ride above it (--install-band-clearance is its top edge, 0 when none).
   return (
     <div className={`pointer-events-none fixed right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 ${mobileBottomNavVisible ? 'bottom-[max(calc(5rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]' : 'bottom-[max(calc(0.75rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]'} md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]`}>
