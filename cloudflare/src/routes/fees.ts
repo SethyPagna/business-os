@@ -524,21 +524,26 @@ app.get('/', async (c) => {
 
 /**
  * The report's four figures from ONE pass over the expense table (read switch `expense_reads`) instead of four: the rows are grouped by day, type and
- * label key and folded in lib/expenseReads.ts. Null = answer with the four statements: the switch is off, the window holds more groups than the plan
- * allows (expenseReportMaxGroups), or a figure sits on a rounding boundary where a sum of sums could round differently from the sum.
+ * label key and folded in lib/expenseReads.ts. Null = answer with the four statements: the switch is off, the window holds more expenses than the plan
+ * lets the Worker fold (expenseReportFoldMaxRows), or a figure sits on a rounding boundary where a sum of sums could round differently from the sum.
+ *
+ * The cap is on ROWS and is applied inside the scan (the subquery stops after cap + 1 rows), so a window over it is turned away after reading about cap
+ * rows rather than after grouping the whole table, and the Worker never decodes or folds more than `cap` groups (a window has at most as many groups as
+ * rows). A window with at most `cap` rows is read whole, so its groups are exactly the ones the unlimited statement would return.
  */
 async function groupedFeeReport(env: Env, db: ReturnType<typeof getDb>, where: string, params: Record<string, unknown>): Promise<FeeReportParts | null> {
   if (!(await expenseReadsOn(env))) return null
-  const cap = getPlanLimits(env).expenseReportMaxGroups
+  const cap = getPlanLimits(env).expenseReportFoldMaxRows
   const groups = await db.prepare(`
-    SELECT f.fee_date AS d, f.fee_type AS t, lower(trim(COALESCE(f.label, ''))) AS k, MIN(TRIM(f.label)) AS label,
-      COUNT(*) AS n, SUM(f.amount_usd) AS usd, SUM(f.amount_khr) AS khr
-    FROM fees f
-    WHERE ${where}
-    GROUP BY f.fee_date, f.fee_type, lower(trim(COALESCE(f.label, '')))
-    LIMIT @groupCap
-  `).all<FeeGroupRow>({ ...params, groupCap: cap + 1 })
-  return groups && groups.length <= cap ? foldFeeGroups(groups) : null
+    SELECT s.fee_date AS d, s.fee_type AS t, lower(trim(COALESCE(s.label, ''))) AS k, MIN(TRIM(s.label)) AS label,
+      COUNT(*) AS n, SUM(s.amount_usd) AS usd, SUM(s.amount_khr) AS khr
+    FROM (SELECT f.fee_date, f.fee_type, f.label, f.amount_usd, f.amount_khr FROM fees f WHERE ${where} LIMIT @rowCap) s
+    GROUP BY s.fee_date, s.fee_type, lower(trim(COALESCE(s.label, '')))
+  `).all<FeeGroupRow>({ ...params, rowCap: cap + 1 })
+  if (!groups) return null
+  let rows = 0
+  for (const group of groups) rows += Number(group.n) || 0
+  return rows <= cap ? foldFeeGroups(groups) : null
 }
 
 // GET /api/fees/report?startDate&endDate&branchId -- fee totals over a range

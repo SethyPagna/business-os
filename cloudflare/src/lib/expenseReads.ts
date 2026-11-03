@@ -125,11 +125,16 @@ export function foldFeeGroups(rows: FeeGroupRow[]): FeeReportParts | null {
  * not a sort by one key, so the cursor holds ONE key per list: the last expense and the last sale row already served (null while none was). `h` is the
  * highest expense id and sale id at the start of the export; a row created later is outside the export, so a mid-export insert can neither shift nor
  * duplicate a page (the sales export's `snapshot_max_id`, GET /api/sales/export).
+ *
+ * A sale row whose created_at has no readable day has a NULL day (and usually a NULL entry time): the list puts those rows last, so the key keeps them as
+ * null, never as the text 'null'. `u` is how many such rows the export's scope held at its start (0 = none: no page looks for them); a token without it
+ * (one handed out before the field existed) reads as 1, which only costs one look for them at the end of the sale list.
  */
 export type FeeExportCursor = {
   e: [string, number] | null
-  s: [string, string, number] | null
+  s: [string | null, string | null, number] | null
   h: [number, number]
+  u: number
 }
 
 const toBase64Url = (text: string): string => {
@@ -143,7 +148,7 @@ const fromBase64Url = (text: string): string => {
 }
 
 export function encodeFeeCursor(cursor: FeeExportCursor): string {
-  return toBase64Url(JSON.stringify({ v: 1, e: cursor.e, s: cursor.s, h: cursor.h }))
+  return toBase64Url(JSON.stringify({ v: 1, e: cursor.e, s: cursor.s, h: cursor.h, u: cursor.u }))
 }
 
 const KEY_TEXT_MAX_CHARS = 64
@@ -153,13 +158,16 @@ const rowId = (value: unknown): value is number => typeof value === 'number' && 
 /** The cursor a page handed out, or null for anything else (a hand-made, truncated or foreign token). The caller then pages by `offset`. */
 export function decodeFeeCursor(text: string): FeeExportCursor | null {
   try {
-    const parsed = JSON.parse(fromBase64Url(text)) as { v?: unknown; e?: unknown; s?: unknown; h?: unknown }
+    const parsed = JSON.parse(fromBase64Url(text)) as { v?: unknown; e?: unknown; s?: unknown; h?: unknown; u?: unknown }
     if (!parsed || parsed.v !== 1) return null
     const { e, s, h } = parsed
     if (e !== null && !(Array.isArray(e) && e.length === 2 && keyText(e[0]) && rowId(e[1]))) return null
-    if (s !== null && !(Array.isArray(s) && s.length === 3 && keyText(s[0]) && keyText(s[1]) && rowId(s[2]))) return null
+    // a dated sale row always has an entry time; only a row with no day may have none (and a null day with a null entry time is the garbage row)
+    if (s !== null && !(Array.isArray(s) && s.length === 3 && (s[0] === null || keyText(s[0])) && (s[1] === null || keyText(s[1])) && !(s[0] !== null && s[1] === null) && rowId(s[2]))) return null
     if (!(Array.isArray(h) && h.length === 2 && h.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0))) return null
-    return { e: e as FeeExportCursor['e'], s: s as FeeExportCursor['s'], h: [h[0], h[1]] }
+    const u = parsed.u === undefined ? 1 : parsed.u
+    if (!(typeof u === 'number' && Number.isSafeInteger(u) && u >= 0)) return null
+    return { e: e as FeeExportCursor['e'], s: s as FeeExportCursor['s'], h: [h[0], h[1]], u }
   } catch {
     return null
   }

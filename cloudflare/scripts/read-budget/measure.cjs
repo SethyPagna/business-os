@@ -63,13 +63,13 @@ const ENTRY_NOTES = {
   'fees-list-with-sale-delivery-rows-month-branch-source-all':
     'The window index (idx_fees_fee_date) leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 10,565 with the branch index reading the whole branch.',
   'fees-report-with-sale-delivery-all-time-branch-include-sales':
-    "No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index. E1-F (read switch expense_reads ON): ONE grouped pass reads the branch's expenses once (8,910: entry plus lookup for about 4,455 rows) plus the sale half 1,506; it was four passes (4,455 + 8,910 + 8,912 + 13,365) and a 40,868 ceiling.",
+    "No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index. E1-F (read switch expense_reads ON, Free): the window holds 4,455 expenses, over the Free fold cap of 1,500 rows (the Worker folds about 3 ms of the 10 ms CPU), so the grouped pass is turned away after reading 1,501 rows (+3,002) and the four passes answer (4,455 + 8,910 + 8,912 + 13,365) plus the sale half 1,506: 40,153 against 37,151 with the switch off. Paid folds the same window in one pass: 8,913 + 1,506.",
   'fees-report-with-sale-delivery-month-branch-include-sales':
-    "The window index leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch. E1-F (read switch expense_reads ON): one grouped pass over the window instead of four.",
+    "The window index leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch. E1-F (read switch expense_reads ON): one grouped pass over the window's 370 expenses instead of four (849 against 2,702); a window of more than the Free fold cap (1,500 rows) is turned away after that many rows.",
   'fees-export-first-page-by-cursor-source-all':
-    "E1-F (read switch expense_reads ON, Free page of 250): the first page also totals the expense summary (8,695) and the courier-sale totals (1,506); 6.0.1053 read 15,175 for the first page and again 16,000 to 28,000 for every later one.",
+    "E1-F (read switch expense_reads ON, Free page of 500): the first page also totals the expense summary (8,695) and the courier-sale totals (1,506); it takes no snapshot when it is the only page, and reads the highest ids once after the page when another follows. 6.0.1053 read 15,175 for the first page and again 16,000 to 28,000 for every later one.",
   'fees-export-middle-page-by-cursor-source-all':
-    "E1-F: resumes after the 2,000th expense and the middle courier sale and reads its own rows (an expense index entry, row and joins per returned row, plus the sale probe and page), not the 2,000 before it; the 6.0.1053 page at offset 2,000 read 19,236.",
+    "E1-F: resumes after the 2,000th expense and the middle courier sale and reads its own 500 rows (an expense index entry, row and joins per returned row, plus the sale probe and page), not the 2,000 before it; the 6.0.1053 page at offset 2,000 read 19,236.",
   'fees-export-middle-page-by-cursor-with-a-branch-source-all':
     "E1-F: the middle page with a branch filter: +f.branch_id and +sales.branch_id keep the branch index out, so the page still reads its own rows.",
 }

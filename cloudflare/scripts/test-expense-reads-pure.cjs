@@ -26,7 +26,12 @@ const MUTANTS = {
   'rounds-half-down': (t) => seam(t, 'Math.floor(scaled + 0.5) / scale', 'Math.floor(scaled) / scale'),
   'days-ascending': (t) => seam(t, 'compareCodePoints(b[0], a[0]))', 'compareCodePoints(a[0], b[0]))'),
   'blank-label-kept-null': (t) => seam(t, "label: sum.label || ''", 'label: sum.label as string'),
-  'sale-cursor-optional': (t) => seam(t, 'if (s !== null && !(Array.isArray(s) && s.length === 3 && keyText(s[0]) && keyText(s[1]) && rowId(s[2]))) return null', ''),
+  'sale-cursor-optional': (t) => seam(t, 'if (s !== null && !(Array.isArray(s) && s.length === 3 && (s[0] === null || keyText(s[0])) && (s[1] === null || keyText(s[1])) && !(s[0] !== null && s[1] === null) && rowId(s[2]))) return null', ''),
+  'dated-sale-key-may-lack-its-time': (t) => seam(t, ' && !(s[0] !== null && s[1] === null)', ''),
+  'null-day-refused': (t) => seam(t, '(s[0] === null || keyText(s[0]))', 'keyText(s[0])'),
+  'cursor-forgets-the-undated-count': (t) => seam(t, ', h: cursor.h, u: cursor.u }', ', h: cursor.h }'),
+  'missing-undated-count-reads-as-none': (t) => seam(t, 'parsed.u === undefined ? 1 : parsed.u', 'parsed.u === undefined ? 0 : parsed.u'),
+  'undated-count-unchecked': (t) => seam(t, "if (!(typeof u === 'number' && Number.isSafeInteger(u) && u >= 0)) return null", ''),
   'cursor-negative-high-water': (t) => seam(t, 'id >= 0))) return null', 'true))) return null'),
   'cursor-version-ignored': (t) => seam(t, 'if (!parsed || parsed.v !== 1) return null', 'if (!parsed) return null'),
   'switch-name-typo': (t) => seam(t, "export const EXPENSE_READS_SWITCH = 'expense_reads'", "export const EXPENSE_READS_SWITCH = 'expense_read'"),
@@ -163,15 +168,39 @@ async function run(mutant) {
     assert.equal(json(fold([])), json({ totals: { count: 0, amount_usd: 0, amount_khr: 0 }, days: [], byType: [], byCategory: [] }))
   })
 
-  const cursor = { e: ['2026-10-11', 41], s: ['2026-10-11', '2026-10-11 03:00:00', 7], h: [900, 5000] }
+  const cursor = { e: ['2026-10-11', 41], s: ['2026-10-11', '2026-10-11 03:00:00', 7], h: [900, 5000], u: 0 }
   await check('cursor: round trip, url-safe, and null keys survive', () => {
     const text = lib.encodeFeeCursor(cursor)
     assert.match(text, /^[A-Za-z0-9_-]+$/)
     assert.deepEqual(lib.decodeFeeCursor(text), cursor)
-    const empty = { e: null, s: null, h: [0, 0] }
+    const empty = { e: null, s: null, h: [0, 0], u: 0 }
     assert.deepEqual(lib.decodeFeeCursor(lib.encodeFeeCursor(empty)), empty)
-    const half = { e: ['2026-10-11', 41], s: null, h: [9, 0] }
+    const half = { e: ['2026-10-11', 41], s: null, h: [9, 0], u: 0 }
     assert.deepEqual(lib.decodeFeeCursor(lib.encodeFeeCursor(half)), half)
+  })
+
+  // A sale row whose created_at has no readable day has a NULL day (and, for garbage or an empty string, a NULL entry time); the list puts it last.
+  // Its key must travel as null: the text 'null' is a day nothing matches, so the next page would look for it and find nothing.
+  const token = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
+  await check('cursor: a sale key with no day (and no entry time) survives as null, with the count of such rows', () => {
+    for (const s of [[null, null, 99002], [null, '2026-10-11 03:00:00', 99001], ['2026-10-11', '2026-10-11 03:00:00', 7]]) {
+      const c = { e: ['2026-10-11', 41], s, h: [900, 5000], u: 2 }
+      const back = lib.decodeFeeCursor(lib.encodeFeeCursor(c))
+      assert.deepEqual(back, c)
+      assert.equal(back.s[0] === null, s[0] === null)
+    }
+    const nulls = JSON.parse(Buffer.from(lib.encodeFeeCursor({ e: null, s: [null, null, 5], h: [1, 1], u: 3 }), 'base64url').toString())
+    assert.deepEqual(nulls.s, [null, null, 5], 'null, not the text "null"')
+    assert.equal(nulls.u, 3, 'the undated count is in the token')
+  })
+
+  await check('cursor: a token from before the undated count reads as "some" (1), a negative or fractional count is refused', () => {
+    assert.equal(lib.decodeFeeCursor(token({ v: 1, e: null, s: null, h: [3, 4] })).u, 1)
+    for (const u of [-1, 1.5, '1', null, Number.MAX_SAFE_INTEGER + 2]) {
+      assert.equal(lib.decodeFeeCursor(token({ v: 1, e: null, s: null, h: [3, 4], u })), null, 'refused u=' + String(u))
+    }
+    // a dated sale key always carries its entry time
+    assert.equal(lib.decodeFeeCursor(token({ v: 1, e: null, s: ['2026-10-11', null, 7], h: [3, 4], u: 0 })), null)
   })
 
   const make = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -200,10 +229,11 @@ async function run(mutant) {
   // source pins: the call sites read the plan fields, and the old statements are still in the file for the switch-off path
   const fees = read('routes/fees.ts'), catalog = read('routes/feesCatalog.ts'), tier = read('lib/planTier.ts'), switches = read('lib/readSwitches.ts')
   const pins = [
-    ['the report reads its group cap from getPlanLimits(env), not a literal', /getPlanLimits\(env\)\.expenseReportMaxGroups/.test(fees) && !/groupCap: \d/.test(fees)],
+    ['the report reads its row cap from getPlanLimits(env), not a literal', /getPlanLimits\(env\)\.expenseReportFoldMaxRows/.test(fees) && !/rowCap: \d/.test(fees)],
+    ['the grouped scan stops after cap + 1 rows INSIDE the scan (a window over the cap is turned away after about cap rows, not after grouping the table)', /FROM \(SELECT f\.fee_date, f\.fee_type, f\.label, f\.amount_usd, f\.amount_khr FROM fees f WHERE \$\{where\} LIMIT @rowCap\) s/.test(fees) && /rowCap: cap \+ 1/.test(fees) && /return rows <= cap \? foldFeeGroups\(groups\) : null/.test(fees)],
     ['the export reads its page cap from getPlanLimits(env), not a literal', /getPlanLimits\(c\.env\)\.expenseExportPageRows/.test(catalog)],
     ['expense_reads is a known read switch on this base', /KNOWN_READ_SWITCHES = \[[^\]]*'expense_reads'/.test(switches)],
-    ['both plan fields exist on the type and on both tiers', ['expenseExportPageRows', 'expenseReportMaxGroups'].every((f) => (tier.match(new RegExp(`\\b${f}\\b`, 'g')) || []).length >= 3)],
+    ['both plan fields exist on the type and on both tiers', ['expenseExportPageRows', 'expenseReportFoldMaxRows'].every((f) => (tier.match(new RegExp(`\\b${f}\\b`, 'g')) || []).length >= 3)],
     ['the four old report statements are still in the file (the switch-off path)', ['SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}', 'GROUP BY f.fee_date ORDER BY f.fee_date DESC', 'GROUP BY f.fee_type ORDER BY amount_usd DESC, amount_khr DESC', "GROUP BY f.fee_type, lower(trim(COALESCE(f.label, '')))"].every((s) => fees.includes(s))],
     ['the report consults the switch once and only before the old statements', (fees.match(/expenseReadsOn\(env\)/g) || []).length === 1 && fees.indexOf('groupedFeeReport(c.env') < fees.indexOf('const [totals, days, byType, byCategory]') + 200],
     ['the list consults the switch only for a request that carries a cursor (a plain list page pays no switch read)', /if \(cursorText && await expenseReadsOn\(c\.env\)\)/.test(catalog)],

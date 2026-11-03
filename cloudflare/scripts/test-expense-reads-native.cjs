@@ -9,10 +9,16 @@
 //      export (the OFF answer is the oracle), including ties on identical timestamps (two expenses, two sales, an expense against a sale), the two spellings
 //      of sales.created_at on one day, and every user kind. A row created or deleted mid-export neither repeats nor skips a row of the start snapshot.
 //   3. OFF is the 6.0.1053 answer: the cursor parameter is read by nothing, and a plain list request does not even read the switch.
-//   4. The plan fields: Free pages 250 rows and groups up to 10,000; Paid 500 and 50,000; a window over the group cap and a figure on a rounding
-//      boundary are answered by the four statements (still byte-identical).
-//   5. Mutation controls: each plausible wrong implementation (drops the sale rows, double-counts a tie, forgets the snapshot, mis-orders the sale key,
-//      reads the wrong day floor, drops sale-linked expenses from the grouped pass, ignores the branch) turns a check red.
+//      A courier sale whose created_at has no readable day ('garbage', '', a time SQLite cannot shift) has a NULL day and sorts LAST in the list; the cursor
+//      export serves it in its own phase and never writes the text 'null' into a token (E1-F review B2).
+//   4. The plan fields: Free pages 500 rows and folds a report of up to 1,500 expense rows; Paid 500 and 50,000. A window over the row cap is turned away
+//      after reading about cap rows (the scan is cut INSIDE the statement), and a figure on a rounding boundary is answered by the four statements too
+//      (still byte-identical). The sizes are read from the plan table: a patched table moves them.
+//   5. Reads: an export that fits one page reads no probe and no high-water id (a month's export is no dearer than today's); a page that has a successor
+//      reads the ids once, after the page.
+//   6. Mutation controls: each plausible wrong implementation (drops the sale rows, double-counts a tie, forgets the snapshot, mis-orders the sale key,
+//      reads the wrong day floor, drops sale-linked expenses from the grouped pass, ignores the branch, loses the NULL-day rows, writes 'null' into a
+//      token) turns a check red.
 //
 // Rows read are measured in test-expense-reads-budget-native.cjs (the Miniflare world, at the seed's full size).
 // Run (from cloudflare/): node scripts/test-expense-reads-native.cjs
@@ -395,7 +401,7 @@ async function scenario(w, patches = []) {
   await check('LOOPHOLE: a forged cursor only chooses a position: permission, branch and range come from the request on every page, and the snapshot ids cannot reach past the data', async () => {
     const { encodeFeeCursor, decodeFeeCursor } = w.load('lib/expenseReads.ts')
     setSwitch(w, true)
-    const forged = encodeFeeCursor({ e: ['2099-01-01', 999999], s: ['2099-01-01', '2099-01-01 00:00:00', 999999], h: [999999999, 999999999] })
+    const forged = encodeFeeCursor({ e: ['2099-01-01', 999999], s: ['2099-01-01', '2099-01-01 00:00:00', 999999], h: [999999999, 999999999], u: 0 })
     // a caller without the courier permission gets expense rows only, whatever sale key the cursor carries
     for (const user of [U.courierOff, U.noSales]) {
       const r = await w.request('GET', `/api/fees?source=all&limit=500&cursor=${forged}`, undefined, user)
@@ -410,10 +416,10 @@ async function scenario(w, patches = []) {
     const branch2 = (await w.request('GET', `/api/fees?source=all&limit=500&branch_id=2&from=2026-10-05&to=2026-10-07&cursor=${forged}`, undefined, U.full)).json
     assert.ok(branch2.fees.length > 0 && branch2.fees.every((f) => f.branch_id === 2 && f.fee_date >= '2026-10-05' && f.fee_date <= '2026-10-07'))
     // a cursor whose ids are 0 reaches nothing; the same request with real ids reaches the rows
-    const none = (await w.request('GET', `/api/fees?source=all&limit=500&cursor=${encodeFeeCursor({ e: ['2099-01-01', 5], s: null, h: [0, 0] })}`, undefined, U.full)).json
+    const none = (await w.request('GET', `/api/fees?source=all&limit=500&cursor=${encodeFeeCursor({ e: ['2099-01-01', 5], s: null, h: [0, 0], u: 0 })}`, undefined, U.full)).json
     assert.deepEqual([none.fees.length, none.next_cursor], [0, null])
     // injection text in a key is data, not SQL
-    const evil = (await w.request('GET', `/api/fees?source=all&limit=5&cursor=${encodeFeeCursor({ e: ["x' OR 1=1 --", 1], s: ["x' OR 1=1 --", "y' --", 1], h: [1000, 1000] })}`, undefined, U.full)).json
+    const evil = (await w.request('GET', `/api/fees?source=all&limit=5&cursor=${encodeFeeCursor({ e: ["x' OR 1=1 --", 1], s: ["x' OR 1=1 --", "y' --", 1], h: [1000, 1000], u: 1 })}`, undefined, U.full)).json
     assert.ok(Array.isArray(evil.fees))
     assert.equal(w.get('SELECT COUNT(*) n FROM fees').n >= 90, true, 'nothing was written')
     setSwitch(w, false)
@@ -471,13 +477,88 @@ async function scenario(w, patches = []) {
     assert.equal(new Set(got).size, got.length)
     setSwitch(w, false)
   })
+
+  // E1-F review B2: a courier sale whose created_at has no readable day has a NULL day. ORDER BY d DESC puts it LAST (after every dated row, by entry time then id),
+  // so the offset export serves it at the end. The cursor export used to drop it (the probe floor cut '', the keyset compared against a NULL day) and to write the
+  // text 'null' into the token.
+  await check('UNDATED: courier sales whose created_at has no readable day come last and are served exactly once at every page size, and no token carries the text "null"', async () => {
+    const { decodeFeeCursor } = w.load('lib/expenseReads.ts')
+    const w2 = newWorld(patches)
+    const add = w2.sql.prepare("INSERT INTO sales (id, created_at, sale_status, branch_id, receipt_number, total_usd, subtotal_usd, delivery_actual_cost_usd, is_delivery) VALUES (?, ?, 'completed', 1, ?, 10, 10, ?, 1)")
+    // 'garbage', '' and 'not a date' have no day and no entry time; 9999-12-31 23:00 reads as a time but its local day (+7 h) is out of range: a NULL day with a real
+    // entry time; the offset spelling is an ordinary day.
+    for (const [id, at] of [[99001, 'garbage'], [99002, ''], [99003, '2026-10-05T10:00:00+07:00'], [99004, '9999-12-31 23:00:00'], [99005, 'not a date'], [99006, '9999-12-31 23:00:00']]) add.run(id, at, `R-${id}`, 1 + (id % 5))
+    setSwitch(w2, false)
+    const oracle = await offsetExport(w2, 'source=all', w2.users.full, 500)
+    const sales = oracle.rows.filter((r) => r.kind === 'sale_delivery')
+    assert.deepEqual(sales.slice(-5).map((r) => r.id), [99006, 99004, 99005, 99002, 99001], 'control: the NULL-day rows are last, entry time then id descending')
+    assert.deepEqual(sales.slice(-5).map((r) => r.fee_date), [null, null, null, null, null], 'control: they have no day')
+    assert.ok(sales.some((r) => r.id === 99003 && r.fee_date === '2026-10-05'), 'control: the offset spelling reads as a day')
+    const undated = oracle.rows.filter((r) => r.kind === 'sale_delivery' && r.fee_date === null).length
+    assert.equal(undated, 5)
+    setSwitch(w2, true)
+    for (const [user, label] of [[w2.users.full, 'full'], [w2.users.courierOff, 'courierOff']]) {
+      setSwitch(w2, false)
+      const expected = await offsetExport(w2, 'source=all', user, 500)
+      setSwitch(w2, true)
+      for (const size of [1, 2, 3, 7, 50, 500]) {
+        const got = await cursorExport(w2, 'source=all', user, size)
+        assert.deepEqual(rowsJson(got.rows), rowsJson(expected.rows), `${label} size ${size}`)
+        assert.equal(got.pages[0].total, expected.first.total, `${label} size ${size}: the total counts the NULL-day rows`)
+        const tokens = got.pages.map((p) => p.next_cursor).filter(Boolean).map((text) => decodeFeeCursor(text))
+        assert.ok(tokens.every((t) => t && !JSON.stringify(t).includes('"null"')), `${label} size ${size}: no token carries the text "null"`)
+        if (label === 'full' && size === 3) assert.deepEqual([...new Set(tokens.map((t) => t.u))], [5], 'the first page counted the NULL-day rows and every token carries the count')
+      }
+    }
+    // the sale list alone, and a window (a window excludes them, in both exports)
+    for (const qs of ['source=sale', 'source=all&from=2026-10-04&to=2026-10-09', 'source=sale&branch_id=1']) {
+      setSwitch(w2, false)
+      const expected = await offsetExport(w2, qs, w2.users.full, 500)
+      setSwitch(w2, true)
+      for (const size of [1, 3, 500]) assert.deepEqual(rowsJson((await cursorExport(w2, qs, w2.users.full, size)).rows), rowsJson(expected.rows), `${qs} size ${size}`)
+    }
+    // a window has none: its token says so, and no page looks for them
+    const windowed = await cursorExport(w2, 'source=all&from=2026-10-04&to=2026-10-09', w2.users.full, 3)
+    assert.deepEqual([...new Set(windowed.pages.map((p) => p.next_cursor).filter(Boolean).map((text) => decodeFeeCursor(text).u))], [0])
+    setSwitch(w2, false)
+  })
+
+  // E1-F review N2: a month's export is one request today. It must not cost more by cursor: no probe (its whole sale list fits the page) and no high-water id.
+  await check('EXPORT READS: an export that fits one page reads no probe and no id; a page that has a successor reads the ids once, after it; later pages read none', async () => {
+    const { decodeFeeCursor } = w.load('lib/expenseReads.ts')
+    const log = recordStatements(w)
+    setSwitch(w, true)
+    const idReads = () => log.filter((s) => /SELECT MAX\(id\) AS id FROM/.test(s.sql)).map((s) => s.sql.match(/FROM (\w+)/)[1]).sort()
+    const probes = () => log.filter((s) => /SELECT sales\.created_at AS created_at FROM sales/.test(s.sql)).length
+    const maxFee = w.get('SELECT MAX(id) AS m FROM fees').m, maxSale = w.get('SELECT MAX(id) AS m FROM sales').m
+    log.length = 0
+    const one = (await w.request('GET', '/api/fees?source=all&limit=500&from=2026-10-04&to=2026-10-09&cursor=start', undefined, U.full)).json
+    assert.ok(one.fees.length > 0 && one.next_cursor === null && one.has_more === false)
+    assert.equal(one.snapshot_max_id, null, 'an export that ends on its first page took no snapshot')
+    assert.deepEqual([idReads(), probes()], [[], 0], 'no id and no probe')
+    log.length = 0
+    const many = (await w.request('GET', '/api/fees?source=all&limit=3&cursor=start', undefined, U.full)).json
+    assert.ok(many.next_cursor)
+    assert.deepEqual(idReads(), ['fees', 'sales'])
+    assert.equal(probes(), 1, 'the sale list is longer than a page: the probe bounds it')
+    assert.deepEqual(decodeFeeCursor(many.next_cursor).h, [maxFee, maxSale])
+    assert.deepEqual(many.snapshot_max_id, { fees: maxFee, sales: maxSale })
+    log.length = 0
+    const noSales = (await w.request('GET', '/api/fees?source=all&limit=3&cursor=start', undefined, U.courierOff)).json
+    assert.deepEqual(idReads(), ['fees'], 'a caller without the courier permission never reads the highest sale id')
+    assert.deepEqual(decodeFeeCursor(noSales.next_cursor).h, [maxFee, 0])
+    log.length = 0
+    await w.request('GET', `/api/fees?source=all&limit=3&cursor=${many.next_cursor}`, undefined, U.full)
+    assert.deepEqual(idReads(), [], 'later pages read the ids from the token')
+    setSwitch(w, false)
+  })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The plan fields, the group cap and the rounding boundary: worlds of their own
 // ---------------------------------------------------------------------------------------------------------------------
 async function scenarioPlan(patches = []) {
-  await check('PLAN: Free pages 250 rows, Paid 500, and the cursor export is complete either way', async () => {
+  await check('PLAN: Free and Paid both page 500 rows, and the cursor export is complete either way; the page size is read from the plan table', async () => {
     const w = newWorld(patches)
     w.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 640)
       INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at)
@@ -486,7 +567,7 @@ async function scenarioPlan(patches = []) {
     const oracle = (await offsetExport(w, 'source=all', w.users.full, 500)).rows
     assert.ok(oracle.length > 700)
     setSwitch(w, true)
-    for (const [tier, cap] of [['free', 250], ['paid', 500], [undefined, 500]]) {
+    for (const [tier, cap] of [['free', 500], ['paid', 500], [undefined, 500]]) {
       const env = asTier(w, tier)
       const got = await cursorExport(w, 'source=all', w.users.full, 500, { env })
       assert.deepEqual(rowsJson(got.rows), rowsJson(oracle), `${tier}`)
@@ -499,28 +580,72 @@ async function scenarioPlan(patches = []) {
     const off = await w.request('GET', '/api/fees?source=all&limit=900', undefined, w.users.full, {}, asTier(w, 'free'))
     assert.equal(off.json.limit, 500)
     assert.equal(off.json.fees.length, 500)
+    // The sizes are the plan table's, not a literal in the route: a table whose Free page is 250 and whose Free fold cap is 120 rows moves both.
+    const small = newWorld([...patches, { file: 'src/lib/planTier.ts', from: 'expenseExportPageRows: 500,\n  expenseReportFoldMaxRows: 1_500,', to: 'expenseExportPageRows: 250,\n  expenseReportFoldMaxRows: 120,' }])
+    small.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 640)
+      INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at)
+      SELECT 'other', 'Bulk ' || (i % 7), 1, 0, date('2026-09-01', '+' || (i % 20) || ' days'), 1, '2026-09-01 03:00:00' FROM n`)
+    setSwitch(small, false)
+    const oracleSmall = (await offsetExport(small, 'source=all', small.users.full, 500)).rows // its own: updated_at is the second the world was built
+    setSwitch(small, true)
+    const freeSmall = await cursorExport(small, 'source=all', small.users.full, 500, { env: asTier(small, 'free') })
+    assert.equal(freeSmall.pages[0].limit, 250, 'the Free page follows the table')
+    assert.equal(freeSmall.pages.length, Math.ceil(oracleSmall.length / 250))
+    assert.deepEqual(rowsJson(freeSmall.rows), rowsJson(oracleSmall))
+    assert.equal((await cursorExport(small, 'source=all', small.users.full, 500, { env: asTier(small, 'paid') })).pages[0].limit, 500)
+    const log = recordStatements(small)
+    const grouped = () => feeStatements(log).filter((s) => /GROUP BY s\.fee_date, s\.fee_type/.test(s.sql))
+    log.length = 0
+    await small.request('GET', '/api/fees/report?startDate=2026-09-01&endDate=2026-09-02', undefined, small.users.full, {}, asTier(small, 'free'))
+    assert.equal(grouped()[0].params.rowCap, 121, 'the scan is cut at the table\'s Free cap + 1')
+    setSwitch(small, false)
   })
 
-  await check('PLAN: a window with more groups than the plan allows is answered by the four statements (still byte-identical); Paid reads it in one', async () => {
+  // E1-F review B3: Free folds at most 1,500 expense rows (about 3 ms of the 10 ms CPU budget); a larger window is turned away after reading ABOUT cap rows
+  // (the scan is cut inside the statement) and answered by the four statements, byte for byte; Paid folds it in one.
+  await check('PLAN: Free folds a report of up to 1,500 expense rows in one statement; a window over that is turned away after cap + 1 rows and answered by the four statements (byte-identical); Paid reads it in one', async () => {
     const w = newWorld(patches)
-    w.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10500)
+    const { getPlanLimits } = w.load('lib/planTier.ts')
+    assert.deepEqual(['free', 'paid'].map((tier) => getPlanLimits(asTier(w, tier)).expenseReportFoldMaxRows), [1500, 50000], 'the Free value is 1,500 and Paid keeps 50,000') // asTier resets the tier cache first
+    w.sql.exec('DELETE FROM fees')
+    const bulk = (count, date) => w.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
       INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at)
-      SELECT 'other', 'Group ' || i, 1, 0, date('2025-01-01', '+' || (i % 400) || ' days'), 1, '2025-01-01 03:00:00' FROM n`)
+      SELECT 'other', 'Group ' || i, 1, 0, date('${date}', '+' || (i % 25) || ' days'), 1, '${date} 03:00:00' FROM n`)
+    bulk(1500, '2025-01-01') // January: exactly the Free cap
+    bulk(101, '2025-03-01') // March: 101 more, so the all-time window is 1,601 rows
     const log = recordStatements(w)
-    const oracle = JSON.stringify(await oldReport(w, {}))
+    const attempt = () => feeStatements(log).filter((s) => /GROUP BY s\.fee_date, s\.fee_type/.test(s.sql))
     setSwitch(w, true)
-    for (const [tier, statements] of [['free', 5], ['paid', 1], [undefined, 1]]) {
+    // what one request did, read off the log at once (the oracle below runs the four statements itself): the body, the fee statements, and the rows the grouped attempt folded
+    const run = async (qs, tier) => {
       log.length = 0
-      const r = await w.request('GET', '/api/fees/report', undefined, w.users.full, {}, asTier(w, tier))
-      assert.equal(JSON.stringify(r.json), oracle, `${tier}`)
-      assert.equal(feeStatements(log).length, statements, `${tier}: the grouped attempt, then ${statements - 1} more`)
+      const r = await w.request('GET', `/api/fees/report${qs}`, undefined, w.users.full, {}, asTier(w, tier))
+      const statements = feeStatements(log).length
+      const grouped = attempt()[0]
+      const folded = grouped ? w.sql.prepare(grouped.sql).all(grouped.params).reduce((sum, row) => sum + row.n, 0) : null
+      return { body: JSON.stringify(r.json), statements, folded }
     }
-    // below the Free cap, Free reads once
-    log.length = 0
-    const month = await w.request('GET', '/api/fees/report?startDate=2025-01-01&endDate=2025-01-05', undefined, w.users.full, {}, asTier(w, 'free'))
-    const used = feeStatements(log).length
-    assert.equal(JSON.stringify(month.json), JSON.stringify(await oldReport(w, { startDate: '2025-01-01', endDate: '2025-01-05' })))
-    assert.equal(used, 1)
+    const bodyOf = async (qs) => JSON.stringify(await oldReport(w, Object.fromEntries(new URLSearchParams(qs.slice(1)))))
+    // exactly 1,500 rows (the January days): one statement on Free
+    const exact = await run('?startDate=2025-01-01&endDate=2025-02-28', 'free')
+    assert.equal(exact.body, await bodyOf('?startDate=2025-01-01&endDate=2025-02-28'))
+    assert.equal(exact.statements, 1, 'a window of exactly the cap is folded')
+    // 1,601 rows: the attempt, then the four statements; the attempt reads cap + 1 rows, not the table
+    const over = await run('', 'free')
+    assert.equal(over.body, await bodyOf(''))
+    assert.equal(over.statements, 5, 'the attempt, then the four statements')
+    assert.equal(over.folded, 1501, 'the attempt read cap + 1 rows and no more')
+    // Paid reads the same window in one, with the same answer
+    const paid = await run('', 'paid')
+    assert.equal(paid.body, await bodyOf(''))
+    assert.deepEqual([paid.statements, paid.folded], [1, 1601], 'Paid read the whole window in one statement')
+    const unset = await run('', undefined)
+    assert.equal(unset.statements, 1, 'an unset PLAN_TIER is Paid')
+    assert.equal(unset.body, await bodyOf(''))
+    // below the cap Free reads once
+    const month = await run('?startDate=2025-03-01&endDate=2025-03-30', 'free')
+    assert.equal(month.body, await bodyOf('?startDate=2025-03-01&endDate=2025-03-30'))
+    assert.equal(month.statements, 1)
   })
 
   await check('PLAN: a middle cursor page starts from an index and sorts no table (expenses: idx_fees_fee_date; sales: idx_sales_courier_cost for the probe and the page), with and without ANALYZE, with and without a branch', async () => {
@@ -548,7 +673,8 @@ async function scenarioPlan(patches = []) {
         log.length = 0
         const first = (await w.request('GET', `/api/fees?source=all&limit=100&cursor=start&${filter}`, undefined, w.users.full)).json
         assert.ok(first.next_cursor, 'a first page with more to come')
-        // The first page also totals the sale half. Its snapshot bound must not steer the planner onto the sales primary key (16,088 rows against 1,506 at seed size).
+        // The first page also totals the sale half. It carries no id bound (the snapshot is taken after the page, and only when a page follows): a plain `sales.id <= ?`
+        // on this statement steered the planner onto the sales primary key (16,088 rows against 1,506 at seed size) in the first design.
         const totals = log.find((s) => /SELECT COUNT\(\*\) AS count, COALESCE\(SUM\(CASE WHEN EXISTS/.test(s.sql))
         assert.ok(totals, `${phase}, ${filter || 'no branch'}: the first page totals the sale half`)
         const totalsPlan = plan(totals)
@@ -577,7 +703,7 @@ async function scenarioPlan(patches = []) {
       const grouped = async (qs) => {
         log.length = 0
         assert.equal((await w.request('GET', `/api/fees/report${qs}`, undefined, w.users.full)).status, 200)
-        const statement = log.find((s) => /GROUP BY f\.fee_date, f\.fee_type/.test(s.sql))
+        const statement = log.find((s) => /GROUP BY s\.fee_date, s\.fee_type/.test(s.sql))
         assert.ok(statement, `${phase}: the grouped statement ran for ${qs || 'no filter'}`)
         return plan(statement)
       }
@@ -638,24 +764,34 @@ async function scenarioPlan(patches = []) {
 const CAT = 'src/routes/feesCatalog.ts'
 const FEES = 'src/routes/fees.ts'
 const MUTANTS = {
-  'the export drops the sale rows': { file: CAT, from: 'scope ? saleDeliveryRowsAfter(db, scope, cursor?.s ?? null, limit + 1) : Promise.resolve<SaleDeliveryRow[]>([])', to: 'Promise.resolve<SaleDeliveryRow[]>([])' },
+  'the export drops the sale rows': { file: CAT, from: '!scope ? Promise.resolve(noSales) : cursor', to: 'true ? Promise.resolve(noSales) : cursor' },
   'the expense key is inclusive, so a tie row is served twice': { file: FEES, from: 'f.fee_date < @afterDate OR f.id < @afterId', to: 'f.fee_date < @afterDate OR f.id <= @afterId' },
-  'the sale key is inclusive, so a tied sale row is served twice': { file: CAT, from: 'AND sales.id < @afterId', to: 'AND sales.id <= @afterId' },
-  'the snapshot is forgotten, so a row created mid-export appears': { file: CAT, from: 'upToId: hi[0], ', to: '' },
-  'the sale snapshot is forgotten': { file: CAT, from: "AND +sales.id <= @saleHi`, params: { ...base.params, saleHi: hi[1] } }", to: "`, params: { ...base.params } }" },
-  'the sale snapshot bound is a plain id comparison (the planner walks every sale)': { plan: true, file: CAT, from: 'AND +sales.id <= @saleHi', to: 'AND sales.id <= @saleHi' },
+  'the sale key is inclusive, so a tied sale row is served twice': { file: CAT, from: '(datetime(sales.created_at) = @afterAt AND sales.id < @afterId)', to: '(datetime(sales.created_at) = @afterAt AND sales.id <= @afterId)' },
+  'the NULL-day key is inclusive, so a NULL-day row is served twice': { file: CAT, from: '${entry} IS NULL AND sales.id < @afterId', to: '${entry} IS NULL AND sales.id <= @afterId' },
+  'the snapshot is forgotten, so a row created mid-export appears': { file: CAT, from: 'upToId: cursor ? cursor.h[0] : null, ', to: '' },
+  'the sale snapshot is forgotten': { file: CAT, from: "{ sql: `${base.sql} AND +sales.id <= @saleHi`, params: { ...base.params, saleHi: cursor.h[1] } }", to: '{ sql: base.sql, params: base.params }' },
   'a sale row tied on entry time with the cursor is skipped': { file: CAT, from: "OR (datetime(sales.created_at) = @afterAt AND sales.id < @afterId)", to: 'OR 1 = 0' },
   'the sale floor is the probe day itself, not the day before': { file: CAT, from: "date(@probeDay, '-1 day')", to: '@probeDay' },
   'the sale probe stops one row short': { file: CAT, from: 'probe?.[limit - 1]?.created_at', to: 'probe?.[limit - 2]?.created_at' },
-  'the cursor keeps only the last expense, the sale key is lost': { file: CAT, from: 'else lastSale = [String(row.fee_date), String(entryTimes.get(Number(row.id))), Number(row.id)]', to: '' },
+  'the cursor keeps only the last expense, the sale key is lost': { file: CAT, from: 'lastSale = [row.fee_date == null ? null : String(row.fee_date), at == null ? null : String(at), Number(row.id)]', to: '' },
+  'a NULL day goes into the cursor as the text null': { file: CAT, from: 'row.fee_date == null ? null : String(row.fee_date)', to: 'String(row.fee_date)' },
+  'a NULL entry time goes into the cursor as the text null': { file: CAT, from: 'at == null ? null : String(at)', to: 'String(at)' },
+  'the dated phase leaves the NULL-day rows to the probe, which cuts them': { file: CAT, from: "undated && !after ? { sql: `${scope.sql} AND ${localDateExpr('sales.created_at')} IS NOT NULL`, params: scope.params } : scope", to: 'scope' },
+  'the NULL-day phase is never run after the dated rows': { file: CAT, from: 'return undated && rows.length < limit ? [...rows, ...await saleDeliveryUndatedRows(db, scope, null, limit - rows.length)] : rows', to: 'return rows' },
+  'the NULL-day phase ignores its cursor and starts over': { file: CAT, from: 'if (after && after[0] === null) return saleDeliveryUndatedRows(db, scope, after, limit)', to: 'if (after && after[0] === null) return saleDeliveryUndatedRows(db, scope, null, limit)' },
+  'the keyset is not carried into the NULL-day phase on a NULL entry time': { file: CAT, from: "? ` AND ${entry} IS NULL AND sales.id < @afterId`", to: "? ` AND ${entry} IS NULL`" },
+  'the first page does not carry the NULL-day count': { file: CAT, from: 'u: cursor ? cursor.u : saleTotals.undated', to: 'u: 0' },
+  'a page that ends the export still takes the snapshot': { file: CAT, from: ': hasMore ? await Promise.all([highestId(db, \'fees\'), showSales ? highestId(db, \'sales\') : 0]) as [number, number] : null', to: ': await Promise.all([highestId(db, \'fees\'), showSales ? highestId(db, \'sales\') : 0]) as [number, number]' },
+  'the whole sale list is probed even when it fits the page': { file: CAT, from: 'totals.count <= limit + 1', to: 'false' },
   'has_more is judged on the page, not the lookahead row': { file: CAT, from: 'const hasMore = merged.length > limit', to: 'const hasMore = page.length === limit && merged.length > limit + 1' },
   'the page is not capped by the plan': { plan: true, file: CAT, from: 'getPlanLimits(c.env).expenseExportPageRows', to: '500' },
-  'the report drops the expenses linked to a sale': { file: FEES, from: '    FROM fees f\n    WHERE ${where}\n    GROUP BY f.fee_date, f.fee_type', to: '    FROM fees f\n    WHERE ${where} AND f.sale_id IS NULL\n    GROUP BY f.fee_date, f.fee_type' },
-  'the report ignores the branch filter': { file: FEES, from: 'FROM fees f\n    WHERE ${where}\n    GROUP BY f.fee_date', to: 'FROM fees f\n    WHERE ${where.replace(/\\+?f\\.branch_id = @branchId/, "1=1")}\n    GROUP BY f.fee_date' },
+  'the report drops the expenses linked to a sale': { file: FEES, from: 'FROM fees f WHERE ${where} LIMIT @rowCap) s', to: 'FROM fees f WHERE ${where} AND f.sale_id IS NULL LIMIT @rowCap) s' },
+  'the report ignores the branch filter': { file: FEES, from: 'FROM fees f WHERE ${where} LIMIT @rowCap) s', to: 'FROM fees f WHERE ${where.replace(/\\+?f\\.branch_id = @branchId/, "1=1")} LIMIT @rowCap) s' },
   'the report keeps the label case of the first row, not the smallest': { file: 'src/lib/expenseReads.ts', from: 'compareCodePoints(row.label, cat.label) < 0', to: 'false' },
   'the report breaks a tie between two types by type descending': { file: 'src/lib/expenseReads.ts', from: 'outCats.sort((a, b) => cmpMoney(a, b) || compareCodePoints(a.label, b.label))', to: 'outCats.sort((a, b) => cmpMoney(a, b) || compareCodePoints(a.label, b.label) || compareCodePoints(b.fee_type, a.fee_type))' },
-  'the group cap is ignored': { plan: true, file: FEES, from: 'groups.length <= cap ? foldFeeGroups(groups) : null', to: 'foldFeeGroups(groups.slice(0, cap))' },
-}
+  'the row cap is ignored: a window over it is folded anyway': { plan: true, file: FEES, from: 'return rows <= cap ? foldFeeGroups(groups) : null', to: 'return foldFeeGroups(groups)' },
+  'the row cap is a literal, not the plan table': { plan: true, file: FEES, from: 'const cap = getPlanLimits(env).expenseReportFoldMaxRows', to: 'const cap = 1500' },
+  'the scan is not cut inside the statement, so an over-cap window groups the whole table': { plan: true, file: FEES, from: 'LIMIT @rowCap) s', to: 'LIMIT @rowCap * 1000000) s' },}
 
 // EXPENSE_READS_ONLY=plan runs the plan worlds and the mutants that judge them; =main the shared fixture and the rest (diagnosis only; the gate runs all).
 const ONLY = process.env.EXPENSE_READS_ONLY || ''
