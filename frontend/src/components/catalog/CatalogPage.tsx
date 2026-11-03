@@ -2595,8 +2595,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {
         return refuseSave('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.', 'customer_portal_google_maps_embed')
       }
-      // The bar's link and days: the Worker refuses the same values, but only after the Save was sent.
-      const announcementIssues = canEditConfig ? portalAnnouncementIssues({
+      // The bar's link and days: the Worker refuses the same values, but only after the Save was sent. Only when this draft edited an
+      // announcement key: a bad value that was already stored must not block an unrelated edit (a FAQ title) by someone who cannot see it.
+      const announcementEdited = [...editedKeysRef.current].some((key) => key.startsWith('customer_portal_announcement_'))
+      const announcementIssues = canEditConfig && announcementEdited ? portalAnnouncementIssues({
         link: editorDraft.customer_portal_announcement_link,
         start: editorDraft.customer_portal_announcement_start,
         end: editorDraft.customer_portal_announcement_end,

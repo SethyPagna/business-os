@@ -831,6 +831,38 @@ test.describe('Website Editor bar (ED-1a)', () => {
     expectNoRuntimeErrors(health)
   })
 
+  test('a stored bad announcement link does not block an unrelated edit: a FAQ-only Save goes through', async ({ page, context }) => {
+    // CATCHES: the pre-save announcement check refusing EVERY Save by a config holder because of a value that was already stored (a FAQ title
+    // typed by someone who cannot even see the bar), instead of only a Save that edited an announcement key.
+    const health = collectPageHealth(page)
+    const scope = await openEditor(page, context, {
+      seed: {
+        customer_portal_announcement_enabled: 'true',
+        customer_portal_announcement_text_en: 'Sample sale',
+        customer_portal_announcement_link: 'javascript:alert(1)',
+      },
+    })
+    await openSection(page, 'faq')
+    await page.locator('#portal-faq-title').fill('Questions')
+    const saved = await saveAndCapture(page)
+    expect(saved.customer_portal_faq_title).toBe('Questions')
+    expect(saved, 'the stored bad link is neither re-sent nor refused').not.toHaveProperty('customer_portal_announcement_link')
+    await expect(statusLine(page)).toHaveText('Saved')
+    const { settings } = await storedSettings(page, scope)
+    expect(settings.customer_portal_faq_title).toBe('Questions')
+
+    // ...but the moment this draft touches the bar, the check applies again.
+    await openSection(page, 'posts')
+    await page.locator('#portal-announcement-text-en').fill('Sample sale, today')
+    await openSection(page, 'faq')
+    const writes: string[] = []
+    page.on('request', (candidate) => { if (candidate.method() === 'POST' && new URL(candidate.url()).pathname === '/api/settings') writes.push(candidate.url()) })
+    await clickSave(page)
+    await expect(page.locator('#portal-announcement-link')).toBeFocused()
+    expect(writes, 'an announcement edit with a bad stored link is refused before the write').toHaveLength(0)
+    expectNoRuntimeErrors(health)
+  })
+
   test('the leave guard\'s Save & Leave saves without the review', async ({ page, context }, testInfo) => {
     test.skip(testInfo.project.name !== DESKTOP_PROJECT, 'the phone bar opens section groups instead of navigating (ios-layout.spec.ts); the guard is the same AppContext code')
     const health = collectPageHealth(page)

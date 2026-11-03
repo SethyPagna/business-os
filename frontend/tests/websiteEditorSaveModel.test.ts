@@ -299,7 +299,11 @@ await runTest('T-S11: a bad announcement link or reversed days is refused before
   const check = save.slice(checkAt, save.indexOf('setEditorSaving(true)'))
   assert.match(check, /refuseSave\('announcementBarLinkInvalid', [^\n]*'customer_portal_announcement_link'\)/, 'a bad link names its field')
   assert.match(check, /refuseSave\('announcementBarRangeInvalid', [^\n]*'customer_portal_announcement_end'\)/, 'a reversed range names its field')
-  assert.match(save.slice(checkAt - 40, checkAt), /canEditConfig/, 'only a person who can write the bar is stopped by it (a posts-only save never sends these keys)')
+  assert.match(save.slice(checkAt - 60, checkAt), /canEditConfig/, 'only a person who can write the bar is stopped by it (a posts-only save never sends these keys)')
+  // A bad value that was ALREADY stored must not block an unrelated edit (a FAQ title) of someone who cannot even see the bar: the check runs only when
+  // this draft touched an announcement key.
+  assert.match(save.slice(checkAt - 400, checkAt), /const announcementEdited = \[\.\.\.editedKeysRef\.current\]\.some\(\(key\) => key\.startsWith\('customer_portal_announcement_'\)\)/)
+  assert.match(save.slice(checkAt - 60, checkAt), /canEditConfig && announcementEdited \?/, 'both conditions gate the check')
 })
 
 await runTest('T-S12: every field sits in a section whose gate is the grant that saves it (show_about, the header colours, the product page)', async () => {
