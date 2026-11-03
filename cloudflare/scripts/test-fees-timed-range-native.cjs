@@ -24,9 +24,19 @@ const db = { prepare(sql) { return {
   async all(params = {}) { return raw.prepare(sql).all(params) },
   async get(params = {}) { return raw.prepare(sql).get(params) },
 } } }
+// E1-F: the report consults the read switch (off here: the old statements) and reads its group cap from the plan table.
+const loadLib = (file, overrides = {}) => {
+  const lib = { exports: {} }
+  new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(root, file), 'utf8')))(lib.exports, request => (request in overrides ? overrides[request] : require(request)), lib)
+  return lib.exports
+}
+const expenseReads = loadLib('lib/expenseReads.ts', { './readSwitches': { readSwitch: async () => false } })
+const planTier = loadLib('lib/planTier.ts')
 const moduleObj = { exports: {} }
 new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(root, 'routes/fees.ts'), 'utf8')))(moduleObj.exports, request => {
   if (request === 'hono') return require('hono')
+  if (request === '../lib/expenseReads') return expenseReads
+  if (request === '../lib/planTier') return planTier
   if (request === '../lib/db') return { getDb: () => db }
   if (request === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', { id: 1, role: 'admin' }); await next() } }
   if (request === '../lib/permissions') return { getPermissionTier: () => 'full', getActionTier: () => 'full' }
