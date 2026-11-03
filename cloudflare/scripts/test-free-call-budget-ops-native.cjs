@@ -1,6 +1,7 @@
 'use strict'
 // Lane P1.2 (S4): the 1008 operations on the Workers FREE plan, through the whole Worker. Boots the REAL Worker (src/index.ts,
-// bundled in memory) under Miniflare with PLAN_TIER=free, counts every D1 call (a db.batch = one call, waitUntil work included)
+// bundled in memory) under Miniflare with PLAN_TIER=free (P12_TIER=paid runs the same file on the Paid tier: every size and
+// bound below is read from the ACTIVE tier's getPlanLimits row), counts every D1 call (a db.batch = one call, waitUntil work included)
 // and refuses call 51 exactly as Cloudflare does, then drives the four operations that scaled their calls with their size:
 //   1. POST /api/branches/transfer-bulk  (3 reads per line after the commit; every pre-read chunked per 100 ids)
 //   2. PATCH /api/sales/:id/status Cancelled -> Completed  (1 branch_stock read per line)
@@ -30,15 +31,18 @@ const CAPTURE = !!process.env.P12_CAPTURE
 const ORIGIN = 'http://127.0.0.1:4391'
 const ADMIN_PASSWORD = 'budget-admin-password-1'
 
-// The Free ceiling comes from planTier.ts itself, never a literal here.
-const freeLimits = (() => {
+// The call ceiling and every plan-sized number (chunk, scan page) come from planTier.ts itself, for the tier under test, never a literal here.
+const TIER = process.env.P12_TIER || 'free'
+const limits = (() => {
   const file = path.join(ROOT, 'src', 'lib', 'planTier.ts')
   const out = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file }).outputText
   const mod = { exports: {} }
   new Function('exports', 'require', 'module', out)(mod.exports, () => { throw new Error('planTier.ts must have no runtime imports') }, mod)
-  return mod.exports.PLAN_LIMITS_BY_TIER.free
+  const row = mod.exports.PLAN_LIMITS_BY_TIER[TIER]
+  if (!row) throw new Error('P12_TIER must be free or paid, got ' + TIER)
+  return row
 })()
-const LIMIT = Number(process.env.P12_LIMIT) || freeLimits.d1QueriesPerInvocation
+const LIMIT = Number(process.env.P12_LIMIT) || limits.d1QueriesPerInvocation
 
 // ---- mutants: wrong implementations, applied to the bundle in memory (src on disk is never touched) ------------------------
 const MUTANTS = {
@@ -149,7 +153,7 @@ async function boot() {
   const mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB', 'IMPORT_DB'], kvNamespaces: ['CACHE'], r2Buckets: ['ASSETS'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
-    bindings: { PLAN_TIER: process.env.P12_TIER || 'free', BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
+    bindings: { PLAN_TIER: TIER, BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
       BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty', BUSINESS_OS_ADMIN_PASSWORD: ADMIN_PASSWORD, TELEGRAM_BOT_TOKEN: '123456:budget-token' },
     outboundService: async (request) => {
       const url = new URL(request.url)
@@ -309,7 +313,7 @@ async function main() {
   cookie = `bos_session=${token}`
   await seed(admin)
   console.log(`boot+seed ${Math.round((Date.now() - bootStarted) / 1000)}s`)
-  console.log(`world ready: tier=${process.env.P12_TIER || 'free'} call limit=${LIMIT} src=${path.relative(ROOT, SRC) || 'src'}${MUTANT ? ` MUTANT=${MUTANT}` : ''}${CAPTURE ? ' CAPTURE' : ''}`)
+  console.log(`world ready: tier=${TIER} call limit=${LIMIT} src=${path.relative(ROOT, SRC) || 'src'}${MUTANT ? ` MUTANT=${MUTANT}` : ''}${CAPTURE ? ' CAPTURE' : ''}`)
 
   // -- 1. transfer-bulk ------------------------------------------------------------------------------------------------------
   const scenarios = [
@@ -508,7 +512,7 @@ async function main() {
 
   // -- 3. payment-method impact and replace ------------------------------------------------------------------------------------
   await check('payment-method impact and linked replace over 12,000 sales inside the call limit, counts exact', async () => {
-    // Ids straddle the 5,000-row page boundary; every third sale is ABA.
+    // Ids straddle the tier's scan-page boundary (Free 5,000 rows, Paid 200); every third sale is ABA.
     await run(`WITH RECURSIVE n(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM n WHERE k<12000)
       INSERT INTO sales(id,receipt_number,cashier_id,cashier_name,branch_id,branch_name,payment_method,payment_details,exchange_rate,sale_status,created_at,updated_at,money_precision_version,total_usd,amount_paid_usd)
       SELECT 200000+k,'B'||k,${admin.id},'Admin',1,'Shop',CASE WHEN k%3=0 THEN 'ABA' ELSE 'Cash' END,
@@ -520,11 +524,13 @@ async function main() {
     assert.equal(impact.status, 200, impact.text.slice(0, 300))
     const replaced = await api('POST', '/api/settings/payment-methods/replace', { from: 'ABA', to: 'Wing', scope: 'linked', currentPassword: ADMIN_PASSWORD, expected_updated_at: impact.json?.settings_updated_at })
     measured['payment-method replace'] = replaced.calls
-    assert.ok(impact.calls <= 15, `impact calls ${impact.calls}`)
+    // One call per scan page plus a fixed handful (Free: 3 pages of 5,000 -> at most 15; Paid: 60 pages of 200 -> at most 72).
+    const scanPages = Math.ceil(12000 / limits.paymentMethodScanPageSize)
+    assert.ok(impact.calls <= scanPages + 12, `impact calls ${impact.calls} for ${scanPages} scan pages`)
     assert.equal(impact.json.live_snapshots.sales, aba)
     assert.equal(impact.json.live_snapshots.payment_detail_lines, aba)
     assert.equal(replaced.status, 200, replaced.text.slice(0, 300))
-    assert.ok(replaced.calls <= 25, `replace calls ${replaced.calls}`)
+    assert.ok(replaced.calls <= scanPages + 22, `replace calls ${replaced.calls} for ${scanPages} scan pages`)
     assert.equal(replaced.json.linkedSales, aba)
     assert.equal((await one("SELECT COUNT(*) n FROM sales WHERE payment_method='Wing'")).n, aba)
     assert.equal((await one("SELECT COUNT(*) n FROM sales WHERE payment_method='ABA' OR payment_details LIKE '%\"ABA\"%'")).n, 0)
@@ -542,7 +548,9 @@ async function main() {
     }
     return deliveries
   }
-  await run(`WITH RECURSIVE n(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM n WHERE k<1400)
+  // The Cancel check needs more than one chunk on every tier: 400 ids on Free (4 chunks of 125), two chunks and a bit on Paid.
+  const CANCEL_N = Math.max(400, 2 * limits.bulkDeleteChunkSize + 50)
+  await run(`WITH RECURSIVE n(k) AS (SELECT 1 UNION ALL SELECT k+1 FROM n WHERE k<${1000 + CANCEL_N})
     INSERT INTO customers(id,name,phone,phone_normalized) SELECT 10000+k,'Budget customer '||k,'0'||(20000000+k),'0'||(20000000+k) FROM n`)
   const customerAudits = async (lo, hi) => one(`SELECT COUNT(*) n, COUNT(DISTINCT entity_id) d FROM audit_logs WHERE entity='customer' AND action='delete' AND CAST(entity_id AS INTEGER) BETWEEN ${lo} AND ${hi}`)
   await check('customers bulk delete of 1,000: one bounded chunk per delivery, exact audit, a duplicate delivery applies the chunk once, redelivery is a no-op', async () => {
@@ -552,10 +560,10 @@ async function main() {
     const first = await t('/__t/queued')
     const raced = await t('/__t/deliver-twice')
     assert.deepEqual(raced.outcomes, [{ acked: true, retried: false }, { acked: true, retried: false }], JSON.stringify(raced).slice(0, 300))
-    assert.equal((await one('SELECT processed_count FROM bulk_delete_jobs WHERE id=?', created.json.jobId)).processed_count, freeLimits.bulkDeleteChunkSize)
-    assert.deepEqual(await customerAudits(10001, 11000), { n: freeLimits.bulkDeleteChunkSize, d: freeLimits.bulkDeleteChunkSize })
+    assert.equal((await one('SELECT processed_count FROM bulk_delete_jobs WHERE id=?', created.json.jobId)).processed_count, limits.bulkDeleteChunkSize)
+    assert.deepEqual(await customerAudits(10001, 11000), { n: limits.bulkDeleteChunkSize, d: limits.bulkDeleteChunkSize })
     const deliveries = await deliverAll()
-    assert.ok(deliveries.length >= Math.ceil(1000 / freeLimits.bulkDeleteChunkSize) - 1, `deliveries ${deliveries.length}`)
+    assert.ok(deliveries.length >= Math.ceil(1000 / limits.bulkDeleteChunkSize) - 1, `deliveries ${deliveries.length}`)
     for (const d of deliveries) {
       assert.equal(d.outcome.acked, true, JSON.stringify(d).slice(0, 300))
       assert.ok(d.calls <= 10, `delivery calls ${d.calls}`)
@@ -569,22 +577,22 @@ async function main() {
     assert.deepEqual(await customerAudits(10001, 11000), { n: 1000, d: 1000 })
   })
   await check('customers bulk delete cancelled after one chunk keeps exactly that chunk and its audit', async () => {
-    const ids = Array.from({ length: 400 }, (_, i) => 11001 + i)
+    const ids = Array.from({ length: CANCEL_N }, (_, i) => 11001 + i)
     const created = await api('POST', '/api/customers/bulk-delete-jobs', { reason: 'budget cancel', ids })
     assert.equal(created.status, 202)
     const firstDelivery = await t('/__t/deliver')
     assert.equal(firstDelivery.outcome.acked, true)
     const progressed = await one('SELECT processed_count FROM bulk_delete_jobs WHERE id=?', created.json.jobId)
-    assert.ok(progressed.processed_count > 0 && progressed.processed_count < 400, JSON.stringify(progressed))
+    assert.ok(progressed.processed_count > 0 && progressed.processed_count < CANCEL_N, JSON.stringify(progressed))
     const cancel = await api('POST', `/api/customers/bulk-delete-jobs/${created.json.jobId}/cancel`)
     assert.equal(cancel.status, 200)
     await deliverAll()
     const job = await one('SELECT status, processed_count FROM bulk_delete_jobs WHERE id=?', created.json.jobId)
     assert.equal(job.status, 'cancelled')
     assert.equal(job.processed_count, progressed.processed_count)
-    const deleted = 400 - (await one('SELECT COUNT(*) n FROM customers WHERE id BETWEEN 11001 AND 11400')).n
+    const deleted = CANCEL_N - (await one(`SELECT COUNT(*) n FROM customers WHERE id BETWEEN 11001 AND ${11000 + CANCEL_N}`)).n
     assert.equal(deleted, progressed.processed_count)
-    assert.deepEqual(await customerAudits(11001, 11400), { n: deleted, d: deleted })
+    assert.deepEqual(await customerAudits(11001, 11000 + CANCEL_N), { n: deleted, d: deleted })
   })
 
   await world.mf.dispose()
