@@ -188,6 +188,15 @@ const CHIP_LOOK = 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-
 
 function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: EditorSectionNavProps) {
   const chips = useRef(new Map<EditorSectionId, HTMLElement>())
+  const focusAfterSelect = useRef(false)
+
+  // The open tab is a different element from a closed one (it carries its word), so selecting remounts the tab being reached.
+  // Focus therefore moves after the commit, to the tab that is now open.
+  useEffect(() => {
+    if (!focusAfterSelect.current) return
+    focusAfterSelect.current = false
+    chips.current.get(active)?.focus()
+  }, [active])
 
   // Arrow keys, Home and End move between the tabs and open the one reached: opening costs no request, so focus and selection travel together.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -199,8 +208,12 @@ function SectionChips({ ed, sections, active, dirty, sellerMissing, onSelect }: 
     if (next < 0) return
     event.preventDefault()
     const target = sections[next]
+    if (target.id === active) {
+      chips.current.get(active)?.focus()
+      return
+    }
+    focusAfterSelect.current = true
     onSelect(target.id)
-    chips.current.get(target.id)?.focus()
   }
 
   return (
