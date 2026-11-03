@@ -100,10 +100,12 @@ type ProductDetailModalProps = {
   brandColorMap?: BrandColorLookup
   fmtUSD: FormatMoney
   fmtKHR: FormatMoney
-  onEdit: () => void
   // Delete lives inside the Edit flow (ProductForm's footer), not here.
   // Each action renders only when its callback is passed, so the caller's
-  // permission check decides whether the button exists at all.
+  // permission check decides whether the button exists at all. Edit used to be
+  // the one required prop, drawn for everyone: a role with View and no Edit was
+  // handed a form it could type into and the Worker then refused the save.
+  onEdit?: () => void
   onAddVariant?: () => void
   onDiscount?: () => void
   onAdjustStock?: () => void
@@ -441,38 +443,42 @@ export default function ProductDetailModal({
           {/* One row at every width (owner button policy, 27 Sep): Edit is the
               main action with icon + word; Add variant and Adjust stock are
               icon-only with a translated tooltip. */}
-          <div className="flex items-center gap-2 border-t border-gray-200 px-3 py-2.5 dark:border-gray-700 sm:justify-end">
-            {onAddVariant ? (
-              <button
-                type="button"
-                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
-                onClick={onAddVariant}
-                aria-label={T('add_variant', 'Add variant')}
-                title={T('add_variant', 'Add variant')}
-              >
-                <PlusCircle className="h-4 w-4" />
-              </button>
-            ) : null}
-            {onAdjustStock ? (
-              <button
-                type="button"
-                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
-                onClick={onAdjustStock}
-                aria-label={T('adjust_stock', 'Adjust stock')}
-                title={T('adjust_stock', 'Adjust stock')}
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 sm:flex-none`}
-              onClick={onEdit}
-            >
-              <Pencil className="h-4 w-4 shrink-0" />
-              <span className="truncate">{T('edit', 'Edit')}</span>
-            </button>
-          </div>
+          {onEdit || onAddVariant || onAdjustStock ? (
+            <div className="flex items-center gap-2 border-t border-gray-200 px-3 py-2.5 dark:border-gray-700 sm:justify-end">
+              {onAddVariant ? (
+                <button
+                  type="button"
+                  className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
+                  onClick={onAddVariant}
+                  aria-label={T('add_variant', 'Add variant')}
+                  title={T('add_variant', 'Add variant')}
+                >
+                  <PlusCircle className="h-4 w-4" />
+                </button>
+              ) : null}
+              {onAdjustStock ? (
+                <button
+                  type="button"
+                  className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
+                  onClick={onAdjustStock}
+                  aria-label={T('adjust_stock', 'Adjust stock')}
+                  title={T('adjust_stock', 'Adjust stock')}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                </button>
+              ) : null}
+              {onEdit ? (
+                <button
+                  type="button"
+                  className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 sm:flex-none`}
+                  onClick={onEdit}
+                >
+                  <Pencil className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{T('edit', 'Edit')}</span>
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

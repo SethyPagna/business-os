@@ -1496,6 +1496,9 @@ function ProductsFullEditor() {
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
   const canRemoveProduct = can('products', 'delete')
+  // Edit product opens the product form, so every way into the form from a list (the detail's Edit, the group menu's Add image) needs
+  // it: PUT /api/products/:id answers 403 without it. A Review-tier role keeps it -- its edit is queued for approval.
+  const canEditProduct = can('products', 'edit')
   // Bulk delete is its own switch on top of Delete (Refused, never queued -- utils/permissionActions.ts), and the Worker's bulk job
   // route (POST /bulk-delete-jobs, above BULK_DELETE_JOB_THRESHOLD rows) reads it. A smaller selection is deleted row by row, which the
   // Worker allows with Delete alone, so the button holds the line for both paths: no "Bulk delete" grant, no bulk Delete.
@@ -5019,21 +5022,24 @@ function ProductsFullEditor() {
     // The same Add variant grant as the detail's button: this menu used to offer it to every role with no check at all.
     const menuItems = [
       ...(canAddVariant ? [{ label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) }] : []),
-      { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
+      // Add image opens the product form (Edit) and the picture goes in through products:image.
+      ...(canEditProduct && canWireImages ? [{ label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') }] : []),
     ]
     return (
       <>
       {hiddenBadge}
-      <PortalMenu
-        align="right"
-        compact
-        triggerWrapperClassName="shrink-0"
-        trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
-        items={menuItems}
-      />
+      {menuItems.length ? (
+        <PortalMenu
+          align="right"
+          compact
+          triggerWrapperClassName="shrink-0"
+          trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
+          items={menuItems}
+        />
+      ) : null}
       </>
     )
-  }, [canAddVariant, openProductFormTab, tr])
+  }, [canAddVariant, canEditProduct, canWireImages, openProductFormTab, tr])
 
   // P3-L6. Held rows are keyed off the group's FULL id list, not its display
   // rows: mergeSameDetailRows collapses branch-only duplicates into one
@@ -5827,7 +5833,7 @@ function ProductsFullEditor() {
             navigateTo={navigateTo}
             fmtKHR={fmtKHR}
             t={t}
-            onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
+            onEdit={canEditProduct ? () => { setDetailProduct(null); openProductFormTab(detailProduct, 'basic') } : undefined}
             onAddVariant={canAddVariant ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
             onAdjustStock={canAdjustInventoryStock ? () => { setDetailProduct(null); setStockSession({ mode: 'add', product: detailProduct }) } : undefined}
             onClose={()=>setDetailProduct(null)}

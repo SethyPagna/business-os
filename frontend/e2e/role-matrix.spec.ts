@@ -369,11 +369,9 @@ for (const role of ROLES.filter((entry) => { const access = accessFor(entry); re
     const session = await begin(browser, testInfo.project.name, role)
     const { page, access } = session
     const wantEdit = grant(access, 'products', 'edit')
-    // APP BUG, kept as a case: ProductDetailModal.tsx:466-470 draws Edit unconditionally (onEdit is a required prop), Products.tsx:5828 passes it
-    // with no products:edit check, and openProductFormTab (:4418) opens the form for anyone. The form guards only the price and cost fieldsets
-    // (ProductForm.tsx:2028/2059/1998), so a role with View and no Edit gets a form it can type into and the Worker then refuses the save.
-    // Found by the locked-employee role (products:edit switched off); every shipped role that can open Products also holds edit.
-    knownDefect(!wantEdit, 'ProductDetailModal.tsx:466 draws Edit with no products:edit check; Products.tsx:5828 passes onEdit unconditionally')
+    // FIXED (PERM-UI, 3 Nov): ProductDetailModal drew Edit unconditionally (onEdit was a required prop) and openProductFormTab opens the form for
+    // anyone; the form guards only the price and cost fieldsets, so a role with View and no Edit got a form it could type into and the Worker
+    // then refused the save. Found by the locked-employee role (products:edit switched off). onEdit is now optional and passed with products:edit.
     try {
       const slot = await open(page, '/products', 'products')
       await slot.getByText(PRODUCT_NAME, { exact: true }).filter({ visible: true }).first().click()

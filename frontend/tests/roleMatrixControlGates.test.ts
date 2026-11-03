@@ -108,6 +108,17 @@ test('PRODUCTS: Add variant (the detail button and the group row menu) needs pro
   assert.equal(add({ 'products:add': false }), false, 'Add off, Variant on: the Worker needs both')
 })
 
+test('PRODUCTS: every way into the product form from a list needs products:edit, and the detail modal draws Edit only when handed onEdit', () => {
+  assert.ok(productsSource.includes("const canEditProduct = can('products', 'edit')"))
+  assert.ok(productsSource.includes('onEdit={canEditProduct ? () =>'), 'the detail Edit')
+  assert.ok(productsSource.includes("...(canEditProduct && canWireImages ? [{ label: tr('add_image', 'Add image')"), 'the group row menu Add image (it opens the form)')
+  assert.equal(productsSource.split('openProductFormTab(').length - 1, 2, 'openProductFormTab is called by the detail Edit and the group menu: a new caller must be gated and listed here')
+  const modal = read('../src/components/products/surfaces/ProductDetailModal.tsx')
+  assert.ok(modal.includes('onEdit?: () => void'), 'onEdit is optional, like every other action of the modal')
+  assert.match(modal, /\{onEdit \? \(\s*<button[^>]*onClick=\{onEdit\}/)
+  assert.ok(modal.includes('{onEdit || onAddVariant || onAdjustStock ? ('), 'a read-only role gets no empty action strip')
+})
+
 test('RETURNS: the customer and the supplier create buttons are drawn only for a role with returns:add', () => {
   const returns = read('../src/components/returns/Returns.tsx')
   assert.match(returns, /const canAddReturn = can\('returns', 'add'\)/)
