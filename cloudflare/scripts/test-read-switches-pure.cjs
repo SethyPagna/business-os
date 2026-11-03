@@ -229,6 +229,62 @@ async function main() {
     assert.equal(await rotates.epoch(env), 'fedcba9876543210fedcba9876543210', 'a rotation is seen by the next refresh')
   })
 
+  await check('callers that arrive while the flags are being read share that read: a cold isolate answering N cached sections reads once, not N times', async () => {
+    clock = 5_900_000
+    const env = fakeEnv(stored({ epoch: 2, switches: { probe: 'off' } }), '0123456789abcdef0123456789abcdef')
+    const store = newStore()
+    const answers = await Promise.all([store.epoch(env), store.epoch(env), store.read(env, 'probe'), store.epoch(env), store.read(env, 'probe')])
+    assert.equal(env.attempts, 1, 'five concurrent callers, one statement')
+    assert.deepEqual(answers.map((a) => (typeof a === 'string' ? a : a.epoch)), ['0123456789abcdef0123456789abcdef', '0123456789abcdef0123456789abcdef', 2, '0123456789abcdef0123456789abcdef', 2])
+    await store.epoch(env)
+    assert.equal(env.attempts, 1, 'the fresh memo answers the next caller')
+    clock += 15_000
+    await Promise.all([store.epoch(env), store.epoch(env), store.epoch(env)])
+    assert.equal(env.attempts, 2, 'the next period is one more statement, shared again')
+    // A reset drops the shared read: the caller after it starts a new one and never joins a read that began before the reset.
+    const slow = fakeEnv(null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    const gate = new Promise((resolve) => { slow.release = resolve })
+    const realPrepare = slow.DB.prepare
+    slow.DB.prepare = (sql) => { const statement = realPrepare(sql); return { bind: (...values) => { const bound = statement.bind(...values); return { all: async () => { const answer = await bound.all(); await gate; return answer } } } } }
+    const rotating = newStore()
+    const before = rotating.epoch(slow)
+    rotating.reset()
+    slow.epoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const after = rotating.epoch(slow)
+    slow.release()
+    assert.equal(await before, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    assert.equal(await after, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'a caller after a reset reads the world as it is now')
+    assert.equal(slow.attempts, 2)
+  })
+
+  await check('F2 (review of 6.0.1041): priming a flip never makes an old data epoch look fresh; the next epoch read goes to the database', async () => {
+    clock = 6_500_000
+    const OLD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const NEW = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    // The control: inside its period a plain memo does answer the epoch it read, so the assertions below can tell the two apart.
+    const plain = newStore()
+    const plainEnv = fakeEnv(stored({ epoch: 1, switches: {} }), OLD)
+    assert.equal(await plain.epoch(plainEnv), OLD)
+    clock += 5_000
+    plainEnv.epoch = NEW
+    assert.equal(await plain.epoch(plainEnv), OLD, 'a memo inside its period answers without reading')
+    assert.equal(plainEnv.attempts, 1)
+    // The defect: the epoch was read ten minutes ago, a restore rotated it since, and an admin flip primes the memo.
+    clock = 7_000_000
+    const store = newStore()
+    const env = fakeEnv(stored({ epoch: 1, switches: {} }), OLD)
+    assert.equal(await store.epoch(env), OLD)
+    clock += 10 * 60_000
+    env.epoch = NEW
+    env.rows = stored({ epoch: 2, switches: { probe: 'on' } })
+    store.prime(sw.parseReadSwitches(env.rows))
+    assert.equal(store.epochTagNow(), null, 'no tag of the old epoch is announced after a prime')
+    assert.equal(await store.epoch(env), NEW, 'the epoch is read again, not carried over from ten minutes ago')
+    assert.equal(env.attempts, 2)
+    assert.equal(store.peek().epoch, 2, 'the flip itself is still what the memo holds')
+    assert.equal(store.header(), 'e=2;probe=1')
+  })
+
   await check('a committed flip is primed into the memo; a read that started before it cannot overwrite it', async () => {
     clock = 6_000_000
     const store = newStore()

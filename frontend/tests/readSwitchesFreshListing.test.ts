@@ -109,7 +109,7 @@ await runTest('the panel\'s own listing read bypasses the client cache: one refu
   assert.ok(server.gets >= 3, 'the first load, the reload after the refusal and the reload after the flip each reached the server')
 }))
 
-await runTest('after a successful flip the reload shows the flip, not the listing cached before it', () => withServer(async (server) => {
+await runTest('after a successful flip the reload shows the flip, not the listing cached before it', () => withServer(async () => {
   let listing = flow.normalizeReadSwitches(await runtime.getReadSwitches()) as Listing
   const deps = {
     t: (key: string) => key,

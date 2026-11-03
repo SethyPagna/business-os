@@ -5,8 +5,17 @@
 //   X-BOS-Epoch     8 hex characters naming the database's data epoch
 // A header that is missing, malformed or older than SIGNAL_TTL_MS counts as nothing: every switch is OFF, which is the
 // behaviour of a client that never heard of switches.
+//
+// Two of the headers are also news. A build that is not the one this tab runs, seen for the first time, fires SERVER_BUILD_EVENT
+// once; index.tsx turns it into one service-worker update check, and the worker's own byte comparison stays the only thing that
+// raises the "Restart now" bar (this module never restarts anything). A new data epoch fires DATA_EPOCH_EVENT once (api/dataEpoch.ts).
+import { __resetDataEpochForTests, observeDataEpoch } from './dataEpoch.ts'
+
+declare const __FRONTEND_BUILD_HASH__: string | undefined
 
 export const SIGNAL_TTL_MS = 45_000
+export const SERVER_BUILD_EVENT = 'sync:server-build'
+const BUILD_TOKEN = /^[A-Za-z0-9._-]{1,64}$/
 const SWITCH_NAME = /^[a-z][a-z0-9_]{0,39}$/
 const BUDGET_ZONES = new Set(['green', 'amber', 'red', 'black'])
 
@@ -17,6 +26,18 @@ let switches: { epoch: number; on: Set<string>; at: number } | null = null
 let budget: (ServerBudget & { at: number }) | null = null
 let build: string | null = null
 let dataEpoch: string | null = null
+let announcedBuild: string | null = null
+
+const runningBuild = (): string => (typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev')
+
+function announceServerBuild(next: string): void {
+  const running = runningBuild()
+  if (next === running) { announcedBuild = null; return }
+  if (!running || running === 'dev' || next === announcedBuild) return
+  announcedBuild = next
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+  try { window.dispatchEvent(new CustomEvent(SERVER_BUILD_EVENT, { detail: { build: next, running, ts: Date.now() } })) } catch { /* an observer never fails a response */ }
+}
 
 export function parseSwitchesHeader(value: string | null | undefined): { epoch: number; on: Set<string> } | null {
   if (typeof value !== 'string' || !value || value.length > 400) return null
@@ -58,9 +79,9 @@ export function recordServerSignals(headers: { get(name: string): string | null 
   const nextBudget = parseBudgetHeader(headers.get('X-BOS-Budget'))
   if (nextBudget) budget = { ...nextBudget, at: now }
   const nextBuild = headers.get('X-BOS-Build')
-  if (nextBuild && /^[A-Za-z0-9._-]{1,64}$/.test(nextBuild)) build = nextBuild
+  if (nextBuild && BUILD_TOKEN.test(nextBuild)) { build = nextBuild; announceServerBuild(nextBuild) }
   const nextEpoch = headers.get('X-BOS-Epoch')
-  if (nextEpoch && /^[0-9a-f]{8}$/.test(nextEpoch)) dataEpoch = nextEpoch
+  if (nextEpoch && /^[0-9a-f]{8}$/.test(nextEpoch)) { dataEpoch = nextEpoch; observeDataEpoch(nextEpoch, 'header') }
   return nextBudget
 }
 
@@ -84,4 +105,6 @@ export function __resetServerSignalsForTests(): void {
   budget = null
   build = null
   dataEpoch = null
+  announcedBuild = null
+  __resetDataEpochForTests()
 }

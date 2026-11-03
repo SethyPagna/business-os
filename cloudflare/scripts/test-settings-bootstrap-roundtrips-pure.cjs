@@ -109,6 +109,7 @@ const authLib = {
 }
 
 const authRoute = load('routes/auth.ts', {
+  '../lib/readSwitches': { readDataEpoch: async () => null, epochTag: async () => null }, // 6.0.1048: /bootstrap announces the data epoch
   '../lib/db': { getDb: () => fakeDb },
   '../lib/auth': authLib,
   '../lib/settingsVisibility': settingsVisibility,

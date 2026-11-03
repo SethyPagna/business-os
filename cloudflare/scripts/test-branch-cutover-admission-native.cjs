@@ -75,6 +75,7 @@ function backups(user = { id: 7, username: 'owner', grants: ['backup', 'backup_r
     '../lib/acquisitionCostAccess': { canViewAcquisitionCosts: () => true, canEditAcquisitionCosts: () => true },
     '../lib/destructiveStepUp': { denyUnlessDefaultAdmin: async () => { backupCalls.push('step-up-admin'); return null }, denyUnlessCurrentPassword: async () => { backupCalls.push('step-up-password'); return null } },
     '../lib/backup': backup, '../lib/maintenance': maintenance, '../lib/cache': { bumpVersions: async () => {} },
+    '../lib/dataEpoch': { rotateDataEpoch: async () => 'e'.repeat(32) }, // 6.0.1048: a restore rotates the data epoch (its own tests: test-cache-restore-epoch-native)
   }).default
 }
 let failures = 0

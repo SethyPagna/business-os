@@ -897,7 +897,7 @@ function getConflictRefreshChannels(error: any, fallbackChannel: string): string
   return [getChannelRefreshKey(fallbackChannel)]
 }
 
-function dispatchGlobalDataRefresh(channels: string[] = RECONNECT_REFRESH_CHANNELS): void {
+export function dispatchGlobalDataRefresh(channels: string[] = RECONNECT_REFRESH_CHANNELS): void {
   if (typeof window === 'undefined') return
   ;(Array.isArray(channels) ? channels : RECONNECT_REFRESH_CHANNELS).forEach((channel) => {
     window.dispatchEvent(new CustomEvent('sync:update', {

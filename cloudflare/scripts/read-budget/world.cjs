@@ -131,12 +131,18 @@ async function migrateDir(db, dir) {
   }
 }
 
-function options({ tier, script, persist }) {
-  const bindings = { PLAN_TIER: tier, BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
+// The bound frontend assets, as far as the Worker reads them: the build manifest that X-BOS-Build is taken from.
+const TEST_BUILD_HASH = 'testbuild-1'
+const staticAssets = async (request) => (new URL(request.url).pathname === '/business-os-build.json'
+  ? Response.json({ revision: 'test', hash: TEST_BUILD_HASH, builtAt: '2026-11-02T00:00:00.000Z' })
+  : new Response('not found', { status: 404 }))
+
+function options({ tier, script, persist, extra = {} }) {
+  const bindings = { ...extra, PLAN_TIER: tier, BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
     BUSINESS_OS_ORGANIZATION_SLUG: 'budgetorg', BUSINESS_OS_ORGANIZATION_NAME: 'Budget Org', TELEGRAM_BOT_TOKEN: '123456:budget-token', BUSINESS_OS_ADMIN_PASSWORD: ADMIN.bootstrapPassword }
   return { workers: [{ name: 'w0', modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: { DB: 'db-main', IMPORT_DB: 'db-import' }, r2Buckets: { ASSETS: 'r2-assets' }, kvNamespaces: { CACHE: 'kv-cache' },
-    durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' }, bindings, outboundService: outbound }],
+    durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' }, serviceBindings: { STATIC_ASSETS: staticAssets }, bindings, outboundService: outbound }],
     log: new Log(LogLevel.ERROR),
     d1Persist: path.join(persist, 'd1'), kvPersist: path.join(persist, 'kv'), r2Persist: path.join(persist, 'r2'), cachePersist: path.join(persist, 'cache'), durableObjectsPersist: path.join(persist, 'do') }
 }
@@ -230,7 +236,9 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir } = {
   const world = { mf, tier, persist, orgId, script, cookie: null, ctx: seedContext(), deadlineHits: 0 }
   world.db = await mf.getD1Database('DB', 'w0')
   const refresh = async () => { world.db = await mf.getD1Database('DB', 'w0') }
-  world.restart = async () => { await mf.setOptions(options({ tier, script, persist })); await refresh() }
+  // restart(extra) starts a fresh isolate on the same storage; `extra` bindings (CF_VERSION_METADATA: { id } simulates a deploy) stay for later restarts.
+  world.extra = {}
+  world.restart = async (extra) => { if (extra !== undefined) world.extra = extra; await mf.setOptions(options({ tier, script, persist, extra: world.extra })); await refresh() }
   world.all = async (sql, ...values) => (await world.db.prepare(sql).bind(...values).all()).results
   // One request through the counting proxy. Past the deadline the isolate is restarted (a runaway statement dies with it).
   world.send = async (method, url, body, opts = {}) => {
@@ -251,7 +259,8 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir } = {
     let json = null
     try { json = JSON.parse(text) } catch { /* not JSON */ }
     const h = (k) => response.headers.get(k)
-    return { status: response.status, ms: Date.now() - started, calls: Number(h('x-d1-calls')), statements: Number(h('x-d1-statements')), rr: Number(h('x-d1-rr')), rw: Number(h('x-d1-rw')),
+    const cache = /cache;desc="(\w+)"/.exec(h('server-timing') || '')
+    return { status: response.status, cache: cache ? cache[1] : undefined, ms: Date.now() - started, calls: Number(h('x-d1-calls')), statements: Number(h('x-d1-statements')), rr: Number(h('x-d1-rr')), rw: Number(h('x-d1-rw')),
       bgError: decodeURIComponent(h('x-d1-bgerr') || '') || undefined, setCookie: h('set-cookie'), json, text }
   }
   world.last = async () => (await mf.dispatchFetch(ORIGIN + '/__budget/last')).json()
@@ -280,7 +289,7 @@ async function runShape(world, shape, { cold = false, cacheMiss = true, counts, 
   let measured
   const send = async (method, url, body) => { measured = await world.send(method, url, body, { miss: cacheMiss, cookie: shape.anon ? null : undefined }); return measured }
   const result = (shape.run ? await shape.run(world, send, prepared) : await send(shape.method || 'GET', shape.url, shape.body)) || measured
-  const out = { status: result.status, code: (result.json && result.json.code) || undefined, overDeadline: result.overDeadline || false,
+  const out = { status: result.status, cache: result.cache, code: (result.json && result.json.code) || undefined, overDeadline: result.overDeadline || false,
     rowsRead: result.rr, rowsWritten: result.rw, calls: result.calls, statements: result.statements, ms: result.ms, bgError: result.bgError, json: result.json }
   if (counts) { out.countsBefore = countsBefore; out.countsAfter = await counts(world) }
   if (fingerprints && !result.overDeadline) out.fingerprints = fingerprintOf((await world.last()).stmts)
@@ -298,4 +307,4 @@ async function explain(world, stmt) {
   return rows.map((r) => r.detail)
 }
 
-module.exports = { bootWorld, runShape, lastStatements, explain, normalizeSql, fingerprintOf, ROOT, ORIGIN, DEADLINE_MS }
+module.exports = { bootWorld, runShape, lastStatements, explain, normalizeSql, fingerprintOf, ROOT, ORIGIN, DEADLINE_MS, TEST_BUILD_HASH }

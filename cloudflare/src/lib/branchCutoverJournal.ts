@@ -1,4 +1,5 @@
 import type { BindParams, D1Compat } from './db'
+import { ROTATE_DATA_EPOCH_SQL } from './dataEpochSql'
 
 type Phase = 'capturing' | 'snapshots' | 'moving' | 'verifying' | 'ready' | 'completed' | 'aborted'
 export type BranchCutoverOwnership = {
@@ -228,7 +229,9 @@ async function commitJournalOnly(db: D1Compat, row: BranchCutoverJournalRow, ass
     AND EXISTS (SELECT 1 FROM system_flags WHERE key='branch_cutover_control_incarnation' AND value=@controlIncarnation)
     THEN 1 ELSE json_extract('[1]', '$[branch_cutover_journal_conflict]') END`, params },
   { sql: `UPDATE branch_cutovers SET ${assignments},revision=revision+1,updated_at=@updatedAt WHERE operation_id=@operationId AND revision=@revision`, params }]
-  if (clearOwnedFlag) statements.push({ sql: "DELETE FROM system_flags WHERE key='maintenance' AND value=@flag", params })
+  // The epoch moves in the SAME transaction as the release: no reader can see the hold gone with the old epoch still in force, and a
+  // batch that cannot rotate does not release (CACHE-LIFECYCLE R2, R4). Entries stored during the run become unreachable at once.
+  if (clearOwnedFlag) statements.push({ sql: ROTATE_DATA_EPOCH_SQL, params: {} }, { sql: "DELETE FROM system_flags WHERE key='maintenance' AND value=@flag", params })
   statements.push({ sql: selectRow, params })
   const results = await db.batchOnce(statements)
   const result = results[results.length - 1]?.results?.[0] as BranchCutoverJournalRow | undefined

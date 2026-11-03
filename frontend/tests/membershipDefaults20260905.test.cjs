@@ -15,7 +15,8 @@ const constants = evaluate(fs.readFileSync(path.join(root, 'src/constants.ts'), 
 const ast = ts.createSourceFile('POS.tsx', pos, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const functions = ['normalizeOrder', 'resolveOrderLoyaltyAccrual']
 const source = ast.statements.filter(node => ts.isFunctionDeclaration(node) && functions.includes(node.name?.text)).map(node => node.getText(ast).replace(/^export /, '')).map(code => `export ${code}`).join('\n')
-const { normalizeOrder, resolveOrderLoyaltyAccrual: resolve } = evaluate(source, constants)
+const { POS_ORDERS_SCHEMA } = evaluate(fs.readFileSync(path.join(root, 'src/utils/persistedRecordSchema.ts'), 'utf8'))
+const { normalizeOrder, resolveOrderLoyaltyAccrual: resolve } = evaluate(source, { ...constants, POS_ORDERS_SCHEMA })
 for (const setting of ['false', 'true']) {
   const expected = setting === 'true'
   let draft = normalizeOrder({}, 1)

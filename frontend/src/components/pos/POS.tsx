@@ -20,6 +20,7 @@ import { useSavingGate } from '../../utils/useSavingGate.ts'
 import SavingBlockedNote from '../shared/SavingBlockedNote.tsx'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { restoreUnresolvedPosCheckouts } from '../../utils/posUnresolvedCheckout.ts'
+import { POS_ORDERS_SCHEMA, announceNewerRecord, pickReadablePosOrders, posOrdersWriteTargets } from '../../utils/persistedRecordSchema.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
@@ -375,6 +376,8 @@ type DeliveryFormState = {
 type PosOrder = Record<string, unknown> & {
   cart: CartLineRecord[]
   checkoutRequestId: string
+  // The schema of the build that saved this order (utils/persistedRecordSchema.ts).
+  schema?: number
   money_precision_version?: 0 | 1
   checkoutPayload?: Record<string, unknown>
   checkoutReviewRequestId?: string
@@ -672,6 +675,7 @@ function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOr
   return {
     ...base,
     ...order,
+    schema: POS_ORDERS_SCHEMA,
     cart: Array.isArray(order.cart) ? order.cart : base.cart,
     customer: { ...base.customer, ...(order.customer || {}) },
     paymentDetails,
@@ -775,9 +779,19 @@ export default function POS() {
   const readPosDraft = (key: string, legacyKey: string): string | null => (
     readPosStorage('local', key) || readPosStorage('session', key) || readPosStorage('session', legacyKey)
   )
+  // Carts saved by a NEWER build (a rollback; another tab still on the new build) are not read under this build's rules and are
+  // never overwritten by it (utils/persistedRecordSchema.ts): that store is skipped, the person is told once, and the other store
+  // (this tab's sessionStorage) still carries this tab's work, which is also what a checkout's read-back accepts.
+  const readPosOrders = (): string | null => {
+    const picked = pickReadablePosOrders([readPosStorage('local', posOrdersStorageKey), readPosStorage('session', posOrdersStorageKey), readPosStorage('session', 'bos_pos_orders')])
+    if (picked.sawNewer) announceNewerRecord('cart')
+    return picked.raw
+  }
+  const posDraftTargets = (key: string) => (key === posOrdersStorageKey ? posOrdersWriteTargets(readPosStorage('local', key), readPosStorage('session', key)) : { local: true, session: true })
   const writePosDraft = (key: string, value: string): void => {
-    writePosStorage('local', key, value)
-    writePosStorage('session', key, value)
+    const { local, session } = posDraftTargets(key)
+    if (local) writePosStorage('local', key, value)
+    if (session) writePosStorage('session', key, value)
   }
 
 // Remote data shared across all orders
@@ -896,7 +910,7 @@ export default function POS() {
   const [orders, setOrders] = useState<PosOrder[]>(() => {
     restoreUnresolvedPosCheckouts(user, posStorageScope)
     try {
-      const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
+      const saved = readPosOrders()
       if (saved) {
         const parsed = JSON.parse(saved) as unknown
         if (Array.isArray(parsed) && parsed.length) return parsed.map((order, index) => normalizeOrder(order as Partial<PosOrder>, index + 1))
@@ -966,7 +980,7 @@ export default function POS() {
     restoreUnresolvedPosCheckouts(user, posStorageScope)
     let nextOrders: PosOrder[] = [normalizeOrder({}, 1)]
     try {
-      const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
+      const saved = readPosOrders()
       const parsed = saved ? JSON.parse(saved) as unknown : null
       if (Array.isArray(parsed) && parsed.length) nextOrders = parsed.map((order, index) => normalizeOrder(order as Partial<PosOrder>, index + 1))
     } catch {}

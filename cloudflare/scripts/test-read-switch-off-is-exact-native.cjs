@@ -39,12 +39,16 @@ function differing(a, b) {
 const DRAIN = 'telegram_scheduled_sends'
 const hasDrain = (m) => (m.fingerprints || []).some((f) => String(f.head).includes(DRAIN))
 const withoutDrain = (m) => ({ ...m, fingerprints: (m.fingerprints || []).filter((f) => !String(f.head).includes(DRAIN)) })
+// 6.0.1048: the flags read (switches + data epoch, memoised 15 s per isolate) is a refresh, not part of a shape: a request that lands just after the
+// window closes pays it. The measure the comparison keeps is one taken inside a window, so a refresh in it is measured again.
+const FLAGS_REFRESH = 'FROM system_flags WHERE key IN (?1, ?2)'
+const hasRefresh = (m) => (m.fingerprints || []).some((f) => String(f.head).includes(FLAGS_REFRESH))
 
 async function measure(world, shape, url) {
   const probe = { method: 'GET', url, anon: shape.anon }
   const first = withoutDrain(await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true }))
   let second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
-  for (let attempt = 0; hasDrain(second) && attempt < 3; attempt += 1) second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
+  for (let attempt = 0; (hasDrain(second) || hasRefresh(second)) && attempt < 3; attempt += 1) second = await runShape(world, probe, { cold: false, cacheMiss: true, fingerprints: true })
   if (hasDrain(second)) throw new Error(`${shape.id}: the drain was in four measures in a row`)
   return { first, second }
 }

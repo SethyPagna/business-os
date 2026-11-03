@@ -36,13 +36,16 @@ function find(test: (node: ts.Node) => boolean): ts.Node {
 }
 const ordersInitializer = (find((node) => ts.isCallExpression(node) && node.expression.getText(posTree) === 'useState' && node.typeArguments?.[0]?.getText(posTree) === 'PosOrder[]') as ts.CallExpression).arguments[0].getText(posTree)
 const readPosDraft = find((node) => ts.isVariableDeclaration(node) && node.name.getText(posTree) === 'readPosDraft').getText(posTree)
+// 6.0.1048: the till reads its orders through readPosOrders (the guarded reader: a cart a newer build wrote is not read).
+const readPosOrders = find((node) => ts.isVariableDeclaration(node) && node.name.getText(posTree) === 'readPosOrders').getText(posTree)
+const { pickReadablePosOrders, announceNewerRecord } = await import('../src/utils/persistedRecordSchema.ts')
 const helpers = ['posStorage', 'readPosStorage'].map((name) => find((node) => ts.isFunctionDeclaration(node) && node.name?.getText(posTree) === name).getText(posTree)).join('\n')
 type Order = { id: string; checkoutRequestId?: string; cart?: unknown[] }
 function tillOrders(user: { id: number; organization_id: number | null }): Order[] {
   const posStorageScope = String(user?.id || 'anonymous')
-  const body = `${js(helpers)}\n${js(`const ${readPosDraft}`)}\nreturn (${js(ordersInitializer).trim().replace(/;$/, '')})()`
-  return new Function('user', 'posStorageScope', 'posOrdersStorageKey', 'normalizeOrder', 'restoreUnresolvedPosCheckouts', body)(
-    user, posStorageScope, `businessos_pos_orders_${posStorageScope}`, (order: Order) => order, restoreUnresolvedPosCheckouts)
+  const body = `${js(helpers)}\n${js(`const ${readPosDraft}`)}\n${js(`const ${readPosOrders}`)}\nreturn (${js(ordersInitializer).trim().replace(/;$/, '')})()`
+  return new Function('user', 'posStorageScope', 'posOrdersStorageKey', 'normalizeOrder', 'restoreUnresolvedPosCheckouts', 'pickReadablePosOrders', 'announceNewerRecord', body)(
+    user, posStorageScope, `businessos_pos_orders_${posStorageScope}`, (order: Order) => order, restoreUnresolvedPosCheckouts, pickReadablePosOrders, announceNewerRecord)
 }
 
 // ---- one device ----
@@ -98,9 +101,9 @@ await check('a till that opened before the account resolved finds it when the ac
     && node.arguments[0]?.getText(posTree).includes('loadedDraftScopeRef.current = posStorageScope')) as ts.CallExpression).arguments[0].getText(posTree)
   let shown: Order[] = []
   const posStorageScope = '7'
-  new Function('user', 'posStorageScope', 'posOrdersStorageKey', 'posActiveStorageKey', 'posCounterStorageKey', 'loadedDraftScopeRef', 'normalizeOrder', 'restoreUnresolvedPosCheckouts', 'setOrders', 'setActiveId', 'setOrderCounter',
-    `${js(helpers)}\n${js(`const ${readPosDraft}`)}\nreturn (${js(effect).trim().replace(/;$/, '')})()`)(
-    A, posStorageScope, 'businessos_pos_orders_7', 'businessos_pos_active_7', 'businessos_pos_counter_7', { current: 'anonymous' }, (order: Order) => order, restoreUnresolvedPosCheckouts,
+  new Function('user', 'posStorageScope', 'posOrdersStorageKey', 'posActiveStorageKey', 'posCounterStorageKey', 'loadedDraftScopeRef', 'normalizeOrder', 'restoreUnresolvedPosCheckouts', 'pickReadablePosOrders', 'announceNewerRecord', 'setOrders', 'setActiveId', 'setOrderCounter',
+    `${js(helpers)}\n${js(`const ${readPosDraft}`)}\n${js(`const ${readPosOrders}`)}\nreturn (${js(effect).trim().replace(/;$/, '')})()`)(
+    A, posStorageScope, 'businessos_pos_orders_7', 'businessos_pos_active_7', 'businessos_pos_counter_7', { current: 'anonymous' }, (order: Order) => order, restoreUnresolvedPosCheckouts, pickReadablePosOrders, announceNewerRecord,
     (orders: Order[]) => { shown = orders }, () => {}, () => {})
   assert.deepEqual(pending(shown).map((order) => order.id), ['ord-sent'])
 })

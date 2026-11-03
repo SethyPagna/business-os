@@ -3,7 +3,7 @@ import { getHubPageFromLocation, navigationHash, needsNavigationGuard } from './
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
-import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
+import { cacheClearAll, ensureSyncUpdateCacheListener, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, forgetActorWriteAccount, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
 import { PASSWORD_CHANGE_REQUIRED_EVENT, currentApiRequestSequence, recoverUnresolvedSignout } from './api/http.ts'
@@ -16,6 +16,8 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
+import { observeDataEpoch, seedDataEpoch } from './api/dataEpoch.ts'
+import { installDataEpochReset } from './api/epochReset.ts'
 import { requestPersistentAppStorage } from './api/syncRuntime.ts'
 import { createSyncChannelScheduler, isRemoteSyncUpdate } from './api/syncRuntime.ts'
 import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
@@ -430,7 +432,6 @@ const SESSION_ONLY_STORAGE_KEYS = [
   STORAGE_KEYS.USER,
   STORAGE_KEYS.USER_EXPIRY,
 ]
-const RUNTIME_RECOVERY_SESSION_KEY = 'bos-runtime-version-recovery'
 
 function safeStorageGet(storage: Storage | null | undefined, key: string): string {
   try {
@@ -977,7 +978,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const nextUser = safePayload?.user || fallbackUser || null
     const runtimeDescriptor = buildRuntimeDescriptorFromBootstrap(safePayload)
     const storedRuntimeDescriptor = readStoredRuntimeDescriptor()
-    if (shouldResetForRuntimeChange(storedRuntimeDescriptor, runtimeDescriptor)) {
+    const hardRuntimeReset = shouldResetForRuntimeChange(storedRuntimeDescriptor, runtimeDescriptor)
+    if (hardRuntimeReset) {
       // On Cloudflare only the organization changes the runtime: another
       // organization's account signed in here. The previous account's
       // unresolved checkouts stay theirs (bound to account, organization and
@@ -990,7 +992,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       })
       if (isActorSessionQuarantined()) throw new Error('Session reconciliation is required.')
     }
-    writeStoredRuntimeDescriptor(runtimeDescriptor)
+    // The data epoch is the one runtime field that never resets the account's local state: a restore keeps the same database, so a
+    // new epoch only drops caches (api/epochReset.ts) and the drafts and carts stay. A bootstrap that carries none (an older Worker,
+    // an unreadable epoch row) leaves the stored one in place.
+    installDataEpochReset()
+    const storedDataEpoch = hardRuntimeReset ? '' : storedRuntimeDescriptor.dataEpoch
+    seedDataEpoch(storedDataEpoch)
+    observeDataEpoch(runtimeDescriptor.dataEpoch, 'bootstrap')
+    writeStoredRuntimeDescriptor({ ...runtimeDescriptor, dataEpoch: runtimeDescriptor.dataEpoch || storedDataEpoch })
 
     // Same guard loadSettings has: the offline / invalid-session / recovery
     // bootstrap fallbacks legitimately carry `settings: {}` — replacing live
@@ -1201,6 +1210,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       return undefined
     }
     ensureSyncUpdateCacheListener()
+    installDataEpochReset()
 
     let disposed = false
     const syncScheduler = createSyncChannelScheduler({
@@ -1334,45 +1344,28 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       writeBlockedNoticeAtRef.current = now
     }
     const onRuntimeMismatch = (e: Event) => {
-      const detail = eventDetail<{ backend?: { frontend?: { hash?: string } }; message?: string }>(e)
-      const message = detail.message
-        || 'Business OS server update is required. Restart the server, then refresh this page.'
+      const detail = eventDetail<{ backend?: { frontend?: { hash?: string } } }>(e)
       const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
       setSyncServerUnreachable(true)
-      // iOS may ignore beforeunload prompts. Keep the current build running
-      // when an editor is dirty and persist any debounced draft immediately;
-      // the next clean recovery event can safely reload the new runtime.
+      // The app never restarts on its own (owner rule, CACHE-LIFECYCLE R6): a build mismatch raises the "Restart now" bar and does
+      // nothing else, whether or not work is open. restartIntoLatestApp() is the one way through and it refuses while unfinished
+      // work is open; every debounced draft is saved now so a restart the user chooses later loses nothing.
+      flushPendingWorkDrafts()
+      window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+        detail: {
+          reason: 'runtime_mismatch',
+          message: 'New version ready',
+          version: runtimeHash,
+          ts: Date.now(),
+        },
+      }))
       if (hasDirtyWork()) {
-        flushPendingWorkDrafts()
-        window.dispatchEvent(new CustomEvent('sync:app-update-available', {
-          detail: {
-            reason: 'runtime_mismatch',
-            message: 'New version ready',
-            version: runtimeHash,
-            ts: Date.now(),
-          },
-        }))
         setNotification({
           message: 'An app update is ready. Save or discard unfinished work before reloading.',
           type: 'warning',
           id: Date.now(),
         })
-        return
       }
-      try {
-        const recoveryKey = `${FRONTEND_BUILD_INFO.hash || 'dev'}:${runtimeHash || 'unknown'}`
-        const previous = window.sessionStorage.getItem(RUNTIME_RECOVERY_SESSION_KEY)
-        if (previous !== recoveryKey) {
-          window.sessionStorage.setItem(RUNTIME_RECOVERY_SESSION_KEY, recoveryKey)
-          const url = new URL(window.location.href)
-          url.searchParams.set('__bos_reload', String(Date.now()))
-          if (runtimeHash) url.searchParams.set('__bos_server_build', runtimeHash)
-          flushPendingWorkDrafts()
-          window.location.replace(url.toString())
-          return
-        }
-      } catch (_) {}
-      setNotification({ message, type: 'error', id: Date.now() })
     }
     const onConflict = (e: Event) => {
       const detail = eventDetail<WriteConflictDetail>(e)

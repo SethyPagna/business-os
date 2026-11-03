@@ -61,7 +61,7 @@ function makeWorld(oracleSha = null, { user = USER } = {}) {
     'lib/auth.ts': { requireAuth: async (c, next) => { c.set('user', user); return next() } },
     'lib/audit.ts': { audit: noop },
     'durable-objects/broadcastHub.ts': { broadcast: noop },
-    'lib/cache.ts': { bumpVersion: noop, bumpVersions: noop, getVersionWithFallback: async () => '0', cachedJsonResponse: async (_r, _c, _k, _t, loader) => loader() },
+    'lib/cache.ts': { bumpVersion: noop, bumpVersions: noop, getVersionWithFallback: async () => '0', cachedJsonResponse: async (_r, _c, _k, _t, loader) => loader(), cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev' },
     'lib/telegram.ts': { sendTelegramEvent: async () => false, sendTelegramShiftReport: async () => false, scheduleTelegramShiftOverview: async () => ({}), sendReturnTelegramEvent: async () => false },
   }
   function load(rel) {

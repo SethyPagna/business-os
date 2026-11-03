@@ -51,8 +51,10 @@ async function main() {
         return row
       }, run: async () => {
         return { meta: { changes: db.prepare(sql).run(...params).changes } }
-      } })
-      return { ...bind([]), bind: (...params) => bind(params) }
+      },
+      // 6.0.1048: the restore and the force-clear rotate the data epoch and read it back through lib/db's get(), which reads with all().
+      all: async () => ({ results: db.prepare(sql.replace(/\?\d+/g, '?')).all(...params), meta: { changes: 0 } }) })
+      return { ...bind([]), bind: (...params) => bind(params.filter((param) => param !== undefined && !(param && typeof param === 'object' && !Array.isArray(param) && !Object.keys(param).length))) }
     }, batch: async statements => {
       if (!raceFired && scenario.startsWith('restore-race-')) {
         raceFired=true

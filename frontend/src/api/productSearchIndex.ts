@@ -67,7 +67,9 @@ const state: {
   stale: boolean
   generation: number
   inflight: Promise<void> | null
-} = { status: 'idle', index: null, pages: new Map(), scope: null, checkedAt: 0, stale: true, generation: 0, inflight: null }
+  // Counts epoch resets: a load that began before one describes another database state and must not store anything.
+  resets: number
+} = { status: 'idle', index: null, pages: new Map(), scope: null, checkedAt: 0, stale: true, generation: 0, inflight: null, resets: 0 }
 
 const listeners = new Set<() => void>()
 function notify(): void {
@@ -117,6 +119,10 @@ const transport = {
     const { writeCachedQueryResult } = await import('./queryCache.ts')
     if (isActorReadScopeCurrent(scope)) await writeCachedQueryResult(STORE_KEY, value, scope)
   },
+  async clearStored(): Promise<void> {
+    const { clearCachedQueryResults } = await import('./queryCache.ts')
+    await clearCachedQueryResults([STORE_KEY])
+  },
 }
 
 async function readStored(): Promise<StoredIndex | null> {
@@ -140,15 +146,16 @@ function fetchPage(page: number, have: string | undefined): Promise<IndexPage> {
 
 // One revalidation wave: every page the client holds goes out in parallel
 // with its hash; pages the first answer lists but the client lacks follow.
-async function revalidate(scope: ActorReadScope): Promise<boolean> {
+async function revalidate(scope: ActorReadScope, mark: number): Promise<boolean> {
+  const stillCurrent = () => isActorReadScopeCurrent(scope) && state.resets === mark
   const held = new Map(state.pages)
   const pageNumbers = held.size ? [...held.keys()] : [0]
   const answers = await Promise.all(pageNumbers.map((page) => fetchPage(page, held.get(page)?.hash)))
-  if (!isActorReadScopeCurrent(scope)) return false
+  if (!stillCurrent()) return false
   const buckets = answers.find((answer) => Array.isArray(answer?.buckets))?.buckets ?? []
   const missing = buckets.filter((page) => !pageNumbers.includes(page))
   const more = missing.length ? await Promise.all(missing.map((page) => fetchPage(page, undefined))) : []
-  if (!isActorReadScopeCurrent(scope)) return false
+  if (!stillCurrent()) return false
   const next = new Map<number, StoredPage>()
   let changed = false
   for (const answer of [...answers, ...more]) {
@@ -171,13 +178,15 @@ async function revalidate(scope: ActorReadScope): Promise<boolean> {
 async function load(force: boolean): Promise<void> {
   if (state.scope && !isActorReadScopeCurrent(state.scope)) resetForNewActor()
   const scope = state.scope ?? captureActorReadScope(STORE_KEY)
+  const mark = state.resets
+  const current = () => isActorReadScopeCurrent(scope) && state.resets === mark
   state.scope = scope
   if (!state.index) {
     const stored = await readStored()
-    if (stored && isActorReadScopeCurrent(scope) && !state.index) {
+    if (stored && current() && !state.index) {
       state.pages = new Map(stored.pages.map((page) => [page.page, page]))
       state.index = await buildIndex(state.pages)
-      if (!isActorReadScopeCurrent(scope)) return
+      if (!current()) return
       state.status = 'ready'
       notify()
     }
@@ -186,19 +195,20 @@ async function load(force: boolean): Promise<void> {
   if (!due && state.index) return
   if (state.status !== 'ready') state.status = 'loading'
   try {
-    const changed = await revalidate(scope)
-    if (!isActorReadScopeCurrent(scope)) return
+    const changed = await revalidate(scope, mark)
+    if (!current()) return
     state.checkedAt = Date.now()
     state.stale = false
     if (changed || !state.index) {
       const index = await buildIndex(state.pages)
-      if (!isActorReadScopeCurrent(scope)) return
+      if (!current()) return
       state.index = index
       writeStored(state.pages, scope)
     }
     state.status = 'ready'
     notify()
   } catch (error) {
+    if (!current()) return
     state.checkedAt = Date.now()
     // 403/404: this account (or this Worker) has no index; the pickers keep
     // the server text search. Anything else keeps whatever index is held.
@@ -219,6 +229,18 @@ export function ensureProductSearchIndex(force = false): Promise<void> {
 
 export function markProductSearchIndexStale(): void {
   state.stale = true
+}
+
+/**
+ * A new data epoch (a restore, a cutover): what this tab holds, in memory and on disk, describes another database state. Both go, a
+ * load already running is fenced from storing anything, and the next use downloads the index again.
+ */
+export async function resetProductSearchIndexForNewEpoch(): Promise<void> {
+  resetForNewActor()
+  state.resets += 1
+  state.inflight = null
+  notify()
+  await transport.clearStored()
 }
 
 /**

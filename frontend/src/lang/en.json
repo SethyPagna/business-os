@@ -4468,6 +4468,8 @@
   "refresh_app": "Refresh / check for update",
   "app_update_ready": "A new version is ready.",
   "restart_now": "Restart now",
+  "newer_cart_record_notice": "Carts saved by a newer version are left untouched. Update the app to open them.",
+  "newer_draft_record_notice": "Drafts saved by a newer version are left untouched. Update the app to open them.",
   "write_failed_app_out_of_date": "This app is out of date, so nothing was saved. Use Restart now in the top bar, or reload the page, to update - then try again.",
   "write_failed_title": "Write failed",
   "write_blocked_title": "Write blocked",

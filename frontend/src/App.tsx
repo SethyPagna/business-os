@@ -24,6 +24,7 @@ import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { optionalAppOperation, restartIntoLatestApp, setAppUpdateUnsavedWorkNotice } from './utils/appUpdate.ts'
+import { NEWER_RECORD_EVENT, takeNewerRecordNotices } from './utils/persistedRecordSchema.ts'
 import { reportClientCrash } from './utils/clientCrashReport.ts'
 import { installStandaloneExternalLinkGuard } from './utils/standaloneNavigation.ts'
 import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './utils/persistentNoticeDismissal.ts'
@@ -1771,6 +1772,18 @@ export default function App() {
     setAppUpdateUnsavedWorkNotice((message) => notify(message, 'warning', 6000))
     return () => setAppUpdateUnsavedWorkNotice(null)
   }, [notify])
+
+  // A cart or draft saved by a NEWER build is left untouched by this one (utils/persistedRecordSchema.ts); say so once. A screen can
+  // meet one before this listener exists, so the notices wait in the module and are taken now and on every announcement.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const show = () => {
+      for (const kind of takeNewerRecordNotices()) notify(kind === 'cart' ? t('newer_cart_record_notice') : t('newer_draft_record_notice'), 'warning', 8000)
+    }
+    show()
+    window.addEventListener(NEWER_RECORD_EVENT, show)
+    return () => window.removeEventListener(NEWER_RECORD_EVENT, show)
+  }, [notify, t])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

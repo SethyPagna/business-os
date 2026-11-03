@@ -1,6 +1,10 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { consumeQuota } from './quotaGuard'
+import { cacheKeyRequest, unsafeVersionToken, type CacheIdentity } from './cacheKey'
+
+// The route files reach the key builder through this module, as they already reach cachedJsonResponse and the version reads.
+export { cacheIdentity, deploymentId, isUnsafeVersion } from './cacheKey'
 // Runtime cache, replacing backend/src/runtimeCache.ts's Redis-backed
 // short-TTL read-through cache (getOrSetJson / deleteByPrefix) with Workers
 // KV.
@@ -88,17 +92,24 @@ function noteCacheOutcome(outcome: 'hit' | 'miss'): void {
 // `version` should come from versionedKey's bumpVersion mechanism (KV) --
 // bumping it changes every cache key at once without needing to enumerate
 // and delete old entries, the same trick versionedKey uses for KV itself.
+//
+// The key is built by lib/cacheKey.ts from the deployment, the organisation, the database's data epoch, the request's canonical
+// parameters and `version`; `identity` carries what only the caller knows (cacheIdentity(c)). When any part cannot be read -- no
+// identity, an unreadable version, no epoch -- there is no safe key: the producer runs and nothing is matched or stored.
 export async function cachedJsonResponse<T>(
   request: Request,
   ctx: { waitUntil(promise: Promise<unknown>): void },
   version: string,
   ttlSeconds: number,
   producer: () => Promise<T> | T,
+  identity?: CacheIdentity,
 ): Promise<T> {
   const cache = caches.default
-  const cacheUrl = new URL(request.url)
-  cacheUrl.searchParams.set('_v', version)
-  const cacheKey = new Request(cacheUrl.toString(), request)
+  const cacheKey = await cacheKeyRequest(request.url, version, identity)
+  if (!cacheKey) {
+    noteCacheOutcome('miss')
+    return producer()
+  }
 
   const cached = await cache.match(cacheKey)
   if (cached) {
@@ -151,18 +162,20 @@ function unreadableVersion(namespace: string): Error {
 export async function getVersionWithFallback(env: Env, namespace: string): Promise<string> {
   const fromKv = await readKvVersion(env, namespace)
   if (fromKv.value != null) return cacheVersionToken('kv', fromKv.value)
+  let d1Failed = false
   try {
     const row = await getDb(env)
       .prepare(`SELECT version FROM cache_versions WHERE namespace = @namespace`)
       .get<{ version: number }>({ namespace })
     if (row?.version != null) return cacheVersionToken('d1', row.version)
   } catch {
-    // A cache-version read must never take the request down. With neither
-    // source available, use the generation-qualified zero token; the cache
-    // remains correct, merely less likely to hit until the next mutation.
+    // A cache-version read must never take the request down, and it must never invent a version either: KV does not hold the
+    // namespace and D1 could not say, so the zero token would be a value shared by every reader. The token returned instead
+    // is unique to this call and marked unsafe; every key builder treats it as "no safe key" (compute, store nothing).
+    d1Failed = true
   }
   if (fromKv.failed) throw unreadableVersion(namespace)
-  return cacheVersionToken('kv', '0')
+  return d1Failed ? unsafeVersionToken() : cacheVersionToken('kv', '0')
 }
 
 const versionMemo = new Map<string, { token: string; at: number }>()
@@ -180,16 +193,18 @@ export async function getVersionsWithFallback(env: Env, namespaces: readonly str
   })
   const missing = namespaces.filter((_, index) => remembered[index] == null)
   const fromKv = await Promise.all(missing.map((namespace) => readKvVersion(env, namespace)))
-  const fromD1 = await readD1Versions(env, missing.filter((_, index) => fromKv[index].value == null), options.requireReadableD1 === true)
+  const needD1 = missing.filter((_, index) => fromKv[index].value == null)
+  const d1Failed = { value: false }
+  const fromD1 = await readD1Versions(env, needD1, options.requireReadableD1 === true, d1Failed)
   const read = new Map<string, string>()
   missing.forEach((namespace, index) => {
     const kv = fromKv[index]
     const d1 = fromD1.get(namespace)
     const token = kv.value != null ? cacheVersionToken('kv', kv.value) : d1 != null ? cacheVersionToken('d1', d1) : null
     if (!token && kv.failed) throw unreadableVersion(namespace)
-    // Neither source holds it (never bumped): the zero token, not remembered.
+    // Neither source holds it (never bumped): the zero token, not remembered. A D1 read that failed is not "never bumped".
     if (token && memoMs > 0) versionMemo.set(namespace, { token, at: now })
-    read.set(namespace, token ?? cacheVersionToken('kv', '0'))
+    read.set(namespace, token ?? (d1Failed.value ? unsafeVersionToken() : cacheVersionToken('kv', '0')))
   })
   return namespaces.map((namespace, index) => remembered[index] ?? read.get(namespace) as string)
 }
@@ -199,7 +214,7 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
   return `${namespace}:${version}:${suffix}`
 }
 
-async function readD1Versions(env: Env, namespaces: string[], requireReadable = false): Promise<Map<string, number>> {
+async function readD1Versions(env: Env, namespaces: string[], requireReadable = false, outcome?: { value: boolean }): Promise<Map<string, number>> {
   if (!namespaces.length) return new Map()
   try {
     const rows = await getDb(env).prepare(`SELECT namespace, version FROM cache_versions
@@ -208,6 +223,7 @@ async function readD1Versions(env: Env, namespaces: string[], requireReadable = 
     return new Map(rows.filter(row => row.version != null).map(row => [row.namespace, Number(row.version)]))
   } catch (error) {
     if (requireReadable) throw error
+    if (outcome) outcome.value = true
     return new Map()
   }
 }
@@ -269,7 +285,8 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
     }
     kvVersions.set(namespace, currentKvRaw)
   }
-  const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null))
+  const d1Unreadable = { value: false }
+  const d1Versions = await readD1Versions(env, unique.filter(namespace => kvVersions.get(namespace) == null), false, d1Unreadable)
   const kvCandidates = unique.filter(namespace => kvVersions.get(namespace) != null || !d1Versions.has(namespace))
   // Aggregate admission may cross the critical threshold before the first key.
   // Moving all candidates to D1 early preserves invalidation and quota safety.
@@ -290,8 +307,11 @@ export async function bumpVersions(env: Env, namespaces: string[]): Promise<void
       }
     }
 
+    // KV holds no counter and D1 could not say whether the namespace already crossed over: starting at 1 could land on a value
+    // some reader already issued. The clock is above every counter a write has ever produced and only grows, so it is the one
+    // start that cannot collide.
     const currentKv = Number(currentKvRaw || '0') || 0
-    const nextKv = currentKv + 1
+    const nextKv = currentKvRaw == null && d1Unreadable.value ? Math.max(Date.now(), currentKv + 1) : currentKv + 1
 
     if (budget?.zone === 'critical' || budget?.zone === 'exhausted') {
       d1Upserts.push({ namespace, minimumVersion: nextKv })

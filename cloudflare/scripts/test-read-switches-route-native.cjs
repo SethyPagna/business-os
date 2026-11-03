@@ -201,7 +201,7 @@ async function main() {
       t.ok('system_flags has guard triggers to check', triggers.length > 0)
       for (const trigger of triggers) t.ok(`${trigger.name} does not name read_switches`, !/read_switches/.test(trigger.sql || ''), trigger.name)
       const keys = await flagKeys()
-      t.ok('only read_switches was added beside the seeded flags', keys.includes('read_switches') && keys.filter((k) => !['read_switches'].includes(k)).every((k) => !/^switch|epoch$/.test(k) || k === 'stock_schema_epoch'), keys)
+      t.ok('only read_switches was added beside the seeded flags', keys.includes('read_switches') && keys.filter((k) => !['read_switches'].includes(k)).every((k) => !/^switch|epoch$/.test(k) || k === 'stock_schema_epoch' || k === 'data_epoch'), keys) // data_epoch: migration 0288, the database's data epoch (6.0.1048)
     })
   } finally {
     await world.dispose()

@@ -147,7 +147,15 @@ function noteConsulted(name: ReadSwitchName, state: ReadSwitchMode): void {
   try { (globalThis as unknown as Record<symbol, Hook | undefined>)[REQUEST_METRICS_HOOK]?.flag?.(name, state) } catch { /* an observer never fails a read */ }
 }
 
-type Memo = { at: number; value: ReadSwitches; dataEpoch: string | null; readable: boolean; seq: number }
+/** First 8 hex characters of the SHA-256 of the epoch: what X-BOS-Epoch and the bootstrap's runtime.dataEpoch carry, never the epoch itself. */
+export async function epochTag(epoch: string | null): Promise<string | null> {
+  if (!epoch) return null
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(epoch))
+  return [...new Uint8Array(digest).slice(0, 4)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// dataEpoch: undefined = not read yet (a flip primed the memo before any read), null = read and absent or malformed.
+type Memo = { at: number; value: ReadSwitches; dataEpoch: string | null | undefined; epochTag: string | null; readable: boolean; seq: number }
 type StoreOptions = { now?: () => number; ttlMs?: number }
 
 export function createReadSwitchStore(options: StoreOptions = {}) {
@@ -155,15 +163,26 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
   const ttlMs = options.ttlMs ?? READ_SWITCH_MEMO_MS
   let memo: Memo | null = null
   let seq = 0
+  let inflight: Promise<ReadSwitches> | null = null
 
   const fresh = (at: number): boolean => memo !== null && at - memo.at >= 0 && at - memo.at < ttlMs
 
   async function load(env: Env): Promise<ReadSwitches> {
     const startedAt = now()
     if (memo && fresh(startedAt)) return memo.value
+    // Callers that arrive while a read is running share it: a cold isolate answering several cached sections at once (the notification
+    // bell has three) reads the flags once, not once each. A reset or a prime drops the shared read so the next caller starts a new one.
+    if (inflight) return inflight
+    const run: Promise<ReadSwitches> = readFlags(env, startedAt).finally(() => { if (inflight === run) inflight = null })
+    inflight = run
+    return run
+  }
+
+  async function readFlags(env: Env, startedAt: number): Promise<ReadSwitches> {
     const mine = ++seq
     let value: ReadSwitches
     let dataEpoch: string | null = null
+    let tag: string | null = null
     let readable = true
     try {
       const statement = getDb(env).prepare(SWITCH_ROWS_SQL)
@@ -171,13 +190,14 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
       const split = splitSwitchRows(rows)
       value = parseReadSwitches(split.switchesRaw)
       dataEpoch = split.dataEpoch
+      tag = await epochTag(dataEpoch)
     } catch {
       value = emptyReadSwitches()
       readable = false
       recordAnalytics(env, { kind: 'switch_read', labels: ['fallback'] })
     }
     // Whatever started last wins: a read that began before a prime() or a later read describes an older world.
-    if (!memo || mine > memo.seq) memo = { at: startedAt, value, dataEpoch, readable, seq: mine }
+    if (!memo || mine > memo.seq) memo = { at: startedAt, value, dataEpoch, epochTag: tag, readable, seq: mine }
     return memo.value
   }
 
@@ -189,15 +209,22 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
       return { ...entry, epoch: switches.epoch, on: entry.state === 'on' }
     },
     /** The state a committed flip just wrote, so this isolate answers with it before the next refresh. */
-    async epoch(env: Env): Promise<string | null> { await load(env); return memo && memo.readable ? memo.dataEpoch : null },
-    prime(value: ReadSwitches): void { memo = { at: now(), value, dataEpoch: memo?.dataEpoch ?? null, readable: true, seq: ++seq } },
+    async epoch(env: Env): Promise<string | null> {
+      if (memo && memo.dataEpoch === undefined) memo = null
+      await load(env)
+      return memo && memo.readable ? memo.dataEpoch ?? null : null
+    },
+    /** The epoch tag from the memo as it stands: no read, null unless the memo is fresh and readable. */
+    epochTagNow(): string | null { return memo && memo.readable && fresh(now()) ? memo.epochTag : null },
+    /** A flip knows the switches, not the data epoch: the epoch half is left unread, so the next epoch read asks the database (a restore may have rotated it since the last read). */
+    prime(value: ReadSwitches): void { inflight = null; memo = { at: now(), value, dataEpoch: undefined, epochTag: null, readable: true, seq: ++seq } },
     peek(): ReadSwitches | null { return memo ? memo.value : null },
     header(): string | null {
       if (!memo || !memo.readable || !fresh(now())) return null
       return `e=${memo.value.epoch};${KNOWN_READ_SWITCHES.map((name) => `${name}=${memo!.value.switches[name].state === 'on' ? 1 : 0}`).join(';')}`
     },
     salt(): string | null { return memo && memo.readable && fresh(now()) ? `sw${memo.value.epoch}` : null },
-    reset(): void { memo = null },
+    reset(): void { memo = null; inflight = null },
   }
 }
 
@@ -227,21 +254,67 @@ export const primeReadSwitches = (value: ReadSwitches): void => store.prime(valu
 export const switchHeaderValue = (): string | null => store.header()
 export const switchKeySalt = (): string | null => store.salt()
 export const readDataEpoch = (env: Env): Promise<string | null> => store.epoch(env)
+export const epochTagNow = (): string | null => store.epochTagNow()
 export const resetReadSwitchMemo = (): void => store.reset()
 
-function applySwitchHeader(headers: Headers): void {
-  const value = switchHeaderValue()
-  if (value) headers.set(SWITCH_HEADER, value)
+// The frontend build hash of the assets bound to THIS Worker version, for X-BOS-Build. Read once per isolate from the bound assets
+// (business-os-build.json; its hash equals __FRONTEND_BUILD_HASH__ and the precache manifest's), so the header names the assets
+// deployed together with the code answering. No D1, no KV. A failed read is remembered for BUILD_RETRY_MS, so a missing binding
+// costs one attempt a minute and not one per response.
+const BUILD_PATHS = ['/business-os-build.json', '/business-os-precache.json'] as const
+const BUILD_RETRY_MS = 60_000
+const BUILD_HASH = /^[A-Za-z0-9._-]{1,64}$/
+let builtHash: { at: number; hash: string | null; pending: Promise<string | null> | null } | null = null
+
+async function readBuildHash(env: Env): Promise<string | null> {
+  const assets = env?.STATIC_ASSETS
+  if (!assets) return null
+  for (const path of BUILD_PATHS) {
+    try {
+      const response = await assets.fetch(new Request(`https://assets.invalid${path}`))
+      if (!response.ok) continue
+      const body = await response.json() as { hash?: unknown }
+      if (typeof body.hash === 'string' && BUILD_HASH.test(body.hash)) return body.hash
+    } catch { /* try the next file */ }
+  }
+  return null
 }
 
-// Sits behind apiCacheHygiene, so its after-next() code runs before that one's. It adds no I/O: the header is the memo
-// as it stands, and a memo older than the refresh period says nothing.
+export async function frontendBuildHash(env: Env, at: number = Date.now()): Promise<string | null> {
+  if (builtHash?.hash) return builtHash.hash
+  if (builtHash?.pending) return builtHash.pending
+  if (builtHash && at - builtHash.at < BUILD_RETRY_MS) return null
+  const pending = readBuildHash(env)
+  builtHash = { at, hash: null, pending }
+  const hash = await pending
+  builtHash = { at, hash, pending: null }
+  return hash
+}
+
+export const resetBuildHash = (): void => { builtHash = null }
+
+export const BUILD_HEADER = 'X-BOS-Build'
+export const EPOCH_HEADER = 'X-BOS-Epoch'
+
+function applySignalHeaders(headers: Headers, build: string | null): void {
+  const value = switchHeaderValue()
+  if (value) headers.set(SWITCH_HEADER, value)
+  const tag = epochTagNow()
+  if (tag) headers.set(EPOCH_HEADER, tag)
+  if (build) headers.set(BUILD_HEADER, build)
+}
+
+// Sits behind apiCacheHygiene, so its after-next() code runs before that one's. It reads no database: X-BOS-Switches and
+// X-BOS-Epoch are the memo as it stands (a memo older than the refresh period, or never loaded, says nothing) and X-BOS-Build
+// is the isolate's one asset read. Every /api/* response carries them, errors and the maintenance 503 included.
 export async function readSwitchHeader(c: Context, next: Next): Promise<void> {
   await next()
+  let build: string | null = null
+  try { build = await frontendBuildHash(c.env as Env) } catch { /* the header is omitted */ }
   try {
-    applySwitchHeader(c.res.headers)
+    applySignalHeaders(c.res.headers, build)
   } catch {
     c.res = new Response(c.res.body, c.res)
-    applySwitchHeader(c.res.headers)
+    applySignalHeaders(c.res.headers, build)
   }
 }

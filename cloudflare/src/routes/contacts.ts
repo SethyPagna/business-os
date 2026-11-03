@@ -47,6 +47,7 @@ import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } fro
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import { invoiceReadWindow } from '../lib/invoiceReadWindow'
 import type { Env } from '../index'
@@ -1042,7 +1043,7 @@ function registerContactRoutes(config: ContactConfig) {
       const version = await getContactReadCacheVersion(c.env, config.table)
       const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
         db.prepare(`SELECT id, name FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
-      )
+      cacheIdentity(c))
       return c.json(rows)
     }
     // fields=picker: the bounded offline-mirror / picker shape. Only the
@@ -1067,7 +1068,7 @@ function registerContactRoutes(config: ContactConfig) {
         const items = rawItems.slice(0, limit)
         const total = Number(totalRow?.count || 0)
         return { items: items || [], total, limit, truncated: total > (items || []).length }
-      })
+      }, cacheIdentity(c))
       return c.json(payload)
     }
     // Narrow Sales/POS customer search. It is deliberately customers-only
@@ -1202,7 +1203,7 @@ function registerContactRoutes(config: ContactConfig) {
       const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
         const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
         return withPoints(rows || [])
-      })
+      }, cacheIdentity(c))
       return c.json(payload)
     }
 
@@ -1222,7 +1223,7 @@ function registerContactRoutes(config: ContactConfig) {
         .filter((value) => /^\d{4}$/.test(value)))]
         .sort((left, right) => Number(right) - Number(left))
       return { items: (await withPoints(items || [])), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
-    })
+    }, cacheIdentity(c))
     return c.json(payload)
   })
 

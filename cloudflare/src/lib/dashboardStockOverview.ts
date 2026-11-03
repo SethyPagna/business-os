@@ -35,6 +35,8 @@ import type { Env } from '../index'
 import { getDb } from './db'
 import { productHasStockSql } from './productStockGuard'
 import { getVersionWithFallback } from './cache'
+import { deploymentId, isUnsafeVersion } from './cacheKey'
+import { readDataEpoch } from './readSwitches'
 import { getFamilyStockOverview, type FamilyStockAlertPage, type FamilyStockStats } from './familyStockStats'
 import { loadLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { getPlanLimits } from './planTier'
@@ -99,9 +101,13 @@ export function dashboardStockOverviewKey(parts: {
   stockVersion: string
   lowStock: LowStockConfig
   utcDate: string
+  // The Worker deployment and the database's data epoch (lib/cacheKey.ts): a deploy, a rollback or a restore never reads an older body.
+  build?: string
+  epoch?: string
 }): string {
   const low = `${parts.lowStock.enabled ? 1 : 0}:${parts.lowStock.mode}:${parts.lowStock.threshold}`
-  return [OVERVIEW_CACHE_SCHEMA, parts.utcDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${low}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`].join('|')
+  return [OVERVIEW_CACHE_SCHEMA, parts.utcDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${low}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`,
+    `b=${parts.build ?? ''}`, `e=${parts.epoch ?? ''}`].join('|')
 }
 
 type Memo = { key: string; expiresAt: number; promise: Promise<DashboardStockOverview> }
@@ -115,6 +121,8 @@ export type DashboardStockOverviewContext = {
   now?: () => number
   // Injected by tests; defaults to the Workers Cache API when present.
   cache?: Pick<Cache, 'match' | 'put'> | null
+  // Injected by tests; defaults to the database's data epoch (null = unreadable: compute, cache nothing).
+  epoch?: string | null
 }
 
 function defaultCache(): Pick<Cache, 'match' | 'put'> | null {
@@ -139,7 +147,11 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   }
   const lowStock = await lowStockPromise
   const [productsVersion, stockVersion] = versions
-  const key = dashboardStockOverviewKey({ productsVersion, stockVersion, lowStock, utcDate: new Date(now).toISOString().slice(0, 10) })
+  const epoch = ctx.epoch === undefined ? await readDataEpoch(env) : ctx.epoch
+  // No epoch or an unsafe version is no safe key: compute, and cache nothing (CACHE-LIFECYCLE R3).
+  if (!epoch || versions.some(isUnsafeVersion)) return computeDashboardStockOverview(env, lowStock)
+  const key = dashboardStockOverviewKey({ productsVersion, stockVersion, lowStock, utcDate: new Date(now).toISOString().slice(0, 10),
+    build: deploymentId(env), epoch })
 
   const current = memo
   if (current && current.key === key && now < current.expiresAt) return current.promise

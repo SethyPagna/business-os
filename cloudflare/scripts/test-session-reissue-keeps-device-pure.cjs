@@ -74,6 +74,7 @@ const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../
 const isAdminControlUser = (u) => Number(u?.id) === 1
 
 const loadAuthRoute = (authModule) => load('routes/auth.ts', {
+  '../lib/readSwitches': { readDataEpoch: async () => null, epochTag: async () => null }, // 6.0.1048: /bootstrap announces the data epoch
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
