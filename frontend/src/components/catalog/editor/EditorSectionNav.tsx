@@ -133,11 +133,14 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect, s
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label={nameWithMarkers(`${sectionsLabel}: ${currentLabel}`, currentMarks)}
-          className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1 text-sm font-semibold leading-snug text-slate-900 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+          className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-1 max-[359px]:gap-1.5 max-[359px]:px-2 text-sm font-semibold leading-snug text-slate-900 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
           onClick={() => (open ? closeMenu(false) : setOpen(true))}
         >
           <CurrentIcon className="h-5 w-5 shrink-0" aria-hidden />
-          <span className="whitespace-nowrap">{currentLabel}</span>
+          {/* The one part that gives way when the row is short: the word ends in an ellipsis, while the section icon, the chevron and the
+              markers (the dot is the only sign of unsaved work in this section) keep their room. py-1 because overflow:hidden clips at the line
+              box, and Khmer vowel signs and subscripts stand outside a box sized for Latin text. */}
+          <span className="min-w-0 truncate py-1">{currentLabel}</span>
           <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
           <Markers {...currentMarks} />
         </button>

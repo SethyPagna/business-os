@@ -509,12 +509,12 @@ const holdUploads = (page: Page): { release: () => void } => {
 
 test.describe('Website Editor bar (ED-1a)', () => {
   for (const language of ['en', 'km'] as const) {
-    test(`E2E-1: at 360 and 390 px the bar is one row of at most 56 px, nothing scrolls sideways and every control is at least 44 px (${language})`, async ({ page, context }) => {
+    test(`E2E-1: at 320, 360 and 390 px the bar is one row of at most 56 px, nothing scrolls sideways and every control is at least 44 px (${language})`, async ({ page, context }) => {
       // CATCHES: a two-row bar (the old tab strip plus a button grid), a status line that pushes the row taller, Khmer
       // words that widen the picker past the screen, and a control a finger cannot hit.
       const health = collectPageHealth(page)
       await openEditor(page, context, { language })
-      for (const width of [360, 390]) {
+      for (const width of [320, 360, 390]) {
         await page.setViewportSize({ width, height: 800 })
         const row = page.getByTestId('editor-bar-row')
         await expect(row).toBeVisible()
@@ -565,6 +565,46 @@ test.describe('Website Editor bar (ED-1a)', () => {
         expect(Math.max(...heights), `every section name fits on one line in the open menu at ${width} px`).toBeLessThanOrEqual(48)
         await page.keyboard.press('Escape')
       }
+      expectNoRuntimeErrors(health)
+    })
+  }
+
+  for (const language of ['en', 'km'] as const) {
+    test(`E2E-1: at 320 px the picker keeps its chevron and markers inside its button and clear of Save, on FAQ and on Contact (${language})`, async ({ page, context }) => {
+      // CATCHES: a picker label that cannot shrink, so on the narrowest phone (the bar sits 26 px inside the aside) the chevron crossed the
+      // button's edge and the blue dot was drawn under Save, which hides the one signal that a section has unsaved work.
+      const health = collectPageHealth(page)
+      await openEditor(page, context, { language, seed: { business_legal_name: '', business_registration_number: '' } })
+      await page.setViewportSize({ width: 320, height: 800 })
+      const picker = editor(page).locator('button[aria-haspopup="menu"]')
+      await expect(picker).toBeVisible()
+      // Save is the last button of the row, whatever language names it.
+      const saveInRow = page.getByTestId('editor-bar-row').locator('button').last()
+      // Everything the picker draws besides its words: the section icon and the chevron (svg), the blue dot, and for Contact the amber triangle (svg).
+      const drawings = picker.locator('svg, span.rounded-full')
+      const checkPicker = async (state: string, expectedDrawings: number) => {
+        await expect(drawings, `${state}: what the picker draws`).toHaveCount(expectedDrawings)
+        const button = (await picker.boundingBox())!
+        const save = (await saveInRow.boundingBox())!
+        expect(button.x + button.width, `${state}: the picker ends before Save starts`).toBeLessThanOrEqual(save.x + 0.5)
+        for (let index = 0; index < expectedDrawings; index += 1) {
+          const box = (await drawings.nth(index).boundingBox())!
+          expect(box.width, `${state}: drawing ${index} is visible`).toBeGreaterThan(0)
+          expect(box.x, `${state}: drawing ${index} starts inside the picker`).toBeGreaterThanOrEqual(button.x - 0.5)
+          expect(box.x + box.width, `${state}: drawing ${index} ends inside the picker`).toBeLessThanOrEqual(button.x + button.width + 0.5)
+          expect(box.x + box.width, `${state}: drawing ${index} stays clear of Save`).toBeLessThanOrEqual(save.x + 0.5)
+        }
+        const aside = (await editor(page).boundingBox())!
+        expect(button.x + button.width, `${state}: the picker ends inside the editor`).toBeLessThanOrEqual(aside.x + aside.width + 0.5)
+      }
+      await openSection(page, 'contact')
+      await checkPicker('Contact, seller details missing', 3)
+      await page.locator('#portal-business-phone').fill('012 345 678')
+      await expect(picker).toHaveAccessibleName(/Unsaved changes|មិនទាន់រក្សាទុក/)
+      await checkPicker('Contact, unsaved and seller details missing', 4)
+      await openSection(page, 'faq')
+      await page.locator('#portal-faq-title').fill(language === 'km' ? 'សំណួរដែលគេសួរញឹកញាប់' : 'Questions')
+      await checkPicker('FAQ, unsaved', 3)
       expectNoRuntimeErrors(health)
     })
   }

@@ -232,4 +232,24 @@ runTest('T-L4: the section picker is a menu of seven radio items; the chips are 
   assert.match(nav, /amber/, 'and differs in colour from the dirty dot')
 })
 
+runTest('T-L4b: on a short row the picker\'s word gives way (an ellipsis, with room for Khmer) and its icon, chevron and markers never do', () => {
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  // The word is the only part that may shrink: min-w-0 down the chain (a flex item is otherwise as wide as its text) and an ellipsis at the end.
+  // py-1 because overflow:hidden clips at the line box, and Khmer vowel signs and subscripts stand outside a box sized for Latin text.
+  assert.match(nav, /<span className="min-w-0 truncate py-1">\{currentLabel\}<\/span>/, 'the picker word truncates, with vertical room')
+  assert.match(nav, /<button\s+ref=\{buttonRef\}[\s\S]*?className="inline-flex min-h-11 min-w-0 max-w-full /, 'the picker button may shrink below its text')
+  // At 320 px in Khmer the chevron crossed the button's edge and the dot was drawn under Save: none of these may give up its room.
+  const picker = nav.slice(nav.indexOf('<CurrentIcon'), nav.indexOf('{open ? ('))
+  assert.match(picker, /<CurrentIcon className="h-5 w-5 shrink-0"/, 'the section icon keeps its room')
+  assert.match(picker, /<ChevronDown className="h-4 w-4 shrink-0"/, 'the chevron keeps its room')
+  const markers = nav.slice(nav.indexOf('function Markers'), nav.indexOf('type InnerProps'))
+  assert.match(markers, /className="h-2 w-2 shrink-0 rounded-full/, 'the unsaved dot keeps its room')
+  assert.match(markers, /<AlertTriangle aria-hidden className="h-3\.5 w-3\.5 shrink-0/, 'the amber triangle keeps its room')
+  // Below 360 px the gaps and padding tighten so less of the word is lost.
+  assert.match(nav, /max-\[359px\]:gap-1\.5 max-\[359px\]:px-2/, 'the picker tightens on the narrowest phones')
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  assert.match(bar, /max-\[359px\]:px-2/, 'and so does the bar')
+  assert.match(bar, /max-\[359px\]:gap-1\.5/)
+})
+
 if (failed) process.exit(1)

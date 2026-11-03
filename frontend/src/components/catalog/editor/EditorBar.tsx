@@ -51,9 +51,9 @@ export default function EditorBar({ ed, compact, sections, activeSection, dirtyS
   return (
     <div
       id="portal-editor-bar"
-      className="sticky top-0 z-30 rounded-2xl border border-slate-200 bg-white px-3 shadow-md dark:border-slate-700 dark:bg-slate-950 sm:top-2"
+      className="sticky top-0 z-30 rounded-2xl border border-slate-200 bg-white px-3 shadow-md max-[359px]:px-2 dark:border-slate-700 dark:bg-slate-950 sm:top-2"
     >
-      <div data-testid="editor-bar-row" className="flex h-14 min-w-0 items-center gap-2 md:h-[52px]">
+      <div data-testid="editor-bar-row" className="flex h-14 min-w-0 items-center gap-2 max-[359px]:gap-1.5 md:h-[52px]">
         <EditorSectionNav
           ed={ed}
           compact={compact}
