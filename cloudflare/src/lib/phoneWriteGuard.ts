@@ -8,7 +8,7 @@
 // digits, so a mask is never matched against "any stored number": one that fits two different numbers is refused. Anything
 // else is refused too. A real number typed by the person passes through untouched.
 import { parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
-import { resolveIncomingPhone } from './phoneMask'
+import { isMaskedPhone, isMaskOf, resolveIncomingPhone } from './phoneMask'
 
 export const MASKED_PHONE_CODE = 'masked_phone_input'
 export const MASKED_PHONE_MESSAGE = 'A phone number in this request is hidden (it shows ***). Type the full number, or leave the phone unchanged.'
@@ -23,6 +23,10 @@ export function isMaskedPhoneInputError(error: unknown): error is MaskedPhoneInp
 }
 
 type PhoneBearingRecord = { phone?: unknown; address?: unknown } | null | undefined
+
+// The text fields of a Contact Option. One saved under a number (a contact person that is a phone) shows masked and comes back masked.
+const OPTION_TEXT_FIELDS = ['name', 'label'] as const
+const isMaskedText = (value: unknown): boolean => typeof value === 'string' && isMaskedPhone(value)
 
 /** Every number a stored contact holds: the primary phone and each Contact Option's phone. */
 export function storedPhonesOf(record: PhoneBearingRecord, mode: ContactOptionMode = 'address'): string[] {
@@ -54,17 +58,17 @@ const sameLabel = (left: unknown, right: unknown): boolean => {
  * identifies the option; a position does not (delete the first option and rename the survivor, and it now sits at position 0), so a
  * position match is only trusted when the mask fits exactly one distinct stored number.
  */
-function storedCounterpart(option: Record<string, unknown>, index: number, storedOptions: ReadonlyArray<{ label: string | null; phone: string | null }>) {
+function storedCounterpart(option: Record<string, unknown>, index: number, storedOptions: ReadonlyArray<{ label: string | null; name: string | null; phone: string | null }>) {
   const byLabel = storedOptions.filter((candidate) => sameLabel(candidate.label, option.label))
-  if (byLabel.length === 1) return { phone: byLabel[0].phone, byPosition: false }
+  if (byLabel.length === 1) return { phone: byLabel[0].phone, byPosition: false, stored: byLabel[0] }
   const positional = storedOptions[index]
-  return positional ? { phone: positional.phone, byPosition: true } : null
+  return positional ? { phone: positional.phone, byPosition: true, stored: positional } : null
 }
 
 /**
  * Contact Options text from a client. Each option whose phone came back masked takes the number of the stored option it edits
- * (same label, else same position) when the mask is that number's; any other masked phone throws. Text with no mask is
- * returned exactly as it arrived.
+ * (same label, else same position) when the mask is that number's; any other masked phone throws. The same for an option's name and
+ * label (a contact person saved as a number shows masked too, review B1). Text with no mask is returned exactly as it arrived.
  */
 export function resolveAddressInput(incoming: unknown, stored: PhoneBearingRecord, mode: ContactOptionMode = 'address'): unknown {
   if (typeof incoming !== 'string' || !incoming.includes('*')) return incoming
@@ -79,10 +83,19 @@ export function resolveAddressInput(incoming: unknown, stored: PhoneBearingRecor
   const options = parsed.map((entry, index) => {
     if (!entry || typeof entry !== 'object') return entry
     const option = entry as Record<string, unknown>
-    if (typeof option.phone !== 'string' || !option.phone.includes('*')) return entry
+    const maskedPhone = typeof option.phone === 'string' && option.phone.includes('*')
+    const maskedText = OPTION_TEXT_FIELDS.filter((field) => isMaskedText(option[field]))
+    if (!maskedPhone && maskedText.length === 0) return entry
     changed = true
     const counterpart = storedCounterpart(option, index, storedOptions)
-    return { ...option, phone: resolvePhoneInput(option.phone, counterpart?.byPosition ? everyStored : [], counterpart?.phone, counterpart?.byPosition === true) }
+    const resolved: Record<string, unknown> = { ...option }
+    if (maskedPhone) resolved.phone = resolvePhoneInput(option.phone, counterpart?.byPosition ? everyStored : [], counterpart?.phone, counterpart?.byPosition === true)
+    for (const field of maskedText) {
+      const kept = counterpart?.stored[field]
+      if (kept == null || !isMaskOf(option[field], kept)) throw new MaskedPhoneInputError()
+      resolved[field] = kept
+    }
+    return resolved
   })
   if (!changed) return incoming
   return serializeContactOptions(options as Array<Record<string, unknown>>, mode) ?? incoming
@@ -101,7 +114,11 @@ export function bodyHasMaskedPhone(body: Record<string, unknown>): boolean {
 function optionsHaveMaskedPhone(text: string): boolean {
   try {
     const parsed: unknown = JSON.parse(text)
-    return Array.isArray(parsed) && parsed.some((entry) => { const phone = !!entry && typeof entry === 'object' ? (entry as Record<string, unknown>).phone : null; return typeof phone === 'string' && phone.includes('*') })
+    return Array.isArray(parsed) && parsed.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false
+      const option = entry as Record<string, unknown>
+      return (typeof option.phone === 'string' && option.phone.includes('*')) || OPTION_TEXT_FIELDS.some((field) => isMaskedText(option[field]))
+    })
   } catch { return false }
 }
 

@@ -48,10 +48,10 @@ const MUTANTS = {
   'zero-to-o retry removed (a mixed word is lost again)': ['lib/phoneSearchGuard.ts', sub("? [rawHaystack, `replace(lower(${rawHaystack}),'o','0')`] : [rawHaystack]", '? [rawHaystack] : [rawHaystack]')],
   'zero-to-o retry also for a digit-only word': ['lib/phoneSearchGuard.ts', sub('/\\p{L}/u.test(word) && word.includes', 'word.includes')],
   'reports returns search reads a numeric name': ['routes/reports.ts', sub('const unrestricted = phoneSearchAccessOf(user).fullPhone', 'const unrestricted = true')],
-  // P2.8-F S1: a number saved in a column the response masks (a note, a cashier, a branch, a supplier) must read as empty to the search.
+  // P2.8-F S1: a number saved in a column the response masks (a note, a cashier, a supplier) must read as empty to the search. (A branch is not a
+  // person: since the review's B2 it is shown as stored, so it is searched as stored.)
   'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`)],
   'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`)],
-  'sales branch that is a number readable': ['routes/sales.ts', sub("'s.branch_name', 's.payment_method',", `${RAW('s.branch_name')}, 's.payment_method',`)],
   'sales cashier filter reads the number': ['routes/sales.ts', subAll("restrictedColumnSql('s.cashier_name')", "'s.cashier_name'")],
   'returns note that is a number readable': ['routes/returns.ts', sub("'r.reason', 'r.notes', 'r.return_type'", `'r.reason', ${RAW('r.notes')}, 'r.return_type'`)],
   'returns supplier saved under a number readable': ['routes/returns.ts', sub("'r.supplier_name', 'r.reason',", `${RAW('r.supplier_name')}, 'r.reason',`)],
@@ -211,8 +211,8 @@ async function main() {
     t.ok('supplier returns 555', has((await get(`/api/returns?scope=supplier&search=${enc('555')}`, 'admin')).text, 'P28-RET-6'))
     t.ok('sales totals 456', Number((await get(`/api/sales/stats?search=${enc('456')}`, 'admin')).json?.total_count) >= 1)
   })
-  await check('no grant: a sale whose note, cashier or branch is a number is not found by a fragment of it (list, totals, cashier filter, digit by digit)', async (t) => {
-    for (const [receipt, queries] of [['P28-0007', ['456', '45', '4567', '093 4', '789']], ['P28-0008', ['555', '094 555', '818']], ['P28-0009', ['777', '095 777', '626']]]) {
+  await check('no grant: a sale whose note or cashier is a number is not found by a fragment of it (list, totals, cashier filter, digit by digit)', async (t) => {
+    for (const [receipt, queries] of [['P28-0007', ['456', '45', '4567', '093 4', '789']], ['P28-0008', ['555', '094 555', '818']]]) {
       for (const q of queries) {
         const r = await get(`/api/sales?search=${enc(q)}`, 'sales_only')
         t.ok(`sales ${q}: status ${r.status}`, r.status === 200)
@@ -232,6 +232,11 @@ async function main() {
       t.eq(`?cashier=${q}: totals`, (await get(`/api/sales/stats?cashier=${enc(q)}`, 'sales_only')).json?.total_count, 0)
     }
     t.ok('the note shows masked to this account', has((await get(`/api/sales?search=${enc('P28-0007')}`, 'sales_only')).text, '093 *** 789'))
+  })
+  await check('no grant: a branch named by a number is shown as stored (review B2), so the search finds it by a fragment, as the holder does', async (t) => {
+    const r = await get(`/api/sales?search=${enc('777')}`, 'sales_only')
+    t.ok('sales 777 finds the sale at the branch named 095 777 626', receiptsIn(r.text).includes('P28-0009'), snippetOf(r.text))
+    t.ok('and the branch shows in full', has(r.text, '095 777 626'), r.text.slice(0, 200))
   })
   await check('no grant: a return whose note is a number, and a supplier return saved under a number, are not found by a fragment of it', async (t) => {
     for (const q of ['456', '45', '093 4', '789']) {

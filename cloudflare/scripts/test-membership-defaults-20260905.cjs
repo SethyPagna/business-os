@@ -73,6 +73,7 @@ const contactsWrite = load('routes/contacts.ts', {
 }).default
 const imports = load('lib/importEngine.ts', {
   './phoneWriteGuard': require('./harness/phone_real_modules.cjs').phoneModule('./phoneWriteGuard'),
+  './phoneAccess': require('./harness/phone_real_modules.cjs').phoneModule('./phoneAccess'),
   './membershipNumber': membership,
   './contactOptions': contactOptions,
   './contactDuplicates': contactDuplicates,

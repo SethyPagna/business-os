@@ -139,7 +139,11 @@ export function nameWithoutPhoneSql(columnSql: string): string {
 /** A search column as an account without the grant may read it. `quoted`: a sentence that quotes a number reads as empty. */
 function quotedNumberFreeSql(columnSql: string): string {
   const text = `COALESCE(${columnSql},'')`
-  return `CASE WHEN ${text} GLOB '*["''\u201c\u2018\u201d\u2019][+0-9]*' AND ${text} GLOB '*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*' THEN '' ELSE ${text} END`
+  // An ASCII number: a quote followed by a digit or +, and seven digits somewhere. A Khmer number (the only other script this shop
+  // writes) is a quote followed by a Khmer digit: a seven-digit Khmer pattern is 91 bytes and D1 refuses a pattern over 50, so the
+  // Khmer test is the quote-then-digit pattern alone (28 bytes). It reads a sentence that quotes any Khmer figure as empty, which
+  // only hides it from the search (review residue, 6.0.1162).
+  return `CASE WHEN ${text} GLOB '*["''\u201c\u2018\u201d\u2019][+0-9]*' AND ${text} GLOB '*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*[0-9]*' THEN '' WHEN ${text} GLOB '*["''\u201c\u2018\u201d\u2019][\u17e0-\u17e9]*' THEN '' ELSE ${text} END`
 }
 
 export type SearchColumn = string | { sql: string; key: string }

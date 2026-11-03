@@ -6,6 +6,7 @@
 //   crawl   test-phone-leak-crawl-native.cjs         the egress projection and the grant-keyed caches
 //   oracle  test-phone-search-oracle-native.cjs      search must not spell out a hidden number
 //   write   test-phone-write-guard-native.cjs        a mask must never overwrite a real number
+//   text    test-phone-masked-text-native.cjs        a mask must never overwrite a name, note or label; people-only name masking; no key leaks
 //
 // Run (from cloudflare/): node scripts/test-phone-leak-mutants-native.cjs
 // Four mutant worlds run at a time; each boots its own Worker under Miniflare.
@@ -16,6 +17,7 @@ const RUNS = [
   ['crawl', 'no-egress-projection', {}],
   ['crawl', 'one-route-bypasses-c-json', { PHONE_CRAWL_FILTER: 'api/sales/delivery-options' }],
   ['crawl', 'duplicate pair value kept', { PHONE_CRAWL_FILTER: 'duplicates' }],
+  ['crawl', 'people: contact_person is not a name', { PHONE_CRAWL_FILTER: 'api/suppliers?page=1' }],
   ['crawl', 'cache-shared-key', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ['crawl', 'cache-stores-full-body', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
   ['crawl', 'cache-variant-ignores-grant', { PHONE_WORLD: 'egress-off', PHONE_MODE: 'cache' }],
@@ -25,14 +27,17 @@ const RUNS = [
     'contacts digit words guarded only for a raw all-digit search', 'sales stats cache shared across grants', 'reports sales list matches the phone by substring',
     'reports sales export matches the phone by substring', 'reports returns search reads a numeric name', 'delivery picker reads a numeric courier name', 'non-ASCII digits are not folded',
     'sales zero-to-o retry reaches the phone column', 'returns zero-to-o retry reaches the folded copy', 'zero-to-o retry also for a digit-only word', 'zero-to-o retry removed (a mixed word is lost again)',
-    'sales note that is a number readable', 'sales cashier that is a number readable', 'sales branch that is a number readable', 'sales cashier filter reads the number',
+    'sales note that is a number readable', 'sales cashier that is a number readable', 'sales cashier filter reads the number',
     'returns note that is a number readable', 'returns supplier saved under a number readable'].map((name) => ['oracle', name, {}]),
   ...['edit saves the mask it was shown', 'edit saves masked Contact Options', 'create accepts a mask', 'resolver accepts a mask of another number',
     'merge accepts a masked custom phone', 'mask matched against any stored number, first hit wins', 'option mask resolved against all stored options',
     'asterisk phone that is not a mask saved as typed', 'position match trusted without a uniqueness check',
     'duplicate dismissal accepts a mask'].map((name) => ['write', name, {}]),
+  ...['write: the masked values are not taken out of the request', 'catalog: a product or branch name is masked like a person', 'people: contact_person and cashier are not names',
+    'people: username is not a name', 'people: the cashiers list key is shown', 'search: a supplier contact person is readable through a digit word',
+    'search: the legacy deleted reason is read raw', 'search: the legacy deleted cashier filter reads the number'].map((name) => ['text', name, {}]),
 ]
-const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs' }
+const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs', text: 'test-phone-masked-text-native.cjs' }
 const PARALLEL = Math.max(1, Number(process.env.PHONE_MUTANT_PARALLEL) || 4)
 
 function run([kind, name, env]) {

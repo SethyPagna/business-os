@@ -63,6 +63,8 @@ function freshDb() {
   customer.run(4, 'Fixture Visal', '+855 12 777 888', null, null, 'Visal Trading', 'LC-P28-4', '012777888')
   const supplier = db.prepare('INSERT INTO suppliers (id, name, phone, address, company, contact_person) VALUES (?, ?, ?, ?, ?, ?)')
   supplier.run(1, 'Fixture Supplies', '077 333 444', option('Office', '078 444 555', 'Street 3'), 'Fixture Co', 'Vanna')
+  // A contact person saved as a number (the supplier form fills it from the primary Contact Option's name): masked in the response, so unreadable to a digit word.
+  supplier.run(2, 'Fixture Noted Supplies', null, null, 'Noted Co', '097 252 812')
   const delivery = db.prepare('INSERT INTO delivery_contacts (id, name, phone, area, address) VALUES (?, ?, ?, ?, ?)')
   delivery.run(1, 'Fixture Courier', '096 555 666', 'North', option('Depot', '095 666 777', null))
   return db
@@ -191,6 +193,11 @@ function run(load, { baseLoad }) {
     assert.deepEqual(ids('customers', '010 222 333', CLOSED), [3], 'found as a whole number (its phone is the same number)')
     for (const q of ['010', '222', '333', '222 333', '0102 2']) assert.deepEqual(ids('customers', q, CLOSED), [], q)
     assert.ok(ids('customers', '222', OPEN).includes(3), 'positive control: the open search reads the numeric name')
+  })
+  check('no grant: a supplier whose contact person is a number is not a way to read that number (review B3)', () => {
+    for (const q of ['252', '812', '097 252', '0972528', '252 812', '097 252 812']) assert.deepEqual(ids('suppliers', q, CLOSED), [], `suppliers ${JSON.stringify(q)}`)
+    assert.ok(ids('suppliers', '252', OPEN).includes(2), 'positive control: the open search reads the contact person')
+    assert.deepEqual(ids('suppliers', 'noted', CLOSED), [2], 'a word of the name still finds the supplier')
   })
   check('no grant: mixed text and digits never reaches a phone column', () => {
     assert.deepEqual(ids('customers', 'dara 087', CLOSED), [])
@@ -356,7 +363,8 @@ const mutants = [
   ['whole number threshold 8 -> 3 digits', { phoneSearchGuard: replaceOnce('export const FULL_NUMBER_MIN_DIGITS = 8', 'export const FULL_NUMBER_MIN_DIGITS = 3') }],
   ['mixed text and digits counts as a whole number', { phoneSearchGuard: (source) => replaceOnce("const digits = toAsciiDigits(words.join(''))", "const digits = toAsciiDigits(words.join('')).replace(/\\D/g, '')")(replaceOnce('if (!words.every(isDigitWord)) return PARTIAL_PROBE', '')(source)) }],
   ['digit comparison drops the Contact Option phones', { phoneSearchGuard: replaceOnce('return { sql: `(${primary.sql} OR ${options})`', 'return { sql: `(${primary.sql})`') }],
-  ['a number saved as a name is readable through a digit word', { contactSearch: replaceOnce("`(${wordMatch} AND NOT ${phoneShapedSql('name')})`", 'wordMatch') }],
+  ['a number saved as a name is readable through a digit word', { contactSearch: replaceOnce("`(${wordMatch} AND ${PERSON_COLUMNS[table].map((column) => `NOT ${phoneShapedSql(column)}`).join(' AND ')})`", 'wordMatch') }],
+  ['a supplier contact person saved as a number is readable through a digit word', { contactSearch: replaceOnce("suppliers: ['name', 'contact_person'],", "suppliers: ['name'],") }],
   ['picker keeps the fragment alternatives', { salesCustomerSearch: replaceOnce('if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original', '') }],
   ['audit log keeps matching phone text', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", '') }],
   ['audit log blocks money figures too', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", "if (figureOnly) return '0'") }],

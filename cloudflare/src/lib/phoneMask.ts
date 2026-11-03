@@ -108,6 +108,15 @@ export function maskQuotedPhones(text: string): string {
   })
 }
 
+/**
+ * A sentence that quotes a MASK (`Phone "087 *** 321" is already registered`): the quoted-number form maskQuotedPhones wrote on the way
+ * out. Coming back in, it is the screen's text echoed by a form, and saving it would replace the real number with the mask.
+ */
+const QUOTED_MASK = /(["'“‘]{1,2})(?:\*\*\*|\p{Nd}{1,3} \*\*\* \p{Nd}{1,3})(["'”’]{1,2})/u
+export function hasMaskedQuote(text: string): boolean {
+  return text.includes('***') && QUOTED_MASK.test(text)
+}
+
 /** A name field that is really a number (a contact saved by its phone): the whole value is a phone. */
 const PHONE_SHAPED = /^[+\s().\-\p{Nd}]{8,24}$/u
 export function isPhoneShaped(value: string): boolean {

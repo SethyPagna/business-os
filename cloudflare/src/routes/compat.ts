@@ -13,6 +13,7 @@ import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { canSeeFullPhones } from '../lib/phoneAccess'
+import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
@@ -659,8 +660,11 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   const conditions: string[] = []
   const params: Record<string, unknown> = {}
   const cashier = String(query.cashier || '').trim()
+  // An account without the full-phone grant reads a cashier saved under a number, and a reason that quotes one, as empty: the response
+  // masks both, so the filter and the search read what the screen shows (the projection's own rule, searchableColumnSql; review E2).
+  const phoneAccess = { fullPhone: canSeeFullPhones(c.get('user')) }
   if (cashier && cashier !== 'all') {
-    conditions.push("lower(trim(COALESCE(d.cashier_name, d.deleted_by, ''))) = lower(trim(@cashier))")
+    conditions.push(`lower(trim(${searchableColumnSql({ sql: "COALESCE(d.cashier_name, d.deleted_by, '')", key: 'cashier_name' }, phoneAccess)})) = lower(trim(@cashier))`)
     params.cashier = cashier
   }
   const search = String(query.search || '').trim().toLowerCase()
@@ -671,8 +675,8 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
       OR lower(COALESCE(d.source_code, '')) LIKE @search
       OR lower(COALESCE(d.invoice_no, '')) LIKE @search
       OR lower(COALESCE(d.reference_no, '')) LIKE @search
-      OR lower(COALESCE(d.deletion_reason, '')) LIKE @search
-      OR lower(COALESCE(d.bill_delete_reason, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.deletion_reason', phoneAccess)}, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.bill_delete_reason', phoneAccess)}, '')) LIKE @search
     )`)
     params.search = `%${search}%`
   }

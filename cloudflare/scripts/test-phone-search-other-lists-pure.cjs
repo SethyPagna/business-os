@@ -98,7 +98,7 @@ function run(w, source = {}) {
   })
 
   // ---- 4. the movement log -------------------------------------------------------------------------------------------------------------
-  check('Movement log: an actor, branch, product or reason saved under a number is not found by a fragment of it; ordinary text is', () => {
+  check('Movement log: an actor or a reason saved under a number is not found by a fragment of it; a branch or a product named by a number is shown as stored, so it is; ordinary text is', () => {
     const db = new Database(':memory:')
     db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT); CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT);
       CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, product_name TEXT, branch_id INTEGER, branch_name TEXT, user_id INTEGER, user_name TEXT, movement_type TEXT, reason TEXT)`)
@@ -108,19 +108,21 @@ function run(w, source = {}) {
     insert.run(2, 'Lip Oil', 'Main', 1, 'James', 'add', 'refund to "093 456 789" requested')
     insert.run(3, 'Lip Oil', '095 777 626', 1, 'James', 'add', 'recount')
     insert.run(4, 'Cream', 'Main', 1, 'James', 'add', 'batch 4471 recount')
+    insert.run(5, '99012370901234', 'Main', 1, 'James', 'add', 'recount')
     const found = (needle, access) => {
       const haystack = w.movement.movementSearchHaystackSql('inventory_movements', (sql, key) => w.guard.searchableColumnSql({ sql, key }, access))
       return db.prepare(`SELECT id FROM inventory_movements WHERE lower(COALESCE(${haystack}, '')) LIKE @needle ORDER BY id`).all({ needle: `%${needle}%` }).map((row) => row.id)
     }
     assert.deepEqual(found('555', CLOSED), [], 'actor saved under a number')
     assert.deepEqual(found('456', CLOSED), [], 'reason quoting a number')
-    assert.deepEqual(found('777', CLOSED), [], 'branch saved under a number')
+    assert.deepEqual(found('777', CLOSED), [3], 'a branch named by a number is shown as stored (review B2), so the search reads it as stored')
+    assert.deepEqual(found('1237', CLOSED), [5], 'a product named by a digit code is shown as stored (review B2)')
     assert.deepEqual(found('555', OPEN), [1])
     assert.deepEqual(found('456', OPEN), [2])
     assert.deepEqual(found('777', OPEN), [3])
     assert.deepEqual(found('damaged', CLOSED), [1])
     assert.deepEqual(found('4471', CLOSED), [4], 'a digit word inside an ordinary reason')
-    assert.deepEqual(found('james', CLOSED), [2, 3, 4])
+    assert.deepEqual(found('james', CLOSED), [2, 3, 4, 5])
     assert.deepEqual(found('lip oil', CLOSED), [1, 2, 3])
     assert.deepEqual(w.movement.movementSearchHaystackSql('inventory_movements'), w.movement.movementSearchHaystackSql('inventory_movements', (sql) => sql), 'the holder form is the form before this change')
   })
@@ -183,7 +185,6 @@ const MUTANTS = [
   ['stock-in sessions: the actor is read raw', { lib: { stockInSessionsQuery: replaceOnce("readable('s.user_name', 'user_name')", "'s.user_name'") } }],
   ['movements: the actor is read raw', { lib: { movementSearch: replaceOnce("readable(movementActorNameSql(alias), 'user_name')", 'movementActorNameSql(alias)') } }],
   ['movements: the reason is read raw', { lib: { movementSearch: replaceOnce("readable(`${alias}.reason`, 'reason')", '`${alias}.reason`') } }],
-  ['movements: the branch is read raw', { lib: { movementSearch: replaceOnce("readable(movementBranchNameSql(alias), 'branch_name')", 'movementBranchNameSql(alias)') } }],
   ['expenses list: the note is read raw', { source: { 'routes/fees.ts': replaceOnce("searchableColumnSql('f.notes', access)", "'f.notes'") } }],
   ['expenses list: the label is read raw', { source: { 'routes/fees.ts': replaceOnce("searchableColumnSql('f.label', access)", "'f.label'") } }],
   ['shift list: the user name is read raw', { source: { 'routes/shifts.ts': replaceOnce("${searchableColumnSql('user_name', phoneSearchAccessOf(user))} LIKE @search", 'user_name LIKE @search') } }],

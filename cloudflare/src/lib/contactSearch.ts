@@ -41,6 +41,15 @@ const NON_PHONE_COLUMNS: Record<ContactSearchTable, string> = {
   delivery_contacts: '{name area}',
 }
 
+// The columns that name a person and so can hold a number (a contact saved under its number, a supplier's contact person that is one):
+// the response masks them, so a digit word of an account without the grant may not read a row whose value in one of them is wholly a
+// number. Listing a column here is what lets the response mask it without opening a search oracle (review B3).
+const PERSON_COLUMNS: Record<ContactSearchTable, readonly string[]> = {
+  customers: ['name'],
+  suppliers: ['name', 'contact_person'],
+  delivery_contacts: ['name'],
+}
+
 export interface ContactMatchClause {
   sql: string
   params: Record<string, string>
@@ -118,8 +127,8 @@ function buildOpenContactMatchClause(
   const wordParam = `${paramPrefix}_word`
   params[wordParam] = wordExpr
   const wordMatch = `id IN (SELECT rowid FROM ${wordTable} WHERE ${wordTable} MATCH @${wordParam})`
-  // A contact saved by its number has that number as its name, so a digit word may not read such a name either.
-  const clauses = [digitWordsAvoidPhones && words.some(hasDigit) ? `(${wordMatch} AND NOT ${phoneShapedSql('name')})` : wordMatch]
+  // A contact saved by its number has that number as its name (a supplier's contact person too), so a digit word may not read such a name either.
+  const clauses = [digitWordsAvoidPhones && words.some(hasDigit) ? `(${wordMatch} AND ${PERSON_COLUMNS[table].map((column) => `NOT ${phoneShapedSql(column)}`).join(' AND ')})` : wordMatch]
 
   if (trigramEligible) {
     const phoneParam = `${paramPrefix}_phone`

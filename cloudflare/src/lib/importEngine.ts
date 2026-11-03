@@ -90,6 +90,7 @@ import { buildImportedContactState, contactDisplayAddress } from './contactOptio
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
 import { MASKED_PHONE_MESSAGE, rowHasMaskedPhone } from './phoneWriteGuard'
+import { scrubMaskedInput } from './phoneAccess'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
@@ -2608,7 +2609,9 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
   const pendingUpdateByExistingId = new Map<number, number>()
 
   const results: ImportRowResult[] = []
-  for (const row of rows) {
+  for (const submitted of rows) {
+    // A file exported while a name or a note was hidden (097 *** 822) carries the mask, not the value: that cell reads as empty (review B1).
+    const row = scrubMaskedInput(submitted) as ParsedCsvRow
     const name = str(row.name)
     // A file exported while the number was hidden (012 *** 678) must not overwrite the real one.
     if (rowHasMaskedPhone(row)) {
@@ -4078,7 +4081,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
   // callers below) -- partitioning a subset that already respects group
   // boundaries gives the identical result as partitioning the full file
   // and discarding groups outside the window, just cheaper.
-  const groups = partitionSalesGroups(rows)
+  const groups = partitionSalesGroups(rows.map((row) => scrubMaskedInput(row) as ParsedCsvRow))
 
   const results: ImportRowResult[] = []
   for (const [, groupRows] of groups) {

@@ -27,7 +27,7 @@
 //
 // Run (from cloudflare/): node scripts/test-phone-leak-crawl-native.cjs
 const { createReporter } = require('./harness/real_worker_world.cjs')
-const { bootPhoneWorld, PHONES, leaksIn, snippetOf, variantsOf } = require('./harness/phone_leak_world.cjs')
+const { bootPhoneWorld, PHONES, PRODUCT_CODE, PRODUCT_CODE_MASK, leaksIn, leakPathsIn, snippetOf, variantsOf } = require('./harness/phone_leak_world.cjs')
 
 const REQUEST_TIMEOUT_MS = 30000
 const PARAM_VALUES = (ids) => [...new Set([1, 2, 3, 4, 5, 6, 9101, ids.customer, ids.sale, ids.return])].map(String)
@@ -47,6 +47,7 @@ const MUTANTS = {
     filter: 'api/sales/delivery-options',
   },
   'duplicate pair value kept': { file: 'lib/phoneAccess.ts', rewrite: sub("if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE", ''), filter: 'duplicates' },
+  'people: contact_person is not a name': { file: 'lib/phoneAccess.ts', rewrite: sub('summary|person|cashier', 'summary|xperson|xcashier'), filter: 'api/suppliers?page=1' },
   'cache-shared-key': { file: 'lib/phoneCache.ts', rewrite: sub('phoneCacheVariant(user))', 'undefined)'), world: 'egress-off', mode: 'cache' },
   'cache-stores-full-body': { file: 'lib/phoneCache.ts', rewrite: sub('async () => projectPhones(await producer(), user)', 'async () => producer()'), world: 'egress-off', mode: 'cache' },
   'cache-variant-ignores-grant': { file: 'lib/phoneCache.ts', rewrite: sub("canSeeFullPhones(user) ? 'phone-full' : 'phone-masked'", "'phone-full'"), world: 'egress-off', mode: 'cache' },
@@ -176,12 +177,37 @@ async function main() {
       t.ok(`at least ${only ? 1 : 15} routes carry numbers (the leak surface is wide)`, phoneBearing.size >= (only ? 1 : 15), phoneBearing.size)
     })
 
+    // Review B3: a crawl that never meets a number cannot say which key it leaves under. The world holds one in every person-name and
+    // free-text field it knows (phone_leak_world.cjs); the administrator must read each of them somewhere.
+    await check('positive control: the administrator reads every number the world keeps in a person-name or free-text field', async (t) => {
+      if (only) return
+      const seen = new Set(results.admin.flatMap((r) => r.leaks))
+      for (const key of ['contactPerson', 'staffName', 'cashierName', 'customerNote', 'supplierNote', 'feeLabel', 'feeNote', 'saleNote', 'moveActor', 'shiftUser', 'legacyCashier', 'returnReason', 'legacyReason', 'moveReason']) t.ok(`${key} is read by the administrator on some route`, seen.has(key))
+    })
+
+    // Review B2: a product is not a person. The world holds a product NAMED by a digit code; no route may show its name masked, to anyone.
+    await check('B2: no route shows the digit-coded product name masked (a product is not a person)', async (t) => {
+      if (only) return
+      const masked = []
+      for (const account of [...world.accounts.allowed, ...world.accounts.denied]) for (const r of results[account]) if (r.text.includes(PRODUCT_CODE_MASK)) masked.push(`${account} ${r.route.split('?')[0]}`)
+      t.eq('routes that mask the product name; first ones', [...new Set(masked)].slice(0, 12), [])
+      t.ok('positive control: the administrator reads the product name in full somewhere', results.admin.some((r) => r.text.includes(`"name":"${PRODUCT_CODE}"`)))
+    })
+
+    // Every key path (array indexes folded) a full number left under, over all five accounts without the grant: the answer to
+    // "which fields carry a number" is a list, and the list must be empty (the review's B3 found four keys the rule did not know).
+    const leakedKeyPaths = new Map()
     for (const account of world.accounts.denied) {
       await check(`ZERO full numbers for ${account} (no grant) on every route`, async (t) => {
         const leaked = results[account].filter((r) => r.leaks.filter((key) => !(account === 'cashier' && key === 'user')).length)
+        for (const r of leaked) for (const keyPath of (r.json ? leakPathsIn(r.json, account === 'cashier' ? ['user'] : []) : ['<non-JSON body>'])) leakedKeyPaths.set(keyPath, (leakedKeyPaths.get(keyPath) || new Set()).add(r.route.split('?')[0]))
         t.eq(`${leaked.length} of ${results[account].length} responses leak a number; first ones`, leaked.slice(0, 12).map((r) => `${r.route} -> ${r.leaks.join(',')} :: ${snippetOf(r.text)}`), [])
       })
     }
+
+    console.log(`key paths that carried a full number to an account without the grant (${leakedKeyPaths.size}):${leakedKeyPaths.size ? '' : ' none'}`)
+    for (const [keyPath, routesOf] of [...leakedKeyPaths].sort()) console.log(`  ${keyPath}   <- ${[...routesOf].slice(0, 3).join(', ')}${routesOf.size > 3 ? ` (+${routesOf.size - 3})` : ''}`)
+    await check('no key path carries a full number to an account without the grant', async (t) => { t.eq('key paths', [...leakedKeyPaths.keys()].sort(), []) })
 
     // A holder and a non-holder on the SAME role differ in nothing but the grant. Every leaf that holds a fixture number for the
     // holder must hold exactly that number's mask for the other; any other leaf that differs is volatile and ignored.

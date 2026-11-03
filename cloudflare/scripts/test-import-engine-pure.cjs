@@ -387,6 +387,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './contactOptions') {
     return contactOptionsModuleObj.exports // real module -- classifyContacts actually calls into it
   }
+  if (request === './phoneAccess') {
+    return require('./harness/phone_real_modules.cjs').phoneModule(request) // real module -- a name or note that is only a mask reads as empty in an import row (review B1)
+  }
   if (request === './phoneWriteGuard') {
     return require('./harness/phone_real_modules.cjs').phoneModule(request) // real module -- a masked phone in an import row is refused (P2.8)
   }
@@ -1767,6 +1770,17 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results.length, 1)
     assert.strictEqual(results[0].action, 'create')
     assert.strictEqual(results[0].data.membership_number, 'LC-00001', 'a brand-new customer gap-fills the house LC- sequence from the shared authority')
+  }
+
+  // 1a) Review B1: a file exported while a note or a name was hidden carries the mask (097 *** 822), not the value. The cell reads as
+  // empty: the mask is never imported as a note or as the name of a new contact.
+  {
+    const db = makeFakeDb([])
+    const results = await classifyContacts(db, 'customers', [row({ name: 'Dara', notes: '097 *** 822', phone: '087654321' }, 1), row({ name: '097 *** 822', phone: '087654322' }, 2)], null)
+    assert.strictEqual(results[0].action, 'create')
+    assert.ok(!JSON.stringify(results[0].data).includes('***'), 'a masked note is not imported: ' + JSON.stringify(results[0].data))
+    assert.strictEqual(results[1].action, 'error', 'a masked name is not a name')
+    assert.match(results[1].message, /name/i)
   }
 
   // 1b) The allocator's seed must UNION portal_accounts.membership_id, same

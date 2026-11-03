@@ -27,7 +27,6 @@ const khmer = (text) => text.replace(/[0-9]/g, (digit) => String.fromCodePoint(0
 const SALES_HIDDEN = [
   ['note that is a number', 'P28-0108', '456', { notes: '093 456 789' }],
   ['cashier that is a number', 'P28-0109', '555', { cashier: '094 555 818' }],
-  ['branch that is a number', 'P28-0110', '777', { branch: '095 777 626' }],
   ['note in Khmer digits', 'P28-0112', khmer('321'), { notes: khmer('096 321 987') }],
   ['note spaced with em spaces', 'P28-0113', '642', { notes: '097 642 813' }],
   ['note spaced with no-break spaces', 'P28-0114', '246', { notes: '098 246 135' }],
@@ -41,6 +40,8 @@ const SALES_VISIBLE = [
   ['deliver at 12 Street 271', 'P28-0111', { notes: 'deliver at 12 Street 271' }],
   ['a number inside a sentence (the note shows as typed)', 'P28-0115', { notes: 'Tel 088 713 904' }],
   ['a 7-digit note (too short to be a phone)', 'P28-0116', { notes: '4412345' }],
+  // Review B2: a branch is not a person. One named by a number is shown to everybody as stored, so the search reads it as stored.
+  ['a branch named by a number', 'P28-0110', { branch: '095 777 626' }],
 ]
 const RETURNS_HIDDEN = [
   ['return note that is a number', 'P28-RET-EA', '456', 'customer', { notes: '093 456 789' }],
@@ -84,11 +85,17 @@ const QUOTED_VALUES = [
   ['quoted number', 'refund to "093 111 424" requested', true], ['single quotes', "ref '093 111 424'", true], ['curly quotes', 'refund to “093 111 424”', true],
   ['quoted seven digits', 'refund "0931114"', true], ['plain reason', 'broken seal batch 4471', false], ['quoted amount', 'amount "12.50" refunded', false],
   ['number outside quotes', 'refund to 093 111 424 requested', false], ['empty', '', false],
+  // The Khmer residue (review E1): a number quoted in Khmer digits was found by a Khmer fragment while the screen showed it masked.
+  ['quoted Khmer number', `refund to "${khmer('093 111 424')}" requested`, true], ['quoted Khmer number, curly quotes', `refund to “${khmer('093 111 424')}”`, true],
+  ['quoted Khmer figure (shown, blanked for the search)', `amount "${khmer('12')}" refunded`, false, true],
 ]
 const ALWAYS_KEYS = ['phone', 'customer_phone', 'driver_phone', 'search_normalized', 'details', 'old_value', 'payload', 'undo_payload']
-const NAME_KEYS = ['notes', 'cashier_name', 'branch_name', 'supplier_name', 'customer_name', 'label', 'description', 'memo', 'recipient_name']
+// Review B3 added the people the app names under keys that do not end in "name": contact_person, username, cashier, created_by, actor ...
+const NAME_KEYS = ['notes', 'cashier_name', 'supplier_name', 'customer_name', 'label', 'description', 'memo', 'recipient_name', 'contact_person', 'username', 'cashier', 'created_by', 'actor', 'owner', 'staff', 'user_name']
 const QUOTED_KEYS = ['reason', 'message', 'warning']
-const PLAIN_KEYS = ['receipt_number', 'legacy_receipt_number', 'payment_method', 'membership_number', 'return_number', 'return_type', 'supplier_settlement', 'id']
+// Review B2: what is named by what it is, not by a person, is shown as stored.
+const CATALOG_KEYS = ['branch_name', 'product_name', 'source_product_name', 'item_name', 'brand_name', 'category_name', 'unit_name', 'from_branch_name', 'product_description']
+const PLAIN_KEYS = [...CATALOG_KEYS, 'receipt_number', 'legacy_receipt_number', 'payment_method', 'membership_number', 'return_number', 'return_type', 'supplier_settlement', 'id']
 
 function run(world) {
   const failures = []
@@ -104,8 +111,8 @@ function run(world) {
       assert.ok(sales(fragment, OPEN).includes(receipt), `positive control, the holder finds ${label}`)
     }
   })
-  check('no grant: a sale whose cashier, branch or customer is a number is not found by a fragment of it; the holder finds it', () => {
-    for (const [label, receipt, fragment] of SALES_HIDDEN.filter(([label]) => label.startsWith('cashier') || label.startsWith('branch') || label.startsWith('customer'))) {
+  check('no grant: a sale whose cashier or customer is a number is not found by a fragment of it; the holder finds it', () => {
+    for (const [label, receipt, fragment] of SALES_HIDDEN.filter(([label]) => label.startsWith('cashier') || label.startsWith('customer'))) {
       assert.deepEqual(sales(fragment, CLOSED), [], `${label}: ${fragment}`)
       assert.ok(sales(fragment, OPEN).includes(receipt), `positive control, the holder finds ${label}`)
     }
@@ -119,8 +126,12 @@ function run(world) {
       for (const [spelling, q] of spellings) assert.ok(!sales(q, CLOSED).includes(receipt), `${label} ${fragment} ${spelling}`)
     }
   })
+  check('no grant: a branch named by a number is shown as stored (review B2), so the search finds it by a fragment, as the holder does', () => {
+    assert.ok(sales('777', CLOSED).includes('P28-0110'))
+    assert.ok(sales('777', OPEN).includes('P28-0110'))
+  })
   check('no grant: the digits are not read two or three at a time either (a longer fragment, two words, a whole number)', () => {
-    for (const q of ['0934', '4567', '456 789', '093 456', '093456789', '094555818', '555 818', '777626', '95 777', '1 777']) assert.deepEqual(sales(q, CLOSED), [], q)
+    for (const q of ['0934', '4567', '456 789', '093 456', '093456789', '094555818', '555 818', '777626']) assert.deepEqual(sales(q, CLOSED), [], q)
   })
   check('no grant: a sale whose note, cashier or branch is ordinary text is still found, with or without digits in it', () => {
     assert.deepEqual(sales('street', CLOSED), ['P28-0111'])
@@ -212,7 +223,6 @@ const RAW = (column, key = 'raw') => `{ sql: "COALESCE(${column},'')", key: '${k
 const MUTANTS = [
   ['sales: the note is read raw', { sales: replaceOnce("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`) }],
   ['sales: the cashier is read raw', { sales: replaceOnce("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`) }],
-  ['sales: the branch is read raw', { sales: replaceOnce("'s.branch_name', 's.payment_method',", `${RAW('s.branch_name')}, 's.payment_method',`) }],
   ['sales: the customer name is read raw', { sales: replaceOnce("'s.cashier_name', 's.customer_name',\n", `'s.cashier_name', ${RAW('s.customer_name')},\n`) }],
   ['returns: the note is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `'r.supplier_name', 'r.reason', ${RAW('r.notes')}, 'r.return_type'`) }],
   ['returns: the supplier is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `${RAW('r.supplier_name')}, 'r.reason', 'r.notes', 'r.return_type'`) }],
@@ -220,6 +230,9 @@ const MUTANTS = [
   ['returns: the reason is read raw', { returns: replaceOnce("'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type'", `'r.supplier_name', ${RAW('r.reason')}, 'r.notes', 'r.return_type'`) }],
   ['returns: the customer name is read raw', { returns: replaceOnce("'r.cashier_name', 'r.customer_name',\n", `'r.cashier_name', ${RAW('r.customer_name')},\n`) }],
   ['rule: a name or note that is a number is not masked in search (name class treated as plain)', { lib: { phoneAccess: replaceOnce("if (kind & NAME) return 'name'", "if (kind & NAME) return 'none'") } }],
+  ['rule: the people named under keys that do not end in name are not names', { lib: { phoneAccess: replaceOnce('summary|person|cashier', 'summary|xperson|xcashier') } }],
+  ['rule: a product, branch or category name is masked like a person', { lib: { phoneAccess: replaceOnce('if (NAME_KEY.test(normalized)) kind |= CATALOG_KEY.test(normalized) ? CATALOG : NAME', 'if (NAME_KEY.test(normalized)) kind |= NAME') } }],
+  ['quoted: the Khmer quote-then-digit pattern is dropped', { lib: { phoneSearchGuard: replaceOnce('][\\u17e0-\\u17e9]*\' THEN', '][\\u17e0-\\u17e9]*xx\' THEN') } }],
   ['rule: a quoted number in a sentence is not masked in search', { lib: { phoneAccess: replaceOnce("if (kind & MESSAGE) return 'quoted'", "if (kind & MESSAGE) return 'none'") } }],
   ['rule: the columns that always mask are read', { lib: { phoneAccess: replaceOnce("if (kind & (PHONE | SEARCH_TEXT | ENVELOPE)) return 'always'", "if (kind & (PHONE | SEARCH_TEXT | ENVELOPE)) return 'none'") } }],
   ['shape: only the old separators (space, tab, line breaks, no-break) are stripped', { lib: { phoneSearchGuard: replaceOnce('for (const code of SHAPE_SPACE_CODES) text', 'for (const code of [9, 10, 13, 0xa0]) text') } }],

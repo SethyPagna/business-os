@@ -24,7 +24,28 @@ const PHONES = {
   duplicate: '011 888 999',
   supplierDuplicate: '012 777 111',
   deliveryDuplicate: '013 666 222',
+  // 6.0.1162 (the security review's B1-B3): a number as the WHOLE value of every person-name and free-text field the API returns
+  // (the 097 2xx 8xx set), so the crawl names the key a full number leaves under and a write test has a real value to lose.
+  contactPerson: '097 252 812',
+  staffName: '097 244 804',
+  cashierName: '097 245 805',
+  customerNote: '097 262 822',
+  supplierNote: '097 267 827',
+  feeLabel: '097 271 831',
+  feeNote: '097 272 832',
+  saleNote: '097 254 814',
+  moveActor: '097 251 811',
+  shiftUser: '097 253 813',
+  legacyCashier: '097 248 808',
+  // Quoted inside a sentence (a reason): the response masks the quoted number, not the sentence.
+  returnReason: '097 243 803',
+  legacyReason: '097 247 807',
+  moveReason: '097 249 809',
 }
+
+// A product NAMED by a long digit code (a supplier's item code): not a person, so it is shown to everybody as it is stored.
+const PRODUCT_CODE = '88512345678901'
+const PRODUCT_CODE_MASK = '885 *** 901'
 
 const PROBES = [
   "app.get('/api/__routes', (c) => c.json(app.routes.map((route) => ({ method: route.method, path: route.path }))))",
@@ -178,6 +199,45 @@ async function bootPhoneWorld({ extraTransform, transformSources } = {}) {
   await twin('delivery_contacts', 9101, 'Fixture Twin Courier A', PHONES.deliveryDuplicate)
   await twin('delivery_contacts', 9102, 'Fixture Twin Courier B', PHONES.deliveryDuplicate)
 
+  // ---- a number as the whole value of every person-name and free-text field (review B1-B3) -------------------------------
+  await world.run("INSERT INTO customers (id, name, membership_number, notes) VALUES (9103, 'Fixture Noted', 'LC-P28-9103', ?)", PHONES.customerNote)
+  await world.run('INSERT INTO suppliers (id, name, contact_person, notes) VALUES (9103, ?, ?, ?)', 'Fixture Noted Supplies', PHONES.contactPerson, PHONES.supplierNote)
+  ids.notedCustomer = 9103
+  ids.notedSupplier = 9103
+  // A staff account whose display name is a number: its audit rows, its sales and its shift carry that name.
+  await world.account('numbered', { roleCode: 'manager' })
+  await world.run('UPDATE users SET name = ? WHERE username = ?', PHONES.staffName, 'numbered')
+  await world.run(`INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, created_at) VALUES (NULL, ?, 'p28_probe', 'product', '91', '{}', datetime('now'))`, PHONES.staffName)
+  await world.run(
+    `INSERT INTO sales (receipt_number, customer_name, cashier_name, notes, total_usd, total_khr, sale_status, payment_method, search_normalized, branch_id, branch_name, created_at)
+     VALUES ('P28-0030', 'Walk-in', ?, ?, 5, 20500, 'completed', 'Cash', 'p28-0030 walk in', ?, 'Main', datetime('now', '-3 hour'))`,
+    PHONES.cashierName, PHONES.saleNote, ids.branch,
+  )
+  await world.run(
+    `INSERT INTO returns (return_number, customer_name, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, reason, search_normalized, created_at)
+     VALUES ('P28-RET-7', 'Walk-in', 'customer', 'completed', 1, 4100, 'P28-0030', ?, 'p28-ret-7 walk in', datetime('now'))`,
+    `Customer "${PHONES.returnReason}" asked for it back`,
+  )
+  await world.run(`INSERT INTO fees (fee_type, label, notes, amount_usd, amount_khr, fee_date, branch_id) VALUES ('other', ?, ?, 1, 0, date('now'), ?)`, PHONES.feeLabel, PHONES.feeNote, ids.branch)
+  ids.numberedFee = (await world.first('SELECT id FROM fees WHERE label = ?', PHONES.feeLabel)).id
+  await world.run(
+    `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
+     VALUES (NULL, 'Fixture Toner', ?, 'Main', 'adjustment', 1, ?, NULL, ?, datetime('now'))`,
+    ids.branch, `Count of "${PHONES.moveReason}"`, PHONES.moveActor,
+  )
+  await world.run(
+    `INSERT INTO legacy_deleted_sale_items (event_key, invoice_no, cashier_name, deletion_reason, deleted_at, source_product_name, product_name, source_file, source_row)
+     VALUES ('p28-ev', 'P28-INV-1', ?, ?, datetime('now'), 'Fixture Cream', 'Fixture Cream', 'p28.xls', 1)`,
+    PHONES.legacyCashier, `Customer "${PHONES.legacyReason}" refused`,
+  )
+  await world.run(
+    `INSERT INTO shift_sessions (shift_code, user_id, user_name, branch_id, branch_name, business_date, opened_at) VALUES ('P28-S1', ?, ?, ?, 'Main', date('now'), datetime('now'))`,
+    world.adminId, PHONES.shiftUser, ids.branch,
+  )
+  const code = await world.api('POST', '/api/products', { name: PRODUCT_CODE, barcode: PRODUCT_CODE, selling_price_usd: 2, price_usd: 2, cost_price_usd: 1, category: 'P28 Codes' }, { as: 'admin' })
+  await must('product named by a digit code', code, [200, 201])
+  ids.digitProduct = code.json && (code.json.id || (code.json.product && code.json.product.id))
+
   world.ids = ids
   world.PHONES = PHONES
   world.placeSale = (options) => placeSale(world, options)
@@ -201,7 +261,7 @@ let saleSeq = 0
  * A real POS sale (POST /api/sales) for an existing customer, with the customer_phone the till sends. A form filled from a masked
  * read sends the mask back; the Worker resolves it to the stored number and the reply is the sale it saved. Returns the response.
  */
-async function placeSale(world, { as = 'manager', customerId, customerName, customerPhone }) {
+async function placeSale(world, { as = 'manager', customerId, customerName, customerPhone, productName, lineName }) {
   const { executeRawStockTransaction } = await stockKernel()
   const sell = world.ids.branch
   await world.run("UPDATE branches SET role = 'shop', canonical_key = 'shop' WHERE id = ?", sell)
@@ -211,7 +271,7 @@ async function placeSale(world, { as = 'manager', customerId, customerName, cust
   const price = 10
   await executeRawStockTransaction(world.db, [
     world.db.prepare('INSERT INTO products(id,name,barcode,sku,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,stock_quantity,is_active) VALUES(?,?,?,?,4,0,?,?,?,1)')
-      .bind(id, `Fixture Soap ${id}`, `88710${String(id).padStart(8, '0')}`, `P28-SKU-${id}`, price, price * 4000, 20),
+      .bind(id, productName || `Fixture Soap ${id}`, `88710${String(id).padStart(8, '0')}`, `P28-SKU-${id}`, price, price * 4000, 20),
     world.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,?,?)').bind(id, sell, 20),
     world.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,unit_cost_usd,is_active) VALUES(?,?,?,?,'2026-09-02',1,4,1)").bind(lot, id, `P28${id}`, `P28${id}`),
     world.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(lot, sell, 20),
@@ -223,7 +283,7 @@ async function placeSale(world, { as = 'manager', customerId, customerName, cust
     offline_owner: { version: 1, actor_id: actor.id, organization_id: actor.organization_id ?? null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
     payment_details: [{ method: 'Cash', amount_usd: price, amount_khr: 0 }], payment_method: 'Cash', amount_paid_usd: price, amount_paid_khr: 0,
     customer_id: customerId, customer_name: customerName, customer_phone: customerPhone,
-    items: [{ product_id: id, quantity: 1, branch_id: sell, batch_id: lot, client_line_key: `${key}-line-1`, pricing_source: 'selling',
+    items: [{ product_id: id, ...(lineName ? { name: lineName, product_name: lineName } : {}), quantity: 1, branch_id: sell, batch_id: lot, client_line_key: `${key}-line-1`, pricing_source: 'selling',
       pricing_quote: { gross_usd: 0, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 0, total_khr: 0 } }],
   }
   // The first answer to a zero quote is the server's own quote (the till's review step); the real request carries it.
@@ -234,6 +294,21 @@ async function placeSale(world, { as = 'manager', customerId, customerName, cust
   return world.api('POST', '/api/sales', body, { as })
 }
 
+/**
+ * Where a fixture number leaves: the key path of every string in `json` that holds one (array indexes folded to []), nested JSON text
+ * included. The crawl prints these so a leak names the KEY, not just the route.
+ */
+function leakPathsIn(json, ignore = []) {
+  const found = new Set()
+  const visit = (node, at) => {
+    if (typeof node === 'string') { if (leaksIn(node).some((key) => !ignore.includes(key))) found.add(at) }
+    else if (Array.isArray(node)) for (const item of node) visit(item, `${at}[]`)
+    else if (node && typeof node === 'object') for (const [key, value] of Object.entries(node)) visit(value, `${at}.${key}`)
+  }
+  visit(json, '$')
+  return [...found]
+}
+
 /** The text around the first fixture number in `text`, for a failure message. */
 function snippetOf(text) {
   const flat = String(text)
@@ -241,4 +316,4 @@ function snippetOf(text) {
   return ''
 }
 
-module.exports = { bootPhoneWorld, PHONES, leaksIn, variantsOf, optionJson, snippetOf }
+module.exports = { bootPhoneWorld, PHONES, PRODUCT_CODE, PRODUCT_CODE_MASK, leaksIn, variantsOf, optionJson, snippetOf, leakPathsIn }
