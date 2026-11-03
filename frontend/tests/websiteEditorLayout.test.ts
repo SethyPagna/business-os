@@ -133,4 +133,54 @@ runTest('T-L6: a post card always shows its product picker and its web link fiel
   assert.match(page, /function updatePromoItemFields\(itemId: string, fields: Record<string, unknown>\) \{\n\s*setPromoItemsDraft\(promoItems\.map\(\(item\) => \(\n\s*item\.id === itemId \? \{ \.\.\.item, \.\.\.fields \} : item/)
 })
 
+// ED-1a (EDITOR-REDESIGN-REFRESH section C): the bar. Button policy: Save keeps icon + word, every other bar control is
+// icon-only with label = aria-label = tooltip. Sticky and opaque with no backdrop blur; one row, 56 px on a phone, 52 px from md.
+const editorFile = (name: string): string => read(`../src/components/catalog/editor/${name}`)
+const noComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
+runTest('T-L1: among the bar\'s buttons only Save shows text; the old text buttons are gone', () => {
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  const buttons = [...bar.matchAll(/<button\b[\s\S]*?<\/button>/g)].map((match) => match[0])
+  assert.equal(buttons.length, 1, 'EditorBar draws one <button>: Save. Every other control is an EditorIconButton')
+  assert.match(buttons[0], /<Save\b/, 'Save keeps its icon')
+  assert.match(buttons[0], /ed\('web_editor_save'/, '... and its word')
+  assert.match(buttons[0], /aria-disabled=/, 'idle and blocked Save stay focusable and ignore the press (aria-disabled, never disabled)')
+  assert.doesNotMatch(buttons[0], /(?<![-\w])disabled=/)
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  assert.doesNotMatch(surface, /jumpToPreview|saveChanges/, 'the "Jump to preview" and "Save changes" text buttons are gone from the surface')
+  assert.doesNotMatch(surface, /data-editor-section=/, 'the section buttons moved into EditorSectionNav')
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /<EditorIconButton\b/, 'an inactive chip is an icon-only EditorIconButton')
+})
+
+runTest('T-L2: an EditorIconButton\'s visible name, accessible name and tooltip are one string', () => {
+  const button = noComments(editorFile('EditorIconButton.tsx'))
+  assert.match(button, /\blabel: string\b/, 'label is required')
+  assert.equal([...button.matchAll(/aria-label=\{([^}]*)\}/g)].map((match) => match[1]).join(','), 'label', 'aria-label is the label')
+  assert.equal([...button.matchAll(/\btitle=\{([^}]*)\}/g)].map((match) => match[1]).join(','), 'label', 'the tooltip is the label')
+  assert.doesNotMatch(button, />[^<>{}]*[A-Za-z]{2,}[^<>{}]*</, 'no text child: the icon is the face')
+})
+
+runTest('T-L3: the bar is sticky, opaque and not blurred, one row of 56 px (52 px from md), with the status below it on a phone', () => {
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  assert.match(bar, /\bsticky\b/)
+  assert.doesNotMatch(bar, /backdrop-blur|bg-white\/|bg-slate-950\/|bg-white\/\d/, 'opaque: a blur over a near-opaque fill costs a GPU pass per scroll frame (stickyHeaderBlurRemoval)')
+  assert.match(bar, /data-testid="editor-bar-row"[^>]*\bh-14\b[^>]*\bmd:h-\[52px\]/, 'the row is 56 px on a phone and 52 px from md')
+  assert.match(bar, /role="status"/, 'the status is one live line')
+  assert.match(bar, /aria-busy=\{/, 'Save says busy while it saves')
+})
+
+runTest('T-L4: the section picker is a menu of seven radio items; the chips are a tablist with a roving tabindex', () => {
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /aria-haspopup="menu"/)
+  assert.match(nav, /role="menuitemradio"[\s\S]*aria-checked=/)
+  assert.match(nav, /aria-label=\{`\$\{ed\('web_editor_sections'[^`]*\}: \$\{/, 'the picker\'s name reads "Sections: Shop"')
+  assert.match(nav, /role="tablist"/)
+  assert.match(nav, /role="tab"[\s\S]*tabIndex=\{/, 'a roving tabindex')
+  for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 'Escape']) assert.ok(nav.includes(`'${key}'`), `${key} is handled`)
+  assert.match(nav, /web_editor_unsaved/, 'a dirty dot has sr-only text')
+  assert.match(nav, /web_editor_seller_missing/, 'the amber Contact marker has sr-only text')
+  assert.match(nav, /amber/, 'and differs in colour from the dirty dot')
+})
+
 if (failed) process.exit(1)
