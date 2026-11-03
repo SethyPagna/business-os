@@ -182,16 +182,26 @@ test.describe('console hygiene', () => {
 
   test('the forgot-password screen boots silently', async ({ page }) => {
     // A screen reached only by someone already having a bad day, and one no
-    // other spec opens. frontend/src/components/auth/Login.tsx:1242 renders the
-    // trigger as tr('reset_password_with_email', ...) = "Forgot password?"
-    // (frontend/src/lang/en.json:4255); the recovery form is what must appear.
+    // other spec opens. Login.tsx renders the trigger as
+    // tr('reset_password_with_email', ...) = "Forgot password?" (en.json).
+    //
+    // Since S-auth4c (28b605850, 27 Sep 2026) that button opens a METHOD CHOOSER
+    // ("How do you want to reset your password?"), not the email form: email only
+    // when this server can send it (/api/auth/verification-capabilities email:true),
+    // and "Ask an administrator" always. The fixture server answers email:false, so
+    // the chooser must offer the administrator route and must NOT offer email; the
+    // spec used to expect the email form (#email-reset-identifier) straight away.
+    // Both screens a stranger can reach from here are opened and read for errors.
     const health = collectPageHealth(page)
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
     await expect(page.locator('#login-username')).toBeVisible({ timeout: 30_000 })
     const forgot = page.getByRole('button', { name: /Forgot password/i })
     await expect(forgot).toBeVisible({ timeout: 30_000 })
     await forgot.click()
-    await expect(page.locator('#email-reset-identifier')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('How do you want to reset your password?', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Email me a reset link', exact: true }), 'no email route on a server that cannot send mail').toHaveCount(0)
+    await page.getByRole('button', { name: 'Ask an administrator', exact: true }).click()
+    await expect(page.locator('#admin-reset-identifier')).toBeVisible({ timeout: 30_000 })
     await settle(page)
 
     expectQuiet(health, 'the forgot-password screen')
