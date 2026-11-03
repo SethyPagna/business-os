@@ -30,6 +30,10 @@ export type EditorSectionDef = {
   keys: readonly string[]
 }
 
+// Draft keys are stored without their shared prefix: every portal key is customer_portal_<name> except the business identity ones, which
+// are written out in full. (A key can still be found by grepping its <name> and the prefix together in buildDraft.)
+const portalKeys = (names: string): string[] => names.split(' ').map((name) => 'customer_portal_' + name)
+
 // A field lives in the section whose gate is the grant that saves it: show_about is About's, the header colours and the
 // product-page texts are config's. The business identity fields (name, phone, email, address, registered name and number)
 // save through a fifth grant that has no section; they stay in the config sections until ED-2 shows them read-only for a
@@ -42,11 +46,11 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     label: ['web_editor_section_shop', 'Shop', 'ហាង'],
     grants: ['customer_portal'],
     keys: [
-      'business_name', 'customer_portal_business_tagline', 'customer_portal_intro',
-      'customer_portal_logo_image', 'customer_portal_show_logo', 'customer_portal_logo_size', 'customer_portal_logo_fit',
-      'customer_portal_logo_zoom', 'customer_portal_logo_position_x', 'customer_portal_logo_position_y',
-      'customer_portal_cover_image', 'customer_portal_show_cover',
-      'customer_portal_hero_gradient_start', 'customer_portal_hero_gradient_mid', 'customer_portal_hero_gradient_end',
+      'business_name',
+      ...portalKeys(
+        'business_tagline intro logo_image show_logo logo_size logo_fit logo_zoom logo_position_x logo_position_y ' +
+        'cover_image show_cover hero_gradient_start hero_gradient_mid hero_gradient_end'
+      ),
     ],
   },
   {
@@ -56,19 +60,20 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     label: ['web_editor_section_contact', 'Contact', 'ទំនាក់ទំនង'],
     grants: ['customer_portal'],
     keys: [
-      'business_phone', 'business_email', 'business_address', 'customer_portal_address_link',
-      'business_legal_name', 'business_registration_number',
-      'customer_portal_show_phone', 'customer_portal_show_email', 'customer_portal_show_address',
-      'customer_portal_website', 'customer_portal_website_label', 'customer_portal_show_website',
-      'customer_portal_facebook', 'customer_portal_facebook_label', 'customer_portal_show_facebook',
-      'customer_portal_instagram', 'customer_portal_instagram_label', 'customer_portal_show_instagram',
-      'customer_portal_telegram', 'customer_portal_telegram_label', 'customer_portal_show_telegram',
-      'customer_portal_contact_messenger', 'customer_portal_contact_messenger_label', 'customer_portal_show_contact_messenger',
-      'customer_portal_contact_telegram', 'customer_portal_contact_telegram_label', 'customer_portal_show_contact_telegram',
-      'customer_portal_contact_instagram', 'customer_portal_contact_instagram_label', 'customer_portal_show_contact_instagram',
-      'customer_portal_contact_whatsapp', 'customer_portal_contact_whatsapp_label', 'customer_portal_show_contact_whatsapp',
-      'customer_portal_contact_phone', 'customer_portal_contact_phone_label', 'customer_portal_show_contact_phone',
-      'customer_portal_google_maps_embed', 'customer_portal_show_google_map',
+      'business_phone',
+      'business_email',
+      'business_address',
+      'business_legal_name',
+      'business_registration_number',
+      // Written out in full: a bare telegram_label would read as a Settings-only row name to the guard in bootstrapSettingsReaders.test.ts.
+      'customer_portal_telegram_label',
+      ...portalKeys(
+        'address_link show_phone show_email show_address website website_label show_website facebook facebook_label ' +
+        'show_facebook instagram instagram_label show_instagram telegram show_telegram contact_messenger ' +
+        'contact_messenger_label show_contact_messenger contact_telegram contact_telegram_label show_contact_telegram ' +
+        'contact_instagram contact_instagram_label show_contact_instagram contact_whatsapp contact_whatsapp_label ' +
+        'show_contact_whatsapp contact_phone contact_phone_label show_contact_phone google_maps_embed show_google_map'
+      ),
     ],
   },
   {
@@ -78,15 +83,13 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     label: ['web_editor_section_products', 'Products', 'ផលិតផល'],
     grants: ['customer_portal'],
     keys: [
-      'customer_portal_show_catalog', 'customer_portal_show_prices', 'customer_portal_show_out_of_stock_products',
-      'customer_portal_show_stock_status', 'customer_portal_show_product_brand', 'customer_portal_show_product_category',
-      'customer_portal_show_product_discount', 'customer_portal_price_display', 'customer_portal_refresh_seconds',
-      'customer_portal_grid_columns_auto', 'customer_portal_grid_columns_mobile', 'customer_portal_grid_columns_desktop',
-      'customer_portal_show_top_seller_badge', 'customer_portal_show_top_product_badge', 'customer_portal_show_recommended_badge',
-      'customer_portal_show_promotion_badge', 'customer_portal_show_new_arrival_badge', 'customer_portal_highlight_rank_limit',
-      'customer_portal_recommended_product_ids',
-      'customer_portal_product_caution_default', 'customer_portal_product_need_more_details_default',
-      'customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold',
+      ...portalKeys(
+        'show_catalog show_prices show_out_of_stock_products show_stock_status show_product_brand show_product_category ' +
+        'show_product_discount price_display refresh_seconds grid_columns_auto grid_columns_mobile grid_columns_desktop ' +
+        'show_top_seller_badge show_top_product_badge show_recommended_badge show_promotion_badge show_new_arrival_badge ' +
+        'highlight_rank_limit recommended_product_ids product_caution_default product_need_more_details_default ' +
+        'stock_threshold_mode low_stock_threshold out_of_stock_threshold'
+      ),
     ],
   },
   {
@@ -97,9 +100,10 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     // Top of page (the announcement bar) is config's; the promotion cards are posts'.
     grants: ['customer_portal', 'portal_posts'],
     keys: [
-      'customer_portal_announcement_enabled', 'customer_portal_announcement_text_en', 'customer_portal_announcement_text_km',
-      'customer_portal_announcement_link', 'customer_portal_announcement_start', 'customer_portal_announcement_end',
-      'customer_portal_show_promotions', 'customer_portal_promotions_title', 'customer_portal_promotions_intro', 'customer_portal_promo_items',
+      ...portalKeys(
+        'announcement_enabled announcement_text_en announcement_text_km announcement_link announcement_start ' +
+        'announcement_end show_promotions promotions_title promotions_intro promo_items'
+      ),
     ],
   },
   {
@@ -109,8 +113,7 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     label: ['web_editor_section_about', 'About', 'អំពី'],
     grants: ['portal_about'],
     keys: [
-      'customer_portal_show_about', 'customer_portal_about_title', 'customer_portal_about_image', 'customer_portal_about_image_alt',
-      'customer_portal_about_content', 'customer_portal_about_blocks',
+      ...portalKeys('show_about about_title about_image about_image_alt about_content about_blocks'),
     ],
   },
   {
@@ -119,7 +122,9 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     icon: 'help-circle',
     label: ['web_editor_section_faq', 'FAQ', 'សំណួរញឹកញាប់'],
     grants: ['portal_faq'],
-    keys: ['customer_portal_show_faq', 'customer_portal_faq_title', 'customer_portal_faq_items'],
+    keys: [
+      ...portalKeys('show_faq faq_title faq_items'),
+    ],
   },
   {
     id: 'features',
@@ -128,22 +133,19 @@ export const EDITOR_SECTIONS: readonly EditorSectionDef[] = [
     label: ['web_editor_section_features', 'Features', 'មុខងារ'],
     grants: ['customer_portal'],
     keys: [
-      'customer_portal_ai_enabled', 'customer_portal_ai_title', 'customer_portal_ai_provider_id', 'customer_portal_ai_intro',
-      'customer_portal_ai_disclaimer', 'customer_portal_ai_prompt',
-      'customer_portal_path', 'customer_portal_public_url', 'customer_portal_translate_widget_enabled', 'customer_portal_translations',
-      'customer_portal_language',
-      'customer_portal_submission_enabled', 'customer_portal_submission_instructions',
+      ...portalKeys(
+        'ai_enabled ai_title ai_provider_id ai_intro ai_disclaimer ai_prompt path public_url translate_widget_enabled ' +
+        'translations language submission_enabled submission_instructions'
+      ),
     ],
   },
 ]
 
 // Draft keys no field edits: carried by buildDraft and the save payload, but never typed into.
-export const HIDDEN_DRAFT_KEYS: readonly string[] = [
-  'customer_portal_favicon_image', 'customer_portal_title', 'customer_portal_title_size', 'customer_portal_show_membership',
-  'customer_portal_points_basis', 'customer_portal_points_per_usd', 'customer_portal_points_per_khr', 'customer_portal_redeem_points',
-  'customer_portal_redeem_value_usd', 'customer_portal_redeem_value_khr', 'customer_portal_show_point_value',
-  'customer_portal_membership_info_text', 'customer_portal_submission_reward_points',
-]
+export const HIDDEN_DRAFT_KEYS: readonly string[] = portalKeys(
+  'favicon_image title title_size show_membership points_basis points_per_usd points_per_khr redeem_points ' +
+  'redeem_value_usd redeem_value_khr show_point_value membership_info_text submission_reward_points'
+)
 
 const SECTION_OF_KEY: ReadonlyMap<string, EditorSectionId> = new Map(
   EDITOR_SECTIONS.flatMap((section) => section.keys.map((key): [string, EditorSectionId] => [key, section.id])),
@@ -165,12 +167,12 @@ export function dirtySectionIds(editedKeys: ReadonlySet<string>): Set<EditorSect
 
 // ---- the section the editor opens on --------------------------------------------------------------------------------
 
-export const EDITOR_SECTION_STORAGE_KEY = 'business-os-website-editor-section-v1'
-type SectionStorage = Pick<Storage, 'getItem' | 'setItem'>
 /** The element ids a tab panel is labelled by: the tab on a wide screen, the picker button below 768 px. */
 export const sectionTabId = (id: EditorSectionId): string => 'portal-tab-' + id
 export const SECTION_PICKER_ID = 'portal-section-picker'
 
+export const EDITOR_SECTION_STORAGE_KEY = 'business-os-website-editor-section-v1'
+type SectionStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 function browserStorage(): SectionStorage | null {
   try {

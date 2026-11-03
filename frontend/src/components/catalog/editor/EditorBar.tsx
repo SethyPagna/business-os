@@ -75,7 +75,7 @@ export default function EditorBar({ ed, compact, sections, activeSection, dirtyS
           }}
         >
           {state === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : state === 'saved' ? <Check className="h-4 w-4" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
-          <span>{state === 'saving' ? ed('web_editor_saving', 'Saving', 'កំពុងរក្សាទុក') : state === 'saved' ? ed('web_editor_saved', 'Saved', 'បានរក្សាទុក') : ed('web_editor_save', 'Save', 'រក្សាទុក')}</span>
+          <span>{state === 'saving' || state === 'saved' ? text : ed('web_editor_save', 'Save', 'រក្សាទុក')}</span>
           {state === 'changed' ? <span aria-hidden className="h-2 w-2 rounded-full bg-white ring-2 ring-white/40" /> : null}
         </button>
       </div>
