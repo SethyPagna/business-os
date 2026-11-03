@@ -146,7 +146,7 @@ function SectionPicker({ ed, sections, active, dirty, sellerMissing, onSelect, s
             ref={menuRef}
             role="menu"
             aria-label={sectionsLabel}
-            className="absolute left-0 top-full z-40 mt-1 max-h-[70vh] w-max min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+            className="absolute left-0 top-full z-40 mt-1 max-h-[calc(70*var(--app-vh))] w-max min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
             onKeyDown={onMenuKeyDown}
           >
             {sections.map((section) => {
