@@ -85,11 +85,21 @@ const ORGANIZATION_FIELD = '#organization-search'
  * inputValue() threw on every poll, and the helper burned its whole budget
  * waiting for an organization that had already been resolved -- which is how a
  * "wait for readiness" turns into the slowest possible sleep.
+ *
+ * The same trap was still open one level down (gate run 41712707233, desktop,
+ * two first attempts): the form flips from the expanded box to the collapsed
+ * row in the instant between the button check and the value read, so the box
+ * is gone and a bare `inputValue()` waits the whole action timeout (30 s here)
+ * for a node that will not come back, with the collapsed row sitting there
+ * ready. One poll swallowed the entire wait. Every read in this probe is
+ * therefore short: a missing box means "not typed yet", and the next poll
+ * sees the button. (submitLogin shares this probe, so it could stall its 20 s
+ * bounded wait the same way and then carry on; that was not measured.)
  */
-function organizationReady(page: Page): () => Promise<boolean> {
+export function organizationReady(page: Page): () => Promise<boolean> {
   return async () => {
     if (await page.getByRole('button', { name: /Switch organization|Change/i }).count()) return true
-    const typed = await page.locator(ORGANIZATION_FIELD).inputValue().catch(() => '')
+    const typed = await page.locator(ORGANIZATION_FIELD).inputValue({ timeout: 1_000 }).catch(() => '')
     return typed.trim() !== ''
   }
 }
