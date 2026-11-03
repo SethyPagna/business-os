@@ -54,8 +54,19 @@ function __hgDb(real: any, delayMs: (sql: string) => number, counter?: HgCounter
       return result
     },
     first: (...a: unknown[]) => st.first(...a), run: (...a: unknown[]) => st.run(...a), raw: (...a: unknown[]) => st.raw(...a),
+    __st: st, __sql: sql,
   })
-  return { prepare: (sql: string) => wrap(real.prepare(sql), sql), batch: (s: unknown[]) => real.batch(s), exec: (s: string) => real.exec(s) }
+  // A batch is handed to the real binding with the real statements, and each statement in it is counted and delayed like a single one.
+  const batch = async (statements: any[]) => {
+    const sqls = statements.map((x) => String(x?.__sql ?? ''))
+    for (const sql of sqls) { __hgSeen.push(sql); if (counter) { counter.statements += 1; if (/products/.test(sql)) counter.products += 1 } }
+    const ms = Math.max(0, ...sqls.map(delayMs))
+    if (ms) { const started = __hgStarted; __hgStarted = null; started?.(); await __hgSleep(ms) }
+    const results = await real.batch(statements.map((x) => x?.__st ?? x))
+    if (counter) for (const result of results) counter.rows += Number((result as any)?.meta?.rows_read ?? 0)
+    return results
+  }
+  return { prepare: (sql: string) => wrap(real.prepare(sql), sql), batch, exec: (s: string) => real.exec(s) }
 }
 const __hgSlowProducts = (env: any) => ({ ...env, DB: __hgDb(env.DB, (sql) => (/products/.test(sql) ? 3000 : 0)) })
 // ONE env object for every request: lowStockSettings keys its memo on env, and a real isolate hands every request the same one.
@@ -82,6 +93,13 @@ app.get('/api/__hg/portal-fire', async (c) => {
   void app.fetch(new Request(new URL('/api/portal/catalog/products/search?query=' + __hgParam(c, 'query'), c.req.url)), __hgSlowProducts(c.env), c.executionCtx).catch(() => {})
   await Promise.race([started, __hgSleep(5000)])
   return c.json({ fired: true })
+})
+// A storefront search that stays on its request until it is done, through a counting env: \`slow\` ms on its first statement that names products.
+app.get('/api/__hg/portal-run', async (c) => {
+  const counted = __hgCounted(c.env, Number(__hgParam(c, 'slow') || 0), /products/)
+  const res = await app.fetch(new Request(new URL('/api/portal/catalog/products/search?query=' + __hgParam(c, 'query'), c.req.url)), counted.env, c.executionCtx)
+  const body: any = await res.json().catch(() => null)
+  return c.json({ status: res.status, items: Array.isArray(body?.items) ? body.items.length : -1, ...counted.counter })
 })
 // A new 'stock' version is a new overview key: the control Dashboard above already memoised today's.
 app.get('/api/__hg/new-overview-key', async (c) => { await __hgBump(c.env, 'stock'); return c.json({ bumped: true }) })
@@ -188,13 +206,29 @@ async function main() {
       t.eq('one settings read, every caller got the config', { reads: json(r)?.settingsReads, same: json(r)?.same }, { reads: 1, same: true })
     })
 
+    // ---- the saving: request A is slow but ALIVE, request B for the same cold key waits in its own context and takes A's finished result
+    await check('S1 guard: while request A builds a cold search (slow, alive), request B for the same search takes the finished body and reads no products', async (t) => {
+      const a = get('/api/__hg/portal-run?query=shared&slow=500')
+      await wait(150)
+      const b = await get('/api/__hg/portal-run?query=shared')
+      const ra = await a
+      t.ok('A answers', ra.status === 200 && json(ra)?.status === 200, ra)
+      t.ok('B answers', b.status === 200 && json(b)?.status === 200, b)
+      t.ok('A built the body', json(ra)?.products > 0, json(ra))
+      t.eq('B issued no statement on products', json(b)?.products, 0)
+      t.eq('B served the same body', json(b)?.items, json(ra)?.items)
+      const reads = (r) => `${json(r)?.statements} statements, ${json(r)?.products} on products, ${json(r)?.rows} rows`
+      console.log(`  cold storefront search, A and B overlapping: A ${reads(ra)}; B ${reads(b)}; B took ${b.ms} ms`)
+    })
+
     // ---- C3: request A starts the work and answers; request B asks for the same thing
     await check('S1 C3: request A starts a storefront build and answers; request B for the same search answers promptly', async (t) => {
       const a = await get('/api/__hg/portal-fire?query=strand')
       t.eq('A answered', a.status, 200)
       const b = await get(search('strand'))
       t.ok('B answers the search', portalAnswers(b), b)
-      t.ok('B is not held by A\'s 3 s build', b.ms < 2500, b.ms)
+      t.ok('B gave A the wait first (the marker is fresh)', b.ms >= 800, b.ms)
+      t.ok('B is not held by A\'s 3 s build', b.ms < 4500, b.ms)
       const next = await get(search('strand'), { limitMs: 5000 })
       t.ok('the next visitor answers', portalAnswers(next), next)
     })

@@ -135,6 +135,21 @@ async function main() {
     assert.ok(Date.now() - started < 40, 'a marker older than the staleness window costs nothing')
   })
 
+  await check('a clock that does not move cannot lengthen the wait: the step count bounds it as well', async () => {
+    const share = isolate()
+    const realNow = Date.now
+    const frozen = realNow.call(Date)
+    void share.run(env, 'k', () => new Promise(() => {}), () => undefined)
+    await sleep(10)
+    Date.now = () => frozen
+    try {
+      const started = performance.now()
+      assert.notEqual(await within(share.run(env, 'k', async () => 'B', () => undefined), 2000), HELD)
+      const waited = performance.now() - started
+      assert.ok(waited >= LIMITS.buildShareWaitMs * 0.8 && waited < LIMITS.buildShareWaitMs + 200, `${Math.round(waited)} ms with a frozen clock`)
+    } finally { Date.now = realNow }
+  })
+
   await check('different keys never wait on each other', async () => {
     const share = isolate()
     void share.run(env, 'x', () => new Promise(() => {}), () => undefined)
@@ -160,6 +175,14 @@ async function main() {
     await sleep(LIMITS.buildShareWaitMs + 40)
     assert.deepEqual(await share.run(env, 'k', async () => { builds += 1; return { body: 2 } }), { body: 2 })
     assert.equal(builds, 1, 'after the window the work is done again')
+  })
+
+  await check('remember never outlives the stored entry it mirrors: a lifetime shorter than the window wins', async () => {
+    const share = isolate()
+    share.remember(env, 'short', 'body', 40)
+    assert.equal(await share.run(env, 'short', async () => 'rebuilt'), 'body')
+    await sleep(80)
+    assert.equal(await share.run(env, 'short', async () => 'rebuilt'), 'rebuilt', 'the 40 ms entry is gone although the window is 300 ms')
   })
 
   await check('waiting on the short memo: the builder remembers its result, the waiter takes it', async () => {

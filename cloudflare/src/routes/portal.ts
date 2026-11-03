@@ -1317,6 +1317,13 @@ function writePortalEdge(ctx: { waitUntil(promise: Promise<unknown>): void }, ke
   ctx.waitUntil(cache.put(key, response).catch((error) => console.error('[portal-cache] edge write failed', key.url, error)))
 }
 
+// A finished storefront result goes to the edge cache and to the short memo the requests waiting on its builder look at (lib/buildShare.ts).
+// Both are written exactly where nothing is stored while maintenance is held, and the memo never outlives the edge entry.
+function storePortalResult(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, key: Request, value: unknown, ttlSeconds: number): void {
+  writePortalEdge(c.executionCtx, key, value, ttlSeconds)
+  buildShareHook()?.remember(c.env, key.url, value, ttlSeconds * 1000)
+}
+
 async function sha256Hex(text: string, bytes = 32): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
   return Array.from(digest.slice(0, bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -1414,7 +1421,7 @@ async function withLivePortalStock(c: PortalContext, rawItems: unknown, versions
       ? await loadPortalStockStates(c.env, ids, idList)
       : await coalescePortalBuild(c, key.url, async () => {
         const loaded = await loadPortalStockStates(c.env, ids, idList)
-        writePortalEdge(c.executionCtx, key, loaded, PORTAL_STOCK_TTL_SECONDS)
+        storePortalResult(c, key, loaded, PORTAL_STOCK_TTL_SECONDS)
         return loaded
       })
   // Stock status switched off: the badge data is not published at all.
@@ -1426,19 +1433,30 @@ function portalQueryRejection(c: PortalContext, reason: string): Response {
   return c.json({ error: 'This storefront request is not supported.', code: 'portal_bad_query', reason }, 400, { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL })
 }
 
-// One rebuild per key per REQUEST: callers of the same request share the first one's work. A promise belongs to the request that
-// created it (workerd): awaiting another request's can hang for good once that request has answered or was cancelled, and this map
-// used to hold the pending promise isolate-wide, so one such request stranded its key for every later visitor (the 6.0.1048 review,
-// B1). Across requests only the finished entry is shared, and that is the edge entry writePortalEdge stores. `request` is the Hono
-// Context, which lives for exactly one request.
+// One rebuild per key. Inside a REQUEST the callers share the first one's work (a promise of that request, so awaiting it is safe). Across
+// requests no promise is shared: a promise belongs to the request that created it (workerd), and awaiting another request's can hang for
+// good once that request has answered or was cancelled; this used to be an isolate-wide map of pending promises, so one such request
+// stranded its key for every later visitor (the 6.0.1048 review, B1). Instead the first request sets a "building since" marker
+// (lib/buildShare.ts) and a request that finds it fresh waits with a timer of its own, for a bounded time, for the FINISHED body that
+// storePortalResult leaves in a short memo; if it does not appear it builds for itself. `request` is the Hono Context, which lives for
+// exactly one request.
 const portalBuildsInRequest = new WeakMap<object, Map<string, Promise<unknown>>>()
 
-export function coalescePortalBuild<T>(request: object, key: string, build: () => Promise<T>): Promise<T> {
+// lib/buildShare.ts installs this hook (index.ts imports it); a test that loads this module alone has none and shares nothing across
+// requests. This file's imports are stubbed by hand in many tests, so the hook is read, not imported.
+type BuildShareHook = {
+  run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T>
+  remember(env: Env, key: string, value: unknown, lifetimeMs?: number): void
+}
+const buildShareHook = (): BuildShareHook | undefined => (globalThis as unknown as Record<symbol, BuildShareHook | undefined>)[Symbol.for('business-os.build-share.v1')]
+
+export function coalescePortalBuild<T>(request: { env: Env }, key: string, build: () => Promise<T>): Promise<T> {
   let builds = portalBuildsInRequest.get(request)
   if (!builds) portalBuildsInRequest.set(request, builds = new Map())
   const running = builds.get(key)
   if (running) return running as Promise<T>
-  const started = build()
+  const hook = buildShareHook()
+  const started = hook ? hook.run(request.env, key, build) : build()
   builds.set(key, started)
   const forget = () => { if (builds.get(key) === started) builds.delete(key) }
   started.then(forget, forget)
@@ -1483,7 +1501,7 @@ async function buildPortalBody(
   const [produced, maintenanceHeld] = await Promise.all([produce(params), key ? portalMaintenanceHeld(c.env) : true])
   const leaked = findForbiddenPublicKey(produced.value)
   if (leaked) throw new Error(`Refusing to publish a private storefront field: ${leaked}`)
-  if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, produced.value, produced.ttl)
+  if (key && !maintenanceHeld) storePortalResult(c, key, produced.value, produced.ttl)
   return produced.value
 }
 
@@ -1710,7 +1728,7 @@ app.get('/ai/status', async (c) => {
   if (cached) return c.json(cached)
   const build = async () => {
     const [status, maintenanceHeld] = await Promise.all([buildPortalAiStatus(c.env), key ? portalMaintenanceHeld(c.env) : true])
-    if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
+    if (key && !maintenanceHeld) storePortalResult(c, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
     return status
   }
   return c.json(key ? await coalescePortalBuild(c, key.url, build) : await build())

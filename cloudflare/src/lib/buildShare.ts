@@ -37,11 +37,14 @@ function recall<T>(key: string): T | undefined {
   return undefined
 }
 
-/** Keeps a finished result for the longest any waiter waits; call it where the result is stored (the storefront's edge write). */
-function remember(env: Env, key: string, value: unknown): void {
+/**
+ * Keeps a finished result for the longest any waiter waits, or for `lifetimeMs` if that is shorter (a stored entry's own lifetime: the memo
+ * must never outlive it). Call it where the result is stored (the storefront's edge write).
+ */
+function remember(env: Env, key: string, value: unknown, lifetimeMs = Number.POSITIVE_INFINITY): void {
   const now = Date.now()
   for (const [other, entry] of remembered) if (now >= entry.until) remembered.delete(other)
-  remembered.set(key, { value, until: now + getPlanLimits(env).buildShareWaitMs })
+  remembered.set(key, { value, until: now + Math.min(getPlanLimits(env).buildShareWaitMs, lifetimeMs) })
 }
 
 /**
@@ -55,7 +58,9 @@ async function run<T>(env: Env, key: string, build: () => Promise<T>, peek: () =
   const marker = building.get(key)
   if (marker && Date.now() - marker.at < limits.buildShareStaleMs) {
     const deadline = Math.min(Date.now() + limits.buildShareWaitMs, marker.at + limits.buildShareStaleMs)
-    while (Date.now() < deadline) {
+    // Two bounds: the clock, and a count of steps (each one a real timer), so a clock that does not move cannot lengthen the wait.
+    let steps = Math.ceil(limits.buildShareWaitMs / limits.buildSharePollMs)
+    while (steps-- > 0 && Date.now() < deadline) {
       await sleep(limits.buildSharePollMs)
       const ready = peek()
       if (ready !== undefined) return ready
@@ -75,7 +80,7 @@ async function run<T>(env: Env, key: string, build: () => Promise<T>, peek: () =
 
 export type BuildShareHook = {
   run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T>
-  remember(env: Env, key: string, value: unknown): void
+  remember(env: Env, key: string, value: unknown, lifetimeMs?: number): void
 }
 
 ;(globalThis as unknown as Record<symbol, BuildShareHook>)[Symbol.for(BUILD_SHARE_HOOK_KEY)] = { run, remember }
