@@ -18,6 +18,8 @@
 //   - paging by the merge keeps the true total and every row exactly once;
 //   - the QUERY PLAN of the sale half uses the partial index idx_sales_courier_cost for every filter shape, with and without ANALYZE: with a branch
 //     filter the planner picked idx_sales_branch_created (branch_id = ?) and visited every sale of the branch to find the few that carry a cost;
+//   - the same for the EXPENSE half (routes/fees.ts: the list rows, the list totals and the four report statements): with a branch filter the planner started
+//     from idx_fees_branch_id / idx_fees_branch_created_dt and read every expense of the branch instead of the date or time window that was asked for;
 //   - mutation controls: each plausible wrong implementation turns a check red.
 //
 // Run (from cloudflare/): node scripts/test-expenses-sale-rows-native.cjs
@@ -352,11 +354,104 @@ async function scenarioPlan(patches = []) {
   })
 }
 
+// The statements a request ran against the expense table, with the parameters each was given.
+function recordStatements(w) {
+  const log = []
+  const prepare = w.raw.prepare.bind(w.raw)
+  w.raw.prepare = (sql) => {
+    const statement = prepare(sql)
+    for (const method of ['all', 'get', 'run']) {
+      const real = statement[method].bind(statement)
+      statement[method] = (params) => { log.push({ sql, params }); return real(params) }
+    }
+    return statement
+  }
+  return log
+}
+
+async function scenarioPlanFees(patches = []) {
+  const w = createFeesWorld({ patches })
+  w.sql.exec("INSERT INTO branches (id, name, role, is_active) VALUES (1, 'Store', 'shop', 1), (2, 'Second', 'shop', 1)")
+  const insert = w.sql.prepare("INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)")
+  w.sql.exec('BEGIN')
+  // 6,000 expenses over 400 days, 95% of them in branch 1 (after the consolidation nearly every row sits in one branch); January 2026 holds about 7%.
+  for (let i = 1; i <= 6000; i += 1) {
+    const day = new Date(Date.UTC(2025, 0, 1) + Math.floor(i / 15) * 86400000).toISOString().slice(0, 10)
+    insert.run(['rent', 'tax', 'delivery'][i % 3], `Fee ${i % 40}`, 1 + (i % 9), day, i % 20 === 0 ? 2 : i % 97 === 0 ? null : 1, `${day} 03:00:00`)
+  }
+  w.sql.exec('COMMIT')
+  const log = recordStatements(w)
+  const cases = [
+    ['all time + branch', '', null],
+    ['month + branch', 'startDate=2026-01-01&endDate=2026-01-31', /idx_fees_fee_date/],
+    ['exact window + branch', 'createdFrom=2026-01-01T00:00:00Z&createdTo=2026-02-01T00:00:00Z', /idx_fees_created_dt/],
+  ]
+  const feeStatements = async (url) => {
+    log.length = 0
+    const response = await w.request('GET', url, undefined, w.users.admin)
+    assert.equal(response.status, 200, url)
+    return { response, statements: log.filter((entry) => /\bFROM fees f\b/.test(entry.sql)).map((entry) => ({ ...entry })) }
+  }
+  const planOf = (entry) => w.sql.prepare(`EXPLAIN QUERY PLAN ${entry.sql}`).all(entry.params || {}).map((row) => row.detail).join(' | ')
+  for (const phase of ['without statistics', 'after ANALYZE']) {
+    if (phase === 'after ANALYZE') w.sql.exec('ANALYZE')
+    await check(`PLAN ${phase}: the expense half reads the window's index, never the branch index (the list always, the report whenever it has a window)`, async () => {
+      for (const [label, range, windowIndex] of cases) {
+        const join = (extra) => [range, extra].filter(Boolean).join('&')
+        for (const [route, branchQuery, plain, expected] of [
+          ['list', join('branch_id=1&limit=20'), join('limit=20'), 2],
+          ['report', join('branchId=1'), join(''), 4],
+        ]) {
+          const url = (query) => `/api/fees${route === 'report' ? '/report' : ''}${query ? `?${query}` : ''}`
+          const { statements } = await feeStatements(url(branchQuery))
+          assert.equal(statements.length, expected, `${label} (${route}): ${statements.length} expense statements`)
+          for (const entry of statements) {
+            const plan = planOf(entry)
+            // The report with no window only aggregates: nothing for the branch equality to hijack, and the branch index reads just the branch, so the planner chooses.
+            if (route === 'list' || windowIndex) assert.doesNotMatch(plan, /idx_fees_branch/, `${label} (${route}) walks the branch index: ${plan}\n${entry.sql.replace(/\s+/g, ' ').slice(0, 120)}`)
+            if (windowIndex) assert.match(plan, windowIndex, `${label} (${route}) does not search the window: ${plan}\n${entry.sql.replace(/\s+/g, ' ').slice(0, 120)}`)
+          }
+          if (windowIndex) {
+            for (const entry of (await feeStatements(url(plain))).statements) {
+              assert.match(planOf(entry), windowIndex, `control: the same window without a branch uses ${windowIndex}: ${planOf(entry)}`)
+            }
+          }
+        }
+      }
+    })
+  }
+  await check('PLAN answers are unchanged: the branch filter narrows the list and the report to its branch (text, padded, decimal and non-numeric ids included)', async () => {
+    const direct = (branch) => w.get('SELECT COUNT(*) n FROM fees WHERE branch_id = ?', branch).n
+    const everything = w.get('SELECT COUNT(*) n FROM fees').n
+    assert.ok(direct(1) > 0 && direct(2) > 0 && direct(1) + direct(2) < everything, 'control: two branches and unassigned expenses, so a filter that does nothing is visible')
+    const list = async (query) => (await w.request('GET', `/api/fees?${query}`, undefined, w.users.admin)).json
+    const report = async (query) => (await w.request('GET', `/api/fees/report?${query}`, undefined, w.users.admin)).json
+    assert.equal((await list('branch_id=1&limit=1')).total, direct(1))
+    assert.equal((await list('branch_id=2&limit=1')).total, direct(2))
+    assert.equal((await report('branchId=1')).totals.count, direct(1))
+    assert.equal((await report('branchId=2')).totals.count, direct(2))
+    const firstPage = (await list('branch_id=1&limit=20')).fees.map((fee) => fee.id)
+    assert.deepEqual(firstPage, w.all('SELECT id FROM fees WHERE branch_id = 1 ORDER BY fee_date DESC, id DESC LIMIT 20').map((row) => row.id), 'the same first page, in the same order')
+    for (const same of ['1', '%201', '1.0', '1e0']) {
+      assert.equal((await list(`branch_id=${same}&limit=1`)).total, direct(1), `list branch_id=${same}`)
+      assert.equal((await report(`branchId=${same}`)).totals.count, direct(1), `report branchId=${same}`)
+    }
+    for (const bad of ['abc', '1abc', '0', '-1']) {
+      assert.equal((await list(`branch_id=${bad}&limit=1`)).total, 0, `list branch_id=${bad} matches no expense`)
+      assert.equal((await report(`branchId=${bad}`)).totals.count, 0, `report branchId=${bad} matches no expense`)
+    }
+    assert.equal((await list('branch_id=%20&limit=1')).total, everything, 'a blank list filter is no filter')
+    assert.equal((await report('branchId=%20')).totals.count, 0, 'a blank report branch matches nothing, as before')
+    assert.equal((await report('')).totals.count, everything, 'no branch: every expense')
+  })
+}
+
 (async () => {
   const w = createFeesWorld()
   seed(w)
   await scenario(w)
   await scenarioPlan()
+  await scenarioPlanFees()
 
   // ---- mutation controls ---------------------------------------------------------------------------------------------
   const mutants = [
@@ -368,6 +463,11 @@ async function scenarioPlan(patches = []) {
     ['the branch goes back through whereActiveSales as a plain equality (the planner walks the branch index again)', { file: 'src/routes/feesCatalog.ts', from: "clauses.push('+sales.branch_id = @saleBranchId')", to: "clauses.push('sales.branch_id = @saleBranchId')" }],
     ['the branch id is bound as text, which the unary plus no longer coerces', { file: 'src/routes/feesCatalog.ts', from: 'params.saleBranchId = branchId', to: 'params.saleBranchId = String(branchId)' }],
     ['a non-numeric branch matches every sale', { file: 'src/routes/feesCatalog.ts', from: "      clauses.push('1 = 0')\n", to: '' }],
+    ['the list branch goes back to a plain equality (the planner walks the branch index again)', { file: 'src/routes/fees.ts', from: "    conditions.push(feeBranchClause(branchId, params))\n", to: "    conditions.push('f.branch_id = @branchId')\n    params.branchId = Number(branchId)\n" }],
+    ['the report branch goes back to a plain equality (the planner walks the branch index again)', { file: 'src/routes/fees.ts', from: "  if (query.branchId) clauses.push(feeBranchClause(query.branchId, params))", to: "  if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }" }],
+    ['the report takes a window for no window (its windowed branch filter goes back to a plain equality)', { file: 'src/routes/fees.ts', from: "params, range.sql !== '1=1')", to: "params, range.sql === '1=1')" }],
+    ['the expense branch id is bound as text, which the unary plus no longer coerces', { file: 'src/routes/fees.ts', from: '  params.branchId = id\n', to: '  params.branchId = String(id)\n' }],
+    ['a non-numeric expense branch matches every expense', { file: 'src/routes/fees.ts', from: "  if (!Number.isFinite(id)) return '1 = 0'\n", to: "  if (!Number.isFinite(id)) return '1 = 1'\n" }],
     ['a request without source also gets the sale rows (an older client would meet one)', { file: 'src/routes/feesCatalog.ts', from: "  if (source !== 'all' && source !== 'sale') return next()\n", to: '' }],
     ['the report block is added to every report, not only include=sales', { file: 'src/routes/feesCatalog.ts', from: "  if (c.req.query('include') !== 'sales') return next()\n", to: '' }],
     ['the merge drops the offset (page 2 repeats page 1)', { file: 'src/routes/feesCatalog.ts', from: "      fees: merged.slice(offset, offset + limit),", to: "      fees: merged.slice(0, limit)," }],
@@ -386,6 +486,7 @@ async function scenarioPlan(patches = []) {
       seed(m)
       await scenario(m)
       await scenarioPlan([].concat(patch))
+      await scenarioPlanFees([].concat(patch))
     } catch {
       red = true
     }

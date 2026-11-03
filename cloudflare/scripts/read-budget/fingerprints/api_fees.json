@@ -91,7 +91,7 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "61dfce604ca6",
+   "8bfb51b6cda0",
    "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
   ],
   [
@@ -103,7 +103,7 @@
    "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
   ],
   [
-   "26b2255f0cea",
+   "855b37b2ca92",
    "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
   ]
  ],
@@ -113,7 +113,7 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "199e68124135",
+   "e29b9beabd19",
    "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
   ],
   [
@@ -125,7 +125,7 @@
    "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
   ],
   [
-   "2538c2b44f83",
+   "73e791cfec7b",
    "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
   ]
  ]

@@ -79,19 +79,19 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "d0a870d7c994",
+   "3331f17a4447",
    "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr)"
   ],
   [
-   "4a3539907e44",
+   "c80e8fdbd307",
    "SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COAL"
   ],
   [
-   "1f7267046170",
+   "c16470db7e19",
    "SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND("
   ],
   [
-   "b640735ccab2",
+   "8ddb1855a53c",
    "SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label, COUNT(*) AS count, ROUND"
   ],
   [

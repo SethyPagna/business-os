@@ -394,6 +394,23 @@ export function feeRangePredicate(query: Record<string, string>): { sql: string;
   return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
 }
 
+/**
+ * The branch filter of the expense statements, written `+f.branch_id = @branchId`. A plain `f.branch_id = ?` lets the planner start from
+ * idx_fees_branch_id / idx_fees_branch_created_dt and read, with a table lookup each, every expense of the branch (after the consolidation, nearly
+ * all of them) instead of the date or time window that was asked for; the unary plus keeps the equality out of index selection, so the window's index
+ * leads and the branch is checked on those rows. The plus also drops the column's integer affinity, so the id is bound as a NUMBER. A value that is
+ * not a number matches no expense, as `branch_id = 'abc'` always did.
+ * `windowed` is false for an aggregate over every expense (the report with no dates): there is no window for the equality to hijack, and the branch
+ * index reads just the branch, so the plain equality stays and the planner chooses.
+ */
+function feeBranchClause(raw: unknown, params: Record<string, unknown>, windowed = true): string {
+  const text = String(raw ?? '').trim()
+  const id = text === '' ? Number.NaN : Number(text)
+  if (!Number.isFinite(id)) return '1 = 0'
+  params.branchId = id
+  return windowed ? '+f.branch_id = @branchId' : 'f.branch_id = @branchId'
+}
+
 export type FeeListPage = {
   fees: Array<Record<string, unknown>>
   total: number
@@ -431,8 +448,7 @@ export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<s
     // branch when asked, same as sale_id above; there's no "unassigned"
     // variant requested anywhere else in this file's filter set, so none
     // is added here either.
-    conditions.push('f.branch_id = @branchId')
-    params.branchId = Number(branchId)
+    conditions.push(feeBranchClause(branchId, params))
   }
   if (deliveryContactId && deliveryContactId.trim()) {
     conditions.push('f.delivery_contact_id = @deliveryContactId')
@@ -498,7 +514,7 @@ app.get('/report', async (c) => {
   try { range = feeRangePredicate(query) } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   const clauses: string[] = [range.sql]
   const params: Record<string, unknown> = { ...range.params }
-  if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }
+  if (query.branchId) clauses.push(feeBranchClause(query.branchId, params, range.sql !== '1=1'))
   const where = clauses.length ? clauses.join(' AND ') : '1=1'
   // Sum BOTH currencies. Fees are recorded in EITHER USD or KHR (never both
   // on one row -- confirmed in data: 186 USD-only vs 4,054 KHR-only), so a
