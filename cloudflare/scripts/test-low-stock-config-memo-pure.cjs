@@ -6,6 +6,8 @@
 // SQLite settings table (node:sqlite) and a fake KV that holds the `settings` cache version:
 //   - without a memo, N calls = N statements (the baseline this replaced);
 //   - with it, N calls inside the window = 1 statement;
+//   - a read still pending is shared by the callers of ONE request only (HANG-2: workerd ties a promise to the request that
+//     created it, so a request that answers first must not hold the next one); across requests only the finished memo is shared;
 //   - a settings save (version bump, or the isolate-local invalidate) re-reads at once;
 //   - a writer that bumps nothing is still picked up once MAX_AGE passes;
 //   - no CACHE binding, an unreadable version, or a missing version = never memoised.
@@ -62,12 +64,16 @@ function makeEnv(initialVersion = '1') {
   }
 }
 
+// The request the caller is inside, as lib/requestMetrics.ts exposes it through its global hook (lowStockSettings.ts does not import it).
+let scope
+globalThis[Symbol.for('business-os.request-metrics.v1')] = { scope: () => scope }
 let now = 1_000_000
 const realNow = Date.now
 Date.now = () => now
 let passed = 0
 async function check(name, fn) {
   invalidateLowStockConfigMemo()
+  scope = undefined
   now += 10 * 60 * 1000
   await fn()
   passed += 1
@@ -89,15 +95,42 @@ async function main() {
     assert.strictEqual(shop.statements, 5)
   })
 
-  await check('17 readers in one burst cost one statement, not 17', async () => {
+  await check('17 readers of one request in one burst cost one statement, not 17', async () => {
     const shop = makeShop(); const env = makeEnv()
     shop.set('low_stock_threshold_default', '7')
+    scope = {}
     const results = await Promise.all(Array.from({ length: 17 }, () => loadLowStockConfig(env)))
-    assert.strictEqual(shop.statements, 1, 'concurrent callers share one read')
+    assert.strictEqual(shop.statements, 1, 'the callers of one request share one read')
     for (const config of results) assert.strictEqual(config.threshold, 7)
     for (let i = 0; i < 17; i += 1) await loadLowStockConfig(env)
     assert.strictEqual(shop.statements, 1, 'sequential callers inside the fresh window cost no I/O')
     assert.strictEqual(env.CACHE.reads, 1, 'and no KV read either')
+  })
+
+  await check('HANG-2: two requests in one burst read once each, not once for the isolate', async () => {
+    const shop = makeShop(); const env = makeEnv(null) // no version key: nothing is memoised, so only the in-flight sharing could join callers
+    shop.set('low_stock_threshold_default', '7')
+    const burst = []
+    for (const request of [{}, {}]) { scope = request; for (let i = 0; i < 3; i += 1) burst.push(loadLowStockConfig(env)) }
+    await Promise.all(burst)
+    assert.strictEqual(shop.statements, 2, 'one read per request')
+  })
+
+  await check('HANG-2: a read that never finishes holds neither the next request nor a caller outside any request', async () => {
+    // Probe C3: request A starts the read and never gets to finish it (it answered, or it was cancelled).
+    const shop = makeShop(); const env = makeEnv(null)
+    shop.set('low_stock_threshold_default', '7')
+    const realPrepare = dbStub.prepare
+    let first = true
+    dbStub.prepare = (sql) => ({ all: async (params) => { if (first) { first = false; return new Promise(() => {}) } return realPrepare(sql).all(params) } })
+    scope = {}; void loadLowStockConfig(env)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const answered = (read) => Promise.race([read, new Promise((resolve) => setTimeout(() => resolve('HELD'), 500))])
+    scope = {}
+    assert.strictEqual((await answered(loadLowStockConfig(env))).threshold, 7, 'request B reads for itself')
+    scope = undefined
+    assert.strictEqual((await answered(loadLowStockConfig(env))).threshold, 7, 'so does a caller outside any request (a cron step)')
+    dbStub.prepare = realPrepare
   })
 
   await check('after the fresh window the version is re-confirmed with one KV read, still no D1 read', async () => {

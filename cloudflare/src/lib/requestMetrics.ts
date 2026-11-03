@@ -270,9 +270,12 @@ export type RequestMetricsHook = {
   rawD1Start?(statements: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
+  /** The object that stands for the request (or background run) the caller is inside; undefined outside one. Lib code with no Hono context keys per-request sharing on it (lib/lowStockSettings.ts). */
+  scope?(): object | undefined
 }
 
 const hook: RequestMetricsHook = {
+  scope() { try { return store.getStore() } catch { return undefined } },
   rawD1Start(statements) { try { const acc = store.getStore(); if (acc) acc.invocation.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
   d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements) } } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },

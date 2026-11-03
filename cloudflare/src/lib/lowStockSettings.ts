@@ -200,7 +200,16 @@ type LowStockMemoEntry = {
   generation: number
 }
 const lowStockMemo = new WeakMap<object, LowStockMemoEntry>()
-const lowStockInflight = new WeakMap<object, { generation: number; promise: Promise<LowStockConfig> }>()
+// A read in flight is shared by the callers of ONE request only. A promise belongs to the request that created it (workerd):
+// awaiting another request's can hang for good once that request has answered or was cancelled, and this map used to be keyed
+// by env, which every request of the isolate shares, so one such request froze every low-stock reader (the 6.0.1048 review, B1).
+// Across requests only the finished memo above is shared. The request is found through the request-metrics hook, not imported:
+// this module keeps a single './db' dependency (see below). Outside a request there is no scope and nothing is shared.
+const lowStockInflight = new WeakMap<object, { env: object; generation: number; promise: Promise<LowStockConfig> }>()
+const REQUEST_METRICS_HOOK = Symbol.for('business-os.request-metrics.v1')
+function currentRequest(): object | undefined {
+  try { return (globalThis as unknown as Record<symbol, { scope?(): object | undefined } | undefined>)[REQUEST_METRICS_HOOK]?.scope?.() } catch { return undefined }
+}
 let lowStockMemoGeneration = 0
 
 /** Forget every memoised config in this isolate. Call after writing the three keys. */
@@ -245,8 +254,9 @@ export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
     if (sinceCheck >= 0 && sinceCheck < LOW_STOCK_CONFIG_MEMO_FRESH_MS && sinceRead >= 0 && sinceRead < LOW_STOCK_CONFIG_MEMO_MAX_AGE_MS) return usable.config
   }
 
-  const pending = lowStockInflight.get(key)
-  if (pending && pending.generation === generation) return pending.promise
+  const request = currentRequest()
+  const pending = request ? lowStockInflight.get(request) : undefined
+  if (pending && pending.env === key && pending.generation === generation) return pending.promise
 
   const promise = (async () => {
     const token = await readSettingsToken(env)
@@ -264,12 +274,12 @@ export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
     }
     return config
   })()
-  lowStockInflight.set(key, { generation, promise })
+  if (request) lowStockInflight.set(request, { env: key, generation, promise })
   try {
     return await promise
   } finally {
-    const current = lowStockInflight.get(key)
-    if (current && current.promise === promise) lowStockInflight.delete(key)
+    const current = request ? lowStockInflight.get(request) : undefined
+    if (request && current && current.promise === promise) lowStockInflight.delete(request)
   }
 }
 
