@@ -42,7 +42,7 @@ const saves: unknown[][] = []
 const sessionReads: Array<Record<string, unknown>> = []
 const creates: unknown[][] = []
 const submissions: Array<{ scope: unknown; input: { branchId: number; requestId: string; lines: Array<Record<string, unknown>> } }> = []
-let submitFailure: 'none' | 'known' | 'unknown' | 'stale' = 'none'
+let submitFailure: 'none' | 'known' | 'unknown' | 'stale' | 'staleNamed' = 'none'
 // Counts approval (ic_fix_stock): what the server says about the open submission, what this viewer may do, and the scripted answers to a decision.
 let sessionApproval: InventoryCheckApproval | null = null
 let capabilities: { fixStock?: boolean; approveCounts?: boolean } | null = null
@@ -113,6 +113,7 @@ const doubles = {
       submissions.push({ scope, input })
       if (submitFailure === 'unknown') throw Object.assign(new Error('answer lost'), { outcome: 'unknown' })
       if (submitFailure === 'stale') throw Object.assign(new Error('stock changed'), { status: 409, code: 'inventory_check_stock_changed', outcome: 'not_dispatched' })
+      if (submitFailure === 'staleNamed') throw Object.assign(new Error('stock changed'), { status: 409, code: 'inventory_check_stock_changed', productIds: [13], outcome: 'not_dispatched' })
       if (submitFailure === 'known') throw Object.assign(new Error('note too long'), { status: 400, code: 'inventory_check_invalid_note', outcome: 'not_dispatched' })
       return { item: { ...selected, id: 'check-submitted', status: 'closed' }, receipt: {}, created: true }
     },
@@ -566,7 +567,7 @@ try {
   await pick(13, true); await counting.type(inside(13, 'data-check-count'), '5')
   submitFailure = 'stale'
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
-  assert.ok(counting.text().includes('Stock changed after you marked a product checked'), 'the person is told why')
+  assert.ok(counting.text().includes('Stock changed after you counted'), 'the person is told why')
   assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '', 'a checked mark is withdrawn with its count')
   assert.equal((inside(13, 'data-check-count') as unknown as { value: string }).value, '5', 'an ordinary count is kept')
   assert.equal(selectedText(), '2 selected', 'both rows stay picked')
@@ -575,6 +576,13 @@ try {
   await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
   assert.ok(counting.text().includes('A note is too long'), 'a refusal is said in words')
   assert.equal(propsOf(inside(13, 'data-check-count')).readOnly, false, 'and the rows are editable again')
+  // a count made against a screen that is out of date: the server names the product, and only its count is withdrawn so it is counted again against the stock now shown
+  submitFailure = 'staleNamed'
+  await counting.click(barAction('submit')); await confirmInDialog(counting, 'Submit')
+  assert.ok(counting.text().includes('Stock changed after you counted'), 'the named stale count is explained')
+  assert.equal((inside(13, 'data-check-count') as unknown as { value: string }).value, '', 'the count of the product the server named is withdrawn')
+  assert.equal((inside(14, 'data-check-count') as unknown as { value: string }).value, '9', 'a product the server did not name keeps its count')
+  assert.equal(selectedText(), '2 selected', 'both rows stay picked')
   submitFailure = 'none'
   await counting.click(barAction('clear'))
   assert.equal(selectedText(), '', 'Clear selection drops every draft')

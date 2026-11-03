@@ -21,11 +21,16 @@ export function approvalLines(items: readonly InventoryCheckSessionItem[]): Inve
  */
 export function approvalResult(item: InventoryCheckSessionItem, approval: InventoryCheckApproval): number | null {
   const counted = item.counted_quantity
-  const recorded = approval.baselines?.[String(item.product_id)]
-  const seen = finite(recorded) ? recorded : item.baseline_quantity
+  const seen = baselineOf(item, approval)
   const damaged = finite(item.current_stock?.recorded_damaged_quantity) ? item.current_stock.recorded_damaged_quantity : 0
   const now = finite(item.current_stock?.recorded_ordinary_quantity) ? item.current_stock.recorded_ordinary_quantity : finite(item.current_quantity) ? item.current_quantity - damaged : null
   return finite(counted) && finite(seen) && now !== null ? Math.max(0, now + counted - seen) : null
+}
+
+/** The figure the count is measured against: the stock recorded at submit, as the approval holds it (the line's own baseline when the approval has none). */
+export function baselineOf(item: InventoryCheckSessionItem, approval: InventoryCheckApproval): number | null | undefined {
+  const recorded = approval.baselines?.[String(item.product_id)]
+  return finite(recorded) ? recorded : item.baseline_quantity
 }
 
 export type InventoryCheckApprovalPanelProps = {
@@ -77,7 +82,7 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
         return <li key={id} data-approval-line={id} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
           <span className="tabular-nums">{label(t, 'inventory_check_approval_counted', 'Counted')} {item.counted_quantity}</span>
-          <span className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_system', 'System')} {item.baseline_quantity}</span>
+          <span data-approval-baseline={id} className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_system', 'System')} {baselineOf(item, approval)}</span>
           {pending && finite(item.current_quantity) ? <span className="tabular-nums text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_now', 'Now')} {item.current_quantity}</span> : null}
           {target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
         </li>

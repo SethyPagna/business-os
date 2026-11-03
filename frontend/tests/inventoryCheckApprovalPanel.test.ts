@@ -45,6 +45,13 @@ const cases: Array<[string, () => Promise<void>]> = [
     const target = (id: number) => panel.find(node => node.getAttribute('data-approval-target') === String(id), `target ${id}`)
     assert.equal(text(target(1)), 'Set to 10')
   }],
+  ['System is the baseline the approval holds, the figure the count is measured against, not a figure read from the stock now', async () => {
+    const panel = await mount({ approval: { ...pending, baselines: { '2': 6 } } })
+    const baseline = panel.find(node => node.getAttribute('data-approval-baseline') === '2', 'baseline of 2')
+    assert.equal(text(baseline), 'System 6', 'the recorded baseline wins over the item figure (5)')
+    assert.match(text(lineOf(panel, 2)), /Set to 1/, 'and the result is measured from it: 4 + 3 - 6')
+    assert.match(text(lineOf(panel, 1)), /System 7/, 'a line without a recorded baseline shows the item figure')
+  }],
   ['Approve and Reject appear only for someone who may decide, only while pending, and fire their own handlers', async () => {
     const panel = await mount()
     assert.ok(action(panel, 'approve') && action(panel, 'reject'))

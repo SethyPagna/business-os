@@ -76,7 +76,7 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_baseline_changed: { key: 'inventory_check_error_baseline_changed', fallback: 'Stock or products changed. Reload and try again.' },
   inventory_check_owner_required: { key: 'inventory_check_error_owner_required', fallback: 'Only the session creator or an administrator can change this check.' },
   inventory_check_product_not_eligible: { key: 'inventory_check_error_product_not_eligible', fallback: 'A product on this page cannot be checked. Reload and try again.' },
-  inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you marked a product checked. The list was reloaded: mark those products again.' },
+  inventory_check_stock_changed: { key: 'inventory_check_error_stock_changed', fallback: 'Stock changed after you counted. The list was reloaded: count those products again.' },
   inventory_check_invalid_note: { key: 'inventory_check_error_invalid_note', fallback: 'A note is too long. Shorten it and submit again.' },
   inventory_check_stock_inconsistent: { key: 'inventory_check_error_stock_inconsistent', fallback: 'A product\'s stock records do not add up. Correct them before approving.' },
   inventory_check_target_not_whole: { key: 'inventory_check_error_target_not_whole', fallback: 'A counted number is not a whole number. Reject this count and recount.' },
@@ -604,7 +604,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       const refusal = unknown ? undefined : knownRefusal(cause)
       if (!unknown) submitAttempt.current = null
       if (current() && (cause as { code?: unknown })?.code === 'inventory_check_stock_changed') {
-        setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id, entry.checked ? { ...entry, count: '', checked: false } : entry])))
+        // The products the server names were counted against stock that has moved since: their counts are withdrawn (the person counts again against the stock now shown), and so is every checked mark.
+        const named = new Set(Array.isArray((cause as { productIds?: unknown }).productIds) ? ((cause as { productIds: unknown[] }).productIds).map(Number) : [])
+        setDrafts(previous => Object.fromEntries(Object.entries(previous).map(([id, entry]) => [id, entry.checked || named.has(Number(id)) ? { ...entry, count: '', checked: false } : entry])))
       }
       if (current() && !unknown && isStaleConflict(cause)) reloadAll()
       if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))

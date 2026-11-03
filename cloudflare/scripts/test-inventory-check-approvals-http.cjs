@@ -67,7 +67,7 @@ const productsRoute = load(path.join(__dirname, '../src/routes/inventoryCheckPro
 const sessionsRoute = load(path.join(__dirname, '../src/routes/inventoryChecks.ts')).default
 const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 
-let db, failApprovalRecord = false
+let db, failApprovalRecord = false, beforeBatch = null
 function binding() {
   function prepare(sql) {
     return { sql, values: [], bind(...values) { return { ...this, values } }, async all() {
@@ -75,6 +75,7 @@ function binding() {
     }, async run() { const result = db.prepare(sql).run(...this.values); return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } } } }
   }
   return { prepare, async batch(statements) {
+    if (beforeBatch) { const run = beforeBatch; beforeBatch = null; run(statements) }
     if (failApprovalRecord && statements.some(statement => /UPDATE inventory_check_approvals SET (applied_json|status)/.test(statement.sql))) throw new Error('D1 unavailable')
     db.exec('BEGIN')
     try { const result = []; for (const statement of statements) result.push(await statement.all()); db.exec('COMMIT'); return result }
@@ -108,7 +109,7 @@ function reset() {
   }
   // 910003 carries two damaged units: its stock now is 5 ordinary + 2 damaged = 7 (damaged units are not part of Set).
   db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910003,1,2)").run()
-  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false
+  writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null
 }
 const setSwitches = (simple, fix) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
@@ -379,10 +380,10 @@ async function main() {
     assert.equal(ordinary(910002), 2, 'live 4 + (counted 3 - saw 5) = 2')
     assert.deepEqual(writer.calls.map(call => ({ type: call.type, quantity: call.quantity })), [{ type: 'remove', quantity: 2 }], 'the variance the count found (3 against the 5 it saw) is removed from the stock of now')
     assert.deepEqual(JSON.parse(approvalRow().applied_json).lines['910002'], { before: 4, target: 2, after: 2, at: JSON.parse(approvalRow().applied_json).lines['910002'].at })
-    // The same sale happened between loading the page and submitting: the server's own baseline (4) differs from what the counter saw (5); the count is still measured against what was seen.
+    // The same sale happened between loading the page and submitting: the stock the server holds (4) differs from what the counter saw (5), so the count is a recount (N3), never measured from a stale screen.
     reset(); setSwitches('on', 'on'); moveStock(910002, 4)
     const earlier = await submit([line(910002, 3, { seenQuantity: 5 })])
-    assert.equal((await decide(earlier.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 2)
+    assert.equal(earlier.status, 409); assert.equal(earlier.body.code, 'inventory_check_stock_changed')
     // Counted 26 (saw 24), one removed after the count: 25, not 26. A raise is a guarded lot-level Set.
     reset(); setSwitches('on', 'on'); moveStock(910002, 24)
     const raise = await submit([line(910002, 26, { seenQuantity: 24 })]); moveStock(910002, 23)
@@ -392,11 +393,11 @@ async function main() {
     reset(); setSwitches('on', 'on')
     const empty = await submit([line(910002, 0, { seenQuantity: 5 })]); moveStock(910002, 3)
     assert.equal((await decide(empty.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 0, 'max(0, 3 + 0 - 5)')
-    // What the counter saw equals the count: nothing was found, so nothing is written, even though the stock at submit was a different figure.
-    reset(); setSwitches('on', 'on'); moveStock(910002, 4)
-    const same = await submit([line(910002, 5, { seenQuantity: 5 })]); const sameId = same.body.item.id
+    // Everything the count found has already left the shelf (a sale took the last units): there is nothing to remove, so nothing is written and nothing is claimed; the line is recorded as settled.
+    reset(); setSwitches('on', 'on')
+    const same = await submit([line(910002, 3, { seenQuantity: 5 })]); const sameId = same.body.item.id; moveStock(910002, 0)
     const settled = await decide(sameId, {})
-    assert.equal(settled.status, 200); assert.equal(settled.body.done, true); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 4)
+    assert.equal(settled.status, 200); assert.equal(settled.body.done, true); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 0)
     assert.equal(JSON.parse(approvalRow().applied_json).lines['910002'].settled, true); assert.equal(approvalRow().applying_request_id, null, 'nothing was written, so nothing was claimed')
     // A viewer who could not see stock is measured against the stock at submit (the same variance, with that figure as the baseline).
     reset(); setSwitches('on', 'on')
@@ -602,6 +603,39 @@ async function main() {
     assert.throws(() => db.exec("UPDATE inventory_check_approvals SET decision_note='edited'"), /inventory_check_approval_immutable/)
     assert.throws(() => db.exec('DELETE FROM inventory_check_approvals'), /inventory_check_approval_immutable/)
     assert.throws(() => db.exec("UPDATE inventory_check_approvals SET submitted_by=1"), /inventory_check_approval_immutable/)
+  })
+
+  await check('N3: the server does not trust the client\'s seen: a viewer who sees stock cannot claim to have seen another figure (recount), and a blind counter is measured against the stock at submit', async () => {
+    const sessionCount = () => db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n
+    reset(); setSwitches('on', 'on')
+    // seen 0 while stock is 5 and 6 is typed: the old build recorded a variance of +6 (stock 11).
+    const lied = await submit([line(910002, 6, { seenQuantity: 0 })], { requestId: 'n3-lie-00001' })
+    assert.equal(lied.status, 409, JSON.stringify(lied.body)); assert.equal(lied.body.code, 'inventory_check_stock_changed'); assert.deepEqual(lied.body.productIds, [910002])
+    assert.equal(sessionCount(), 0, 'nothing is recorded'); assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_approvals').get().n, 0)
+    // The same figure the counter really saw is accepted, and the figure the variance uses is the stock at submit.
+    const honest = await submit([line(910002, 6, { seenQuantity: 5 })], { requestId: 'n3-honest-001' })
+    assert.equal(honest.status, 201); assert.equal(approvalRow().baselines_json, '{"910002":5}')
+    assert.equal((await decide(honest.body.item.id, { requestId: 'n3-approve-001' })).status, 200); assert.equal(ordinary(910002), 6, 'the true shelf')
+    // A sale before the submit (stock 4): the counter still saw 5. A differing count is a recount, never an approval measured from a stale screen.
+    reset(); setSwitches('on', 'on'); moveStock(910002, 4)
+    const stale = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n3-stale-0001' })
+    assert.equal(stale.status, 409); assert.equal(stale.body.code, 'inventory_check_stock_changed'); assert.deepEqual(stale.body.productIds, [910002]); assert.equal(sessionCount(), 0)
+    // A count that equals the stock of now needs no change whatever was on the screen: Done, no approval line, so nothing is applied twice.
+    const equal = await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'n3-equal-0001' })
+    assert.equal(equal.status, 201); assert.equal('approval' in equal.body, false); assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_approvals').get().n, 0)
+    assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910002").get().state, 'done')
+    // A viewer who sends no seen is measured against the stock at submit (the page always sends it).
+    reset(); setSwitches('on', 'on')
+    const bare = await submit([line(910002, 3)], { requestId: 'n3-bare-00001' })
+    assert.equal(bare.status, 201); assert.equal(approvalRow().baselines_json, '{"910002":5}')
+    // A blind counter cannot see stock, so what they send as seen means nothing: ignored, the stock at submit is the baseline.
+    reset(); setSwitches('on', 'on')
+    const blind = await submit([line(910002, 6, { seenQuantity: 0 })], { requestId: 'n3-blind-0001' }, BLIND)
+    assert.equal(blind.status, 201, JSON.stringify(blind.body)); assert.equal(approvalRow().baselines_json, '{"910002":5}', 'the stock at submit, not the figure the blind client made up')
+    assert.equal((await decide(blind.body.item.id, { requestId: 'n3-blind-appr1' })).status, 200); assert.equal(ordinary(910002), 6, 'the true shelf, not 11')
+    // Without ic_fix_stock nothing is applied, so a stale seen changes nothing about the old behaviour.
+    reset(); setSwitches('on', undefined)
+    assert.equal((await submit([line(910002, 6, { seenQuantity: 0 })], { requestId: 'n3-off-000001' })).status, 201)
   })
 
   console.log(`${groups} groups passed`)

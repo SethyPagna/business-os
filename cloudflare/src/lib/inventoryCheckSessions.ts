@@ -489,7 +489,11 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
     const state: 'done' | 'issue' = !access.fields.stock || matched ? 'done' : 'issue'
     return { line, baseline, matched, state, reason: state === 'issue' ? line.note ?? DEFAULT_COUNT_NOTE : null }
   })
-  const stale = resolved.filter(item => item.line.checked && !item.matched).map(item => item.line.productId)
+  // The figure the counter saw is checked against the stock of now by the server, never trusted: a count that differs is measured from that stock, so a screen that is
+  // out of date (or a made-up figure) is a recount. Only a viewer who sees stock has a screen to be out of date; for everyone else the figure means nothing and is ignored.
+  const staleScreen = (item: typeof resolved[number]): boolean => options.approvals === true && access.fields.stock && item.line.seen !== null && item.baseline?.quantity != null
+    && !item.matched && Math.abs(item.baseline.quantity - item.line.seen) > COUNT_EPSILON
+  const stale = resolved.filter(item => (item.line.checked && !item.matched) || staleScreen(item)).map(item => item.line.productId)
   if (stale.length) fail(409, 'inventory_check_stock_changed', { productIds: stale })
   const now = new Date().toISOString(), id = crypto.randomUUID()
   const members = await Promise.all(resolved.map(async item => ({ product_id: item.line.productId, product: productById.get(item.line.productId), baseline: item.baseline,
@@ -499,8 +503,8 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   // A count differs when stock was readable and not equal to it; this is judged here for every viewer, so a count typed without seeing stock is still reviewed.
   const differing = options.approvals ? resolved.filter(item => item.baseline?.quantity != null && Math.abs(item.baseline.quantity - item.line.counted) > COUNT_EPSILON).length : 0
   const scope = { membership: 'submission' }
-  // What the counter saw is the figure the count is later measured against; a viewer who could not see stock is measured against the stock at submit.
-  const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.line.seen ?? item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
+  // The figure a count is later measured against is the stock at submit. For a viewer who sees stock it equals what the counter saw (checked above); for anyone else it is the only trustworthy figure.
+  const seenJson = JSON.stringify(Object.fromEntries(resolved.map(item => [String(item.line.productId), item.baseline?.quantity ?? null]).filter(([, seen]) => seen !== null)))
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify(scope), now,
     members: JSON.stringify(members), baseline: JSON.stringify(baselines), count: productIds.length, signature: snapshot.signature }
   const stock = buildInventoryCheckStockQuery({ branchId, productIds })
