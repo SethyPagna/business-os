@@ -428,7 +428,6 @@ const compileBand = (install: InstallModule): ComponentModule => compileComponen
   '../../app/pathRouting.ts': pathRouting,
   '../../utils/lazyImport.ts': { lazyRetry: () => () => null },
   '../../utils/useInstallBandClearance.ts': { useInstallBandClearance: () => {} },
-  '../../utils/bottomActionBar.ts': { hasBottomActionBar: () => false, subscribeBottomActionBar: () => () => {} },
 })
 
 async function renderBand(device: Device, language: Language, afterLoad?: (win: EventTarget, install: InstallModule) => void): Promise<string> {
@@ -589,12 +588,15 @@ const packText = (language: Language) => {
   return (key: string): string => String(packs[language][key] ?? packs.en[key] ?? key)
 }
 
-async function renderStaffBand(hostname: string, language: Language): Promise<string> {
+const bottomActionBar = await import('../src/utils/bottomActionBar.ts')
+
+async function renderStaffBand(hostname: string, language: Language, page = 'dashboard'): Promise<string> {
   useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, hostname })
   const install = await freshInstallModule()
   const hint = compileComponent('src/components/shared/IosInstallHint.tsx', {
-    '../../AppContext.tsx': { useApp: () => ({ t: packText(language), language }) },
+    '../../AppContext.tsx': { useApp: () => ({ t: packText(language), language, page }) },
     '../../app/pathRouting.ts': pathRouting,
+    '../../utils/bottomActionBar.ts': bottomActionBar,
     './InstallPromptBand.tsx': compileBand(install),
   })
   return renderToStaticMarkup(React.createElement(hint.default, {}))
@@ -681,17 +683,26 @@ await check('on a phone the scroll buttons ride above the band, and the desktop 
   assert.ok(app.includes('md:bottom-[calc(1rem+env(safe-area-inset-bottom))]'), 'from md the band is offset sideways instead, so the buttons keep their corner')
 })
 
-await check('the till declares its pinned Complete Sale bar; the band and the scroll buttons obey it', () => {
-  assert.ok(
-    read('src/components/pos/POS.tsx').includes("useBottomActionBar({ active: isActive, visible: isDesktopViewport || mobileView === 'cart' })"),
-    'the till is the page in use (band stays away) and its cart is on screen beside the products or on the Cart tab (buttons step aside)',
-  )
-  assert.ok(
-    read('src/components/shared/InstallPromptBand.tsx').includes('hasBottomActionBar() ? null : installBandRoute(staffApp)'),
-    'the band is not offered over a declared bar',
-  )
+await check('the till page gets no band from its first render; the scroll buttons and the notes tab keep clear of its pinned bar', async () => {
+  const { pageHasBottomActionBar, BOTTOM_ACTION_BAR_CLEARANCE_VAR } = bottomActionBar
+  assert.equal(pageHasBottomActionBar('pos'), true)
+  for (const page of ['dashboard', 'inventory', 'sales', 'notes', '', undefined]) assert.equal(pageHasBottomActionBar(page), false, `${String(page)} has no pinned bottom bar`)
+  assert.equal(await renderStaffBand('admin.leangbeauty.com', 'en', 'pos'), '', 'the till page renders nothing, although an iPhone on the admin host would be offered the install')
+  assert.ok(visibleText(await renderStaffBand('admin.leangbeauty.com', 'en', 'dashboard')).length > 0, 'every other page still gets it')
+  const hint = read('src/components/shared/IosInstallHint.tsx')
+  assert.ok(hint.includes('if (!isAdminHostname() || pageHasBottomActionBar(page)) return null'), 'the shell wrapper asks by page id, before any chunk of the page has loaded')
+  assert.match(hint, /<InstallPromptBand translate=\{translateFromPack\(t, language\)\} \/>/)
+  const pos = read('src/components/pos/POS.tsx')
+  assert.ok(pos.includes("useBottomActionBar({ visible: isActive && (isDesktopViewport || mobileView === 'cart'), actionRef: completeSaleRef })"), 'visible while the till is the page in use and its cart is on screen (beside the products from md up; the Cart tab on a phone)')
+  assert.ok(pos.includes('<button ref={completeSaleRef} className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker}'), 'the ref is on the Complete Sale button itself')
   const app = read('src/App.tsx')
   assert.ok(app.includes('const coversPinnedAction = useBottomActionBarVisible()') && app.includes('if (coversPinnedAction) return null'), 'the scroll buttons are not drawn over a visible bar')
+  const notes = read('src/components/shared/NotesWidget.tsx')
+  assert.ok(notes.includes('const barOnScreen = useBottomActionBarVisible()'))
+  assert.ok(
+    notes.includes("${barOnScreen ? ' max-md:bottom-[calc(var(" + BOTTOM_ACTION_BAR_CLEARANCE_VAR + ")+0.125rem)]' : ''}"),
+    'on a phone the notes tab docks just above Complete Sale (in the bar row beside the centred cue), on top of its default bottom',
+  )
 })
 
 await check('the staff loading screens say Leang Cosmetics Admin', () => {

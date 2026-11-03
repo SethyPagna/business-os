@@ -58,8 +58,8 @@ type Scenario = {
   win: EventTarget
   mountBand(language?: Language): Promise<MountedSurface>
   arm(): Promise<void>
-  /** What the till does while it is the page in use: declare its pinned bottom bar. Unmounting ends the declaration. */
-  declareBottomBar(props: { active: boolean; visible: boolean }): Promise<MountedSurface>
+  /** The shell's admin wrapper, as the app renders it for the given page id. */
+  mountHint(page: string): Promise<MountedSurface>
 }
 
 async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Promise<void> {
@@ -78,8 +78,13 @@ async function scenario(device: Device, run: (s: Scenario) => Promise<void>): Pr
           surfaces.push(await harness.mount({ component: 'utils/standaloneNavigation.ts', exportName: 'installBeforeInstallPromptCapture', app: {}, doubles: {} }))
         } finally { console.error = quiet }
       },
-      async declareBottomBar(props) {
-        const surface = await harness.mount({ component: 'utils/bottomActionBar.ts', exportName: 'useBottomActionBar', props, app: {}, doubles: {} })
+      async mountHint(page) {
+        const surface = await harness.mount({
+          component: 'components/shared/IosInstallHint.tsx',
+          props: {},
+          app: { t: (key: string) => key, language: 'en', page },
+          doubles: {},
+        })
         surfaces.push(surface)
         return surface
       },
@@ -132,30 +137,15 @@ await check('nothing shows until the browser fires beforeinstallprompt', async (
   })
 })
 
-await check('a page with a bottom-pinned action (the till) is never covered by the offer; the offer is back when it is left', async () => {
-  for (const visible of [true, false]) {
-    await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
-      await s.arm()
-      const band = await s.mountBand()
-      await dispatch(s.win, promptEvent('accepted'))
-      await band.settle()
-      assert.ok(hasButtonWithText(band, 'Install'), 'offered before the till opens')
-      const till = await s.declareBottomBar({ active: true, visible })
-      await band.settle()
-      assert.equal(band.text(), '', `the till is the page in use (bar ${visible ? 'on screen' : 'on the other tab'}): no band`)
-      await till.unmount()
-      await band.settle()
-      assert.ok(hasButtonWithText(band, 'Install'), 'the offer is back after the till is left')
-    })
-  }
+await check('the till page is never offered the install, from its first render; every other page is', async () => {
   await scenario({ userAgent: UA.android, hostname: ADMIN_HOST }, async (s) => {
     await s.arm()
-    const band = await s.mountBand()
     await dispatch(s.win, promptEvent('accepted'))
-    await band.settle()
-    await s.declareBottomBar({ active: false, visible: true })
-    await band.settle()
-    assert.ok(hasButtonWithText(band, 'Install'), 'a till kept alive in the background (not the page in use) declares nothing')
+    const till = await s.mountHint('pos')
+    assert.equal(till.text(), '', 'the till page: nothing, although the browser has offered the install')
+    const other = await s.mountHint('dashboard')
+    await other.settle()
+    assert.ok(hasButtonWithText(other, 'Install'), 'another page: offered')
   })
 })
 

@@ -11,6 +11,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Maximize2 from 'lucide-react/dist/esm/icons/maximize-2.js'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
+import { useBottomActionBarVisible } from '../../utils/bottomActionBar.ts'
 import { noteDisplayTitle } from '../notes/useNotesController.ts'
 import { useNotes } from '../notes/NotesContext.tsx'
 import type { NoteRecord } from '../../api/notesTransport.ts'
@@ -213,6 +214,7 @@ function defaultDragPos(width: number, height: number): DragPos {
 export default function NotesWidget() {
   const { page, navigateTo, settings } = useApp()
   const pagesNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
+  const barOnScreen = useBottomActionBarVisible()
   const {
     t,
     loading,
@@ -515,7 +517,7 @@ export default function NotesWidget() {
     // handlers instead of scrolling the page.
     return (
       <div
-        className={`pointer-events-none fixed left-0 z-[1001] ${launcherDisplayTop == null ? `${pagesNavigation ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]'} md:bottom-auto md:top-1/2 md:-translate-y-1/2` : ''}`}
+        className={`pointer-events-none fixed left-0 z-[1001] ${launcherDisplayTop == null ? `${pagesNavigation ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))]'} md:bottom-auto md:top-1/2 md:-translate-y-1/2${barOnScreen ? ' max-md:bottom-[calc(var(--bottom-action-bar-clearance)+0.125rem)]' : ''}` : ''}`}
         style={launcherDisplayTop != null ? { top: `${launcherDisplayTop}px` } : undefined}
       >
         <button

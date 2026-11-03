@@ -8,7 +8,6 @@ import {
   promptAppInstall,
   subscribeInstallOffer,
 } from '../../utils/standaloneNavigation.ts'
-import { hasBottomActionBar, subscribeBottomActionBar } from '../../utils/bottomActionBar.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useInstallBandClearance } from '../../utils/useInstallBandClearance.ts'
 
@@ -28,12 +27,6 @@ export function translateFromPack(t: (key: string) => string, language: string):
 
 const noRouteOutsideBrowser = () => null
 
-const subscribeOfferOrBottomBar = (listener: () => void) => {
-  const offer = subscribeInstallOffer(listener)
-  const bar = subscribeBottomActionBar(listener)
-  return () => { offer(); bar() }
-}
-
 const STAFF_APP_ICON = '/icon-192.png'
 const SHOP_APP_ICON = '/leang-cosmetics-icon-192-v2.png'
 // Under 360 px (iPhone SE class) the band is one short row: icon, one word, X. The sentence goes, unless it is the whole message.
@@ -42,8 +35,7 @@ const HIDDEN_WHEN_NARROW = 'max-[359px]:hidden'
 export default function InstallPromptBand({ translate }: { translate: InstallPromptTranslate }) {
   // The admin host installs the staff app; every other host is the shop, which names itself.
   const staffApp = isAdminHostname()
-  // A page with its own bottom-pinned primary action (the till) is never covered by the offer.
-  const route = useSyncExternalStore(subscribeOfferOrBottomBar, () => (hasBottomActionBar() ? null : installBandRoute(staffApp)), noRouteOutsideBrowser)
+  const route = useSyncExternalStore(subscribeInstallOffer, () => installBandRoute(staffApp), noRouteOutsideBrowser)
   const [iosStepsOpen, setIosStepsOpen] = useState(false)
   const bandRef = useRef<HTMLDivElement>(null)
   useInstallBandClearance(bandRef, route !== null)

@@ -112,10 +112,10 @@ async function openTillWithCart(page: Page): Promise<void> {
   await gotoAdminPage(page, '/pos')
 }
 
-/** A tap at the centre and at the right edge of the button reaches that button, not something floating over it. */
+/** A tap near the left edge, at the centre and near the right edge of the button reaches that button, not something floating over it. */
 async function expectTapsReach(page: Page, button: Locator, name: string): Promise<void> {
   const box = await boxOf(button, name)
-  for (const [where, x] of [['centre', box.x + box.width / 2], ['right edge', box.x + box.width - 2]] as const) {
+  for (const [where, x] of [['left edge', box.x + 10], ['centre', box.x + box.width / 2], ['right edge', box.x + box.width - 2]] as const) {
     const hit = await page.evaluate((point) => document.elementFromPoint(point.x, point.y)?.closest('button')?.textContent?.trim() ?? null, { x, y: box.y + box.height / 2 })
     expect(hit, `a tap at the ${where} of "${name}" reaches it`).toBe(name)
   }
@@ -233,6 +233,10 @@ test.describe('till cart on a phone with the install prompt available', () => {
       await offerPrompt()
       await expect(installBand(page, 'en'), 'the till is never covered by the offer').toHaveCount(0)
       await expect(scrollButtons(page), 'the scroll buttons would sit on Complete Sale and the payment rows').toHaveCount(0)
+      // The notes tab docks at the left edge, bottom up. It must be on screen for the taps below to mean anything.
+      const notesTab = page.getByRole('button', { name: pack('en').notes_title, exact: true })
+      await expect(notesTab, 'the notes tab is on screen').toBeVisible({ timeout: 30_000 })
+      expect(overlapArea(await boxOf(notesTab, 'the notes tab'), await boxOf(completeSale(page), 'Complete Sale')), 'the notes tab over Complete Sale').toBe(0)
       await expectTapsReach(page, completeSale(page), 'Complete Sale')
 
       // The Products tab is still the till: no band there either, but the buttons come back (nothing is pinned under them).
@@ -246,4 +250,47 @@ test.describe('till cart on a phone with the install prompt available', () => {
       await expect(installBand(page, 'en')).toBeVisible({ timeout: 15_000 })
     })
   }
+})
+
+test.describe('cold load of the till on a phone', () => {
+  test.describe.configure({ timeout: 120_000 })
+  test.skip(({ browserName, isMobile }) => !isMobile && browserName === 'chromium', 'phone contracts')
+
+  test('390x844: the install band is never in the page, in any frame, from the first paint of a cold /pos', async ({ page }, info) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await signIn(page, E2E_ACCOUNTS.cashierA)
+    // Counts every mutation and every frame in which the band is in the document (an element that is not there cannot paint).
+    // Chromium on Android is offered the install from the first moment the app listens, and again every 50 ms.
+    await page.addInitScript(({ offerPrompt, dismissLabel }) => {
+      const sightings = { count: 0 }
+      ;(window as unknown as { __bandSightings: { count: number } }).__bandSightings = sightings
+      const look = () => {
+        if ([...document.querySelectorAll('[role="status"]')].some((node) => node.querySelector(`button[aria-label="${dismissLabel}"]`))) sightings.count += 1
+      }
+      new MutationObserver(look).observe(document, { subtree: true, childList: true })
+      const everyFrame = () => { look(); requestAnimationFrame(everyFrame) }
+      requestAnimationFrame(everyFrame)
+      if (offerPrompt) {
+        const offer = () => window.dispatchEvent(Object.assign(new Event('beforeinstallprompt', { cancelable: true }), { prompt: async () => {}, userChoice: Promise.resolve({ outcome: 'dismissed' }) }))
+        document.addEventListener('DOMContentLoaded', offer)
+        const timer = setInterval(offer, 50)
+        setTimeout(() => clearInterval(timer), 10_000)
+      }
+    }, { offerPrompt: info.project.name === 'android-chromium', dismissLabel: pack('en').dismiss_notification })
+    const sightings = (): Promise<number> => page.evaluate(() => (window as unknown as { __bandSightings?: { count: number } }).__bandSightings?.count ?? -1)
+
+    await page.goto(`${ADMIN_ORIGIN}/pos`, { waitUntil: 'commit' })
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(await sightings(), 'right after the first paint of a cold /pos').toBe(0)
+    await page.waitForLoadState('load')
+    await expect(page.getByRole('button', { name: /^Cart/ }), 'the till has mounted').toBeVisible({ timeout: 30_000 })
+    await page.waitForTimeout(1_500)
+    expect(await sightings(), 'after load and the till mounted').toBe(0)
+    await expect(installBand(page, 'en')).toHaveCount(0)
+
+    // Control: the same detector does see the band on a cold load of any other page, so the zeros above are the till's doing.
+    await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
+    await expect(installBand(page, 'en')).toBeVisible({ timeout: 15_000 })
+    expect(await sightings(), 'the detector sees the band elsewhere').toBeGreaterThan(0)
+  })
 })

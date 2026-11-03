@@ -1,39 +1,53 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore, type RefObject } from 'react'
+
+/** Read by floats that dock at the bottom edge: how much of the screen bottom the page's pinned primary action (and what sits under it) covers. */
+export const BOTTOM_ACTION_BAR_CLEARANCE_VAR = '--bottom-action-bar-clearance'
 
 /**
- * A page whose primary action is pinned to the bottom of the screen (the till's Complete Sale) declares it while it is
- * the page in use. Floating things then keep off it: the install band is not offered at all (`declared`), and the
- * scroll buttons step aside while the bar can actually be seen (`visible`: false on the phone's Products tab).
+ * Pages whose primary action is pinned to the bottom of the screen (the till's Complete Sale). Listed by page id
+ * because on a cold open the page's own chunk is not loaded yet: the shell can already keep the install band off the
+ * first paint, which a declaration made by the page itself could not.
  */
-let declaredBars = 0
+const PAGES_WITH_BOTTOM_ACTION_BAR: readonly string[] = ['pos']
+
+export const pageHasBottomActionBar = (page: string | undefined): boolean => page !== undefined && PAGES_WITH_BOTTOM_ACTION_BAR.includes(page)
+
 let visibleBars = 0
 const listeners = new Set<() => void>()
 const changed = () => { for (const listener of listeners) listener() }
-
-export function subscribeBottomActionBar(listener: () => void): () => void {
+const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
 
-export const hasBottomActionBar = (): boolean => declaredBars > 0
-
-export function useBottomActionBar({ active, visible }: { active: boolean; visible: boolean }): void {
+/**
+ * The page calls this with its pinned primary action. While `visible` (it can actually be seen: not on a phone's other
+ * tab) the scroll buttons step aside and the clearance variable says where the action starts, so docked floats sit above it.
+ */
+export function useBottomActionBar({ visible, actionRef }: { visible: boolean; actionRef: RefObject<HTMLElement | null> }): void {
   useEffect(() => {
-    if (!active) return undefined
-    declaredBars += 1
-    changed()
-    return () => { declaredBars -= 1; changed() }
-  }, [active])
-  const showing = active && visible
-  useEffect(() => {
-    if (!showing) return undefined
+    const action = actionRef.current
+    if (!visible || !action) return undefined
+    const root = document.documentElement
+    const publish = () => root.style.setProperty(BOTTOM_ACTION_BAR_CLEARANCE_VAR, `${Math.max(0, Math.ceil(window.innerHeight - action.getBoundingClientRect().top))}px`)
+    publish()
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(publish) : null
+    resizeObserver?.observe(action)
+    if (action.parentElement) resizeObserver?.observe(action.parentElement)
+    window.addEventListener('resize', publish)
     visibleBars += 1
     changed()
-    return () => { visibleBars -= 1; changed() }
-  }, [showing])
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', publish)
+      root.style.removeProperty(BOTTOM_ACTION_BAR_CLEARANCE_VAR)
+      visibleBars -= 1
+      changed()
+    }
+  }, [visible, actionRef])
 }
 
-/** True while a declared bottom bar is on screen. */
+/** True while a page's pinned bottom action is on screen. */
 export function useBottomActionBarVisible(): boolean {
-  return useSyncExternalStore(subscribeBottomActionBar, () => visibleBars > 0, () => false)
+  return useSyncExternalStore(subscribe, () => visibleBars > 0, () => false)
 }
