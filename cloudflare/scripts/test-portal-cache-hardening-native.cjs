@@ -10,7 +10,9 @@
 //   P2-2  a 150-character Khmer query with five Khmer categories is a 200;
 //   P2-3  nothing is stored while maintenance is held; leaving maintenance
 //         (restore end, force clear) moves every cache version;
-//   P3-1  concurrent misses for one entry run its producer once;
+//   P3-1  concurrent misses from different requests each run their own producer and a finished entry answers every later
+//         request; a build still pending is shared inside ONE request only (HANG-2: workerd ties a promise to the request that
+//         created it, so a request that answers before its build settles must not hold the next visitor);
 //   P3-2  a translation key naming a private field never takes /config down;
 //   P3-3  a new deploy (version id) never reads an older deploy's entries;
 //   P3-4  HEAD strips Set-Cookie like GET;
@@ -251,16 +253,37 @@ async function run() {
     assert.equal((await shop('/catalog/products/search?query=busy0')).status, 200, 'the cap frees once they finish')
   })
 
-  await check('P3-1: concurrent misses for one entry run the producer once', async () => {
+  await check('P3-1: concurrent misses from different requests each run their producer; the finished entry then answers without one', async () => {
     slowMs = 30
     statements.length = 0
     const results = await Promise.all([1, 2, 3].map(() => shop('/catalog/products/search?query=coalesce')))
     slowMs = 0
     for (const result of results) assert.equal(result.status, 200)
     assert.deepEqual(results[1].json, results[0].json)
+    assert.deepEqual(results[2].json, results[0].json)
     const producerRuns = statements.filter((sql) => sql.includes('GROUP BY value')).length
     statements.length = 0
-    assert.equal(producerRuns, 1, `the rail query ran ${producerRuns} times`)
+    assert.equal(producerRuns, 3, `three requests, three producers (a pending build is never joined across requests): the rail query ran ${producerRuns} times`)
+    const later = await shop('/catalog/products/search?query=coalesce')
+    assert.equal(later.status, 200)
+    assert.equal(builtBody(later.sql), false, 'the finished entry is what later requests share')
+    assert.deepEqual(later.json, results[0].json)
+  })
+
+  await check('P3-1b: a pending build is shared inside one request; a build that never settles holds no other request', async () => {
+    const { coalescePortalBuild } = portalRoute
+    const requestA = {}
+    let builds = 0
+    const build = () => { builds += 1; return new Promise((resolve) => setTimeout(() => resolve(builds), 20)) }
+    const [first, second] = await Promise.all([coalescePortalBuild(requestA, 'k1', build), coalescePortalBuild(requestA, 'k1', build)])
+    assert.equal(builds, 1, 'the callers of one request share one build')
+    assert.equal(first, second)
+    assert.equal(await coalescePortalBuild(requestA, 'k1', build), 2, 'a settled build is forgotten: the next call builds again')
+    // The 6.0.1048 probe C3 in this harness: request A starts the build for a key and never gets to finish it.
+    builds = 0
+    void coalescePortalBuild({}, 'k2', () => new Promise(() => {}))
+    const answered = await Promise.race([coalescePortalBuild({}, 'k2', async () => 'b-built'), new Promise((resolve) => setTimeout(() => resolve('HELD'), 500))])
+    assert.equal(answered, 'b-built', 'request B builds for itself instead of waiting on request A')
   })
 
   await check('P1-1: the fuzzy fallback runs only for 3-40 characters and at most 4 words', async () => {

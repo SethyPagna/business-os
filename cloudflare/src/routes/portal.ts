@@ -1412,7 +1412,7 @@ async function withLivePortalStock(c: PortalContext, rawItems: unknown, versions
     ? cached
     : !key
       ? await loadPortalStockStates(c.env, ids, idList)
-      : await coalescePortalBuild(key.url, async () => {
+      : await coalescePortalBuild(c, key.url, async () => {
         const loaded = await loadPortalStockStates(c.env, ids, idList)
         writePortalEdge(c.executionCtx, key, loaded, PORTAL_STOCK_TTL_SECONDS)
         return loaded
@@ -1426,15 +1426,21 @@ function portalQueryRejection(c: PortalContext, reason: string): Response {
   return c.json({ error: 'This storefront request is not supported.', code: 'portal_bad_query', reason }, 400, { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL })
 }
 
-// One rebuild per key per isolate: concurrent misses for the same entry share the first one's work.
-const portalBuildsInFlight = new Map<string, Promise<unknown>>()
+// One rebuild per key per REQUEST: callers of the same request share the first one's work. A promise belongs to the request that
+// created it (workerd): awaiting another request's can hang for good once that request has answered or was cancelled, and this map
+// used to hold the pending promise isolate-wide, so one such request stranded its key for every later visitor (the 6.0.1048 review,
+// B1). Across requests only the finished entry is shared, and that is the edge entry writePortalEdge stores. `request` is the Hono
+// Context, which lives for exactly one request.
+const portalBuildsInRequest = new WeakMap<object, Map<string, Promise<unknown>>>()
 
-function coalescePortalBuild<T>(key: string, build: () => Promise<T>): Promise<T> {
-  const running = portalBuildsInFlight.get(key)
+export function coalescePortalBuild<T>(request: object, key: string, build: () => Promise<T>): Promise<T> {
+  let builds = portalBuildsInRequest.get(request)
+  if (!builds) portalBuildsInRequest.set(request, builds = new Map())
+  const running = builds.get(key)
   if (running) return running as Promise<T>
   const started = build()
-  portalBuildsInFlight.set(key, started)
-  const forget = () => { if (portalBuildsInFlight.get(key) === started) portalBuildsInFlight.delete(key) }
+  builds.set(key, started)
+  const forget = () => { if (builds.get(key) === started) builds.delete(key) }
   started.then(forget, forget)
   return started
 }
@@ -1505,7 +1511,8 @@ async function servePortalPublic(
   const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'body', route, canonical.search, versions.body)
   let body = key ? await readPortalEdge<Record<string, unknown>>(key) : null
   if (!body) {
-    const cold = route === 'search' && !(key && portalBuildsInFlight.has(key.url))
+    // Every miss runs its own producer (a build in flight belongs to another request), so every cold search is counted.
+    const cold = route === 'search'
     if (cold) {
       if (await portalSearchRateLimited(c)) {
         return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
@@ -1519,7 +1526,7 @@ async function servePortalPublic(
     }
     try {
       const build = () => buildPortalBody(c, key, canonical.params, produce)
-      body = key ? await coalescePortalBuild(key.url, build) : await build()
+      body = key ? await coalescePortalBuild(c, key.url, build) : await build()
     } finally {
       if (cold) portalColdSearches -= 1
     }
@@ -1706,7 +1713,7 @@ app.get('/ai/status', async (c) => {
     if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
     return status
   }
-  return c.json(key ? await coalescePortalBuild(key.url, build) : await build())
+  return c.json(key ? await coalescePortalBuild(c, key.url, build) : await build())
 })
 
 // Sanitizes the free-form shopper profile object from the request body.
