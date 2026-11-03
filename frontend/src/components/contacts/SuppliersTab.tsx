@@ -53,6 +53,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
+import { ALL_PHONE_FIELDS_SENT, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
@@ -250,7 +251,7 @@ function patchSupplierRow(rows: SupplierRow[], id: number | string, patch: Recor
 
 interface SupplierFormProps {
   supplier?: SupplierRow | null
-  onSave: (payload: SupplierPayload) => Promise<unknown> | unknown
+  onSave: (payload: SupplierPayload, untouched: UntouchedPhoneFields) => Promise<unknown> | unknown
   onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
@@ -263,7 +264,8 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
   const [form, setForm] = useState<SupplierPayload>(init)
   // S4-21: dismissing this modal with edits raises the discard prompt.
   const { dirty: formDirty } = useFormDirty(form, String(supplier?.id ?? 'new'))
-  const [options, setOptions] = useState<ContactOption[]>(() => {
+  // The Contact Options as the form first showed them: a save that leaves them alone does not send them (contactPhoneFields.ts).
+  const [initialOptions] = useState<ContactOption[]>(() => {
     const parsed = parseStoredContactOptions(init.address, { legacyField: 'address' })
     if (parsed.length) return parsed
     return [createContactOption({
@@ -273,6 +275,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
       address: init.address || '',
     })]
   })
+  const [options, setOptions] = useState<ContactOption[]>(initialOptions)
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -330,14 +333,16 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
     setSaving(true)
     try {
       const primaryOption = getPrimaryContactOption(options)
-      const result = await Promise.resolve(onSave({
+      const payload: SupplierPayload = {
         ...form,
         phone: primaryOption.phone || form.phone || '',
         email: primaryOption.email || form.email || '',
         address: serializeContactOptions(options) || '',
         contact_person: primaryOption.name || form.contact_person || '',
         gender: form.gender || '',
-      }))
+      }
+      const baseline = { phone: getPrimaryContactOption(initialOptions).phone || init.phone || '', address: serializeContactOptions(initialOptions) || '' }
+      const result = await Promise.resolve(onSave(payload, supplier ? untouchedPhoneFields(baseline, payload) : ALL_PHONE_FIELDS_SENT))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
@@ -870,7 +875,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     load({ silent: true, label: 'Suppliers refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form: SupplierPayload) => {
+  const handleSave = async (form: SupplierPayload, untouched: UntouchedPhoneFields = ALL_PHONE_FIELDS_SENT) => {
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -904,7 +909,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       }
       const useUpdate = Boolean(selected) && !renameCopy
       const result = useUpdate
-        ? await runSupplierMutation(() => getSupplierApi().updateSupplier((selected as { id: number | string }).id, payload), 'Update supplier')
+        ? await runSupplierMutation(() => getSupplierApi().updateSupplier((selected as { id: number | string }).id, withoutUntouchedPhoneFields(payload, untouched)), 'Update supplier')
         : await runSupplierMutation(() => getSupplierApi().createSupplier(payload), 'Create supplier')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
@@ -916,7 +921,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const restoreResult = await runSupplierMutation(
-              () => getSupplierApi().updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot)),
+              () => getSupplierApi().updateSupplier(existingSnapshot.id, withoutUntouchedPhoneFields(buildSupplierPayload(existingSnapshot), untouched)),
               'Undo supplier edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
@@ -924,7 +929,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           },
           redo: async () => {
             const redoResult = await runSupplierMutation(
-              () => getSupplierApi().updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot)),
+              () => getSupplierApi().updateSupplier(nextSnapshot.id, withoutUntouchedPhoneFields(buildSupplierPayload(nextSnapshot), untouched)),
               'Redo supplier edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply supplier changes')

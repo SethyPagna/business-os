@@ -6,6 +6,7 @@ import { getCustomerIdentityById, invalidateCustomerReadCache } from '../../api/
 import { createCustomer, updateCustomer } from '../../api/contactWriteTransport.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { buildCustomerSourcePayload, customerSourceRestorePayload, type CustomerSource } from './customerSource.ts'
+import { withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type CustomerRow = Record<string, unknown> & { id?: number | string; name?: string; updated_at?: string }
@@ -75,13 +76,14 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
     )
   }
 
-  const save = async (form: Record<string, unknown>) => {
+  const save = async (form: Record<string, unknown>, untouched: UntouchedPhoneFields) => {
     if (savingGate.blocked) {
       notify(savingGate.reason, 'error')
       return { success: false }
     }
     try {
-      const payload = buildCustomerSourcePayload(form, loaded, source)
+      // An edit that left the phone fields alone does not send them (contactPhoneFields.ts); a create sends everything.
+      const payload = withoutUntouchedPhoneFields(buildCustomerSourcePayload(form, loaded, source), editing ? untouched : null)
       const record = (editing
         ? await updateCustomer(customerId, payload)
         : await createCustomer(payload)) as CustomerRow | null
@@ -95,8 +97,8 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
         const after = { ...before, ...record }
         pushAction({
           label: `${tr(t, 'edit_customer', 'Edit Customer')} ${String(before.name || '')}`.trim(),
-          undo: async () => { await updateCustomer(before.id as number | string, customerSourceRestorePayload(before, source)); invalidateCustomerReadCache() },
-          redo: async () => { await updateCustomer(after.id as number | string, customerSourceRestorePayload(after, source)); invalidateCustomerReadCache() },
+          undo: async () => { await updateCustomer(before.id as number | string, withoutUntouchedPhoneFields(customerSourceRestorePayload(before, source), untouched)); invalidateCustomerReadCache() },
+          redo: async () => { await updateCustomer(after.id as number | string, withoutUntouchedPhoneFields(customerSourceRestorePayload(after, source), untouched)); invalidateCustomerReadCache() },
         })
       }
       notify(editing ? tr(t, 'customer_updated', 'Customer updated') : tr(t, 'customer_added', 'Customer added'))
