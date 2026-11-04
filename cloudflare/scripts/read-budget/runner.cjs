@@ -132,9 +132,11 @@ function writeProblems(entry, m) {
   return out
 }
 
-async function runWritePass({ label }) {
+// The write shapes are budgeted on the Free config as it runs once call_counting is ON (P1.1): admission counts D1 calls, a db.batch() is one.
+// OFF, the same shapes are refused or deferred by the statement count; test-call-counting-free-native.cjs proves both sides.
+async function runWritePass({ label, switches = { call_counting: 'on' } }) {
   const byId = new Map(loadBudgets().shapes.map((e) => [e.id, e]))
-  const world = await bootWorld({ tier: 'free' })
+  const world = await bootWorld({ tier: 'free', switches })
   const reds = []
   let n = 0
   try {

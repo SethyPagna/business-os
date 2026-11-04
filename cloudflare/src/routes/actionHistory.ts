@@ -571,11 +571,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       try {
         const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
         // Include raw maintenance and reserve six cache attempts plus two history-response attempts.
+        const callCounting = metrics && (applier.name === STOCK_SESSION_KIND || applier.name === RETURN_BULK_ACTION_KIND) ? (await metrics.callCounting?.()) === true : false
         const stockSessionQueryBudget = applier.name === STOCK_SESSION_KIND && metrics
-          ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 8 } : undefined
+          ? { statementsUsed: () => (callCounting ? metrics.invocation.attemptedCalls : metrics.attemptedStatements) + 1, reserveStatements: 8, callCounting } : undefined
         // A grouped return action is one atomic batch whose size grows with its stock lines (see lib/returnBulkAction.ts).
         const returnBulkQueryBudget = applier.name === RETURN_BULK_ACTION_KIND && metrics
-          ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 8 } : undefined
+          ? { statementsUsed: () => (callCounting ? metrics.invocation.attemptedCalls : metrics.attemptedStatements) + 1, reserveStatements: 8, callCounting } : undefined
         outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation, stockSessionQueryBudget, returnBulkQueryBudget })
         applied = true
         // Server-applied undo/redo rewrites product and stock rows, but the

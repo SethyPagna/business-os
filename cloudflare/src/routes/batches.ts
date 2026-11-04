@@ -233,6 +233,8 @@ export type ReceiveBody = {
 // a second time.
 export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
   if (hasAcquisitionCostInput(body, c.get('user'))) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
+  const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+  const callCounting = (await metrics?.callCounting?.()) === true
   return withStockMutationReceipt(
     () => getDb(c.env),
     c.get('user')?.id ?? null,
@@ -252,10 +254,9 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
       }
     },
     { requireReceipt: true, budget: (() => {
-      const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
       // Receipt2 + result2 + audit2 + cache6; a price audit adds two.
-      return metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
-        reserve: body.selling_price_usd != null || body.selling_price_khr != null ? 14 : 12 } : undefined
+      return metrics?.invocation ? { used: () => callCounting ? metrics.invocation.attemptedCalls : metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+        reserve: body.selling_price_usd != null || body.selling_price_khr != null ? 14 : 12, callCounting } : undefined
     })() },
   )
 }

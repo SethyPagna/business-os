@@ -2,7 +2,11 @@
 // Read-budget world: the REAL Worker (src/index.ts, bundled in memory) under Miniflare with a counting D1 proxy that
 // sums meta.rows_read / rows_written per request and counts physical calls (a db.batch is one call). Seeded once per
 // (migrations + seed + bundle) under RUNNER_TEMP with an atomic mkdir lock; every caller works on its own copy.
-//   bootWorld({ tier, seedVariant, persistDir, switches }) -> world   (switches: read switches stored for the whole run, e.g. { report_atomic: 'on' })
+//   bootWorld({ tier, seedVariant, persistDir, seedTier, switches, enforceCalls, patches }) -> world
+//     seedTier: share the seed of another tier (the same data under a different PLAN_TIER)
+//     switches: read switches stored for the whole run, { name: 'on' | 'off' } (e.g. { report_atomic: 'on' }), written to the read_switches row before the first request
+//     enforceCalls: the 51st D1 call of one request throws, as on Free
+//     patches: [{ name, file: 'src/lib/x.ts', from, to }] rewrite source text in memory at bundle time (a mutant); each anchor must occur exactly once
 //   runShape(world, shape, { cold, cacheMiss })  -> { status, code, rowsRead, rowsWritten, calls, statements, fingerprints }
 const crypto = require('node:crypto')
 const fs = require('node:fs')
@@ -31,9 +35,16 @@ function patchCache() {
   const c = caches.default; const realMatch = c.match.bind(c);
   c.match = (...a) => forceMiss ? Promise.resolve(undefined) : realMatch(...a);
 }
+// The 51st D1 call of one invocation throws, as it does on Free. A db.batch() is ONE call, however many statements it holds.
+let callLimit = Infinity;
+function tick() {
+  if (!current) return;
+  current.calls++;
+  if (current.calls > callLimit) throw new Error('Too many API requests by single Worker invocation');
+}
 function note(tag, sql, values) {
   if (!current) return null;
-  current.calls++; current.statements++;
+  current.statements++;
   const rec = { tag, raw: String(sql).slice(0, 200000), values: values || [], rr: 0, rw: 0 };
   if (current.stmts.length < 3000) current.stmts.push(rec);
   return rec;
@@ -50,19 +61,20 @@ function counting(real, tag) {
     if (key === '__sql') return sql;
     if (key === '__values') return values;
     if (key === 'bind') return (...vals) => statement(target.bind(...vals), sql, vals);
-    if (key === 'all' || key === 'run') return async (...args) => { const rec = note(tag, sql, values); const r = await target[key](...args); addMeta(rec, r && r.meta); return r };
-    if (key === 'first') return async (col) => { const rec = note(tag, sql, values); const r = await target.all(); addMeta(rec, r && r.meta); const row = r.results[0]; if (!row) return null; return col ? (row[col] ?? null) : row };
-    if (key === 'raw') return async (...args) => { const rec = note(tag, sql, values); if (rec) rec.rawNoMeta = true; return target.raw(...args) };
+    if (key === 'all' || key === 'run') return async (...args) => { tick(); const rec = note(tag, sql, values); const r = await target[key](...args); addMeta(rec, r && r.meta); return r };
+    if (key === 'first') return async (col) => { tick(); const rec = note(tag, sql, values); const r = await target.all(); addMeta(rec, r && r.meta); const row = r.results[0]; if (!row) return null; return col ? (row[col] ?? null) : row };
+    if (key === 'raw') return async (...args) => { tick(); const rec = note(tag, sql, values); if (rec) rec.rawNoMeta = true; return target.raw(...args) };
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
   return new Proxy(real, { get(target, key) {
     if (key === 'prepare') return (sql) => statement(target.prepare(sql), sql);
     if (key === 'batch') return async (items) => {
+      tick();
       const recs = items.map((i) => note(tag, 'B| ' + String(i.__sql || ''), i.__values));
-      if (current) { current.calls -= Math.max(0, items.length - 1); current.batches++ }
+      if (current) current.batches++;
       const out = await target.batch(items.map((item) => item.__inner || item));
       (out || []).forEach((r, i) => addMeta(recs[i], r && r.meta));
       return out };
-    if (key === 'exec') return (sql) => { note(tag, 'EXEC ' + sql); return target.exec(sql) };
+    if (key === 'exec') return (sql) => { tick(); note(tag, 'EXEC ' + sql); return target.exec(sql) };
     if (key === 'withSession') return (...a) => counting(target.withSession(...a), tag);
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value } });
 }
@@ -74,6 +86,7 @@ let wrappedSource = null, wrapped = null;
 function wrapEnv(env) {
   if (wrappedSource === env && wrapped) return wrapped;
   wrappedSource = env;
+  callLimit = Number(env.BUDGET_CALL_LIMIT) || Infinity;
   wrapped = { ...env, DB: counting(env.DB, 'db'), IMPORT_DB: env.IMPORT_DB ? counting(env.IMPORT_DB, 'importDb') : undefined,
     IMPORT_QUEUE: fakeQueue('business-os-import'), MEDIA_QUEUE: fakeQueue('business-os-media'), BACKUP_QUEUE: fakeQueue('business-os-backup-assets') };
   return wrapped;
@@ -107,11 +120,25 @@ export default { ...worker, async fetch(request, env, ctx) {
 } };
 `
 
-async function bundleWorker() {
-  const out = await build({ stdin: { contents: WRAPPER, resolveDir: ROOT, loader: 'ts' }, bundle: true, write: false,
+async function bundleWorker(patches = []) {
+  const applied = new Set()
+  const plugins = patches.length ? [{ name: 'read-budget-source-patches', setup(b) {
+    b.onLoad({ filter: /[\\/]src[\\/].*\.ts$/ }, (args) => {
+      let text = fs.readFileSync(args.path, 'utf8')
+      const rel = path.relative(ROOT, args.path).split(path.sep).join('/')
+      for (const p of patches.filter((x) => x.file === rel)) {
+        if (text.split(p.from).length !== 2) throw new Error('patch ' + p.name + ': anchor must occur exactly once in ' + rel)
+        text = text.replace(p.from, () => p.to)
+        applied.add(p.name)
+      }
+      return { contents: text, loader: 'ts' }
+    })
+  } }] : []
+  const out = await build({ plugins, stdin: { contents: WRAPPER, resolveDir: ROOT, loader: 'ts' }, bundle: true, write: false,
     platform: 'browser', format: 'esm', target: 'es2022', conditions: ['workerd', 'worker', 'browser'],
     external: ['node:*', 'cloudflare:*'], nodePaths: [path.join(ROOT, 'node_modules')], logLevel: 'error',
     define: { __WORKER_BUILD_REVISION__: JSON.stringify('readbudget'), __WORKER_BUILD_HASH__: JSON.stringify('readbudgethash'), __WORKER_BUILT_AT__: JSON.stringify('2026-11-02T00:00:00Z') } })
+  for (const p of patches) if (!applied.has(p.name)) throw new Error('patch ' + p.name + ' was not applied')
   return out.outputFiles[0].text
 }
 
@@ -137,8 +164,8 @@ const staticAssets = async (request) => (new URL(request.url).pathname === '/bus
   ? Response.json({ revision: 'test', hash: TEST_BUILD_HASH, builtAt: '2026-11-02T00:00:00.000Z' })
   : new Response('not found', { status: 404 }))
 
-function options({ tier, script, persist, extra = {} }) {
-  const bindings = { ...extra, PLAN_TIER: tier, BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
+function options({ tier, script, persist, extra = {}, callLimit }) {
+  const bindings = { ...extra, PLAN_TIER: tier, ...(callLimit ? { BUDGET_CALL_LIMIT: String(callLimit) } : {}), BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: ORIGIN, BUSINESS_OS_ADMIN_URL: ORIGIN,
     BUSINESS_OS_ORGANIZATION_SLUG: 'budgetorg', BUSINESS_OS_ORGANIZATION_NAME: 'Budget Org', TELEGRAM_BOT_TOKEN: '123456:budget-token', BUSINESS_OS_ADMIN_PASSWORD: ADMIN.bootstrapPassword }
   return { workers: [{ name: 'w0', modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: { DB: 'db-main', IMPORT_DB: 'db-import' }, r2Buckets: { ASSETS: 'r2-assets' }, kvNamespaces: { CACHE: 'kv-cache' },
@@ -235,20 +262,26 @@ function seedScriptFor(script) {
   return fs.readFileSync(pinned, 'utf8')
 }
 
-async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, switches } = {}) {
-  const script = await bundleWorker()
-  const seeded = await ensureSeed({ seedVariant, tier, script: seedScriptFor(script) })
+async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, seedTier = tier, switches, enforceCalls = false, patches = [] } = {}) {
+  const cleanScript = await bundleWorker()
+  const script = patches.length ? await bundleWorker(patches) : cleanScript
+  const callLimit = enforceCalls ? 50 : 0
+  const seeded = await ensureSeed({ seedVariant, tier: seedTier, script: seedScriptFor(cleanScript) })
   const persist = persistDir || fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'read-budget-work-'))
   fs.rmSync(persist, { recursive: true, force: true })
   fs.cpSync(seeded, persist, { recursive: true })
   const { orgId } = JSON.parse(fs.readFileSync(path.join(persist, 'org.json'), 'utf8'))
-  const mf = new Miniflare(options({ tier, script, persist }))
+  const mf = new Miniflare(options({ tier, script, persist, callLimit }))
   const world = { mf, tier, persist, orgId, script, cookie: null, ctx: seedContext(), deadlineHits: 0 }
   world.db = await mf.getD1Database('DB', 'w0')
   const refresh = async () => { world.db = await mf.getD1Database('DB', 'w0') }
   // restart(extra) starts a fresh isolate on the same storage; `extra` bindings (CF_VERSION_METADATA: { id } simulates a deploy) stay for later restarts.
   world.extra = {}
-  world.restart = async (extra) => { if (extra !== undefined) world.extra = extra; await mf.setOptions(options({ tier, script, persist, extra: world.extra })); await refresh() }
+  world.restart = async (extra) => { if (extra !== undefined) world.extra = extra; await mf.setOptions(options({ tier, script, persist, extra: world.extra, callLimit })); await refresh() }
+  // The switches row, in the shape lib/readSwitches.ts reads. A later isolate restart reads it afresh.
+  world.setSwitches = async (map) => {
+    await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: map })).run()
+  }
   world.all = async (sql, ...values) => (await world.db.prepare(sql).bind(...values).all()).results
   // One request through the counting proxy. Past the deadline the isolate is restarted (a runaway statement dies with it).
   world.send = async (method, url, body, opts = {}) => {
@@ -282,7 +315,7 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, swit
   world.analyze = async () => { await world.db.prepare('ANALYZE').run() }
   // Stored once, before the first request of the run, through the raw binding: the isolate reads it like production does and no later flip,
   // restart or login can move the rows another shape reads.
-  if (switches && Object.keys(switches).length) await world.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(JSON.stringify({ epoch: 1, switches })).run()
+  if (switches && Object.keys(switches).length) await world.setSwitches(switches)
   world.dispose = async () => { await mf.dispose(); fs.rmSync(persist, { recursive: true, force: true }) }
   await world.restart()
   await world.login()

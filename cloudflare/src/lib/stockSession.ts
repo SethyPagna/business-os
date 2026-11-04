@@ -419,7 +419,9 @@ function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionReq
   return { ...request, items }
 }
 
-export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number }
+// statementsUsed is the invocation's spend in the unit being counted. callCounting (lib/callCounting.ts) says that unit
+// is D1 calls, so the commit batch costs one; absent or false is the statement count it always was.
+export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number; callCounting?: boolean }
 
 // Positive answer only: a missing table is re-checked, a present one stays for the isolate.
 let lotEditTableAvailable = false
@@ -484,11 +486,13 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   }
   return { db: counted, begin() { admission = true }, check,
     async commit(statements: StockWriteStatement[]) {
-      check(stockTransactionStatementCount(statements.length))
-      local += stockTransactionStatementCount(statements.length)
+      const charge = budget?.callCounting ? 1 : stockTransactionStatementCount(statements.length)
+      check(charge)
+      local += charge
       return executeStockTransaction(db, statements, 'once')
     },
-    finishReads() { admission = false; tailReads = true },
+    // After a commit the stock has moved, so the receipt read must not refuse; after a failed commit the tail reads stay guarded.
+    finishReads(committed = false) { admission = false; tailReads = !committed },
   }
 }
 
@@ -1248,7 +1252,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   checkBounds(statements, snapshot)
   try {
     await execution.commit(packSessionAssertions(statements))
-    execution.finishReads()
+    execution.finishReads(true)
   } catch (error) {
     execution.finishReads()
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error

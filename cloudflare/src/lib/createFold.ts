@@ -301,7 +301,7 @@ export async function foldCreateWithStockInResponse(
   name: string,
   body: Record<string, unknown>,
   destination: FoldDestination & { branchId: number },
-  options: { waitUntil?: (promise: Promise<unknown>) => void; invocation?: { used: () => number; limit: number } } = {},
+  options: { waitUntil?: (promise: Promise<unknown>) => void; invocation?: { used: () => number; limit: number; callCounting?: boolean } } = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const db = getDb(env)
   const requestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : null

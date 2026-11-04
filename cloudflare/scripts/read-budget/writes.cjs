@@ -87,10 +87,11 @@ function stockSession(n, offset) {
     run: async (world, send, body) => send('POST', '/api/inventory/sessions', body) }
 }
 
-function returnOf(n, offset) {
+// saleLines: how many lines the sale being returned has (10 for the budgeted shapes); a loophole test returns a longer sale.
+function returnOf(n, offset, saleLines = 10) {
   return { id: `w-return-${n}-lines`, label: `POST /api/returns ${n} lines (restock)`, method: 'POST', url: '/api/returns',
     prepare: async (world) => {
-      const id = await createSale(world, `ret${n}`, await lots(world, 10, offset))
+      const id = await createSale(world, `ret${n}`, await lots(world, saleLines, offset))
       const lines = (await world.all('SELECT id, product_id FROM sale_items WHERE sale_id = ? ORDER BY id', id)).slice(0, n)
       const quote = await world.send('POST', '/api/returns/quote', { sale_id: id, items: lines.map((l) => ({ sale_item_id: l.id, quantity: 1 })) })
       if (quote.status !== 200) throw new Error(`return quote answered ${quote.status} ${quote.text.slice(0, 200)}`)
@@ -184,4 +185,7 @@ async function measureWrite(world, shape, { fingerprints = false } = {}) {
   return { ...out, changed: changedTables(out.countsBefore || {}, out.countsAfter || {}) }
 }
 
-module.exports = { writeShapes, measureWrite, rowCounts, lots }
+// Request ids come from one counter, so two worlds that run the same shapes in the same order send the same ids.
+const resetSequence = () => { sequence = 0 }
+
+module.exports = { writeShapes, measureWrite, rowCounts, lots, resetSequence, returnOf }

@@ -25,7 +25,12 @@ const queueModule = {exports:{}}
 new Function('exports','require','module',native.transpile(queuePath))(queueModule.exports,request =>
   request === './lib/importEngine' ? native.engine : request === './lib/importMaintenanceFence' ? fence : native.makeRequire(path.dirname(queuePath))(request),queueModule)
 
+// call_counting (lib/callCounting.ts) reaches the import queue through this Symbol.for hook; absent is OFF, the statement count. A shape with
+// callCounting registers the hook for its run, so the budget is charged in D1 calls and a db.batch() is one.
+const CALL_COUNTING_HOOK = Symbol.for('business-os.call-counting.v1')
 async function measure(tier, units, shape = {}) {
+  if (shape.callCounting) globalThis[CALL_COUNTING_HOOK] = { on: async (env) => env.PLAN_TIER === 'free' }
+  else delete globalThis[CALL_COUNTING_HOOK]
   const {sqlite, db} = native.makeDb()
   sqlite.exec(`CREATE TABLE import_job_row_signatures(job_id TEXT); CREATE TABLE quota_usage(resource TEXT,window_key TEXT,used INTEGER,updated_at TEXT,UNIQUE(resource,window_key)); CREATE TABLE cache_versions(namespace TEXT PRIMARY KEY,version INTEGER,updated_at TEXT); CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,name TEXT,permissions TEXT); CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,name TEXT,organization_id INTEGER,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT); INSERT INTO roles VALUES(1,'admin','Admin','{}'); INSERT INTO users VALUES(61,'admin','Administrator',1,1,'{}',1,NULL);`)
   if (!shape.create) native.seedProduct(sqlite,{id:50,name:'Budget',barcode:'B50',shop:shape.sale?units:0})
@@ -106,13 +111,15 @@ async function measure(tier, units, shape = {}) {
     if(retried){assert.ok((shape.finalizeFault||shape.lostAck)&&injected,'only injected finalizerfailure retries');queued++}else assert.ok(acked,'successful or deferred continuation is acknowledged')
     const moved=sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n-before
     stats.push({tier,statements,calls,moved})
-    assert.ok(statements<=(tier==='free'?50:1000),'whole queue entry statement bound')
+    if(shape.callCounting) assert.ok(calls<=(tier==='free'?50:1000),'whole queue entry call bound')
+    else assert.ok(statements<=(tier==='free'?50:1000),'whole queue entry statement bound')
     if(!shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error'`).get().n,0,'budget deferrals never become row failures')
     if(!queued){if(shape.replay&&!firstSnapshot){firstSnapshot=physicalSnapshot();continue}break}
   }
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,shape.mixed?1:shape.oversized?0:units*(shape.twoBranches?2:1))
   if(shape.sale) assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n,shape.oversized?0:1)
-  if(shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error' AND json_extract(result_json,'$.code')='stock_import_unit_over_tier_budget'`).get().n,units,'entire oversize atomicgroup fails before any effects')
+  // Counting calls, a group above 8 actions is refused whole by the atomic batch's own statement bound (no code), not by the call budget.
+  if(shape.oversized) assert.strictEqual(resultsDb.prepare(`SELECT COUNT(*) n FROM import_job_rows WHERE action='error'${shape.callCounting?'':` AND json_extract(result_json,'$.code')='stock_import_unit_over_tier_budget'`}`).get().n,units,'entire oversize atomicgroup fails before any effects')
   assert.strictEqual(sqlite.prepare('SELECT SUM(quantity) quantity FROM branch_stock').get().quantity,shape.mixed?units+1:shape.sale?(shape.oversized?units:0):units*(shape.twoBranches?2:1))
   console.log(JSON.stringify({tier,units,shape,invocations:stats.length,maxStatements:Math.max(...stats.map(s=>s.statements)),maxCalls:Math.max(...stats.map(s=>s.calls))}))
   if(shape.replay) assert.strictEqual(physicalSnapshot(),firstSnapshot,'full queue replay changes no physical business rows')
@@ -181,5 +188,22 @@ async function groupFinalizerOracle() {
   await measure('free',60,{reconcile:true})
   await measure('free',60,{reconcile:true,sale:true,reconcileRefusal:true})
   assert.ok(freeMax<=50,`Free whole invocation ${freeMax}>50`)
+  // call_counting ON: the same 60 actions leave the same rows in FEWER queue invocations, each inside 50 CALLS (a batch is one call). A sale group of
+  // 8 actions, which statement counting refuses, now fits one invocation and is applied; 12 still cannot and is refused before any effect (the
+  // 'oversized' shape asserts that inside measure).
+  const counted=await measure('free',60,{callCounting:true})
+  const countedMax=Math.max(...counted.map(s=>s.calls))
+  assert.ok(countedMax<=50,`Free call-counted invocation ${countedMax}>50 calls`)
+  assert.ok(counted.length<free.length,`call counting must need fewer queue deliveries than statement counting (${counted.length} vs ${free.length})`)
+  assert.ok(Math.max(...counted.map(s=>s.statements))>50,'a call-counted invocation is allowed to hold more than 50 statements')
+  await measure('free',60,{callCounting:true,reconcile:true})
+  await measure('free',8,{callCounting:true,sale:true})
+  await measure('free',12,{callCounting:true,sale:true,oversized:true})
+  await measure('free',12,{callCounting:true,sale:true,oversized:true,mixed:true})
+  await measure('free',1,{callCounting:true,replay:true})
+  await measure('free',1,{callCounting:true,lostAck:true,replay:true})
+  await measure('paid',480,{callCounting:true})
+  delete globalThis[CALL_COUNTING_HOOK]
+  console.log(JSON.stringify({callCounting:{freeDeliveries:{statements:free.length,calls:counted.length},freeMaxCalls:countedMax}}))
   assert.ok(paidMax<=1000,`Paid single-delivery budget ${paidMax}>1000`)
 })().catch(e=>{console.error(e);process.exitCode=1})
