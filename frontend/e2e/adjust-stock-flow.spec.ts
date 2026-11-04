@@ -10,9 +10,10 @@ for (const language of ['en', 'km'] as const) {
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(error.message))
     const catalog = JSON.parse(readFileSync(new URL('./fixtures/admin-products.json', import.meta.url), 'utf8'))
-    await page.route(/\/api\/inventory\/(?:bootstrap|products\/search)(?:\?|$)/, async route => route.fulfill({ json: {
-      products: catalog, ...catalog, total: catalog.items.length, page: 1, pageSize: 20,
-      movements: [], brands: [], categories: [], stats: {},
+    // One product on the page, so the spec opens exactly the row whose lots it mocks below (id 1000).
+    const [product] = catalog.items
+    await page.route(/\/api\/products\/(?:bootstrap|search|by-ids)(?:\?|$)/, async route => route.fulfill({ json: {
+      ...catalog, items: [product], total: 1, page: 1, pageSize: 20,
     } }))
     await page.route(/\/api\/auth\/(?:bootstrap|me|login)(?:\?|$)/, async route => {
       const response = await route.fetch()
@@ -26,13 +27,17 @@ for (const language of ['en', 'km'] as const) {
     ] } }))
     await signIn(page, E2E_ACCOUNTS.admin)
     if (language === 'km') await page.getByRole('button', { name: 'Switch to Khmer' }).click()
-    await page.goto(`${ADMIN_ORIGIN}/inventory`)
-    if ((page.viewportSize()?.width || 0) >= 768) await expect.poll(async () => {
-      const menu = page.locator('[data-inventory-product-menu]').first()
-      if (await menu.getAttribute('open') === null) await menu.locator('summary').click()
-      return await menu.getByRole('button', { name: labels.adjust_stock }).isVisible()
-    }).toBe(true)
-    await page.getByRole('button', { name: labels.adjust_stock }).first().click()
+    // Entry point moved. This spec used to open /inventory and press "Adjust stock" in a product row's menu. Since
+    // 6.0.816 and 6.0.826 (19 Oct 2026, "Restore Inventory navigation", "Wire the Inventory count workspace") the
+    // /inventory page is the count workspace (Products, Count sessions, Issues) and has no Adjust stock row action;
+    // the old stock table is reachable only for its RFID tab. The same Add/Remove/Set session, pre-selected on a
+    // product, now opens from the product's detail sheet on /products (onAdjustStock -> setStockSession({ mode: 'add',
+    // product })), a path that exists on phone and desktop alike, so the old desktop-only poll is gone.
+    await page.goto(`${ADMIN_ORIGIN}/products`)
+    await page.getByText(product.name, { exact: true }).filter({ visible: true }).first().click()
+    // The page header button carries the same name but sits behind the open detail sheet (a plain modal shell with no
+    // dialog role), so scope the click to the sheet; it is the only modal open at this point.
+    await page.locator('.modal-viewport-safe').getByRole('button', { name: labels.adjust_stock, exact: true }).click()
     const dialog = page.getByRole('dialog').last()
     await expect(dialog).toBeVisible()
     const receivedDate = dialog.getByRole('button', { name: labels.received_date, exact: true })
