@@ -146,6 +146,8 @@ function getEntries(ctx) {
     ['portal/submissions/review', '/api/portal/submissions/review'], ['portal/submissions/:id/screenshot/:i', '/api/portal/submissions/1/screenshot/0'],
     ['inventory-checks/products all-time name page, page 2', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20`],
     ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`],
+    ['inventory-checks/products page 2 with summary=0 (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20&summary=0`],
+    ['inventory-checks/products Issues by checkState (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`],
     ['inventory-checks/products Issues in session', `/api/inventory-checks/products?sessionId={{checkId}}&state=issue&page=1&pageSize=20`],
     ['inventory-checks/products stock sort ascending', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=asc&page=1&pageSize=20`],
     // ic_simple ON (lane 6.0.1044, the owner's list): the switch row is set around the measured request only; the shapes above stay the OFF path.
