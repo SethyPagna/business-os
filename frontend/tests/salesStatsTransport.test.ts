@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   __resetApiHealthForTests, __resetApiWriteDedupeForTests,
-  cacheClearAll, cacheGet, cacheInvalidate, cacheSet, isApiVersionMismatchError,
+  cacheClearAll, cacheGet, cacheInvalidate, cacheSet, isApiVersionMismatchError, isD1DailyLimitActive,
   route, setSyncServerUrl, setSyncToken,
 } from '../src/api/http.ts'
 import { getSalesStats } from '../src/api/salesTransport.ts'
@@ -87,11 +87,12 @@ function installFetch(handler: (call: FetchCall, index: number) => Response | Pr
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const call = { url: new URL(String(input)), init }
     calls.push(call)
-    assert.equal(call.url.pathname, '/api/sales/stats', 'this endpoint must not issue unrelated data requests')
+    assert.ok(call.url.pathname === '/api/sales/stats' || call.url.pathname === '/health', `this endpoint must not issue unrelated data requests (${call.url.pathname}); only the health probe a failed read asks for is allowed`)
     return Promise.resolve(handler(call, calls.length - 1))
   }) as typeof fetch
   return calls
 }
+const statsCalls = (calls: FetchCall[]) => calls.filter((call) => call.url.pathname === '/api/sales/stats')
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((done) => { resolve = done })
@@ -234,16 +235,16 @@ try {
       assert.equal(cacheGet(key()), null)
       assert.equal(calls.length, 1)
       if (status === 503) {
-        const beforeRecovery = events.length
-        const readScope = captureActorReadScope(key())
-        await assert.rejects(getSalesStats(), stale)
-        assertRecoveryEvents(beforeRecovery)
-        assert.equal(isActorReadScopeCurrent(readScope), false, 'reconnect invalidates the successful old revision')
-        assert.equal(cacheGet(key()), null, 'recovery response cannot refill an invalidated scope')
+        // The Worker's daily-cap answer is not an outage (api/http.ts D1_DAILY_LIMIT_CODE): the banner is raised, no health probe, reconnect or
+        // refresh event follows, and the first API answer that succeeds lifts the banner and is cached as true data.
+        assert.equal(isD1DailyLimitActive(), true, 'the refusal raises the daily-limit banner')
+        assert.equal(events.some((event) => event.type === 'server:health' || event.type === 'sync:reconnected'), false, 'a cap is not an outage')
+        assert.equal(calls.length, 1)
         const fresh = await getSalesStats()
         assert.deepEqual(fresh, body)
-        assert.strictEqual(cacheGet(key()), fresh)
-        assert.equal(calls.length, 3, 'a current invocation after the recovery event adopts truth')
+        assert.strictEqual(cacheGet(key()), fresh, 'the next answer is cached as the truth, never the refusal')
+        assert.equal(isD1DailyLimitActive(), false, 'the first successful API answer lifts the banner')
+        assert.equal(calls.length, 2)
       } else {
         assert.deepEqual(await getSalesStats(), body)
         assert.equal(calls.length, 2)
@@ -266,19 +267,19 @@ try {
     })
     await assert.rejects(getSalesStats())
     assert.equal(cacheGet(key()), null)
-    const failedAttempts = calls.length
+    const failedAttempts = statsCalls(calls).length
     assert.ok(failedAttempts >= 1, 'failed attempts must actually reach native fetch')
     failing = false
     const beforeRecovery = events.length
-    const readScope = captureActorReadScope(key())
-    await assert.rejects(getSalesStats(), stale)
+    const recovered = await getSalesStats()
+    assert.deepEqual(recovered, payload(), 'the recovery call returns what the server said now, never a zero')
+    // Recovery announces itself through the refresh events (api/syncRuntime.ts delivers them to the pages); it no longer clears every cache,
+    // so the scope is not invalidated here and a page's own sales effect is what asks again.
     assertRecoveryEvents(beforeRecovery)
-    assert.equal(isActorReadScopeCurrent(readScope), false)
-    assert.equal(cacheGet(key()), null)
     const fresh = await getSalesStats()
     assert.deepEqual(fresh, payload())
     assert.strictEqual(cacheGet(key()), fresh)
-    assert.equal(calls.length, failedAttempts + 2, 'recovery event requires a fresh current-scope read')
+    assert.ok(statsCalls(calls).length >= failedAttempts + 1, 'recovery reads from the server, it does not reuse the failed attempt')
   })
 
   await test('configured timeout reaches the actual fetch signal and never caches zero', async () => {
@@ -295,8 +296,8 @@ try {
     await assert.rejects(getSalesStats({}, { timeoutMs: 25 }), (error: unknown) =>
       (error as ApiError)?.code === 'request_timeout' && (error as ApiError)?.timeoutMs === 25)
     assert.equal(cacheGet(key()), null)
-    assert.ok(calls.length >= 1)
-    assert.equal(abortedAttempts, calls.length)
+    assert.ok(statsCalls(calls).length >= 1)
+    assert.equal(abortedAttempts, statsCalls(calls).length, 'every stats request received the abort')
   })
 
   await test('no configured endpoint and no snapshot is unavailable, not a local zero', async () => {
@@ -339,16 +340,19 @@ try {
     await test(`late server result cannot publish/cache after ${change} changes`, async () => {
       const started = deferred<void>()
       const response = deferred<Response>()
-      const calls = installFetch(() => { started.resolve(); return response.promise })
+      const calls = installFetch((_call, index) => {
+        if (index === 0) { started.resolve(); return response.promise }
+        return json({ error: 'Denied', code: 'forbidden' }, 403)
+      })
       const old = getSalesStats()
-      const checked = assert.rejects(old, stale)
+      const checked = change === 'account' ? assert.rejects(old, stale) : assert.rejects(old, (error: unknown) => (error as ApiError)?.status === 403)
       await within(started.promise, 'late-result fetch')
       if (change === 'account') actor(2)
       else localStorage.setItem('businessos_user', JSON.stringify({ id: 1, organization_id: 1, role_code: 'staff', permissions: { sales: 'none' } }))
-      response.resolve(json(payload()))
+      response.resolve(json(payload({ revenue_usd: 999 })))
       await checked
-      assert.equal(cacheGet(key()), null)
-      assert.equal(calls.length, 1)
+      assert.equal(cacheGet(key()), null, 'the late body is neither returned nor cached')
+      assert.equal(calls.length, change === 'account' ? 1 : 2, 'a changed account is not re-issued; the same user is re-issued once, as a new request')
     })
   }
 
