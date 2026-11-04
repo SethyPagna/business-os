@@ -48,7 +48,7 @@ const MUTANTS = {
   },
   'duplicate pair value kept': { file: 'lib/phoneAccess.ts', rewrite: sub("if (phoneTyped && (key === 'value' || key === 'key')) kind |= PHONE", ''), filter: 'duplicates' },
   'people: contact_person is not a name': { file: 'lib/phoneAccess.ts', rewrite: sub('summary|person|cashier', 'summary|xperson|xcashier'), filter: 'api/suppliers?page=1' },
-  'cache-shared-key': { file: 'lib/phoneCache.ts', rewrite: sub('phoneCacheVariant(user))', 'undefined)'), world: 'egress-off', mode: 'cache' },
+  'cache-shared-key': { file: 'lib/phoneCache.ts', rewrite: sub("return { ...identity, scope: identity.scope === 'neutral' ? variant : `${identity.scope}|${variant}` }", 'return identity'), world: 'egress-off', mode: 'cache' },
   'cache-stores-full-body': { file: 'lib/phoneCache.ts', rewrite: sub('async () => projectPhones(await producer(), user)', 'async () => producer()'), world: 'egress-off', mode: 'cache' },
   'cache-variant-ignores-grant': { file: 'lib/phoneCache.ts', rewrite: sub("canSeeFullPhones(user) ? 'phone-full' : 'phone-masked'", "'phone-full'"), world: 'egress-off', mode: 'cache' },
 }

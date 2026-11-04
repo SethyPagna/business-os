@@ -35,7 +35,7 @@ const MUTANTS = {
   'contacts only an all-digit word is guarded': ['lib/contactSearch.ts', sub('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))')],
   'returns digit words guarded only for a raw all-digit search': ['routes/returns.ts', sub('const guardDigitWords = !access.fullPhone', `const guardDigitWords = !access.fullPhone && ${RAW_DIGITS}.test(search)`)],
   'audit search reads phone text': ['routes/compat.ts', sub('phoneTextBlocked: !canSeeFullPhones(user),', 'phoneTextBlocked: false,')],
-  'sales stats cache shared across grants': ['routes/sales.ts', sub('}, phoneCacheVariant(user))', '})')],
+  'sales stats cache shared across grants': ['routes/sales.ts', sub('}, cacheIdentity(c, { scope: phoneCacheVariant(user) }))', '}, cacheIdentity(c))')],
   'contacts search ignores the grant': ['lib/contactSearch.ts', sub('if (access.fullPhone) {', 'if (true) {')],
   'contacts digit words guarded only for a raw all-digit search': ['lib/contactSearch.ts', sub('`${paramPrefix}_restricted`, true)', `\`\${paramPrefix}_restricted\`, ${RAW_DIGITS}.test(String(rawSearch ?? '')))`)],
   'reports sales list matches the phone by substring': ['routes/reports.ts', sub('rows = rows.filter(salesReportSearchMatcher(search, phoneSearchAccessOf(user)))', 'rows = rows.filter(salesReportSearchMatcher(search, { fullPhone: true }))')],
