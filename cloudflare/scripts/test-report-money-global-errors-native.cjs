@@ -79,6 +79,8 @@ Module._load = function(request, parent, isMain) {
   if (request === './lib/apiCacheHygiene') return originalLoad.call(this, path.join(root, 'src', 'lib', 'apiCacheHygiene.ts'), parent, isMain)
   // The call_counting resolver (6.0.1049) is /api middleware too: same reason, the real module.
   if (request === './lib/callCounting') return originalLoad.call(this, path.join(root, 'src', 'lib', 'callCounting.ts'), parent, isMain)
+  // P2.8 (6.0.1046): the phone-mask middleware is mounted on /api/* ahead of every route and must call next(); this test has no phones.
+  if (request === './lib/phoneMaskMiddleware') return { phoneMaskResponses: async (_c, next) => next() }
   // The review-alert deferral scope is /api middleware too (it calls next() inside AsyncLocalStorage.run): same reason.
   if (request === './lib/requestDefer') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestDefer.ts'), parent, isMain)
   // The /api cache-header and read-switch-header middleware call next() after the handler: the real modules, not a proxy.

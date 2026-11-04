@@ -80,6 +80,9 @@ function makeWorld(oracleSha) {
       sendTelegramEvent: async () => {}, telegramMoney: (value) => String(value ?? ''),
     },
   }
+  // lib/phoneCache.ts reaches the cache helper as './cache': the same stand-in (the Cache API does not exist in this process).
+  overrides['./cache'] = overrides['../lib/cache']
+
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', 'src', rel)

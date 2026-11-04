@@ -79,6 +79,7 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   stock_schema_unavailable: 'stock_receipt_unavailable',
   stock_transaction_outcome_unknown: 'stock_request_outcome_unknown',
   loyalty_points_disabled: 'loyalty_points_disabled',
+  masked_phone_input: 'masked_phone_input',
   bulk_price_outcome_unknown: 'bulk_price_outcome_unknown',
   bulk_price_request_not_saved: 'bulk_price_request_not_saved',
   stock_session_query_budget_exceeded: 'stock_session_query_budget_exceeded',

@@ -43,6 +43,8 @@ import {
   serializeContactOptions as serializeStoredContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
+import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 import { readContactDuplicateDecisionError, resolveContactDuplicateSyncError, type ContactDuplicateMatch } from './contactDuplicates'
 import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
@@ -769,7 +771,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     load({ silent: true, label: 'Customers refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form: Partial<CustomerRow>) => {
+  const handleSave = async (form: Partial<CustomerRow>, untouched: UntouchedPhoneFields = ALL_PHONE_FIELDS_SENT) => {
     if (savingGate.blocked) {
       notify(savingGate.reason, 'error')
       return { success: false }
@@ -804,7 +806,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
       }
       const result = selected
-        ? await runCustomerMutation(() => getCustomerApi().updateCustomer(selected.id, payload), 'Update customer')
+        ? await runCustomerMutation(() => getCustomerApi().updateCustomer(selected.id, withoutUntouchedPhoneFields(payload, untouched)), 'Update customer')
         : await runCustomerMutation(() => getCustomerApi().createCustomer(payload), 'Create customer')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
@@ -812,11 +814,13 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched) || undoNeedsHiddenValue(existingSnapshot, nextSnapshot)
         actionHistory.pushAction({
           label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr(t, 'contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => {
             const restoreResult = await runCustomerMutation(
-              () => getCustomerApi().updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot)),
+              () => getCustomerApi().updateCustomer(existingSnapshot.id, withoutUntouchedPhoneFields(buildCustomerPayload(existingSnapshot), untouched)),
               'Undo customer edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
@@ -824,7 +828,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           },
           redo: async () => {
             const redoResult = await runCustomerMutation(
-              () => getCustomerApi().updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot)),
+              () => getCustomerApi().updateCustomer(nextSnapshot.id, withoutUntouchedPhoneFields(buildCustomerPayload(nextSnapshot), untouched)),
               'Redo customer edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply customer changes')

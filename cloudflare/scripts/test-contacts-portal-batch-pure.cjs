@@ -46,7 +46,7 @@ function sliceBetween(source, startMarker, endMarker, label) {
 
 // ---- 1. contacts.ts:557 ----
 check('contacts.ts imports bumpVersions', () => {
-  assert.match(contactsSource, /import \{ bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback \} from '\.\.\/lib\/cache'/)
+  assert.match(contactsSource, /import \{ bumpVersion, bumpVersions, getVersionWithFallback \} from '\.\.\/lib\/cache'/)
 })
 
 check('mergeSupplierIntoExisting uses one bumpVersions call, not three bumpVersion calls', () => {

@@ -11,6 +11,8 @@ import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
+import { cachedPhoneJson } from '../lib/phoneCache'
+import type { PhoneActor } from '../lib/phoneAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
@@ -191,11 +193,12 @@ export const INVENTORY_FULL_ITEMS = 5000
 
 type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
 
-type SectionCache = <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>) => Promise<T>
+// `contacts` marks a section whose body names customers or suppliers: it is cached per full-phone grant (lib/phoneCache.ts).
+type SectionCache = <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>, options?: { contacts?: boolean }) => Promise<T>
 
 // One per request: each data version is read once however many sections key on it
 // (products, settings and the rest are shared by two or three of them).
-function sectionCacheFor(c: NotificationContext): SectionCache {
+function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache {
   const versionReads = new Map<string, Promise<string>>()
   const versionOf = (namespace: string) => {
     let read = versionReads.get(namespace)
@@ -205,12 +208,13 @@ function sectionCacheFor(c: NotificationContext): SectionCache {
     }
     return read
   }
-  return async (name, namespaces, inputs, producer) => {
+  return async (name, namespaces, inputs, producer, options) => {
     // No Cache API (a unit-test harness): behave exactly as the uncached route did.
     if (typeof caches === 'undefined') return producer()
     const versions = await Promise.all(namespaces.map(versionOf))
     const version = namespaces.map((namespace, index) => `${namespace}:${versions[index]}`).join('|')
     const request = new Request(`${new URL(c.req.url).origin}/api/notifications/_section/${name}?k=${encodeURIComponent(inputs)}`)
+    if (options?.contacts) return cachedPhoneJson(request, c.executionCtx, user, version, NOTIFICATION_SECTION_CACHE_TTL_SECONDS, producer, cacheIdentity(c))
     return cachedJsonResponse(request, c.executionCtx, version, NOTIFICATION_SECTION_CACHE_TTL_SECONDS, producer, cacheIdentity(c))
   }
 }
@@ -765,7 +769,7 @@ app.get('/summary', async (c) => {
   // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
   const { loyaltyPointsEnabled, ...preferences } = await loadPreferences(c.env)
   const sections: NotificationSection[] = []
-  const cachedSection = sectionCacheFor(c)
+  const cachedSection = sectionCacheFor(c, user)
 
   const tasks: Array<Promise<NotificationSection | null>> = []
   let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
@@ -784,7 +788,7 @@ app.get('/summary', async (c) => {
   // Loyalty off: no cache-version read and no ledger or settings read at all.
   if (preferences.loyaltyEnabled && loyaltyPointsEnabled && getActionTier(user, 'contacts', 'view') !== 'none') {
     loyaltyTask = () => cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], String(preferences.loyaltyThreshold),
-      () => buildLoyaltySection(c.env, preferences.loyaltyThreshold, () => requestMetricsOf(c)?.invocation.attemptedStatements || 0))
+      () => buildLoyaltySection(c.env, preferences.loyaltyThreshold, () => requestMetricsOf(c)?.invocation.attemptedStatements || 0), { contacts: true })
   }
   // Pending Share & Reward submissions are an approve/reject queue (an
   // admin decision awards or denies real loyalty points), not an
@@ -852,7 +856,7 @@ app.get('/summary/items', async (c) => {
   const { inventoryEnabled } = await loadPreferences(c.env)
   if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
   const lowStockConfig = await loadLowStockConfig(c.env)
-  const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
+  const section = await sectionCacheFor(c, user)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
     () => buildInventorySection(c.env, lowStockConfig, INVENTORY_FULL_ITEMS))
   return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [] })
 })

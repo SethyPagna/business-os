@@ -214,6 +214,8 @@ async function main() {
     './lib/apiCacheHygiene': load('lib/apiCacheHygiene.ts'),
     // Real module too: the call_counting resolver (6.0.1049) is /api middleware. The tier is paid here, so it never reads the switch.
     './lib/callCounting': load('lib/callCounting.ts', { './planTier': load('lib/planTier.ts'), './readSwitches': { readSwitch: async () => false }, './requestMetrics': load('lib/requestMetrics.ts', { './analytics': load('lib/analytics.ts'), 'node:async_hooks': require('node:async_hooks') }) }),
+    // P2.8 (6.0.1046): mounted on /api/* ahead of every route; it must call next() (this test has no phones).
+    './lib/phoneMaskMiddleware': { phoneMaskResponses: async (_c, next) => next() },
     // Real module too: the review-alert deferral scope is /api middleware that must call next(). The alert installer is
     // called once at module scope and this test sends no review alert, so it is a no-op here.
     './lib/requestDefer': load('lib/requestDefer.ts', { 'node:async_hooks': require('node:async_hooks') }),

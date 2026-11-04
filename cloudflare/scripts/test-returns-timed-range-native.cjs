@@ -38,6 +38,7 @@ const db = { prepare(sql) { return {
   async all(params = {}) { reads++; return raw.prepare(sql).all(params) },
   async get(params = {}) { reads++; return raw.prepare(sql).get(params) },
 } } }
+const phoneDeps = require('./harness/phone_real_modules.cjs').routePhoneDeps()
 const routeModule = { exports: {} }
 new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(root, 'routes/returns.ts'), 'utf8')))(routeModule.exports, name => {
   if (name === 'hono') return require('hono')
@@ -54,6 +55,8 @@ new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(r
       .map(fn => extract('lib/shiftReconciliation.ts', fn)).join('\n')))(drawer.exports)
     return drawer.exports
   }
+  // P2.8 (6.0.1046): the real phone modules (the Returns list search takes a PhoneSearchAccess).
+  if (Object.prototype.hasOwnProperty.call(phoneDeps, name)) return phoneDeps[name]
   return {} // No write-only integration is invoked by these GET handlers.
 }, routeModule)
 const app = routeModule.exports.default

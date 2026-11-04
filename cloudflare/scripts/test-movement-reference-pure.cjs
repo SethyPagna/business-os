@@ -271,7 +271,9 @@ ok(true, 'product name, reason and movement type stay searchable')
 // The routes must actually use both halves; a query that resolves and a
 // response that drops the value would pass every assertion above.
 const routeSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'inventory.ts'), 'utf8')
-assert.ok(/movementSearchHaystackSql\('inventory_movements'\)/.test(routeSrc), 'the /movements search does not use the shared haystack kernel')
+assert.ok(/movementSearchHaystackSql\('inventory_movements'[,)]/.test(routeSrc), 'the /movements search does not use the shared haystack kernel')
+// P2.8-F S1: an account without the full-phone permission reads the fields the response masks as empty (the second argument).
+assert.ok(/movementSearchHaystackSql\('inventory_movements', \(sql, key\) => searchableColumnSql\(\{ sql, key \}, phoneAccess\)\)/.test(routeSrc), 'the /movements search must read its fields through the account\'s phone access')
 assert.ok(!/COALESCE\(user_name, ''\)/.test(routeSrc), 'the /movements search still concatenates the raw actor snapshot')
 assert.ok(!/COALESCE\(branch_name, ''\)/.test(routeSrc), 'the /movements search still concatenates the raw branch snapshot')
 ok(true, 'GET /api/inventory/movements searches through the shared haystack, not the raw snapshots')

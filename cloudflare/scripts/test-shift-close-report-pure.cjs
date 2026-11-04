@@ -146,7 +146,7 @@ const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
-  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
   '../lib/db': { getDb: () => activeD1 },
   '../lib/auth': {
     requireAuth: async (c, next) => { c.set('user', { id: currentUserId, name: 'Za', username: 'za' }); await next() },
@@ -318,7 +318,7 @@ async function main() {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
-    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': { getDb: () => d1(empty) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },
     '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },

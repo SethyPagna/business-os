@@ -36,12 +36,14 @@ import { movementBranchNameSql } from './movementBranchName'
  *
  * Product name, branch, actor, movement type and reason -- the movement's own
  * displayed fields, with branch and actor resolved exactly as they are
- * rendered.
+ * rendered. `readable` maps a column (and the key it leaves the Worker under) to what
+ * the reader may search: an account without the full-phone permission passes the
+ * projection's own rule (searchableColumnSql), so a field the response masks reads as empty.
  */
-export function movementSearchHaystackSql(alias: string): string {
+export function movementSearchHaystackSql(alias: string, readable: (column: string, key: string) => string = (column) => column): string {
   return `(
-      COALESCE(${alias}.product_name, '') || ' ' || COALESCE(${movementBranchNameSql(alias)}, '') || ' ' ||
-      COALESCE(${movementActorNameSql(alias)}, '') || ' ' || COALESCE(${alias}.movement_type, '') || ' ' ||
-      COALESCE(${alias}.reason, '')
+      COALESCE(${readable(`${alias}.product_name`, 'product_name')}, '') || ' ' || COALESCE(${readable(movementBranchNameSql(alias), 'branch_name')}, '') || ' ' ||
+      COALESCE(${readable(movementActorNameSql(alias), 'user_name')}, '') || ' ' || COALESCE(${alias}.movement_type, '') || ' ' ||
+      COALESCE(${readable(`${alias}.reason`, 'reason')}, '')
     )`
 }

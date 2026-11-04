@@ -52,6 +52,8 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
+import { ALL_PHONE_FIELDS_SENT, UNDO_PHONE_HIDDEN_FALLBACK, undoNeedsHiddenPhone, untouchedPhoneFields, withoutUntouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields.ts'
+import { undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
 const DeliveryContactReportModal = lazyRetry(() => import('./DeliveryContactReportModal'), 'delivery-contact-report')
@@ -290,7 +292,7 @@ function OptionEditor({ option, index, total, onChange, onRemove, t }: OptionEdi
 // ?€?€ DeliveryForm ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 interface DeliveryFormProps {
   contact?: DeliveryContact | null
-  onSave: (payload: DeliveryPayload) => Promise<unknown> | unknown
+  onSave: (payload: DeliveryPayload, untouched: UntouchedPhoneFields) => Promise<unknown> | unknown
   onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   t: TranslateFn
@@ -301,11 +303,13 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
   const [form, setForm] = useState<DeliveryPayload>(init)
   // S4-21: dismissing this modal with edits raises the discard prompt.
   const { dirty: formDirty } = useFormDirty(form, String(contact?.id ?? 'new'))
-  const [options, setOptions] = useState(() => {
+  // The Contact Options as the form first showed them: a save that leaves them alone does not send them (contactPhoneFields.ts).
+  const [initialOptions] = useState(() => {
     const parsed = parseDeliveryOptions(init.address)
     if (parsed.length) return parsed
     return [BLANK_OPTION()]
   })
+  const [options, setOptions] = useState(initialOptions)
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -366,7 +370,7 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
     setSaving(true)
     try {
       const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
-      const result = await Promise.resolve(onSave({
+      const payload: DeliveryPayload = {
         ...form,
         name: primaryOption.name || form.name || '',
         phone: primaryOption.phone || form.phone || '',
@@ -374,7 +378,12 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
         address: serializeDeliveryOptions(options),
         gender: form.gender || '',
         ...(duplicateDecision ? { duplicateDecision } : {}),
-      }))
+      }
+      const baselinePrimary = getPrimaryContactOption(initialOptions, {
+        fallback: { name: init.name || '', phone: init.phone || '', area: init.area || '' },
+      })
+      const baseline = { phone: baselinePrimary.phone || init.phone || '', address: serializeDeliveryOptions(initialOptions) }
+      const result = await Promise.resolve(onSave(payload, contact ? untouchedPhoneFields(baseline, payload, 'area') : ALL_PHONE_FIELDS_SENT))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)
@@ -863,7 +872,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     load({ silent: true, label: 'Delivery contacts refresh' })
   }, [active, load, syncChannelName, syncChannelTs])
 
-  const handleSave = async (form: DeliveryPayload) => {
+  const handleSave = async (form: DeliveryPayload, untouched: UntouchedPhoneFields = ALL_PHONE_FIELDS_SENT) => {
     if (!beginSingleAction(saveInFlightRef)) return
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {
       finishSingleAction(saveInFlightRef)
@@ -885,16 +894,18 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
       }
       const res = selected
-        ? await runDeliveryMutation(() => getDeliveryApi().updateDeliveryContact(selected.id, payload), 'Update delivery contact')
+        ? await runDeliveryMutation(() => getDeliveryApi().updateDeliveryContact(selected.id, withoutUntouchedPhoneFields(payload, untouched)), 'Update delivery contact')
         : await runDeliveryMutation(() => getDeliveryApi().createDeliveryContact(payload), 'Create delivery contact')
       if (res?.success === false) { notify(res.error||'Failed', 'error'); return }
       if (selected && existingSnapshot) {
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        const undoBlocked = undoNeedsHiddenPhone(existingSnapshot, untouched) || undoNeedsHiddenValue(existingSnapshot, nextSnapshot)
         actionHistory.pushAction({
           label: `Edit delivery contact ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_PHONE_HIDDEN_FALLBACK)) } : async () => {
             const restoreResult = await runDeliveryMutation(
-              () => getDeliveryApi().updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot)),
+              () => getDeliveryApi().updateDeliveryContact(existingSnapshot.id, withoutUntouchedPhoneFields(buildDeliveryPayload(existingSnapshot), untouched)),
               'Undo delivery contact edit',
             )
             if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
@@ -902,7 +913,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           },
           redo: async () => {
             const redoResult = await runDeliveryMutation(
-              () => getDeliveryApi().updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot)),
+              () => getDeliveryApi().updateDeliveryContact(nextSnapshot.id, withoutUntouchedPhoneFields(buildDeliveryPayload(nextSnapshot), untouched)),
               'Redo delivery contact edit',
             )
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply delivery contact changes')

@@ -56,7 +56,7 @@ test('levels, extras and fields follow the design: tiered rows offer their middl
   for (const id of ['dashboard', 'pos', 'backup', 'library', 'inventory_checks', 'customer_portal']) assert.deepEqual(levelsOf(row(id)), ['none', 'full'], id)
   const extras = (id: string) => row(id).extras.map((def) => def.key)
   assert.deepEqual(extras('products'), ['product_cost_view', 'product_cost_edit', 'destructive_delete'])
-  assert.deepEqual(extras('contacts'), ['contacts_suppliers'])
+  assert.deepEqual(extras('contacts'), ['contacts_suppliers', 'contacts_full_phone'])
   assert.deepEqual(extras('dashboard'), ['dashboard_export'])
   assert.deepEqual(extras('backup'), ['backup_restore'])
   assert.deepEqual(extras('settings'), ['business_identity', 'sales_policy', 'receipt_settings', 'drive_credentials'])

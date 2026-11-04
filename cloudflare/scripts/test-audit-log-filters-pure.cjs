@@ -41,8 +41,9 @@ fs.writeFileSync(tsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib',
 fs.writeFileSync(winPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 fs.writeFileSync(sectionsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditSections.ts'), 'utf8'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'continuousReadWindow.ts'), path.join(tmpDir, 'continuousReadWindow.ts'))
+for (const file of ['phoneSearchGuard.ts', 'phoneAccess.ts', 'permissions.ts', 'phoneMask.ts', 'phone.ts', 'searchMatch.ts']) fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${sectionsPath}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --outDir ${tmpDir} ${tsPath} ${winPath} ${sectionsPath}`, { cwd: tmpDir, stdio: 'inherit' })
 const { buildAuditLogFilters } = require(path.join(tmpDir, 'auditLogQuery.js'))
 
 // ---- real schema ----------------------------------------------------------

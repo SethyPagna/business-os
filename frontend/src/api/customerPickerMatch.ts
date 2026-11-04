@@ -44,9 +44,11 @@ export function salesCustomerPickerFallbackMatches(row: SalesCustomerPickerCandi
   // Match the Worker's salesCustomerSearch compatibility path exactly for
   // phone-shaped input: formatting is ignored, Cambodian +855 and local 0
   // forms are equivalent, and 3+ digit fragments remain searchable.
+  // A masked phone (012 *** 678) hides digits between the ones it shows, so its visible digits are not a number to search.
+  const phoneIsMasked = String(row.phone ?? '').includes('*')
   const displayDigits = String(row.phone ?? '').replace(/\D/g, '')
   const canonicalPhone = canonicalizePickerPhone(row.phone)
-  const phoneMatches = pickerPhoneAlternatives(search).some((candidate) => (
+  const phoneMatches = !phoneIsMasked && pickerPhoneAlternatives(search).some((candidate) => (
     candidate === canonicalPhone || displayDigits.includes(candidate)
   ))
 

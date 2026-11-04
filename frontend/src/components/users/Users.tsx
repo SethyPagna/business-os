@@ -40,6 +40,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue } from '../../utils/hiddenValueUndo.ts'
 import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
 import { clearWorkDraft, readWorkDraft, writeWorkDraft } from '../../utils/workDrafts.ts'
 import { draftAuthorityChangedText, isDraftAuthorityCurrent } from '../../utils/draftAuthority.ts'
@@ -1059,9 +1060,11 @@ export default function Users() {
         // Undo and redo replay the rename scope this edit was made with.
         const replayScope = userEditReplayScope(previousSnapshot, nextSnapshot, renameScope)
         const actor = { id: currentUser?.id, name: currentUser?.name }
+        const undoBlocked = undoNeedsHiddenValue(previousSnapshot, nextSnapshot)
         actionHistory.pushAction({
           label: tr('user_history_edit', 'Edit user {name}').replace('{name}', previousSnapshot.name || nextSnapshot.name || '').trim(),
-          undo: async () => {
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : async () => {
             const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
               .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
             if (undoResult?.success === false) throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore user')

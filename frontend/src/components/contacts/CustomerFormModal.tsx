@@ -9,6 +9,7 @@ import {
   serializeContactOptions,
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
+import { ALL_PHONE_FIELDS_SENT, untouchedPhoneFields, type UntouchedPhoneFields } from './contactPhoneFields'
 import { CUSTOMER_MEMBERSHIP_PLACEHOLDER } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
@@ -43,7 +44,7 @@ interface CustomerFormState extends CustomerRecord {
 
 interface CustomerFormModalProps {
   customer?: CustomerRecord | null
-  onSave: (payload: CustomerFormState & { address: string | null; duplicateDecision?: ContactDuplicateDecision }) => unknown | Promise<unknown>
+  onSave: (payload: CustomerFormState & { address: string | null; duplicateDecision?: ContactDuplicateDecision }, untouched: UntouchedPhoneFields) => unknown | Promise<unknown>
   onUseExisting: (match: ContactDuplicateMatch) => void | Promise<void>
   onClose: () => void
   savingBlockedText?: string
@@ -128,10 +129,12 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
   const [form, setForm] = useState<CustomerFormState>(initial)
   // S4-21: dismissing this modal with edits raises the discard prompt.
   const { dirty: formDirty } = useFormDirty(form, String(customer?.id ?? 'new'))
-  const [options, setOptions] = useState(() => {
+  // The Contact Options as the form first showed them: a save that leaves them alone does not send them (contactPhoneFields.ts).
+  const [initialOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
     return parsed.length ? parsed : [createContactOption()]
   })
+  const [options, setOptions] = useState(initialOptions)
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
   // Part 563: the review dialog is open (handleSubmit validated + opened it;
@@ -207,13 +210,15 @@ export default function CustomerFormModal({ customer, onSave, onUseExisting, onC
     setSaving(true)
     try {
       const duplicateDecision = pendingDuplicateCheck ? createSeparateContactDecision(pendingDuplicateCheck) : null
-      const result = await Promise.resolve(onSave({
+      const payload = {
         ...form,
         name,
         membership_number: membershipNumber.toUpperCase(),
         address: serializeContactOptions(options),
         ...(duplicateDecision ? { duplicateDecision } : {}),
-      }))
+      }
+      const untouched = customer ? untouchedPhoneFields({ phone: initial.phone, address: serializeContactOptions(initialOptions) }, payload) : ALL_PHONE_FIELDS_SENT
+      const result = await Promise.resolve(onSave(payload, untouched))
       const nextCheck = (result as { duplicateDecisionRequired?: ContactDuplicateCheck } | null)?.duplicateDecisionRequired
       if (nextCheck) {
         setServerDuplicateCheck(nextCheck)

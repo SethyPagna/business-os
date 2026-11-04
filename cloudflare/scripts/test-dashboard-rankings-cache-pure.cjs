@@ -82,7 +82,11 @@ function load(patches = {}) {
     './quotaGuard': { consumeQuota: async () => true },
     './cacheKey': cacheKey,
   }, patches['src/lib/cache.ts'] || [])
-  const lib = loadTs('src/lib/dashboardRankingsCache.ts', { './cache': cacheLib, './cacheKey': cacheKey, './readSwitches': readSwitches }, patches['src/lib/dashboardRankingsCache.ts'] || [])
+  const phoneMask = loadTs('src/lib/phoneMask.ts', {})
+  const permissions = loadTs('src/lib/permissions.ts', {})
+  const phoneAccess = loadTs('src/lib/phoneAccess.ts', { './permissions': permissions, './phoneMask': phoneMask })
+  const phoneCache = loadTs('src/lib/phoneCache.ts', { './cache': cacheLib, './phoneAccess': phoneAccess })
+  const lib = loadTs('src/lib/dashboardRankingsCache.ts', { './cache': cacheLib, './cacheKey': cacheKey, './readSwitches': readSwitches, './phoneAccess': phoneAccess, './phoneCache': phoneCache }, patches['src/lib/dashboardRankingsCache.ts'] || [])
   return { cacheLib, lib }
 }
 
@@ -166,9 +170,47 @@ async function versionsBehaviour(patches = {}) {
   assert.deepEqual(kvTokens.length, 4)
 }
 
+// P2.8 (6.0.1046): the top-customers rows carry a phone. The key carries the full-phone grant and the rows stored for an
+// account without it are already masked, so neither account can be served the other's entry (CACHE-LIFECYCLE section 5).
+async function phoneBehaviour(patches = {}) {
+  const { lib } = load(patches)
+  const holder = { id: 1, role_code: 'admin', permissions: '{}', role_permissions: '{}' }
+  const cashier = { id: 2, role_code: 'employee', permissions: '{}', role_permissions: JSON.stringify({ dashboard: true }) }
+  const granted = { id: 3, role_code: 'employee', permissions: JSON.stringify({ contacts_full_phone: true }), role_permissions: '{}' }
+  const customers = [{ customer_id: 5, customer_name: 'Fixture Dara', phone: '087 654 321', revenue_usd: 12.5 }]
+  const { env } = makeEnv({ kv: ALL_KV })
+  const cache = makeCache()
+  const waits = []
+  const open = (user) => lib.openDashboardRankingsCache(env, { requestUrl: URL_, waitUntil: (p) => waits.push(p), cache, user }, FILTERS)
+  const drain = async () => { await Promise.all(waits.splice(0)) }
+
+  // the holder warms the cache first: an account without the grant must not read it
+  const holderHandle = await open(holder)
+  holderHandle.write('top_customers', customers)
+  await drain()
+  assert.deepEqual(await (await open(holder)).read('top_customers'), customers, 'positive control: the holder reads its own entry in full')
+  assert.deepEqual(await (await open(granted)).read('top_customers'), customers, 'a person granted the permission shares the holder entry')
+  assert.equal(await (await open(cashier)).read('top_customers'), null, 'an account without the grant is a MISS on the holder entry')
+  assert.equal(await (await open(undefined)).read('top_customers'), null, 'no account at all is treated as without the grant')
+
+  // an account without the grant warms its own entry: masked in the store, and the holder never reads it
+  const cashierHandle = await open(cashier)
+  cashierHandle.write('top_customers', customers)
+  await drain()
+  const stored = [...cache.store.values()].join('\n')
+  const cashierRows = await (await open(cashier)).read('top_customers')
+  assert.equal(cashierRows[0].phone, '087 *** 321', 'what an account without the grant reads is masked')
+  assert.equal(cashierRows[0].customer_name, 'Fixture Dara', 'and nothing else changed')
+  assert.equal(cashierRows[0].revenue_usd, 12.5)
+  assert.equal([...cache.store.values()].filter((body) => body.includes('087 654 321')).length, 1, 'exactly one stored entry holds the full number (the holder one)')
+  assert.ok(stored.includes('087 *** 321'), 'the other stored entry is the masked one')
+  assert.deepEqual(await (await open(holder)).read('top_customers'), customers, 'the holder still reads in full after the other account warmed its own entry')
+}
+
 async function suite(patches = {}) {
   await behaviour(patches)
   await versionsBehaviour(patches)
+  await phoneBehaviour(patches)
 }
 
 const DRC = 'src/lib/dashboardRankingsCache.ts'
@@ -205,6 +247,8 @@ async function main() {
   // ---- mutants ----
   const mutants = [
     ...['sales', 'returns', 'customers', 'products'].map((namespace) => ({ name: `key ignores the ${namespace} version`, patches: { [DRC]: [{ from: 'versions[index]]', to: `namespace === '${namespace}' ? '' : versions[index]]` }] } })),
+    { name: 'key ignores the full-phone grant', patches: { [DRC]: [{ from: "['phone', phoneCacheVariant(ctx.user)]", to: "['phone', 'phone-full']" }] } },
+    { name: 'an account without the grant stores the full rows', patches: { [DRC]: [{ from: 'projectPhones(rows, ctx.user)', to: 'rows' }] } },
     { name: 'key ignores the kind', patches: { [DRC]: [{ from: "['kind', kind], ", to: '' }] } },
     { name: 'key ignores the branch', patches: { [DRC]: [{ from: "['branchId', filters.branchId], ", to: '' }] } },
     { name: 'key ignores the end date', patches: { [DRC]: [{ from: "['endDate', filters.endDate], ", to: '' }] } },

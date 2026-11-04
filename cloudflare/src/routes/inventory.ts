@@ -1057,7 +1057,9 @@ app.get('/movements', async (c) => {
     // built from the SAME branch and actor expressions the SELECT below renders
     // -- searching the raw snapshots asked about values that are nowhere on the
     // screen. Same shallow shape, same alreadyNormalizedCols=true contract.
-    const movementHaystack = movementSearchHaystackSql('inventory_movements')
+    const [{ phoneSearchAccessOf }, { searchableColumnSql }] = await Promise.all([import('../lib/phoneAccess'), import('../lib/phoneSearchGuard')])
+    const phoneAccess = phoneSearchAccessOf(c.get('user'))
+    const movementHaystack = movementSearchHaystackSql('inventory_movements', (sql, key) => searchableColumnSql({ sql, key }, phoneAccess))
     const termClauses = terms.map((term, index) => buildLikeAliasClause(term, [movementHaystack], params, `search${index}`, true))
     where.push(`(${termClauses.join(` ${mode} `)})`)
   }

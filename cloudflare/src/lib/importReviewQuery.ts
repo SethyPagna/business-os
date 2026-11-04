@@ -5,6 +5,8 @@ export interface ImportReviewFilter {
   action?: RowAction | null
   query?: string
   warningKinds?: ImportWarningKind[]
+  /** A reader without the full-phone permission: a number typed in the search box never matches the phone or the identifier (it can be one). */
+  phoneTextBlocked?: boolean
 }
 
 export interface ImportReviewWhere {
@@ -52,10 +54,11 @@ export function buildImportReviewWhere(filter: ImportReviewFilter): ImportReview
       OR LOWER(COALESCE(identifier, '')) LIKE @codeQuery ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @codeQuery ESCAPE '\\'`
       : ''
+    const numberSearchHidden = !!filter.phoneTextBlocked && /\p{Nd}/u.test(query) && !/\p{L}/u.test(query)
     clauses.push(`(
-      LOWER(COALESCE(identifier, '')) LIKE @query ESCAPE '\\'
+      ${numberSearchHidden ? '0' : `LOWER(COALESCE(identifier, '')) LIKE @query ESCAPE '\\'`}
       OR LOWER(COALESCE(json_extract(result_json, '$.data.name'), '')) LIKE @query ESCAPE '\\'
-      OR LOWER(COALESCE(json_extract(result_json, '$.data.phone'), '')) LIKE @query ESCAPE '\\'
+      OR ${numberSearchHidden ? '0' : `LOWER(COALESCE(json_extract(result_json, '$.data.phone'), '')) LIKE @query ESCAPE '\\'`}
       OR LOWER(COALESCE(json_extract(result_json, '$.data.email'), '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.membership_number'), '')) LIKE @query ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(result_json, '$.data.barcode'), '')) LIKE @query ESCAPE '\\'${codeMatches}

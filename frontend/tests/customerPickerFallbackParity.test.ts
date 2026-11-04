@@ -16,6 +16,13 @@ assert.equal(salesCustomerPickerFallbackMatches({ phone: '012-345-678' }, '34567
 assert.equal(salesCustomerPickerFallbackMatches({ phone: '012-345-678' }, '12'), false, 'phone fragments shorter than the server minimum do not widen results')
 assert.equal(salesCustomerPickerFallbackMatches(reordered, ''), true, 'an empty query preserves the existing unfiltered fallback')
 
+// A row the Worker masked (no full-phone permission) is not matched through the digits it happens to show (P2.8).
+const masked = { name: 'Sok Dara', phone: '012 *** 678' }
+assert.equal(salesCustomerPickerFallbackMatches(masked, 'dara'), true, 'a masked row is still found by name')
+assert.equal(salesCustomerPickerFallbackMatches(masked, '012678'), false, 'the shown digits joined together are not a number the row has')
+assert.equal(salesCustomerPickerFallbackMatches(masked, '126'), false, 'a fragment spanning the hidden digits matches nothing')
+assert.equal(salesCustomerPickerFallbackMatches(masked, '012345678'), false, 'a whole number is not matched against a mask')
+
 const transport = readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
 const picker = transport.slice(transport.indexOf('export async function getSalesCustomerPicker'))
 assert.match(picker, /salesCustomerPickerFallbackMatches\(value, search\)/, 'the real fallback uses the parity matcher')

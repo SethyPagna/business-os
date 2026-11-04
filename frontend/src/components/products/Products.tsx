@@ -86,6 +86,7 @@ import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue, undoNeedsHiddenValueIn } from '../../utils/hiddenValueUndo.ts'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
 import { toggleIdSet } from '../../utils/recordFilters.ts'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.ts'
@@ -2672,9 +2673,12 @@ function ProductsFullEditor() {
               }).snapshot
 
           if (previousSnapshot && targetProductId) {
+            // A field shown masked (a supplier saved under a number) that the edit changed cannot be put back from a masked snapshot.
+            const undoBlocked = undoNeedsHiddenValue(previousSnapshot, latestProductSnapshot)
             actionHistory.pushAction({
               label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-              undo: () => restoreProductSnapshots([previousSnapshot]),
+              undoRefused: undoBlocked,
+              undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : () => restoreProductSnapshots([previousSnapshot]),
               redo: () => restoreProductSnapshots([latestProductSnapshot]),
             })
           } else if (latestProductSnapshot?.id && !foldedIntoName) {
@@ -4602,9 +4606,11 @@ function ProductsFullEditor() {
       await load(true)
       const restoredSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
       if (done > 0 && restoredSnapshots.length) {
+        const undoBlocked = undoNeedsHiddenValueIn(restoredSnapshots, nextUpdates)
         actionHistory.pushAction({
           label: `Update ${done} product${done === 1 ? '' : 's'}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots),
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : () => restoreProductSnapshots(restoredSnapshots),
           redo: async () => {
             const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
               if (!snapshot.id) return

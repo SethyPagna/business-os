@@ -12,6 +12,8 @@ import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
+import { canSeeFullPhones } from '../lib/phoneAccess'
+import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
@@ -451,9 +453,10 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
+function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void }; get(key: 'user'): unknown }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
+    user: c.get('user') as DashboardRankingsCacheContext['user'],
     waitUntil(promise) {
       try { c.executionCtx.waitUntil(promise) } catch { void promise.catch(() => {}) }
     },
@@ -584,6 +587,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
       // The responses below redact these costs after the query, so the search must not be able to find them either.
+      phoneTextBlocked: !canSeeFullPhones(user),
       hiddenTextPatterns: [...(canViewCourierCost(user) ? [] : [COURIER_COST_TEXT_PATTERN]), ...(canViewAcquisitionCosts(user) ? [] : ACQUISITION_COST_TEXT_PATTERNS)],
     })
     // The courier's actual cost leaves here by the same permission as everywhere else.
@@ -656,8 +660,11 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   const conditions: string[] = []
   const params: Record<string, unknown> = {}
   const cashier = String(query.cashier || '').trim()
+  // An account without the full-phone grant reads a cashier saved under a number, and a reason that quotes one, as empty: the response
+  // masks both, so the filter and the search read what the screen shows (the projection's own rule, searchableColumnSql; review E2).
+  const phoneAccess = { fullPhone: canSeeFullPhones(c.get('user')) }
   if (cashier && cashier !== 'all') {
-    conditions.push("lower(trim(COALESCE(d.cashier_name, d.deleted_by, ''))) = lower(trim(@cashier))")
+    conditions.push(`lower(trim(${searchableColumnSql({ sql: "COALESCE(d.cashier_name, d.deleted_by, '')", key: 'cashier_name' }, phoneAccess)})) = lower(trim(@cashier))`)
     params.cashier = cashier
   }
   const search = String(query.search || '').trim().toLowerCase()
@@ -668,8 +675,8 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
       OR lower(COALESCE(d.source_code, '')) LIKE @search
       OR lower(COALESCE(d.invoice_no, '')) LIKE @search
       OR lower(COALESCE(d.reference_no, '')) LIKE @search
-      OR lower(COALESCE(d.deletion_reason, '')) LIKE @search
-      OR lower(COALESCE(d.bill_delete_reason, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.deletion_reason', phoneAccess)}, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.bill_delete_reason', phoneAccess)}, '')) LIKE @search
     )`)
     params.search = `%${search}%`
   }

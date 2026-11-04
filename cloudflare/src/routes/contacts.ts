@@ -46,8 +46,12 @@ import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
-import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
+import { cachedPhoneJson } from '../lib/phoneCache'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { bodyHasMaskedPhone, isMaskedPhoneInputError, MASKED_PHONE_CODE, MASKED_PHONE_MESSAGE, resolveAddressInput, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
+import { isMaskedPhone } from '../lib/phoneMask'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import { invoiceReadWindow } from '../lib/invoiceReadWindow'
 import type { Env } from '../index'
@@ -666,6 +670,7 @@ function parseContactMergeRequest(body: Record<string, unknown>, config: Contact
       if (!id) return invalidChoice
       choices[column] = { source_id: id }
     } else if ('custom' in choice && column !== 'created_at' && (choice.custom === null || typeof choice.custom === 'string')) {
+      if ((column === 'phone' || column === 'address') && bodyHasMaskedPhone({ [column]: choice.custom })) return { error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }
       choices[column] = { custom: contactMergeCustomValue(column, choice.custom, config.optionMode) }
     } else {
       return invalidChoice
@@ -1041,7 +1046,7 @@ function registerContactRoutes(config: ContactConfig) {
     // to exactly those two columns.
     if (String(query.fields || '') === 'names') {
       const version = await getContactReadCacheVersion(c.env, config.table)
-      const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
+      const rows = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
         db.prepare(`SELECT id, name FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
       cacheIdentity(c))
       return c.json(rows)
@@ -1060,7 +1065,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (String(query.fields || '') === 'picker') {
       const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
       const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
-      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
         const [totalRow, rawItems] = await Promise.all([
           db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''}`).get<{ count: number }>({}),
           db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
@@ -1080,7 +1085,7 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
       const predicates: string[] = []
       const params: Record<string, unknown> = { limit }
-      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '', phoneSearchAccessOf(c.get('user')))
       if (contactMatch) {
         predicates.push(contactMatch.sql)
         Object.assign(params, contactMatch.params)
@@ -1111,7 +1116,7 @@ function registerContactRoutes(config: ContactConfig) {
     // lib/contactSearch.ts for why this is a plain MATCH combine rather
     // than the products-side per-group hybrid (contacts search has never
     // had a comma-groups AND/OR UI, just one free-text phrase).
-    const contactMatch = buildContactMatchClause(config.table, search, 'search')
+    const contactMatch = buildContactMatchClause(config.table, search, 'search', phoneSearchAccessOf(c.get('user')))
     if (contactMatch) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
@@ -1200,7 +1205,7 @@ function registerContactRoutes(config: ContactConfig) {
 
     if (!hasPaging) {
       const version = await getContactReadCacheVersion(c.env, config.table)
-      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
         const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
         return withPoints(rows || [])
       }, cacheIdentity(c))
@@ -1211,7 +1216,7 @@ function registerContactRoutes(config: ContactConfig) {
     const pageSize = clampInt(query.pageSize, 20, 1, 200)
     const offset = (page - 1) * pageSize
     const version = await getContactReadCacheVersion(c.env, config.table)
-    const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+    const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
       const [totalRow, items, yearRows] = await Promise.all([
         db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params),
         db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset }),
@@ -1282,7 +1287,7 @@ function registerContactRoutes(config: ContactConfig) {
     const name = String(query.name || '').trim()
     const rawPhones = (c.req.queries('phone') || [String(query.phone || '')])
       .map((value) => String(value || '').trim())
-      .filter(Boolean)
+      .filter((value) => value && !isMaskedPhone(value))
       .slice(0, 4)
     const excludeId = query.excludeId || null
     if (!name && !rawPhones.length) return c.json({ matches: [], duplicateReview: buildContactDuplicateReview([]), allowedActions: [] })
@@ -1339,6 +1344,9 @@ function registerContactRoutes(config: ContactConfig) {
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
+    // A cluster is identified by its real value. An account without the full-phone permission only holds the mask, which names no cluster:
+    // nothing is written (it would be a dismissal no list ever shows).
+    if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
     const db = getDb(c.env)
     await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ ok: true })
@@ -1356,6 +1364,9 @@ function registerContactRoutes(config: ContactConfig) {
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
+    // A cluster is identified by its real value. An account without the full-phone permission only holds the mask, which names no cluster:
+    // nothing is written (it would be a dismissal no list ever shows).
+    if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
     const db = getDb(c.env)
     await undismissDuplicateCluster(db, config.table, type, value)
     return c.json({ ok: true })
@@ -1622,6 +1633,8 @@ function registerContactRoutes(config: ContactConfig) {
     // the joined date even for Full.
     const payload = pickColumns(body, config.table === 'customers' ? customerCreateColumns(config.columns, getPermissionTier(user, 'contacts')) : config.columns)
     payload.name = name
+    // A hidden number (012 *** 678) is not a number: a new contact has no stored one to take its place.
+    if (bodyHasMaskedPhone(payload)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
     if (salesSource.source) delete payload.created_at
     // P7-c: store the P8 display shape (0XX XXX XXX[X]) so manual creates
     // match the 10,352 migrated numbers. Matching below stays digit-based,
@@ -1867,6 +1880,16 @@ function registerContactRoutes(config: ContactConfig) {
     const allowedColumns = source ? SALES_CUSTOMER_COLUMNS : tier === 'review' ? ['name'] : config.columns
     const payload = pickColumns(body, allowedColumns)
     payload.name = name
+    // The form was filled from a masked read when the editor lacks the full-phone grant: a hidden number comes back as the
+    // stored number it hides, never as the mask.
+    try {
+      const storedPhones = storedPhonesOf(current, config.optionMode)
+      if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = resolvePhoneInput(payload.phone, storedPhones, current?.phone)
+      if (Object.prototype.hasOwnProperty.call(payload, 'address')) payload.address = resolveAddressInput(payload.address, current, config.optionMode)
+    } catch (error) {
+      if (isMaskedPhoneInputError(error)) return c.json({ error: error.message, code: error.code }, 400)
+      throw error
+    }
     // P7-c: same P8 display shape on edit as on create -- an update that
     // touches the phone must not undo the convention.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
@@ -3106,6 +3129,7 @@ app.post('/customers/link-conflicts/relink', async (c) => {
   if (denied) return denied
   if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (bodyHasMaskedPhone(body) || isMaskedPhone(String(body.phone_key ?? '')) || isMaskedPhone(String(body.value ?? ''))) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
   const currentId = Number(body.customer_id)
   const phoneKey = String(body.phone_key || '').trim()
   const targetId = Number(body.target_customer_id)
@@ -3154,6 +3178,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   if (denied) return denied
   if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') return c.json({ error: 'No permission to reassign sale customers.' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (bodyHasMaskedPhone(body) || isMaskedPhone(String(body.phone_key ?? '')) || isMaskedPhone(String(body.value ?? ''))) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
   const name = String(body.name || '').trim()
   const phone = String(body.phone || '').trim()
   const phoneKey = String(body.phone_key || '').trim()
@@ -3243,6 +3268,7 @@ app.post('/customers/link-conflicts/dismiss', async (c) => {
   const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
   const value = String(body.value || '').trim()
   if (!kind || !value) return c.json({ error: 'kind ("mismatch" or "missing") and value are required' }, 400)
+  if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
   const db = getDb(c.env)
   await db.prepare(`
     INSERT INTO contact_duplicate_dismissals (contact_table, cluster_type, cluster_value, dismissed_by_id, dismissed_by_name, dismissed_at)
@@ -3266,6 +3292,7 @@ app.post('/customers/link-conflicts/undismiss', async (c) => {
   const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
   const value = String(body.value || '').trim()
   if (!kind || !value) return c.json({ error: 'kind ("mismatch" or "missing") and value are required' }, 400)
+  if (isMaskedPhone(value)) return c.json({ error: MASKED_PHONE_MESSAGE, code: MASKED_PHONE_CODE }, 400)
   const db = getDb(c.env)
   await db.prepare(`
     DELETE FROM contact_duplicate_dismissals
@@ -3430,7 +3457,7 @@ app.get('/customers/points-summary', async (c) => {
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
   // old LIKE scan now that customers_fts/customers_fts_phone exist anyway.
-  const contactMatch = buildContactMatchClause('customers', search, 'search')
+  const contactMatch = buildContactMatchClause('customers', search, 'search', phoneSearchAccessOf(c.get('user')))
   if (contactMatch) {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)

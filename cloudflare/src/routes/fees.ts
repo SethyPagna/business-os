@@ -450,7 +450,10 @@ export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<s
   }
 
   if (search && search.trim()) {
-    conditions.push('(f.label LIKE @search OR f.notes LIKE @search OR f.fee_type LIKE @search)')
+    // A label or note that is a number shows masked to an account without the full-phone permission, so it reads as empty here.
+    const [{ phoneSearchAccessOf }, { searchableColumnSql }] = await Promise.all([import('../lib/phoneAccess'), import('../lib/phoneSearchGuard')])
+    const access = phoneSearchAccessOf(c.get('user'))
+    conditions.push(`(${searchableColumnSql('f.label', access)} LIKE @search OR ${searchableColumnSql('f.notes', access)} LIKE @search OR f.fee_type LIKE @search)`)
     params.search = `%${search.trim()}%`
   }
   if (feeType && feeType.trim() && feeType !== 'all') {

@@ -1,6 +1,7 @@
 import { buildContactMatchClause, type ContactMatchClause } from './contactSearch'
-import { canonicalizePhone } from './phone'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
+import { phoneDigitsOf, toAsciiDigits } from './phoneMask'
+import { FULL_NUMBER_MIN_DIGITS, type PhoneSearchAccess } from './phoneSearchGuard'
 
 function phoneDigitsSql(value: string): string {
   let digits = value
@@ -12,13 +13,16 @@ function phoneDigitsSql(value: string): string {
 // may be unformatted while historical phone FTS contains separated tokens.
 // Keep the ordinary name/phone FTS clause, and union literal phone alternatives
 // without changing the directory search contract or introducing LIKE patterns.
-export function buildSalesCustomerMatchClause(rawSearch: unknown): ContactMatchClause | undefined {
-  const raw = String(rawSearch ?? '').trim()
-  const original = buildContactMatchClause('customers', raw, 'picker')
+export function buildSalesCustomerMatchClause(rawSearch: unknown, access: PhoneSearchAccess): ContactMatchClause | undefined {
+  const original = buildContactMatchClause('customers', rawSearch, 'picker', access)
+  // The digits of any script and the 855 / 00855 country-code forms fold to the local number before they are compared.
+  const raw = toAsciiDigits(String(rawSearch ?? '')).trim()
   if (!/^[+\d\s().-]+$/.test(raw)) return original
   const digits = raw.replace(/\D/g, '')
   if (digits.length < 3 || digits.length > 15) return original
-  const canonical = canonicalizePhone(raw) || digits
+  // Without the full-phone permission a fragment of a number is not a search (lib/phoneSearchGuard.ts); a whole number is.
+  if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original
+  const canonical = phoneDigitsOf(digits)
   const alternatives = new Set([digits, canonical])
   if (/^0\d{8,9}$/.test(canonical)) alternatives.add(`855${canonical.slice(1)}`)
   const params: Record<string, string> = { ...original?.params }
@@ -30,8 +34,10 @@ export function buildSalesCustomerMatchClause(rawSearch: unknown): ContactMatchC
   Array.from(alternatives).forEach((value, index) => {
     const key = `picker_phone_digits_${index}`
     params[key] = value
-    clauses.push(`(phone_normalized=@${key} OR instr(${displayDigits},@${key})>0)`)
-    optionMatches.push(`instr(${phoneDigitsSql(optionPhone)},@${key})>0`)
+    // A holder keeps the containment match it always had; without the permission the number must EQUAL the phone, so a longer
+    // number that merely contains these digits (or a shorter one the typed digits contain) names nobody.
+    clauses.push(access.fullPhone ? `(phone_normalized=@${key} OR instr(${displayDigits},@${key})>0)` : `(phone_normalized=@${key} OR ${displayDigits}=@${key})`)
+    optionMatches.push(access.fullPhone ? `instr(${phoneDigitsSql(optionPhone)},@${key})>0` : `${phoneDigitsSql(optionPhone)}=@${key}`)
   })
   // The address field can also be ordinary legacy text. Only parse valid
   // option arrays and only normalize the explicit phone member, never street,

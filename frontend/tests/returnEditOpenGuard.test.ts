@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { accessibleText, createHarness, type MemoryNode } from './mountedComponentHarness.ts'
 import { cloneHistorySnapshot } from '../src/utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue } from '../src/utils/hiddenValueUndo.ts'
 
 // A customer return must never be edited, undone or redone from a row whose
 // lines were not loaded (OPUS-REVIEW-RETURN-EDIT-7077 finding 2, 12 Oct 2026).
@@ -236,6 +237,9 @@ function recorderHarness(latestRead: () => Promise<unknown>) {
     cloneHistorySnapshot,
     hasLoadedReturnLines,
     loadReturns: async () => {},
+    tr,
+    undoNeedsHiddenValue,
+    UNDO_HIDDEN_VALUE_FALLBACK,
     actionHistory: { pushAction: (entry: Record<string, unknown>) => { pushed.push(entry); return entry } },
     restoreReturnSnapshot: async (snapshot: Record<string, unknown>, _label: string, context: { direction: string }) => { restored.push({ snapshot, direction: context.direction }) },
   })

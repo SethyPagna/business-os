@@ -239,6 +239,7 @@ const customerReturnQuotePlanKernel = loadReal('lib/customerReturnQuotePlan.ts',
   './saleRecordEvents': saleRecordEventsKernel, './saleMoneyPrecision': saleMoneyPrecisionKernel,
 })
 const returnsRoute = loadReal('routes/returns.ts', {
+  ...require('./harness/phone_real_modules.cjs').routePhoneDeps(),
   '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
   '../lib/returnExchangeIntent': returnExchangeIntentKernel,
   '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
