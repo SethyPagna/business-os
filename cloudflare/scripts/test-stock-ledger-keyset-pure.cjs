@@ -191,6 +191,18 @@ async function main() {
     assert.deepEqual(second.items, offsetPage(filters, 2, 10))
   })
 
+  await check('page 1 spends one statement on the count and the summary when there is no In/Out view (the summary already counts the same rows), and both when there is', async () => {
+    for (const [filters, spared] of [[{}, true], [{ branchId: 1 }, true], [{ view: 'in' }, false], [{ view: 'out', branchId: 2 }, false]]) {
+      const prepared = []
+      const spy = { prepare: (sql) => { prepared.push(sql); return asyncDb.prepare(sql) } }
+      const query = kernel.buildStockLedgerQuery(filters)
+      const body = await keyset.readStockLedgerKeyset(spy, query, { page: 1, pageSize: 10, cursor: null, totals: false, view: filters.view || 'all' })
+      assert.equal(prepared.includes(query.countSql), !spared, JSON.stringify(filters) + (spared ? ': no separate count' : ': the count runs'))
+      assert.equal(prepared.includes(query.summarySql), true)
+      assert.equal(body.total, offsetTotals(filters).total, JSON.stringify(filters) + ': the same total either way')
+    }
+  })
+
   await check('the first request with a page number past 1 (a deep link) answers the offset page and hands out the cursor', async () => {
     const body = await cursorPage({}, 4, 10, null)
     assert.deepEqual(body.items, offsetPage({}, 4, 10))

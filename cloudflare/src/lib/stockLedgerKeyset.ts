@@ -42,15 +42,17 @@ export async function readStockLedgerKeyset(db: D1Compat, ledger: StockLedgerQue
   }))
   const body: Record<string, unknown> = { items }
   if (!cursor || args.totals) {
-    // The same two statements the offset list runs, in the same order, over the same scope.
-    const countRow = await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params)
-    const total = Number(countRow?.total || 0)
+    // The two statements the offset list runs, over the same scope. With no In/Out view the count IS the summary's own total (same joins, same base filters),
+    // so one statement does both; with a view chip the count differs from the summary's and runs as it always did.
+    const summaryRow = await db.prepare(ledger.summarySql).get<{ in_count: number; out_count: number; in_qty: number; out_qty: number; total: number }>(ledger.params)
+    const total = ledger.whereSql === ledger.baseWhereSql
+      ? Number(summaryRow?.total || 0)
+      : Number((await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params))?.total || 0)
     body.total = total
     body.page = page
     body.pageSize = pageSize
     body.totalPages = Math.max(1, Math.ceil(total / pageSize))
     body.view = args.view
-    const summaryRow = await db.prepare(ledger.summarySql).get<{ in_count: number; out_count: number; in_qty: number; out_qty: number; total: number }>(ledger.params)
     body.summary = {
       inCount: Number(summaryRow?.in_count || 0),
       outCount: Number(summaryRow?.out_count || 0),
