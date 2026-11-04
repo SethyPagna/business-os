@@ -1,8 +1,9 @@
 'use strict'
-// The Inventory Check lane's stand-in for P0.3's lib/readSwitches.ts (6.0.1048): the stored document, the tokens, the statement and the 15 s memo are
-// P0.3's, so the file can be replaced at compose without a caller noticing. This runs the real module with a fake clock and a fake D1 under the real
-// lib/db.ts, and pins what the Inventory Check routes rely on: only the exact token 'on' is ON (the pre-P0.3 object shape is not), a bad read is OFF
-// for the memo window, one statement serves every switch for 15 s, callers that meet a running read share it, and a reset forces the next read.
+// What the Inventory Check routes rely on from lib/readSwitches.ts (6.0.1048). The lane wrote this against its stand-in for P0.3's store; at compose
+// (rc/20261105a) the stand-in is gone and P0.3's store is the module, so this now runs the REAL store with a fake clock and a fake D1 under the real
+// lib/db.ts and keeps the lane's contract: both Inventory Check switches are known names, only the exact token 'on' is ON (the pre-P0.3 object shape
+// is not), a bad read is OFF for the memo window, one statement serves every switch for the plan's window (Free 15 s: planTier.ts
+// readSwitchMemoSeconds, no literal here), callers inside one request share a running read, and a reset forces the next read.
 //
 // Run: node scripts/test-read-switches-standin-pure.cjs
 const assert = require('node:assert/strict')
@@ -19,10 +20,13 @@ function load(relative, requireFor = require) {
 }
 
 const db = load('lib/db.ts', (id) => (id === './importMaintenanceFence' ? { getImportFencedDb() {}, withImportMaintenanceWriteFence() {}, isImportMaintenanceFenceError: () => false, ImportMaintenanceFenceError: class extends Error {} } : require(id)))
-const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? db : require(id)))
+// The memo window is the plan's, so the plan module is the real one and its tier cache is shared with the store.
+const planTier = load('lib/planTier.ts')
+const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? db : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? planTier : require(id)))
+const MEMO_MS = planTier.getPlanLimits({ PLAN_TIER: 'free' }).readSwitchMemoSeconds * 1000
 
 function fakeEnv(raw, extraRows = []) {
-  const state = { sql: [], binds: [], attempts: 0, raw, fail: null, gate: null }
+  const state = { sql: [], binds: [], attempts: 0, raw, fail: null, gate: null, PLAN_TIER: 'free' }
   const all = async () => {
     state.attempts += 1
     if (state.gate) await state.gate
@@ -41,19 +45,22 @@ let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
 async function main() {
-  await check('this lane lists exactly its two switches, and every unreadable shape is off for both', () => {
-    assert.deepEqual([...sw.KNOWN_READ_SWITCHES], ['ic_simple', 'ic_fix_stock'])
+  await check('the two Inventory Check switches are known names, and every unreadable shape is off for both', () => {
+    for (const name of ['ic_simple', 'ic_fix_stock']) assert.ok(sw.KNOWN_READ_SWITCHES.includes(name), name + ' is in KNOWN_READ_SWITCHES (an unlisted name reads OFF whatever is stored)')
     for (const raw of [null, undefined, '', '{}', 'not json', '[]', '"on"', '42', 'null', stored({ switches: [] }), stored({ switches: 'on' }), stored({ switches: { ic_simple: 'ON' } }), stored({ switches: { ic_simple: true } }),
       stored({ switches: { ic_simple: 1 } }), stored({ switches: { ic_simple: { state: 'on' }, ic_fix_stock: { state: 'on' } } }), stored({ switches: { ic_simple: ' on' } }), stored({ switch: { ic_simple: 'on' } })]) {
       const parsed = sw.parseReadSwitches(raw)
-      assert.deepEqual(Object.keys(parsed.switches), ['ic_simple', 'ic_fix_stock'], 'only names this build knows')
+      assert.deepEqual(Object.keys(parsed.switches), [...sw.KNOWN_READ_SWITCHES], 'only names this build knows')
       for (const name of sw.KNOWN_READ_SWITCHES) assert.deepEqual(parsed.switches[name], { state: 'off', rate: 0 }, `${name}: ${String(raw)}`)
     }
   })
 
   await check('the exact tokens parse: on, off, shadow:<rate> clamped to 0.1; the pre-P0.3 object shape, a bare shadow and shadow:0 are off', () => {
     const parsed = sw.parseReadSwitches(stored({ epoch: 7, set_at: '2026-11-03T00:05:00Z', set_by: 5, switches: { ic_simple: 'on', ic_fix_stock: 'shadow:0.05' } }))
-    assert.deepEqual(parsed, { epoch: 7, setAt: '2026-11-03T00:05:00Z', setBy: 5, switches: { ic_simple: { state: 'on', rate: 0 }, ic_fix_stock: { state: 'shadow', rate: 0.05 } } })
+    // The store lists every known switch (other slices' names read off here), so the two of this lane are compared by name.
+    assert.deepEqual({ ...parsed, switches: { ic_simple: parsed.switches.ic_simple, ic_fix_stock: parsed.switches.ic_fix_stock } },
+      { epoch: 7, setAt: '2026-11-03T00:05:00Z', setBy: 5, switches: { ic_simple: { state: 'on', rate: 0 }, ic_fix_stock: { state: 'shadow', rate: 0.05 } } })
+    for (const name of sw.KNOWN_READ_SWITCHES.filter((known) => known !== 'ic_simple' && known !== 'ic_fix_stock')) assert.deepEqual(parsed.switches[name], { state: 'off', rate: 0 }, name + ' is not set by this document')
     assert.deepEqual(sw.parseReadSwitches(stored({ switches: { ic_simple: 'shadow:0.5' } })).switches.ic_simple, { state: 'shadow', rate: 0.1 })
     assert.deepEqual(sw.parseReadSwitches(stored({ switches: { ic_simple: 'off' } })).switches.ic_simple, { state: 'off', rate: 0 })
     for (const token of ['shadow', 'shadow:0', 'shadow:', 'shadow:-1', 'shadow:abc', 'On', 'yes']) assert.equal(sw.parseSwitchToken(token).state, 'off', token)
@@ -62,7 +69,7 @@ async function main() {
     for (const epoch of [1.5, -1, '3', null, true, {}, [2]]) assert.equal(sw.parseReadSwitches(stored({ epoch })).epoch, 0, JSON.stringify(epoch))
   })
 
-  await check('one statement reads both switches for 15 s: the statement and its binds are P0.3\'s, the second switch costs no call', async () => {
+  await check('one statement reads both switches for the plan\'s window: the statement and its binds are P0.3\'s, the second switch costs no call', async () => {
     const env = fakeEnv(stored({ epoch: 4, switches: { ic_simple: 'on', ic_fix_stock: 'off' } }), [{ key: 'data_epoch', value: 'a'.repeat(32) }])
     const store = newStore()
     assert.equal((await store.read(env, 'ic_simple')).on, true)
@@ -72,12 +79,13 @@ async function main() {
     assert.equal(sw.SWITCH_ROWS_SQL, 'SELECT key, value FROM system_flags WHERE key IN (@switches, @epoch)')
     assert.deepEqual(env.sql, ['SELECT key, value FROM system_flags WHERE key IN (?1, ?2)'])
     assert.deepEqual(env.binds, [['read_switches', 'data_epoch']])
-    clock += sw.READ_SWITCH_MEMO_MS - 1
+    assert.equal(sw.READ_SWITCH_MEMO_MS, undefined, 'the window is the plan\'s (planTier.ts readSwitchMemoSeconds), not a literal in the module')
+    clock += MEMO_MS - 1
     await store.read(env, 'ic_simple'); assert.equal(env.attempts, 1, 'still the memo one millisecond before it expires')
     clock += 1
     env.raw = stored({ epoch: 5, switches: { ic_simple: 'off', ic_fix_stock: 'on' } })
     assert.deepEqual([(await store.read(env, 'ic_simple')).on, (await store.read(env, 'ic_fix_stock')).on], [false, true])
-    assert.equal(env.attempts, 2, 'at 15 s the next caller asks again and sees the new document')
+    assert.equal(env.attempts, 2, 'at the end of the window the next caller asks again and sees the new document')
   })
 
   await check('a reset forgets the memo at once; the next caller reads', async () => {
@@ -91,11 +99,12 @@ async function main() {
     assert.equal(env.attempts, 2)
   })
 
-  await check('callers that meet a running read share it; a reset drops the shared read', async () => {
+  await check('callers inside one request share a running read', async () => {
     const env = fakeEnv(stored({ switches: { ic_simple: 'on', ic_fix_stock: 'on' } }))
     let open; env.gate = new Promise((resolve) => { open = resolve })
     const store = newStore()
-    const pending = [store.read(env, 'ic_simple'), store.read(env, 'ic_fix_stock'), store.read(env, 'ic_simple')]
+    // P0.3 shares a pending read inside one request only (a promise belongs to the request that made it, 6.0.1048 review B1).
+    const pending = store.inRequest(() => [store.read(env, 'ic_simple'), store.read(env, 'ic_fix_stock'), store.read(env, 'ic_simple')])
     await Promise.resolve()
     open()
     assert.deepEqual((await Promise.all(pending)).map((reading) => reading.on), [true, true, true])
@@ -110,7 +119,7 @@ async function main() {
     assert.equal(env.attempts, 1, 'allOnce: the retry kernel does not run')
     env.fail = null
     assert.equal((await store.read(env, 'ic_simple')).on, false, 'inside the window the failure stands (fail closed)')
-    clock += sw.READ_SWITCH_MEMO_MS
+    clock += MEMO_MS
     assert.equal((await store.read(env, 'ic_simple')).on, true)
   })
 
