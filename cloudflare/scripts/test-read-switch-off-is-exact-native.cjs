@@ -15,7 +15,7 @@ const { prepareWorld, resolveUrl } = require('./read-budget/runner.cjs')
 
 const SAMPLE = [
   'auth-me', 'auth-bootstrap', 'runtime-version', 'settings', 'settings-meta', 'products-search-pos-page-name-asc-family-metadata-0', 'products-search-pos-text',
-  'products-bootstrap-pos-first-load', 'categories', 'units', 'inventory-summary', 'inventory-checks-products-all-time-name-page-check-default', 'sales-list-today',
+  'products-bootstrap-pos-first-load', 'categories', 'units', 'inventory-summary', 'inventory-checks-products-all-time-name-page-check-default', 'products-stock-ledger', 'sales-list-today',
   'sales-stats-today', 'returns-list', 'customers-list', 'dashboard-startup-today', 'notifications-summary-bell', 'fees-labels', 'shifts-current', 'branches', 'users', 'portal-config',
 ]
 // Their SQL list depends on which cache versions the run has already read (date and order), so only OFF versus ON is compared.

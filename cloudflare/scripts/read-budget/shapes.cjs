@@ -166,6 +166,12 @@ function getEntries(ctx) {
     ['inventory-checks/products first open without a branch (ic_simple ON)', `/api/inventory-checks/products?sortBy=name&sortDirection=asc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['products/search Products page 2 (default sort, 50)', `/api/products/search?page=2&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products page 3 (default sort, 50)', `/api/products/search?page=3&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    // INV-B S8: the Stock Changes list, all time (33.5K movements in the seed), page 1 and page 400 of 25 (the list's own page size), with ledger_keyset OFF (offset paging, a COUNT and a summary on
+    // every page) and ON (page 1 the same plus the cursor; page 400 by the cursor of the row before it, no COUNT, no summary, no OFFSET).
+    ['products/stock-ledger all time page 1 (ledger_keyset OFF)', `/api/products/stock-ledger?page=1&pageSize=25`],
+    ['products/stock-ledger all time page 1 (ledger_keyset ON)', `/api/products/stock-ledger?page=1&pageSize=25`, { switches: ['ledger_keyset'] }],
+    ['products/stock-ledger all time deep page 400 (ledger_keyset OFF)', `/api/products/stock-ledger?page=400&pageSize=25`],
+    ['products/stock-ledger all time deep page 400 (ledger_keyset ON)', `/api/products/stock-ledger?page=400&pageSize=25&cursor={{ledgerCursor}}`, { switches: ['ledger_keyset'] }],
   ]
 }
 
