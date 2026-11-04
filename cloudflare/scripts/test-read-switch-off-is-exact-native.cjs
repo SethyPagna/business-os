@@ -61,6 +61,10 @@ async function main() {
   let compared = 0
   try {
     await prepareWorld(world)
+    // The recorded lists are those of a request that finds the flags memo cold (the first read of a fresh isolate pays the one flags statement, in auth-bootstrap).
+    // prepareWorld now sends Inventory Check requests, which read their switches and warm that memo for 15 s, so the comparison starts on a fresh isolate, as it does in production.
+    await world.restart()
+    await world.login()
     const shapes = getShapes(world.ctx).filter((s) => SAMPLE.includes(s.id))
     if (shapes.length !== SAMPLE.length) reds.push(`the sample names ${SAMPLE.length} shapes, ${shapes.length} exist: ${SAMPLE.filter((id) => !shapes.some((s) => s.id === id)).join(', ')}`)
     const urls = new Map()
