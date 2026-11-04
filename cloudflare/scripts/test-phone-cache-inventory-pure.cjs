@@ -69,7 +69,8 @@ for (const file of Object.keys(PHONE_KEYED)) {
 {
   const sales = read('routes/sales.ts')
   const stats = sales.slice(sales.indexOf("app.get('/stats',"), sales.indexOf("app.get('/stats-strip',"))
-  if (!stats.includes('}, phoneCacheVariant(user))')) fail('sales.ts: /stats no longer keys its cache on the full-phone variant')
+  // The variant rides in the identity's scope (lib/cacheKey.ts hashes it); the old `variant` argument and `_g` parameter are gone.
+  if (!stats.includes('}, cacheIdentity(c, { scope: phoneCacheVariant(user) }))')) fail('sales.ts: /stats no longer keys its cache on the full-phone variant')
 }
 
 // The dashboard rankings (top customers carry a phone) fold the variant into the key and store the projected rows.
@@ -83,8 +84,12 @@ if (!/user: c\.get\('user'\)/.test(compat)) fail('compat.ts: the rankings contex
 const helper = read('lib/phoneCache.ts')
 if (!/phone-full/.test(helper) || !/phone-masked/.test(helper)) fail('phoneCache.ts: the two variants are gone')
 if (!/projectPhones\(await producer\(\), user\)/.test(helper)) fail('phoneCache.ts: the producer result is no longer projected for the account')
+// The variant joins the Cache API key through the identity: phoneCache.ts folds it into the identity's scope and the one builder hashes the scope.
+if (!/phoneCacheIdentity\(identity, user\)\)/.test(helper)) fail('phoneCache.ts: the producer is no longer cached under the identity with the variant folded in')
+if (!/scope: identity\.scope === 'neutral' \? variant : `\$\{identity\.scope\}\|\$\{variant\}`/.test(helper)) fail('phoneCache.ts: the variant no longer joins the identity scope')
 const cacheLib = read('lib/cache.ts')
-if (!/searchParams\.set\('_g', variant\)/.test(cacheLib)) fail('cache.ts: the variant no longer joins the Cache API key')
+if (!/cacheKeyRequest\(request\.url, version, identity\)/.test(cacheLib)) fail('cache.ts: the identity (with the variant in its scope) no longer reaches the one key builder')
+if (/searchParams\.set\('_g'/.test(cacheLib)) fail('cache.ts: a second, hand-built key parameter for the variant has come back (the builder hashes the identity scope)')
 
 if (failures.length) {
   for (const failure of failures) console.error(`FAIL ${failure}`)
