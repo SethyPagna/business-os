@@ -1543,6 +1543,12 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
   const callCounting = (await metrics?.callCounting?.()) === true
+  // Fix stock (ic_fix_stock) names the count it fixes in its request id: while that count waits for approval it is decided first, not settled beside it.
+  // Loaded only for such an id, like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
+  if (typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')) {
+    const { fixStockHeldByApproval, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
+    if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
+  }
   return withStockMutationReceipt(
     () => getDb(c.env),
     c.get('user')?.id ?? null,
@@ -2507,7 +2513,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           : [movementRowStatement(), ...(resolvedBatchId == null ? planRemovalLotRecord(targetProductId, plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))) : [])]),
       ]), atomicMark, { status: 200, body: adjustResponseBody() })
     } catch (err) {
-      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError) throw err
+      if (stockTransactionRefusal(err) || err instanceof StockMutationBudgetError || atomicMark?.answered?.(err)) throw err
       const stockGuard = productStockGuardError(err)
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)

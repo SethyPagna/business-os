@@ -57,6 +57,12 @@ const unsupportedStockSql = `SELECT
       WHERE s.branch_id=@source AND s.quantity>0 AND ${inexactSql('(s.quantity+t.quantity)')})
     OR EXISTS(SELECT 1 FROM branch_batch_stock s JOIN branch_batch_stock t ON t.batch_id=s.batch_id AND t.branch_id=@target
       WHERE s.branch_id=@source AND s.quantity>0 AND ${inexactSql('(s.quantity+t.quantity)')}) AS inexact`
+/** A count waiting for approval at the retiring branch would be applied to the wrong branch's stock after the cutover: it is decided first. (0286 may not be applied yet.) */
+async function approvalCapabilities(db: D1Compat, schema: CaptureSchema, identity: CutoverIdentity) {
+  if (!schema.columns.inventory_check_approvals) return []
+  const waiting = await db.prepare("SELECT count(*) AS n FROM inventory_check_approvals WHERE status='pending' AND branch_id=@source").get<{ n: number }>({ source: identity.sourceBranchId })
+  return waiting && waiting.n > 0 ? [{ code: 'inventory_check_approvals_pending', detail: String(waiting.n) }] : []
+}
 async function stockCapabilities(db: D1Compat, identity: CutoverIdentity) {
   const counts = await db.prepare(unsupportedStockSql).get<Record<string, number>>({ source: identity.sourceBranchId, target: identity.targetBranchId })
   requireParent(counts)
@@ -175,8 +181,9 @@ function compose(db: D1Compat, before: CutoverStatement[], after: CutoverStateme
     return Reflect.get(target, key, receiver)
   } })
 }
-function requireSchema(schema: CaptureSchema): void {
-  if (schema.capabilities.length) throw new BranchCutoverCapabilityError(schema.capabilities.map(v => v.code + ':' + v.detail).join(';'))
+function requireSchema(schema: CaptureSchema, extra: Array<{ code: string; detail: string }> = []): void {
+  const refused = [...schema.capabilities, ...extra]
+  if (refused.length) throw new BranchCutoverCapabilityError(refused.map(v => v.code + ':' + v.detail).join(';'))
 }
 function validName(value: unknown): value is string {
   return typeof value === 'string' && value === value.trim() && value.length >= 1 && value.length <= 64 && !/[\u0000-\u001f\u007f]/.test(value)
@@ -260,7 +267,7 @@ export async function inspectBranchCutover(db: D1Compat, actor: Principal, organ
     (SELECT count(*) FROM branch_batch_stock WHERE branch_id=@source AND quantity<>0) AS nonzeroLots,
     (SELECT count(*) FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
     (SELECT count(*) FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid`).get<Record<string, number>>({ source: identity.sourceBranchId })
-  capabilities.push(...await stockCapabilities(db, identity))
+  capabilities.push(...await stockCapabilities(db, identity), ...await approvalCapabilities(db, schema, identity))
   const inactiveStock = await readInactiveStockPlan(db, approvedFolds)
   for (const item of inactiveStock.refuse) capabilities.push({ code: 'inactive_stock_without_twin', detail: item.id + ':' + item.reason })
   return { sourcePreimageJson: JSON.stringify(state.source), targetPreimageJson: JSON.stringify(state.target), schemaDigest: schema.digest,
@@ -276,7 +283,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
     && cutoverBytes(input.expectedSourceJson) <= 16384 && cutoverBytes(input.expectedTargetJson) <= 16384
     && validName(input.retiredName) && validName(input.successorName) && input.retiredName.toLowerCase() !== input.successorName.toLowerCase())
   db = metered(db, budget); const current = await principal(db, actor, organizationId); const state = await branches(db, input)
-  const schema = await readCutoverCaptureSchema(db); requireSchema(schema)
+  const schema = await readCutoverCaptureSchema(db); requireSchema(schema, await approvalCapabilities(db, schema, input))
   const unsupported = await stockCapabilities(db, input)
   const approvedFolds = parseApprovedFolds(input.approvedFolds ?? [])
   const inactivePlan = await readInactiveStockPlan(db, approvedFolds)
@@ -303,7 +310,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
   const admission = cutoverAssert(`NOT EXISTS(SELECT 1 FROM import_jobs WHERE status IN ('pending','queued','running','analyzing','approved','applying','cancelling') OR julianday(lease_expires_at)>julianday('now'))
     AND NOT EXISTS(SELECT 1 FROM bulk_delete_jobs WHERE status IN ('pending','processing'))
     AND NOT EXISTS(SELECT 1 FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL)
-    AND NOT EXISTS(SELECT 1 FROM pending_actions WHERE status='open')
+    AND NOT EXISTS(SELECT 1 FROM pending_actions WHERE status='open')${schema.columns.inventory_check_approvals ? "\n    AND NOT EXISTS(SELECT 1 FROM inventory_check_approvals WHERE status='pending' AND branch_id=@source)" : ''}
     AND (SELECT count(*) FROM branches WHERE is_active=1)=2
     AND (SELECT count(*) FROM branches WHERE is_active=1 AND ((id=@source AND canonical_key='shop') OR (id=@target AND canonical_key='warehouse')))=2`,
   { source: input.sourceBranchId, target: input.targetBranchId })

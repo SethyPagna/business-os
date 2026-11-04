@@ -518,6 +518,7 @@ const REVIEW_REQUEST_PHRASES = {
   'Delete expense': 'លុបចំណាយ',                // km.json perm_act_fees_delete
   'Edit stock reasons': 'កែប្រែមូលហេតុស្តុក',   // កែប្រែ (shift_action_edit) + មូលហេតុ (reason) + ស្តុក (stock)
   'Edit branch': 'កែប្រែសាខា',                 // km.json perm_act_branches_edit
+  'Count approval': 'ការអនុម័តការរាប់',            // km.json inventory_check_approval
 } as const
 export type ReviewRequestPhrase = keyof typeof REVIEW_REQUEST_PHRASES
 export const TELEGRAM_REVIEW_REQUEST_PHRASES: Record<string, string> = REVIEW_REQUEST_PHRASES

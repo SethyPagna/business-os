@@ -8,10 +8,8 @@ import ProductImage from '../pos/ProductImage.tsx'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
-import { knownCost } from '../../utils/costDisplay.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
-import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import type { InventoryCheckId, InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
 import InventoryCheckCountEditor, { countMatchesStock, finiteQuantity, parseCount, signedDelta, stepCount } from './InventoryCheckCountEditor.tsx'
@@ -36,11 +34,6 @@ export type InventoryCheckRowsProps = {
   locked?: boolean
   canViewStock?: boolean
   canViewCounts?: boolean
-  canViewPrice: boolean
-  canViewCost: boolean
-  /** Left unset, the Sold and Cust columns follow whether any listed product carries the figure. */
-  canViewSales?: boolean
-  canViewCustomers?: boolean
   /** Counts, Start and the check buttons exist only inside a session; left unset, an open session or any saved check implies it. */
   inSession?: boolean
   /** Recent issue reasons offered as chips in the count editor. */
@@ -51,7 +44,6 @@ export type InventoryCheckRowsProps = {
   onCommitted?: (id: InventoryCheckId, via: InventoryCheckCommitVia) => boolean
   /** `external`: the page mounts InventoryCheckSheetHeader itself (pinned), so the list draws none. */
   sheetHeader?: 'inline' | 'external'
-  fmtUSD?: (amount: number) => string
   t: InventoryCheckTranslator
   onOpenProduct: (product: InventoryCheckProduct) => void
   onSave: (productId: InventoryCheckId, patch: InventoryCheckPatch, expectedRevision: number) => void | Promise<void>
@@ -68,10 +60,10 @@ const makeTr = (t: InventoryCheckTranslator) => (key: string, fallback: string) 
 
 // ---- The count sheet (1024px and up) ---------------------------------------------------------------------------------------
 // Phone: a line of facts under the name. From `lg` the same cells line up as columns: every cell has one fixed width and one
-// `order`, so rows and header agree without a shared grid. Damaged, Sold and Cust only fit beside the 220px sidebar from `xl`.
+// `order`, so rows and header agree without a shared grid. (The list has its own rows: InventoryCheckListRows.)
 
-export type SheetField = 'now' | 'start' | 'damaged' | 'price' | 'cost' | 'sold' | 'customers' | 'count'
-export type SheetFlags = { canCheck: boolean; inSession: boolean; canViewStock: boolean; canViewCounts: boolean; canViewPrice: boolean; canViewCost: boolean; canViewSales: boolean; canViewCustomers: boolean }
+export type SheetField = 'now' | 'start' | 'count'
+export type SheetFlags = { canCheck: boolean; inSession: boolean; canViewStock: boolean; canViewCounts: boolean }
 export type SheetColumns = { fields: readonly SheetField[]; actions: 'buttons' | 'state' | null }
 
 /** The columns that exist for this viewer: a column nobody may read, or that only a session fills, is not drawn at all. */
@@ -79,27 +71,20 @@ export function sheetColumns(flags: SheetFlags): SheetColumns {
   const fields: SheetField[] = []
   if (flags.canViewStock) fields.push('now')
   if (flags.canViewStock && flags.inSession) fields.push('start')
-  if (flags.canViewStock) fields.push('damaged')
-  if (flags.canViewPrice) fields.push('price')
-  if (flags.canViewCost) fields.push('cost')
-  if (flags.canViewSales) fields.push('sold')
-  if (flags.canViewCustomers) fields.push('customers')
   if (flags.canViewCounts && flags.inSession) fields.push('count')
   return { fields, actions: !flags.inSession ? null : flags.canCheck ? 'buttons' : 'state' }
 }
 
 const CELL_BOX: Record<SheetField, string> = {
-  now: 'lg:order-2 lg:w-[4.5rem]', start: 'lg:order-3 lg:w-[5.5rem]', damaged: 'lg:order-4 lg:w-14', price: 'lg:order-5 lg:w-20',
-  cost: 'lg:order-6 lg:w-20', sold: 'lg:order-7 lg:w-12', customers: 'lg:order-8 lg:w-14', count: 'lg:order-9 lg:w-[4.5rem]',
+  now: 'lg:order-2 lg:w-24', start: 'lg:order-3 lg:w-[5.5rem]', count: 'lg:order-5 lg:w-[4.5rem]',
 }
-const WIDE_FIELDS: ReadonlySet<SheetField> = new Set(['damaged', 'sold', 'customers'])
 const PRODUCT_BOX = 'lg:order-1 lg:min-w-0 lg:flex-1'
 /** Text read beside its figure on a phone; from 1024px the column header carries it and only screen readers keep it. */
 const BELOW_SHEET_ONLY = 'sr-only max-lg:not-sr-only'
 const ACTIONS_BOX = { buttons: 'lg:order-10 lg:w-[5.25rem]', state: 'lg:order-10 lg:w-10' } as const
 /** A placeholder keeps an empty cell's width on the sheet and does not exist on a phone. */
 function cellClass(field: SheetField, placeholder = false): string {
-  const show = WIDE_FIELDS.has(field) ? (placeholder ? 'hidden lg:hidden xl:block' : 'lg:hidden xl:block') : placeholder ? 'hidden lg:block' : ''
+  const show = placeholder ? 'hidden lg:block' : ''
   return `lg:shrink-0 lg:text-right lg:tabular-nums ${CELL_BOX[field]} ${show}`
 }
 
@@ -107,11 +92,6 @@ function fieldLabel(field: SheetField, tr: (key: string, fallback: string) => st
   switch (field) {
     case 'now': return tr('inventory_check_now', 'Now')
     case 'start': return tr('inventory_check_start', 'Start')
-    case 'damaged': return tr('inventory_check_damaged', 'Damaged')
-    case 'price': return tr('inventory_check_price', 'Price')
-    case 'cost': return tr('inventory_check_cost', 'Cost')
-    case 'sold': return tr('inventory_check_sold', 'Sold')
-    case 'customers': return tr('inventory_check_customers_short', 'Cust')
     case 'count': return tr('inventory_check_count', 'Count')
   }
 }
@@ -139,7 +119,7 @@ function expiryBadge(date: string | null | undefined): { text: string; tone: 'ex
   return { text: `${match[2]}/${match[1]}`, tone: days < 0 ? 'expired' : days <= 30 ? 'soon' : 'ok', full: fmtDateOnly(match[0]) }
 }
 
-function CheckRow({ product, observation, pending, error, header, adornment, frozenAttempt, copy, columns, reasonSuggestions, scanHit, onAdvance, canCheck, locked = false, canViewStock = true, canViewCounts = canCheck || canViewStock, fmtUSD = formatUsd4, t, onOpenProduct, onSave, onEditingChange, onCommitted }: {
+function CheckRow({ product, observation, pending, error, header, adornment, frozenAttempt, copy, columns, reasonSuggestions, scanHit, onAdvance, canCheck, locked = false, canViewStock = true, canViewCounts = canCheck || canViewStock, t, onOpenProduct, onSave, onEditingChange, onCommitted }: {
   product: InventoryCheckProduct
   observation?: InventoryCheckObservation
   pending: boolean
@@ -152,7 +132,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   reasonSuggestions: readonly string[]
   scanHit: boolean
   onAdvance: (id: InventoryCheckId) => void
-} & Pick<InventoryCheckRowsProps, 'canCheck' | 'locked' | 'canViewStock' | 'canViewCounts' | 'fmtUSD' | 't' | 'onOpenProduct' | 'onSave' | 'onEditingChange' | 'onCommitted'>) {
+} & Pick<InventoryCheckRowsProps, 'canCheck' | 'locked' | 'canViewStock' | 'canViewCounts' | 't' | 'onOpenProduct' | 'onSave' | 'onEditingChange' | 'onCommitted'>) {
   const [draft, setDraft] = useState<Draft | null>(null)
   // The sheet's Count input: null shows the saved count, any string is a typed, unsaved one.
   const [countText, setCountText] = useState<string | null>(null)
@@ -174,8 +154,6 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   const failure = error || saveError
   // The row's own attempt, or the page's frozen one when this row was remounted/discarded after a failed save.
   const retryable: Attempt | null = attempt ?? frozenAttempt ?? null
-  const price = knownCost(product.selling_price_usd)
-  const cost = knownCost(product.cost_price_usd)
   const tr = makeTr(t)
   const state = observation?.state
   const showStateIcon = !canCheck && (state === 'done' || state === 'issue')
@@ -318,13 +296,13 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   // Titles show beside a value on a phone; on the sheet the header carries them.
   const named = (field: SheetField, text = fieldLabel(field, tr)) => <span className={BELOW_SHEET_ONLY}>{text}</span>
 
-  // Counting facts first: Now · Start (Δ⚠) · Counted · Damaged · Price · Cost · Sold · Cust. A fact with no value is not drawn on a phone and keeps its width on the sheet.
+  // Counting facts first: Now · Start (Δ⚠) · Status · Counted · Last checked. A fact with no value is not drawn on a phone and keeps its width on the sheet.
   const facts: Array<[SheetField, ReactNode]> = []
   const wants = (field: SheetField) => columns.fields.includes(field)
   if (wants('now')) {
     const unit = finiteQuantity(product.quantity) ? String(product.unit ?? '').trim() : ''
     const hint = tr('inventory_check_stock_inconsistent_hint', 'Stock records for this product disagree. Check its stock before counting.')
-    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{product.stock_consistent === false ? <InfoHint text={hint} label={hint} className="ml-0.5" triggerClassName="inline-flex h-4 w-4 items-center justify-center rounded-full text-amber-700 dark:text-amber-300" /> : null}</span>])
+    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_damaged', 'Damaged')}: ${product.damaged_quantity}`}>{tr('inventory_check_damaged', 'Damaged')} {product.damaged_quantity}</span></> : null}{product.stock_consistent === false ? <InfoHint text={hint} label={hint} className="ml-0.5" triggerClassName="inline-flex h-4 w-4 items-center justify-center rounded-full text-amber-700 dark:text-amber-300" /> : null}</span>])
   }
   if (wants('start')) {
     if (observation && Object.hasOwn(observation, 'baseline_quantity')) {
@@ -335,15 +313,11 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
     } else facts.push(['start', null])
   }
   if (wants('count')) {
-    const counted = !header && canViewCounts && finiteQuantity(observation?.counted_quantity) ? observation.counted_quantity : null
+    const recorded = observation?.counted_quantity
+    const counted = !header && canViewCounts && finiteQuantity(recorded) ? recorded : null
     // With a Count input the sheet shows that instead, so the phone-only fact steps aside there.
     facts.push(['count', counted === null ? null : <span>{named('count', tr('inventory_check_counted', 'Counted'))} {counted}</span>])
   }
-  if (wants('damaged')) facts.push(['damaged', finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <span>{named('damaged')} {product.damaged_quantity}</span> : null])
-  if (wants('price')) facts.push(['price', <span title={tr('inventory_check_price', 'Price')}><span className="sr-only">{tr('inventory_check_price', 'Price')} </span>{price === null ? '—' : fmtUSD(price)}</span>])
-  if (wants('cost')) facts.push(['cost', <span>{named('cost')} {cost === null ? '—' : fmtUSD(cost)}{product.cost_needs_review === true ? <><span className={`ml-1 text-amber-700 dark:text-amber-300 ${BELOW_SHEET_ONLY}`}>{tr('merge_cost_needs_review', 'Cost needs review')}</span><span className="ml-0.5 hidden text-amber-700 lg:inline dark:text-amber-300" title={tr('merge_cost_needs_review', 'Cost needs review')} aria-hidden="true"><AlertTriangle className="inline h-3 w-3" /></span></> : null}</span>])
-  if (wants('sold')) facts.push(['sold', finiteQuantity(product.qty_sold) ? <span>{named('sold')} {product.qty_sold}</span> : null])
-  if (wants('customers')) facts.push(['customers', finiteQuantity(product.customer_count) ? <span title={tr('inventory_check_customers', 'Customers')}>{named('customers')} {product.customer_count}</span> : null])
   let shown = 0
 
   const barcode = product.barcode || product.sku
@@ -354,9 +328,11 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   if (product.category) identity.push(['category', <span>{product.category}</span>])
   const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
   const expiryName = expiry ? expiry.tone === 'expired' ? tr('inventory_check_expired', 'Expired') : expiry.tone === 'soon' ? tr('inventory_check_expires_soon', 'Expires soon') : tr('expiry', 'Expiry') : ''
-  const edge = state === 'done' ? 'border-l-emerald-500' : state === 'issue' ? 'border-l-amber-500' : 'border-l-transparent'
+  const shownState = state
+  const edge = shownState === 'done' ? 'border-l-emerald-500' : shownState === 'issue' ? 'border-l-amber-500' : 'border-l-transparent'
+  const note = state === 'issue' ? observation?.reason : null
 
-  return <li data-inventory-check-row={String(product.id)} data-check-state={state ?? 'unstarted'} data-scan-hit={scanHit ? '' : undefined}
+  return <li data-inventory-check-row={String(product.id)} data-check-state={shownState ?? 'unstarted'} data-scan-hit={scanHit ? '' : undefined}
     className={`min-w-0 max-w-full border-b border-l-2 border-b-gray-100 py-2 pl-2 last:border-b-0 dark:border-b-gray-800 ${edge} ${busy ? 'lg:opacity-70' : ''} ${scanHit ? 'rounded-sm ring-2 ring-primary-400 dark:ring-primary-300' : ''}`} aria-busy={busy}>
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 lg:flex lg:items-center" data-inventory-check-main>
       <div className={`flex min-w-0 items-start gap-2 ${PRODUCT_BOX}`}>
@@ -406,7 +382,7 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
         </> : null}
       </span>}
     </div>
-    {!header && state === 'issue' && observation?.reason ? <p className="mt-1 break-words text-xs lg:pl-12 leading-relaxed text-amber-800 dark:text-amber-200">{observation.reason}</p> : null}
+    {!header && note ? <p className="mt-1 break-words text-xs lg:pl-12 leading-relaxed text-amber-800 dark:text-amber-200" data-check-note>{note}</p> : null}
     {failure ? <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-red-700 dark:text-red-300">
       <p role="alert" className="min-w-0 break-words leading-relaxed">{failure}</p>
       {!draft && retryable && canCheck ? <button type="button" disabled={busy} aria-label={retryLabel} title={retryLabel} className={rowIconButton} onClick={() => { void save(retryable.patch, retryable.revision, retryable.via ?? 'tick') }}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button> : null}
@@ -418,16 +394,13 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
   </li>
 }
 
-export default function InventoryCheckRows({ products, observations, pending = {}, errors = {}, adornments = {}, frozen = {}, reasonSuggestions = [], focusRequest, sheetHeader = 'inline', inSession, canViewPrice, canViewCost, canViewSales, canViewCustomers, ...props }: InventoryCheckRowsProps) {
+export default function InventoryCheckRows({ products, observations, pending = {}, errors = {}, adornments = {}, frozen = {}, reasonSuggestions = [], focusRequest, sheetHeader = 'inline', inSession, ...props }: InventoryCheckRowsProps) {
   const observationOf = (product: InventoryCheckProduct) => String(observations[String(product.id)]?.product_id) === String(product.id) ? observations[String(product.id)] : undefined
   const parentsWithMembers = new Set(products.flatMap(product => product.parent_id == null ? [] : [String(product.parent_id)]))
   const canViewStock = props.canViewStock ?? true
   const canViewCounts = props.canViewCounts ?? (props.canCheck || canViewStock)
   const flags: SheetFlags = {
     canCheck: props.canCheck, inSession: inSession ?? (props.canCheck || products.some(product => observationOf(product) !== undefined)), canViewStock, canViewCounts,
-    canViewPrice, canViewCost,
-    canViewSales: canViewSales ?? products.some(product => finiteQuantity(product.qty_sold)),
-    canViewCustomers: canViewCustomers ?? products.some(product => finiteQuantity(product.customer_count)),
   }
   const columns = sheetColumns(flags)
   const listRef = useRef<HTMLUListElement | null>(null)

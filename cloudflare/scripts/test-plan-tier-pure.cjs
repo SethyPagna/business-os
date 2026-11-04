@@ -141,6 +141,7 @@ const PAID = {
   stockInLinesPerRequest: 24,
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
+  inventoryCheckApprovalTakeoverSeconds: 300,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
   readSwitchMemoSeconds: 5,
@@ -177,6 +178,7 @@ const FREE = {
   stockInLinesPerRequest: 1,
   stockInLinesPerRequestByCalls: 2,
   callCountingSwitchApplies: true,
+  inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -216,7 +218,9 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // The buildShare durations (lib/buildShare.ts) are in it too: Free waits longer for the first builder's result because a duplicate build costs
 // reads, and polls more coarsely because a Free invocation has 10 ms of CPU. buildShareMemoMaxEntries is a ceiling (Free 16 < Paid 32), so it
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs']
+// inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
+// approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the

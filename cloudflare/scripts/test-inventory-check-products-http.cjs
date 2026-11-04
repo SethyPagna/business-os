@@ -14,6 +14,7 @@ function load(file) {
   return module.exports
 }
 const route = load(path.join(__dirname, '../src/routes/inventoryCheckProducts.ts')).default
+const { resetReadSwitchMemo } = load(path.join(__dirname, '../src/lib/readSwitches.ts'))
 let db, readHook, statements
 function binding() {
   function prepare(sql) {
@@ -89,6 +90,7 @@ async function main() {
     db.prepare('UPDATE products SET cost_review_key=? WHERE id=910001').run('0123456789abcdef0123456789abcdef')
     db.exec("UPDATE products SET cost_review_key='' WHERE id=910002")
     const before=physical(); statements=0
+    resetReadSwitchMemo() // the first request made the one switch read (memoized for 15 s); the count below compares like with like
     const current=await request('pageSize=3',900003)
     assert.equal(current.status,200)
     assert.equal(statements,oldStatements,'column detection piggybacks on existing authority reads')

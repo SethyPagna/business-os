@@ -618,6 +618,9 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.usage = parsed?.usage || null
   error.forceable = parsed?.forceable === true
   error.operationId = parsed?.operationId || null
+  // A refusal that names products (an Inventory count whose stock moved since it was counted, an approval line that cannot be applied) keeps the list and, for an approval, the reason of each line.
+  error.productIds = Array.isArray(parsed?.productIds) ? parsed.productIds.filter((id: unknown) => Number.isSafeInteger(id)) : null
+  error.refused = Array.isArray(parsed?.refused) ? parsed.refused : null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null

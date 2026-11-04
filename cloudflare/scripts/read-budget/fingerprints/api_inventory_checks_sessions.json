@@ -43,6 +43,10 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
+   "d5a7bcc37603",
+   "SELECT key, value FROM system_flags WHERE key IN (?1, ?2)"
+  ],
+  [
    "3d0de332b3d9",
    "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
   ],

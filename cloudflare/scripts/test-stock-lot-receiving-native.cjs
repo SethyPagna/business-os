@@ -116,6 +116,16 @@ async function check(name, action) {
 // branch_retired_no_successor before the receipt barrier; with an active successor the Set asks for the confirmed
 // branch and lands there (scripts/test-cutover-lr-adjust-pure.cjs, test-cutover-lr-batches-pure.cjs).
 async function main() {
+  await check('a refusal the receipt wrapper answers itself (out of statements before the batch, a counts approval taken over first) is rethrown untouched, not turned into stock changed; any other failure still is', async () => {
+    const f = world(), before = snapshot(f), answered = new Error('answered by the wrapper'), other = new Error('something else')
+    let thrown = answered
+    const mark = { statement: () => null, committed() {}, execute: async () => { throw thrown }, answered: error => error === answered }
+    await assert.rejects(lot.applyStockLotSet(f.db, actor, 'answered-set-0001', request('branch'), async () => {}, null, mark), error => error === answered)
+    assert.equal(snapshot(f), before, 'nothing was written')
+    thrown = other
+    const refused = await lot.applyStockLotSet(f.db, actor, 'answered-set-0002', request('branch'), async () => {}, null, mark)
+    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'stock_conflict'); assert.equal(snapshot(f), before)
+  })
   for (const scope of ['lot','branch']) {
     await check(`inactive positive ${scope} refuses before receipt barrier or batch`, async () => {
       const f = world({ active: false }), before = snapshot(f)

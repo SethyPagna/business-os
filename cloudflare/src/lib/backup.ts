@@ -254,6 +254,7 @@ export const BACKUP_TABLES = [
   'inventory_check_sessions',
   'inventory_check_items',
   'inventory_check_events',
+  'inventory_check_approvals',
   'branch_cutovers',
   'audit_logs',
   'custom_tables',

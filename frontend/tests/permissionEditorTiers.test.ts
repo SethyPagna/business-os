@@ -194,7 +194,8 @@ await test('field rows collapse to one toggle chip row with accessible pressed s
   const groups = surface.findAll((node) => node.getAttribute('role') === 'group' && node.getAttribute('aria-label') === 'Fields shown')
   assert.equal(groups.length, 2, 'inventory checks and image-only role each get one row')
   const sizes = groups.map((group) => surface.findAll((node) => node.tagName === 'BUTTON' && within(node, group)).length).sort()
-  const countFields = (prefix: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).filter((permission) => permission.key.startsWith(prefix)).length
+  // A retired field (price, units sold, customers, cost left the Inventory check list) keeps its stored grant but offers no chip.
+  const countFields = (prefix: string) => PERMISSION_SECTIONS.flatMap((section) => section.permissions).filter((permission) => permission.key.startsWith(prefix) && !permission.retired).length
   assert.deepEqual(sizes, [countFields('products_image_only_show_'), countFields('inventory_check_show_')].sort(), 'one chip per field, none left over as a switch row')
   assert.ok(!surface.findAll((node) => node.getAttribute('role') === 'switch' && /Show recorded stock|Image-only role/.test(node.textContent)).length, 'no per-field switch rows remain')
   const stock = surface.button(/Show recorded stock/)

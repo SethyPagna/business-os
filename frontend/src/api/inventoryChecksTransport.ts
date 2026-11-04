@@ -6,6 +6,51 @@ import {
 } from './actorReadScope.ts'
 import type { InventoryCheckObservation, InventoryCheckPatch, InventoryCheckProduct } from '../types/inventoryChecks.ts'
 
+/** What approving a line wrote (or, for a line already at its figure, found): ordinary stock before and after, and the target. */
+export type InventoryCheckApprovalLine = { before: number; target: number; after: number; at: string; settled?: true
+  /** The stock ran out before the whole shortage the count found could be removed: stock was set to 0 and `wanted` (below zero) is the figure the count asked for. */
+  clamped?: true; wanted?: number }
+/** A submitted count's approval (ic_fix_stock). Sent only to a viewer who may see stock. */
+export type InventoryCheckApproval = {
+  status: 'pending' | 'approved' | 'rejected'
+  lines: number
+  applied: number
+  submitted_at: string
+  can_approve: boolean
+  /** Decided by the system, not a person: every line was replaced by a newer count. It has no decided_by_name; its note says why. */
+  replaced?: true
+  decided_at?: string
+  decision_note?: string | null
+  decided_by_name?: string | null
+  /** Session detail only. */
+  applied_lines?: Record<string, InventoryCheckApprovalLine>
+  /** Stock may already have moved for this approval: it cannot be rejected, and only the approver who started it can finish it. */
+  applying?: boolean
+  /** Sent to that approver only: the request id every repeat of the approval must carry. */
+  applying_request_id?: string
+  /** The approval was ended by a close: lines applied stay applied (status approved), these were NOT applied, each with the reason (a refusal code or inventory_check_not_applied). */
+  closed?: { lines: Record<string, string> }
+  /** Session detail only: per product, the stock the counter saw. The count is measured against it. */
+  baselines?: Record<string, number>
+  /** Lines a newer count of the same product replaced (one waiting item per product): product id -> the newer count's session. They are never applied. */
+  superseded?: Record<string, string>
+}
+/** The answer to one request of a decision: approving repeats the same request until done. */
+export type InventoryCheckApprovalDecision = {
+  approval: InventoryCheckApproval
+  applied: number
+  remaining: number
+  done: boolean
+  replayed?: boolean
+  failed?: Array<{ productId: number; code: string | null; error: string }>
+  /** Lines this request could not apply, each with the reason; the others were applied. */
+  refused?: Array<{ productId: number; code: string }>
+  /** The request took the approval over from an approver who is gone; it moved no stock, repeating it continues. */
+  takeover?: true
+  /** The request recorded the plan but used up its statements before any stock was written; nothing is lost, repeating it writes. */
+  deferred?: true
+}
+
 export type InventoryCheckSession = {
   id: string
   branch_id: number
@@ -22,11 +67,15 @@ export type InventoryCheckSession = {
   /** Sessions list only. Branch name is always sent; creator_name only when the viewer may see staff identity. */
   branch_name?: string | null
   creator_name?: string | null
+  /** Sessions list and session read: present for a submitted count that differs from stock, to a viewer who may see stock. */
+  approval?: InventoryCheckApproval
 }
 export type InventoryCheckSessionsParams = QueryParams & {
   branchId?: string | number
   status?: 'open' | 'closed'
   mine?: 1 | '1'
+  /** Only counts waiting for approval (ic_fix_stock, for a viewer who is shown approvals). */
+  approval?: 'pending'
   /** Business days (YYYY-MM-DD, Cambodia UTC+7) on started_at. */
   startDate?: string
   endDate?: string
@@ -54,6 +103,8 @@ export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'>
   current_product_name?: string | null
   current_quantity?: number | null
   stock_changed?: boolean
+  /** The damaged units now (a Set excludes them); sent with the stock field. */
+  current_stock?: { recorded_ordinary_quantity?: number | null; recorded_damaged_quantity?: number | null; consistent?: boolean }
 }
 export type InventoryCheckReceipt = {
   requestId: string
@@ -107,11 +158,11 @@ export function readInventoryCheckProducts<T>(params: QueryParams, signal?: Abor
   return apiFetch('GET', appendQuery(`${base}/products`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
-export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number }> {
+export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number; approvals?: boolean }> {
   return apiFetch('GET', appendQuery(`${base}/sessions`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
-export function readInventoryCheckSession(id: string, signal?: AbortSignal): Promise<{ item: InventoryCheckSession; items: InventoryCheckSessionItem[] }> {
+export function readInventoryCheckSession(id: string, signal?: AbortSignal): Promise<{ item: InventoryCheckSession; items: InventoryCheckSessionItem[]; approval?: InventoryCheckApproval }> {
   return apiFetch('GET', sessionPath(id), undefined, undefined, { signal })
 }
 
@@ -129,6 +180,24 @@ export function createInventoryCheckSession(scope: InventoryCheckWriteScope, inp
 export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, productId: number, patch: InventoryCheckPatch, expectedRevision: number, expectedSessionRevision: number, requestId: string): Promise<{ item: InventoryCheckSessionItem; session: InventoryCheckSession; receipt: InventoryCheckReceipt }> {
   if (!scope.context.sessionId || !Number.isSafeInteger(productId) || productId < 1) throw new Error('An Inventory session and product are required.')
   return write(scope, `${sessionPath(scope.context.sessionId)}/items/${productId}`, 'PATCH', { ...patch, expectedRevision, expectedSessionRevision, requestId })
+}
+
+/** The owner's way to count: every picked product with its count in one request, recorded whole as a closed session. Nothing about stock changes. */
+export type InventoryCheckSubmission = {
+  branchId: number
+  requestId: string
+  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }>
+}
+export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
+  if (scope.context.sessionId) throw new Error('Counts are submitted from the list, not from inside a session.')
+  if (!Number.isSafeInteger(input.branchId) || input.branchId < 1) throw new Error('Choose a branch before submitting counts.')
+  return write(scope, `${base}/submissions`, 'POST', input)
+}
+
+/** Approve, reject or close the open session's submitted count. Approving is repeated with the SAME requestId until the answer says done; closing ends an approval that cannot be finished (no stock moves). */
+export function decideInventoryCheckApproval(scope: InventoryCheckWriteScope, input: { decision: 'approve' | 'reject' | 'close'; requestId: string }): Promise<InventoryCheckApprovalDecision> {
+  if (!scope.context.sessionId) throw new Error('An Inventory session is required.')
+  return write(scope, `${sessionPath(scope.context.sessionId)}/approval`, 'POST', input)
 }
 
 export function changeInventoryCheckSession(scope: InventoryCheckWriteScope, action: 'close' | 'resume', expectedRevision: number, requestId: string): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt }> {

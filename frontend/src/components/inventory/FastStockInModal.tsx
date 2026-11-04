@@ -102,6 +102,8 @@ export type StockSessionInitialLine = {
   mode?: StockMode
   batchId?: number | null
   reason?: string
+  /** The line's stock request id, when its host needs the server to recognise it (Fix stock names the count it fixes). */
+  requestId?: string
 }
 
 // One line's committed outcome folded into the queue, as a NEW array, so the
@@ -246,7 +248,7 @@ export default function FastStockInModal({
         const mode = entry.mode || opened.mode
         const cost = catalogCostOf(entry.product)
         return {
-          key: `${entry.product.id}-${Date.now()}-${index}`, requestId: mintLineId(), product: entry.product,
+          key: `${entry.product.id}-${Date.now()}-${index}`, requestId: entry.requestId && /^[A-Za-z0-9_-]{8,120}$/.test(entry.requestId) ? entry.requestId : mintLineId(), product: entry.product,
           productName: String(entry.product.name || `#${entry.product.id}`), mode, quantity: Math.max(0, Math.floor(Number(entry.quantity) || 0)),
           freeQuantity: 0, unitCost: mode === 'add' && canViewCosts && cost != null ? String(cost) : '',
           sellingPrice: mode === 'add' ? priceText(entry.product.selling_price_usd) : '', freeGoods: false, expiryDate: '',

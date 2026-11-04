@@ -17,6 +17,7 @@ const fixture = String.raw`
   const params = new URLSearchParams(location.search)
   const language = params.get('lang') || 'en'
   const section = params.get('section') || 'products'
+  const simple = params.get('simple') === '1'
   const t = key => (language === 'km' ? km : en)[key] || key
   document.body.className = language === 'km' ? 'lang-km' : ''
   const longName = language === 'km' ? 'ទឹកអប់ក្លិនផ្កាម្លិះធម្មជាតិ ១០០មីលីលីត្រ ផលិតផលសាកល្បងឈ្មោះវែង' : 'Synthetic long product name for the narrow phone layout check 100ml'
@@ -35,6 +36,7 @@ const fixture = String.raw`
     const url = new URL(String(input && input.url || input), location.href)
     if (url.pathname === '/api/inventory/reasons') return respond({ items: [{ id: 1, type: 'adjust', label: 'Shelf mismatch' }] })
     if (!url.pathname.startsWith('/api/inventory-checks/')) return nativeFetch(input, init)
+    if (url.pathname.endsWith('/products') && simple) return respond({ items: products.map((item, index) => ({ ...item, check_status: ['ok', 'issue', 'not_checked'][index], check_counted_quantity: index < 2 ? 9 : undefined, check_note: index === 1 ? 'Fell off the shelf' : undefined, check_by: index < 2 ? 'amy' : undefined, check_at: index < 2 ? '2026-10-30 08:15:00' : undefined })), total: 3, page: 1, pageSize: 20, simple: true, branches: [{ id: 1, name: branchName }], summary: { not_checked: 1, in_check: 0, ok: 1, issue: 1, total: 3 }, facets: { brands: ['Synthetic brand'], categories: [] }, facetsLimited: { brands: false, categories: false } })
     if (url.pathname.endsWith('/products')) return respond({ items: products, total: 3, page: 1, pageSize: 20, branches: [{ id: 1, name: branchName }], stats: { total_products: 3, stock_quantity: 30, low_stock: 0, out_of_stock: 0, qty_sold: 12, unique_customer_count: 9 }, facets: { brands: ['Synthetic brand'], categories: [], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, rankings: { products: [] }, issues: [] })
     if (url.pathname.endsWith('/history')) return respond({ items: [], total: 0, page: 1, pageSize: 20 })
     if (url.pathname.endsWith('/sessions')) return respond({ items: [session, { ...session, id: 'check-2', status: 'closed', closed_at: '2026-10-19 10:00:00', started_at: '2026-10-19 02:31:00', creator_name: 'bobby-with-a-long-name' }], total: 2, page: 1, pageSize: 20 })
@@ -42,7 +44,7 @@ const fixture = String.raw`
   }
   window.history.replaceState(null, '', '/inventory#hub:inventory:' + section)
   const app = { ...FALLBACK_APP_CONTEXT, t, language, page: 'inventory', authReady: true, canWriteToServer: true, settings: { navigation_mode: 'sections' }, AccessDenied: () => null,
-    user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true } },
+    user: { id: 7, username: 'alice', role_code: 'employee', permissions: { inventory: true, inventory_checks: true, ...(params.get('stock') === '1' ? { inventory_check_show_stock: true } : {}) } },
     navigateTo: (page, anchor) => { window.history.pushState(null, '', '/inventory#' + (anchor || '')); window.dispatchEvent(new CustomEvent('bos:navigate', { detail: { page, path: '/inventory', anchor } })) } }
   createRoot(document.getElementById('root')).render(<AppContext.Provider value={app}><div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><InventoryChecksPage /></div></AppContext.Provider>)
 `
@@ -69,7 +71,7 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
       // A phone uses the layered "pages" navigation and draws no chips; wider screens must show them, outside the scroller.
       assert.ok(!hub.chipsInside && (hub.chips || width < 768), `${lang} ${width} ${section}: the section chips sit above the scroller, so they stay put and the inset is not doubled`)
       assert.ok(hub.pinnedInset >= 11 && hub.pinnedInset <= 13, `${lang} ${width} ${section}: one 12px inset inside the scroller (${hub.pinnedInset})`)
-      if (section === 'sessions') assert.equal(hub.rows, 1, `${lang} ${width}: the Sessions tab pins a single row (Filters, dates, presets, Refresh)`)
+      if (section === 'sessions') assert.equal(hub.rows, 1, `${lang} ${width}: the Sessions tab pins a single row (Filters, dates, presets)`)
       else if (width >= 1024) {
         assert.ok(Math.abs((hub.searchCentre ?? 0) - (hub.contextCentre ?? 99)) < 3, `${lang} ${width}: from 1024px the search group and the context bar share one line`)
         assert.ok(Math.abs((hub.searchWidth ?? 0) - 416) < 2, `${lang} ${width}: the search group is 26rem wide (${hub.searchWidth})`)
@@ -87,7 +89,7 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
     const measured = await browser.evaluate<{ document: number; page: number }>(overflow)
     assert.ok(measured.document <= 0 && measured.page <= 0, `${lang} ${width} session: no horizontal scroll (${JSON.stringify(measured)})`)
     const actions = await browser.evaluate<Array<{ label: string | null; text: string; width: number; height: number }>>(`Array.from(document.querySelectorAll('[data-inventory-check-actions] button'), node => ({ label: node.getAttribute('aria-label'), text: node.textContent, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height }))`)
-    assert.deepEqual(actions.map(action => action.label), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session, pack.refresh], `${lang} ${width}: bar actions (the details hint exists below 640px only through its own button)`)
+    assert.deepEqual(actions.map(action => action.label), [pack.inventory_check_leave_session, pack.inventory_check_session_details, pack.history, pack.inventory_check_close_session], `${lang} ${width}: bar actions, no Refresh (the details hint exists below 640px only through its own button)`)
     assert.ok(actions.every(action => action.text === '' && (action.label === pack.inventory_check_session_details || (action.width >= 40 && action.height >= 40))), `${lang} ${width}: bar actions are touch-sized icons (the small hint trigger aside)`)
     const bar = await browser.evaluate<{ height: number; spread: number; ring: number; counts: number; middle: { left: number; right: number }; ringBox: { left: number; right: number }; countsBox: { left: number; right: number }; details: string; detailsShown: boolean; hint: boolean }>(`(() => {
       const actions = document.querySelector('[data-inventory-check-actions]'), box = node => node.getBoundingClientRect()
@@ -118,5 +120,33 @@ await browser.run('PASS Inventory page layout: Products, Sessions and an open se
     const rowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
     assert.ok(rowsFit, `${lang} ${width}: product rows wrap inside their own box`)
     if (lang === 'km') await browser.khmerRoom(`${width}px session`, '[data-inventory-check-page]', 3)
+    // The ic_simple list: a check box before each image, the selection bar, the owner's columns; nothing scrolls sideways.
+    await browser.open(width, `lang=${lang}&section=products&simple=1&stock=1`, `document.querySelector('[data-inventory-check-row]')`, 700)
+    const listMeasured = await browser.evaluate<{ document: number; page: number }>(overflow)
+    assert.ok(listMeasured.document <= 0 && listMeasured.page <= 0, `${lang} ${width} list: no horizontal scroll (${JSON.stringify(listMeasured)})`)
+    const listBar = await browser.evaluate<{ present: boolean; height: number; overflow: number; submit: string; submitHeight: number; boxes: number; boxBeforeImage: boolean; noRefresh: boolean; noCount: boolean }>(`(() => {
+      const bar = document.querySelector('[data-inventory-check-selection-bar]'), row = document.querySelector('[data-inventory-check-row]')
+      const submit = document.querySelector('[data-selection-action="submit"]')
+      return { present: !!bar, height: bar ? bar.getBoundingClientRect().height : 0, overflow: bar ? bar.scrollWidth - bar.clientWidth : 0, submit: submit ? submit.textContent : '', submitHeight: submit ? submit.getBoundingClientRect().height : 0,
+        boxes: document.querySelectorAll('[data-check-select]').length, boxBeforeImage: row.querySelector('[data-check-select-box]').getBoundingClientRect().left < row.querySelector('[data-check-image]').getBoundingClientRect().left,
+        noRefresh: !Array.from(document.querySelectorAll('button')).some(node => node.getAttribute('aria-label') === ${JSON.stringify(pack.refresh)}),
+        noCount: !Array.from(document.querySelectorAll('button')).some(node => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(pack.inventory_check_start_page + ' (')})) }
+    })()`)
+    assert.ok(listBar.present && listBar.height <= 48 && listBar.overflow <= 0, `${lang} ${width} list: the selection bar is one line of at most 48px (${JSON.stringify(listBar)})`)
+    assert.equal(listBar.submit, pack.inventory_check_submit, `${lang} ${width} list: the main action keeps its word`)
+    assert.ok(listBar.submitHeight >= (width < 1024 ? 44 : 40), `${lang} ${width} list: Submit is a touch-sized button (${listBar.submitHeight})`)
+    assert.equal(listBar.boxes, 3, `${lang} ${width} list: a check box on each product`)
+    assert.ok(listBar.boxBeforeImage && listBar.noRefresh && listBar.noCount, `${lang} ${width} list: the box sits before the image, and there is no Refresh or Count (n) button (${JSON.stringify(listBar)})`)
+    const listRowsFit = await browser.evaluate<boolean>(`Array.from(document.querySelectorAll('[data-inventory-check-row]')).every(row => row.scrollWidth <= row.clientWidth + 1)`)
+    assert.ok(listRowsFit, `${lang} ${width} list: rows wrap inside their own box`)
+    if (width >= 1024) {
+      const listSheet = await browser.evaluate<{ pinned: boolean; shown: boolean; titles: string[] }>(`(() => {
+        const header = document.querySelector('[data-inventory-check-sheet-header]')
+        return { pinned: document.querySelector('[data-inventory-check-pinned]').contains(header), shown: getComputedStyle(header).display !== 'none', titles: Array.from(header.children).filter(node => node.getBoundingClientRect().width > 0 && node.textContent).map(node => node.textContent) }
+      })()`)
+      assert.ok(listSheet.pinned && listSheet.shown, `${lang} ${width} list: the column header is pinned with the controls`)
+      assert.deepEqual(listSheet.titles, [pack.product, pack.inventory_check_now, pack.inventory_check_status_short, pack.inventory_check_counted, pack.inventory_check_count, pack.inventory_check_last_checked], `${lang} ${width} list: the owner's columns`)
+    }
+    if (lang === 'km') await browser.khmerRoom(`${width}px list`, '[data-inventory-check-page]', 3)
   }
 })
