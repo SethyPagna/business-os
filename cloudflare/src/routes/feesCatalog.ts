@@ -815,7 +815,7 @@ async function exportPage(c: Ctx, db: Db, query: Record<string, string>, source:
   const noSales = { totals: { count: 0, usd: 0, khr: 0, undated: 0 }, rows: [] as SaleDeliveryRow[] }
   const [fees, sales] = await Promise.all([
     source === 'all'
-      ? queryFeeList(db, query, limit + 1, 0, { upToId: cursor ? cursor.h[0] : null, after: cursor?.e ? { feeDate: cursor.e[0], id: cursor.e[1] } : null, rowsOnly: !first })
+      ? queryFeeList(db, query, limit + 1, 0, { upToId: cursor ? cursor.h[0] : null, after: cursor?.e ? { feeDate: cursor.e[0], id: cursor.e[1] } : null, rowsOnly: !first }, c.get('user'))
       : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),
     !scope ? Promise.resolve(noSales) : cursor
       ? saleDeliveryRowsAfter(db, scope, cursor.s, limit + 1, cursor.u > 0).then((rows) => ({ ...noSales, rows }))
@@ -879,7 +879,7 @@ app.get('/', async (c, next) => {
     }
     const scope = showSales ? await saleScope(db, query, true) : null
     const [fees, saleTotals, saleRows] = await Promise.all([
-      source === 'all' ? queryFeeList(db, query, need, 0) : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),
+      source === 'all' ? queryFeeList(db, query, need, 0, undefined, c.get('user')) : Promise.resolve<FeeListPage>({ fees: [], total: 0, summary: [] }),
       scope ? saleDeliveryTotals(db, scope) : Promise.resolve({ count: 0, usd: 0, khr: 0 }),
       scope ? saleDeliveryRows(db, scope, need) : Promise.resolve<SaleDeliveryRow[]>([]),
     ])

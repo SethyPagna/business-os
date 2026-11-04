@@ -153,7 +153,11 @@ function run(w, source = {}) {
   check('Expenses list: the label and the note are read through the account\'s phone access', () => {
     const fees = src('routes/fees.ts')
     assert.ok(fees.includes("searchableColumnSql('f.label', access)") && fees.includes("searchableColumnSql('f.notes', access)"), 'fees search')
-    assert.ok(fees.includes('const access = phoneSearchAccessOf(c.get(\'user\'))'), 'fees search takes the account\'s access')
+    // queryFeeList is an exported function (E1-F), so the account arrives as its `viewer` argument: every caller must hand the signed-in account over.
+    assert.ok(fees.includes('const access = phoneSearchAccessOf(viewer)'), 'fees search takes the account\'s access')
+    const callers = ['routes/fees.ts', 'routes/feesCatalog.ts'].flatMap((file) => src(file).split('\n').filter((line) => /\bqueryFeeList\(/.test(line) && !/function queryFeeList/.test(line)).map((line) => [file, line]))
+    assert.ok(callers.length >= 3, 'the three callers are found: ' + callers.length)
+    for (const [file, line] of callers) assert.ok(line.includes("c.get('user')"), file + ' hands the signed-in account to queryFeeList: ' + line.trim().slice(0, 100))
   })
   check('Shift list: the user name is read through the account\'s phone access', () => {
     assert.ok(src('routes/shifts.ts').includes("${searchableColumnSql('user_name', phoneSearchAccessOf(user))} LIKE @search"), 'shift search')

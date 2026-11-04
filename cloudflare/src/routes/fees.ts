@@ -33,6 +33,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
 import { expenseReadsOn, foldFeeGroups, type FeeGroupRow, type FeeReportParts } from '../lib/expenseReads'
 import { getPlanLimits } from '../lib/planTier'
+import type { PhoneActor } from '../lib/phoneAccess'
 import {
   canonicalFeeCreateRequest,
   feeCreateAuditStatement,
@@ -431,8 +432,9 @@ export type FeeKeyset = { upToId?: number | null; after?: { feeDate: string; id:
  * Search matches label/notes/fee_type, the same "one field, several columns" pattern sales.ts's list endpoint already uses
  * rather than a bespoke per-page search implementation. Throws RangeError for a bad date parameter.
  * routes/feesCatalog.ts calls this for the expense half of the merged list, so the two lists filter identically.
+ * `viewer` is the signed-in account: what its search may match depends on the full-phone grant (lib/phoneSearchGuard.ts); absent = without the grant.
  */
-export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset): Promise<FeeListPage> {
+export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset, viewer?: PhoneActor): Promise<FeeListPage> {
   const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId } = query
 
   const range = feeRangePredicate(query)
@@ -452,7 +454,7 @@ export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<s
   if (search && search.trim()) {
     // A label or note that is a number shows masked to an account without the full-phone permission, so it reads as empty here.
     const [{ phoneSearchAccessOf }, { searchableColumnSql }] = await Promise.all([import('../lib/phoneAccess'), import('../lib/phoneSearchGuard')])
-    const access = phoneSearchAccessOf(c.get('user'))
+    const access = phoneSearchAccessOf(viewer)
     conditions.push(`(${searchableColumnSql('f.label', access)} LIKE @search OR ${searchableColumnSql('f.notes', access)} LIKE @search OR f.fee_type LIKE @search)`)
     params.search = `%${search.trim()}%`
   }
@@ -511,7 +513,7 @@ app.get('/', async (c) => {
   const offset = Math.max(toNumber(query.offset, 0), 0)
   let page: FeeListPage
   try {
-    page = await queryFeeList(getDb(c.env), query, limit, offset)
+    page = await queryFeeList(getDb(c.env), query, limit, offset, undefined, c.get('user'))
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     throw error
