@@ -510,5 +510,89 @@
    "1670c85597b6",
    "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
   ]
+ ],
+ "products-search-products-page-2-default-sort-50": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "20bc264a747f",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "594392a52f5a",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "d04f8394d4fb",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "fdb840a640a7",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "6a8da7f09a7e",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
+ ],
+ "products-search-products-page-3-default-sort-50": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "20bc264a747f",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "4b18b62a005d",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "1b1eff617a34",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "fe8c6169d5f2",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "3e2dc5fd12fb",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
  ]
 }

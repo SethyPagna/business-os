@@ -159,6 +159,13 @@ function getEntries(ctx) {
     ['inventory-checks/products ic_simple issues', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    // INV-B S1 (Inventory replan rev. 2): the BEFORE-numbers the later slices are judged against. Opening the Inventory Check sends this request with no branchId;
+    // when the answer lists one branch the page asks again with branchId (the other shapes above), so a first open costs both. Products pages 2 and 3 are the
+    // default list's page steps (each re-ranks the whole scope today). The branch-1 low-stock list is the existing shape products-search-products-branch-1-low-stock.
+    ['inventory-checks/products first open without a branch (OFF path)', `/api/inventory-checks/products?sortBy=name&sortDirection=asc&page=1&pageSize=20`],
+    ['inventory-checks/products first open without a branch (ic_simple ON)', `/api/inventory-checks/products?sortBy=name&sortDirection=asc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['products/search Products page 2 (default sort, 50)', `/api/products/search?page=2&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    ['products/search Products page 3 (default sort, 50)', `/api/products/search?page=3&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
   ]
 }
 
