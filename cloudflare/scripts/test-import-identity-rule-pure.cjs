@@ -31,6 +31,8 @@ const REAL = new Set([
   'productIdentity',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions', 'phoneWriteGuard', 'phoneMask',
   'importImageMatch', 'searchMatch',
+  // importEngine scrubs masked request values with phoneAccess.scrubMaskedInput (P2.8): a stub without it breaks classifySales.
+  'phoneAccess',
 ])
 const asyncNoop = async () => {}
 const STUBS = {
