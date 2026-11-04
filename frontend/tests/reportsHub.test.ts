@@ -781,10 +781,11 @@ test('the control row keeps every control at each width: nothing is dropped, not
   assert.ok(hub.includes("triggerClassName={compact ? 'reports-mobile-range flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
   assert.match(hub, /showQuickRanges=\{false\}/, 'Reports keeps its external quick-range rail without duplicating those presets inside the picker')
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-  // The outside button now shows dates only, preserving the shrinkable,
-  // fully visible endpoint layout; editable times stay inside the picker.
-  assert.match(picker, /const triggerEndpoint = \(date: string\) => \([\s\S]*?inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums/, 'both picker endpoints share the shrinkable, fully visible, single-line trigger layout')
-  assert.match(picker, /\{triggerEndpoint\(startTriggerDate\)\}[\s\S]*?\{triggerEndpoint\(endTriggerDate\)\}/, 'the report trigger renders both complete dates without time suffixes')
+  // The outside button shows each endpoint's date AND time (owner, 4 Nov: "not
+  // showing time only showing date"), on one line, in the fully visible
+  // endpoint layout; the times are edited inside the picker.
+  assert.match(picker, /const triggerEndpoint = \(\{ date, time \}: TriggerEndpoint\) => \([\s\S]*?inline-flex min-w-0 items-baseline justify-center[\s\S]*?whitespace-nowrap tabular-nums/, 'both picker endpoints share the fully visible, single-line trigger layout')
+  assert.match(picker, /\{triggerEndpoint\(triggerEndpoints\.start\)\}[\s\S]*?\{triggerEndpoint\(triggerEndpoints\.end\)\}/, 'the report trigger renders both complete endpoints, date and time')
 })
 
 // --- Part 586: density, and the Khmer line box ----------------------------

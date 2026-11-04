@@ -192,21 +192,24 @@ try {
 
   for (const width of [320, 360, 390, 768, 1280]) {
     await setViewport(width, 480)
-    const geometry = await evaluate<{ viewport: number; body: number; buttonClient: number; buttonScroll: number; values: string }>(`(() => {
+    const geometry = await evaluate<{ viewport: number; body: number; buttonClient: number; buttonScroll: number; values: string; clipped: boolean }>(`(() => {
       const button = document.querySelector('[data-stats-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]')
-      return { viewport: document.documentElement.clientWidth, body: document.documentElement.scrollWidth, buttonClient: button.clientWidth, buttonScroll: button.scrollWidth, values: button.querySelector('[data-date-range-trigger-values]').textContent }
+      const track = button.querySelector('[data-date-range-trigger-values]')
+      const clipped = [...track.children].some((node) => node.tagName === 'SPAN' && node.scrollWidth > node.clientWidth + 1)
+      return { viewport: document.documentElement.clientWidth, body: document.documentElement.scrollWidth, buttonClient: button.clientWidth, buttonScroll: button.scrollWidth, values: track.textContent, clipped }
     })()`)
     assert.equal(geometry.body, geometry.viewport, `${width}px page has no horizontal overflow`)
     assert.ok(geometry.buttonScroll <= geometry.buttonClient + 1, `${width}px action-heavy range trigger keeps all content inside its box`)
-    for (const value of ['01/02/2028', '29/02/2028']) assert.ok(geometry.values.includes(value), `${width}px trigger keeps ${value} visible`)
-    assert.doesNotMatch(geometry.values, /\d{2}:\d{2}/, 'times stay inside the picker')
+    assert.equal(geometry.clipped, false, `${width}px neither endpoint is clipped by its own box`)
+    // TIME-1: a timed surface prints each endpoint's time beside its date.
+    for (const value of ['01/02/2028', '29/02/2028', '00:00', '23:59']) assert.ok(geometry.values.includes(value), `${width}px trigger keeps ${value} visible`)
 
     // P9 follow-up (Sep 16 2026): the Reports compact control row (real
     // reports-surface.css rules applied, not just the shared component) must
     // keep the same no-overflow / full-value contract, and below 400px stack
     // Start above End as two lines rather than breaking either date/time
     // string mid-word.
-    const reportsGeometry = await evaluate<{ body: number; viewport: number; buttonClient: number; buttonScroll: number; values: string; startTop: number; endTop: number }>(`(() => {
+    const reportsGeometry = await evaluate<{ body: number; viewport: number; buttonClient: number; buttonScroll: number; values: string; startTop: number; endTop: number; clipped: boolean }>(`(() => {
       const button = document.querySelector('[data-reports-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]')
       const track = button.querySelector('[data-date-range-trigger-values]')
       const spans = track.querySelectorAll(':scope > span')
@@ -214,12 +217,15 @@ try {
         body: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
         buttonClient: button.clientWidth, buttonScroll: button.scrollWidth, values: track.textContent,
         startTop: spans[0].getBoundingClientRect().top, endTop: spans[1].getBoundingClientRect().top,
+        clipped: [...spans].some((node) => node.scrollWidth > node.clientWidth + 1),
       }
     })()`)
     assert.equal(reportsGeometry.body, reportsGeometry.viewport, `${width}px reports control row has no horizontal overflow`)
     assert.ok(reportsGeometry.buttonScroll <= reportsGeometry.buttonClient + 1, `${width}px reports range trigger keeps all content inside its box`)
-    for (const value of ['01/02/2028', '29/02/2028']) assert.ok(reportsGeometry.values.includes(value), `${width}px reports trigger keeps ${value} visible, never broken mid-string`)
-    assert.doesNotMatch(reportsGeometry.values, /\d{2}:\d{2}/, 'Reports keeps times inside the picker')
+    assert.equal(reportsGeometry.clipped, false, `${width}px reports endpoints are not clipped by their own box`)
+    for (const value of ['01/02/2028', '29/02/2028', '00:00', '23:59']) assert.ok(reportsGeometry.values.includes(value), `${width}px reports trigger keeps ${value} visible, never broken mid-string`)
+    // A host that does not filter by time keeps the plain date-only trigger.
+    assert.doesNotMatch(await evaluate<string>(`document.querySelector('[data-direct-fixture] [data-date-range-trigger-values]').textContent`), /\d{2}:\d{2}/, `${width}px a showTime={false} trigger prints dates only`)
     // Below 400px the CSS stacks Start above End (two distinct row tops);
     // at/above it they stay side by side (same row top).
     assert.equal(reportsGeometry.endTop, reportsGeometry.startTop, `${width}px reports trigger keeps Start and End side by side`)
@@ -251,7 +257,7 @@ try {
   assert.equal(panel.overflowY, 'auto')
   assert.ok(panel.scrollHeight > panel.clientHeight, 'expanded time and calendar controls become an internal scroll surface on a short viewport')
   assert.equal(panel.presetRail, false, 'StatsRangeRow external presets suppress the duplicate picker rail')
-  assert.deepEqual(await evaluate<string[]>(`Array.from(document.querySelectorAll('[data-date-time-range-panel] input[placeholder="HH:MM"]'), input => input.value)`), ['00:00', '23:59'], 'hidden trigger times remain in the editable panel')
+  assert.deepEqual(await evaluate<string[]>(`Array.from(document.querySelectorAll('[data-date-time-range-panel] input[placeholder="HH:MM"]'), input => input.value)`), ['00:00', '23:59'], 'trigger times remain editable in the panel')
   await evaluate(`(() => {
     const input = document.querySelector('[data-date-time-range-panel] input[placeholder="HH:MM"]')
     input.focus()
@@ -260,7 +266,7 @@ try {
     input.blur()
   })()`)
   await waitFor(async () => await evaluate<boolean>(`JSON.parse(document.querySelector('[data-range-state]').textContent).startTime === '09:30'`) ? true : null)
-  assert.doesNotMatch(await evaluate<string>(`document.querySelector('[data-stats-fixture] [data-date-range-trigger-values]').textContent`), /09:30/, 'time edits update the range without returning to the outside button')
+  assert.match(await evaluate<string>(`document.querySelector('[data-stats-fixture] [data-date-range-trigger-values]').textContent`), /09:30/, 'a time edited in the panel shows on the outside button at once')
 
   const navLabels = await evaluate<string[]>(`Array.from(document.querySelectorAll('[data-date-range-nav]'), (node) => node.getAttribute('aria-label'))`)
   assert.deepEqual(navLabels, ['មុន ឆ្នាំ', 'មុន ខែ', 'បន្ទាប់ ខែ', 'បន្ទាប់ ឆ្នាំ'])

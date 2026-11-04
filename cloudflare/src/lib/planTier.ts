@@ -247,6 +247,12 @@ export type PlanLimits = {
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
 
+  // lib/dashboardStockOverview.ts, read switch `dash_overview_5m` ON: the longest the Dashboard stock overview is ever served after it was
+  // computed (the owner's "up to 5 minutes old, with the time it was calculated"). It is also the length of the time bucket in the key, so a
+  // sale does not recompute it: only a product or inventory write (they bump the 'products' version), a low-stock setting, a deploy, a restore
+  // or this window moving does. Paid 300 s, Free 300 s: a freshness promise to the owner, not a plan-sized saving.
+  dashboardOverviewMaxAgeSeconds: number
+
   // lib/readSwitches.ts: how long one isolate remembers the one system_flags read that carries the in-app read switches AND the
   // data epoch (X-BOS-Switches, X-BOS-Epoch, every cache key). A kill switch or a restore's new epoch reaches every isolate within
   // one window, so this is also the longest a flip or an epoch rotation takes to be seen, and what a restore waits before it
@@ -383,6 +389,7 @@ const PAID_LIMITS: PlanLimits = {
   inventoryCheckApprovalTakeoverSeconds: 5 * 60,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
@@ -421,6 +428,7 @@ const FREE_LIMITS: PlanLimits = {
   inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,

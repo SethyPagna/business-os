@@ -144,6 +144,7 @@ const PAID = {
   inventoryCheckApprovalTakeoverSeconds: 300,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
@@ -181,6 +182,7 @@ const FREE = {
   inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
@@ -231,7 +233,9 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows']
+// dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
+// the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
