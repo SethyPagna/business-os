@@ -118,6 +118,20 @@ export type PlanLimits = {
   // chunk that still overshoots on either plan.
   bulkDeleteChunkSize: number
 
+  // ---- Payment-method rename ---------------------------------------------
+
+  // routes/settings.ts loadPaymentMethodCandidates -- sales read per D1 call
+  // by GET /payment-methods/impact and by the linked POST /payment-methods/
+  // replace (id, payment_method, payment_details only; keyset on sales.id, so
+  // a page edge can never split a sale). The scan is one call per page, so on
+  // Free the page is what keeps ~16k sales under the 50 calls per invocation:
+  // 200 a page took 80 calls, 5000 takes 4 and (with ~20 calls around the
+  // scan) stays under 50 until ~150k sales. Paid 200 is today's page, kept so the Paid path reads exactly what
+  // it read before (Paid has 1000 calls). Unlike the ceilings above, Free's
+  // number is the LARGER one: a bigger page is fewer calls, and calls are
+  // what Free rations; test-plan-tier-pure.cjs lists such fields by name.
+  paymentMethodScanPageSize: number
+
   // ---- Backup ------------------------------------------------------------
 
   // backup.ts MAX_ASSET_BYTES_PER_BACKUP (misnamed at its definition site:
@@ -303,6 +317,7 @@ const PAID_LIMITS: PlanLimits = {
   stockActionAddConcurrency: 12,
   historicalSalesImportConcurrency: 12,
   bulkDeleteChunkSize: 500,
+  paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
   maxImageDeletesPerReset: 500,
@@ -332,6 +347,7 @@ const FREE_LIMITS: PlanLimits = {
   stockActionAddConcurrency: 6,
   historicalSalesImportConcurrency: 6,
   bulkDeleteChunkSize: 125,
+  paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
   maxImageDeletesPerReset: 40,

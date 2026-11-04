@@ -63,6 +63,9 @@ const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/paymentMethodRegistry': {},
   '../lib/paymentSettlement': {},
   '../lib/permissions': permissions,
+  // routes/settings.ts reads its payment-method scan page size from the plan tier (P1.2); the real module is
+  // pure (a type-only import), and this test never reaches the payment-method scan.
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   // The real P1-3 admin-only-key guard (pure, no imports of its own).
   '../lib/settingsAdminKeys': loadReal('lib/settingsAdminKeys.ts'),
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),

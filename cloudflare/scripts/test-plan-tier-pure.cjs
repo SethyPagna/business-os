@@ -131,6 +131,7 @@ const PAID = {
   stockActionAddConcurrency: 12,
   historicalSalesImportConcurrency: 12,
   bulkDeleteChunkSize: 500,
+  paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
   maxImageDeletesPerReset: 500,
@@ -159,6 +160,7 @@ const FREE = {
   stockActionAddConcurrency: 6,
   historicalSalesImportConcurrency: 6,
   bulkDeleteChunkSize: 125,
+  paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
   maxImageDeletesPerReset: 40,
@@ -199,6 +201,12 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
 const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds']
 
+// PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
+// deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
+// lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
+const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
+
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
 // Without this, every assertion above still passes when the free table is a
@@ -210,13 +218,13 @@ check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, 
   for (const key of Object.keys(paid)) {
     if (key === 'tier') continue
     if (free[key] === paid[key]) same.push(key)
-    if (typeof paid[key] === 'number' && FREE_IS_LONGER.includes(key)) {
+    if (typeof paid[key] === 'number' && FREE_IS_LONGER_ALL.includes(key)) {
       assert.ok(free[key] > paid[key], `free.${key} (${free[key]}) is a lifetime and must be strictly LONGER than paid.${key} (${paid[key]})`)
     } else if (typeof paid[key] === 'number') {
       assert.ok(free[key] < paid[key], `free.${key} (${free[key]}) must be strictly smaller than paid.${key} (${paid[key]})`)
     }
   }
-  for (const key of FREE_IS_LONGER) assert.ok(Object.hasOwn(paid, key), `FREE_IS_LONGER names a field that does not exist: ${key}`)
+  for (const key of FREE_IS_LONGER_ALL) assert.ok(Object.hasOwn(paid, key), `FREE_IS_LONGER names a field that does not exist: ${key}`)
   assert.deepEqual(same, [], `these fields are identical on both tiers, so the split does nothing for them: ${same.join(', ')}`)
   // And the control's own control: a deliberately identical pair must be
   // REPORTED as identical, so a green run above cannot come from the
@@ -234,6 +242,14 @@ check('a free deployment stays inside the platform ceilings it is sized against'
   assert.ok(free.maxImageDeletesPerReset <= 50, 'a free reset image sweep must fit the 50-subrequest ceiling')
   assert.equal(free.d1MaxDatabaseBytes, 500 * 1024 * 1024)
   assert.equal(free.scheduledBackupEnabled, false, 'a full D1 backup cannot run inside a 10ms cron invocation')
+  // The payment-method rename scans every sale, one D1 call per page. About
+  // 20 calls go to auth, settings, the revision snapshot, the write batch and
+  // the audit read-back; the rest is the scan. 100,000 sales is more than six
+  // times the shop's ~16k, and must still fit.
+  assert.ok(Math.ceil(100_000 / free.paymentMethodScanPageSize) + 20 <= free.d1QueriesPerInvocation,
+    'a free payment-method rename over 100,000 sales must fit the 50-call ceiling')
+  assert.ok(Math.ceil(16_000 / PLAN_LIMITS_BY_TIER.paid.paymentMethodScanPageSize) + 20 > free.d1QueriesPerInvocation,
+    'control: the PAID page would not fit the Free ceiling (that is why the page is a plan field)')
 })
 
 // 6.0.1048 (owner rule, 3 Nov): a Free-sized number is a field here, never a literal at the call site. The switch/epoch memo was one.

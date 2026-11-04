@@ -304,8 +304,9 @@ await check('both transfer routes use the shared read-only provenance planner an
     assert.match(body, /await planTransferOperation\(db,/)
     // The statements ride in ONE batch whose final statement is the ordinary
     // maintenance guard, so a maintenance marker arriving after admission rolls
-    // the whole transfer back (lib/businessMaintenanceGuard.ts).
-    assert.match(body, /await executeStockTransaction\(db, \[\.\.\.statements, ordinaryBusinessMaintenanceGuard\], 'retry'\)/)
+    // the whole transfer back (lib/businessMaintenanceGuard.ts). transfer-bulk
+    // adds its read-back SELECTs (receipt, on-hand) ahead of the guard.
+    assert.match(body, /await executeStockTransaction\(db, \[\.\.\.statements, (?:\.\.\.readBack, )?ordinaryBusinessMaintenanceGuard\], 'retry'\)/)
     assert.doesNotMatch(body, /await db\.batch\(\[\.\.\.statements/)
     assert.doesNotMatch(body, /await resolveDestinationBatch\(/)
   }

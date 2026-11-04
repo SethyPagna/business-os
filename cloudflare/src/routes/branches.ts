@@ -22,7 +22,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
     return false
   }
 }
-import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
+import { buildInClause, chunkForBinding } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
@@ -60,7 +60,7 @@ import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds }
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
-import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
+import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest, type TransferReceiptRow } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -634,27 +634,25 @@ app.post('/transfer-bulk', async (c) => {
     }
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
-  // A transfer can carry any number of lines, so both product lookups are
-  // chunked to stay inside D1's 100-bound-parameter limit; @branchId is
-  // reserved out of the stock query's budget.
+  // A transfer can carry up to 200 lines. Every per-line lookup is one
+  // statement over json_each(@ids) -- one bound parameter whatever the line
+  // count -- so the Free plan's 50-calls-per-invocation limit is never a
+  // function of the transfer's size.
   const productIds = items.map((item) => item.productId)
+  const productIdsJson = JSON.stringify(productIds)
 
-  const [products, stockRows, fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
-    selectInChunks(productIds, 0, (chunk) => {
-      const { sql, params } = buildInClause('id', chunk)
-      return db.prepare(`
-        SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
-        FROM products WHERE id IN (${sql})
-      `).all<ProductIdentityRow>(params)
-    }),
-    selectInChunks(productIds, 1, (chunk) => {
-      const { sql, params } = buildInClause('id', chunk)
-      return db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (${sql})`).all<{ product_id: number; quantity: number }>({ ...params, branchId: fromBranchId })
-    }),
-    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
+  const [products, stockRows, endpointBranches, canonicalTransferRows] = await Promise.all([
+    db.prepare(`
+      SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
+      FROM products WHERE id IN (SELECT value FROM json_each(@ids))
+    `).all<ProductIdentityRow>({ ids: productIdsJson }),
+    db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (SELECT value FROM json_each(@ids))`)
+      .all<{ product_id: number; quantity: number }>({ ids: productIdsJson, branchId: fromBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id IN (@from, @to)').all<{ id: number; name: string; role: string | null }>({ from: fromBranchId, to: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
+  const fromBranch = endpointBranches.find((branch) => Number(branch.id) === fromBranchId)
+  const toBranch = endpointBranches.find((branch) => Number(branch.id) === toBranchId)
 
   let canonicalTransferPair: CanonicalTransferPair
   try {
@@ -710,17 +708,12 @@ app.post('/transfer-bulk', async (c) => {
   const batchById = new Map<number, { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>()
   if (batchItems.length) {
     const batchIds = [...new Set(batchItems.map((item) => item.batchId))]
+    const batchIdsJson = JSON.stringify(batchIds)
     const [batchRows, batchStockRows] = await Promise.all([
-      selectInChunks(batchIds, 0, (chunk) => {
-        const { sql, params } = buildInClause('bid', chunk)
-        return db.prepare(`SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
-          .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>(params)
-      }),
-      selectInChunks(batchIds, 1, (chunk) => {
-        const { sql, params } = buildInClause('bid', chunk)
-        return db.prepare(`SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = @branchId AND batch_id IN (${sql})`)
-          .all<{ batch_id: number; quantity: number }>({ ...params, branchId: fromBranchId })
-      }),
+      db.prepare(`SELECT id, variant_product_id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id IN (SELECT value FROM json_each(@ids)) AND is_active = 1`)
+        .all<{ id: number; variant_product_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>({ ids: batchIdsJson }),
+      db.prepare(`SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = @branchId AND batch_id IN (SELECT value FROM json_each(@ids))`)
+        .all<{ batch_id: number; quantity: number }>({ ids: batchIdsJson, branchId: fromBranchId }),
     ])
     const batchRowById = new Map(batchRows.map((row) => [row.id, row]))
     const batchStockById = new Map(batchStockRows.map((row) => [row.batch_id, Number(row.quantity) || 0]))
@@ -748,15 +741,34 @@ app.post('/transfer-bulk', async (c) => {
     const lot = item.batchId == null ? null : batchById.get(item.batchId)
     if (lot) { receivedDateByItemIndex.set(index, lot.received_at); lotCodeByItemIndex.set(index, lot.lot_code) }
   }
+  const lines = items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId }))
+  // Read back inside the same atomic batch, after its writes: the committed
+  // receipt and each line's resulting on-hand for the Telegram notice. One
+  // call for any line count; reading them afterwards cost 3 calls per line
+  // and, past 11 lines, pushed the request over the Free plan's 50-call
+  // limit after the stock had already moved.
+  let onHandRows: Array<{ from_on_hand: number | null; to_on_hand: number | null; total_on_hand: number | null }> = []
+  let committedReceipt: TransferReceiptRow | undefined
   try {
     // Planned inside the try, as in /transfer: every refusal is a 4xx.
-    const { statements } = await planTransferOperation(db, {
+    const { statements, operationId } = await planTransferOperation(db, {
       user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
-      fromBranchId, toBranchId, reason,
-      lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
-      response: responsePayload,
+      fromBranchId, toBranchId, reason, lines, response: responsePayload,
     })
-    await executeStockTransaction(db, [...statements, ordinaryBusinessMaintenanceGuard], 'retry')
+    const readBack = [{
+      sql: `SELECT
+          (SELECT COALESCE(quantity, 0) FROM branch_stock WHERE product_id = json_extract(j.value, '$[0]') AND branch_id = @from) AS from_on_hand,
+          (SELECT COALESCE(quantity, 0) FROM branch_stock WHERE product_id = json_extract(j.value, '$[1]') AND branch_id = @to) AS to_on_hand,
+          (SELECT COALESCE(stock_quantity, 0) FROM products WHERE id = json_extract(j.value, '$[1]')) AS total_on_hand
+        FROM json_each(@lines) j ORDER BY j.key`,
+      params: { lines: JSON.stringify(lines.map((line) => [line.productId, line.destProductId])), from: fromBranchId, to: toBranchId },
+    }, {
+      sql: `SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipts WHERE operation_id = @operation`,
+      params: { operation: operationId },
+    }]
+    const results = await executeStockTransaction(db, [...statements, ...readBack, ordinaryBusinessMaintenanceGuard], 'retry')
+    onHandRows = (results[statements.length]?.results ?? []) as typeof onHandRows
+    committedReceipt = results[statements.length + 1]?.results?.[0] as TransferReceiptRow | undefined
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -779,28 +791,22 @@ app.post('/transfer-bulk', async (c) => {
   // (the builder caps the list and states the remainder).
   c.executionCtx.waitUntil((async () => {
     const mergedInto = new Map(merges.map((merge) => [merge.productId, merge]))
-    const lines = await Promise.all(items.map(async (item, itemIndex) => {
-      const destProductId = mergedInto.get(item.productId)?.mergedIntoProductId ?? item.productId
-      const [fromRow, toRow, totalRow] = await Promise.all([
-        db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: item.productId, branchId: fromBranchId }),
-        db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: destProductId, branchId: toBranchId }),
-        db.prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId: destProductId }),
-      ])
-      return {
-        product: productById.get(item.productId)?.name || `#${item.productId}`, quantity: item.quantity,
-        receivedDate: receivedDateByItemIndex.get(itemIndex) || null,
-        lot: lotCodeByItemIndex.get(itemIndex) || null,
-        mergedInto: mergedInto.get(item.productId)?.mergedIntoProductName || null,
-        fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
-        totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
-      }
+    // A missing row stays null (shown as unknown), as the per-line reads did.
+    const onHand = (value: unknown) => value == null ? null : Number(value) || 0
+    const telegramLines = items.map((item, itemIndex) => ({
+      product: productById.get(item.productId)?.name || `#${item.productId}`, quantity: item.quantity,
+      receivedDate: receivedDateByItemIndex.get(itemIndex) || null,
+      lot: lotCodeByItemIndex.get(itemIndex) || null,
+      mergedInto: mergedInto.get(item.productId)?.mergedIntoProductName || null,
+      fromOnHand: onHand(onHandRows[itemIndex]?.from_on_hand), toOnHand: onHand(onHandRows[itemIndex]?.to_on_hand),
+      totalOnHand: onHand(onHandRows[itemIndex]?.total_on_hand),
     }))
     await sendTelegramEvent(c.env, {
       type: 'stock_out', heading: '🔁 Stock transferred',
-      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user), items: lines }),
+      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user), items: telegramLines }),
     })
   })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
-  return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
+  return c.json(transferReceiptResponse((committedReceipt ?? await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
 

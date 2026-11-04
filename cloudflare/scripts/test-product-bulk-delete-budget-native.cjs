@@ -184,12 +184,21 @@ async function terminalRecovery() {
     absent.raw.close()
     const contact = fixture('free', 2)
     contact.raw.exec("UPDATE bulk_delete_jobs SET entity_type='customers',status='completed',processed_count=2")
+    const contactJob = JSON.stringify(contact.job())
+    const contactAudits = contact.raw.prepare('SELECT * FROM audit_logs ORDER BY id').all()
     await contact.run()
-    assert.equal(contact.kv.size, 0, 'legacy non-product terminal flow is unchanged')
-    assert.equal(contact.env.broadcasts.length, 0)
+    // P1.2 review E1: the last chunk of a contacts job can commit while its delivery throws (lost acknowledgement) before
+    // the cache bump, so a redelivery of a COMPLETED contacts job repeats the invalidation -- and nothing else. It used to
+    // return silently, which left the lists stale. The job row and the audit log are exactly as they were.
+    assert.ok(contact.kv.size > 0, 'a completed contacts job repeats its cache invalidation')
+    assert.deepEqual(contact.env.broadcasts.map(b => [b.channel, b.payload.action, b.payload.jobId]), [['customers', 'bulk-delete', 'budget']])
+    assert.equal(JSON.stringify(contact.job()), contactJob, 'the job row is untouched')
+    assert.deepEqual(contact.raw.prepare('SELECT * FROM audit_logs ORDER BY id').all(), contactAudits, 'and nothing is audited again')
+    const contactKeys = contact.kv.size
     contact.raw.exec('DELETE FROM bulk_delete_jobs')
     await contact.run()
-    assert.equal(contact.kv.size, 0, 'missing job remains a no-op')
+    assert.equal(contact.kv.size, contactKeys, 'missing job remains a no-op')
+    assert.equal(contact.env.broadcasts.length, 1)
     contact.raw.close()
     const large = fixture('free', 2)
     large.raw.prepare("UPDATE bulk_delete_jobs SET status='completed',processed_count=50000,total_count=50000,ids_json=?").run(JSON.stringify(Array.from({ length: 50000 }, (_, i) => i + 1)))
