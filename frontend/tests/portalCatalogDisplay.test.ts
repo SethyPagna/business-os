@@ -301,7 +301,7 @@ runTest('stock withheld by the Worker (stock status off) is never read as out of
 })
 
 runTest('portal editor compacts compatible controls into responsive rows with mobile clearance', () => {
-  assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-hidden[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
+  assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-clip[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
   assert.match(catalogEditorSource, /data-testid="portal-visibility-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
   assert.match(catalogEditorSource, /data-testid="portal-layout-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-4/)
   assert.match(catalogEditorSource, /data-testid="portal-highlight-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
@@ -319,8 +319,8 @@ runTest('portal editor compaction keeps guidance, validation, preview, and linke
   assert.match(catalogEditorSource, /<HintLabel[\s\S]*stockThresholdHint/)
   assert.doesNotMatch(catalogEditorSource, /<p[^>]*>\{copy\('contactChannelsHint'/)
   assert.doesNotMatch(catalogEditorSource, /<p[^>]*>\{copy\('stockThresholdHint'/)
-  assert.match(catalogEditorSource, /disabled=\{editorSaving \|\| !editorDirty\} onClick=\{savePortalDraft\}/)
-  assert.match(catalogEditorSource, /previewSectionRef\.current\?\.scrollIntoView/)
+  assert.match(catalogEditorSource, /onSave=\{requestSave\}/, 'Save goes through the review (ED-1a); the button itself is editor/EditorBar.tsx')
+  assert.doesNotMatch(catalogEditorSource, /previewSectionRef|jumpToPreview/, 'the "Jump to preview" text button is gone (ED-1a); the eye button arrives with the split view (ED-1b)')
   assert.match(catalogEditorSource, /href=\{publicPortalUrl\}[^>]*target="_blank"/)
   assert.match(catalogEditorSource, /navigateTo\('loyalty_points'\)/)
 })

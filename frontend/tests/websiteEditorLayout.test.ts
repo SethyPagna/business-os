@@ -133,4 +133,123 @@ runTest('T-L6: a post card always shows its product picker and its web link fiel
   assert.match(page, /function updatePromoItemFields\(itemId: string, fields: Record<string, unknown>\) \{\n\s*setPromoItemsDraft\(promoItems\.map\(\(item\) => \(\n\s*item\.id === itemId \? \{ \.\.\.item, \.\.\.fields \} : item/)
 })
 
+// ED-1a (EDITOR-REDESIGN-REFRESH section C): the bar. Button policy: Save keeps icon + word, every other bar control is
+// icon-only with label = aria-label = tooltip. Sticky and opaque with no backdrop blur; one row, 56 px on a phone, 52 px from md.
+const editorFile = (name: string): string => read(`../src/components/catalog/editor/${name}`)
+const noComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
+runTest('T-L1: among the bar\'s buttons only Save shows text; the old text buttons are gone', () => {
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  const buttons = [...bar.matchAll(/<button\b[\s\S]*?<\/button>/g)].map((match) => match[0])
+  assert.equal(buttons.length, 1, 'EditorBar draws one <button>: Save. Every other control is an EditorIconButton')
+  assert.match(buttons[0], /<Save\b/, 'Save keeps its icon')
+  assert.match(buttons[0], /ed\('web_editor_save'/, '... and its word')
+  assert.match(buttons[0], /aria-disabled=/, 'idle and blocked Save stay focusable and ignore the press (aria-disabled, never disabled)')
+  assert.doesNotMatch(buttons[0], /(?<![-\w])disabled=/)
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  assert.doesNotMatch(surface, /jumpToPreview|saveChanges/, 'the "Jump to preview" and "Save changes" text buttons are gone from the surface')
+  assert.doesNotMatch(surface, /data-editor-section=/, 'the section buttons moved into EditorSectionNav')
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /<EditorIconButton\b/, 'an inactive chip is an icon-only EditorIconButton')
+})
+
+runTest('T-L2: an EditorIconButton\'s visible name, accessible name and tooltip are one string', () => {
+  const button = noComments(editorFile('EditorIconButton.tsx'))
+  assert.match(button, /\blabel: string\b/, 'label is required')
+  assert.equal([...button.matchAll(/aria-label=\{([^}]*)\}/g)].map((match) => match[1]).join(','), 'label', 'aria-label is the label')
+  assert.equal([...button.matchAll(/\btitle=\{([^}]*)\}/g)].map((match) => match[1]).join(','), 'label', 'the tooltip is the label')
+  assert.doesNotMatch(button, />[^<>{}]*[A-Za-z]{2,}[^<>{}]*</, 'no text child: the icon is the face')
+})
+
+runTest('T-L3: the bar is sticky, opaque and not blurred, one row of 56 px (52 px from md), with the status below it on a phone', () => {
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  assert.match(bar, /\bsticky\b/)
+  assert.doesNotMatch(bar, /backdrop-blur|bg-white\/|bg-slate-950\/|bg-white\/\d/, 'opaque: a blur over a near-opaque fill costs a GPU pass per scroll frame (stickyHeaderBlurRemoval)')
+  assert.match(bar, /data-testid="editor-bar-row"[^>]*\bh-14\b[^>]*\bmd:h-\[52px\]/, 'the row is 56 px on a phone and 52 px from md')
+  assert.match(bar, /role="status"/, 'the status is one live line')
+  assert.match(bar, /aria-busy=\{/, 'Save says busy while it saves')
+})
+
+runTest('T-L3b: the bar can stick: nothing between it and the page scroller is a scroll container', () => {
+  // CATCHES: overflow-x: hidden on the aside. CSS rewrites the paired overflow-y to auto, which makes the aside the scrollport
+  // every sticky descendant resolves against -- a box that never scrolls -- so the bar scrolled away with the page. clip is the
+  // one overflow value that is not rewritten (CatalogPreviewSurface.tsx records the same trap on the storefront).
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  const aside = surface.match(/<aside id="portal-editor-top" className="([^"]*)"/)?.[1] || ''
+  assert.ok(aside, 'the aside is found')
+  assert.match(aside, /(?:^|\s)overflow-x-clip(?:\s|$)/, 'the aside contains sideways overflow with clip')
+  assert.doesNotMatch(aside, /overflow-(?:x-|y-)?(?:hidden|auto|scroll)/, 'a hidden, auto or scroll aside would be the sticky bar its scrollport')
+})
+
+runTest('T-L3c: a refused field is centred inside the page scroller only, never with scrollIntoView on the app shell', () => {
+  // CATCHES: field.scrollIntoView({ block: 'center' }) after a refused Save. It scrolls every scrollable ancestor, the app shell around the
+  // page scroller included, which pushed the sticky bar about half out of the top of a 360 px phone (viewport ratio 0.57 in the e2e).
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  const start = surface.indexOf('function focusEditorField(')
+  assert.ok(start > 0, 'focusEditorField exists')
+  const body = surface.slice(start, surface.indexOf('\n}\n', start))
+  assert.match(body, /closest<HTMLElement>\('\.page-scroll'\)/, 'it finds the page scroller')
+  assert.match(body, /scroller\.scrollTop \+=/, 'and scrolls that one element')
+  assert.equal(count(body, /scrollIntoView/g), 1, 'scrollIntoView survives only as the fallback')
+  assert.ok(body.indexOf('scrollIntoView') > body.indexOf('if (!scroller)'), 'and only when there is no page scroller')
+})
+
+runTest('T-L5: the markers are in the accessible names, and every section is a tab panel named by what opened it', () => {
+  // CATCHES: an aria-label that replaces the inner text of a closed tab or the picker button, so a screen reader never heard "unsaved changes" or
+  // "seller details missing" (the dot and the triangle were the only carriers).
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /label=\{nameWithMarkers\(ed\(\.\.\.section\.label\), words\)\}/, 'a closed tab is named with its markers')
+  assert.match(nav, /nameWithMarkers = \(name: string, \{ unsaved, seller \}: MarkerWords\)[^\n]*\[name, unsaved, seller\]\.filter\(Boolean\)\.join\(', '\)/, 'name, then the unsaved words, then the seller words')
+  assert.match(nav, /id=\{sectionTabId\(section\.id\)\}[\s\S]*role="tab"[\s\S]*id=\{sectionTabId\(section\.id\)\}[\s\S]*role="tab"/, 'both the open and the closed tab carry the id a panel names itself by')
+  assert.match(nav, /id=\{SECTION_PICKER_ID\}/, 'and so does the picker button')
+  const surface = noComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  assert.match(surface, /const panel = \(id: EditorSectionId\) => \(\{ role: 'tabpanel', 'aria-labelledby': compact \? SECTION_PICKER_ID : sectionTabId\(id\) \}\)/)
+  for (const id of ['shop', 'contact', 'products', 'posts', 'about', 'faq', 'features']) {
+    assert.match(surface, new RegExp('<div id="portal-section-' + id + '" className=\\{[^\\n]*\\} \\{\\.\\.\\.panel\\(\'' + id + '\'\\)\\}>'), id + ' is a tab panel')
+  }
+})
+
+runTest('T-L4: the section picker is a menu of seven radio items; the chips are a tablist with a roving tabindex', () => {
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  assert.match(nav, /aria-haspopup="menu"/)
+  assert.match(nav, /role="menuitemradio"[\s\S]*aria-checked=/)
+  assert.match(nav, /aria-label=\{nameWithMarkers\(`\$\{sectionsLabel\}: \$\{currentLabel\}`, currentMarks\)\}/, 'the picker\'s name reads "Sections: Shop", plus the words of its markers')
+  assert.equal(count(nav, /ed\('web_editor_sections'/g), 1, 'the word "Sections" is asked for once and handed down')
+  assert.match(nav, /role="tablist"/)
+  assert.match(nav, /role="tab"[\s\S]*tabIndex=\{/, 'a roving tabindex')
+  for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 'Escape']) assert.ok(nav.includes(`'${key}'`), `${key} is handled`)
+  // The open tab is a different element from a closed one, so selecting by key remounts the tab reached: focus must follow the commit.
+  assert.match(nav, /focusAfterSelect\.current = true\s*onSelect\(target\.id\)/, 'an arrow key selects, then focus moves once the new tab is mounted')
+  assert.match(nav, /useEffect\(\(\) => \{\s*if \(!focusAfterSelect\.current\) return\s*focusAfterSelect\.current = false\s*chips\.current\.get\(active\)\?\.focus\(\)\s*\}, \[active\]\)/)
+  // The menu hangs from its button, so it moves with the bar however the page shifts (a scroll, a collapsing app header, a resize). Fixed to the
+  // screen it closed on every scroll event, and a late one shut it as it opened.
+  assert.match(nav, /role="menu"[\s\S]*className="absolute left-0 top-full /, 'the menu is absolute under its button')
+  assert.match(nav, /className="absolute left-0 top-full [^"]*\bw-max\b[^"]*\bmin-w-full\b/, 'as wide as its longest name (an absolute box is otherwise capped at the button width and wraps Khmer)')
+  assert.doesNotMatch(nav, /\bfixed\b/, 'and not fixed to the screen')
+  assert.doesNotMatch(nav, /addEventListener\('(?:scroll|resize)'/, 'so there is no scroll or resize handler to close it')
+  assert.match(nav, /web_editor_unsaved/, 'a dirty dot has sr-only text')
+  assert.match(nav, /web_editor_seller_missing/, 'the amber Contact marker has sr-only text')
+  assert.match(nav, /amber/, 'and differs in colour from the dirty dot')
+})
+
+runTest('T-L4b: on a short row the picker\'s word gives way (an ellipsis, with room for Khmer) and its icon, chevron and markers never do', () => {
+  const nav = noComments(editorFile('EditorSectionNav.tsx'))
+  // The word is the only part that may shrink: min-w-0 down the chain (a flex item is otherwise as wide as its text) and an ellipsis at the end.
+  // py-1 because overflow:hidden clips at the line box, and Khmer vowel signs and subscripts stand outside a box sized for Latin text.
+  assert.match(nav, /<span className="min-w-0 truncate py-1">\{currentLabel\}<\/span>/, 'the picker word truncates, with vertical room')
+  assert.match(nav, /<button\s+ref=\{buttonRef\}[\s\S]*?className="inline-flex min-h-11 min-w-0 max-w-full /, 'the picker button may shrink below its text')
+  // At 320 px in Khmer the chevron crossed the button's edge and the dot was drawn under Save: none of these may give up its room.
+  const picker = nav.slice(nav.indexOf('<CurrentIcon'), nav.indexOf('{open ? ('))
+  assert.match(picker, /<CurrentIcon className="h-5 w-5 shrink-0"/, 'the section icon keeps its room')
+  assert.match(picker, /<ChevronDown className="h-4 w-4 shrink-0"/, 'the chevron keeps its room')
+  const markers = nav.slice(nav.indexOf('function Markers'), nav.indexOf('type InnerProps'))
+  assert.match(markers, /className="h-2 w-2 shrink-0 rounded-full/, 'the unsaved dot keeps its room')
+  assert.match(markers, /<AlertTriangle aria-hidden className="h-3\.5 w-3\.5 shrink-0/, 'the amber triangle keeps its room')
+  // Below 360 px the gaps and padding tighten so less of the word is lost.
+  assert.match(nav, /max-\[359px\]:gap-1\.5 max-\[359px\]:px-2/, 'the picker tightens on the narrowest phones')
+  const bar = noComments(editorFile('EditorBar.tsx'))
+  assert.match(bar, /max-\[359px\]:px-2/, 'and so does the bar')
+  assert.match(bar, /max-\[359px\]:gap-1\.5/)
+})
+
 if (failed) process.exit(1)

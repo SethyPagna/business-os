@@ -40,7 +40,10 @@ try {
   fs.mkdirSync(assets, { recursive: true })
   // The till, sales and report pages are closure-checked too (6.0.880), and the barcode decode worker must exist (6.0.935).
   const staticChecked = ['POS', 'Dashboard', 'SaleDetailModal', 'Receipt', 'InventoryChecksPage', 'ReportsHub', 'CancelSaleModal', 'ExportModal', 'FeesPage', 'AddressPresetPicker', 'Sales', 'barcodeDecode.worker']
-  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...staticChecked]) {
+  // 6.0.1171: the Website Editor is a lazy chunk reached only from the catalog route, and Receipt Settings must not pull either one
+  // (a shared icon once folded into catalog-editor and dragged the editor into /receipt-settings), so the graph needs all three.
+  const editorChunks = ['catalog', 'catalog-editor', 'ReceiptSettings']
+  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...editorChunks, ...staticChecked]) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
   // The Expenses transport chunk and the pages that must NOT load it (E1-F): only the Expenses page imports it here.
@@ -61,7 +64,7 @@ try {
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 24 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 27 chunks, zero cycles/)
   // A till page that statically imports SheetJS must fail the gate.
   fs.writeFileSync(path.join(assets, 'vendor-xlsx-12345678.js'), 'export const xlsx = 1;')
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'import { xlsx } from "./vendor-xlsx-12345678.js"; export const value = xlsx;')
@@ -76,6 +79,29 @@ try {
   assert.notEqual(feesOnReturns.status, 0)
   assert.match(feesOnReturns.stdout + feesOnReturns.stderr, /only chunks that use fees code may statically import fees-api/)
   fs.writeFileSync(path.join(assets, 'Returns-12345678.js'), 'export const value = 1;')
+  // The lazy editor stays lazy. Three ways it can stop being lazy, each its own failure: any chunk but the catalog route importing the
+  // editor, Receipt Settings reaching the catalog page (and so the editor behind it), and Receipt Settings reaching the page alone.
+  const write = (name: string, source: string) => fs.writeFileSync(path.join(assets, name + '-12345678.js'), source)
+  const failure = (result: ReturnType<typeof verify>, pattern: RegExp) => {
+    assert.notEqual(result.status, 0)
+    assert.match(result.stdout + result.stderr, pattern)
+  }
+  write('ReceiptSettings', 'import { value } from "./catalog-editor-12345678.js"; export const settings = value;')
+  failure(verify(), /only the catalog route may statically import catalog-editor/)
+  write('ReceiptSettings', 'export const value = 1;')
+  write('Sales', 'import { value } from "./catalog-editor-12345678.js"; export const sales = value;')
+  failure(verify(), /only the catalog route may statically import catalog-editor/)
+  write('Sales', 'export const value = 1;')
+  // The catalog route importing the editor is the one allowed edge, and it must pass.
+  write('catalog', 'import { value } from "./catalog-editor-12345678.js"; export const catalog = value;')
+  const catalogImportsEditor = verify()
+  assert.equal(catalogImportsEditor.status, 0, catalogImportsEditor.stdout + catalogImportsEditor.stderr)
+  // Receipt Settings reaching the allowed edge through the catalog page pulls the editor with it.
+  write('ReceiptSettings', 'import { catalog } from "./catalog-12345678.js"; export const settings = catalog;')
+  failure(verify(), /ReceiptSettings statically pulls catalog-editor/)
+  write('catalog', 'export const value = 1;')
+  failure(verify(), /ReceiptSettings statically pulls catalog\b(?!-)/)
+  write('ReceiptSettings', 'export const value = 1;')
   // A decode worker that imports another chunk is no longer self-contained.
   fs.writeFileSync(path.join(assets, 'barcodeDecode.worker-12345678.js'), 'import "./vendor-12345678.js"; export const value = 1;')
   const workerImport = verify()
