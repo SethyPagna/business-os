@@ -1,4 +1,4 @@
-import { normalizePriceValue } from '../../utils/pricing.ts'
+import { normalizePriceValue, priceText } from '../../utils/pricing.ts'
 import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney2, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
 import { capturePricingProduct, evaluateCapturedPricingPool, SaleDiscountRefusedError, type CapturedPricingPool, type ExactLinePricing, type PricingSource } from '../../utils/saleItemPricing.ts'
@@ -909,9 +909,9 @@ export function buildVariantOptionLabels(
     let hint: string | null = null
     if (barcodeVaries) {
       label = barcode || String(row?.sku || '') || 'No barcode'
-      if (priceVaries) hint = formatPrice(price)
+      if (priceVaries) hint = priceText(formatPrice, price)
     } else if (priceVaries) {
-      label = formatPrice(price)
+      label = priceText(formatPrice, price)
     } else {
       // Neither barcode nor selling price distinguishes these rows (and cost is
       // never shown). The shared barcode would render as identical pills, so

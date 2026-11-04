@@ -108,11 +108,10 @@ const SALES: Array<{ row: Row; blocked: string[]; why: string }> = [
   { row: listRow(1, 'awaiting_payment', {}), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'owes the whole total' },
   { row: listRow(2, 'awaiting_payment', { amount_paid_khr: 41000 }), blocked: [], why: 'paid to the riel in KHR' },
   { row: listRow(3, 'completed', {}), blocked: [], why: 'already Completed: not this rule\'s move' },
-  // Paid means covered to within half a US cent (the one definition in
-  // saleStatusResolution.ts). $9.99 + 20 riel at 4,100 is $0.0051 short, one
-  // step past the band. (This row used to be $9.99 + 40 riel, $0.00024 short:
-  // a tender the POS records Completed, so it is paid now -- pinned below.)
-  { row: listRow(4, 'awaiting_payment', { amount_paid_usd: 9.99, amount_paid_khr: 20 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'just over half a cent short on a mixed tender' },
+  // Paid means covered (the one definition in saleStatusResolution.ts): within half a US cent, or -- a tender with
+  // riel -- short by under 100 riel (owner ruling, 27 Oct 2026). $9.97 + 20 riel at 4,100 is 103 riel short, past
+  // the riel rule. (This row used to be $9.99 + 20 riel, 21 riel short: under one riel note, so it is paid now.)
+  { row: listRow(4, 'awaiting_payment', { amount_paid_usd: 9.97, amount_paid_khr: 20 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'a mixed tender 103 riel short' },
   { row: listRow(5, null, {}), blocked: [], why: 'a NULL status is a legacy Completed' },
   // A return keeps the payment state in status_before_return and lowers what is owed (owner, 29 Sep / 6 Oct 2026).
   { row: listRow(7, 'partial_return', { status_before_return: 'awaiting_payment', refund_usd: 4 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'a returned Not Paid sale that still owes $6' },

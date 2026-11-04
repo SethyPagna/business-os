@@ -1382,8 +1382,8 @@ assert.match(
 )
 assert.match(
   dashboardExport,
-  /formatPriceNumber/,
-  'dashboard export chunk should own export-only price formatting',
+  /formatMoneyNumber/,
+  'dashboard export chunk should own export-only money formatting (nearest cent: report figures are displayed money, not selling prices)',
 )
 assert.match(
   viteConfig,

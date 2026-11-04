@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import * as actorReadScope from '../src/api/actorReadScope.ts'
 import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
+import { shiftCountIssue, shiftRielCountInvalid } from '../src/components/shifts/shiftCountRules.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -218,6 +219,7 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('shared/Modal')) return { default: ModalMarker }
   if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
   if (name.includes('formatters')) return { fmtDateTime24: String, parseServerTimestampMs: Date.parse }
+  if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
   if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
@@ -284,6 +286,7 @@ try {
     if (name.includes('formatters')) return { fmtDateOnly: String }
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
     if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
+    if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
     if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
       listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
       closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
@@ -349,6 +352,7 @@ try {
       if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
       if (name.includes('formatters')) return { fmtDateOnly: String }
       if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
+      if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
       if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
         listShifts: async () => ({ shifts: [], total: 0, page: 1, scope: 'own' }),
         fetchShiftHistory: async () => { detailReads++; return { shift: fixture, amendments: [] } },

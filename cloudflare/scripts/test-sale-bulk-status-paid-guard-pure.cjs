@@ -99,14 +99,13 @@ const statuses = (f) => f.sql.prepare('SELECT id,sale_status FROM sales ORDER BY
     assert.equal(h.snapshot(f), before)
   })
 
-  // Paid means covered to within half a US cent (the one definition in
-  // saleStatusResolution.ts). This case used to name a sale ONE riel short
-  // ($0.00024); that tender is paid now -- the POS records it Completed -- so
-  // the uncovered row is 21 riel ($0.0051) short, one step past the band.
-  await runTest('every uncovered sale is named, including one short by just over half a cent', async () => {
+  // Paid means covered (the one definition in saleStatusResolution.ts): within half a US cent, or -- a tender with riel
+  // -- short by under 100 riel (owner ruling, 27 Oct 2026). The uncovered riel row is 100 riel short, the first riel
+  // amount past that rule (it used to be 21 riel short, past the half-cent band; that tender is paid now).
+  await runTest('every uncovered sale is named, including a riel tender one 100-riel note short', async () => {
     const f = h.fixture(); h.seed(f, 3)
     setMoney(f, 1, { total: 10, paidUsd: 4 })       // partly paid is not paid
-    setMoney(f, 2, { total: 10, paidKhr: 40979 })   // 21 riel short at 4100
+    setMoney(f, 2, { total: 10, paidKhr: 40900 })   // 100 riel short at 4100
     setMoney(f, 3, { total: 10, paidUsd: 5, paidKhr: 20500 }) // mixed, exactly covered
     const before = h.snapshot(f)
     const refused = await f.call(h.sales, '/bulk-status', h.request(f, 'completed', 'bulk-short-past-the-band'))

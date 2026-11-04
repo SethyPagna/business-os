@@ -143,6 +143,7 @@ let currentUserId = 7
 const primaryD1 = d1(sqlite)
 let activeD1 = primaryD1
 const shiftsRoute = loadReal('routes/shifts.ts', {
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
@@ -315,6 +316,7 @@ async function main() {
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
@@ -355,7 +357,7 @@ async function main() {
   const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-  const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+  const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {

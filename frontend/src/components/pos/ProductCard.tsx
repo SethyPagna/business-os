@@ -1,4 +1,5 @@
 import ProductNameRail from '../shared/ProductNameRail'
+import { priceText } from '../../utils/pricing.ts'
 /**
  * ONE product card. The POS grid's card, lifted out of POS.tsx so the other
  * surface that searches products for a SALE -- the sale detail modal's
@@ -97,7 +98,7 @@ function promotionText(product: ProductCardProduct, promotionRules: readonly Pro
   const badge = promotionBadgeForProduct(product, promotionRules)
   return badge.kind === 'quantity_hint'
     ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
-    : `${(badge.show_title && badge.title) || String(product.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
+    : `${(badge.show_title && badge.title) || String(product.discount_label || '') || label} ${priceText(fmtUSD, evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
 }
 
 function ProductDiscountBadge({
@@ -120,7 +121,7 @@ function ProductDiscountBadge({
   if (!badge.active) return null
   const text = badge.kind === 'quantity_hint'
     ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
-    : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
+    : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${priceText(fmtUSD, evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
   return (
     <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text} data-reveal-text={text}>
       {text}
@@ -210,15 +211,15 @@ function ProductCardComponent({
           option selling price. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="text-sm font-bold text-blue-600">
-          {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(product.selling_price_usd)) : asNumber(product.selling_price_usd))}
+          {priceText(fmtUSD, groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(product.selling_price_usd)) : asNumber(product.selling_price_usd))}
         </span>
       </div>
-      {!posPresentation && asNumber(product.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(product.selling_price_khr))}</p> : null}
+      {!posPresentation && asNumber(product.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{priceText(fmtKHR, asNumber(product.selling_price_khr))}</p> : null}
       {!posPresentation && promoBadge.active ? (
         <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
           {promoBadge.kind === 'quantity_hint'
             ? ((promoBadge.show_title && promoBadge.title) || `${copy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
-            : `${(promoBadge.show_title && promoBadge.title) || String(product.discount_label || '') || copy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd)}`}
+            : `${(promoBadge.show_title && promoBadge.title) || String(product.discount_label || '') || copy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${priceText(fmtUSD, evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd)}`}
         </p>
       ) : null}
       {/* Colored qty+unit instead of a separate "Out of Stock" label --

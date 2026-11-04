@@ -44,7 +44,11 @@ check('half-cent edge: short by exactly $0.005 is covered, short by $0.0051 is n
 check('riel-only payment counts at the sale rate: 40,000 covers $10 at 4,000; 20,000 is half and leaves Part paid', () => {
   assert.equal(derive({}, { khr: 40000 }).saleStatus, 'completed')
   assert.equal(derive({}, { khr: 39980 }).saleStatus, 'completed', '20 riel short = exactly $0.005')
-  assert.equal(derive({}, { khr: 39979 }).saleStatus, 'awaiting_payment', '21 riel short is past the band')
+  // A riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026); 100 riel short still owes.
+  assert.equal(derive({}, { khr: 39901 }).saleStatus, 'completed', '99 riel short is paid')
+  assert.equal(derive({}, { khr: 39900 }).saleStatus, 'awaiting_payment', '100 riel short owes')
+  assert.equal(derive({}, { khr: 39900 }).owedUsd, 0.025)
+  assert.equal(derive({}, { usd: 9.99 }).saleStatus, 'awaiting_payment', 'USD keeps the half-cent band')
   const half = derive({}, { khr: 20000 })
   assert.deepEqual([half.saleStatus, half.owedUsd, half.partPaid], ['awaiting_payment', 5, true])
   assert.equal(derive({}, { usd: 2, khr: 20000 }).owedUsd, 3, 'dollars and riel add')
@@ -227,13 +231,14 @@ check('riel is converted at the SALE rate, not the event rate (P2-1): the event 
   assert.deepEqual(view(alloc([POS(10)], [ev('in', 9.9949)])), ['pos:part_paid:9.9949/0.0051'])
 })
 
-check('tags and status agree on one basis across rates, precision versions and a sweep of riel amounts around the band (P2-1)', () => {
+check('tags and status agree on one basis across rates, precision versions and a sweep of riel amounts around the 100-riel rule (P2-1)', () => {
   let paidSeen = 0
   let notPaidSeen = 0
   for (const rate of [4000, 4100, 4123.45678, 3999.99995]) {
     for (const version of [0, 1]) {
       const exactKhr = Math.round(10 * rate)
-      for (let khr = exactKhr - 40; khr <= exactKhr + 2; khr++) {
+      // Across the 100-riel rule (owner ruling, 27 Oct 2026), not only the half-cent band.
+      for (let khr = exactKhr - 140; khr <= exactKhr + 2; khr++) {
         const overrides = { exchange_rate: rate, money_precision_version: version }
         const status = derive(overrides, { khr }).saleStatus
         const tag = alloc([POS(10)], [ev('in', 0, null, khr)], 0, overrides).groups[0].tag
@@ -327,12 +332,14 @@ check('a negative pool is taken back from the paid groups, newest first, so line
   }
 })
 
-check('v0 and v1 differ on one rate: 39,980 riel at 4000.00004 covers a $10 sale under v0 (rate quantised to 4000) and not under v1 (P3-D2)', () => {
+// The riel rule (owner ruling, 27 Oct 2026) puts the edge at 100 riel short: 39,900.0002 riel is 99.9998 short on the
+// quantised v0 rate (paid) and 100.0002 short on the exact v1 rate (owes).
+check('v0 and v1 differ on one rate: 39,900.0002 riel at 4000.00004 covers a $10 sale under v0 (rate quantised to 4000) and not under v1 (P3-D2)', () => {
   const rate = { exchange_rate: 4000.00004 }
-  assert.equal(derive({ ...rate, money_precision_version: 0 }, { khr: 39980 }).saleStatus, 'completed')
-  assert.equal(derive({ ...rate, money_precision_version: 1 }, { khr: 39980 }).saleStatus, 'awaiting_payment')
-  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 0 }).groups[0].tag, 'paid')
-  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39980)], 0, { ...rate, money_precision_version: 1 }).groups[0].tag, 'part_paid')
+  assert.equal(derive({ ...rate, money_precision_version: 0 }, { khr: 39900.0002 }).saleStatus, 'completed')
+  assert.equal(derive({ ...rate, money_precision_version: 1 }, { khr: 39900.0002 }).saleStatus, 'awaiting_payment')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39900.0002)], 0, { ...rate, money_precision_version: 0 }).groups[0].tag, 'paid')
+  assert.equal(alloc([POS(10)], [ev('in', 0, null, 39900.0002)], 0, { ...rate, money_precision_version: 1 }).groups[0].tag, 'part_paid')
 })
 
 check('displayed paid and owed round half-up, not down (P3-D3)', () => {

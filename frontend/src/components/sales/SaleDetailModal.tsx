@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { priceText } from '../../utils/pricing.ts'
 import { createPortal } from 'react-dom'
 import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -88,6 +89,7 @@ import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
+import { parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 import {
   mergeSaleProductSearchCandidates,
@@ -479,6 +481,7 @@ export default function SaleDetailModal({
   const rawMethodsVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).pos_payment_methods ?? '') : ''
   const rawRateVersion = settings && typeof settings === 'object' ? String((settings as Record<string, unknown>).exchange_rate ?? '') : ''
   const paymentConfigLoaded = paymentConfig.scope === detailScope && paymentConfig.status === 'ready'
+  const settlementMethodKinds = parsePaymentMethodKinds(settings && typeof settings === 'object' ? (settings as Record<string, unknown>).pos_payment_method_kinds : undefined)
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
@@ -1759,7 +1762,9 @@ export default function SaleDetailModal({
         return
       }
       const payload = buildSettlementPayload(settlementRows, settlementSession.configuredMethods, paymentCorrection)
-      const rowIssue = settlementRowsIssue(settlementRows, settlementSession.configuredMethods, paymentCorrection)
+      const rowIssue = settlementRowsIssue(settlementRows, settlementSession.configuredMethods, paymentCorrection, settlementMethodKinds)
+      // The row says it inline (SaleSettlementEditor); nothing is sent.
+      if (rowIssue === 'riel_cash') return
       if (rowIssue === 'method') {
         setPayError(translateOr('sale_settlement_method_unavailable', 'Choose an active configured payment method for every row.', 'សូមជ្រើសវិធីទូទាត់សកម្មដែលបានកំណត់ សម្រាប់គ្រប់បន្ទាត់។'))
         return
@@ -3092,6 +3097,7 @@ export default function SaleDetailModal({
                   error={payError}
                   recordedIssue={settlementSession.recordedIssue}
                   allowRecordedEdits={paymentCorrection}
+                  methodKinds={settlementMethodKinds}
                   translate={translateOr}
                   fmtUSD={fmtUSD}
                   fmtKHR={fmtKHR}
@@ -3181,7 +3187,7 @@ export default function SaleDetailModal({
               items={[
                 ...(addReview?.lines || []).map((line): ConfirmReviewItem => ({
                   label: line.name,
-                  value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
+                  value: `${line.quantity} × ${priceText(fmtUSD, line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
                 })),
                 {
                   label: translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម'),

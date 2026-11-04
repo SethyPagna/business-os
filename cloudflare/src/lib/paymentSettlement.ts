@@ -8,12 +8,14 @@ import {
 import {
   MAX_METHOD_LENGTH,
   RETIRED_PAYMENT_METHODS,
+  isCashPaymentMethod,
   parseConfiguredMethodsStrict,
+  parsePaymentMethodKinds,
   paymentMethodKey,
 } from './paymentMethodRegistry'
 import { resolveChangeExchangeRate } from './saleTotals'
 import { nativeChangeAmounts } from './moneyPrecision'
-import { paymentCoversSaleTotalUnits } from './saleStatusResolution'
+import { paymentCoversSaleTotalUnits, RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 
 export const MAX_SETTLEMENT_TENDER_ROWS = 12
 
@@ -33,6 +35,7 @@ export type SettlementErrorCode =
   | 'stored_payment_invalid'
   | 'partial_payment_reduced'
   | 'insufficient_payment'
+  | typeof RIEL_CASH_NOT_HUNDREDS
 
 export class SettlementValidationError extends Error {
   readonly statusCode = 400
@@ -102,6 +105,8 @@ export type SettlementPlan = {
 export function planSaleSettlement(input: {
   moneyPrecisionVersion?: 0 | 1
   configuredMethodsRaw: unknown
+  /** The pos_payment_method_kinds setting: which methods are drawer cash (lib/paymentMethodRegistry.ts). */
+  methodKindsRaw?: unknown
   paymentDetailsRaw: unknown
   existingPaidUsd: unknown
   existingPaidKhr: unknown
@@ -123,6 +128,7 @@ export function planSaleSettlement(input: {
   }
 
   const canonical = new Map(configured.methods.map((method) => [paymentMethodKey(method), method]))
+  const kinds = parsePaymentMethodKinds(input.methodKindsRaw)
   let existingUsdUnits: bigint
   let existingKhrUnits: bigint
   try {
@@ -228,6 +234,11 @@ export function planSaleSettlement(input: {
       }
       if (!isExactNonNegativeAmount(detail.amount_khr ?? 0, 0) || khrUnits % 10_000n !== 0n) {
         fail(`Payment row ${index + 1} must use whole KHR riel.`, 'invalid_payment_amount')
+      }
+      // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026). Only a row this request adds is
+      // asked: a recorded row the request repeats (preserved above) is kept as it was stored.
+      if (!rielCashAmountValid(calculationUnitsValue(khrUnits)) && isCashPaymentMethod(activeMethod, kinds)) {
+        fail(`Payment row ${index + 1}: riel paid in cash must be whole 100 riel notes.`, RIEL_CASH_NOT_HUNDREDS)
       }
       method = activeMethod
       try { usdUnits = actualUsdMinorUnits((detail.amount_usd ?? 0) as FinancialDecimalInput) * 100n } catch {

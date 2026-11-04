@@ -27,6 +27,8 @@ const boundaries: Array<[string, string]> = [
   // sale-modal mutation paths stays in app-api-methods, or every one of those pages fetches fees-api for ten lines.
   ['api/feesTransport.ts', 'fees-api'],
   ['utils/directMutationRefusal.ts', 'app-api-methods'],
+  // Displayed-money rounding for the signed-in app's fmtUSD/fmtKHR and the export chunks: kept out of 'pricing-utils', which the storefront loads.
+  ['utils/displayMoney.ts', 'app-auth'],
   ['utils/permissions.ts', 'permissions-core'],
   ['utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
@@ -172,6 +174,18 @@ for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', '
 // Sales reaches the Expenses transport through a dynamic import only: SaleDetailModal and CancelSaleModal import shared code from the Sales chunk, so a static
 // import there makes every page that opens either modal fetch 'fees-api' (checked on the emitted graph in the --bundle section below).
 assert.doesNotMatch(fs.readFileSync(path.join(frontend, 'src/components/sales/Sales.tsx'), 'utf8'), /^import\s[^;]*from\s+'[^']*api\/feesTransport\.ts'/m, 'Sales must not import feesTransport statically')
+// The riel-cash rule and the sale/report money rules (utils/saleStatusResolution.ts, financialPrecision.ts, reportMoney.ts) are the
+// 'money-core' chunk: till, shift, sale and report code only. A boot-path module that imports one of them -- api/shiftTransport.ts did, for the
+// shift count's riel check, and posCore.ts did, for the POS riel helpers (posCore rides app-shared through ProductOptionSheet) -- puts
+// money-core into the storefront and index closures (MONEY-1, 4 Nov 2026: +5.4 KB on every page load). The riel helpers live in
+// components/shifts/shiftCountRules.ts and components/pos/posRielCash.ts, which only the till and shift screens import.
+const MONEY_CORE_SOURCES = ['utils/saleStatusResolution.ts', 'utils/financialPrecision.ts', 'utils/reportMoney.ts']
+for (const relative of ['api/shiftTransport.ts', 'api/saleSubmitErrors.ts', 'components/pos/posCore.ts', 'utils/pricing.ts', 'app/AppContextCore.tsx']) {
+  const closure = sourceClosure(relative)
+  for (const money of MONEY_CORE_SOURCES) {
+    assert.equal(closure.has(path.join(frontend, 'src', money)), false, `${relative} must not import ${money}: it would put money-core on the storefront and index boot paths`)
+  }
+}
 console.log('PASS neutral chunk policy, real config ordering, and source dependency boundaries')
 
 // Run explicitly after a build; ordinary unit runs must not silently inspect
@@ -203,10 +217,12 @@ if (process.argv.includes('--bundle')) {
     return closure
   }
   for (const [entryName, forbidden] of [
-    ['index', ['vendor', 'app-auth', 'auth-login', 'catalog', 'backup-reset-tools']],
-    ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker']],
-    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools']],
-    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools', 'image-lightbox']],
+    // 'money-core' (the riel-cash and sale/report money rules) belongs to the till, shift, sale and report pages only: the index entry and the
+    // whole storefront (catalog-public, catalog-products) never load it. Red when a boot-path module imports saleStatusResolution.ts again.
+    ['index', ['vendor', 'app-auth', 'auth-login', 'catalog', 'backup-reset-tools', 'money-core']],
+    ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker', 'money-core']],
+    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools', 'money-core']],
+    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools', 'image-lightbox', 'money-core']],
     ['catalog-secondary-tabs', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
   ] as const) {
     const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)

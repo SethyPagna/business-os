@@ -47,6 +47,10 @@ const overrides = {
     saleMethodsUsed: () => [],
     parseConfiguredMethods: () => [],
     mergePaymentMethods: (methods) => ({ methods, added: [], changed: false }),
+    // POST /sales asks whether a tender row is cash (riel cash is whole 100 notes, owner 27 Oct 2026); this fixture sells in dollars.
+    parsePaymentMethodKinds: () => ({}),
+    isCashPaymentMethod: (method) => /cash/i.test(String(method || '')),
+    PAYMENT_METHOD_KINDS_SETTING: 'pos_payment_method_kinds',
   },
   '../lib/telegram': {
     formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [],

@@ -71,6 +71,7 @@ function database({ retired }) {
 async function scenario({ retired, mutate }) {
   const sqlite = database({ retired }); const user = { id: 7, name: 'Cashier', permissions: JSON.stringify({ pos: true }) }
   const route = loadReal('routes/shifts.ts', {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) }, '../lib/db': { getDb: () => d1(sqlite) },

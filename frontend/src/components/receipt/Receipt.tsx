@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { priceText } from '../../utils/pricing.ts'
 import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
@@ -746,7 +747,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                     ever broken across lines. */}
                 {showUnitPriceCol ? (
                   <div data-receipt-cell="price" style={itemNumericStyle} className="min-w-0 text-right leading-snug">
-                    <div className="whitespace-nowrap">{unknownRecordedUnit ? '—' : fmtUSD(unitUsd)}</div>
+                    <div className="whitespace-nowrap">{unknownRecordedUnit ? '—' : priceText(fmtUSD, unitUsd)}</div>
                     {hasItemDiscount ? <div className="whitespace-nowrap font-normal text-red-600">(-{fmtUSD(unitSavingsUsd)})</div> : null}
                   </div>
                 ) : null}

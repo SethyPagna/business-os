@@ -45,6 +45,7 @@ import {
   type FeeCreateIntent,
 } from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -144,6 +145,8 @@ function toNumber(value: unknown, fallback = 0): number {
 
 // Missing version is deliberately legacy-compatible, including frozen requests
 // that have not reached the server yet. It is not a fresh-input admission proof.
+const FEE_RIEL_CASH_REFUSAL = { error: 'Riel paid in cash must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS }
+
 function feeMoneyVersion(body: Record<string, unknown>): 1 | undefined {
   if (!Object.prototype.hasOwnProperty.call(body, 'fee_money_version')) return undefined
   if (body.fee_money_version !== 1) throw new Error('invalid_fee_money_version')
@@ -702,6 +705,9 @@ app.post('/', async (c) => {
     }
     return c.json(feeOperationReceiptResponse(priorReceipt))
   }
+  // An expense is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026). Asked after the receipt
+  // lookup, so a request committed before the rule still replays its receipt.
+  if (!rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
 
   let saleId: number | null
   let branchId: number
@@ -832,6 +838,8 @@ app.put('/:id', async (c) => {
   } catch {
     return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
   }
+  // Only a riel amount this edit changes is asked; one stored before the rule is kept as it is.
+  if (amountKhr !== Number(existing.amount_khr) && !rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
   let saleId: number | null
   let branchId: number

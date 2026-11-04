@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import InfoHint from '../shared/InfoHint'
 import { formatMergeCost } from '../../utils/mergeCostPreview.ts'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
@@ -94,7 +95,7 @@ function formatPrice(field: string, value: number): string {
   }
   return field.endsWith('_khr')
     ? `${Math.round(amount).toLocaleString('en-US')}៛`
-    : `$${amount % 1 === 0 ? amount : amount.toFixed(2)}`
+    : `$${amount % 1 === 0 ? amount : normalizePriceValue(amount).toFixed(2)}`
 }
 
 export default function MergeStockChoiceDialog({

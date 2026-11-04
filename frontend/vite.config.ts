@@ -788,6 +788,8 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.endsWith('/src/api/authTransport.ts')
       || normalized.endsWith('/src/AppContext.tsx')
+      // fmtUSD / fmtKHR's nearest-cent rounding and the export chunks' money text: signed-in app only, never the storefront boot path.
+      || normalized.endsWith('/src/utils/displayMoney.ts')
     ) {
       return 'app-auth'
     }

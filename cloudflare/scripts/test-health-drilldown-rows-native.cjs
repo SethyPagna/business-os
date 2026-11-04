@@ -245,7 +245,7 @@ async function main() {
     }
   })
 
-  await check('completed-short list: covered_by_worker_rule is paymentCoversSaleTotal across the half-cent edge, on USD and riel tenders', () => {
+  await check('completed-short list: covered_by_worker_rule is paymentCoversSaleTotal across the half-cent edge (USD) and the 100-riel edge (riel tenders)', () => {
     const { paymentCoversSaleTotal } = loadRealLib('saleStatusResolution.ts')
     const db = migratedDatabase()
     let seed = 20261022
@@ -257,7 +257,8 @@ async function main() {
       const paidKhr = next(3) === 0 ? 100 * next(400) : 0
       // total = tender + half a cent + a sub-unit excess the raw float rule sees and the 4 dp units may drop
       const excess = (11 + next(1190)) / 10_000_000
-      const total = Number((paidUsd + paidKhr / 4100 + 0.005 + excess).toFixed(7))
+      // A riel tender is paid when short by under 100 riel (owner ruling 27 Oct 2026), so its edge is one riel note, not half a cent.
+      const total = Number((paidUsd + (paidKhr ? (paidKhr + 100) / 4100 : 0.005) + excess).toFixed(7))
       sales.push({ id, total_usd: total, subtotal_usd: total, exchange_rate: 4100, amount_paid_usd: paidUsd, amount_paid_khr: paidKhr, created_at: '2026-10-03 03:00:00' })
     }
     insert(db, 'sales', sales)

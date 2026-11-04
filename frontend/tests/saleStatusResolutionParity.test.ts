@@ -173,10 +173,25 @@ const FIXTURES: Fixture[] = [
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'completed', expectedBeforeFix: 'awaiting_payment',
   },
+  // A tender with riel short by under 100 riel is paid (owner ruling, 27 Oct 2026); 100 riel short still owes.
   {
-    name: 'mixed tender $0.0051 short stays Not Paid',
+    name: 'mixed tender 99 riel short is paid (the riel rule)',
     requestedStatus: 'awaiting_payment',
-    paidUsd: 4.9949, paidKhr: 20500, totalUsd: 10, exchangeRate: 4100,
+    paidUsd: 5, paidKhr: 20401, totalUsd: 10, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'completed', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'mixed tender 100 riel short stays Not Paid',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 5, paidKhr: 20400, totalUsd: 10, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'awaiting_payment',
+  },
+  {
+    name: 'USD tender $0.0051 short stays Not Paid (USD keeps the half-cent band)',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100,
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'awaiting_payment',
   },
@@ -357,20 +372,20 @@ const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
     from: 'awaiting_payment', to: 'completed', sale: legacyRow({ amount_paid_khr: 41000, exchange_rate: 0 }),
     expected: true, expectedBeforeFix: false,
   },
-  // Which money basis a row is read on: 204,999,980 riel against $50,000 at
-  // 4100.00004 is $0.0054 short on the EXACT (V1) rate -- past the half-cent
-  // band -- and $0.0049 short, inside it, on the rate quantized to four places
-  // (legacy). calculated_total_usd alone marks recorded V1 money.
+  // Which money basis a row is read on: 204,999,902 riel against $50,000 at
+  // 4100.00004 is 100 riel short on the EXACT (V1) rate -- it still owes -- and
+  // 98 riel short, paid by the riel rule (owner ruling, 27 Oct 2026), on the rate
+  // quantized to four places (legacy). calculated_total_usd alone marks recorded V1 money.
   {
     name: 'calculated_total_usd alone selects the exact V1 rate',
     from: 'awaiting_payment', to: 'completed',
-    sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }),
+    sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999902, exchange_rate: 4100.00004 }),
     expected: true, expectedBeforeFix: false,
   },
   {
     name: 'without a V1 marker the legacy quantized rate is used',
     from: 'awaiting_payment', to: 'completed',
-    sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }),
+    sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999902, exchange_rate: 4100.00004 }),
     expected: false,
   },
   {
@@ -445,7 +460,9 @@ const BAND_FIXTURES: BandFixture[] = [
   { name: 'one riel short at 4,100 is covered', paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
   { name: 'the owner case: 39,400 riel for $9.61 at 4,100 is covered', paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
   { name: 'a mixed tender one riel short is covered', paidUsd: 5, paidKhr: 20499, totalUsd: 10, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
-  { name: '$0.00525 short (37,979 riel for $9.50 at 4,000) is not covered', paidUsd: 0, paidKhr: 37979, totalUsd: 9.5, exchangeRate: 4000, covered: false, exact: false, outstandingUsd: 0.0053 },
+  { name: '99 riel short (37,901 riel for $9.50 at 4,000) is covered: the riel rule', paidUsd: 0, paidKhr: 37901, totalUsd: 9.5, exchangeRate: 4000, covered: true, exact: false, outstandingUsd: 0 },
+  { name: '100 riel short (37,900 riel for $9.50 at 4,000) is not covered', paidUsd: 0, paidKhr: 37900, totalUsd: 9.5, exchangeRate: 4000, covered: false, exact: false, outstandingUsd: 0.025 },
+  { name: '$0.00525 short in USD is not covered', paidUsd: 9.4947, paidKhr: 0, totalUsd: 9.5, exchangeRate: 4000, covered: false, exact: false, outstandingUsd: 0.0053 },
   { name: 'one unit past the band ($0.0051 short) is not covered', paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: false, exact: false, outstandingUsd: 0.0051 },
   { name: 'a partial riel tender owes the rest', paidUsd: 3, paidKhr: 12600, totalUsd: 10, exchangeRate: 4200, covered: false, exact: false, outstandingUsd: 4 },
   { name: 'zero tender owes the whole total', paidUsd: 0, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: false, exact: false, outstandingUsd: 10 },
@@ -502,8 +519,8 @@ const RECORDED_OUTSTANDING_FIXTURES: Array<{ name: string; sale: Record<string, 
   { name: '$0.0051 short owes $0.0051', sale: v1Row({ amount_paid_usd: 9.9949 }), expected: 0.0051 },
   { name: 'exact payment owes nothing', sale: v1Row({ amount_paid_khr: 41000 }), expected: 0 },
   { name: 'a credit sale owes its total', sale: v1Row({}), expected: 10 },
-  { name: 'legacy rows read on the quantized rate', sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }), expected: 0 },
-  { name: 'V1 rows read on the exact rate', sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }), expected: 0.0054 },
+  { name: 'legacy rows read on the quantized rate', sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999902, exchange_rate: 4100.00004 }), expected: 0 },
+  { name: 'V1 rows read on the exact rate', sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999902, exchange_rate: 4100.00004 }), expected: 0.0244 },
   { name: 'an unreadable total throws', sale: v1Row({ total_usd: null }), expected: 'throws' },
 ]
 
@@ -588,13 +605,21 @@ await runTest('coverage is exact integer arithmetic, not floating point', async 
     assert.equal(copy.paymentCoversSaleTotal({
       paidUsd: 0.3, paidKhr: 0, totalUsd: 0.3, exchangeRate: 4100, moneyPrecisionVersion: 1,
     }), true, 'an exactly-covering USD tender is covered')
-    // The riel edge of the half-cent band at 4,100 is 20.5 riel.
+    // The riel edge (owner ruling, 27 Oct 2026): under one 100-riel note short is paid, a whole note is not;
+    // a hundredth of a riel either side must land on the right side.
     assert.equal(copy.paymentCoversSaleTotal({
-      paidUsd: 0, paidKhr: 40980, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
-    }), true, '20 riel short ($0.00488) is inside the band')
+      paidUsd: 0, paidKhr: 40900.01, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), true, '99.99 riel short is paid')
     assert.equal(copy.paymentCoversSaleTotal({
-      paidUsd: 0, paidKhr: 40979, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
-    }), false, '21 riel short ($0.00512) is NOT covered')
+      paidUsd: 0, paidKhr: 40900, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), false, '100 riel short is NOT covered')
+    // The USD edge of the half-cent band.
+    assert.equal(copy.paymentCoversSaleTotal({
+      paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), true, '$0.0050 short in USD is inside the band')
+    assert.equal(copy.paymentCoversSaleTotal({
+      paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), false, '$0.0051 short in USD is NOT covered')
     assert.equal(copy.paymentCoversSaleTotal({
       paidUsd: 0, paidKhr: 41000, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
     }), true, 'exactly covering in riel IS covered')
@@ -682,6 +707,24 @@ await runTest('both copies read a stored sale in the two-status model identicall
   assert.ok(retired.length >= 4, 'expected several retired rows')
   // Read at face value (the old readers), none of these is its stored state.
   for (const fixture of retired) assert.notEqual(String(fixture.row.sale_status), fixture.expected.saleStatus, `"${fixture.name}" does not discriminate`)
+})
+
+// Riel cash comes in whole hundreds (owner, 27 Oct 2026). Both copies answer the same; the rows are chosen so the
+// plausible wrong rules differ: a 'whole riel' check accepts 39,950, a 'round to 100' check accepts 39,950 as 40,000,
+// and a rule that ignored the method refuses ABA.
+await runTest('both copies apply the riel cash rule identically, and correctly', async () => {
+  const worker = await loadWorkerCopy()
+  const amounts: Array<[unknown, boolean]> = [[0, true], [100, true], [39900, true], ['39900.0000', true], [39950, false], [50, false], [1, false],
+    [150, false], [39900.5, false], ['39950', false], [null, true], ['', true], ['abc', true]]
+  for (const copy of [uiCopy, worker]) {
+    for (const [khr, valid] of amounts) assert.equal(copy.rielCashAmountValid(khr), valid, `rielCashAmountValid(${JSON.stringify(khr)})`)
+    const isCash = (method: unknown) => String(method).toLowerCase() === 'cash'
+    assert.equal(copy.rielCashRowRefused([{ method: 'ABA', amount_khr: 39950 }, { method: 'Cash', amount_khr: 39900 }], isCash), -1, 'ABA may hold any riel')
+    assert.equal(copy.rielCashRowRefused([{ method: 'ABA', amount_khr: 39950 }, { method: 'Cash', amount_khr: 39950 }], isCash), 1, 'the cash row is named')
+    for (const [raw, floored] of [[9717, 9700], [3990, 3900], [100, 100], [99, 0], [-5, 0], [Number.NaN, 0], [399.99999999999994, 400]])
+      assert.equal(copy.rielCashFloor(raw as number), floored, `rielCashFloor(${raw})`)
+    assert.equal(copy.RIEL_CASH_NOT_HUNDREDS, 'riel_cash_not_hundreds')
+  }
 })
 
 if (failed > 0) {

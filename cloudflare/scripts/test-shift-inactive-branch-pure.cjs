@@ -94,6 +94,7 @@ function database() {
 
 function route(sqlite, source, getUser) {
   const loaded = loadText(ROUTE_PATH, source, {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),

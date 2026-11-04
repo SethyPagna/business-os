@@ -262,15 +262,18 @@ assert.equal(settlementOutstandingUsd(ownerRows, ownerSale), 0)
 const tenSale = { totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1 as const }
 const cash = (usd: string, khr = ''): SettlementRow[] => [{ id: 'x', method: 'Cash', usd, khr }]
 assert.equal(settlementOutstandingUsd(cash('10'), tenSale), 0, 'exact payment owes nothing')
-assert.equal(settlementOutstandingUsd(cash('', '40980'), tenSale), 0, '20 riel ($0.0049) short is inside the band')
-assert.equal(settlementOutstandingUsd(cash('', '40979'), tenSale), 0.0051, '21 riel short is one step past it and owed exactly')
+// USD keeps the half-cent band; a riel tender short by under 100 riel is paid (owner ruling, 27 Oct 2026).
+assert.equal(settlementOutstandingUsd(cash('9.995'), tenSale), 0, '$0.0050 short in USD is inside the band')
+assert.equal(settlementOutstandingUsd(cash('9.9949'), tenSale), 0.0051, '$0.0051 short in USD is one step past it and owed exactly')
+assert.equal(settlementOutstandingUsd(cash('', '40901'), tenSale), 0, '99 riel short is paid')
+assert.equal(settlementOutstandingUsd(cash('', '40900'), tenSale), 0.0244, '100 riel short is owed exactly')
 assert.equal(settlementOutstandingUsd(cash('', '41500'), tenSale), 0, 'an overpayment is change, never a balance')
 const pastBand = initialSettlementRows({
-  paymentDetails: [{ method: 'Cash', amount_usd: 0, amount_khr: 40979 }],
-  paymentMethod: 'Cash', amountPaidUsd: 0, amountPaidKhr: 40979,
+  paymentDetails: [{ method: 'Cash', amount_usd: 0, amount_khr: 40900 }],
+  paymentMethod: 'Cash', amountPaidUsd: 0, amountPaidKhr: 40900,
   ...tenSale, configuredMethods: ['Cash'],
 })
-assert.equal(pastBand[1]?.usd, '0.01', 'past the band the shortfall is prefilled, rounded up to a whole cent')
+assert.equal(pastBand[1]?.usd, '0.03', 'past the riel rule the shortfall is prefilled, rounded up to a whole cent')
 // The editor's Outstanding row and the completion gate read the same answer.
 assert.match(editorSource, /const remaining = settlementOutstandingUsd\(rows, \{ totalUsd, exchangeRate, moneyPrecisionVersion \}\)/)
 assert.doesNotMatch(editorSource, /totalUsd - totals\.paidEquivalentUsd/, 'the float shortfall must not decide Outstanding')
