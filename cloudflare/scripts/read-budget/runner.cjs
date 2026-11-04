@@ -66,10 +66,10 @@ async function resolveUrl(world, url) {
   return out
 }
 
-// A shape that names read switches has them set around its one measured request and cleared afterwards, so no other shape ever runs with one on.
-const setSwitches = (world, names) => world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)")
-  .bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: Object.fromEntries(names.map((name) => [name, 'on'])) })).run()
-const clearSwitches = (world) => world.db.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run()
+// A shape that names read switches has them added to the pass's own around its one measured request, and the pass's switches put back afterwards, so no
+// other shape ever runs with one more on (or with the pass's own switches gone: read-budget/switches.cjs).
+const setSwitches = (world, names) => world.addSwitches(names)
+const clearSwitches = (world) => world.restoreSwitches()
 const withSwitches = (names, url) => ({ prepare: (world) => setSwitches(world, names), run: async (world, send) => { try { return await send('GET', url) } finally { await clearSwitches(world) } } })
 
 async function measureGet(world, shape, { cold = true, statements = false, fingerprints = false } = {}) {

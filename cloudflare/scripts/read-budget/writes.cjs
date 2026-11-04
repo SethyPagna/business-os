@@ -103,6 +103,31 @@ function returnOf(n, offset, saleLines = 10) {
     run: async (world, send, body) => send('POST', '/api/returns', body) }
 }
 
+// A counter submits two counts of 0 (an approved device, as every non-administrator needs: nobody approves their own count) and the administrator approves the
+// session once. `counting` false = the pass's call_counting switch is taken away for this request (the Free plan before it is turned on); true = as the pass has it.
+function approvalStep({ id, label, offset, counting }) {
+  return { id, label, method: 'POST', url: '/api/inventory-checks/sessions/:id/approval',
+    prepare: async (world) => {
+      await world.addSwitches(['ic_simple', 'ic_fix_stock'], counting ? {} : { without: ['call_counting'] })
+      // The switches are memoized per isolate for 15 s: the counter's submission below must meet the row just written.
+      await world.restart()
+      const rows = await lots(world, 2, offset)
+      // Nobody approves their own count: a counter (an approved device, as every non-administrator needs) submits, the administrator approves.
+      await world.db.prepare("INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0)").bind(JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true })).run()
+      await world.db.prepare("INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(902,'budget_counter','budget_counter',?,902,'{}',1,?,0)").bind(bcrypt.hashSync('budget-password-1', 4), world.orgId).run()
+      await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
+      const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
+      if (!login.setCookie) throw new Error('approval fixture: the counter could not sign in: ' + login.text.slice(0, 200))
+      const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines: rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false })) }, { cookie: login.setCookie.split(';')[0] })
+      if (made.status !== 201) throw new Error('approval fixture: submission answered ' + made.status)
+      return { id: made.json.item.id, request: key('approval') }
+    },
+    run: async (world, send, prepared) => {
+      try { return await send('POST', '/api/inventory-checks/sessions/' + prepared.id + '/approval', { decision: 'approve', requestId: prepared.request }) }
+      finally { await world.restoreSwitches() }
+    } }
+}
+
 function writeShapes() {
   const shapes = [
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
@@ -158,34 +183,18 @@ function writeShapes() {
     // The owner's way to count (ic_simple): 20 picked products with their counts, recorded whole as one closed session. Counted 0 against stock differs, so every line is an issue.
     { id: 'w-inventory-check-submission-20', label: 'POST /api/inventory-checks/submissions 20 products (ic_simple)', method: 'POST', url: '/api/inventory-checks/submissions',
       prepare: async (world) => {
-        await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on' } })).run()
+        await world.addSwitches(['ic_simple'])
         return (await world.all('SELECT id FROM products WHERE is_active=1 ORDER BY id LIMIT 20 OFFSET 80')).map((r) => r.id)
       },
       run: async (world, send, ids) => {
         try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission'), lines: ids.map((productId) => ({ productId, countedQuantity: 0, seenQuantity: null, checked: false })) }) }
-        finally { world.db.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run() }
+        finally { await world.restoreSwitches() }
       } },
-    // Approving a submitted count (ic_fix_stock): on the Free plan the first request of an approval applies ONE stock line (a lowering Set), records it and answers.
-    { id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', method: 'POST', url: '/api/inventory-checks/sessions/:id/approval',
-      prepare: async (world) => {
-        await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on', ic_fix_stock: 'on' } })).run()
-        // The switches are memoized per isolate for 15 s: the counter's submission below must meet the row just written.
-        await world.restart()
-        const rows = await lots(world, 2, 1100)
-        // Nobody approves their own count: a counter (an approved device, as every non-administrator needs) submits, the administrator approves.
-        await world.db.prepare("INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(902,'Counter','employee',?,0)").bind(JSON.stringify({ inventory_checks: true, inventory_check_show_stock: true })).run()
-        await world.db.prepare("INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(902,'budget_counter','budget_counter',?,902,'{}',1,?,0)").bind(bcrypt.hashSync('budget-password-1', 4), world.orgId).run()
-        await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
-        const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
-        if (!login.setCookie) throw new Error('approval fixture: the counter could not sign in: ' + login.text.slice(0, 200))
-        const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines: rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false })) }, { cookie: login.setCookie.split(';')[0] })
-        if (made.status !== 201) throw new Error('approval fixture: submission answered ' + made.status)
-        return { id: made.json.item.id, request: key('approval') }
-      },
-      run: async (world, send, prepared) => {
-        try { return await send('POST', '/api/inventory-checks/sessions/' + prepared.id + '/approval', { decision: 'approve', requestId: prepared.request }) }
-        finally { world.db.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run() }
-      } },
+    // Approving a submitted count (ic_fix_stock). The lane's own shape measures the Free plan as it runs until call_counting is turned ON: the first request of
+    // an approval applies ONE stock line (a lowering Set), records it and answers. The second is the same request under the write pass's own config, call_counting
+    // ON (P1.1): the commit's cap becomes stockInLinesPerRequestByCalls (2 on Free), so one request applies both lines and finishes the approval.
+    approvalStep({ id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', offset: 1100, counting: false }),
+    approvalStep({ id: 'w-inventory-check-approval-step-counted', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, call_counting ON, both lines)', offset: 1150, counting: true }),
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',
