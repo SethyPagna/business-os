@@ -245,7 +245,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
       <div className="space-y-5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <InfoHint align="left" label={tr('export_sales_report', 'Export Sales Report')} text={tr('export_sales_hint', 'Preview the accounting summary first, then export the detailed CSV for the selected date range.')} />
-          <fieldset className="min-w-[10.5rem] flex-1" disabled={loading}>
+          <fieldset className="min-w-max flex-1" disabled={loading}>
             <legend className="sr-only">{tr('report_period', 'Report Period')}</legend>
             <DateTimeRangePicker value={range} onChange={changeRange} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
           </fieldset>

@@ -7,7 +7,7 @@ import { APP_ROOT, E2E_ACCOUNTS, signIn } from './support/session'
 // separate online-auth-safety spec runs the actual native worker.
 test.use({ serviceWorkers: 'block' })
 
-test('Returns exposes endpoint times inside a responsive date-only range picker', async ({ page, context }, testInfo) => {
+test('Returns shows date and time on its range button and edits them in a responsive panel', async ({ page, context }, testInfo) => {
   const health = collectPageHealth(page)
   const reads: URL[] = []
   await context.route('**/*', async route => {
@@ -46,7 +46,7 @@ test('Returns exposes endpoint times inside a responsive date-only range picker'
     expect(rect!.x + rect!.width).toBeLessThanOrEqual(width + 1)
     const triggerRect = await trigger.boundingBox()
     expect(triggerRect!.x + triggerRect!.width).toBeLessThanOrEqual(width + 1)
-    expect(await trigger.innerText()).not.toMatch(/\d{1,2}:\d{2}/)
+    expect(await trigger.innerText()).toMatch(/00:00[\s\S]*23:59/)
     await page.screenshot({ path: testInfo.outputPath(`returns-range-${width}.png`) })
     await panel.getByRole('button', { name: 'Close', exact: true }).click()
   }
@@ -65,7 +65,8 @@ test('Returns exposes endpoint times inside a responsive date-only range picker'
   await panel.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(trigger).toContainText('19/09/2026')
   await expect(trigger).toContainText('20/09/2026')
-  expect(await trigger.innerText()).not.toMatch(/22:00|02:00/)
+  await expect(trigger).toContainText('22:00')
+  await expect(trigger).toContainText('02:00')
   await trigger.click()
   await expect(panel.getByLabel('Start time', { exact: true })).toHaveValue('22:00')
   await expect(panel.getByLabel('End time', { exact: true })).toHaveValue('02:00')

@@ -4,9 +4,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
-// The current contract supersedes the earlier inline date+time trigger:
-// dates alone stay on one line; editable times remain inside the panel.
-// The native responsive test covers actual rendered values and time edits.
+// The closed trigger shows each endpoint as date AND time, together on one
+// line (owner, 15 Sep: "i want them same compact one row"; 4 Nov: "i still see
+// dashboard and other not showing time only showing date"). The 20 Sep change
+// that dropped the time to stop a wrap is reversed: tighter widths, never a
+// hidden time. dateRangeTriggerTime.test.ts reads the rendered text and
+// dateRangeTriggerTimeBrowser.test.ts measures every host in a real browser.
 
 const testDir = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = resolve(testDir, '..')
@@ -28,7 +31,7 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const source = readFrontend('src/components/shared/DateTimeRangePicker.tsx')
-const start = source.indexOf('const triggerEndpoint = (date: string) => (')
+const start = source.indexOf('const triggerEndpoint = ({ date, time }: TriggerEndpoint) => (')
 assert.notEqual(start, -1, 'triggerEndpoint helper must exist')
 const end = source.indexOf('\n  )', start)
 const triggerEndpointBody = source.slice(start, end)
@@ -45,9 +48,9 @@ runTest('the trigger endpoint stays on one line (whitespace-nowrap, tabular-nums
   assert.match(triggerEndpointBody, /tabular-nums/, 'digits must keep tabular widths so the trigger does not jitter')
 })
 
-runTest('the closed trigger shows dates only while the panel retains time editing', () => {
-  assert.match(triggerEndpointBody, /<span>\{date\}<\/span>/)
-  assert.doesNotMatch(triggerEndpointBody, /\btime\b|showTimes|startTime|endTime/)
+runTest('the closed trigger prints the date and its time side by side while the panel retains time editing', () => {
+  assert.match(triggerEndpointBody, /<span>\{date\}<\/span>\s*\{time \? <span className="font-medium opacity-80">\{time\}<\/span> : null\}/, 'date then time, inline')
+  assert.doesNotMatch(triggerEndpointBody, /showTimes|startTime|endTime/, 'the text is decided by dateRangeTriggerText.ts, not by the endpoint box')
   assert.match(source, /<TimeEntryInput value=\{value\.startTime\} onChange=\{\(next\) => apply\(\{ startTime: next \}\)\}/)
   assert.match(source, /<TimeEntryInput allowEndOfDay value=\{value\.endTime\} onChange=\{\(next\) => apply\(\{ endTime: next \}\)\}/)
 })
