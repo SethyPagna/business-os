@@ -28,9 +28,9 @@ import { chromium } from '@playwright/test'
 import { createServer, transformWithEsbuild } from 'vite'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const ownerPhoto = process.env.SCANNER_OWNER_PHOTO
-  || 'C:/Users/mrkl6/Downloads/Projects/BusinessOS/Records/Consolidation/2026-10-20/scanner-fixtures/dior-silver-vertical-3348901729222.webp'
-const hasOwnerPhoto = existsSync(ownerPhoto)
+// The owner's photo is a private fixture that is never in the repo: set SCANNER_OWNER_PHOTO to its path to run that case.
+const ownerPhoto = process.env.SCANNER_OWNER_PHOTO || ''
+const hasOwnerPhoto = ownerPhoto !== '' && existsSync(ownerPhoto)
 // The decoder imports the retail readers by deep path; pre-bundling them up
 // front keeps a mid-run dependency discovery from reloading the page.
 const ZXING_DEEP_IMPORTS = [
@@ -209,7 +209,7 @@ try {
   // A loaded machine can take minutes to optimise dependencies on first load.
   await page.goto(`http://127.0.0.1:${address.port}/scanner-low-contrast`, { timeout: 240_000 })
   await page.waitForFunction(() => (window as any).__scannerFixtureReady === true, null, { timeout: 240_000 })
-  if (!hasOwnerPhoto) console.log(`SKIP owner photo case: ${ownerPhoto} is not on this machine (private fixture, never in the repo)`)
+  if (!hasOwnerPhoto) console.log(`SKIP owner photo case: ${ownerPhoto ? ownerPhoto + ' is not on this machine' : 'SCANNER_OWNER_PHOTO is not set'} (private fixture, never in the repo)`)
   const results = await page.evaluate((withPhoto) => (window as any).runScannerCases(withPhoto), hasOwnerPhoto) as Array<{
     name: string
     expected: string

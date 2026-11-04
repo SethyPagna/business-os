@@ -1271,8 +1271,9 @@ export const STOCK_CROSSING_ALERTS_TABLE = 'stock_crossing_alerts'
 
 /**
  * Statements one restore transaction (permit + business statements + release) may hold. 300 is the size the import engine
- * already submits to production D1 as one db.batch() (D1_IMPORT_BATCH_CHUNK_SIZE in importEngine.ts), and it stays far inside
- * the 1,000 D1 calls one invocation may make on the Free plan. It was 100, which a full restore's deletion plan met exactly
+ * already submits to production D1 as one db.batch() (D1_IMPORT_BATCH_CHUNK_SIZE in importEngine.ts). A db.batch() counts as ONE D1
+ * call however many statements it holds, so the batch costs one of the invocation's calls (planTier.ts d1QueriesPerInvocation: 50 on
+ * Free, 1,000 on Paid), not 300. It was 100, which a full restore's deletion plan met exactly
  * (one DELETE per BACKUP_TABLES entry, the products update, the stock_crossing_alerts clear, plus the two permit statements):
  * the next table added to BACKUP_TABLES made every full restore refuse at run time.
  */
