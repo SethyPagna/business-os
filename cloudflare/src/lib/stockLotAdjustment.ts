@@ -156,10 +156,10 @@ export function resetStockLotSetSchemaProbe(): void { operationsReady = false }
 async function operationsAvailable(db: D1Compat): Promise<boolean> {
   if (operationsReady) return true
   try {
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'",
-    ).get<{ ready: number }>()
-    operationsReady = Number(row?.ready ?? 0) > 0
+    // Ask the table itself, not the schema: COUNT(*) over sqlite_master scanned every object (751 rows on the budget seed) on each cold isolate. A missing table
+    // throws, which is the same "not ready yet" answer; LIMIT 0 reads no row.
+    await db.prepare('SELECT 1 FROM stock_lot_adjustment_operations LIMIT 0').all()
+    operationsReady = true
   } catch {
     operationsReady = false
   }
@@ -183,8 +183,8 @@ const MAINTENANCE_RESPONSE: StockLotSetResult = {
   body: { error: 'Maintenance is in progress. No stock was changed; try again shortly.', code: 'maintenance_active' },
 }
 
-function conflict(error: string, code = 'stock_conflict'): StockLotSetResult {
-  return { status: 409, body: { error, code } }
+function conflict(error: string, code = 'stock_conflict', extra: Record<string, unknown> = {}): StockLotSetResult {
+  return { status: 409, body: { error, code, ...extra } }
 }
 
 function stateGuard(from: Snapshot): Statement {
@@ -413,7 +413,8 @@ export async function applyStockLotSet(
   }
   if ((request.expectedLotQuantity !== undefined && request.expectedLotQuantity !== before.lotQuantity)
     || (request.expectedBranchQuantity !== undefined && request.expectedBranchQuantity !== before.branchQuantity)) {
-    return conflict('Stock changed since this received date was loaded. Refresh and try again.')
+    // The figures the writer itself just read (the facts statement above): the screen patches its row to them and the person confirms or recounts. No extra read.
+    return conflict('Stock changed since this received date was loaded. Refresh and try again.', 'stock_conflict', { current: { lotQuantity: before.lotQuantity, branchQuantity: before.branchQuantity } })
   }
   const planned = snapshotAfter(before, request)
   if (!planned) return conflict('The selected received date does not have enough stock for this branch total.', 'selected_lot_unavailable')
