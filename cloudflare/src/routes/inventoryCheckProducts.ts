@@ -50,8 +50,13 @@ app.get('/', async c => {
     if (JSON.stringify(after) !== JSON.stringify(actor)) throw new InventoryCheckSessionError(403, 'inventory_check_authority_changed')
     return c.json(answer)
   }
-  const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, ...query } = c.req.query()
-  const sessionId = rawSession?.trim() || undefined, state = rawState?.trim() === 'all' ? undefined : rawState?.trim() || undefined
+  const { sessionId: rawSession, state: rawState, reason: rawReason, customerRanking: rawRanking, checkState: rawCheckState, summary: rawSummary, ...query } = c.req.query()
+  // The ic_simple page speaks two words this old list never had, and reaches it whenever the switch is off (the default): `summary=0` on a page step (there are no check
+  // counts to skip, so it is ignored) and `checkState=issue` for the Issues view (which is the old state=issue). Any other checkState has no meaning here and stays a 400.
+  if (rawSummary !== undefined && rawSummary.trim() !== '' && !['0', '1'].includes(rawSummary.trim())) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'summary')
+  const checkState = rawCheckState?.trim() || undefined, stateWord = rawState?.trim() || undefined
+  if (checkState !== undefined && (checkState !== 'issue' || stateWord !== undefined && stateWord !== 'issue')) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'checkState')
+  const sessionId = rawSession?.trim() || undefined, state = checkState ? 'issue' : stateWord === 'all' ? undefined : stateWord
   const reason = rawReason?.trim() || undefined
   if (state && !['unstarted', 'done', 'issue'].includes(state)) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'state')
   if (['unstarted', 'done'].includes(state || '') && !sessionId) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'sessionId')

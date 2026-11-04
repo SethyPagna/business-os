@@ -90,6 +90,20 @@ async function send(route, method, url, body, actor = ADMIN) {
 }
 const products = (query = '', actor = ADMIN) => send(productsRoute, 'GET', `/${query ? `?${query}` : ''}`, undefined, actor)
 const sessions = (method, url, body, actor = ADMIN) => send(sessionsRoute, method, url, body, actor)
+// `sent` is a request the candidate page can put on the wire; `twin` is what the live (pre-ic_simple) page sends for the same view. Both must be 200, with the same bytes and the same reads.
+const same = async (sent, twin, actor = ADMIN) => {
+  const b = await products(twin, actor), a = await products(sent, actor)
+  assert.equal(b.status, 200, `the live page's own request ${twin}`)
+  assert.equal(a.status, 200, `${sent} -> ${JSON.stringify(a.body)}`)
+  assert.equal(JSON.stringify(a.body), JSON.stringify(b.body), `${sent} answers byte for byte as ${twin}`)
+  assert.deepEqual(a.queries, b.queries, `${sent} reads exactly what ${twin} reads`)
+  assert.match(a.cache, /no-store/)
+  return b.body
+}
+const refused = async (query, parameter) => {
+  const read = await products(query)
+  assert.equal(read.status, 400, query); assert.equal(read.body.code, 'inventory_check_invalid_query', query); assert.equal(read.body.parameter, parameter, query)
+}
 const physical = () => ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots', 'sales', 'sale_items', 'inventory_movements'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
 const metadata = () => ['inventory_check_sessions', 'inventory_check_items', 'inventory_check_events'].map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(row => ({ ...row })))
 let groups = 0
@@ -253,6 +267,88 @@ async function main() {
     assert.equal(withUnit.unit, 'box'); assert.equal(withUnit.image_path, 'img/p.png')
     const damaged = (await products('branchId=1&pageSize=25')).body.items.find(row => row.id === 910004)
     assert.equal(damaged.damaged_quantity, 2, 'positive control: the damaged chip figure is in the compared set')
+  })
+
+  await check('OFF takes what the ic_simple page can still send: summary is ignored, checkState=issue is the old issue state, every other checkState stays refused; each answer is its old-key twin byte for byte', async () => {
+    reset(); setSwitch(undefined)
+    const base = 'branchId=1&sortBy=name&sortDirection=asc&pageSize=10'
+    await products(base) // the first read of a run also reads the switch: warm it, so what is compared below is the route's own reads
+    // A page step carries summary=0 (the ic_simple page asks the server to skip the check counts): the old list has none to skip.
+    const first = await same(`${base}&page=1&summary=0`, `${base}&page=1`)
+    const second = await same(`${base}&page=2&summary=0`, `${base}&page=2`)
+    assert.equal(second.items.length, 10); assert.notDeepEqual(second.items.map(row => row.id), first.items.map(row => row.id), 'positive control: page 2 is another page, not page 1 twice')
+    assert.ok(first.stats && first.issues, 'positive control: the answer is the old shape (stats and issues), so an empty-versus-empty match is impossible')
+    await same(`${base}&page=2&summary=1`, `${base}&page=2`); await same(`${base}&page=2&summary=`, `${base}&page=2`)
+    // The Issues tab: checkState=issue is state=issue.
+    const issues = await same(`${base}&page=1&checkState=issue`, `${base}&page=1&state=issue`)
+    assert.ok(issues.issues.length >= 2 && issues.total >= 1 && issues.total < 25, 'positive control: Issues is a real filter with issues in it')
+    await same(`${base}&page=1&checkState=issue&summary=0`, `${base}&page=1&state=issue`)
+    await same(`${base}&page=1&checkState=issue&state=issue`, `${base}&page=1&state=issue`)
+    await same('pageSize=1&page=1&checkState=issue', 'pageSize=1&page=1&state=issue')
+    await same('pageSize=1&page=2&summary=0&checkState=issue', 'pageSize=1&page=2&state=issue')
+    // Inside a session (page 2 of three rows, and the issue view of it).
+    const inSession = await same('sessionId=own&pageSize=2&page=2&summary=0', 'sessionId=own&pageSize=2&page=2')
+    assert.equal(inSession.items.filter(row => row.checkable).length, 1, 'positive control: the second page of the session holds its third row')
+    const sessionIssues = await same('sessionId=own&checkState=issue&summary=0', 'sessionId=own&state=issue')
+    assert.deepEqual(sessionIssues.items.filter(row => row.checkable).map(row => row.id), [910001], 'positive control: only the issue row of the session')
+    // The same for every role that may open the page.
+    for (const actor of [COUNTER, BLIND]) { await same(`${base}&page=2&summary=0`, `${base}&page=2`, actor); await same(`${base}&checkState=issue`, `${base}&state=issue`, actor) }
+    // Everything else about a check status stays what it was: refused.
+    for (const value of ['not_checked', 'in_check', 'ok', 'bogus', 'ISSUE', 'issue%20x', 'all']) await refused(`${base}&checkState=${value}`, 'checkState')
+    await refused('sessionId=own&checkState=in_check', 'checkState'); await refused('sessionId=own&checkState=ok', 'checkState')
+    await refused(`${base}&state=unstarted&sessionId=own&checkState=issue`, 'checkState'); await refused(`${base}&state=all&checkState=issue`, 'checkState')
+    await refused(`${base}&summary=2`, 'summary'); await refused(`${base}&summary=x`, 'summary')
+    assert.equal((await products(`${base}&summary=0&summary=0`)).status, 400, 'a repeated parameter')
+    assert.equal((await products(`${base}&checkState=issue&checkState=issue`)).status, 400, 'a repeated parameter')
+    // The old keys and refusals are untouched.
+    await refused(`${base}&bogus=1`, 'bogus'); await refused(`${base}&state=banana`, 'state')
+    assert.equal((await products(`${base}&state=issue&reason=Two%20on%20shelf`)).status, 200)
+    assert.equal((await products('startDate=2026-10-01&endDate=2026-10-19&customerRanking=1')).status, 200)
+  })
+
+  await check('the page\'s own request builder, told what an OFF server answered, asks only what OFF understands: every request of the walk is 200 and its live twin byte for byte', async () => {
+    // The real frontend module (not a copy of its output): the Worker test fails if the page ever starts sending a key the old list refuses.
+    const { productsWireParams } = load(path.join(__dirname, '../../frontend/src/components/inventory/inventoryCheckProductsRequest.ts'))
+    const { buildQueryString } = load(path.join(__dirname, '../../frontend/src/api/query.ts'))
+    reset(); setSwitch(undefined)
+    await products('pageSize=1') // warm the switch read
+    const held = { branchId: '1', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', query: '', page: 1, pageSize: 10, sessionId: '' }
+    const live = 'branchId=1&sortBy=name&sortDirection=asc&pageSize=10'
+    // [what the page holds, what it knows of the server, whether it believes it may skip a summary, the live page's own request for that view]
+    const walk = [
+      [{}, 'unknown', false, `${live}&page=1`],
+      [{ page: 2 }, 'old', true, `${live}&page=2`],
+      [{ page: 3 }, 'old', true, `${live}&page=3`],
+      [{ checkState: 'issue' }, 'unknown', false, `${live}&page=1&state=issue`],
+      [{ checkState: 'issue' }, 'old', true, `${live}&page=1&state=issue`],
+      [{ checkState: 'issue', page: 2, pageSize: 1 }, 'old', true, 'branchId=1&sortBy=name&sortDirection=asc&pageSize=1&page=2&state=issue'],
+      [{ query: 'Product 1', brand: 'Brand 1', stockState: 'in_stock', page: 2 }, 'old', true, `${live}&page=2&query=Product%201&brand=Brand%201&stockState=in_stock`],
+      [{ sortBy: 'stock', sortDirection: 'desc', page: 2 }, 'old', true, 'branchId=1&sortBy=stock&sortDirection=desc&pageSize=10&page=2'],
+      [{ sessionId: 'own', pageSize: 2 }, 'old', false, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=2&page=1'],
+      [{ sessionId: 'own', pageSize: 2, page: 2 }, 'old', true, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=2&page=2'],
+      [{ sessionId: 'own', checkState: 'in_check' }, 'old', true, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=10&page=1&state=unstarted'],
+      [{ sessionId: 'own', checkState: 'ok' }, 'old', true, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=10&page=1&state=done'],
+      [{ sessionId: 'own', checkState: 'issue' }, 'old', true, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=10&page=1&state=issue'],
+      [{ sessionId: 'own', checkState: 'issue', page: 2, pageSize: 1 }, 'old', true, 'sessionId=own&branchId=1&sortBy=name&sortDirection=asc&pageSize=1&page=2&state=issue'],
+      [{ checkState: 'ok' }, 'old', true, `${live}&page=1`], // a stale status from an earlier server: left out, not a 400
+    ]
+    let sentKeys = 0
+    for (const [patch, server, skip, twin] of walk) {
+      const sent = buildQueryString(productsWireParams({ ...held, ...patch }, server, skip))
+      if (server === 'old') assert.ok(!/(^|&)(summary|checkState)=/.test(sent), `an OFF-aware page sends neither summary nor checkState: ${sent}`)
+      sentKeys += sent.split('&').length
+      for (const actor of [ADMIN, COUNTER]) await same(sent, twin, actor)
+    }
+    assert.ok(sentKeys > walk.length * 4, 'positive control: real, multi-key requests were compared')
+    // The page that is not yet sure which server it talks to may only ask Issues the shared way, and that one is understood.
+    assert.equal(buildQueryString(productsWireParams({ ...held, checkState: 'issue' }, 'unknown', false)).includes('checkState=issue'), true)
+    // Told the server is ic_simple, the page asks it in its own words, and ON accepts exactly those (the ON path is unchanged).
+    setSwitch(ON)
+    for (const [patch, skip] of [[{ page: 2 }, true], [{ checkState: 'issue' }, false], [{ checkState: 'not_checked', page: 2 }, true], [{ sessionId: 'own', checkState: 'in_check' }, false]]) {
+      const sent = buildQueryString(productsWireParams({ ...held, ...patch }, 'simple', skip))
+      assert.equal(sent.includes('summary=0'), skip, sent)
+      assert.equal((await products(sent)).status, 200, `ON answers ${sent}`)
+    }
   })
 
   console.log(`${groups} groups passed`)

@@ -30,6 +30,7 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
+import { productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import InventoryCheckApprovalPanel from './InventoryCheckApprovalPanel.tsx'
 import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
@@ -229,8 +230,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [refresh, setRefresh] = useState(0)
   const [sessionReload, setSessionReload] = useState(0)
   const [data, setData] = useState<ProductsResult | null>(null)
-  // The scope (everything but the page) whose check counts and filter options `data` holds: a page step inside it asks the server to skip them.
+  // The scope (everything but the page) whose check counts and filter options `data` holds: a page step inside it asks the server to skip them -- but only a server
+  // whose last answer was the check-status list (ic_simple), which is also what `productsServer` records: the older list has no counts to skip and refuses the key.
   const summaryScope = useRef('')
+  const productsServer = useRef<ProductsServer>('unknown')
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [approval, setApproval] = useState<InventoryCheckApproval | null>(null)
@@ -325,18 +328,22 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
           const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
-          const products = await readInventoryCheckProducts<ProductsResult>(summaryScope.current === stepScope ? { ...params, summary: 0 } : params, abort.signal)
+          const products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, productsServer.current, summaryScope.current === stepScope), abort.signal)
           if (publish()) {
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
               return
             }
-            if (products.facets) summaryScope.current = stepScope
+            productsServer.current = productsServerOf(products)
+            if (products.simple !== true) summaryScope.current = ''
+            else if (products.facets) summaryScope.current = stepScope
             setData(previous => products.simple && !products.facets && previous ? { ...products, summary: previous.summary, facets: previous.facets, facetsLimited: previous.facetsLimited } : products)
             setLoadedKey(scopeKey)
           }
         }
-      } catch {
+      } catch (cause) {
+        // A refused query key means the switch moved since the last answer (ic_simple turned on or off under an open tab): forget which list this is, so Retry asks in the words both understand.
+        if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query') { productsServer.current = 'unknown'; summaryScope.current = '' }
         if (publish()) setError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
       } finally { if (publish()) setLoading(false) }
     }
@@ -702,7 +709,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     : !branchId ? tr('inventory_check_count_blocked_branch', 'Choose a branch first.')
     : !countableIds.length ? tr('inventory_check_count_blocked_empty', 'No products on this page to count.') : ''
   const countLabel = createAttempt.current ? t('retry') : tr('inventory_check_start_page', 'Count')
-  const statusFilter = section !== 'issues' && (!!sessionId || !!data?.simple)
+  // The status choice exists once an answer has shown which list this is: the check-status list (ic_simple) has it everywhere; the older list has it only inside a session
+  // (its unstarted | done | issue), and the Issues tab elsewhere -- so no choice is drawn for it on the Products list, and none before the first answer.
+  const statusFilter = section !== 'issues' && !!data && (data.simple === true || !!sessionId)
   const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter }) > 0 || !!query.trim()
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
   const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length)
