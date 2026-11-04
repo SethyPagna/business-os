@@ -1432,6 +1432,61 @@ async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, us
   return { ...payload, tagged_lots: await readTaggedLotGroups(getDb(env), pageIds) }
 }
 
+// include=lots (INV-A S3) folds each row's received dates into the answer: `lots: [{id, received_at, expiry_date, lot_code, batch_number, supplier_name,
+// branches: [{branch_id, quantity}]}]`, so a screen that counts or edits by received date reads them from the rows it already holds instead of one
+// GET /api/batches per product. Read live after the page cache like tagged_lots, so the cache entry and its key are unchanged; without the token nothing
+// is added to any shape. It lists a row's ACTIVE lots that have a branch row, in listBatchesForProduct's first-in-first-out order (soonest expiry, no
+// expiry last, then received date, then id), at most productListLotsPerRow per row with `lots_more: true` on a row that has more (the rest load through
+// GET /api/batches as before). Money-free by construction: the statement selects no cost, payment or credit column. ONE statement for the whole page: the
+// ids are one json_each parameter and the join to the branch rows is the unique (batch_id, branch_id) index. The order and the cap are applied here, not by
+// the statement: an ORDER BY (and a window rank, which the first version used) is a sort the database counts as rows read again -- 2,151 against 849 rows
+// for the same 50 products on the budget seed -- and a lot of a page costs its own row plus one per branch it sits in either way. So the cap bounds the
+// payload and the work per row, not the rows read; a row's lots are few (4.3 on average in production).
+// Gated like the batches read it mirrors (Inventory view, POS or Sales view): a caller outside it gets rows without the key.
+type PageLotRow = { product_id: number; id: number; received_at: string | null; expiry_date: string | null; lot_code: string | null; batch_number: number | null
+  supplier_name: string | null; branch_id: number; quantity: number }
+// The order of listBatchesForProduct: (expiry_date IS NULL), expiry_date, received_at, id -- SQLite sorts NULL below every value, text by byte.
+const compareText = (a: string | null, b: string | null): number => (a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1)
+function compareLotsFifo(a: { expiry_date: string | null; received_at: string | null; id: number }, b: { expiry_date: string | null; received_at: string | null; id: number }): number {
+  if ((a.expiry_date === null) !== (b.expiry_date === null)) return a.expiry_date === null ? 1 : -1
+  return compareText(a.expiry_date, b.expiry_date) || compareText(a.received_at, b.received_at) || a.id - b.id
+}
+async function attachLotRows<T extends { items: unknown }>(env: Env, user: SessionUser, query: Record<string, string>, payload: T): Promise<T> {
+  if (!productSearchIncludes(query).has('lots')
+    || !(getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full')) return payload
+  const items = payload.items as Array<Record<string, unknown>>
+  const ids = [...new Set(items.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!ids.length) return payload
+  const cap = getPlanLimits(env).productListLotsPerRow
+  const rows = await getDb(env).prepare(`
+    SELECT pb.variant_product_id AS product_id, pb.id AS id, pb.received_at AS received_at, pb.expiry_date AS expiry_date, pb.lot_code AS lot_code,
+           pb.batch_number AS batch_number, pb.supplier_name AS supplier_name, bbs.branch_id AS branch_id, bbs.quantity AS quantity
+    FROM json_each(@ids) wanted
+    JOIN product_batches pb ON pb.variant_product_id = wanted.value AND pb.is_active = 1
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+  `).all<PageLotRow>({ ids: JSON.stringify(ids) })
+  type Lot = { id: number; received_at: string | null; expiry_date: string | null; lot_code: string | null; batch_number: number | null; supplier_name: string | null; branches: Array<{ branch_id: number; quantity: number }> }
+  const lotById = new Map<number, Lot>()
+  const lotsByProduct = new Map<number, Lot[]>()
+  for (const row of rows) {
+    let lot = lotById.get(Number(row.id))
+    if (!lot) {
+      lot = { id: Number(row.id), received_at: row.received_at, expiry_date: row.expiry_date, lot_code: row.lot_code, batch_number: row.batch_number, supplier_name: row.supplier_name, branches: [] }
+      lotById.set(lot.id, lot)
+      const productId = Number(row.product_id)
+      const list = lotsByProduct.get(productId)
+      if (list) list.push(lot); else lotsByProduct.set(productId, [lot])
+    }
+    lot.branches.push({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0 })
+  }
+  return { ...payload, items: items.map((row) => {
+    const all = lotsByProduct.get(Number(row.id)) ?? []
+    const kept = all.length > 1 ? [...all].sort(compareLotsFifo) : all
+    for (const lot of kept) if (lot.branches.length > 1) lot.branches.sort((a, b) => a.branch_id - b.branch_id)
+    return { ...row, lots: kept.slice(0, cap), ...(kept.length > cap ? { lots_more: true } : {}) }
+  }) }
+}
+
 app.get('/search', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
@@ -1460,7 +1515,8 @@ app.get('/search', async (c) => {
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
-  return c.json(await attachFoldedTaggedLots(c.env, user, query, payload))
+  const [withTagged, withLots] = await Promise.all([attachFoldedTaggedLots(c.env, user, query, payload), attachLotRows(c.env, user, query, payload)])
+  return c.json(withLots === payload ? withTagged : { ...withTagged, items: withLots.items })
 })
 
 // ---- G37: the client search index ------------------------------------

@@ -21,6 +21,8 @@ function getEntries(ctx) {
     ['settings/payment-methods/impact', '/api/settings/payment-methods/impact?from=Cash&to=ABA'], ['pos/address-presets', '/api/pos/address-presets'], ['telegram/status', '/api/telegram/status'],
     // products
     ['products/search Products default (created_desc, 50, branch_stock,images,batches,tagged_lots)', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    // INV-A S3: the same default page with the received dates folded in (include=lots); Inventory asks for it. The default shape above stays without the token.
+    ['products/search default lots', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots,lots`],
     ['products/search Products text "serum"', `/api/products/search?${P}&query=serum&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products text "product 12"', `/api/products/search?${P}&query=product%2012&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products barcode', `/api/products/search?${P}&query=8850000001234&searchMode=smart&include=branch_stock,images,batches,tagged_lots`],

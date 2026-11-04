@@ -308,6 +308,14 @@ export type PlanLimits = {
   // exactly what 6.0.1053 reads. A window with both ends can still be over the cap and pays the attempt once. Paid tries every window (it folds the table).
   expenseReportFoldUnboundedWindows: boolean
 
+  // ---- Received dates in the Products list (INV-A S3; token-gated, additive) ----
+  //
+  // routes/products.ts GET /search with include=lots: the most received dates (lots) ONE row carries. The answer lists a row's active lots that have a branch
+  // row, first-in-first-out, and sets `lots_more: true` on a row that has more; the rest load through GET /api/batches as before. The cap bounds the payload
+  // bytes and the per-row work on the tier that rations both (Free 20, Paid 50); the statement still reads every active lot of the page's rows (a lot costs its own
+  // row plus one per branch it sits in), because ordering in SQL would be counted as rows read again.
+  productListLotsPerRow: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -398,6 +406,7 @@ const PAID_LIMITS: PlanLimits = {
   expenseExportPageRows: 500,
   expenseReportFoldMaxRows: 50_000,
   expenseReportFoldUnboundedWindows: true,
+  productListLotsPerRow: 50,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -437,6 +446,7 @@ const FREE_LIMITS: PlanLimits = {
   expenseExportPageRows: 500,
   expenseReportFoldMaxRows: 1_500,
   expenseReportFoldUnboundedWindows: false,
+  productListLotsPerRow: 20,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
