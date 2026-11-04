@@ -17,7 +17,7 @@
 //     numbers from its own entry (proved by a stale-name probe that shows the two entries are separate), and the other
 //     way round: an account without the grant warms first and the holder still reads in full.
 //
-// Variants (environment), used by test-phone-leak-mutants-native.cjs:
+// Variants (environment), used by test-phone-leak-mutants-{crawl,oracle}-native.cjs:
 //   PHONE_WORLD=egress-off   the c.json projection (lib/phoneMaskMiddleware.ts) is removed, so the cache layer is the only wall
 //   PHONE_MODE=cache         only the cached-path checks
 //   PHONE_MUTANT=<name>      one defect applied to a source file in the in-memory bundle (src/ is untouched)

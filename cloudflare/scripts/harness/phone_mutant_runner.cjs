@@ -8,7 +8,8 @@
 //   write   test-phone-write-guard-native.cjs        a mask must never overwrite a real number
 //   text    test-phone-masked-text-native.cjs        a mask must never overwrite a name, note or label; people-only name masking; no key leaks
 //
-// Run (from cloudflare/): node scripts/test-phone-leak-mutants-native.cjs
+// Run (from cloudflare/): node scripts/test-phone-leak-mutants-crawl-native.cjs   (crawl, write, text)
+//                          node scripts/test-phone-leak-mutants-oracle-native.cjs  (oracle)
 // Four mutant worlds run at a time; each boots its own Worker under Miniflare.
 const { spawn } = require('node:child_process')
 const path = require('node:path')
@@ -38,11 +39,14 @@ const RUNS = [
     'search: the legacy deleted reason is read raw', 'search: the legacy deleted cashier filter reads the number'].map((name) => ['text', name, {}]),
 ]
 const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs', text: 'test-phone-masked-text-native.cjs' }
+// The mutants are split over two test files so that each fits the gate's first try (10 min) with margin: one file took 675 s on a loaded machine.
+// Every kind belongs to exactly one group (checked below), so no mutant is dropped by the split.
+const GROUPS = { crawl: ['crawl', 'write', 'text'], oracle: ['oracle'] }
 const PARALLEL = Math.max(1, Number(process.env.PHONE_MUTANT_PARALLEL) || 4)
 
 function run([kind, name, env]) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(__dirname, FILES[kind])], { env: { ...process.env, PHONE_MUTANT: name, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [path.join(__dirname, '..', FILES[kind])], { env: { ...process.env, PHONE_MUTANT: name, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     child.stdout.on('data', (chunk) => { output += chunk })
     child.stderr.on('data', (chunk) => { output += chunk })
@@ -54,8 +58,13 @@ function run([kind, name, env]) {
   })
 }
 
-async function main() {
-  const queue = [...RUNS]
+const grouped = new Set(Object.values(GROUPS).flat())
+for (const [kind, name] of RUNS) if (!grouped.has(kind)) throw new Error(`mutant ${kind}: ${name} is in no group`)
+
+async function main(group) {
+  const kinds = GROUPS[group]
+  if (!kinds) throw new Error(`unknown mutant group ${group}`)
+  const queue = RUNS.filter(([kind]) => kinds.includes(kind))
   const results = []
   await Promise.all(Array.from({ length: PARALLEL }, async () => {
     while (queue.length) {
@@ -70,9 +79,10 @@ async function main() {
       console.log(`${killed ? 'killed  ' : 'SURVIVED'} ${result.kind}: ${result.name}${result.anchor ? ' (the mutant\'s anchor text is gone: update the mutant)' : ` (${result.red} red case${result.red === 1 ? '' : 's'}${retried ? ', after one restart of a crashed world' : ''})`}`)
     }
   }))
+  if (!results.length) { console.error(`FAIL group ${group} ran no mutant`); process.exit(1) }
   const survivors = results.filter((result) => !(result.code !== 0 && result.red > 0 && !result.anchor))
   if (survivors.length) { console.error(`FAIL ${survivors.length} mutant(s) survived`); process.exit(1) }
-  console.log(`PASS ${results.length} phone mutants killed`)
+  console.log(`PASS ${results.length} phone mutants killed (${group})`)
 }
 
-main().catch((error) => { console.error(error); process.exit(1) })
+module.exports = { main: (group) => main(group).catch((error) => { console.error(error); process.exit(1) }), GROUPS, RUNS }

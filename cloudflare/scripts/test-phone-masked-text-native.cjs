@@ -18,7 +18,7 @@
 // run would prove nothing. Each was red on 21137933b. Synthetic numbers only (the 097 2xx 8xx set).
 //
 // Run (from cloudflare/): node scripts/test-phone-masked-text-native.cjs
-// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-native.cjs runs each).
+// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-{crawl,oracle}-native.cjs runs each).
 const { createReporter } = require('./harness/real_worker_world.cjs')
 const { bootPhoneWorld, PHONES, PRODUCT_CODE, PRODUCT_CODE_MASK, leaksIn, leakPathsIn } = require('./harness/phone_leak_world.cjs')
 

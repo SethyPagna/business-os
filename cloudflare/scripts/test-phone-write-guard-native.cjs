@@ -7,7 +7,7 @@
 // record it belongs to, or is refused with `masked_phone_input`; a number the person really typed passes untouched.
 //
 // Run (from cloudflare/): node scripts/test-phone-write-guard-native.cjs
-// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-native.cjs runs each).
+// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-{crawl,oracle}-native.cjs runs each).
 const { createReporter } = require('./harness/real_worker_world.cjs')
 const { bootPhoneWorld, PHONES, optionJson } = require('./harness/phone_leak_world.cjs')
 

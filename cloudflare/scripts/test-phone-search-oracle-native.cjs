@@ -7,7 +7,7 @@
 // names, receipts and membership numbers must search as before; and the holder's results must be today's.
 //
 // Run (from cloudflare/): node scripts/test-phone-search-oracle-native.cjs
-// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-native.cjs runs each).
+// PHONE_MUTANT=<name> applies one defect to a source file in the in-memory bundle (test-phone-leak-mutants-{crawl,oracle}-native.cjs runs each).
 const { createReporter } = require('./harness/real_worker_world.cjs')
 const { bootPhoneWorld, PHONES, leaksIn, snippetOf } = require('./harness/phone_leak_world.cjs')
 const { disguises } = require('./harness/phone_disguises.cjs')
@@ -161,14 +161,16 @@ async function main() {
     }
   })
   await check('no grant: the cached Sales totals do not say how many sales a number fragment matches (holder warms first, then the other way)', async (t) => {
+    // The holder must share the other account's organisation: the organisation is part of the cache key, so a holder in another one (the bootstrap admin) could never share an entry with it,
+    // and a key that forgot the grant would still be told apart (6.0.1259: the mutant below was equivalent in that world).
     const count = (response) => (response.json && response.json.total_count)
-    const holderFirst = await get(`/api/sales/stats?search=${enc('654321')}`, 'admin')
+    const holderFirst = await get(`/api/sales/stats?search=${enc('654321')}`, 'manager_granted')
     t.ok('positive control: the holder counts the sale by a fragment of its number', count(holderFirst) >= 1, holderFirst.text.slice(0, 200))
     const denied = await get(`/api/sales/stats?search=${enc('654321')}`, 'sales_only')
     t.eq('the account without the grant counts nothing for the same URL', count(denied), 0)
     const deniedFirst = await get(`/api/sales/stats?search=${enc('999000')}`, 'sales_only')
     t.eq('warmed by the account without the grant: nothing', count(deniedFirst), 0)
-    const holderAfter = await get(`/api/sales/stats?search=${enc('999000')}`, 'admin')
+    const holderAfter = await get(`/api/sales/stats?search=${enc('999000')}`, 'manager_granted')
     t.ok('and the holder still counts the sale (its own entry)', count(holderAfter) >= 1, holderAfter.text.slice(0, 200))
   })
   await check('no grant: Returns search does not read a customer name that is a number', async (t) => {
