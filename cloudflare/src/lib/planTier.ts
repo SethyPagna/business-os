@@ -249,6 +249,28 @@ export type PlanLimits = {
   // serverSignals.ts SIGNAL_TTL_MS) are sized from the Free value; scripts/test-plan-tier-pure.cjs pins that they still cover it.
   readSwitchMemoSeconds: number
 
+  // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
+  // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
+  // "building since <time>" marker (a plain value); the others poll for its FINISHED result with their own timer and never await
+  // anything the first request created: workerd ties a promise to its request, so awaiting another request's can hang for good (the
+  // 6.0.1048 review, B1). The wait and the staleness window save D1 reads (a longer wait means fewer duplicate builds), so Free's number is
+  // the LARGER one; the poll step is larger on Free too, because a Free invocation has 10 ms of CPU and fewer wake-ups spend less of it.
+  //   buildSharePollMs   the step between looks at the result memo. Paid 50, Free 100.
+  //   buildShareWaitMs   the longest one request waits; also how long a finished result stays in the buildShare memo (the longest any
+  //                      waiter waits). Paid 1,000, Free 2,000.
+  //   buildShareStaleMs  the age at which a marker is taken for a dead builder (cancelled, killed) and ignored. Paid 3,000, Free 5,000.
+  //                      A cold-search slot (routes/portal.ts, the per-isolate cap on searches that run their own build) counts as lost
+  //                      at the same age: its release sits in a `finally` that a request whose context ended never reaches, and a build
+  //                      older than this is the one a waiter has already stopped trusting.
+  //   buildShareMemoMaxEntries  how many finished bodies the buildShare memo holds at once (the oldest go first). The memo is only read
+  //                      by a request waiting on a builder, for at most buildShareWaitMs, but it holds whole storefront bodies, so its
+  //                      size is bounded by count, not by time alone. An evicted body costs its waiter one rebuild. Unlike the three
+  //                      durations this is a ceiling, so Free is the SMALLER one: Paid 32, Free 16.
+  buildSharePollMs: number
+  buildShareWaitMs: number
+  buildShareStaleMs: number
+  buildShareMemoMaxEntries: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -330,6 +352,10 @@ const PAID_LIMITS: PlanLimits = {
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   readSwitchMemoSeconds: 5,
+  buildSharePollMs: 50,
+  buildShareWaitMs: 1000,
+  buildShareStaleMs: 3000,
+  buildShareMemoMaxEntries: 32,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -360,6 +386,10 @@ const FREE_LIMITS: PlanLimits = {
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
   readSwitchMemoSeconds: 15,
+  buildSharePollMs: 100,
+  buildShareWaitMs: 2000,
+  buildShareStaleMs: 5000,
+  buildShareMemoMaxEntries: 16,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

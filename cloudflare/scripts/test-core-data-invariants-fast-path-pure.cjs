@@ -195,36 +195,55 @@ async function main() {
       assert.equal(fx.stats.writes, 0)
     } finally { fx.raw.close() }
   })
-  await check('once wrapper shares concurrent work and warm calls add zero reads', async () => {
+  // The once wrapper shares the FINISHED result across requests and lets concurrent callers wait for it on a marker (lib/buildShare.ts,
+  // HANG-2: it used to share the pending promise, which a cancelled first request left unsettled for the whole isolate). The Worker
+  // installs the hook; these two cases install it the same way and remove it afterwards.
+  const SHARE_KEY = Symbol.for('business-os.build-share.v1')
+  const withBuildShare = async (run) => {
+    load('lib/buildShare.ts', { './planTier': load('lib/planTier.ts') })
+    try { await run() } finally { delete globalThis[SHARE_KEY] }
+  }
+  await check('once wrapper: concurrent callers wait for the finished result of the first; warm calls add zero reads', async () => {
     const fx = await healthy(), once = loadCore()
     try {
-      let release
-      fx.stats.gate = new Promise((resolve) => { release = resolve })
-      const first = once.ensureCoreDataInvariantsOnce(fx.env)
-      const others = Array.from({ length: 8 }, () => once.ensureCoreDataInvariantsOnce(fx.env))
-      others.forEach((promise) => assert.equal(promise, first))
-      release()
-      await Promise.all([first, ...others])
-      assert.equal(fx.stats.reads, 1)
-      assert.equal(once.ensureCoreDataInvariantsOnce(fx.env), first)
-      await once.ensureCoreDataInvariantsOnce(fx.env)
-      assert.equal(fx.stats.reads, 1)
-      assert.equal(fx.stats.writes, 0)
+      await withBuildShare(async () => {
+        let release
+        fx.stats.gate = new Promise((resolve) => { release = resolve })
+        const first = once.ensureCoreDataInvariantsOnce(fx.env)
+        const others = Array.from({ length: 8 }, () => once.ensureCoreDataInvariantsOnce(fx.env))
+        release()
+        const results = await Promise.all([first, ...others])
+        assert.equal(fx.stats.reads, 1, 'nine concurrent callers, one check')
+        results.forEach((result) => assert.deepEqual(result, results[0]))
+        await once.ensureCoreDataInvariantsOnce(fx.env)
+        assert.equal(fx.stats.reads, 1)
+        assert.equal(fx.stats.writes, 0)
+      })
     } finally { fx.raw.close() }
   })
-  await check('once wrapper clears a rejected attempt and shares the successful retry', async () => {
+  await check('once wrapper: a rejected attempt is not memoised and a caller behind it is not poisoned by it', async () => {
     const fx = await healthy(), once = loadCore()
     try {
-      fx.stats.fail = true
-      const first = once.ensureCoreDataInvariantsOnce(fx.env)
-      assert.equal(once.ensureCoreDataInvariantsOnce(fx.env), first)
-      await assert.rejects(first, /injected read failure/)
-      const retry = once.ensureCoreDataInvariantsOnce(fx.env)
-      assert.notEqual(retry, first)
-      assert.equal(once.ensureCoreDataInvariantsOnce(fx.env), retry)
-      await retry
-      assert.equal(fx.stats.reads, 2)
-      assert.equal(fx.stats.writes, 0)
+      await withBuildShare(async () => {
+        fx.stats.fail = true
+        const first = once.ensureCoreDataInvariantsOnce(fx.env)
+        const behind = once.ensureCoreDataInvariantsOnce(fx.env)
+        await assert.rejects(first, /injected read failure/)
+        await behind
+        assert.equal(fx.stats.reads, 2, 'the failed read, then the one the waiting caller did for itself')
+        await once.ensureCoreDataInvariantsOnce(fx.env)
+        assert.equal(fx.stats.reads, 2, 'and the success is memoised')
+        assert.equal(fx.stats.writes, 0)
+      })
+    } finally { fx.raw.close() }
+  })
+  await check('once wrapper with no hook (a module loaded alone) shares nothing but still memoises the finished result', async () => {
+    const fx = await healthy(), once = loadCore()
+    try {
+      await Promise.all([once.ensureCoreDataInvariantsOnce(fx.env), once.ensureCoreDataInvariantsOnce(fx.env)])
+      assert.equal(fx.stats.reads, 2, 'two concurrent callers, no marker: each does its own check')
+      await once.ensureCoreDataInvariantsOnce(fx.env)
+      assert.equal(fx.stats.reads, 2, 'then the finished result answers')
     } finally { fx.raw.close() }
   })
   // Discriminating control for the admin_role ORDER BY (roles.code is not

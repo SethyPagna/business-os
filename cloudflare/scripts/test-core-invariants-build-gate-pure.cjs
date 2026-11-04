@@ -153,6 +153,47 @@ async function main() {
     assert.equal(flag(w).status, 'verified')
   })
 
+  // HANG-2: the once-per-build gate is awaited by every /api request, so it must never hold a request on a promise another request created.
+  // The Worker installs the buildShare hook (index.ts); these cases install it the same way and remove it afterwards.
+  const SHARE_KEY = Symbol.for('business-os.build-share.v1')
+  const withBuildShare = async (run) => {
+    load('lib/buildShare.ts', { './planTier': load('lib/planTier.ts') })
+    try { await run() } finally { delete globalThis[SHARE_KEY] }
+  }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  await check('HANG-2: concurrent requests of ONE isolate: one gate run, the others take its finished outcome', async () => {
+    const w = await seeded()
+    await withBuildShare(async () => {
+      const mod = isolate()
+      let release
+      w.control.gate = new Promise((resolve) => { release = resolve })
+      const runs = Array.from({ length: 5 }, () => mod.ensureCoreDataInvariantsForBuildOnce(w.env, opts()))
+      await sleep(20)
+      release(); w.control.gate = null
+      assert.deepEqual(await Promise.all(runs), ['checked', 'checked', 'checked', 'checked', 'checked'])
+      assert.equal(fullScans(w), 1, 'five requests, one full scan')
+      assert.equal(writes(w), 2, 'one lease and one record write')
+    })
+  })
+
+  await check('HANG-2: a first request that never finishes holds no other request: the next one waits the cap, then runs the gate itself', async () => {
+    const w = await seeded()
+    await withBuildShare(async () => {
+      const mod = isolate()
+      w.control.gate = new Promise(() => {})
+      void mod.ensureCoreDataInvariantsForBuildOnce(w.env, opts()) // request A: cancelled mid-check, its read never returns
+      await sleep(30)
+      w.control.gate = null
+      const started = Date.now()
+      const outcome = await Promise.race([mod.ensureCoreDataInvariantsForBuildOnce(w.env, opts()), sleep(4000).then(() => 'HELD')])
+      assert.notEqual(outcome, 'HELD', 'request B must not wait on the gate promise of request A')
+      assert.equal(outcome, 'checked')
+      assert.ok(Date.now() - started >= 900, `B gave A the wait first (${Date.now() - started} ms)`)
+      assert.equal(await mod.ensureCoreDataInvariantsForBuildOnce(w.env, opts()), 'checked', 'and the next request finds the settled outcome')
+    })
+  })
+
   await check('a deferred isolate re-checks after the lease window instead of skipping forever', async () => {
     const w = await seeded()
     // Another isolate holds an unexpired lease and then dies without recording.
