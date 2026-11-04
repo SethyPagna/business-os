@@ -162,7 +162,13 @@ function writeShapes() {
       prepare: async (world) => (await world.all('SELECT * FROM products WHERE id=1003'))[0],
       run: async (world, send, p) => send('PUT', '/api/products/1003', { ...p, selling_price_usd: 11, expected_updated_at: p.updated_at, client_request_id: key('edit') }) },
     { id: 'w-read-switch-flip', label: 'PUT /api/runtime/read-switches', method: 'PUT', url: '/api/runtime/read-switches',
-      run: async (world, send) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: 0 }) },
+      // The write pass boots with call_counting stored (P1.1), so the row already carries epoch 1; the flip names the epoch the world holds
+      // instead of assuming an empty row (0), which the route answers 409 read_switch_epoch_stale.
+      prepare: async (world) => {
+        const row = (await world.all("SELECT value FROM system_flags WHERE key='read_switches'"))[0]
+        try { return Number(JSON.parse(row.value).epoch) || 0 } catch { return 0 }
+      },
+      run: async (world, send, epoch) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: epoch }) },
     { id: 'w-logout', label: 'POST /api/auth/logout', method: 'POST', url: '/api/auth/logout', body: {} },
   ]
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))
