@@ -316,6 +316,20 @@ export type PlanLimits = {
   // row plus one per branch it sits in), because ordering in SQL would be counted as rows read again.
   productListLotsPerRow: number
 
+  // ---- The wired Inventory Check read path (INV-A S4a; behind the read switch `ic_wired`) ----
+  //
+  // routes/inventoryChecks.ts GET /overlay: the most product ids ONE overlay request reads count entries, pending marks and last movements for (a window is
+  // a page plus the prefetch pages after it). Above it the request is refused 400, so the statements stay bounded by a number the client was told.
+  inventoryOverlayMaxRows: number
+
+  // lib/inventoryCheckOverlay.ts: the most movement rows read per product to find its last recorded stock change. The newest day's rows are read in index order
+  // (created_at mixes 'YYYY-MM-DD HH:MM:SS' and ISO 'T...Z', so the text order alone puts ISO 09:00 above 14:00) and the latest by julianday among these wins.
+  inventoryLastChangeMaxRows: number
+
+  // lib/inventoryCheckList.ts: the most ids a check-state filter (Issues, Counted, Pending, Not checked) may carry into the Products kernel as ONE json_each
+  // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
+  inventoryCheckFilterMaxIds: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -407,6 +421,9 @@ const PAID_LIMITS: PlanLimits = {
   expenseReportFoldMaxRows: 50_000,
   expenseReportFoldUnboundedWindows: true,
   productListLotsPerRow: 50,
+  inventoryOverlayMaxRows: 300,
+  inventoryLastChangeMaxRows: 8,
+  inventoryCheckFilterMaxIds: 10_000,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -447,6 +464,9 @@ const FREE_LIMITS: PlanLimits = {
   expenseReportFoldMaxRows: 1_500,
   expenseReportFoldUnboundedWindows: false,
   productListLotsPerRow: 20,
+  inventoryOverlayMaxRows: 150,
+  inventoryLastChangeMaxRows: 4,
+  inventoryCheckFilterMaxIds: 2_000,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
