@@ -131,7 +131,14 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
   const graph = buildEmittedGraph()
   const entry = [...graph.keys()].find((file) => /^catalog-products-[\w-]{8}\.js$/.test(file))
   assert.ok(entry, 'missing exact catalog-products chunk in dist/assets')
-  const { chunks, bytes } = closureBytesAndCount(graph, [entry as string])
+  const { chunks, bytes, files: closureFiles } = closureBytesAndCount(graph, [entry as string])
+  // The Expenses transport serves the Expenses page, its report and the Sales hub; filed in the /src/api/ catch-all it rode in app-api-methods and cost the
+  // storefront ~11 KB (E1-F). Its own chunk ('fees-api') is outside this closure, and no chunk inside it carries the Expenses endpoints.
+  assert.ok(!closureFiles.some((file) => /^fees-api-/.test(file)), 'the catalog-products closure must not load the Expenses transport chunk')
+  assert.deepEqual(
+    closureFiles.filter((file) => fs.readFileSync(path.join(distAssets, file), 'utf8').includes('/api/fees/report')), [],
+    'no chunk of the catalog-products closure carries the Expenses report endpoint',
+  )
   assert.ok(
     bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES,
     `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,

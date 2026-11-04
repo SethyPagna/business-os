@@ -43,6 +43,11 @@ try {
   for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...staticChecked]) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
+  // The Expenses transport chunk and the pages that must NOT load it (E1-F): only the Expenses page imports it here.
+  for (const entry of ['fees-api', 'Returns', 'EditReturnModal', 'ReturnsBulkActionModal', 'app-api-methods']) {
+    fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
+  }
+  fs.writeFileSync(path.join(assets, 'FeesPage-12345678.js'), 'import "./fees-api-12345678.js"; export const value = 1;')
   // The validator also checks the language packs (I6-1): JSON text behind a
   // default export, and the early Khmer preload naming an emitted chunk.
   for (const language of ['en', 'km']) {
@@ -56,7 +61,7 @@ try {
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 19 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 24 chunks, zero cycles/)
   // A till page that statically imports SheetJS must fail the gate.
   fs.writeFileSync(path.join(assets, 'vendor-xlsx-12345678.js'), 'export const xlsx = 1;')
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'import { xlsx } from "./vendor-xlsx-12345678.js"; export const value = xlsx;')
@@ -65,6 +70,12 @@ try {
   assert.match(xlsxOnTill.stdout + xlsxOnTill.stderr, /POS statically pulls vendor-xlsx/)
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'export const value = 1;')
   fs.rmSync(path.join(assets, 'vendor-xlsx-12345678.js'))
+  // A page that runs no fees code must not load the Expenses transport: Returns importing it fails the gate.
+  fs.writeFileSync(path.join(assets, 'Returns-12345678.js'), 'import "./fees-api-12345678.js"; export const value = 1;')
+  const feesOnReturns = verify()
+  assert.notEqual(feesOnReturns.status, 0)
+  assert.match(feesOnReturns.stdout + feesOnReturns.stderr, /only chunks that use fees code may statically import fees-api/)
+  fs.writeFileSync(path.join(assets, 'Returns-12345678.js'), 'export const value = 1;')
   // A decode worker that imports another chunk is no longer self-contained.
   fs.writeFileSync(path.join(assets, 'barcodeDecode.worker-12345678.js'), 'import "./vendor-12345678.js"; export const value = 1;')
   const workerImport = verify()

@@ -23,6 +23,10 @@ const boundaries: Array<[string, string]> = [
   ['api/unresolvedSignout.ts', 'actor-read-scope'],
   ['api/offlineQueueOwnership.ts', 'actor-read-scope'],
   ['utils/businessTimeBounds.ts', 'shared-formatters'],
+  // The Expenses transport has its own chunk (E1-F: in app-api-methods it cost the storefront ~11 KB); the 4xx predicate it shares with the Returns and
+  // sale-modal mutation paths stays in app-api-methods, or every one of those pages fetches fees-api for ten lines.
+  ['api/feesTransport.ts', 'fees-api'],
+  ['utils/directMutationRefusal.ts', 'app-api-methods'],
   ['utils/permissions.ts', 'permissions-core'],
   ['utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
@@ -154,8 +158,8 @@ for (const relative of [
   assert.equal(closure.has(path.join(frontend, 'src/AppContext.tsx')), false, `${relative} must not import admin startup`)
   assert.equal([...closure].some(file => /(?:PublicCatalogPage|CatalogPage|BackgroundImportTracker)\.tsx$/.test(file)), false)
 }
-// API transports ride the boot path (feesTransport is bundled into
-// app-api-methods). Importing the Reports model from one of them hoists the
+// API transports ride the boot path (returnsReadTransport and the other transports without a chunk of their own are bundled into app-api-methods;
+// feesTransport has its own 'fees-api' chunk and reaches the storefront through neither). Importing the Reports model from one of them hoists the
 // whole model into a manual API chunk that the storefront then fetches before
 // first paint -- the regression that took the landing count from 50 to 52.
 for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', 'utils/returnsExportWindow.ts']) {
@@ -165,6 +169,9 @@ for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', '
   // The pending-request store (~10 KB) stays off the boot path; the refusal predicate lives in its own leaf.
   assert.equal(closure.has(path.join(frontend, 'src/utils/directMutationRequest.ts')), false, `${relative} must not import the direct-mutation request store`)
 }
+// Sales reaches the Expenses transport through a dynamic import only: SaleDetailModal and CancelSaleModal import shared code from the Sales chunk, so a static
+// import there makes every page that opens either modal fetch 'fees-api' (checked on the emitted graph in the --bundle section below).
+assert.doesNotMatch(fs.readFileSync(path.join(frontend, 'src/components/sales/Sales.tsx'), 'utf8'), /^import\s[^;]*from\s+'[^']*api\/feesTransport\.ts'/m, 'Sales must not import feesTransport statically')
 console.log('PASS neutral chunk policy, real config ordering, and source dependency boundaries')
 
 // Run explicitly after a build; ordinary unit runs must not silently inspect
@@ -240,6 +247,23 @@ if (process.argv.includes('--bundle')) {
     assert.equal([...publicPreloadClosure].some(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file)), false, `public preload graph pulls ${name}`)
   }
   console.log(`PASS actual public preload closure: ${publicPreloadClosure.size} chunks, no admin/file/import code`)
+  // E1-F: 'fees-api' is the Expenses transport and nothing else. A chunk may import it statically only if it is a page or modal that uses fees code
+  // (Expenses, its label manager and form, and the Reports hub's Expenses report). Two things put it on pages that run no fees code: Rollup moved the 4xx
+  // predicate that Returns and the sale modals share into it, and Sales imported getFeesReport statically while SaleDetailModal and CancelSaleModal import
+  // shared code from the Sales chunk; Returns, SaleDetailModal, CancelSaleModal, EditReturnModal and ReturnsBulkActionModal then each fetched the whole 11 KB
+  // transport (one more request on first paint). Sales now loads it with a dynamic import when its period strip needs the expense figures.
+  const feesApi = files.filter(file => /^fees-api-[\w-]{8}\.js$/.test(file))
+  assert.equal(feesApi.length, 1, 'exactly one fees-api chunk')
+  const FEES_CODE_CHUNKS = /^(FeesPage|FeeForm|ExpenseLabelManagerModal|ExpenseTypesSection|ReportsHub)-[\w-]{8}\.js$/
+  const feesImporters = files.filter(file => graph.get(file)?.includes(feesApi[0]))
+  assert.ok(feesImporters.length > 0, 'the Expenses page imports fees-api')
+  assert.deepEqual(feesImporters.filter(file => !FEES_CODE_CHUNKS.test(file)), [], 'only chunks that use fees code may statically import fees-api')
+  for (const name of ['index', 'app-api-methods', 'catalog-products', 'POS', 'Dashboard', 'Sales', 'Returns', 'EditReturnModal', 'ReturnsBulkActionModal', 'SaleDetailModal', 'CancelSaleModal']) {
+    const entry = files.find(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file))
+    assert.ok(entry, `missing exact ${name} chunk`)
+    assert.equal([...closureOf([entry])].some(file => feesApi.includes(file)), false, `${name} must not statically load fees-api`)
+  }
+  console.log(`PASS fees-api is imported only by fees code (${feesImporters.length} chunks), and by no Returns, till, dashboard, Sales or sale-modal closure`)
   const css = fs.readdirSync(assets).filter(file => file.endsWith('.css'))
     .map(file => fs.readFileSync(path.join(assets, file), 'utf8')).join('\n')
   const khmerFaces = (css.match(/@font-face\s*\{[^}]*\}/g) || [])

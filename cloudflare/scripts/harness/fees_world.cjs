@@ -71,11 +71,13 @@ function createFeesWorld({ patches = [], overrides = {}, through } = {}) {
   root.route('/api/reports', load('routes/reports.ts').default)
 
   const executionCtx = { waitUntil(promise) { return promise }, passThroughOnException() {} }
-  async function request(method, url, body, user, headers = {}) {
+  // `env` is the Worker's bindings for this request (e.g. { PLAN_TIER: 'free' }); lib/planTier.ts caches the tier per module, so a test that changes it
+  // resets the cache first (w.load('lib/planTier.ts').__resetPlanTierCacheForTests()).
+  async function request(method, url, body, user, headers = {}, env = {}) {
     state.user = user
     const init = { method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers } }
     if (body !== undefined) init.body = JSON.stringify(body)
-    const response = await root.request(url, init, {}, executionCtx)
+    const response = await root.request(url, init, env, executionCtx)
     const text = await response.text()
     let json = null
     try { json = text ? JSON.parse(text) : null } catch { json = null }

@@ -5607,6 +5607,7 @@
   "read_switch_name_report_atomic": "សរុបរបាយការណ៍លក់",
   "read_switch_name_report_atomic_long": "របាយការណ៍លក់ពេញលេញ",
   "read_switch_name_call_counting": "រាប់ការហៅ (ក្រុមមួយ = ការហៅមួយ)",
+  "read_switch_name_expense_reads": "ការអានទំព័រចំណាយ",
   "read_switch_stale": "កុងតាក់ត្រូវបានប្ដូរពីកន្លែងផ្សេង។ បង្ហាញថ្មីបំផុត។",
   "read_switch_state_off": "បិទ",
   "read_switch_state_on": "បើក",

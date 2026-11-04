@@ -148,6 +148,9 @@ const PAID = {
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
   buildShareMemoMaxEntries: 32,
+  expenseExportPageRows: 500,
+  expenseReportFoldMaxRows: 50000,
+  expenseReportFoldUnboundedWindows: true,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -181,6 +184,9 @@ const FREE = {
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
   buildShareMemoMaxEntries: 16,
+  expenseExportPageRows: 500,
+  expenseReportFoldMaxRows: 1500,
+  expenseReportFoldUnboundedWindows: false,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -218,6 +224,11 @@ const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverview
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
 const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 
+// Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
+// offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
+// fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows']
+
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
 // Without this, every assertion above still passes when the free table is a
@@ -228,6 +239,10 @@ check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, 
   const same = []
   for (const key of Object.keys(paid)) {
     if (key === 'tier') continue
+    if (SAME_ON_BOTH_TIERS.includes(key)) {
+      assert.equal(free[key], paid[key], `${key} is named as the same on both tiers, so it must be`)
+      continue
+    }
     if (free[key] === paid[key]) same.push(key)
     if (typeof paid[key] === 'number' && FREE_IS_LONGER_ALL.includes(key)) {
       assert.ok(free[key] > paid[key], `free.${key} (${free[key]}) is a lifetime and must be strictly LONGER than paid.${key} (${paid[key]})`)
@@ -236,6 +251,7 @@ check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, 
     }
   }
   for (const key of FREE_IS_LONGER_ALL) assert.ok(Object.hasOwn(paid, key), `FREE_IS_LONGER names a field that does not exist: ${key}`)
+  for (const key of SAME_ON_BOTH_TIERS) assert.ok(Object.hasOwn(paid, key), `SAME_ON_BOTH_TIERS names a field that does not exist: ${key}`)
   assert.deepEqual(same, [], `these fields are identical on both tiers, so the split does nothing for them: ${same.join(', ')}`)
   // And the control's own control: a deliberately identical pair must be
   // REPORTED as identical, so a green run above cannot come from the

@@ -5611,6 +5611,7 @@
   "read_switch_name_report_atomic": "Sales report totals",
   "read_switch_name_report_atomic_long": "Full sales reports",
   "read_switch_name_call_counting": "Call counting (batch = one call)",
+  "read_switch_name_expense_reads": "Expenses page reads",
   "read_switch_stale": "The switches changed elsewhere. Showing the current ones.",
   "read_switch_state_off": "Off",
   "read_switch_state_on": "On",

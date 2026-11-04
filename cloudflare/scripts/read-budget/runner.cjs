@@ -37,6 +37,20 @@ async function ensureStockKey(world) {
   return world.state.stockKey
 }
 
+// A mid-export cursor for the Expenses export shapes (routes/feesCatalog.ts, lib/expenseReads.ts encodeFeeCursor: base64url of {v, e, s, h}): resume after the
+// 2,000th expense of the list and the middle courier sale of the sale list, with the highest ids as the export started. Read from the seeded database directly.
+async function ensureFeeCursor(world) {
+  if (world.state?.feeCursor) return world.state.feeCursor
+  const courier = 'delivery_actual_cost_usd IS NOT NULL OR delivery_actual_cost_khr IS NOT NULL'
+  const [e] = await world.all('SELECT fee_date, id FROM fees ORDER BY fee_date DESC, id DESC LIMIT 1 OFFSET 1999')
+  const [{ n }] = await world.all(`SELECT COUNT(*) AS n FROM sales WHERE ${courier}`)
+  const [s] = await world.all(`SELECT date(created_at, '+7 hours') AS d, datetime(created_at) AS dt, id FROM sales WHERE ${courier} ORDER BY d DESC, dt DESC, id DESC LIMIT 1 OFFSET ?`, Math.floor(n / 2))
+  const [h] = await world.all('SELECT (SELECT MAX(id) FROM fees) AS f, (SELECT MAX(id) FROM sales) AS s')
+  const token = Buffer.from(JSON.stringify({ v: 1, e: [e.fee_date, e.id], s: [s.d, s.dt, s.id], h: [h.f, h.s] })).toString('base64url')
+  world.state = { ...world.state, feeCursor: token }
+  return token
+}
+
 // The ids the GET shapes name exist before anything is measured, so the order of shapes never changes the data.
 async function prepareWorld(world) {
   await ensureCheckId(world)
@@ -48,6 +62,7 @@ async function resolveUrl(world, url) {
   let out = url
   if (out.includes('{{checkId}}')) out = out.replaceAll('{{checkId}}', await ensureCheckId(world))
   if (out.includes('{{stockKey}}')) out = out.replaceAll('{{stockKey}}', encodeURIComponent(await ensureStockKey(world)))
+  if (out.includes('{{feeCursor}}')) out = out.replaceAll('{{feeCursor}}', await ensureFeeCursor(world))
   return out
 }
 
@@ -156,4 +171,4 @@ async function runWritePass({ label, switches = { call_counting: 'on' } }) {
   return reds
 }
 
-module.exports = { getSwitches, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }
+module.exports = { getSwitches, ensureFeeCursor, prepareWorld, writeProblems, runWritePass, loadBudgets, today, roundUp, callsLimit, part, measureGet, getProblems, pinProblems, runGetPass, ensureCheckId, resolveUrl, codeOf, BUDGETS_FILE, FREE_CALL_LIMIT }

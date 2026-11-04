@@ -138,6 +138,9 @@ const route = loadReal('routes/fees.ts', {
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
+  // E1-F: the report consults the read switch (off here: the old statements) and reads its group cap from the plan table
+  '../lib/expenseReads': loadReal('lib/expenseReads.ts', { './readSwitches': { readSwitch: async () => false } }),
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   '../index': {},
 }).default
 
