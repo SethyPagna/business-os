@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createHarness, propsOf, type MemoryNode } from './mountedComponentHarness.ts'
+import { createHarness, type MemoryNode } from './mountedComponentHarness.ts'
 import type { InventoryCheckSession, InventoryCheckSessionItem } from '../src/api/inventoryChecksTransport.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
