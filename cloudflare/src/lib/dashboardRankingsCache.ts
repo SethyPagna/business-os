@@ -16,6 +16,8 @@
 
 import type { Env } from '../index'
 import { getVersionsWithFallback } from './cache'
+import { deploymentId, isUnsafeVersion } from './cacheKey'
+import { readDataEpoch } from './readSwitches'
 import type { DashboardCustomerRow, DashboardProductRow, DashboardRankKind, SalesFilters } from './salesAnalytics'
 
 export type RankingRow = DashboardCustomerRow | DashboardProductRow
@@ -31,6 +33,8 @@ export type DashboardRankingsCacheContext = {
   waitUntil(promise: Promise<unknown>): void
   // Injected by tests; defaults to the Workers Cache API when present.
   cache?: Pick<Cache, 'match' | 'put'> | null
+  // Injected by tests; defaults to the database's data epoch (null = unreadable: compute, cache nothing).
+  epoch?: string | null
 }
 
 export type DashboardRankingsCache = {
@@ -63,11 +67,14 @@ export async function openDashboardRankingsCache(
   } catch {
     return null
   }
+  const epoch = ctx.epoch === undefined ? await readDataEpoch(env) : ctx.epoch
+  if (!epoch || versions.some(isUnsafeVersion)) return null
+  const build = deploymentId(env)
   const keyFor = (kind: DashboardRankKind): Request => {
     const url = new URL('/__internal-cache/dashboard-ranking', ctx.requestUrl)
     const parts: Array<[string, unknown]> = [['schema', CACHE_SCHEMA], ['kind', kind], ['limit', DASHBOARD_RANKING_ROWS],
       ['startDate', filters.startDate], ['endDate', filters.endDate], ['createdFrom', filters.createdFrom], ['createdTo', filters.createdTo],
-      ['branchId', filters.branchId], ...VERSION_NAMESPACES.map((namespace, index): [string, unknown] => [`v_${namespace}`, versions[index]])]
+      ['branchId', filters.branchId], ['build', build], ['epoch', epoch], ...VERSION_NAMESPACES.map((namespace, index): [string, unknown] => [`v_${namespace}`, versions[index]])]
     for (const [name, value] of parts) url.searchParams.set(name, value == null ? '' : String(value))
     return new Request(url.toString(), { method: 'GET' })
   }

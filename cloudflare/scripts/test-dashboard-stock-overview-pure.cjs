@@ -68,10 +68,15 @@ function modules(cdb, { planTier = load('lib/planTier.ts'), failCompute = null }
   const familyPagination = load('lib/familyPagination.ts', { './db': dbStub })
   const lowStockSettings = load('lib/lowStockSettings.ts', { './db': dbStub })
   const familyStockStats = load('lib/familyStockStats.ts', { './familyPagination': familyPagination, './lowStockSettings': lowStockSettings })
-  const cache = load('lib/cache.ts', { './db': dbStub, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) } })
+  // 6.0.1048: the key carries the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
+  const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
+  const cacheKey = load('lib/cacheKey.ts', { './readSwitches': readSwitches })
+  const cache = load('lib/cache.ts', { './db': dbStub, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) }, './cacheKey': cacheKey })
   const overview = load('lib/dashboardStockOverview.ts', {
     './db': dbStub,
     './cache': cache,
+    './cacheKey': cacheKey,
+    './readSwitches': readSwitches,
     './familyStockStats': failCompute ? { ...familyStockStats, getFamilyStockOverview: failCompute } : familyStockStats,
     './lowStockSettings': lowStockSettings,
     './planTier': planTier,

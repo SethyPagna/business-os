@@ -140,6 +140,7 @@ const PAID = {
   stockInLinesPerRequest: 24,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
+  readSwitchMemoSeconds: 5,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -165,6 +166,7 @@ const FREE = {
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
+  readSwitchMemoSeconds: 15,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -191,7 +193,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
 // reads fewer D1 rows, so on these Free is deliberately the LARGER number.
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -232,6 +234,79 @@ check('a free deployment stays inside the platform ceilings it is sized against'
   assert.equal(free.d1QueriesPerInvocation, 50, 'documented assumption: the conservative of the two published figures')
   assert.equal(free.d1MaxDatabaseBytes, 500 * 1024 * 1024)
   assert.equal(free.scheduledBackupEnabled, false, 'a full D1 backup cannot run inside a 10ms cron invocation')
+})
+
+// 6.0.1048 (owner rule, 3 Nov): a Free-sized number is a field here, never a literal at the call site. The switch/epoch memo was one.
+check('the switch/epoch memo is a plan field with no literal left at its call sites', async () => {
+  const read = (...parts) => fs.readFileSync(path.join(cloudflareRoot, ...parts), 'utf8').replace(/\r\n/g, '\n')
+  assert.equal(PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds, 15)
+  assert.equal(PLAN_LIMITS_BY_TIER.paid.readSwitchMemoSeconds, 5)
+  const switches = read('src', 'lib', 'readSwitches.ts')
+  assert.match(switches, /getPlanLimits\(env\)\.readSwitchMemoSeconds/, 'the module reads the plan field')
+  assert.doesNotMatch(switches, /READ_SWITCH_MEMO_MS|ttlMs\s*=\s*[0-9]|MEMO_MS\s*=\s*[0-9]/, 'no bare window left in the module')
+  assert.match(read('src', 'lib', 'dataEpoch.ts'), /readSwitchMemoMs\(env\) \+ EPOCH_SETTLE_MARGIN_MS/, 'the restore settle follows the plan window')
+  assert.match(read('src', 'routes', 'runtime.ts'), /memoSeconds: getPlanLimits\(env\)\.readSwitchMemoSeconds/, 'the listing reports the plan window')
+})
+
+// The browser cannot read the plan, so its two windows are sized from the LARGEST server memo (Free). This keeps them honest.
+check('the client windows cover the longest server memo: the echo window outlasts memo + settle, the signal lifetime is three memos', async () => {
+  const frontend = (...parts) => fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', ...parts), 'utf8')
+  const number = (source, name) => Number(new RegExp(`${name} = ([0-9_]+)`).exec(source)[1].replace(/_/g, ''))
+  const longest = Math.max(...Object.values(PLAN_LIMITS_BY_TIER).map((limits) => limits.readSwitchMemoSeconds)) * 1000
+  assert.equal(longest, PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000, 'Free holds the longest memo; the client windows are sized from it')
+  const echo = number(frontend('dataEpoch.ts'), 'ECHO_WINDOW_MS')
+  const signal = number(frontend('serverSignals.ts'), 'SIGNAL_TTL_MS')
+  assert.ok(echo >= 2 * longest, `ECHO_WINDOW_MS ${echo} must cover memo + settle (2 x ${longest})`)
+  assert.ok(signal >= 3 * longest, `SIGNAL_TTL_MS ${signal} must cover three memos (${3 * longest})`)
+})
+
+// 6.0.1048 review B2: a restore and a forced clear wait one memo period (epochSettleMs) before they release writes. On Free that is the
+// longest request the app makes on purpose, and the browser must not give up on it.
+check('the restore and forced-clear requests outlast the Free settle with room to spare (computed from the plan, not a literal)', async () => {
+  const frontend = (...parts) => fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', ...parts), 'utf8').replace(/\r\n/g, '\n')
+  const margin = Number(/EPOCH_SETTLE_MARGIN_MS = ([0-9_]+)/.exec(fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'dataEpoch.ts'), 'utf8'))[1].replace(/_/g, ''))
+  const freeSettle = PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000 + margin
+  const timeout = Number(/export const WRITE_REQUEST_TIMEOUT_MS = ([0-9_]+)/.exec(frontend('http.ts'))[1].replace(/_/g, ''))
+  assert.ok(freeSettle > 15_000, 'the Free settle is the figure the review measured (about 16 s)')
+  assert.ok(timeout > freeSettle, `WRITE_REQUEST_TIMEOUT_MS ${timeout} must exceed the Free settle ${freeSettle}`)
+  assert.ok(timeout >= 2 * freeSettle, `and leave room for the password check, the epoch write and the release: at least 2 x ${freeSettle}`)
+  const sync = Number(/REQUEST_TIMEOUT_MS: ([0-9_]+)/.exec(fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'constants.ts'), 'utf8'))[1].replace(/_/g, ''))
+  assert.ok(sync < freeSettle, 'control: the ordinary request timeout IS shorter than the settle, which is why these two calls must not use it')
+  const jobs = frontend('systemJobs.ts')
+  assert.match(jobs, /'\/api\/backups\/maintenance\/clear', \{ force: true, currentPassword \}, WRITE_REQUEST_TIMEOUT_MS\)/, 'the forced clear')
+  assert.match(jobs, /type: 'import-folder',[\s\S]*?\}, WRITE_REQUEST_TIMEOUT_MS\)/, 'the restore')
+})
+
+// 6.0.1048 (delta review): the Backup page races the restore request against a timer of its own (withLoaderTimeout). On Free the server
+// answers after 16 s or more, so that timer must be at least the transport timeout, which is at least twice the Free settle. The numbers are
+// resolved from the sources (a constant may be written as another constant plus a margin), never retyped here.
+check('the Backup page does not give up on a restore before the transport does: UI race >= transport >= 2 x the Free settle', async () => {
+  const read = (...parts) => fs.readFileSync(path.join(...parts), 'utf8').replace(/\r\n/g, '\n')
+  const frontend = path.join(cloudflareRoot, '..', 'frontend', 'src')
+  const sources = [
+    read(frontend, 'components', 'utils-settings', 'Backup.tsx'),
+    read(frontend, 'api', 'systemJobs.ts'),
+    read(frontend, 'api', 'http.ts'),
+    read(frontend, 'constants.ts'),
+  ]
+  const resolve = (name, depth = 0) => {
+    assert.ok(depth < 6, `${name}: constant chain too deep`)
+    for (const source of sources) {
+      const match = new RegExp(`(?:export )?const ${name}(?::[^=]+)? = ([^\\n]+)`).exec(source)
+      if (!match) continue
+      const expression = match[1].replace(/\/\/.*$/, '').trim()
+      return expression.split('+').map((term) => term.trim()).reduce((sum, term) => sum + (/^[0-9_]+$/.test(term) ? Number(term.replace(/_/g, '')) : resolve(term, depth + 1)), 0)
+    }
+    throw new Error(`constant ${name} not found`)
+  }
+  const call = /'Queue backup restore',\s*([A-Za-z_]+),?\s*\)/.exec(sources[0])
+  assert.ok(call, 'the restore call in Backup.tsx is found')
+  const uiRace = resolve(call[1])
+  const transport = resolve('WRITE_REQUEST_TIMEOUT_MS')
+  const margin = Number(/EPOCH_SETTLE_MARGIN_MS = ([0-9_]+)/.exec(read(cloudflareRoot, 'src', 'lib', 'dataEpoch.ts'))[1].replace(/_/g, ''))
+  const freeSettle = PLAN_LIMITS_BY_TIER.free.readSwitchMemoSeconds * 1000 + margin
+  assert.ok(uiRace >= transport, `the restore's UI race (${call[1]} = ${uiRace}) must be at least the transport timeout (${transport}), or the page says "took longer" for a restore that succeeds`)
+  assert.ok(transport >= 2 * freeSettle, `the transport timeout ${transport} must be at least twice the Free settle ${freeSettle}`)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

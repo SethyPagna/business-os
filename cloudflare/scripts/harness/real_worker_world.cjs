@@ -49,7 +49,16 @@ async function migrate(db) {
   }
 }
 
-async function bootWorld({ adminPassword, transformEntry }) {
+// `staticAssets: true` binds STATIC_ASSETS to a stub that serves only the build manifest the Worker reads for X-BOS-Build (lib/readSwitches.ts);
+// every other path is a 404. Off by default: a world without the binding answers 503 on a document route, as it always did.
+const WORLD_BUILD_HASH = 'worldbuild-1'
+const staticAssetsStub = async (request) => (new URL(request.url).pathname === '/business-os-build.json'
+  ? Response.json({ revision: 'world', hash: WORLD_BUILD_HASH, builtAt: '2026-11-02T00:00:00.000Z' })
+  : new Response('not found', { status: 404 }))
+
+// `bindings` adds to the Worker's bindings. EPOCH_SETTLE_MS is 0 here: a rotation that precedes the end of a maintenance hold waits one memo
+// period in production (lib/dataEpoch.ts), which no test other than the one that measures it should pay.
+async function bootWorld({ adminPassword, transformEntry, staticAssets = false, bindings: extraBindings = {} }) {
   assert.ok(adminPassword, 'adminPassword seeds the built-in admin account')
   const { Miniflare, Log, LogLevel } = require('miniflare')
   const script = await bundleWorker(transformEntry)
@@ -58,9 +67,10 @@ async function bootWorld({ adminPassword, transformEntry }) {
     modules: true, script, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat', 'no_handle_cross_request_promise_resolution'],
     d1Databases: ['DB'], kvNamespaces: ['CACHE'], r2Buckets: ['ASSETS'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
+    ...(staticAssets ? { serviceBindings: { STATIC_ASSETS: staticAssetsStub } } : {}),
     bindings: {
       PLAN_TIER: 'paid', BUSINESS_OS_PUBLIC_URL: 'https://leangbeauty.com', BUSINESS_OS_ADMIN_URL: 'https://admin.leangbeauty.com',
-      BUSINESS_OS_ADMIN_PASSWORD: adminPassword, BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty',
+      BUSINESS_OS_ADMIN_PASSWORD: adminPassword, BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty', EPOCH_SETTLE_MS: '0', ...extraBindings,
     },
     log: new Log(LogLevel.ERROR),
   })
@@ -156,4 +166,4 @@ function createReporter() {
   return { check, finish }
 }
 
-module.exports = { bootWorld, createReporter }
+module.exports = { bootWorld, createReporter, WORLD_BUILD_HASH }

@@ -49,7 +49,7 @@ export const AUDIT_SECTION_ENTITIES: Record<AuditSectionId, readonly string[]> =
   ],
   website: ['website', 'portal_submission', 'portal_account', 'customer_portal'],
   system: [
-    'system', 'backup', 'file', 'note', 'audit_log', 'data-integrity', 'pending_action', 'action_history',
+    'system', 'backup', 'file', 'note', 'audit_log', 'data-integrity', 'pending_action', 'action_history', 'read_switch',
   ],
 }
 

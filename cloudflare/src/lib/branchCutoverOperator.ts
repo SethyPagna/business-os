@@ -6,6 +6,8 @@ import { prepareInactiveStock, type ParentHooks } from './branchCutoverParent'
 import { parseApprovedFolds } from './branchCutoverInactiveStock'
 import type { Env } from '../index'
 import { invalidateCachesAfterMaintenance } from './cache'
+import { rotateDataEpoch } from './dataEpoch'
+import { resetReadSwitchMemo } from './readSwitches'
 import { BRANCH_CUTOVER_FINAL_NAMES, beginBranchCutover, continueBranchCutover, inspectBranchCutover, isBranchCutoverRetryable } from './branchCutoverParent'
 import { executePlannedBranchCutoverChild } from './branchCutoverChild'
 import { abortEffectFreeBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
@@ -167,6 +169,8 @@ async function runBegin(db: D1Compat, body: Record<string, unknown>, env: { DB: 
   // begin just took, so the P7 reads are taken on the prepared stock. A replayed begin runs it again (idempotent); a refusal here leaves the held
   // run for the operator to abort or fix and resume (the first capture page re-checks).
   await prepareInactiveStock(db, actor, begun.row.operation_id, parseApprovedFolds(body.approvedFolds), inactiveProductHooks(env))
+  // Entry: every cache entry stored before the run describes the Shop as it was. A replayed begin rotates again (harmless).
+  await rotateDataEpoch(env as unknown as Env)
   return summary(begun.row, requestId, begun.replayed)
 }
 
@@ -251,7 +255,11 @@ export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN
     if (action === 'status') return await runStatus(db, body)
     if (action === 'repair-sk2') return await runRepairSk2(db, body)
     const outcome = action === 'abort' ? await runAbort(db, body) : await runStep(db, body, action, env)
-    if (await releasedMaintenance(db, outcome)) await invalidateCachesAfterMaintenance(env as unknown as Env, 'branch-cutover')
+    if (await releasedMaintenance(db, outcome)) {
+      // The epoch already moved inside the journal batch that released the hold (branchCutoverJournal.ts); this isolate re-reads it now.
+      resetReadSwitchMemo()
+      await invalidateCachesAfterMaintenance(env as unknown as Env, 'branch-cutover')
+    }
     return outcome
   } catch (error) { return failure(error) }
 }

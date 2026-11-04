@@ -11,8 +11,8 @@
 // the region that served the calls (meta.served_by_region; 'mixed' when they
 // differ) and how many were served by the primary, whether the response came
 // from the Cache API (hit | miss | bypass), and which feature flags the
-// request consulted (none yet: nothing writes acc.flags until the C3v2 KV
-// flag reader lands with its first consumer). No SQL text or bound value is
+// request consulted (lib/readSwitches.ts records each switch it reads into
+// acc.flags through the hook; none until a route consults one). No SQL text or bound value is
 // ever read or kept.
 //
 // WHERE THE NUMBERS COME FROM
@@ -270,6 +270,7 @@ export type RequestMetricsHook = {
   rawD1Start?(statements: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
+  flag(name: string, state: FlagState): void
 }
 
 const hook: RequestMetricsHook = {
@@ -277,6 +278,7 @@ const hook: RequestMetricsHook = {
   d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements) } } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
+  flag(name, state) { try { const acc = store.getStore(); if (acc && !acc.sealed) acc.flags[name] = state } catch { /* no-op */ } },
 }
 ;(globalThis as unknown as Record<symbol, RequestMetricsHook>)[Symbol.for(REQUEST_METRICS_HOOK_KEY)] = hook
 

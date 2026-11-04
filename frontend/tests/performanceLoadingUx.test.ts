@@ -1027,8 +1027,9 @@ assert.match(customerMembershipNumber, /const CUSTOMER_MEMBERSHIP_PREFIX = 'LC'/
 assert.match(customerFormModal, /CUSTOMER_MEMBERSHIP_PLACEHOLDER/, 'customer form should show a display-only membership placeholder')
 assert.match(customerFormModal, /membership_number_auto_hint/, 'the add-customer form should say the number is assigned on save')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
-assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
-assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch should heal through a hard reload once')
+// 6.0.1048 (CACHE-LIFECYCLE R6/G4): a runtime mismatch no longer reloads the page at all, so there is no reload to loop; the Restart bar is the only way through.
+assert.doesNotMatch(appContext, /RUNTIME_RECOVERY_SESSION_KEY|__bos_reload/, 'runtime mismatch must not keep a reload-recovery path')
+assert.doesNotMatch(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch must not reload the page by itself')
 assert.match(appContext, /const APP_SETTINGS_LOAD_TIMEOUT_MS = 9000/, 'app settings should use an explicit timeout constant')
 assert.match(appContext, /const APP_BOOTSTRAP_TIMEOUT_MS = 9000/, 'app bootstrap should use an explicit timeout constant')
 assert.match(appContext, /const APP_LOGIN_TIMEOUT_MS = 15000/, 'app login should use an explicit timeout constant')

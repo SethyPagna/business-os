@@ -8,6 +8,7 @@ const modules = new Map()
 function load(name) {
   if (name === './db') return { getDb: () => adapter }
   if (name === './passwordHash') return {}
+  if (name.startsWith('node:')) return require(name)
   if (modules.has(name)) return modules.get(name)
   const source = fs.readFileSync(path.join(sourceRoot, name + '.ts'), 'utf8')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText

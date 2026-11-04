@@ -397,6 +397,8 @@ const staticApi = {
   getSystemConfig: getSystemRuntimeMethod('getSystemConfig'),
   getSystemBootstrap: getSystemRuntimeMethod('getSystemBootstrap'),
   getSystemDebugLog: getSystemRuntimeMethod('getSystemDebugLog'),
+  getReadSwitches: getSystemRuntimeMethod('getReadSwitches'),
+  setReadSwitch: getSystemRuntimeMethod('setReadSwitch'),
   testSyncServer: getSystemRuntimeMethod('testSyncServer'),
 
   setSyncServerUrl(url: unknown) {

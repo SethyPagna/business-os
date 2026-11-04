@@ -3,6 +3,8 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { bumpVersion, getVersionsWithFallback } from '../lib/cache'
+import { deploymentId, isUnsafeVersion } from '../lib/cache'
+import { readDataEpoch } from '../lib/readSwitches'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -1357,10 +1359,12 @@ async function portalCacheVersion(c: { env: Env }, scope: { stock: boolean; prom
   const namespaces = ['products', 'settings', ...(scope.stock ? ['stock'] : []), ...(scope.promotions ? ['promotions'] : [])]
   const tokens = await getVersionsWithFallback(c.env, namespaces, { memoMs: PORTAL_VERSION_MEMO_MS })
   const version = (namespace: string) => tokens[namespaces.indexOf(namespace)] ?? '-'
-  const deploy = c.env.CF_VERSION_METADATA?.id || 'dev'
+  const epoch = await readDataEpoch(c.env)
+  if (!epoch || tokens.some(isUnsafeVersion)) throw new Error('portal cache key unavailable') // readPortalCacheVersion then serves uncached
+  const shared = [deploymentId(c.env), epoch, version('products'), version('settings')]
   return {
-    body: ['portal-body-v2', deploy, version('products'), version('settings'), version('promotions')].join(':'),
-    stock: ['portal-stock-v1', deploy, version('products'), version('settings'), version('stock')].join(':'),
+    body: ['portal-body-v2', ...shared, version('promotions')].join(':'),
+    stock: ['portal-stock-v1', ...shared, version('stock')].join(':'),
   }
 }
 

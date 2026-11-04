@@ -1,7 +1,11 @@
 import { SYNC } from '../constants.ts'
-import { apiFetch } from './http.ts'
+import { apiFetch, WRITE_REQUEST_TIMEOUT_MS } from './http.ts'
 
 export const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
+// The Backup page races the restore request against a timer of its own (withLoaderTimeout). That timer must outlast the transport timeout the
+// request runs under, or the page reports "took longer" for a restore that is still succeeding (on Free the server answers after 16 s or more).
+const RESTORE_UI_MARGIN_MS = 5_000
+export const BACKUP_RESTORE_UI_TIMEOUT_MS = WRITE_REQUEST_TIMEOUT_MS + RESTORE_UI_MARGIN_MS
 const DEFAULT_SYSTEM_JOB_POLL_MS = 1200
 
 export type SystemJob = Record<string, unknown> & {
@@ -93,13 +97,16 @@ export async function exportBackupFolder(destinationDir = ''): Promise<Record<st
   return queueBackupFolderExport(destinationDir)
 }
 
+// A restore and a forced clear end by rotating the data epoch and waiting one memo period before they release writes (routes/backups.ts,
+// lib/dataEpoch.ts epochSettleMs: 16 s on Free), so both answer later than an ordinary request: they take the long write timeout, never
+// SYNC.REQUEST_TIMEOUT_MS. cloudflare/scripts/test-plan-tier-pure.cjs keeps this timeout above the Free settle.
 export async function queueBackupFolderRestore(sourceDir: string, confirmation: { currentPassword: string }): Promise<Record<string, unknown>> {
   if (!confirmation?.currentPassword) throw new Error('Restoring a backup requires the current password.')
   return apiFetch('POST', '/api/backups', {
     type: 'import-folder',
     sourceDir,
     currentPassword: confirmation.currentPassword,
-  }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
+  }, WRITE_REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
 }
 
 export async function importBackupFolder(sourceDir: string, confirmation: { currentPassword: string }): Promise<Record<string, unknown>> {
@@ -145,5 +152,5 @@ export async function getBackupMaintenance(): Promise<{ maintenance: RestoreMain
 }
 
 export async function clearBackupMaintenance(currentPassword: string): Promise<Record<string, unknown>> {
-  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true, currentPassword }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
+  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true, currentPassword }, WRITE_REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
 }

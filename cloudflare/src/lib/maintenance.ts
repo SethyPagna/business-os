@@ -240,6 +240,8 @@ export function isMaintenanceGatedRequest(method: string, path: string, mode: Ma
   if (!WRITE_METHODS.has(method.toUpperCase())) return false
   if (!path.startsWith('/api/')) return false
   if (path === '/api/auth' || path.startsWith('/api/auth/')) return false
+  // A kill switch must be reachable while writes are held; the route itself refuses to turn anything ON during maintenance.
+  if (path === '/api/runtime/read-switches') return false
   if (mode === 'restore' && (path === '/api/backups' || path.startsWith('/api/backups/'))) return false
   return true
 }

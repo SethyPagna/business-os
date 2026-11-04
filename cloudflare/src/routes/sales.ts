@@ -29,6 +29,7 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
@@ -6261,7 +6262,7 @@ app.get('/', async (c) => {
         net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
       }
     }))
-  })
+  }, cacheIdentity(c))
 
   return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
 })
@@ -6361,7 +6362,7 @@ app.get('/stats', async (c) => {
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
-  })
+  }, cacheIdentity(c))
   return c.json(payload)
 })
 
@@ -6526,7 +6527,7 @@ app.get('/stats-strip', async (c) => {
       by_status: byStatus || [],
       returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
-  })
+  }, cacheIdentity(c))
   return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,...reportMoneyAccess(c.get('user')))})
 })
 

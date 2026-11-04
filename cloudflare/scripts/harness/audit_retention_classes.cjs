@@ -156,6 +156,7 @@ const ROWS = [
   ['shift_session', 'shift.reopen', KEPT],
   ['shift_session', 'shift.amend', KEPT],
   ['shift_session', 'shift.cancel', KEPT],
+  ['read_switch', 'read_switch_set', KEPT],
   ['promotion', 'create', PURGED],
   ['promotion', 'update', PURGED],
   ['promotion', 'delete', PURGED],

@@ -15,6 +15,8 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
+import { cacheIdentity, deploymentId, isUnsafeVersion } from '../lib/cache'
+import { readDataEpoch } from '../lib/readSwitches'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
@@ -731,7 +733,10 @@ async function loadImageOnlyFacets(
   if (facetCache && env) {
     try {
       const versions = await getVersionsWithFallback(env, PRODUCT_FILTERS_VERSIONS, { requireReadableD1: true })
-      const identity = JSON.stringify(['image-only-facets-v1', versions, fields.map(([key]) => key), statements])
+      // No data epoch or an unsafe version is no safe key; the surrounding catch then runs the statements uncached.
+      const epoch = await readDataEpoch(env)
+      if (!epoch || versions.some(isUnsafeVersion)) throw new Error('image-only facets: no safe cache key')
+      const identity = JSON.stringify(['image-only-facets-v2', deploymentId(env), epoch, versions, fields.map(([key]) => key), statements])
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))
       const key = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
       const cacheUrl = new URL('/api/products/image-only-facets-cache', facetCache.requestUrl)
@@ -1450,7 +1455,7 @@ app.get('/search', async (c) => {
   const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     produced = true
     return searchProductsWithIndexFallback(c.env, query)
-  })
+  }, cacheIdentity(c))
   // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
@@ -1531,7 +1536,7 @@ app.get('/search-index', async (c) => {
   const cacheUrl = new URL(c.req.url)
   cacheUrl.search = `?page=${page}&format=${SEARCH_INDEX_FORMAT}`
   const payload = await cachedJsonResponse(new Request(cacheUrl.toString(), { method: 'GET' }), c.executionCtx, version, 3600,
-    () => buildProductSearchIndexPage(c.env, page, version))
+    () => buildProductSearchIndexPage(c.env, page, version), cacheIdentity(c))
   c.header('Cache-Control', 'private, no-store')
   if (have && have === payload.hash) {
     return c.json({ format: payload.format, version: payload.version, page: payload.page, buckets: payload.buckets, pageIds: payload.pageIds, hash: payload.hash, unchanged: true })
@@ -1553,7 +1558,7 @@ app.get('/', async (c) => {
   const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     produced = true
     return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
-  })
+  }, cacheIdentity(c))
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
   const items = isImageOnlyRead(user, surface)
@@ -1653,7 +1658,7 @@ app.get('/filters', async (c) => {
   const filtersUrl = new URL(c.req.url)
   if (imageOnly) filtersUrl.search = ''
   const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery))
+    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery), cacheIdentity(c))
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
@@ -6309,7 +6314,7 @@ app.get('/possible-duplicates', async (c) => {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)), cacheIdentity(c))
   return c.json({ success: true, clusters })
 })
 
@@ -6331,7 +6336,7 @@ app.get('/data-gaps/counts', async (c) => {
   const denied = denyDataGaps(c)
   if (denied) return denied
   const counts = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true))
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true), cacheIdentity(c))
   if (canViewAcquisitionCosts(c.get('user'))) return c.json({ success: true, counts })
   const { unknown_cost: _hidden, ...visible } = counts
   return c.json({ success: true, counts: visible })

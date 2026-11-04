@@ -308,6 +308,9 @@ const ENTITY_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
   title: ['title', 'Title'],
   return_type: ['return_type', 'Return type'],
   exchange_rate: ['exchange_rate', 'Exchange Rate'],
+  // A read-switch flip (cloudflare/src/routes/runtime.ts) audits the switch state and the switch version it moved to.
+  state: ['status', 'Status'],
+  epoch: ['read_switch_epoch_label', 'Switch version'],
 }
 
 /**

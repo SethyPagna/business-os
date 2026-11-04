@@ -374,6 +374,7 @@ async function workerBundle() {
             c.set('user',{id:7,username:'admin',name:'Fixture Admin',role_code:'admin',permissions:raw});return next()}`,
           audit: 'export const audit=async()=>{};export const buildAuditStatement=()=>({sql:"SELECT 1",params:{}});export const changedFields=()=>null;export const auditChangeColumns=()=>({old_value:null,new_value:null});export const isSecretShapedAuditKey=()=>false',
           cache: `export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};export const getVersionWithFallback=async()=>0;export const getVersionsWithFallback=async(_e,names)=>names.map(()=>0);
+            export const cacheIdentity=()=>undefined;export const isUnsafeVersion=()=>false;export const deploymentId=()=>'dev';
             export const cachedJsonResponse=async(_e,_k,_t,fn)=>fn()`,
           broadcastHub: 'export const broadcast=async()=>{}',
           telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};

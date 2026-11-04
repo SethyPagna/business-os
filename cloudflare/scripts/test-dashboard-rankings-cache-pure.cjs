@@ -74,11 +74,15 @@ function makeEnv({ kv = {}, d1 = {} } = {}) {
 }
 
 function load(patches = {}) {
+  // 6.0.1048: the key carries the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
+  const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
+  const cacheKey = loadTs('src/lib/cacheKey.ts', { './readSwitches': readSwitches })
   const cacheLib = loadTs('src/lib/cache.ts', {
     './db': { getDb: (env) => env.__db },
     './quotaGuard': { consumeQuota: async () => true },
+    './cacheKey': cacheKey,
   }, patches['src/lib/cache.ts'] || [])
-  const lib = loadTs('src/lib/dashboardRankingsCache.ts', { './cache': cacheLib }, patches['src/lib/dashboardRankingsCache.ts'] || [])
+  const lib = loadTs('src/lib/dashboardRankingsCache.ts', { './cache': cacheLib, './cacheKey': cacheKey, './readSwitches': readSwitches }, patches['src/lib/dashboardRankingsCache.ts'] || [])
   return { cacheLib, lib }
 }
 

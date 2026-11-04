@@ -222,8 +222,10 @@ async function main() {
       DB: {},
     }
     const { bumpVersions } = loadTs('lib/cache.ts', {
-      './db': { getDb: () => ({ batch: async (statements) => { batchCalls.push(statements); return statements.map(() => ({})) } }) },
+      // The D1 read answers "no row for these namespaces" (6.0.1048: a D1 read that FAILS now starts the counter at the clock, not at 1).
+      './db': { getDb: () => ({ prepare: () => ({ all: async () => [] }), batch: async (statements) => { batchCalls.push(statements); return statements.map(() => ({})) } }) },
       './quotaGuard': { consumeQuota: async () => ({ zone: 'critical' }) },
+      './cacheKey': { cacheKeyRequest: async () => null, unsafeVersionToken: () => 'unsafe:test' }, // 6.0.1048: lib/cache.ts builds its entry keys there
     })
     await bumpVersions(fakeEnv, ['products', 'sales', 'returns'])
     assert.equal(batchCalls.length, 1, 'bumping several namespaces that all fall back to D1 must issue ONE db.batch() call')

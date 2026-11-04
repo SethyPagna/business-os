@@ -1,5 +1,6 @@
 import { isActorSessionQuarantined } from '../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, normalizeOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../api/offlineQueueOwnership.ts'
+import { inspectPosOrdersRecord } from './posOrdersSchema.ts'
 
 // A POS checkout whose request was sent with no confirmed answer yet. A
 // confirmed sign-out, or another organization signing in on the device, clears
@@ -70,6 +71,8 @@ export function restoreUnresolvedPosCheckouts(user: TillUser, tillScope: string)
     if (!kept.length) { local.removeItem(key); return }
     const ordersKey = `${ORDERS_PREFIX}${tillScope}`
     const session = store('session')
+    // Carts saved by a NEWER build are left byte for byte (utils/persistedRecordSchema.ts); the kept copy stays for a build that can merge into them.
+    if (inspectPosOrdersRecord(local.getItem(ordersKey)) === 'newer' || inspectPosOrdersRecord(session?.getItem(ordersKey)) === 'newer') return
     const saved = orders(local.getItem(ordersKey) || session?.getItem(ordersKey))
     const missing = kept.filter((order) => !saved.some((entry) => pendingId(entry) === pendingId(order)))
       .map((order, index) => ({ ...order, label: `Order ${saved.length + index + 1}` }))

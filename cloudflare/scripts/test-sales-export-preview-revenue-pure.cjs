@@ -34,6 +34,9 @@ const overrides = {
     bumpVersion: async () => {},
     getVersionWithFallback: async () => 0,
     cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),
+    cacheIdentity: () => undefined,
+    isUnsafeVersion: () => false,
+    deploymentId: () => 'dev',
   },
   '../lib/telegram': {
     formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [],

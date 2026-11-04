@@ -66,12 +66,14 @@ import { originGuard } from './lib/originGuard'
 import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 import { apiCacheHygiene } from './lib/apiCacheHygiene'
+import { readDataEpoch, readSwitchHeader } from './lib/readSwitches'
 import type { RotationStep } from './lib/cronRotation'
 import { dispatchCron } from './lib/cronDispatch'
 import { settingsRotationStore } from './lib/cronRotationStore'
 import { runWithRequestDefer } from './lib/requestDefer'
 import { installReviewAlerts } from './lib/reviewAlert'
 import { PendingActionIdempotencyError } from './lib/pendingActions'
+import { d1DailyLimitBody } from './lib/d1DailyLimit'
 
 export type Env = {
   DB: D1Database
@@ -148,6 +150,8 @@ export type Env = {
   // an unset value must never be treated as 'free', and why the tier is
   // never inferred from which bindings happen to be present.
   PLAN_TIER?: 'free' | 'paid'
+  // Milliseconds a rotation of the data epoch waits before a maintenance hold is released (lib/dataEpoch.ts). Test worlds only.
+  EPOCH_SETTLE_MS?: string
   // Slug (or public_id) of the one organization this deployment serves --
   // see routes/organizations.ts's getDefaultOrganization for why this is a
   // preference with a fallback rather than a hard requirement. Optional:
@@ -215,6 +219,7 @@ app.use('/api/*', requestMetricsMiddleware)
 
 // Right behind the metrics wrapper so its after-next() code runs last for every /api/* response, errors and the maintenance 503 included (lib/apiCacheHygiene.ts).
 app.use('/api/*', apiCacheHygiene)
+app.use('/api/*', readSwitchHeader)
 
 // Opens the request's waitUntil scope for lib code that has no Hono context (lib/requestDefer.ts); no ExecutionContext, no scope.
 app.use('/api/*', async (c, next) => {
@@ -238,6 +243,14 @@ installReviewAlerts()
 app.onError((error, c) => {
   const transactionRefusal = stockTransactionRefusal(error)
   if (transactionRefusal) return c.json({ success: false, ...transactionRefusal }, 503)
+  // The account's D1 daily cap (Free plan) is not a bug: one stable 503 with the reset time, no raw message, no Sentry noise.
+  const dailyLimit = d1DailyLimitBody(error)
+  if (dailyLimit) {
+    console.warn('[worker] D1 daily limit reached', dailyLimit.limit, c.req.method, c.req.path)
+    return c.json({ ...dailyLimit, error: 'The daily database limit was reached. It resets at 00:00 UTC.' }, 503, {
+      'Retry-After': String(Math.max(1, Math.ceil((Date.parse(dailyLimit.resetsAt) - Date.now()) / 1000))),
+    })
+  }
   const stockRefusal = productStockGuardError(error)
   if (stockRefusal) return c.json({ success: false, error: stockRefusal.message, code: stockRefusal.code }, 409)
   if (error instanceof PendingActionIdempotencyError) return c.json({ success: false, error: error.message, code: error.code }, 409)
@@ -487,6 +500,8 @@ app.use('/api/*', async (c, next) => {
     const maintenance = await getMaintenance(c.env)
     const operatorStep = maintenance?.mode === 'branch-cutover' && isBranchCutoverOperatorPath(c.req.path)
     if (maintenance && !operatorStep && isMaintenanceGatedRequest(c.req.method, c.req.path, maintenance.mode)) {
+      // X-BOS-Epoch rides on this answer too (readSwitchHeader reads the memo): make sure the memo has the epoch, one shared statement per period.
+      await readDataEpoch(c.env)
       return c.json({
         error: maintenance.mode === 'restore'
           ? 'A backup restore is in progress. The system is read-only until it finishes.'

@@ -99,7 +99,7 @@ async function main() {
       await cache.getVersionWithFallback(env, 'products'), 20, () => {
         cacheMisses++
         return raw.prepare('SELECT cost_price_usd value FROM products WHERE id=14').get().value
-      })
+      }, cache.cacheIdentity({ env, get: () => ({ organization_id: 1 }) })) // 6.0.1048: an entry needs the caller's identity and the database's data epoch
     assert.equal(await cachedCost(), 8)
     await Promise.all(pending.splice(0))
     assert.equal(await cachedCost(), 8)

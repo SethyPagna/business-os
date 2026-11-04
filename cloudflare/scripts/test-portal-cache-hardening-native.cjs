@@ -77,8 +77,12 @@ Date.now = () => clockMs
 const dbModule = { getDb: () => db }
 const searchMatch = loadReal('lib/searchMatch.ts')
 const portalText = loadReal('lib/portalText.ts')
-const cache = loadReal('lib/cache.ts', { './db': dbModule, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) } })
+// 6.0.1048: the entry keys carry the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
+const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
+const cacheKey = loadReal('lib/cacheKey.ts', { './readSwitches': readSwitches })
+const cache = loadReal('lib/cache.ts', { './db': dbModule, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) }, './cacheKey': cacheKey })
 const portalRoute = loadReal('routes/portal.ts', {
+  '../lib/readSwitches': readSwitches,
   '../lib/loyaltyEligibility': loadReal('lib/loyaltyEligibility.ts'),
   '../lib/actorSnapshot': loadReal('lib/actorSnapshot.ts'),
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
@@ -345,6 +349,7 @@ async function run() {
         getMaintenance: async () => ({ mode: 'restore', revision: 'r' }), maintenanceStatus: (state) => state,
       },
       '../lib/cache': cache,
+      '../lib/dataEpoch': { rotateDataEpoch: async () => 'e'.repeat(32) }, // a restore rotates the data epoch (test-cache-restore-epoch-native owns that)
     }).default
     const restoreEnv = { ...env, DB: { prepare: () => ({ first: async () => ({ n: 0 }) }) } }
     const call = (route, body) => backups.fetch(new Request(`https://admin.shop.test${route}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),

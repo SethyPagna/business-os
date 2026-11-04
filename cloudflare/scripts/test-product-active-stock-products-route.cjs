@@ -145,7 +145,7 @@ const productsRoute = loadReal('routes/products.ts', {
   './db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { ...loadReal('lib/audit.ts', { './db': { getDb: () => db } }), audit: async () => {} },
-  '../lib/cache': { cachedJsonResponse: async (_request,_ctx,_version,_ttl,producer) => producer(), getVersionWithFallback: async () => 1, bumpVersion: async () => {}, bumpVersions: async () => {} },
+  '../lib/cache': { cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev', cachedJsonResponse: async (_request,_ctx,_version,_ttl,producer) => producer(), getVersionWithFallback: async () => 1, bumpVersion: async () => {}, bumpVersions: async () => {} },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/importImageMatch': { matchLibraryImagesStrict: async () => [], ADMIN_MAX_IMAGES_PER_PRODUCT: 20, MAX_IMAGES_PER_PRODUCT: 10 },

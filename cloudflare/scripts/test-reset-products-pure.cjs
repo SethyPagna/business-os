@@ -129,7 +129,14 @@ const imageVariantStore = loadReal('lib/imageVariantStore.ts', {
 const planTier = loadReal('lib/planTier.ts')
 
 const { withStepUp } = require('./harness/step_up_lib.cjs')
+// 6.0.1048 (R2): every data-reset route rotates the data epoch once the wipe has committed. The REAL rotation runs over this database.
+const dataEpoch = loadReal('lib/dataEpoch.ts', {
+  './db': { getDb: () => db },
+  './dataEpochSql': loadReal('lib/dataEpochSql.ts'),
+  './readSwitches': { DATA_EPOCH_KEY: 'data_epoch', resetReadSwitchMemo: () => {} },
+})
 const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
+  '../lib/dataEpoch': dataEpoch,
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.
@@ -384,6 +391,23 @@ async function main() {
     }
     assert.deepStrictEqual(backupCallLog, [], 'a refused step-up must not even take a backup')
     assert.deepStrictEqual({ sales: count('sales'), products: count('products'), customers: count('customers') }, before, 'nothing was deleted')
+  })
+
+  await check('N4 (review of 6.0.1048, rule R2): each data-reset route gives the database a new data epoch once the wipe has committed; a refused reset leaves it alone', async () => {
+    const epoch = () => rawDbHandle.prepare("SELECT value FROM system_flags WHERE key = 'data_epoch'").get()?.value
+    for (const [url, body] of [['/reset-data', { mode: 'products' }], ['/reset-data', { mode: 'sales' }], ['/reset-data', { mode: 'all' }], ['/reset-section', { section: 'customers' }]]) {
+      const label = url + ' ' + JSON.stringify(body)
+      seed()
+      const before = epoch()
+      assert.match(before, /^[0-9a-f]{32}$/, label + ': there is an epoch to rotate')
+      const refused = await req('POST', url, { ...body, currentPassword: 'wrong-password' })
+      assert.ok(refused.status >= 400, label + ': the wrong password is refused')
+      assert.strictEqual(epoch(), before, label + ': a refused reset keeps the epoch')
+      const done = await req('POST', url, body)
+      assert.strictEqual(done.status, 200, label + ': ' + JSON.stringify(done.json))
+      assert.match(epoch(), /^[0-9a-f]{32}$/, label + ': the new epoch is well formed')
+      assert.notStrictEqual(epoch(), before, label + ': the reset gave the database a new epoch')
+    }
   })
 
   await check('mode=products deletes every table in PRODUCTS_RESET_TABLES', async () => {
@@ -704,7 +728,8 @@ async function main() {
     const durableFlagsBefore = rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all()
     assert.deepStrictEqual(durableFlagsBefore.map(flag => flag.key), [
       // cost_zero_watermark (0273, Conflicts): a durable boundary like the others; a reset must not move it.
-      'cost_zero_watermark', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+      // data_epoch (0288): the row survives a reset, and a reset moves it (the check after the reset).
+      'cost_zero_watermark', 'data_epoch', 'loyalty_points_reset', 'multilot_revert_watermark', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
     ])
     assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
 
@@ -746,8 +771,13 @@ async function main() {
       'sale_record_events_reset_guard','sale_incident_recovery_reset_guard',
       'sale_not_paid_stock_recovery_reset_guard','stock_transaction_permit'
     )`).n, 0, 'short-lived reset authority and stock permit cannot survive the atomic batch')
-    assert.deepStrictEqual(rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all(), durableFlagsBefore,
+    const flagsAfter = rawDbHandle.prepare('SELECT key,value FROM system_flags ORDER BY key').all()
+    const withoutEpoch = flags => flags.filter(flag => flag.key !== 'data_epoch')
+    assert.deepStrictEqual(withoutEpoch(flagsAfter), withoutEpoch(durableFlagsBefore),
       'all five durable boundaries, including the exact stock epoch, survive factory reset unchanged')
+    const epochOf = flags => flags.find(flag => flag.key === 'data_epoch')?.value
+    assert.match(epochOf(flagsAfter), /^[0-9a-f]{32}$/, 'the data epoch row survives a factory reset')
+    assert.notStrictEqual(epochOf(flagsAfter), epochOf(durableFlagsBefore), 'R2: a factory reset gives the database a new data epoch')
   })
 
   await check('mode=products clears current scoped Set operations and supports the optional-table-absent schema', async () => {

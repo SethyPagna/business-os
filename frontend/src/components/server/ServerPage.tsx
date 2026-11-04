@@ -10,6 +10,8 @@ import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
 import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
+import ReadSwitchesPanel from './ReadSwitchesPanel'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -31,7 +33,7 @@ const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250
 type TranslationFn = (key: string) => string
 
 type AppContextValue = {
-  user?: { id?: number; organization_id?: number | null } | null
+  user?: ({ id?: number; organization_id?: number | null } & PermissionUser) | null
   settings?: Record<string, unknown>
   t: TranslationFn
   notify: (message: string, type?: string) => void
@@ -517,7 +519,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 }
 
 export default function ServerPage() {
-  const { t, notify, syncUrl, updateSyncUrl } = useApp()
+  const { t, notify, syncUrl, updateSyncUrl, user } = useApp()
   const { syncConnected } = useSync()
   const isActive = useIsPageActive('server')
   const [urlInput, setUrlInput] = useState('')
@@ -805,6 +807,8 @@ export default function ServerPage() {
           <strong className="text-gray-700 dark:text-gray-300">{t('offline_first') || 'Server-required writes:'} </strong>
           Reads can fall back to local IndexedDB when the server is unreachable, but changes are blocked and treated as invalid until the live server reconnects.
         </div>
+
+        {isAdminControlUser(user) ? <ReadSwitchesPanel /> : null}
 
         <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} active={isActive} initialDebugLog={serverBootstrapDebugLog} />
       </div>

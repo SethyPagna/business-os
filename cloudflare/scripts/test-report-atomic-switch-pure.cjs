@@ -1,6 +1,6 @@
 'use strict'
 // P1.4 (6.0.1050): the report_atomic and report_atomic_long switches, without a database. Proves the stored-row parser fails closed, the
-// 15 s memo behaves to the millisecond and no promise is shared between callers, the mode decision (OFF / ON / sampled shadow, never
+// plan-sized memo (15 s on Free, 5 s on Paid: planTier.ts readSwitchMemoSeconds) behaves to the millisecond and no promise is shared between callers, the mode decision (OFF / ON / sampled shadow, never
 // shadow on Free) is made per switch name, the router calls exactly the reader it should, and the shadow comparison tells a match, a real
 // mismatch, a concurrent write and a refusal apart without ever putting a business value in the log line or the datapoint.
 // Mutants of the source must each turn a check red.
@@ -18,9 +18,9 @@ const MUTANTS = {
   'shadow-allowed-on-free': { file: 'reportAtomicSwitch', edit: t => seam(t, " || resolvePlanTier(env) === 'free'", '') },
   'no-write-between': { file: 'reportAtomicSwitch', edit: t => seam(t, 'if (reportCanonicalJson(again) === servedJson) {', 'if (true) {') },
   'sample-boundary-inclusive': { file: 'reportAtomicSwitch', edit: t => seam(t, 'sampler() < reading.rate', 'sampler() <= reading.rate') },
-  'shared-promise-returns': { file: 'readSwitches', edit: t => seam(t, 'async function load(env: Env): Promise<Loaded> {', 'let shared: Promise<Loaded> | null = null\nfunction load(env: Env): Promise<Loaded> {\n  if (shared) return shared\n  shared = loadOnce(env).finally(() => { shared = null })\n  return shared\n}\nasync function loadOnce(env: Env): Promise<Loaded> {') },
+  'shared-promise-returns': { file: 'readSwitches', edit: t => seam(t, 'async function load(env: Env, needEpoch: boolean): Promise<Memo> {', 'let shared: Promise<Memo> | null = null\n  function load(env: Env, needEpoch: boolean): Promise<Memo> {\n    if (shared) return shared\n    shared = loadOnce(env, needEpoch).finally(() => { shared = null })\n    return shared\n  }\n  async function loadOnce(env: Env, needEpoch: boolean): Promise<Memo> {') },
   'long-switch-reads-the-short-name': { file: 'reportAtomicSwitch', edit: t => seam(t, 'await readSwitchState(env, name)', 'await readSwitchState(env, REPORT_ATOMIC_SWITCH)') },
-  'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "['report_atomic', 'report_atomic_long'] as const", "['report_atomic'] as const") },
+  'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "['probe', 'report_atomic', 'report_atomic_long'] as const", "['probe', 'report_atomic'] as const") },
   'router-ignores-switch-option': { file: 'reportAtomicSwitch', edit: t => seam(t, 'reportAtomicMode(env, options.switch)', 'reportAtomicMode(env)') },
 }
 
@@ -30,6 +30,7 @@ function load(mutant) {
   const state = { dates: [], db: null }
   const require_ = (from) => (request) => {
     if (request === './db') return { getDb: env => env.__db }
+    if (request === 'node:async_hooks') return require('node:async_hooks')
     const name = request.replace(/^\.\//, '')
     if (FILES.includes(name)) return exportsOf[name] || (exportsOf[name] = evaluate(name))
     throw new Error('unexpected require ' + request + ' from ' + from)
@@ -64,7 +65,17 @@ function envWith({ row, delay = 0, fail = false, tier = 'paid' } = {}) {
 const stored = state => JSON.stringify({ epoch: 3, switches: { report_atomic: state } })
 const storedPair = (short, long) => JSON.stringify({ epoch: 3, switches: { report_atomic: short, report_atomic_long: long } })
 
+// P0.3's store binds `Date.now` when its module is evaluated, so a clock the test swaps in later is never seen. The clock is therefore
+// installed before the modules are evaluated, as one stable function that forwards to `nowImpl`, and a check moves time by replacing nowImpl.
+let nowImpl = () => Date.now()
 async function runAll(mutant) {
+  const realNow = Date.now
+  nowImpl = () => realNow.call(Date)
+  Date.now = () => nowImpl()
+  try { return await runAllChecks(mutant) } finally { Date.now = realNow; nowImpl = () => realNow.call(Date) }
+}
+
+async function runAllChecks(mutant) {
   const m = load(mutant)
   const { switches, router } = m
   const queued = []
@@ -87,25 +98,29 @@ async function runAll(mutant) {
     const off = { state: 'off', rate: 0 }
     for (const bad of [null, undefined, '', 'not json', '[]', 'null', '"on"', '1', 'true', '{', '{"switches":[]}', '{"switches":null}', '{"switches":"on"}', '{"epoch":1}', '{"switches":{"report_atomic_x":"on"}}', '{"switches":{"report_atomic_longer":"on"}}', '{"switches":{"REPORT_ATOMIC_LONG":"on"}}', '{"switches":{"__proto__":{"report_atomic_long":"on"}}}', '{"switches":{"__proto__":{"report_atomic":"on"}}}', '{"switches":{"constructor":{"report_atomic":"on"}}}', '{"switches":{"REPORT_ATOMIC":"on"}}'])
       for (const name of ['report_atomic', 'report_atomic_long']) assert.deepEqual(switches.parseReadSwitches(bad).switches[name], off, `${name} must be OFF: ${bad}`)
-    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, switches: { report_atomic: { state: 'on', rate: 0 }, report_atomic_long: off } }, 'a stored name turns on only itself')
-    assert.deepEqual(switches.parseReadSwitches(storedPair('off', 'shadow:0.05')), { epoch: 3, switches: { report_atomic: off, report_atomic_long: { state: 'shadow', rate: 0.05 } } })
-    assert.deepEqual(switches.parseReadSwitches('{"switches":{"report_atomic_long":"on","report_atomic":"junk"}}').switches, { report_atomic: off, report_atomic_long: { state: 'on', rate: 0 } }, 'one bad token does not spoil the other name')
+    assert.deepEqual(switches.parseReadSwitches(stored('on')), { epoch: 3, setAt: null, setBy: null, switches: { probe: off, report_atomic: { state: 'on', rate: 0 }, report_atomic_long: off } }, 'a stored name turns on only itself')
+    assert.deepEqual(switches.parseReadSwitches(storedPair('off', 'shadow:0.05')), { epoch: 3, setAt: null, setBy: null, switches: { probe: off, report_atomic: off, report_atomic_long: { state: 'shadow', rate: 0.05 } } })
+    assert.deepEqual(switches.parseReadSwitches('{"switches":{"report_atomic_long":"on","report_atomic":"junk"}}').switches, { probe: off, report_atomic: off, report_atomic_long: { state: 'on', rate: 0 } }, 'one bad token does not spoil the other name')
     assert.equal(switches.parseReadSwitches('{"epoch":1.5,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":-2,"switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.parseReadSwitches('{"epoch":"3","switches":{"report_atomic":"on"}}').epoch, 0)
     assert.equal(switches.isKnownReadSwitch('report_atomic'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_long'), true); assert.equal(switches.isKnownReadSwitch('report_atomic_longer'), false); assert.equal(switches.isKnownReadSwitch('toString'), false); assert.equal(switches.isKnownReadSwitch('constructor'), false)
   })
 
-  check('memo: one statement per 15 s window, refetch at exactly 15 s, a clock that moves backwards refetches', async () => {
-    const real = Date.now; let now = 1_000_000; Date.now = () => now
+  check('memo: one statement per plan window (Free 15 s), refetch at exactly the window, a clock that moves backwards refetches', async () => {
+    const real = nowImpl; let now = 1_000_000; nowImpl = () => now
     try {
-      freshMemo(); const { env } = envWith({ row: stored('on') })
+      freshMemo(); const { env } = envWith({ row: stored('on'), tier: 'free' })
       assert.equal((await switches.readSwitchState(env, 'report_atomic')).on, true); assert.equal(env.statements, 1)
       now += 14_999; assert.equal((await switches.readSwitchState(env, 'report_atomic')).on, true); assert.equal(env.statements, 1, '14.999 s is still the memo')
       now += 1; await switches.readSwitchState(env, 'report_atomic'); assert.equal(env.statements, 2, '15 s refetches')
       now -= 5_000; await switches.readSwitchState(env, 'report_atomic'); assert.equal(env.statements, 3, 'a clock that moved back must not extend the memo')
       assert.equal(await switches.readSwitch(env, 'unknown_switch'), false); assert.equal((await switches.readSwitchState(env, 'toString')).state, 'off')
-    } finally { Date.now = real }
+      // The window is the plan's number, not a literal: Paid refetches at exactly 5 s.
+      freshMemo(); now = 2_000_000; const paid = envWith({ row: stored('on'), tier: 'paid' })
+      await switches.readSwitchState(paid.env, 'report_atomic'); now += 4_999; await switches.readSwitchState(paid.env, 'report_atomic'); assert.equal(paid.env.statements, 1, 'Paid: 4.999 s is still the memo')
+      now += 1; await switches.readSwitchState(paid.env, 'report_atomic'); assert.equal(paid.env.statements, 2, 'Paid: 5 s refetches')
+    } finally { nowImpl = real }
   })
 
   check('no promise is shared between callers: each cold reader reads for itself, then the memo serves the rest; every failure is one fallback datapoint', async () => {

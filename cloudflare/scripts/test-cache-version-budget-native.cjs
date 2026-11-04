@@ -48,6 +48,7 @@ function fixture(options = {}) {
   const realQuota=load('quotaGuard',{'./db':dbDependency,'./analytics':{recordAnalytics:()=>{}},'./planTier':plan})
   const cache = load('cache', {
     './db': dbDependency,
+    './cacheKey': load('cacheKey', { './readSwitches': { readDataEpoch: async () => null } }),
     './quotaGuard': { consumeQuota: async (_env, resource, count) => { quota.push({ resource, count }); return options.realQuota?realQuota.consumeQuota(_env,resource,count):{ zone: options.zone || 'ok' } } },
   })
   const env = { PLAN_TIER:options.tier||'free', CACHE: {

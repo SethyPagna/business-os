@@ -98,7 +98,7 @@ const FIXTURES = {
 
 async function workerBundle() {
   return build({ stdin: { contents: ENTRY, resolveDir: root, loader: 'ts' },
-    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022',
+    bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2022', external: ['node:*', 'cloudflare:*'],
     plugins: [{ name: 'returns-telegram-once-fixtures', setup(b) {
       b.onResolve({ filter: /^\.\/db$/ }, (args) => (slash(args.importer).endsWith('src/lib/returnBulkAction.ts') ? { path: 'slowdb', namespace: 'test-fixture' } : undefined))
       b.onResolve({ filter: /(?:lib\/auth|durable-objects\/broadcastHub)$/ }, (args) => ({ path: args.path.split('/').pop(), namespace: 'test-fixture' }))
@@ -123,7 +123,7 @@ async function main() {
   // the test would pass while observing nothing.
   assert.match(bundle.outputFiles[0].text, /slowread-/, 'the delayed replay read is bundled into the kernel')
   const mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, d1Databases: ['DB'], kvNamespaces: ['CACHE'],
-    bindings: { TELEGRAM_BOT_TOKEN: 'test-token-not-real' }, compatibilityDate: '2026-08-01', log: new Log(LogLevel.ERROR) })
+    bindings: { TELEGRAM_BOT_TOKEN: 'test-token-not-real' }, compatibilityDate: '2026-08-01', compatibilityFlags: ['nodejs_compat'], log: new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     await migrate(db)

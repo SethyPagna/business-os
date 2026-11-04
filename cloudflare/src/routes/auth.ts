@@ -34,6 +34,7 @@ import {
   takeGooglePkceCookie,
   verifyState,
 } from '../lib/googleOauth'
+import { epochTag, readDataEpoch } from '../lib/readSwitches'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -556,6 +557,11 @@ app.get('/bootstrap', async (c) => {
   if (!user) {
     return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   }
+  // The data epoch rides the same per-isolate read as the read switches (planTier.ts readSwitchMemoSeconds), and is asked for only once there is a session: a 401 never
+  // starts a read it would not wait for. Its tag is the runtime's dataEpoch: a client that sees a different one than it stored (a restore,
+  // a cutover) drops its caches and keeps its drafts and carts (api/epochReset.ts). It is deliberately not the runtime's dataRootKey:
+  // that key resets ALL local state, including every unsent draft and cart.
+  const epochRead = readDataEpoch(c.env)
 
   const settingsRows = await (settingsRead ?? readSettings())
   // Same visibility rule as GET /api/settings, through the same function: this
@@ -567,6 +573,7 @@ app.get('/bootstrap', async (c) => {
     Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value])),
   )
 
+  const dataEpoch = await epochTag(await epochRead)
   return c.json({
     user,
     settings,
@@ -574,6 +581,7 @@ app.get('/bootstrap', async (c) => {
     group: null,
     system: {
       runtime: {
+        ...(dataEpoch ? { dataEpoch } : {}),
         runtime: 'cloudflare-workers',
         database: 'd1',
         objectStorage: 'r2',

@@ -18,6 +18,7 @@ import {
 } from '../lib/backup'
 import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, MaintenanceAdmissionConflictError } from '../lib/maintenance'
 import { invalidateCachesAfterMaintenance } from '../lib/cache'
+import { rotateDataEpoch } from '../lib/dataEpoch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -97,6 +98,12 @@ app.post('/maintenance/clear', async (c) => {
   // Forcing the hold off re-opens writes on a half-restored database, so it asks for what the restore asked for.
   const passwordDenied = await denyUnlessCurrentPassword(c, body, 403)
   if (passwordDenied) return passwordDenied
+  // Caches filled while the database was half-restored must not outlive the hold: the data epoch moves first, and if it cannot
+  // move the hold stays (CACHE-LIFECYCLE R2, R4).
+  try { await rotateDataEpoch(c.env, { settle: true }) } catch (error) {
+    console.error('[backups] data epoch not rotated; maintenance stays on', (error as Error)?.message || error)
+    return c.json({ cleared: false, code: 'data_epoch_not_rotated', error: 'The cache epoch could not be rotated, so maintenance was not cleared. Try again.' }, 503)
+  }
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
@@ -223,6 +230,15 @@ app.post('/', async (c) => {
         }
         throw error
       }
+      // Entry: whatever the caches hold now describes the database as it is before the restore. If the epoch cannot move,
+      // nothing destructive has run, so the hold taken above is released and the restore refused.
+      try { await rotateDataEpoch(c.env) } catch (error) {
+        console.error('[backups] data epoch not rotated at restore entry', (error as Error)?.message || error)
+        if (await endMaintenance(c.env, maintenance.token)) {
+          return c.json({ code: 'data_epoch_not_rotated', error: 'The cache epoch could not be rotated. No restore was started.' }, 503)
+        }
+        throw error
+      }
       let restore: Awaited<ReturnType<typeof restoreCloudflareBackup>>
       // restoreCloudflareBackup reports progress only from the deletion phase on, after every refusal it can make has been
       // checked, so "no progress reported" means no row was touched.
@@ -264,6 +280,18 @@ app.post('/', async (c) => {
           created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         console.error('[backups] restore audit failed', (error as Error)?.message || error)
         return c.json({ job_id: job.id, item: job, error: message, code: 'restore_audit_not_recorded', data_restored: true }, 503)
+      }
+      // The hold is released only after the epoch moved (CACHE-LIFECYCLE R2, R4): a read served during the restore may have filled
+      // a cache, and from this point nothing stored before it is reachable. If the epoch cannot move, maintenance stays on. The rotation
+      // settles (waits one memo period) so that every isolate keys under the new epoch before reads are admitted again.
+      try { await rotateDataEpoch(c.env, { settle: true }) } catch (error) {
+        const message = 'Backup data was restored, but the cache epoch could not be rotated. Maintenance stays on: clear maintenance, then retry the same restore.'
+        await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
+        const job = await storeSystemJob(c.env, { id: crypto.randomUUID(), status: 'failed', progress: 100,
+          message, error: message, result: { success: false, data_restored: true, epoch_rotated: false, maintenance_released: false, restore },
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        console.error('[backups] data epoch not rotated before release', (error as Error)?.message || error)
+        return c.json({ job_id: job.id, item: job, error: message, code: 'data_epoch_not_rotated', data_restored: true }, 503)
       }
       const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
       if (maintenanceReleased) await invalidateCachesAfterMaintenance(c.env, 'backups')

@@ -34,7 +34,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import { clearBackupMaintenance, getBackupMaintenance, isRestoreAuditNotRecordedError, isRestoreAuditNotRecordedState, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
+import { BACKUP_RESTORE_UI_TIMEOUT_MS, clearBackupMaintenance, getBackupMaintenance, isRestoreAuditNotRecordedError, isRestoreAuditNotRecordedState, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -1970,7 +1970,7 @@ export default function Backup() {
         () => Promise.resolve(getBackupApi().queueBackupFolderRestore?.(folderImportPath, { currentPassword: restorePassword }))
           .catch((error: unknown) => { throw translateStepUpRefusal(error, copy) }),
         'Queue backup restore',
-        BACKUP_JOB_QUEUE_TIMEOUT_MS,
+        BACKUP_RESTORE_UI_TIMEOUT_MS,
       )
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) {

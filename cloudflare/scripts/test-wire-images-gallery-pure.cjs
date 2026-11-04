@@ -234,7 +234,8 @@ const productsRoute = loadReal('routes/products.ts', {
   // so inert stubs are honest.
   '../lib/catalogCostRecompute': { recordManualCostEntry: async () => null, recomputeCatalogCost: async () => null },
 
-  '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
+  '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {}, cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev' },
+  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32) },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => ({ ok: true }) },
   '../lib/reviewGate': { maybeQueueForReview: async () => null },

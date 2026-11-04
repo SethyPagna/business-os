@@ -28,6 +28,11 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/utils/dirtyWork.ts', 'work-drafts'],
   ['/src/components/shared/hubNavigation.ts', 'hub-navigation'],
   ['/src/utils/publicAssetUrls.ts', 'api-http-core'],
+  // http.ts reads the server's build, epoch and read-budget headers through these three leaves. Left to the '/src/api/' fallback they
+  // land in app-api-methods, which imports http.ts back: a static chunk cycle that verify-built-startup refuses.
+  ['/src/api/serverSignals.ts', 'api-http-core'],
+  ['/src/api/dataEpoch.ts', 'api-http-core'],
+  ['/src/api/readBudgetShed.ts', 'api-http-core'],
   ['/src/components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['/src/components/catalog/portalContrast.ts', 'catalog-public-utils'],
   ['/src/components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],

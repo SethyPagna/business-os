@@ -9,6 +9,7 @@ import { PRODUCT_SUPPLIER_REFUSAL, lotSupplierChanged } from '../lib/productSupp
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { executeStockTransaction } from '../lib/stockTransaction'
 import { listOpenDamagedLots } from '../lib/returnsStock'
@@ -129,7 +130,7 @@ app.get('/tracked-product-ids', async (c) => {
   const namespaces = ['products', 'stock', 'inventory']
   const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(c.env, namespace)))
   const productIds = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    versions.map((version, index) => `${namespaces[index]}:${version}`).join('|'), 300, () => getTrackedProductIds(db, branchId))
+    versions.map((version, index) => `${namespaces[index]}:${version}`).join('|'), 300, () => getTrackedProductIds(db, branchId), cacheIdentity(c))
   return c.json({ productIds })
 })
 

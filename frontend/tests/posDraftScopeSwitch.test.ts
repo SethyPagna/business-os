@@ -34,7 +34,10 @@ check('a scope change is detected against the scope the state was loaded for', (
 
 check('the new scope\'s saved drafts are READ (orders, active id, counter) when the scope changes', () => {
   const load = persistBlock.slice(0, persistBlock.indexOf('}, [posStorageScope])'))
-  assert.match(load, /readPosDraft\(posOrdersStorageKey, 'bos_pos_orders'\)/)
+  // The orders are read through the guarded reader (lane 6.0.1048): the first store that is not from a newer build -- localStorage, then
+  // this tab's sessionStorage, then the legacy key -- which is the order readPosDraft always had.
+  assert.match(load, /const saved = readPosOrders\(\)/)
+  assert.match(source, /pickReadablePosOrders\(\[readPosStorage\('local', posOrdersStorageKey\), readPosStorage\('session', posOrdersStorageKey\), readPosStorage\('session', 'bos_pos_orders'\)\]\)/)
   assert.match(load, /setOrders\(nextOrders\)/)
   assert.match(load, /setActiveId\(readPosDraft\(posActiveStorageKey/)
   assert.match(load, /setOrderCounter\(/)

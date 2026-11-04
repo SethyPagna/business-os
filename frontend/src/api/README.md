@@ -29,6 +29,7 @@ This folder is the browser-side transport layer for Business OS.
 - `syncRuntime.ts`
   - sync event, service-worker outbox registration, and stored-session helpers
   - keeps offline queue signalling shared between `methods.ts` and `web-api.ts`
+  - coalesced sync events: a burst of `sync:update` events reaches pages as one `sync:flush` (`subscribeSyncFlush(channels, handler)`; 250 ms after an own write, 1.5 s for remote sales/inventory/returns pushes, staggered for bulk bursts)
 
 - `browserDialogs.ts`
   - browser CSV picker and image/data-url compatibility fallbacks

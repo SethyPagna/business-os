@@ -65,6 +65,10 @@ function createProductsRouteHarness(options = {}) {
       getVersionWithFallback: async () => 1,
       bumpVersion: async () => {},
       bumpVersions: async () => {},
+      // 6.0.1048: the routes build their cache identity and test a version token through lib/cache.
+      cacheIdentity: () => undefined,
+      isUnsafeVersion: () => false,
+      deploymentId: () => 'dev',
     },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, ok: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
