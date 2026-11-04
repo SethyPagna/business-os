@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { PROJECT_CONTEXT_USE } from '../playwright.config'
 import { ADMIN_ORIGIN, STOREFRONT_KM_LABELS, STOREFRONT_ORIGIN, storefrontCards, storefrontSectionTab } from './support/harness'
-import { E2E_ACCOUNTS, APP_ROOT, USERNAME_FIELD, PASSWORD_FIELD } from './support/session'
+import { E2E_ACCOUNTS, signInForTiming } from './support/session'
 
 /**
  * perf-budget.spec.ts -- how long the first useful screen takes, and how many
@@ -204,19 +204,11 @@ function countRequests(page: Page): { all: string[]; late: string[] } {
   return { all, late }
 }
 
+// The sign-in waits for the organization and verifies what it typed before the
+// clock starts (support/session.ts signInForTiming): the typed-too-early
+// version lost a cold attempt on a loaded CI runner and the leg went "flaky".
 async function signInQuickly(page: Page): Promise<number> {
-  await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
-  await expect(page.locator(USERNAME_FIELD)).toBeVisible({ timeout: 30_000 })
-  await page.fill(USERNAME_FIELD, E2E_ACCOUNTS.cashierA.username)
-  await page.fill(PASSWORD_FIELD, 'e2e-password')
-  const started = Date.now()
-  // Explicit, generous action timeout: the default 15 s is a fine ceiling for a
-  // functional spec, but here three browsers are hammering one fixture server on
-  // purpose, and a contended click that times out reports itself as a broken
-  // test rather than as the slow sample it actually is.
-  await page.getByRole('button', { name: /^Login$/ }).click({ timeout: 60_000 })
-  await expect(page.locator(APP_ROOT)).toBeVisible({ timeout: 30_000 })
-  return Date.now() - started
+  return signInForTiming(page, E2E_ACCOUNTS.cashierA)
 }
 
 test.describe('first-screen budgets', () => {
