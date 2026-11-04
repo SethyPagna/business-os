@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { cacheIdentity } from '../lib/cacheKey'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
@@ -297,6 +298,8 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
     out_of_stock_preview_truncated: stockOverview.out.hasMore,
     expiring_products: stockOverview.expiring || [],
     expiring_count: num(stockOverview.expiringCount),
+    // When the stock figures above were computed (UTC ISO): they may be a few minutes old, and the Dashboard says so.
+    stock_as_of: stockOverview.asOf,
     recent_sales: (recentSales || []).map((sale) => ({
       ...sale,
       // The relational sale_items table is canonical.  Do not derive this
@@ -451,12 +454,17 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
+// The asker (organisation, the branch the Dashboard was opened on, whether they may see costs) is what read switch dash_overview_5m keys its
+// five-minute copy on, so a body is shared only between askers who may see the same thing; the switch OFF never reads these.
+function dashboardOverviewContext(c: { req: { url: string; query(name: string): string | undefined }; env: Env; get(key: 'user'): any; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
     waitUntil(promise) {
       try { c.executionCtx.waitUntil(promise) } catch { void promise.catch(() => {}) }
     },
+    org: cacheIdentity(c).org,
+    branchScope: String(c.req.query('branchId') || '').trim(),
+    costGrant: canViewAcquisitionCosts(c.get('user')) ? 'cost' : 'nocost',
   }
 }
 

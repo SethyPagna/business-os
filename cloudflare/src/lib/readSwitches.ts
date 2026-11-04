@@ -27,8 +27,9 @@ export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH
 // Every switch any slice reads is named here, because a name that is not known parses to OFF whatever is stored. 'probe' is the
 // test switch; report_atomic / report_atomic_long are the P1.4 sales-report switches (lib/reportAtomicSwitch.ts); call_counting is
 // the P1.1 admission switch (lib/callCounting.ts: a db.batch() is charged as one D1 call); expense_reads is the E1-F Expenses page
-// read path (routes/fees.ts, routes/feesCatalog.ts).
-export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads'] as const
+// read path (routes/fees.ts, routes/feesCatalog.ts); dash_overview_5m is the Dashboard stock overview kept for up to 5 minutes and stamped
+// with the time it was computed (lib/dashboardStockOverview.ts).
+export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'dash_overview_5m'] as const
 /** How long one isolate remembers the flags read: planTier.ts readSwitchMemoSeconds (Free 15 s, Paid 5 s). */
 export const readSwitchMemoMs = (env: Env): number => getPlanLimits(env).readSwitchMemoSeconds * 1000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1

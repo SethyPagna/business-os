@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ADMIN_ORIGIN, collectPageHealth, expectNoRuntimeErrors } from './support/harness'
+import { ADMIN_ORIGIN, DEVICE_SETTINGS_KEY, collectPageHealth, expectNoRuntimeErrors } from './support/harness'
 import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 
 /**
@@ -89,6 +89,47 @@ for (const pageSpec of PAGES) {
         await page.screenshot({ path: path.join(directory, `${stem}-page.png`) })
         const row = page.locator('[data-stats-range-controls]').first()
         if (await row.count()) await row.screenshot({ path: path.join(directory, `${stem}-range-row.png`) })
+      }
+      expectNoRuntimeErrors(health)
+    })
+  }
+}
+
+// P1.8b: the stock cards may be up to 5 minutes old, so the Dashboard prints the Worker's compute time under the range. The fixture server
+// sends 2026-11-04T07:05:00Z, which is 14:05 in Phnom Penh whatever the browser's own time zone is.
+for (const language of ['en', 'km'] as const) {
+  for (const size of SIZES) {
+    test(`dashboard prints when the stock figures were computed (${language}) at ${size.label}`, async ({ page }, testInfo) => {
+      const health = collectPageHealth(page)
+      await page.setViewportSize({ width: size.width, height: size.height })
+      await signIn(page, E2E_ACCOUNTS.cashierA)
+      // The sign-in form is English-only to the helper, so the language is chosen after it, the way the in-app toggle stores it.
+      await page.evaluate(([key, value]) => window.localStorage.setItem(key, JSON.stringify(value)), [DEVICE_SETTINGS_KEY, { language }] as const)
+      await gotoAdminPage(page, '/')
+      await expect(page.locator('html')).toHaveAttribute('lang', language)
+      const line = page.getByText(language === 'en' ? 'Stock as of 14:05' : 'ស្តុក ត្រឹម 14:05', { exact: true })
+      await expect(line).toBeVisible({ timeout: 30_000 })
+      await page.evaluate(() => document.fonts.ready.then(() => true))
+      const box = await line.evaluate((node) => {
+        const style = getComputedStyle(node)
+        const size = parseFloat(style.fontSize)
+        return {
+          fontSize: size, lineHeight: style.lineHeight === 'normal' ? size * 1.6 : parseFloat(style.lineHeight),
+          clippedAcross: node.scrollWidth > node.clientWidth + 1, clippedDown: node.scrollHeight > node.clientHeight + 1,
+          right: node.getBoundingClientRect().right, pageScroll: document.documentElement.scrollWidth, pageClient: document.documentElement.clientWidth,
+        }
+      })
+      expect(box.fontSize, 'not below the 11 px floor').toBeGreaterThanOrEqual(11)
+      expect(box.lineHeight, 'a line box with room for the script').toBeGreaterThanOrEqual(box.fontSize * (language === 'km' ? 1.5 : 1.2))
+      expect(box.clippedAcross, 'the sentence fits its row').toBe(false)
+      expect(box.clippedDown, 'no glyph is cut off vertically').toBe(false)
+      expect(box.right, 'on screen').toBeLessThanOrEqual(size.width + 1)
+      expect(box.pageScroll, 'the page does not scroll sideways').toBeLessThanOrEqual(box.pageClient)
+
+      const directory = process.env.BUSINESS_OS_SCREENSHOTS_DIR
+      if (directory) {
+        fs.mkdirSync(directory, { recursive: true })
+        await page.screenshot({ path: path.join(directory, `dashboard-stock-as-of-${language}-${size.label}-${testInfo.project.name}.png`) })
       }
       expectNoRuntimeErrors(health)
     })
