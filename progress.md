@@ -4,7 +4,7 @@
 
 **Contents:** [Status](#status-snapshot--27-oct-2026-cambodia-utc7) · [Lanes](#current-status) · [Release process](#release-process) · [Owner questions](#open-owner-questions) · [Golden Rules](#golden-rules) · [Queue](#queue) — elsewhere: [owner decisions](docs/owner-decisions.md) · [queue details](docs/queue-details.md) · [releases, holds, history](docs/history/releases.md) · [session log](docs/history/session-log.md)
 
-Ending a session: update Status snapshot and the queue here, reserve versions in `Records/Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
+Ending a session: update Status snapshot and the queue here, reserve versions in `private:Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
 ## Status snapshot — 4 Nov 2026, 00:00 (Cambodia, UTC+7)
 
@@ -78,7 +78,7 @@ States: planned · in progress · review · gate · ready · live. Lanes already
 | 6.0.996 | RC3 dry-run compose (read-only) | review | rehearsal `7d06eeff4`, not pushed | redo after the 982/988/992 rounds |
 | 6.0.997 | hand-edit current-format returns | in progress (S1, S2) | `claude/return-v1-edit-20261027` | S3/S4 wait on owner questions 1–4 |
 | 6.0.998 | this board | review | `claude/progress-organize-20261027` | lead merges |
-| analysis | app-wide page/function/float analysis (8 read-only areas) | in progress | `Records/Analysis/2026-10-27/` (private) | proposals follow |
+| analysis | app-wide page/function/float analysis (8 read-only areas) | in progress | `private:Analysis/2026-10-27/` (private) | proposals follow |
 | 6.0.969, 980–981 | multi-client line: merge main in; first admin and client secrets at deploy | in progress | `claude/mc-merge-20261023`, `claude/first-admin-at-deploy-20261025` | branch only; 980–981 not pushed |
 
 ## Release process
@@ -86,7 +86,7 @@ States: planned · in progress · review · gate · ready · live. Lanes already
 - Every candidate: exact-SHA full GitHub gate, independent review, threat review and secrets scan, `deploy.yml plan=paid`, independent postflight and health pack; never infer that main is deployed. Follow the [deploy-provenance skill](.claude/skills/deploy-provenance/SKILL.md) before any deploy.
 - At most two deploys per Cambodia date (07:00, and one after 20:00 with fresh `open_today=0`); since 22 Oct a daytime deploy is allowed once work is finished, gated and reviewed.
 - Remote D1 only through the ops workflows; never wrangler `--remote` or a D1 connector from an agent. Migrations are append-only, LF-only, with pre/post assertions; a new number must clear `d1_migrations` and every ref.
-- Versions are reserved in `Records/Recovery/COMMIT-VERSIONS.json`; titles are `n.n.n — concise description`; never rewrite pushed history.
+- Versions are reserved in `private:Recovery/COMMIT-VERSIONS.json`; titles are `n.n.n — concise description`; never rewrite pushed history.
 - Holds (held migrations, never rerun the cutover, data repairs only with owner approval) and the full process text: [docs/history/releases.md](docs/history/releases.md#holds-and-production-only-actions).
 
 ## Open owner questions
