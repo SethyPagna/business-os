@@ -8,6 +8,14 @@
 const { randomBytes } = require('node:crypto')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
 
+// The switch list comes from the Worker itself (readSwitches.ts KNOWN_READ_SWITCHES), so a new switch changes no expectation here.
+const NAMES = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src/lib/readSwitches.ts'), 'utf8')
+  .match(/KNOWN_READ_SWITCHES = (\[[^\]]*\])/)[1].replace(/'/g, '"'))
+const listing = (probe = { state: 'off', rate: 0 }) => NAMES.map((name) => (name === 'probe' ? { name, ...probe } : { name, state: 'off', rate: 0 }))
+// A flip stores every known switch's state, so the stored row names them all.
+const states = (probe) => Object.fromEntries(NAMES.map((name) => [name, name === 'probe' ? probe : 'off']))
+const header = (epoch, probeOn = false) => `e=${epoch};` + NAMES.map((name) => `${name}=${name === 'probe' && probeOn ? 1 : 0}`).join(';')
+
 const MAINTENANCE_STATE = JSON.stringify({
   mode: 'restore', token: 'test-token', backupKey: 'test-key', startedAt: '2026-01-01T00:00:00.000Z',
   startedBy: 'test', phase: 'deleting', updatedAt: '2026-01-01T00:00:00.000Z',
@@ -50,8 +58,8 @@ async function main() {
       const r = await world.api('GET', URL)
       t.eq('status', r.status, 200)
       // memoSeconds is the plan's window (planTier.ts readSwitchMemoSeconds); this world runs PLAN_TIER=paid, so 5. Free (15) is pinned in test-plan-tier-pure.
-      t.eq('body', r.json && { epoch: r.json.epoch, setAt: r.json.setAt, setBy: r.json.setBy, switches: r.json.switches, memoSeconds: r.json.memoSeconds }, { epoch: 0, setAt: null, setBy: null, switches: [{ name: 'probe', state: 'off', rate: 0 }], memoSeconds: 5 })
-      t.eq('header', r.headers.get('x-bos-switches'), 'e=0;probe=0')
+      t.eq('body', r.json && { epoch: r.json.epoch, setAt: r.json.setAt, setBy: r.json.setBy, switches: r.json.switches, memoSeconds: r.json.memoSeconds }, { epoch: 0, setAt: null, setBy: null, switches: listing(), memoSeconds: 5 })
+      t.eq('header', r.headers.get('x-bos-switches'), header(0))
       t.eq('a read writes nothing', await stored(), null)
     })
 
@@ -99,11 +107,11 @@ async function main() {
       t.eq('status', on.status, 200)
       t.eq('changed', on.json && on.json.changed, true)
       t.eq('epoch 1', on.json && on.json.epoch, 1)
-      t.eq('listing', on.json && on.json.switches, [{ name: 'probe', state: 'on', rate: 0 }])
+      t.eq('listing', on.json && on.json.switches, listing({ state: 'on', rate: 0 }))
       t.eq('setBy is the admin', on.json && on.json.setBy, world.adminId)
-      t.eq('PUT header', on.headers.get('x-bos-switches'), 'e=1;probe=1')
+      t.eq('PUT header', on.headers.get('x-bos-switches'), header(1, true))
       const row = JSON.parse(await stored())
-      t.eq('stored row', { epoch: row.epoch, set_by: row.set_by, switches: row.switches }, { epoch: 1, set_by: world.adminId, switches: { probe: 'on' } })
+      t.eq('stored row', { epoch: row.epoch, set_by: row.set_by, switches: row.switches }, { epoch: 1, set_by: world.adminId, switches: states('on') })
       const rows = await audits()
       t.eq('one audit row', rows.length, 1)
       const a = rows[0] || {}
@@ -111,7 +119,7 @@ async function main() {
       t.eq('audit details name states and epochs only', JSON.parse(a.details || '{}'), { name: 'probe', from: 'off', to: 'on', epochBefore: 0, epochAfter: 1 })
       t.eq('audit old/new', [JSON.parse(a.old_value || '{}'), JSON.parse(a.new_value || '{}')], [{ state: 'off', epoch: 0 }, { state: 'on', epoch: 1 }])
       const version = await world.api('GET', '/api/runtime/version')
-      t.eq('another route shows the header within the memo period', version.headers.get('x-bos-switches'), 'e=1;probe=1')
+      t.eq('another route shows the header within the memo period', version.headers.get('x-bos-switches'), header(1, true))
     })
 
     await check('the same state again is a no-op: 200 changed:false, no new epoch, no second audit row', async (t) => {
@@ -125,11 +133,11 @@ async function main() {
     await check('off then on again: epoch 2 then 3, an audit row each; shadow:5 is clamped to 0.1', async (t) => {
       const off = await world.api('PUT', URL, { name: 'probe', state: 'off', expectedEpoch: 1 })
       t.eq('off epoch', off.json && off.json.epoch, 2)
-      t.eq('off header', off.headers.get('x-bos-switches'), 'e=2;probe=0')
+      t.eq('off header', off.headers.get('x-bos-switches'), header(2))
       const shadow = await world.api('PUT', URL, { name: 'probe', state: 'shadow:5', expectedEpoch: 2 })
       t.eq('shadow status', shadow.status, 200)
-      t.eq('shadow clamped', shadow.json && shadow.json.switches, [{ name: 'probe', state: 'shadow', rate: 0.1 }])
-      t.eq('shadow header (shadow is not ON for a client)', shadow.headers.get('x-bos-switches'), 'e=3;probe=0')
+      t.eq('shadow clamped', shadow.json && shadow.json.switches, listing({ state: 'shadow', rate: 0.1 }))
+      t.eq('shadow header (shadow is not ON for a client)', shadow.headers.get('x-bos-switches'), header(3))
       const on = await world.api('PUT', URL, { name: 'probe', state: 'on', expectedEpoch: 3 })
       t.eq('on epoch', on.json && on.json.epoch, 4)
       t.eq('four audit rows', (await audits()).map((r) => JSON.parse(r.details).to), ['on', 'off', 'shadow:0.1', 'on'])
@@ -188,13 +196,13 @@ async function main() {
       await world.run("UPDATE system_flags SET value = ? WHERE key = 'read_switches'", JSON.stringify({ epoch: 8, set_at: 'x', set_by: 1, switches: { probe: 'on', future_slice: 'shadow:0.05' } }))
       const flip = await world.api('PUT', URL, { name: 'probe', state: 'off', expectedEpoch: 8 })
       t.eq('flip', [flip.status, flip.json && flip.json.epoch], [200, 9])
-      t.eq('the newer build token survives', JSON.parse(await stored()).switches, { future_slice: 'shadow:0.05', probe: 'off' })
+      t.eq('the newer build token survives', JSON.parse(await stored()).switches, { future_slice: 'shadow:0.05', ...states('off') })
       await world.run("UPDATE system_flags SET value = 'garbage {' WHERE key = 'read_switches'")
       const read = await world.api('GET', URL)
-      t.eq('garbage reads as OFF at epoch 0', [read.json.epoch, read.json.switches], [0, [{ name: 'probe', state: 'off', rate: 0 }]])
+      t.eq('garbage reads as OFF at epoch 0', [read.json.epoch, read.json.switches], [0, listing()])
       const heal = await world.api('PUT', URL, { name: 'probe', state: 'on', expectedEpoch: 0 })
       t.eq('a flip replaces the unreadable row', [heal.status, heal.json && heal.json.epoch], [200, 1])
-      t.eq('and the stored row is valid JSON again', JSON.parse(await stored()).switches, { probe: 'on' })
+      t.eq('and the stored row is valid JSON again', JSON.parse(await stored()).switches, states('on'))
     })
 
     await check('the switch row stays clear of the cutover triggers: they guard only maintenance and the control incarnation, and no other key is touched by a flip', async (t) => {

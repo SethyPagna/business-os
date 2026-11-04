@@ -417,7 +417,7 @@ type CoverState = 'waiting' | 'ready' | 'failed'
  * down by the difference when the picture decodes. Holding the card (the page shows the skeleton meanwhile, and the footer waits
  * for the card) puts the whole card on screen at its final size, and a failed file shows the brand banner from the start instead
  * of a frame that collapses. The request starts as soon as the config is in hand, which is earlier than the lazy About chunk used
- * to start it, and the card's own <img> then finds the file in the browser's cache.
+ * to start it, and the card's own image element then finds the file in the browser's cache.
  */
 function useCoverState(src: string): CoverState {
   const [settled, setSettled] = useState<{ src: string; state: CoverState }>({ src: '', state: 'waiting' })
