@@ -1138,6 +1138,8 @@
   "bulk_add_batch_note": "Each product is received under the received date below.",
   "bulk_add_stock": "Add Stock",
   "bulk_change_branch": "Change Branch",
+  "bulk_branch_skipped_label": "Skipped (no stock)",
+  "bulk_branch_skipped_note": "{count} product(s) with no stock were skipped -- adding them to a branch needs Adjust / receive stock.",
   "bulk_delete": "Delete Selected",
   "bulk_delete_confirm": "Delete {n} selected contacts?",
   "bulk_delete_partial_fail": "{n} branch(es) could not be deleted.",

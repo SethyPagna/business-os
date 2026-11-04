@@ -2209,6 +2209,13 @@ function registerContactRoutes(config: ContactConfig) {
     if (getActionTier(user, 'contacts', 'bulk') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
+    // The job deletes exactly what DELETE /:id deletes, so 'contacts:delete' switched off stops it too. This route
+    // used to read bulk_delete and bulk alone, so a role with Delete off and Bulk delete on got a 202 and the job
+    // deleted what the single route refuses (PERM-UI review E1 sweep, 4 Nov 2026). The role editor's bulk_delete
+    // row `requires` contacts:delete.
+    if (getActionTier(user, 'contacts', 'delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
 
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const reason = body.reason != null ? String(body.reason).trim() || null : null
@@ -2261,7 +2268,12 @@ function registerContactRoutes(config: ContactConfig) {
   // cancellation and products.ts's identical route.
   app.post(`${config.path}/bulk-delete-jobs/:id/cancel`, async (c) => {
     const user = c.get('user')
-    if (getActionTier(user, 'contacts', 'bulk') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    // Cancelling is part of running the job, so it asks for what starting one asks for: the umbrella, Bulk delete and Delete.
+    if (getActionTier(user, 'contacts', 'bulk') !== 'full'
+      || getActionTier(user, 'contacts', 'bulk_delete') !== 'full'
+      || getActionTier(user, 'contacts', 'delete') !== 'full') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const entityType = contactBulkDeleteEntityType(config)
     const job = await getBulkDeleteJob(c.env, c.req.param('id'))
     if (!job || job.entity_type !== entityType) return c.json({ error: 'Bulk delete job not found' }, 404)

@@ -102,7 +102,15 @@ interface ProductBranchTransferPlan {
   quantity: number
 }
 
-type ProductBranchMovePlan = ProductBranchInitializePlan | ProductBranchTransferPlan
+// A product with no stock anywhere is "moved" by adding it to the target branch at quantity 0, which is a POST /api/inventory/adjust.
+// The Worker answers that 403 without Adjust / receive stock, so a role without it gets this plan instead of a call that cannot succeed.
+interface ProductBranchSkipPlan {
+  action: 'skip'
+  reason: 'adjust_required'
+  branchId: number
+}
+
+type ProductBranchMovePlan = ProductBranchInitializePlan | ProductBranchTransferPlan | ProductBranchSkipPlan
 
 interface ProductTransferStockOptions {
   productId?: unknown
@@ -374,7 +382,12 @@ export function buildProductStockAdjustmentPayload(product: ProductRecord = {}, 
   }
 }
 
-export function buildProductBranchMovePlan(product: ProductRecord = {}, targetBranchId: unknown = 0): ProductBranchMovePlan | null {
+/**
+ * What moving one product to a branch takes. Stock somewhere: a transfer (Branches: transfer). No stock anywhere: initialise the
+ * target branch with a zero-quantity add, which needs Adjust / receive stock -- pass `canInitialize: false` for a role without it and
+ * the row is planned as a skip, so the caller can leave it out and say so. Omitted means true (the plan every existing caller got).
+ */
+export function buildProductBranchMovePlan(product: ProductRecord = {}, targetBranchId: unknown = 0, options: { canInitialize?: boolean } = {}): ProductBranchMovePlan | null {
   const toBranchId = Number(targetBranchId || 0)
   if (!Number.isFinite(toBranchId) || toBranchId <= 0) return null
 
@@ -386,6 +399,7 @@ export function buildProductBranchMovePlan(product: ProductRecord = {}, targetBr
     .find((entry) => Number.isFinite(entry.branchId) && entry.branchId > 0 && entry.quantity > 0)
 
   if (!currentBranch) {
+    if (options.canInitialize === false) return { action: 'skip', reason: 'adjust_required', branchId: toBranchId }
     return {
       action: 'initialize',
       branchId: toBranchId,

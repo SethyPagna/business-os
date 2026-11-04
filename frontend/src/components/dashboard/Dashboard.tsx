@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
@@ -195,16 +196,17 @@ interface DashboardSummary {
   today_return_usd: number
   all_total: number
   all_total_khr: number
-  cost_in: number
-  cost_out: number
-  cost_in_khr: number
-  cost_out_khr: number
+  // Cost-derived: the Worker omits these for a caller without product_cost_view, so they are never defaulted to 0.
+  cost_in?: number
+  cost_out?: number
+  cost_in_khr?: number
+  cost_out_khr?: number
   product_count: number
   in_stock_count: number
   low_stock_count: number
   out_of_stock_count: number
-  stock_value_usd: number
-  stock_value_khr: number
+  stock_value_usd?: number
+  stock_value_khr?: number
   low_stock: DashboardProduct[]
   out_of_stock: DashboardProduct[]
   expiring_products: DashboardProduct[]
@@ -306,16 +308,10 @@ const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   today_return_usd: 0,
   all_total: 0,
   all_total_khr: 0,
-  cost_in: 0,
-  cost_out: 0,
-  cost_in_khr: 0,
-  cost_out_khr: 0,
   product_count: 0,
   in_stock_count: 0,
   low_stock_count: 0,
   out_of_stock_count: 0,
-  stock_value_usd: 0,
-  stock_value_khr: 0,
   low_stock: [],
   out_of_stock: [],
   expiring_products: [],
@@ -725,13 +721,15 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
   </div>
 }
 
+// Requires only keys the Worker sends to EVERY role that may open the Dashboard. stock_value_usd is deliberately not one of them:
+// compat.ts mounts acquisitionCostResponses on /dashboard/*, which removes it (with cost_in, cost_out and the *_khr twins) for a
+// caller without product_cost_view, so requiring it made the seeded Manager's Dashboard fail as "incomplete summary data".
 function isDashboardSummaryPayload(value: unknown): value is DashboardSummary {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<DashboardSummary>
   return (
     Number.isFinite(Number(payload.product_count))
     && Number.isFinite(Number(payload.today_count))
-    && Number.isFinite(Number(payload.stock_value_usd))
     && Number.isFinite(Number(payload.expiring_count))
     && Array.isArray(payload.recent_sales)
     && Array.isArray(payload.low_stock)
@@ -1403,6 +1401,9 @@ export default function Dashboard() {
   const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aInvoiceDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
+  // Stock value is quantity x unit cost: cost-derived, so it needs the cost grant AND the Worker having sent it (PRESENCE-signalled like
+  // aHasProfit below). A Manager without product_cost_view gets no stock-value card instead of a $0.00 that reads as an empty shelf.
+  const aHasStockValue = canViewAcquisitionCosts(user) && Number.isFinite(Number(summary?.stock_value_usd ?? NaN))
   const aStockValue = summary?.stock_value_usd || 0
   const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
   const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
@@ -1634,7 +1635,7 @@ export default function Dashboard() {
         { label: translateOr('product_expiry_alerts', 'Expiry alerts'), value: summary?.expiring_count ?? summary?.expiring_products?.length ?? 0 },
       ],
     },
-    {
+    ...(aHasStockValue ? [{
       id: 'stock-value',
       info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range."),
       label: translateOr('stock_value', 'Stock value'),
@@ -1650,7 +1651,7 @@ export default function Dashboard() {
         { label: translateOr('low_stock', 'Low stock'), value: lowStockCount },
         { label: translateOr('out_of_stock', 'Out of stock'), value: outOfStockCount },
       ],
-    },
+    }] : []),
     {
       id: 'revenue',
       // Part 388: expressive/expression-based info -- the FORMULA with this
@@ -1836,6 +1837,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     aCollected,
     aDiscountRate,
     aAvgStockValue,
+    aHasStockValue,
     aCost,
     aDelivery,
     aDiscounts,

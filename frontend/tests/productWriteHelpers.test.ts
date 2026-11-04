@@ -324,6 +324,21 @@ assert.deepEqual(
 
 assert.equal(buildProductBranchMovePlan({}, 'bad'), null)
 
+// PERM-UI review E4: a product with no stock anywhere is "moved" by a zero-quantity add at the target branch, which is a
+// POST /api/inventory/adjust and answers 403 without Adjust / receive stock. A role without it plans a skip, not a call.
+{
+  const noStock = { branch_stock: [{ branch_id: 1, quantity: 0 }] }
+  assert.deepEqual(buildProductBranchMovePlan(noStock, 3, { canInitialize: false }), { action: 'skip', reason: 'adjust_required', branchId: 3 }, 'no stock anywhere + no Adjust: skip')
+  assert.deepEqual(buildProductBranchMovePlan(noStock, 3, { canInitialize: true }), { action: 'initialize', branchId: 3 }, 'no stock anywhere + Adjust: initialise')
+  assert.deepEqual(buildProductBranchMovePlan(noStock, 3), { action: 'initialize', branchId: 3 }, 'the option is absent for every existing caller: unchanged')
+  assert.deepEqual(buildProductBranchMovePlan({}, 3, { canInitialize: false }), { action: 'skip', reason: 'adjust_required', branchId: 3 }, 'a product with no branch rows at all')
+  // Stock somewhere is a transfer (Branches: transfer), whatever Adjust says; already at the target is still a no-op.
+  const stocked = { branch_stock: [{ branch_id: 1, quantity: 5 }] }
+  assert.deepEqual(buildProductBranchMovePlan(stocked, 2, { canInitialize: false }), { action: 'transfer', fromBranchId: 1, toBranchId: 2, quantity: 5 }, 'a transfer does not need Adjust')
+  assert.equal(buildProductBranchMovePlan(stocked, 1, { canInitialize: false }), null, 'already in the target branch')
+  assert.equal(buildProductBranchMovePlan(noStock, 'bad', { canInitialize: false }), null, 'no valid target: nothing to plan')
+}
+
 assert.deepEqual(
   summarizeProductBulkRun({
     successes: [{ item: '1' }, { item: 2 }, { item: 'bad' }],

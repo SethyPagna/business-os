@@ -189,6 +189,7 @@ back into the failure message rather than left to expire.
 | `receipt-print.spec.ts` | the receipt that reaches the printer: Printer paper by default with no blank top band, one print call per tap, the 80x50 card from the top of the paper, the app's Khmer font in the print document, and Print → All printing the card and then the full receipt. |
 | `online-auth-safety.spec.ts` | a sign-out whose request is lost asks for confirmation ("Finish signing out") instead of leaving the app half signed in. Runs with the real service worker. |
 | `console-hygiene.spec.ts` | every public surface and every signed-out admin route boots with no uncaught error, no `console.error`, no failed resource and no unmocked API call. |
+| `role-matrix.spec.ts` | the browser half of the permission matrix (Gap #16): per role, at 1280 px on desktop-chromium and 390 px on android-chromium, the sidebar / home tiles / account menu / hub sections, a direct URL to each of the 15 admin routes (renders, or lands on a page the role may open with the denied slot holding only Access Denied), the Products / Sales / Returns / Contacts buttons and the product form's Delete and price lock against `permissionActions.ts`, cost absent from every response body and the DOM, and full phone numbers. Roles and expectations are computed from the real definitions (`support/roleMatrix.ts`), cost redaction is the Worker's own `projectAcquisitionCosts`, and an admin control proves every locator can see its control. Defects it found are kept as `test.fail` cases with the file and line. App tier only: the forged-call 403 half is the system-tier lane. **Run it by path** (`npx playwright test e2e/role-matrix.spec.ts --workers=1`): a bare `role-matrix` is a regex over the whole file path, so in a worktree whose directory name contains it every spec matches. Use a private `E2E_PORT` on a shared laptop, or Playwright reuses whichever fixture server already owns 4318. |
 | `system/pos-sale.spec.ts` | **opt-in.** A real cashier signs in against real bcrypt, rings a real sale through `POST /api/sales`, and the sale, its money, its item, its cashier, its branch, the shop's stock and the receipt on the Sales page all agree afterwards. |
 
 Every spec file opens with a header naming what it proves, the incident class it
@@ -212,8 +213,13 @@ not skipped noise; each one names the exact lines that decide it.
 | `storage-isolation` | the till is wiped of A's **unprefixed** keys too | `clientRuntime.ts:46/221` clears only `businessos_` / `business_os_` prefixes, leaving `pos_search`, the seven `pos_*` filters, the legacy `bos_pos_*` keys (still read by `POS.tsx:700`) and `bos_dashboard_filters:<id>` |
 | `storage-isolation` | signing out is not an error | `POS.tsx:1436` logs `console.error` and sets `catalogLoadError` on the 401 caused by a deliberate logout; `Dashboard.tsx:844` guards the identical case with `isInvalidSessionError` |
 | `storage-isolation` | an account handover does not surface the read fence | `actorReadScope.ts:220` `stale_read_scope` is treated as a hard failure by `Dashboard.tsx:838-848`, `POS.tsx:1436` and `POS.tsx:2121` |
+| `role-matrix` | a customer's full phone number is withheld from a role without a "See full phone numbers" grant | no such grant at `rc/20261104a` (P2.8, `claude/p28-phone-permission-20261102`, is not in it); the sale detail shows the number to every role that opens Sales. The catalogue case and the per-role case turn themselves off when `permissionDefinitions.ts` gains the grant |
 
 When one of them is fixed, delete the `.fixme` — do not weaken the assertion.
+
+The `role-matrix` rows are `test.fail` (via `knownDefect` in `role-matrix.spec.ts`), not `fixme`: the case runs, and when the app is fixed Playwright
+reports "expected to fail but passed" — delete that `knownDefect` line. `E2E_ROLE_MATRIX_RAW=1` switches every annotation off to read the real failure.
+Read each failed-as-expected message before trusting it: `test.fail` also accepts a failure for the wrong reason (a locator, a connection reset).
 
 ## Known-noise quarantines
 

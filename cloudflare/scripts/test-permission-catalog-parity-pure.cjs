@@ -492,6 +492,22 @@ const REQUIREMENT_PROOFS = {
     file: 'routes/products.ts',
     proof: [/app\.post\('\/variant'[\s\S]{0,700}?getActionTier\(user, 'products', 'variant'\) !== 'full' \|\| getActionTier\(user, 'products', 'add'\) !== 'full'/],
   },
+  // A bulk-delete job deletes what DELETE /:id deletes, so create and cancel both ask for Delete as well (PERM-UI review E1).
+  'products:delete': {
+    file: 'routes/products.ts',
+    proof: [
+      /function productBulkDeleteTier\(user\) \{\s*const tier = getActionTier\(user, 'products', 'bulk_delete'\);?\s*return getActionTier\(user, 'products', 'delete'\) === 'none' \? 'none' : tier;?\s*\}/,
+      /app\.post\('\/bulk-delete-jobs', async[\s\S]{0,300}?const tier = productBulkDeleteTier\(user\)/,
+      /app\.post\('\/bulk-delete-jobs\/:id\/cancel'[\s\S]{0,300}?productBulkDeleteTier\(user\) !== 'full'/,
+    ],
+  },
+  'contacts:delete': {
+    file: 'routes/contacts.ts',
+    proof: [
+      /app\.post\(`\$\{config\.path\}\/bulk-delete-jobs`[\s\S]{0,2000}?getActionTier\(user, 'contacts', 'delete'\) === 'none'/,
+      /app\.post\(`\$\{config\.path\}\/bulk-delete-jobs\/:id\/cancel`[\s\S]{0,600}?getActionTier\(user, 'contacts', 'delete'\) !== 'full'/,
+    ],
+  },
   'inventory:adjust': [
     { file: 'lib/createFold.ts', proof: [/function foldStockInPermissionRefusal\(user\) \{\s*if \(user && getActionTier\(user, 'inventory', 'adjust'\) === 'full'\)\s*return null/] },
     { file: 'lib/importEngine.ts', proof: [/const allowProductStockWrites = !isStockAdjustImportType\(job\.type\) \|\| getActionTier\(actor, 'inventory', 'adjust'\) === 'full'/, /export function isStockAdjustImportType\(type\) \{\s*return type === 'products' \|\| type === 'inventory' \|\| type === 'stock_actions';?\s*\}/] },

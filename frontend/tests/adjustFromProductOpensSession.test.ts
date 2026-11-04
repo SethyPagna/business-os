@@ -75,9 +75,11 @@ function noLegacyAdjustEntry(products: string, inventory: string, branches: stri
 
 function gatesDetailActions(source: string): boolean {
   const detail = jsxBlock(source, 'ProductDetailModal')
-  return /const canAddProduct = can\('products', 'add'\)/.test(source)
+  // PERM-UI (3 Nov): Add variant rides products:variant, whose grant table `requires` products:add (pinned in
+  // roleMatrixControlGates.test.ts), so the one flag still covers "needs products add" and also the Variant switch.
+  return /const canAddVariant = can\('products', 'variant'\)/.test(source)
     && /const canAdjustInventoryStock = can\('inventory', 'adjust'\)/.test(source)
-    && /onAddVariant=\{canAddProduct \? \(\) => \{/.test(detail)
+    && /onAddVariant=\{canAddVariant \? \(\) => \{/.test(detail)
     && /onAdjustStock=\{canAdjustInventoryStock \? /.test(detail)
 }
 
@@ -162,7 +164,7 @@ runTest('no new-entry path opens the retired one-product forms', () => {
   assert.ok(noLegacyAdjustEntry(products, inventory, branches))
 })
 
-runTest('Adjust and Add variant are gated on inventory adjust and products add', () => {
+runTest('Adjust and Add variant are gated on inventory adjust and products variant (which requires products add)', () => {
   assert.ok(gatesDetailActions(products))
   assert.ok(gatesInventoryAdjust(inventory))
 })

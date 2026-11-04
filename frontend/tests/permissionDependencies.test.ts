@@ -73,7 +73,9 @@ await test('the inventory and sales import rows carry the same cost grants as th
 await test('contacts bulk delete, merge and import are unavailable while Select and change multiple contacts is off', () => {
   const base = { contacts: true }
   for (const action of ['bulk_delete', 'merge', 'import']) {
-    assert.deepEqual(rowOf('contacts', action).requires?.map((requirement) => requirement.key), ['contacts:bulk'], `${action} names the umbrella switch`)
+    // Bulk delete also demands Delete: the Worker's job deletes what DELETE /:id deletes (PERM-UI review E1 sweep).
+    const expected = action === 'bulk_delete' ? ['contacts:bulk', 'contacts:delete'] : ['contacts:bulk']
+    assert.deepEqual(rowOf('contacts', action).requires?.map((requirement) => requirement.key), expected, `${action} names the umbrella switch${action === 'bulk_delete' ? ' and Delete' : ''}`)
     assert.equal(can(base, 'contacts', action), true, `${action}: nothing switched off`)
     assert.equal(can({ ...base, 'contacts:bulk': false }, 'contacts', action), false, `${action}: the Worker refuses it without contacts:bulk`)
     assert.equal(can({ ...base, 'contacts:bulk': false, [`contacts:${action}`]: true }, 'contacts', action), false, `${action}: a stored true never grants`)
@@ -83,6 +85,20 @@ await test('contacts bulk delete, merge and import are unavailable while Select 
   }
   assert.equal(can({ ...base, 'contacts:bulk': false }, 'contacts', 'delete'), true, 'a single delete is not behind the umbrella switch')
   assert.equal(can({ ...base, 'contacts:bulk': false }, 'contacts', 'export'), true, 'export is not behind the umbrella switch')
+})
+
+await test('bulk delete needs the single Delete too, for products and for contacts: the job deletes what DELETE /:id deletes', () => {
+  assert.deepEqual(rowOf('products', 'bulk_delete').requires?.map((requirement) => requirement.key), ['products:delete'])
+  for (const [section, base] of [['products', { products: true }], ['contacts', { contacts: true }]] as const) {
+    assert.equal(can(base, section, 'bulk_delete'), true, `${section}: nothing switched off`)
+    assert.equal(can({ ...base, [`${section}:delete`]: false }, section, 'bulk_delete'), false, `${section}: Delete off, Bulk delete left on -- the combination the editor used to offer`)
+    assert.equal(can({ ...base, [`${section}:delete`]: false, [`${section}:bulk_delete`]: true }, section, 'bulk_delete'), false, `${section}: a stored true never grants`)
+    assert.equal(can({ ...base, [`${section}:bulk_delete`]: false }, section, 'bulk_delete'), false, `${section}: its own switch off`)
+    assert.equal(can({ ...base, [`${section}:delete`]: false }, section, 'delete'), false, `${section}: the single Delete itself is off`)
+    assert.equal(can({ ...base, [`${section}:bulk_delete`]: false }, section, 'delete'), true, `${section}: Bulk delete off leaves the single Delete`)
+    assert.equal(can({ [section]: 'review' }, section, 'bulk_delete'), false, `${section}: Review never reaches it`)
+    assert.equal(can({}, section, 'bulk_delete', 'admin'), true, `${section}: an administrator holds every grant`)
+  }
 })
 
 await test('Add variant needs Add product', () => {

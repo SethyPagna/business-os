@@ -19,7 +19,7 @@ import { cacheIdentity, deploymentId, isUnsafeVersion } from '../lib/cache'
 import { readDataEpoch } from '../lib/readSwitches'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
+import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { persistClientImageVariants } from '../lib/imageVariantStore'
@@ -3166,6 +3166,16 @@ app.delete('/:id', async (c) => {
     action_history_id: committed?.action_history_id ?? null, generation: Number(committed?.generation || 0) })
 })
 
+// A bulk-delete job removes exactly what DELETE /:id removes, so the role needs that action's grant as well as
+// Bulk delete. The route used to read bulk_delete alone: a role with Delete switched off and Bulk delete left on
+// (the editor offered that combination) got a 202 and the job deleted the products the single route refuses
+// (PERM-UI review E1, 4 Nov 2026). The role editor's bulk_delete row `requires` products:delete, so the two agree.
+// Create and cancel share this one answer; a Review caller still gets 'review' (bulk_delete is Refused, never queued).
+function productBulkDeleteTier(user: SessionUser): PermissionTier {
+  const tier = getActionTier(user, 'products', 'bulk_delete')
+  return getActionTier(user, 'products', 'delete') === 'none' ? 'none' : tier
+}
+
 // POST /api/products/bulk-delete-jobs -- the 10k+-safe path. Products.tsx's
 // bulk-delete flow (runBulkDeleteConfirmed) uses this instead of calling
 // DELETE /:id once per selected row once the selection is large enough
@@ -3185,7 +3195,7 @@ app.delete('/:id', async (c) => {
 // error telling them why, not a silently-wrong partial behavior.
 app.post('/bulk-delete-jobs', async (c) => {
   const user = c.get('user')
-  const tier = getActionTier(user, 'products', 'bulk_delete')
+  const tier = productBulkDeleteTier(user)
   if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   if (tier === 'review') {
     return c.json({ error: 'Bulk delete requires Full access for Products. Ask an admin, or delete a smaller selection through the normal review flow.' }, 403)
@@ -3247,7 +3257,7 @@ app.get('/bulk-delete-jobs/:id', async (c) => {
 // cancellation.
 app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'bulk_delete') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (productBulkDeleteTier(user) !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   try {
     await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
   } catch (error) {

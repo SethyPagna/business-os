@@ -2513,7 +2513,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // must still reach the page for its Loyalty section -- the promo
     // sections inside self-gate on the real 'promotions' tier, so this
     // widens the door, not the controls.
-    if (pageId === 'promotions' && (can('customer_portal', 'view') || can('products', 'view'))) return true
+    // The door admits a role only for a section the page will then draw. Discounts is a PRICE change (owner, 6 Oct 2026), so
+    // PromotionsPage and hubNavigation offer it for products view + edit + the price action; Products view alone (the Employee
+    // default) used to open the page to nothing. tests/roleMatrixControlGates.test.ts pins door <=> offered sections.
+    if (pageId === 'promotions' && (can('customer_portal', 'view') || (can('products', 'view') && can('products', 'edit') && can('products', 'price')))) return true
     // E3/E4 (Part 403): audit_log, users and backup retired as standalone
     // pages -- their components are sections of Review & Logs / Settings
     // now. A grant on any absorbed section opens its host page; each
