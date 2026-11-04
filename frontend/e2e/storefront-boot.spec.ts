@@ -14,6 +14,7 @@ import {
   storefrontCards,
   storefrontSectionTab,
 } from './support/harness'
+import { framedPicture } from './support/storefrontStub'
 
 /**
  * storefront-boot.spec.ts -- the customer storefront comes up, on every engine,
@@ -336,10 +337,8 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     expectNoRuntimeErrors(health)
   })
 
-  test('P2-3 layout shift from navigation to settled stays under 0.05 on a phone', async ({ page }, testInfo) => {
-    // CATCHES: a skeleton that does not hold the hero's box, a header name
-    // that arrives on a second line, or a footer that pushes content up.
-    test.skip(testInfo.project.name !== 'android-chromium', 'layout-shift entries are Chromium-only; the budget is set for the phone')
+  // Layout-shift total from navigation on (Chromium only: the observer type does not exist elsewhere).
+  async function watchLayoutShift(page: Page): Promise<void> {
     await page.addInitScript(() => {
       const state = { cls: 0 }
       ;(window as unknown as { __p2Cls: typeof state }).__p2Cls = state
@@ -349,14 +348,76 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
         }
       }).observe({ type: 'layout-shift', buffered: true })
     })
+  }
+  const layoutShift = (page: Page) => page.evaluate(() => (window as unknown as { __p2Cls: { cls: number } }).__p2Cls.cls)
+
+  test('P2-3 layout shift from navigation to settled stays under 0.05 on a phone', async ({ page }, testInfo) => {
+    // CATCHES: a skeleton that does not hold the hero's box, a header name
+    // that arrives on a second line, or a footer that pushes content up.
+    test.skip(testInfo.project.name !== 'android-chromium', 'layout-shift entries are Chromium-only; the budget is set for the phone')
+    await watchLayoutShift(page)
     await routeStorefrontConfig(page, { patch: REAL_SHOP, delayMs: 800 })
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
     await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
     await expect.poll(() => page.locator('img[data-portal-cover="true"]').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
     await pause(500)
-    const cls = await page.evaluate(() => (window as unknown as { __p2Cls: { cls: number } }).__p2Cls.cls)
+    const cls = await layoutShift(page)
     testInfo.annotations.push({ type: 'cls', description: cls.toFixed(4) })
     expect(cls).toBeLessThan(0.05)
+  })
+
+  // CATCHES: a missing cover that first shows an empty frame and then collapses to the banner (0.0968 on the build before the fix), a wait that
+  // runs out after the file has already failed and turns the banner back into a frame (seen once while building the fix), and a cover frame
+  // reserved at a fixed 144 px that a slow 16:9 picture (200 px tall on a phone) outgrows: the card below jumped by the difference (0.0539).
+  for (const [name, cover, delayMs] of [['a missing cover', 'missing', 0], ['a 16:9 cover slower than the wait', 'wide', 2_000]] as const) {
+    test(`P2-3b ${name} keeps the layout shift under 0.05 on a phone`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== 'android-chromium', 'layout-shift entries are Chromium-only; the budget is set for the phone')
+      await watchLayoutShift(page)
+      await routeStorefrontConfig(page, { patch: REAL_SHOP, delayMs: 800 })
+      // Registered after the config route's own picture route, so it answers first.
+      await page.route('**/uploads/*-e2e.png', async (route) => {
+        await pause(delayMs)
+        if (cover === 'missing') return route.fulfill({ status: 404, body: 'missing' })
+        return route.fulfill({ body: framedPicture(1600, 900, 'Cover 16:9'), contentType: 'image/svg+xml' })
+      })
+      await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
+      await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
+      if (cover === 'wide') await expect.poll(() => page.locator('img[data-portal-cover="true"]').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
+      // Past the wait (1.2 s): a late flip of a failed cover back into a frame would show here.
+      await pause(1_800)
+      const cls = await layoutShift(page)
+      testInfo.annotations.push({ type: 'cls', description: cls.toFixed(4) })
+      expect(cls).toBeLessThan(0.05)
+    })
+  }
+
+  test('P2-3c the skeleton holds the header\'s social row, so the page does not move when the shop arrives', async ({ page }) => {
+    // CATCHES: a header that grows by the 56 px social row when the config lands (the tabs and the card under it jumped down by that much:
+    // 0.0486 of the 0.05 budget on its own), and a placeholder that is not the same height as the row it stands in for.
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    await routeStorefrontConfig(page, { patch: REAL_SHOP, gate })
+    await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
+    const placeholder = page.locator('[data-portal-social-skeleton="true"]')
+    await expect(placeholder, 'the social row is held while the config is on its way').toBeVisible()
+    const pending = await page.evaluate(() => {
+      const row = document.querySelector('[data-portal-social-skeleton="true"]')!.getBoundingClientRect()
+      const tabs = document.querySelector('.portal-nav-shell')!.getBoundingClientRect().top
+      return { height: row.height, gap: tabs - row.bottom, tabs: tabs + window.scrollY }
+    })
+    release()
+    await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
+    await expect(placeholder).toHaveCount(0)
+    const landed = await page.evaluate(() => {
+      const row = document.querySelector('[data-portal-social-row="true"]')!.getBoundingClientRect()
+      const tabs = document.querySelector('.portal-nav-shell')!.getBoundingClientRect().top
+      return { height: row.height, gap: tabs - row.bottom, tabs: tabs + window.scrollY }
+    })
+    expect(landed.height, 'the placeholder is as tall as the row').toBeCloseTo(pending.height, 0)
+    expect(landed.gap, 'and sits the same distance above the section tabs').toBeCloseTo(pending.gap, 0)
+    // On a phone nothing else in the header changes size when the shop lands, so the tabs stay put. From the sm width the header's first row
+    // also grows by 11 px at 1280 px (its icon buttons arrive with the config): a separate skeleton gap, outside the phone's CLS budget.
+    if ((page.viewportSize()?.width ?? 0) < 640) expect(landed.tabs, 'the section tabs stay where they were').toBeCloseTo(pending.tabs, 0)
   })
 
   test('P2-4 an old saved copy is never painted, never requested, and removed; the shopper list is untouched', async ({ page, context, browser }) => {

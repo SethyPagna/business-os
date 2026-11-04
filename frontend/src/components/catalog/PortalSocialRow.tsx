@@ -90,13 +90,19 @@ const ICON_CLASS = 'h-4 w-4 shrink-0 text-[#9c7a3c] dark:text-amber-300'
  * is never cut), every target 44px tall. A platform with several accounts is
  * one button that opens a picker, so the row stays short.
  */
-export default function PortalSocialRow({ groups, mapLink = '', pageLanguage, copy }: {
+export default function PortalSocialRow({ groups, mapLink = '', pageLanguage, copy, pending = false }: {
   groups: readonly PortalSocialGroup[]
   mapLink?: string
   pageLanguage: string
   copy: CopyFn
+  /** The shop's config is still on its way, so whether it has social links is not known yet. */
+  pending?: boolean
 }) {
-  if (!groups.length && !mapLink) return null
+  if (!groups.length && !mapLink) {
+    // The row is 56 px tall (mt-2, a 44 px item, pb-1) and arrives with the config, pushing everything under the header down by that much.
+    // While the config is pending the skeleton holds the same box (mt-2 + h-12 = 8 + 44 + 4), so nothing moves when it lands.
+    return pending ? <div aria-hidden="true" data-portal-social-skeleton="true" className="mt-2 h-12" /> : null
+  }
   const language = pageLanguage === 'km' ? 'km' : 'en'
   return (
     <nav
