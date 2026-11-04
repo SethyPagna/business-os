@@ -62,6 +62,8 @@ type ProductsResult = {
   facetsLimited?: { brands: boolean; categories: boolean }
   /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
   capabilities?: { fixStock?: boolean; approveCounts?: boolean }
+  /** The older list (ic_simple off) answers the all-sessions Issues view with the issues themselves: one per product and session, with the reason, the counted figure and the session. */
+  issues?: Array<{ product_id: number; branch_id: number; session_id: string; created_by: number; reason: string | null; revision: number; counted_quantity?: number | null }>
 }
 /** creatorName rides along from the Sessions list: the single-session read does not send it. */
 type Selection = { branchId: string; sessionId: string; creatorName?: string | null; bootstrapIntent?: ControlIntent }
@@ -714,10 +716,12 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const statusFilter = section !== 'issues' && !!data && (data.simple === true || !!sessionId)
   const filtersActive = countActiveFilters(filters, { branch: branches.length > 1, state: statusFilter }) > 0 || !!query.trim()
   const sessionFiltersActive = !!(sessionFilters.status || sessionFilters.mine || sessionFilters.waiting || sessionRange.startDate || sessionRange.endDate || (branches.length > 1 && !!branchId))
-  const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : visibleProducts.length)
+  // The older list (ic_simple off) draws the all-sessions Issues view from the answer's `issues` (reason, counted figure, the session), not from product rows.
+  const oldIssues = section === 'issues' && !sessionId && !!data && data.simple !== true
+  const loadedNothing = !loading && fresh && !unavailableProducts.length && !(section === 'sessions' ? sessions?.items.length : oldIssues ? data?.issues?.length : visibleProducts.length)
 
   // A scan points at the one exact row of the list on screen (product rows only: the all-sessions Issues list has none).
-  const showsProductRows = section !== 'sessions'
+  const showsProductRows = section !== 'sessions' && !oldIssues
   const scanHit = scan && fresh && showsProductRows ? scanHitOf(visibleProducts, scan.query, access.fields.barcode) : null
   const focusRequest: InventoryCheckFocusRequest | undefined = scan && scanHit ? { id: scanHit.id, token: scan.token, target: scan.target } : undefined
   const scanMissed = !!scan && loadedNothing && showsProductRows
@@ -752,10 +756,17 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     const issueBranch = branches.find(branch => branch.id === product.check_branch_id)?.name
     return [String(product.id), <button key="open" type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(product.check_branch_id), sessionId: String(product.check_session_id) })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button>]
   })) : {}
+  const issueRows = oldIssues && fresh ? (data?.issues ?? []).map(issue => {
+    const product = visibleProducts.find(candidate => Number(candidate.id) === issue.product_id) ?? { id: issue.product_id, name: `#${issue.product_id}` }
+    const showCount = (access.fields.stock || Number(issue.created_by) === Number(user?.id)) && typeof issue.counted_quantity === 'number' && Number.isFinite(issue.counted_quantity)
+    const issueBranch = branches.find(branch => branch.id === issue.branch_id)?.name
+    return { key: `${issue.session_id}:${issue.product_id}`, product, observation: { product_id: issue.product_id, state: 'issue' as const, counted_quantity: showCount ? issue.counted_quantity ?? null : null, reason: issue.reason, revision: issue.revision },
+      chip: <button type="button" className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 text-[11px] font-semibold leading-relaxed text-slate-700 dark:bg-zinc-800 dark:text-slate-200" aria-label={issueBranch ? `${open}: ${issueBranch}` : open} title={open} onClick={() => onSelect({ branchId: String(issue.branch_id), sessionId: issue.session_id })}><ClipboardList className="h-3 w-3 shrink-0" aria-hidden="true" />{issueBranch ? <span className="min-w-0 break-words">{issueBranch}</span> : null}</button> }
+  }) : []
   const rowProps = { canViewStock: access.fields.stock, canViewCounts, t, onOpenProduct: setDetail } as const
   const canCheckRows = fresh && canEdit && session?.status === 'open' && canWriteToServer && !lifecycleAttempt.current
   // One column header for the whole list, pinned with the controls: the rows below line up under it from 1024px.
-  const sheetHeader = fresh && visibleProducts.length && section !== 'sessions'
+  const sheetHeader = fresh && visibleProducts.length && section !== 'sessions' && !oldIssues
     ? listMode ? <InventoryCheckListHeader selecting={selecting} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} />
       : <InventoryCheckSheetHeader canCheck={canCheckRows} inSession={!!sessionId} canViewStock={access.fields.stock} canViewCounts={canViewCounts} t={t} /> : null
 
@@ -849,6 +860,9 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           ? <InventoryCheckApprovalPanel approval={approval} items={items} canDecide={canDecide} canClose={canClose} busy={busy} refused={refusedLines} t={t} onApprove={() => { void decideApproval('approve') }} onReject={() => { void decideApproval('reject') }} onClose={() => { void decideApproval('close') }} /> : null}
         {!fresh && !error && !sessionError ? <ListSkeleton loadingText={t('loading')} /> : null}
         {section === 'sessions' ? (fresh && sessions?.items.length ? <InventoryCheckSessionsList items={sessions.items} t={t} onOpen={item => { setSection('products'); onSelect({ branchId: String(item.branch_id), sessionId: item.id, creatorName: item.creator_name ?? null }) }} /> : null)
+          : oldIssues ? <div className="min-w-0 divide-y" aria-label={t('issues')} data-inventory-check-old-issues>
+            {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
+          </div>
           : listMode ? <InventoryCheckListRows products={visibleProducts} drafts={drafts} selecting={selecting} locked={busy || !!submitAttempt.current} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
             adornments={issueChips} focusRequest={focusRequest} onCountEntered={onCommitted} t={t} onOpenProduct={setDetail} {...draftHandlers} />
           : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}

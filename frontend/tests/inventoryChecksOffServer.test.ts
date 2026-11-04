@@ -40,7 +40,7 @@ const answer = (query: URLSearchParams) => {
   const issue = query.get('state') === 'issue' || query.get('checkState') === 'issue'
   const row = { id: 12, name: `${issue ? 'Issue' : 'Product'} page ${page}`, quantity: 8, unit: 'pcs' }
   const base = { items: [row], total: 45, page, pageSize: 20, branches }
-  if (server === 'off') return { ...base, facets: { brands: ['Test brand'], categories: ['Test category'], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, stats: { total_products: 45 }, issues: [] }
+  if (server === 'off') return { ...base, facets: { brands: ['Test brand'], categories: ['Test category'], reasons: [] }, facetsLimited: { brands: false, categories: false, reasons: false }, stats: { total_products: 45 }, issues: issue && !query.get('sessionId') ? [{ product_id: 12, branch_id: 1, session_id: 'check-1', created_by: 7, reason: 'Shelf short (old list)', revision: 2, counted_quantity: 3 }] : [] }
   return { ...base, simple: true, ...(query.get('summary') === '0' ? {} : { summary: { not_checked: 40, in_check: 2, ok: 2, issue: 1, total: 45 }, facets: { brands: ['Test brand'], categories: ['Test category'] }, facetsLimited: { brands: false, categories: false } }) }
 }
 const session: InventoryCheckSession = { id: 'check-1', branch_id: 1, created_by: 7, title: 'Test check', status: 'open', revision: 1, scope: {}, started_at: '2026-10-19 02:30:00', updated_at: '2026-10-19 02:30:00', progress: { total: 1, done: 0, issue: 0, unstarted: 1 }, branch_name: 'Branch one', creator_name: 'alice' }
@@ -126,6 +126,9 @@ try {
   noError(products, 'Issues'); assert.equal(last().query.get('page'), '1')
   assert.equal(last().query.get('state'), 'issue', 'Issues asks the old list in its own words: state=issue')
   assert.ok(products.text().includes('Issue page 1'), 'the Issues answer is drawn')
+  assert.ok(products.text().includes('Shelf short (old list)'), "the old list's Issues show each issue's reason")
+  assert.ok(products.text().includes('Counted 3'), 'and the counted figure')
+  assert.equal(products.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Open session: Branch one').length, 1, 'and a link to the session that recorded it')
   assert.ok(!(await menuSections(products)).includes('checkState'), 'and the Issues filter menu has no check-status choice (the tab is the status)')
   await step(products)
   assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('state'), 'issue'); noError(products, 'Issues page 2'); assert.ok(products.text().includes('Issue page 2'))
@@ -164,6 +167,8 @@ try {
   await step(cold)
   assert.equal(last().query.get('page'), '2'); assert.equal(last().query.get('state'), 'issue', 'and once the answer has shown the old list it speaks the old word'); assert.equal(last().query.has('checkState'), false)
   assert.equal(last().query.has('summary'), false); noError(cold, 'cold Issues page 2')
+  await cold.click(cold.button('Open session: Branch one'))
+  assert.equal(last().query.get('sessionId'), 'check-1'); assert.equal(last().query.get('branchId'), '1', "the Open session link opens the issue's own session and branch")
   await cold.unmount()
   aliasUnderstood = false
 
