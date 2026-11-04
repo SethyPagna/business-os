@@ -93,7 +93,7 @@ function withCustomer(f, body) {
     const state = h.creationState(f.raw)
     assert.deepEqual({ sales: state.sales, items: state.items, product: state.product, branch: state.branch, batch: state.batch }, { sales: 1, items: 1, product: 9, branch: 9, batch: 9 })
     const sqlHeads = reads.map((call) => call.sql.slice(0, 60)).sort()
-    for (const needle of ['FROM branches WHERE id IN', 'SELECT * FROM products WHERE id IN', 'FROM branch_stock WHERE branch_id', "key IN ('exchange_rate','change_exchange_rate')", 'FROM customers WHERE id = ?', "key = 'loyalty_points_enabled'", 'FROM promotion_rules WHERE is_active=1', 'SELECT name FROM branches WHERE id = ?']) {
+    for (const needle of ['FROM branches WHERE id IN', 'SELECT * FROM products WHERE id IN', 'FROM branch_stock WHERE branch_id', "key IN ('exchange_rate','change_exchange_rate','pos_payment_method_kinds')", 'FROM customers WHERE id = ?', "key = 'loyalty_points_enabled'", 'FROM promotion_rules WHERE is_active=1', 'SELECT name FROM branches WHERE id = ?']) {
       assert.ok(reads.some((call) => call.sql.includes(needle)), `read still issued: ${needle}\n${sqlHeads.join('\n')}`)
     }
     assert.ok(reads.some((call) => /product_batches|branch_batch_stock/.test(call.sql)), 'the lot availability read is still issued')
