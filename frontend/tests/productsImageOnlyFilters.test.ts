@@ -6,8 +6,7 @@ import { classesOf, dimension } from './tailwindPixels.ts'
 
 // 6.0.860: the image-only Products view gets the received-date range, stock / category / brand / sort controls
 // that the 6.0.854 server contract serves (cloudflare/src/lib/productImageOnlyQuery.ts). Mounted, against a
-// transport double that records every request the view sends. F1-F9 are the plan's frontend cases
-// (Records/Consolidation/2026-10-19/Inventory/PLAN-854-IMAGE-ONLY-FILTERS.md section 4).
+// transport double that records every request the view sends. F1-F9 are the frontend cases.
 
 const packs = Object.fromEntries(['en', 'km'].map((lang) => [lang, JSON.parse(readFileSync(new URL(`../src/lang/${lang}.json`, import.meta.url), 'utf8'))])) as Record<string, Record<string, string>>
 const harness = await createHarness()
@@ -263,7 +262,7 @@ try {
       assert.ok(dimension(classesOf(select.className), 'h') >= 44, `${lang}: ${label} is a 44 px target (Khmer needs the room)`)
     }
     const filterRow = surface.find((node) => node.hasAttribute('data-products-image-only-filters'), 'filter row')
-    assert.ok(classesOf(filterRow.className).includes('overflow-x-auto') && classesOf(filterRow.className).includes('min-w-0'), `${lang}: the filter row scrolls inside itself instead of widening the page`)
+    assert.ok(classesOf(filterRow.className).includes('chip-rail'), `${lang}: the filter row is the shared rail (main.css: nowrap, overflow-x auto, min-width 0), so it scrolls inside itself instead of widening the page`)
     await surface.unmount()
   }
   console.log('productsImageOnlyFilters.test.ts passed')

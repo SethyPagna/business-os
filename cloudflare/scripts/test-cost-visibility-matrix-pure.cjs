@@ -111,7 +111,7 @@ const PROJECTED = {
   'inventoryCheckProducts.ts': [/getInventoryCheckAccess\(actor\)/, /readInventoryCheckProducts\(db, actor, query,/, /currentInventoryCheckActor\(db, principal\)/],
 }
 // route files that never put a cost-bearing field in a response (checked below)
-const NO_COST = ['ai.ts', 'auth.ts', 'branchCutoverOperator.ts', 'devices.ts', 'fees.ts', 'files.ts', 'lookups.ts', 'notes.ts', 'notifications.ts', 'organizations.ts',
+const NO_COST = ['ai.ts', 'auth.ts', 'branchCutoverOperator.ts', 'devices.ts', 'fees.ts', 'feesCatalog.ts', 'files.ts', 'lookups.ts', 'notes.ts', 'notifications.ts', 'organizations.ts',
   'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts', 'inventoryChecks.ts']
 const COST_FIELD = /\b(cost_price_(?:usd|khr)|purchase_price_(?:usd|khr)|received_cost_usd|cost_usd|cogs|total_cost_usd)\b/
 

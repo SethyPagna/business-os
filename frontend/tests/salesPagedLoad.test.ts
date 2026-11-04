@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { transformSync } from 'esbuild'
+import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
@@ -69,10 +70,13 @@ function harness(api: ReturnType<typeof server>) {
   const view = { sales: [] as Row[], published: [] as Row[][], errors: [] as unknown[], loading: [] as boolean[], stats: 0 }
   const render = (props: Props) => compile(loadSalesSource, {
     ...refs, useCallback: (callback: unknown) => callback, statusSecurityScope: 's1', authReady: true, canViewSales: true,
+    salesPageRowsRef: { current: null },
+    salesPageParams: { startDate: props.date, endDate: props.date, ...(props.status ? { status: props.status } : {}), page: props.page || 1, limit: 20, sortBy: props.sortBy || 'date', sortDir: props.sortDir || 'desc' },
+    salesPageScope: JSON.stringify(['s1', props.date, props.status, props.page || 1, props.sortBy || 'date', props.sortDir || 'desc']),
     isAdmin: false, userFilter: 'all', statusFilter: props.status || 'all', debouncedSearch: '',
     salesDateRange: { startDate: props.date, endDate: props.date }, salesPage: props.page || 1, salesPageSize: 20,
     salesSortSpec: { field: props.sortBy || 'date', direction: props.sortDir || 'desc' },
-    beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent,
+    beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, captureActorReadScope,
     clearLoadWatchdog: () => {}, setLoading: (value: boolean) => view.loading.push(value), setLoadError: (value: unknown) => { if (value) view.errors.push(value) },
     setSales: (rows: Row[]) => { view.sales = rows; view.published.push(rows) },
     window: { setTimeout: () => 1 }, withLoaderTimeout: (run: () => Promise<unknown>) => run(), SALES_LIST_REQUEST_TIMEOUT_MS: 8000,
@@ -210,8 +214,8 @@ await test('Sales uses the shared Previous/Next pager like Returns: same compone
   assert.match(sales, /<div data-sales-bottom-pager="" className="mt-3 flex justify-center">\s*<PaginationControls compact rangeAsPageSize compactCentered page=\{salesPage\} pageSize=\{salesPageSize\} totalItems=\{totalSalesCount\}/)
   assert.match(sales, /const \[salesPageSize, setSalesPageSize\] = useState\(DEFAULT_PAGE_SIZE\)/)
   assert.match(read('../src/components/shared/PaginationControls.tsx'), /export const DEFAULT_PAGE_SIZE = 20/)
-  // The count is the server aggregate over the same filters as the list (falls back to the rows held before it lands).
-  assert.match(sales, /const totalSalesCount = salesStats\?\.total_count \?\? allVisibleSales\.length/)
+  // A missing aggregate cannot claim the page length is the complete count.
+  assert.match(sales, /const totalSalesCount = salesStats\?\.total_count \?\? null/)
   assert.ok(!/show-all|showAll|ShowAll/.test(sales), 'no Show all left')
   assert.ok(!fs.existsSync(new URL('../src/utils/salesShowAll.ts', import.meta.url)))
 })

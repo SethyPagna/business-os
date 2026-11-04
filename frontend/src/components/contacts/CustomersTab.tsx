@@ -21,6 +21,7 @@ import type { QueryParams } from '../../api/query.ts'
 import { isWriteConflictError } from '../../api/http.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import SearchInput from '../shared/SearchInput'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -1048,25 +1049,16 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           receivables ledger, one shown at a time -- the same compact one-row
           chip shape the Suppliers tab uses for Directory / Invoices, so the
           two contact tabs read the same way. */}
-      <div className="flex items-center gap-2 overflow-x-auto">
-        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
-          {sectionChips.map((chip) => {
-            const Icon = chip.icon
-            const isActive = section === chip.key
-            return (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => setSection(chip.key)}
-                aria-pressed={isActive}
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {chip.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      <ChipRail label={tr(t, 'sections', 'Sections')}>
+        {sectionChips.map((chip) => {
+          const Icon = chip.icon
+          return (
+            <RailChip key={chip.key} selected={section === chip.key} onClick={() => setSection(chip.key)} icon={<Icon className="h-3.5 w-3.5" />}>
+              {chip.label}
+            </RailChip>
+          )
+        })}
+      </ChipRail>
 
       {canViewFinancialHistory && section === 'invoices' ? (
         <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr(t, 'loading', 'Loading...')}</div>}>

@@ -30,7 +30,7 @@ const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
 
 const BASE = (process.argv.slice(2).find(arg => arg.startsWith('--base=')) || '').slice('--base='.length)
-// Statements per request before SF-4 (c329b9e29) for this fixture (see the lane report).
+// Statements per request before SF-4 (c329b9e29) for this fixture.
 const BASE_STATEMENTS = { analytics: 37, export: 21 }
 
 const day = (date, hourUtc = 3) => `${date}T${String(hourUtc).padStart(2, '0')}:00:00.000Z`

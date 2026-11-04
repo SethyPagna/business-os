@@ -375,10 +375,11 @@ test('POSITIVE CONTROL: the predicate catches the comment that actually shipped'
   assert.equal(claimsAwaitingIsOut('// only a cancelled sale is out of revenue'), false)
 })
 
-test('footer fallback: no comment on the page claims awaiting-payment is out of revenue', () => {
+test('footer aggregate: no page subtotal substitutes for missing server authority', () => {
   const source = read('src/components/sales/Sales.tsx')
   assert.equal(claimsAwaitingIsOut(source), false, 'the isCountedSale comment still denies the cohort is counted')
-  assert.match(source, /saleListRevenueUsd\(filtered\)/, 'the fallback goes through the shared kernel mirror')
+  assert.doesNotMatch(source, /saleListRevenueUsd\(filtered\)/, 'a page subtotal cannot claim the complete filtered revenue')
+  assert.match(source, /const revenue: number \| null = salesStats\?\.revenue_usd \?\? null/)
   assert.equal(/net_total_usd \?\? sale\.total_usd/.test(source), false, 'the third revenue definition is gone')
 })
 

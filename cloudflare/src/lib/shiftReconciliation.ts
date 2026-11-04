@@ -572,21 +572,26 @@ export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, 
  * payout also recorded as a linked delivery fee would be counted twice
  * (R-telegram E2, 27 Sep 2026).
  */
-export async function courierPayoutsWhere(
-  env: Env, clauses: string[], params: Record<string, unknown>, options: { formula?: number } = {},
-): Promise<ShiftMoney> {
-  const where = [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"]
+export function courierPayoutExpressions(options: { formula?: number } = {}): { usd: string; khr: string; recognized: string } {
   const rielTwin = (options.formula ?? SHIFT_FIGURES_FORMULA) >= 2
     ? 'WHEN COALESCE(sales.delivery_actual_cost_usd, 0) > 0 THEN 0'
     : ''
-  const khrExpr = `CASE WHEN EXISTS (
+  const khr = `CASE WHEN EXISTS (
       SELECT 1 FROM fees
       WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_type, '') = 'delivery'
     ) THEN 0
     ${rielTwin}
     ELSE COALESCE(sales.delivery_actual_cost_khr, 0) END`
-  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${deliveryActualCostExpr('sales.')}), 0) AS usd,
-      COALESCE(SUM(${khrExpr}), 0) AS khr FROM sales WHERE ${where.join(' AND ')}`)
+  return { usd: deliveryActualCostExpr('sales.'), khr, recognized: "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'" }
+}
+
+export async function courierPayoutsWhere(
+  env: Env, clauses: string[], params: Record<string, unknown>, options: { formula?: number } = {},
+): Promise<ShiftMoney> {
+  const expressions = courierPayoutExpressions(options)
+  const where = [...clauses, expressions.recognized]
+  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${expressions.usd}), 0) AS usd,
+      COALESCE(SUM(${expressions.khr}), 0) AS khr FROM sales WHERE ${where.join(' AND ')}`)
     .get<{ usd: number; khr: number }>(params)
   return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
 }

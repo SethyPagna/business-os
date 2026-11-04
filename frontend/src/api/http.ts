@@ -323,6 +323,10 @@ export function cacheGet(key: string): any {
   return (e && isActorReadScopeCurrent(e.scope) && Date.now() - e.ts < freshCacheTtl(key)) ? e.data : null
 }
 export function cacheSet(key: string, data: any): void  { _cache[key] = { data, ts: Date.now(), scope: captureActorReadScope(key) } }
+export function cacheEvictValue(key: string, value: unknown): void {
+  const entry = _cache[key]
+  if (entry && entry.data === value && isActorReadScopeCurrent(entry.scope)) delete _cache[key]
+}
 // Stable lookup lists change only through writes that push their own channel (categories/units
 // also follow product values, see DERIVED_READ_PREFIXES). While the sync socket is open every
 // change clears the entry, so it may outlive CACHE_TTL; the socket opening drops the entries read

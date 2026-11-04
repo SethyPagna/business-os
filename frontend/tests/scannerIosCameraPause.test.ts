@@ -1,6 +1,6 @@
 // 6.0.978: the pause below is switched OFF (IOS_CAMERA_PAUSE_ENABLED = false). WebKit's source shows
-// track.enabled = false never reaches the capture source, so the camera and its green indicator stay on
-// (Records/Consolidation/2026-10-25/RESEARCH-IOS-CAMERA-INDICATOR.md). Closing now stops the tracks at once on
+// track.enabled = false never reaches the capture source, so the camera and its green indicator stay on.
+// Closing now stops the tracks at once on
 // every platform; the tests that need the pause itself run only when the switch is on, and the parking code is
 // covered directly (flag-independent) in the "dormant parking code" test. This file also pins the 6.0.978 rules:
 // getUserMedia inside the tap, and the iOS auto-resume cut-off.

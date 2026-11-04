@@ -8,6 +8,14 @@ import * as XLSX from 'xlsx'
 const root = path.resolve(import.meta.dirname, '..'), reportDir = path.join(root, 'src/components/sales/reports')
 const packs = Object.fromEntries(['en', 'km'].map(l => [l, JSON.parse(fs.readFileSync(path.join(root, 'src/lang', l+'.json'), 'utf8'))]))
 const before = Object.fromEntries(['ReturnsReport', 'ExpensesReport'].map(name => [name, execFileSync('git', ['show', `440a706e06fe8ad472359d935feb3da575373135:frontend/src/components/sales/reports/${name}.tsx`], { cwd: root, encoding: 'utf8' })]))
+// The baseline blobs above were written when the kit still exported `Chip`. That second chip design is retired (every
+// chip row is ChipRail + RailChip), so the blob's import is answered by the shared RailChip: same props the two reports use
+// (selected, onClick, children), same button role, so the baseline still behaves as it did.
+const KIT_CHIP_IMPORT = "import { Button, Chip, Fold, OverflowMenu } from '../../shared/kit'"
+const withSharedChip = (source: string): string => {
+  assert.ok(source.includes(KIT_CHIP_IMPORT), 'the baseline imports the retired kit Chip the way this shim expects')
+  return source.replace(KIT_CHIP_IMPORT, "import { Button, Fold, OverflowMenu } from '../../shared/kit'\nimport { RailChip as Chip } from '../../shared/kit/ChipRail.tsx'")
+}
 const transportNames = [...new Set(['reportsTransport','returnsReadTransport','feesTransport'].flatMap(name => [...fs.readFileSync(path.join(root,'src/api',name+'.ts'),'utf8').matchAll(/^export (?:async )?(?:function|class) (\w+)/gm)].map(m=>m[1])))]
 const fixture = String.raw`
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
@@ -42,7 +50,7 @@ const server = await createServer({ root, logLevel:'error', server:{host:'127.0.
  name:'actual-record-report-host', enforce:'pre', resolveId(id){if(id==='virtual:record-host')return'\0record-host';if(/Old(?:Returns|Expenses)Report\.tsx$/.test(id))return path.join(reportDir,path.basename(id)).replaceAll('\\','/');if(/(?:reportsTransport|returnsReadTransport|feesTransport)\.ts$/.test(id))return'\0record-transport'},
  async load(id){if(id==='\0record-host')return(await transformWithEsbuild(fixture,'fixture.tsx',{loader:'tsx',jsx:'automatic'})).code;
  if(id==='\0record-transport')return transportNames.map(name=>`export const ${name}=${['getBusinessSummaryReturnsPage','getBusinessSummaryExpensesPage','getBusinessSummarySalesPage'].includes(name)?'q=>window.__fetch(q)':['getReturnsReport','getFeesReport'].includes(name)?'q=>window.__aggregate(q)':'()=>{throw Error("Unexpected transport '+name+'")}'}`).join(';');
- for(const name of ['ReturnsReport','ExpensesReport'])if(id===path.join(reportDir,'Old'+name+'.tsx').replaceAll('\\','/'))return(await transformWithEsbuild(before[name],id,{loader:'tsx',jsx:'automatic'})).code;},
+ for(const name of ['ReturnsReport','ExpensesReport'])if(id===path.join(reportDir,'Old'+name+'.tsx').replaceAll('\\','/'))return(await transformWithEsbuild(withSharedChip(before[name]),id,{loader:'tsx',jsx:'automatic'})).code;},
  configureServer(app){app.middlewares.use('/record-host',async(_req,res)=>{res.setHeader('content-type','text/html');res.end(await app.transformIndexHtml('/record-host','<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@id/virtual:record-host"></script></body></html>'))})}
 }] })
 await server.listen();const address=server.httpServer!.address() as {port:number}

@@ -275,8 +275,8 @@ test('the picker is wired to the shared constants, both packs, and sits outside 
   assert.match(REPORT, /useDebouncedValue\(search, SHIFT_SEARCH_DEBOUNCE_MS\)/)
   assert.match(REPORT, /text\.slice\(0, SHIFT_SEARCH_MAX_LENGTH\)/)
   assert.doesNotMatch(REPORT, /AppSelect/, 'no click-only select remains')
-  // The secondary rail is overflow-x:auto, which also clips vertically; the
-  // search field's floating list must not live inside it.
+  // The secondary rail is the shared ChipRail (overflow-x:auto, overflow-y:hidden), which clips
+  // vertically; the search field's floating list must not live inside it.
   const rail = REPORT.slice(REPORT.indexOf('secondaryActions={'), REPORT.indexOf('menuAction={'))
   assert.doesNotMatch(rail, /SuggestionTextInput/, 'the search field is not on the clipping secondary rail')
   const en = JSON.parse(read('lang/en.json')), km = JSON.parse(read('lang/km.json'))

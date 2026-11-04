@@ -22,6 +22,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { restoreUnresolvedPosCheckouts } from '../../utils/posUnresolvedCheckout.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { useBottomActionBar } from '../../utils/bottomActionBar.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -1169,6 +1170,11 @@ export default function POS() {
     mq.addEventListener('change', handleChange)
     return () => mq.removeEventListener('change', handleChange)
   }, [])
+  // Complete Sale is pinned to the bottom of the cart. While that cart is on screen (always beside the products from md
+  // up; the Cart tab on a phone) the scroll buttons step aside and docked floats such as the notes tab sit just above it.
+  // (The install band keeps off the whole till by page id: see pageHasBottomActionBar.)
+  const completeSaleRef = useRef<HTMLButtonElement | null>(null)
+  useBottomActionBar({ visible: isActive && (isDesktopViewport || mobileView === 'cart'), actionRef: completeSaleRef })
   const clampCartWidth = useCallback((px: number) => {
     if (!mainPanelsRef.current) return Math.min(CART_WIDTH_MAX_PX, Math.max(CART_WIDTH_MIN_PX, px))
     // Leave the products panel at least this wide so it never gets
@@ -4552,7 +4558,7 @@ export default function POS() {
                 ].join('\n\n')}
               />
             </div>
-            <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
+            <button ref={completeSaleRef} className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
             {savingBlocked ? <SavingBlockedNote id="pos-saving-blocked" text={savingBlockedText} className="mt-1.5" textClassName="text-center" /> : null}

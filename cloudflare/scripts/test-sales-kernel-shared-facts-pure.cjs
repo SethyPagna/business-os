@@ -19,6 +19,10 @@ const FILTERS = { startDate: '2026-10-01', endDate: '2026-10-31' }
 const DERIVE = 'function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {'
 const COUNT = `${DERIVE}\n  ;(globalThis as { __saleFactPasses?: number }).__saleFactPasses = ((globalThis as { __saleFactPasses?: number }).__saleFactPasses || 0) + 1`
 const CACHE_HIT = '  const known = SALE_FACTS.get(snapshot)\n  if (known) return known\n'
+const MONEY = 'function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullableZero = true): ReportExactDecimal {'
+const MONEY_COUNT = `${MONEY}\n  const reads = (globalThis as { __saleMoneyReads?: Record<string, number> }).__saleMoneyReads\n  if (reads && Object.hasOwn(reads, key)) reads[key] += 1`
+const REUSED = '    const { subtotal, storeDiscount, membershipDiscount } = fact'
+const REPARSED = "    const subtotal = reportMoney(sale, 'subtotal_usd', version)\n    const storeDiscount = reportMoney(sale, 'discount_usd', version)\n    const membershipDiscount = reportMoney(sale, 'membership_discount_usd', version)"
 
 function seed(world) {
   const { sqlite } = world
@@ -52,6 +56,39 @@ async function run(patches = []) {
   return { totals, status, products, dashboard, exportPasses, dashboardPasses }
 }
 
+async function headerReads(patches = []) {
+  const world = makeKernelWorld({ patches: [{ file: 'src/lib/salesAnalytics.ts', from: DERIVE, to: COUNT },
+    { file: 'src/lib/salesAnalytics.ts', from: MONEY, to: MONEY_COUNT }, ...patches] })
+  try {
+    seed(world)
+    world.sqlite.exec('UPDATE sales SET subtotal_usd=subtotal_usd+0.75,discount_usd=0.5,membership_discount_usd=0.25')
+    const a = world.analytics, snapshot = await a.readSalesReportSnapshot(world.env, FILTERS)
+    assert.ok(snapshot.sales.length > 0)
+    globalThis.__saleFactPasses = 0
+    globalThis.__saleMoneyReads = { subtotal_usd: 0, discount_usd: 0, membership_discount_usd: 0 }
+    const pack = value => ({ value, diagnostic: a.reportMoneyDiagnostic(value) })
+    const totals = pack(a.salesTotalsFromSnapshot(snapshot)), first = { ...globalThis.__saleMoneyReads }
+    const precise = pack(a.salesTotalsFromSnapshot(snapshot, 4)), status = pack(a.exportStatusSplitFromSnapshot(snapshot))
+    const repeated = { ...globalThis.__saleMoneyReads }, repeatedPasses = globalThis.__saleFactPasses
+    const copied = { ...snapshot, sales: snapshot.sales.map(row => ({ ...row })) }
+    const fresh = pack(a.salesTotalsFromSnapshot(copied)), afterFresh = { ...globalThis.__saleMoneyReads }
+    return { count: snapshot.sales.length, first, repeated, repeatedPasses, afterFresh,
+      freshPasses: globalThis.__saleFactPasses, answers: { totals, precise, status, fresh } }
+  } finally {
+    delete globalThis.__saleMoneyReads
+    world.sqlite.close()
+  }
+}
+function assertHeaderReuse(result) {
+  for (const key of ['subtotal_usd', 'discount_usd', 'membership_discount_usd']) {
+    assert.equal(result.first[key], result.count, `${key} parsed once per sale`)
+    assert.equal(result.repeated[key], result.count, `${key} reused across views`)
+    assert.equal(result.afterFresh[key], result.count * 2, `${key} parsed for a fresh snapshot`)
+  }
+  assert.equal(result.repeatedPasses, 1)
+  assert.equal(result.freshPasses, 2)
+}
+
 async function main() {
   let passed = 0
   const check = async (name, fn) => { await fn(); passed += 1; console.log(`PASS ${name}`) }
@@ -76,6 +113,25 @@ async function main() {
     assert.ok(mutant.exportPasses >= 3, `export passes ${mutant.exportPasses}`)
     assert.ok(mutant.dashboardPasses >= 5, `dashboard passes ${mutant.dashboardPasses}`)
     assert.deepEqual(mutant.totals, base.totals, 'the answers are the same either way; only the cost differs')
+  })
+  let reused
+  await check('three sale headers are parsed once and reused across views; a fresh snapshot derives again', async () => {
+    reused = await headerReads()
+    assertHeaderReuse(reused)
+    assert.deepEqual(reused.answers.fresh, reused.answers.totals)
+    assert.equal(reused.answers.totals.value.store_discount_usd, reused.count * 0.5)
+    assert.equal(reused.answers.totals.value.membership_discount_usd, reused.count * 0.25)
+  })
+  await check('control: redundant reparses preserve money and diagnostics but fail the cost check', async () => {
+    const mutant = await headerReads([{ file: 'src/lib/salesAnalytics.ts', from: REUSED, to: REPARSED }])
+    assert.deepEqual(mutant.answers, reused.answers)
+    assert.throws(() => assertHeaderReuse(mutant), /parsed once per sale/)
+  })
+  await check('control: swapping retained amounts is caught despite unchanged parse counts', async () => {
+    const mutant = await headerReads([{ file: 'src/lib/salesAnalytics.ts', from: REUSED,
+      to: '    const { subtotal: storeDiscount, storeDiscount: subtotal, membershipDiscount } = fact' }])
+    assertHeaderReuse(mutant)
+    assert.notDeepEqual(mutant.answers, reused.answers)
   })
   console.log(`\nGREEN shared sale facts: ${passed} checks hold`)
 }

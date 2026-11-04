@@ -15,7 +15,7 @@
 // Receive stock, Bulk add stock and the Add/Create Products session were
 // retired into the one Stock Session. The pure rules below stay pinned where
 // the session still uses them; the source pins on the retired surfaces are
-// listed in the UI-STOCK-3 lane report, and the now-unused exports of
+// retired with them, and the now-unused exports of
 // stockReceiptFields.ts are handed to its owner (UI-STOCK-2).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

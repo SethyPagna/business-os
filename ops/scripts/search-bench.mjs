@@ -3,7 +3,7 @@
 //
 //   node ops/scripts/search-bench.mjs [path/to/d1-export-product-names.json]
 //
-// Default input: the 2026-09-26 active-catalog export under Records/Ops. It
+// Default input: the 2026-09-26 active-catalog export, kept outside the repo. It
 // is read from disk only; this never touches D1. Prints:
 //   - index build time (cold, from raw fields)
 //   - per-keystroke match + rank latency p50/p95/p99/max over a replay of

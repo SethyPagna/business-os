@@ -317,25 +317,33 @@ test('Sales statistics keep COGS, gross profit, and permitted expenses visible',
 })
 
 test('Part 564: headline + day-group counts count only what the money counts', () => {
-  // User, Aug 31: "count only what the money counts." Cancelled records still
-  // appear in the list but are excluded from every count shown, so the count
-  // reconciles with the money and with the stats strip.
-  //
-  // CORRECTED Sep 6 2026 (owner ask N6). This used to pin a predicate that
-  // dropped awaiting_payment too, and the money it was meant to reconcile with
-  // never did: recognizedExpr is `<> 'cancelled'`, so unpaid credit is INSIDE
-  // revenue and inside GET /api/sales/stats's revenue_count. The footer read
-  // "4 sales" beside a revenue built out of 5. What is pinned now is that the
-  // page takes the rule from ONE place -- the shared kernel mirror in
-  // utils/statsFormulas.ts -- rather than restating it in a local list.
+  // The backend count covers the full filtered cohort; day counts cover visible
+  // sections. Both include credit and exclude cancelled, unlike total_count.
   const sales = read('src/components/sales/Sales.tsx')
   assert.ok(/isCountedSale = useCallback\(\(sale: SaleRecord\) => isRevenueCountedSale\(sale\)/.test(sales),
     'Sales takes the money-counting predicate from the shared kernel mirror')
   assert.ok(!/isCountedSale[\s\S]{0,200}'awaiting_payment'/.test(sales),
     'and no longer restates it as a local list that drops the cohort the kernel counts')
-  assert.ok(/revenueCount[\s\S]{0,60}filter\(isCountedSale\)/.test(sales), 'Sales computes the reconciled headline count')
+  const declarations = ['isCountedSale', 'revenueCount'].map(name => {
+    const matches = [...sales.matchAll(new RegExp(`^\\s*const ${name}\\b[^\\r\\n]*`, 'gm'))]
+    assert.equal(matches.length, 1, `one actual Sales ${name} declaration`)
+    return matches[0][0]
+  })
+  const require = createRequire(import.meta.url)
+  const { isRevenueCountedSale } = require('../src/utils/statsFormulas.ts')
+  const filtered = [{ sale_status: 'completed' }, { sale_status: 'awaiting_payment' }, { sale_status: 'cancelled' }]
+  const execute = new Function('salesStats', 'filtered', 'useCallback', 'isRevenueCountedSale',
+    `${transformSync(declarations.join('\n'), { loader: 'ts', target: 'es2022' }).code};return { revenueCount, isCountedSale }`)
+  const project = (salesStats: Record<string, unknown> | null | undefined) => execute(salesStats, filtered, (callback: unknown) => callback, isRevenueCountedSale)
+  const ready = project({ revenue_count: 85, total_count: 100 })
+  assert.equal(filtered.filter(ready.isCountedSale).length, 2, 'visible day count includes credit and excludes cancelled')
+  assert.equal(ready.revenueCount, 85, 'headline count uses the backend cohort, not the loaded page or total_count')
+  for (const unavailable of [null, undefined, {}]) {
+    assert.equal(project(unavailable).revenueCount, null, 'unavailable aggregate count stays unknown despite loaded rows')
+  }
+  assert.equal(project({ revenue_count: 0, total_count: 15 }).revenueCount, 0, 'authoritative zero remains zero when the cohort contains only cancelled sales')
   const salesSurface = read('src/components/sales/SalesListSurface.tsx')
-  assert.ok(salesSurface.includes('{revenueCount}'), 'the Sales footer shows the money-counting count')
+  assert.match(salesSurface, /\{revenueCount === null \? '—' : revenueCount\}/, 'the footer distinguishes unknown aggregate count from genuine zero')
   assert.ok(/section\.items\.filter\(isCountedSale\)/.test(salesSurface), 'Sales day headers show the money-counting count')
   const returnsSurface = read('src/components/returns/ReturnsListSurface.tsx')
   assert.ok(/section\.items\.filter\(isCountedReturn\)/.test(returnsSurface), 'Returns day headers exclude cancelled from the count')
@@ -357,7 +365,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   assert.match(hub, /titleControl: reportControlRow/, 'every report receives the shared compound title')
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
   assert.match(frame, /actions=\{menuAction \? <span className="reports-frame-menu">\{menuAction\}<\/span> : undefined\}/, 'the fourth header control is only the report overflow menu')
-  assert.match(frame, /secondaryActions \? <div className="reports-frame-secondary-actions">\{secondaryActions\}<\/div> : null/, 'mode and history controls remain on the secondary rail')
+  assert.match(frame, /secondaryActions \? <ChipRail label=\{secondaryLabel\}>\{secondaryActions\}<\/ChipRail> : null/, 'mode and history controls remain on the secondary rail, the shared ChipRail')
   // The branch select rides the shared control row's filters slot, not its own line.
   assert.ok(/const filterSelects = \([\s\S]{0,120}showsBranchHistoryFilter\(branchRows\) \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
   // Part 586: the selects no longer sit inline on wide screens at all -- they
@@ -377,7 +385,7 @@ test('Part 552: report headers keep exactly four controls; hub tabs fit; branch 
   const shell = read('src/components/sales/SalesHubPage.tsx')
   assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
   const nav = read('src/components/shared/HubSectionNav.tsx')
-  assert.ok(nav.includes('hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto'), 'the chip row is viewport bounded and scrolls inside its own box (owner choice, 5 Oct 2026)')
+  assert.ok(nav.includes('className="hub-section-pills chip-rail-tall">'), 'the chip row is the shared ChipRail: viewport bounded and scrolling inside its own box (owner choice, 5 Oct 2026; pinned in chipRail.test.ts)')
   const sidebar = read('src/components/navigation/Sidebar.tsx')
   assert.ok(sidebar.includes('grid min-w-0 grid-cols-2'), 'inline mobile group children use two bounded columns')
   assert.ok(sidebar.includes('flex min-h-16 min-w-0 flex-col items-center justify-center'), 'mobile leaf tiles keep a 64px touch target with icon above title')
@@ -482,8 +490,8 @@ test('Part 560: StatsStrip owns one stable date/action row and a one-row preset 
   // Stats is folded and scroll in one non-wrapping rail on narrow screens.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
-  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('overflow-x-auto'), 'presets are restored in a single scroll rail')
-  assert.ok(rangeRow.includes('flex-nowrap'), 'date controls and presets never wrap')
+  assert.ok(rangeRow.includes('STATS_PRESETS.map') && rangeRow.includes('<ChipRail label={presetLabel}'), 'presets are restored in a single scroll rail (the shared ChipRail: no wrap, overflow-x auto, pinned in chipRail.test.ts)')
+  assert.ok(rangeRow.includes('<ChipRail label={rangeLabel') && rangeRow.includes('data-stats-range-controls'), 'date controls and presets never wrap: the scrolling layout is one ChipRail')
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.match(strip, /<StatsRangeRow range=\{range\} onRangeChange=\{onRangeChange\}/, 'StatsStrip owns the shared date row when its range contract is supplied')
   assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
@@ -515,15 +523,16 @@ test('preset buttons execute the shared date-only and timestamp range callbacks'
   const compiled = transformSync(read('src/components/shared/StatsRangeRow.tsx'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     if (id.includes('DateTimeRangePicker')) return () => null
+    if (id.includes('ChipRail')) return { __esModule: true, default: 'ChipRail', RailChip: 'RailChip' }
     if (id.includes('statsStripPresets')) return require('../src/components/shared/statsStripPresets.ts')
     return require(id)
   }, mod, mod.exports)
   for (const showTime of [false, true]) {
     let changed: ReturnType<typeof statsPresetRange> | null = null
     const tree = mod.exports.default({ range: statsPresetRange('all'), t: (key: string) => key, showTime, onRangeChange: (value: ReturnType<typeof statsPresetRange>) => { changed = value } })
-    assert.equal(tree.props.children[0].props.children[1].props.continuous, false, 'shared row does not silently change existing consumers')
+    assert.equal(tree.props.children[0].props.children.props.children[1].props.continuous, false, 'shared row does not silently change existing consumers')
     const continuousTree = mod.exports.default({ range: statsPresetRange('today'), t: (key: string) => key, showTime, continuous: true, onRangeChange: () => {} })
-    assert.equal(continuousTree.props.children[0].props.children[1].props.continuous, true, 'explicit continuous semantics reach the actual picker')
+    assert.equal(continuousTree.props.children[0].props.children.props.children[1].props.continuous, true,'explicit continuous semantics reach the actual picker')
     const rail = tree.props.children[1]
     const buttons = rail.props.children
     assert.deepEqual(buttons.map((button: { key: string }) => button.key), STATS_PRESETS.map(({ id }) => id))

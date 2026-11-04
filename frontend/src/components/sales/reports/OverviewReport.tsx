@@ -21,7 +21,8 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import InfoHint from '../../shared/InfoHint.tsx'
 import { FEE_TYPE_OPTIONS } from '../../fees/FeeForm.tsx'
-import { Chip, DenseTable, Fold, OverflowMenu, Skeleton } from '../../shared/kit'
+import { DenseTable, Fold, OverflowMenu, Skeleton } from '../../shared/kit'
+import ChipRail, { RailChip } from '../../shared/kit/ChipRail.tsx'
 import ReceiptSheet, { type ReceiptBlock } from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { type ReportColumn } from './ReportTable.tsx'
@@ -322,15 +323,19 @@ export default function OverviewReport(p: ReportViewProps) {
   return (
     <>
       {chips.length ? (
-        <div className="reports-overview-tabs" aria-label={tr('details', 'Details')}>
+        <ChipRail label={tr('details', 'Details')}>
           {chips.map((c) => (
-            <span key={c.id} ref={(el) => { chipRefs.current[c.id] = el }}>
-              <Chip selected={open === c.id} count={c.count} onClick={() => openFold(c.id)}>
+            <span key={c.id} ref={(el) => { chipRefs.current[c.id] = el }} className="flex shrink-0">
+              <RailChip
+                selected={open === c.id}
+                badge={typeof c.count === 'number' ? <span className="chip-rail-badge">{c.count}</span> : undefined}
+                onClick={() => openFold(c.id)}
+              >
                 {c.label}
-              </Chip>
+              </RailChip>
             </span>
           ))}
-        </div>
+        </ChipRail>
       ) : null}
       <ReportFrame
         title={tr(view.labelKey, view.fallback)}

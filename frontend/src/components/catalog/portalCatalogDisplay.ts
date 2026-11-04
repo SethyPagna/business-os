@@ -192,6 +192,16 @@ export function getPortalMobileGridClass(mobileColumns: unknown): string {
   return 'grid-cols-2 sm:grid-cols-2'
 }
 
+// Owner, 2 Nov 2026: the product grid follows the screen: 2 on phones, 3 on tablets, then 4, 5 and 6 as it gets
+// wider. Written out for Tailwind. Automatic is the default (an unset setting is automatic); a shop that turned
+// "Automatic columns" off in the Website Editor keeps the fixed counts it chose (getPortalMobileGridClass/getPortalGridClass).
+export const PORTAL_AUTO_GRID_CLASS = 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6'
+
+export function getPortalProductGridClass(config: { gridColumnsAuto?: unknown; gridColumnsMobile?: unknown; gridColumnsDesktop?: unknown }): string {
+  if (config.gridColumnsAuto !== false) return PORTAL_AUTO_GRID_CLASS
+  return `${getPortalMobileGridClass(config.gridColumnsMobile)} ${getPortalGridClass(config.gridColumnsDesktop)}`
+}
+
 export function productMatchesPortalBranches(product: PortalProduct = {}, branchFilter: unknown): boolean {
   if (!Array.isArray(branchFilter) || !branchFilter.length || portalStockWithheld(product)) return true
   // Server-shaped rows carry redacted per-branch statuses; a branch matches

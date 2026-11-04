@@ -362,8 +362,7 @@ export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env
   deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' })
 }
 
-// One session lookup per request (perf F3, Records/Performance/2026-09-25
-// I1). Stacked routers each run requireAuth -- products + productCost,
+// One session lookup per request. Stacked routers each run requireAuth -- products + productCost,
 // inventory + stockInCommit, system + compat -- and index.ts's staff body
 // admission resolves the session before the route's own requireAuth. Every
 // one of those used to be its own D1 round trip for the same cookie.

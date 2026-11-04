@@ -17,6 +17,7 @@ import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import { ModalCloseContext } from '../../shared/modalCloseContext.ts'
 import MinimizeButton from '../../shared/MinimizeButton.tsx'
+import ChipRail, { RailChip } from '../../shared/kit/ChipRail.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../../shared/SuggestionTextInput.tsx'
@@ -1576,23 +1577,14 @@ function ProductFormContent({
       unsavedChanges={{ workKey: dirtyWorkKey }}>
       {saveAuthorityWarning === draftKey && !draftAuthority.current ? <DraftAuthorityNotice t={t} className="mb-3" /> : null}
       {unscopedDraftAvailable ? <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-300">{tr('product_draft_unknown_authority', 'An older draft is preserved on this device. Its server cannot be verified, so it has not been opened here.', 'សេចក្ដីព្រាងចាស់នៅតែរក្សាទុកលើឧបករណ៍នេះ។ មិនអាចផ្ទៀងផ្ទាត់ម៉ាស៊ីនមេរបស់វាបានទេ ដូច្នេះវាមិនត្រូវបានបើកនៅទីនេះទេ។')}</p> : null}
-      <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
-        <div className="flex gap-1 overflow-x-auto">
+      <div ref={productFormContentRef} className="mb-5 -mx-5 border-b border-gray-200 px-5 pb-2 dark:border-gray-700">
+        <ChipRail label={tr('sections', 'Sections')} className="chip-rail-tall">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`-mb-px min-h-11 shrink-0 border-b-2 px-4 py-2 text-sm font-medium ${
-                activeTab === tab.id
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
+            <RailChip key={tab.id} selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}>
               {tab.label}
-            </button>
+            </RailChip>
           ))}
-        </div>
+        </ChipRail>
       </div>
 
       {activeTab === 'basic' ? (

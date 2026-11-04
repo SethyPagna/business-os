@@ -32,6 +32,12 @@ const ROUTE_NOTES = {
     '/api/settings/payment-methods/impact': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
     '/api/sales/:id/status': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
   },
+  // The GET shapes are measured with these read switches stored (the state the Free plan is meant to run in; the old paths are covered by the slices' own
+  // OFF-versus-ON tests); the write shapes are measured with none.
+  switches: { report_atomic: 'on', report_atomic_long: 'on' },
+  // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
+  switchSensitive: ['/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
+    '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],
   reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
 
@@ -41,6 +47,8 @@ const EXEMPTION_REASONS = {
   'get-not-in-shapes': 'a GET with no shape yet: OAuth callback, job poll, download, duplicate check',
 }
 
+const switchSensitive = (routes, shape) => ROUTE_NOTES.switchSensitive.includes((matchRoute(routes, shape.method, (shape.url || '').split('?')[0]) || {}).route)
+
 const classOf = (entry, longRange) => (Math.max(entry.rows_max, entry.rows_max_analyze) > 50000 || longRange ? 'H' : ROUTE_NOTES.protected.includes(`${entry.method} ${entry.route}`) ? 'P' : 'N')
 
 function expectOf(status, code) {
@@ -48,11 +56,29 @@ function expectOf(status, code) {
   return { refused: code || 'http_' + status, until: ROUTE_NOTES.until[code] ?? null }
 }
 
+// Why a ceiling is what it is, for the shapes that need a word (written into the entry as "note").
+const ENTRY_NOTES = {
+  'fees-list-with-sale-delivery-rows-all-time-branch-source-all':
+    'No window, so the expense summary reads every expense once (8,695) plus the 100-row page (234); the sale half is 5,310 with idx_sales_courier_cost leading. 6.0.1053: +f.branch_id keeps the branch index out; it was 29,073 with it.',
+  'fees-list-with-sale-delivery-rows-month-branch-source-all':
+    'The window index (idx_fees_fee_date) leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 10,565 with the branch index reading the whole branch.',
+  'fees-report-with-sale-delivery-all-time-branch-include-sales':
+    'No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index (4,455 + 8,910 + 8,912 + 13,365 expense rows, branch 1 holding about half of this seed) plus the sale half 1,506. Four passes over the branch; one grouped pass is the follow-up.',
+  'fees-report-with-sale-delivery-month-branch-include-sales':
+    'The window index leads for all four statements and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch.',
+}
+
+// 6.0.1053: the sale half of the Expenses list (routes/feesCatalog.ts) must start from idx_sales_courier_cost, the partial index of the few sales that
+// carry a courier cost, whatever the filter. With a branch filter the planner once chose idx_sales_branch_created and read every sale of the branch.
+const SALE_COST_STATEMENTS = ['FROM sales WHERE', 'SELECT sales.id, sales.receipt_number']
 const pinsOf = (statements) => {
   const pins = []
   for (const s of statements || []) {
     const found = /INDEXED BY (\w+)/.exec(s.sql)
     if (found && !pins.some((p) => p.index === found[1])) pins.push({ match: `INDEXED BY ${found[1]}`, index: found[1] })
+  }
+  for (const start of SALE_COST_STATEMENTS) {
+    if ((statements || []).some((s) => s.sql.includes(start) && s.sql.includes('delivery_actual_cost_usd IS NOT NULL'))) pins.push({ match: start, index: 'idx_sales_courier_cost' })
   }
   return pins
 }
@@ -71,13 +97,25 @@ async function main() {
   const writeShapeList = writeShapes(require('./seed.cjs').seedContext()).filter((s) => s.variant === 'base')
 
   if (getShapeList.some((s) => !done.has(`get:${s.id}`))) {
-    const world = await bootWorld({ tier: 'free' })
+    const world = await bootWorld({ tier: 'free', switches: ROUTE_NOTES.switches })
     try {
       await prepareWorld(world)
       for (const shape of getShapeList.filter((s) => !done.has(`get:${s.id}`))) {
         const m = await measureGet(world, shape, { cold: true, statements: true, fingerprints: true })
         remember('get', shape.id, { url: m.url, cold: { status: m.cold.status, calls: m.cold.calls }, warm: slim(m.warm), pins: pinsOf(m.statements) })
         process.stdout.write(`${shape.id}: cold ${m.cold.calls} calls, warm-miss ${m.warm.rowsRead} rows\n`)
+      }
+    } finally { await world.dispose() }
+  }
+  if (getShapeList.some((s) => switchSensitive(routes, s) && !done.has(`fpold:${s.id}`))) {
+    const world = await bootWorld({ tier: 'free' })
+    try {
+      await prepareWorld(world)
+      for (const shape of getShapeList.filter((s) => switchSensitive(routes, s) && !done.has(`fpold:${s.id}`))) {
+        const m = await measureGet(world, shape, { cold: false, fingerprints: true })
+        remember('fpold', shape.id, slim(m.warm).fingerprints)
+        process.stdout.write(`${shape.id}: old-path fingerprints (${m.warm.fingerprints.length} statements)
+`)
       }
     } finally { await world.dispose() }
   }
@@ -92,7 +130,7 @@ async function main() {
     } finally { await world.dispose() }
   }
   if (getShapeList.some((s) => !done.has(`analyze:${s.id}`))) {
-    const world = await bootWorld({ tier: 'free' })
+    const world = await bootWorld({ tier: 'free', switches: ROUTE_NOTES.switches })
     try {
       await prepareWorld(world)
       await world.analyze()
@@ -127,15 +165,16 @@ async function main() {
       if (!entry.target) throw new Error(`${shape.id}: ${cold} cold calls and no dated target for ${reg.route}`)
     }
     if (isGet && data.pins.length) entry.pins = data.pins
+    if (ENTRY_NOTES[shape.id]) entry.note = ENTRY_NOTES[shape.id]
     entries.push(entry)
-    ;(prints[reg.route.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')] ||= {})[shape.id] = w.fingerprints
+    ;(prints[reg.route.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '')] ||= {})[shape.id] = (isGet && done.get(`fpold:${shape.id}`)) || w.fingerprints
   }
   // A route registered for every method (app.all, a path-level middleware) is covered by a shape on the same path.
   const covered = (r) => entries.some((e) => e.route === r.route && (r.method === 'ALL' || e.method === r.method))
   const exemptions = routes.filter((r) => r.method !== 'HEAD' && !covered(r))
     .map((r) => ({ method: r.method, route: r.route, class: ROUTE_NOTES.protected.includes(`${r.method} ${r.route}`) ? 'P' : 'N', reason: ROUTE_NOTES.reason(r) }))
   const file = { version: 1, base: '05ef61b73', rule: 'MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs "raised": { from, reason }.',
-    programme: { rows_ceiling: 100000, by: '2026-11-30' }, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }
+    programme: { rows_ceiling: 100000, by: '2026-11-30' }, switches: ROUTE_NOTES.switches, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }
   fs.writeFileSync(BUDGETS_FILE, serialize(file))
   fs.rmSync(FINGERPRINTS, { recursive: true, force: true })
   fs.mkdirSync(FINGERPRINTS)
@@ -146,7 +185,7 @@ async function main() {
 // One line per shape or exemption keeps a raised ceiling a one-line diff.
 function serialize(file) {
   const line = (x) => '    ' + JSON.stringify(x)
-  return `{\n  "version": ${file.version},\n  "base": ${JSON.stringify(file.base)},\n  "rule": ${JSON.stringify(file.rule)},\n  "programme": ${JSON.stringify(file.programme)},\n  "reasons": ${JSON.stringify(file.reasons)},\n`
+  return `{\n  "version": ${file.version},\n  "base": ${JSON.stringify(file.base)},\n  "rule": ${JSON.stringify(file.rule)},\n  "programme": ${JSON.stringify(file.programme)},\n  "switches": ${JSON.stringify(file.switches)},\n  "reasons": ${JSON.stringify(file.reasons)},\n`
     + `  "exemptions": [\n${file.exemptions.map(line).join(',\n')}\n  ],\n  "shapes": [\n${file.shapes.map(line).join(',\n')}\n  ]\n}\n`
 }
 

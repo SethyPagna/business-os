@@ -14,7 +14,7 @@
 // UI-STOCK-3 (30 Sep 2026) deleted CreateProductsSessionModal.tsx: the
 // Products header Add opens the one Stock Session float (UI-STOCK-2), which
 // has its own tests (stockSession*.test.ts). The pins on the modal's own source
-// are retired with it and listed in the UI-STOCK-3 lane report.
+// are retired with it.
 //
 // Run: node tests/createProductsSession.test.ts
 import assert from 'node:assert/strict'

@@ -902,6 +902,139 @@ export type SalesReportScalarScope = (saleAlias: string) => {
 
 type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue> }
 
+type ReportScopeProvenance = {
+  sql: string
+  params: Readonly<Record<string, SalesReportScalarScopeValue>>
+}
+
+const REPORT_SCOPE_PROVENANCE = new WeakMap<SalesReportScalarScope, ReportScopeProvenance>()
+const REPORT_ATOMIC_PURE_FUNCTIONS = new Set([
+  'COALESCE', 'NULLIF', 'TRIM', 'LOWER', 'UPPER', 'REPLACE', 'INSTR', 'CAST', 'CHAR', 'LENGTH',
+])
+const REPORT_ATOMIC_GROUP_KEYWORDS = new Set([
+  'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'WHEN', 'THEN', 'ELSE', 'WHERE', 'ON', 'SELECT',
+])
+const REPORT_ATOMIC_BLOCKED_KEYWORDS = new Set([
+  'CURRENT_TIME', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'LIMIT', 'OFFSET', 'GROUP', 'HAVING',
+  'WINDOW', 'OVER', 'FILTER', 'WITH', 'UNION', 'INTERSECT', 'EXCEPT', 'ORDER',
+])
+
+type ReportScopeToken = { kind: 'word' | 'literal' | 'parameter' | 'open' | 'close' | 'other'; value: string }
+
+function reportScopeTokens(sql: string): ReportScopeToken[] | null {
+  const tokens: ReportScopeToken[] = []
+  for (let offset = 0; offset < sql.length;) {
+    const char = sql[offset]
+    if (/\s/.test(char)) { offset += 1; continue }
+    if (char === "'") {
+      let end = offset + 1
+      let closed = false
+      while (end < sql.length) {
+        if (sql[end] !== "'") { end += 1; continue }
+        if (sql[end + 1] === "'") { end += 2; continue }
+        end += 1
+        closed = true
+        break
+      }
+      if (!closed) return null
+      tokens.push({ kind: 'literal', value: sql.slice(offset, end) })
+      offset = end
+      continue
+    }
+    if (char === '"' || char === '`' || char === '[' || char === ';' || char === '?'
+      || sql.startsWith('--', offset) || sql.startsWith('/*', offset)) return null
+    if (char === '@') {
+      const match = /^@[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(offset))
+      if (!match) return null
+      tokens.push({ kind: 'parameter', value: match[0] })
+      offset += match[0].length
+      continue
+    }
+    const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(offset))
+    if (word) {
+      tokens.push({ kind: 'word', value: word[0].toUpperCase() })
+      offset += word[0].length
+      continue
+    }
+    tokens.push({ kind: char === '(' ? 'open' : char === ')' ? 'close' : 'other', value: char })
+    offset += 1
+  }
+  return tokens
+}
+
+function reportAtomicScopeSqlEligible(sql: string): boolean {
+  const tokens = reportScopeTokens(sql)
+  if (!tokens) return false
+  const opens: number[] = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (token.kind === 'open') {
+      const previous = tokens[index - 1]
+      if (previous?.kind === 'literal' || previous?.kind === 'parameter') return false
+      if (previous?.kind === 'word' && !REPORT_ATOMIC_PURE_FUNCTIONS.has(previous.value)
+        && !REPORT_ATOMIC_GROUP_KEYWORDS.has(previous.value)) return false
+      opens.push(index)
+      continue
+    }
+    if (token.kind === 'close') {
+      if (!opens.length) return false
+      opens.pop()
+      continue
+    }
+    if (token.kind !== 'word') continue
+    if (REPORT_ATOMIC_BLOCKED_KEYWORDS.has(token.value)) return false
+    if (token.value === 'SELECT') {
+      const open = opens[opens.length - 1]
+      const owner = open === undefined ? undefined : tokens[open - 1]
+      if (open === undefined || index !== open + 1 || owner?.kind !== 'word'
+        || (owner.value !== 'IN' && owner.value !== 'EXISTS')) return false
+    }
+  }
+  return opens.length === 0
+}
+
+function rememberReportScopeProvenance(
+  scope: SalesReportScalarScope,
+  sql: string,
+  params: Record<string, SalesReportScalarScopeValue>,
+): void {
+  REPORT_SCOPE_PROVENANCE.set(scope, Object.freeze({ sql, params: Object.freeze({ ...params }) }))
+}
+
+function reportAtomicScopeProvenanceEligible(
+  scope: SalesReportScalarScope,
+  captured: CapturedSalesReportScalarScope,
+): boolean {
+  const source = REPORT_SCOPE_PROVENANCE.get(scope)
+  if (!source || captured.sql !== source.sql || Object.keys(captured.params).length !== Object.keys(source.params).length) return false
+  if (!Object.keys(source.params).every(key => Object.hasOwn(captured.params, key) && Object.is(captured.params[key], source.params[key]))) return false
+  return reportAtomicScopeSqlEligible(captured.sql)
+}
+
+function reportAtomicFiltersEligible(f: SalesFilters): boolean {
+  return [f.startDate, f.endDate, f.startTime, f.endTime, f.createdFrom, f.createdTo]
+    .every(value => value == null || value === '')
+}
+
+function reportDashboardDateFiltersEligible(f: SalesFilters): boolean {
+  if (Object.getPrototypeOf(f) !== Object.prototype || Object.getOwnPropertySymbols(f).length) return false
+  const supported = ['startDate', 'endDate', 'branchId', 'createdFrom', 'createdTo']
+  for (const key of Object.getOwnPropertyNames(f)) {
+    const descriptor = Object.getOwnPropertyDescriptor(f, key)
+    if (!supported.includes(key) || !descriptor || !Object.hasOwn(descriptor, 'value')) return false
+  }
+  const date = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value + 'T00:00:00Z'))
+    && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value
+  if (!date(f.startDate) || !date(f.endDate) || f.startDate > f.endDate) return false
+  if (f.branchId != null && typeof f.branchId !== 'string' && !Number.isSafeInteger(f.branchId)) return false
+  const from = f.createdFrom, to = f.createdTo
+  if (from == null && to == null) return true
+  const instant = (value: unknown): value is string => typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) && shiftWindowBound(value) === value
+  return instant(from) && instant(to) && from < to
+}
+
 // A sales-LIST filter (GET /api/sales/stats: `where` clauses over alias `s`
 // plus their @params) as a report scope. Preserves the list's rich,
 // server-built predicates, including the LEFT customer join and item-branch
@@ -919,10 +1052,10 @@ export function salesListFilterReportScope(where: string[], params: Record<strin
     scopedParams[`reportScope_${key}`] = value
     return `@reportScope_${key}`
   })
-  return (alias) => ({
-    sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
-    params: scopedParams,
-  })
+  const sqlForAlias = (alias: string) => `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`
+  const scope: SalesReportScalarScope = (alias) => ({ sql: sqlForAlias(alias), params: scopedParams })
+  rememberReportScopeProvenance(scope, sqlForAlias('s'), scopedParams)
+  return scope
 }
 
 function captureSalesReportScalarScope(scope?: SalesReportScalarScope): CapturedSalesReportScalarScope | null {
@@ -971,16 +1104,20 @@ async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): 
   return tableColumnSet(db, table)
 }
 
-async function reportRestoreActive(db: ReturnType<typeof getDb>): Promise<boolean> {
-  const columns = await reportTableColumns(db, 'system_flags')
-  if (!columns.has('key') || !columns.has('value')) return false
-  const rows = await db.prepare("SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key")
-    .all<{ value: unknown }>()
+function reportRestoreValuesActive(rows: Array<{ value: unknown }>): boolean {
   return (rows || []).some((row) => {
     const raw = String(row.value ?? '').trim()
     if (raw.toLowerCase() === 'restore') return true
     try { return String((JSON.parse(raw) as { mode?: unknown }).mode || '').toLowerCase() === 'restore' } catch { return false }
   })
+}
+
+async function reportRestoreActive(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const columns = await reportTableColumns(db, 'system_flags')
+  if (!columns.has('key') || !columns.has('value')) return false
+  const rows = await db.prepare("SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key")
+    .all<{ value: unknown }>()
+  return reportRestoreValuesActive(rows || [])
 }
 
 async function assertReportReadable(db: ReturnType<typeof getDb>): Promise<void> {
@@ -1073,7 +1210,613 @@ function reportSnapshotScalars(snapshot: SalesReportSnapshot): string[] {
   return rows
 }
 
+type ReportReadPurpose = 'full' | 'totals' | 'dashboard'
+
+const REPORT_TOTALS_SALE_FIELDS = new Set([
+  'id', 'sale_status', 'status_before_return', 'subtotal_usd', 'discount_usd', 'membership_discount_usd', 'tax_usd', 'total_usd',
+  'delivery_fee_usd', 'delivery_fee_paid_by', 'delivery_actual_cost_usd', 'is_delivery', 'source_return_id',
+  'amount_paid_usd', 'amount_paid_khr', 'exchange_rate', 'money_precision_version', 'calculated_total_usd',
+  'rounding_adjustment_usd', 'delivery_has_linked_fee',
+])
+const REPORT_TOTALS_ITEM_FIELDS = new Set([
+  'id', 'sale_id', 'quantity', 'total_usd', 'cost_price_usd', 'product_discount_usd', 'manual_discount_usd',
+])
+const REPORT_TOTALS_VOID_FIELDS = new Set(['id'])
+
+function reportDashboardAllTimeProjectionEligible(f: SalesFilters): boolean {
+  if (Object.getPrototypeOf(f) !== Object.prototype || Object.getOwnPropertySymbols(f).length) return false
+  const supported = ['startDate', 'endDate', 'branchId', 'createdFrom', 'createdTo']
+  for (const key of Object.getOwnPropertyNames(f)) {
+    const descriptor = Object.getOwnPropertyDescriptor(f, key)
+    if (!supported.includes(key) || !descriptor || !Object.hasOwn(descriptor, 'value')) return false
+  }
+  return reportAtomicFiltersEligible(f)
+    && (f.branchId == null || typeof f.branchId === 'string' || Number.isSafeInteger(f.branchId))
+}
+
+const REPORT_DASHBOARD_OMITTED_HEADER_FIELDS = new Set([
+  'cashier_id', 'cashier_name', 'customer_phone', 'receipt_number', 'delivery_contact_id', 'delivery_contact_name',
+])
+
+function reportSelectForPurpose(
+  fields: Record<string, string>, purpose: ReportReadPurpose, totalsFields: ReadonlySet<string>,
+  dashboardOmittedFields?: ReadonlySet<string>,
+): { sql: string; columns: string[] } {
+  const selected = Object.entries(fields).filter(([key]) => (purpose !== 'totals' || totalsFields.has(key))
+    && (purpose !== 'dashboard' || !dashboardOmittedFields?.has(key)))
+  return { sql: selected.map(([, sql]) => sql).join(','), columns: selected.map(([key]) => key) }
+}
+
+type ReportReadGroupKind = 'sales' | 'voidSales' | 'items' | 'returns' | 'returnItems' | 'deliveryFees'
+type ReportReadGroups = Pick<SalesReportSnapshot, ReportReadGroupKind>
+type ReportReadGroup = { kind: ReportReadGroupKind; sql: string; idExpr: string; params: Record<string, unknown>; columns: string[] }
+type ReportReadBand = { sql: string; params: Record<string, unknown> }
+type ReportReadPlan = { groups: ReportReadGroup[]; primary: { sql: string; params: Record<string, unknown> }; preciseSales: boolean; preciseReturns: boolean; itemBand?: ReportReadBand }
+
+function reportDashboardDateContextEligible(
+  f: SalesFilters, includeDeliveryFees: boolean, scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions, purpose: ReportReadPurpose,
+): boolean {
+  return (purpose === 'full' || purpose === 'dashboard') && !includeDeliveryFees && scalarScope === null
+    && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+    && reportDashboardDateFiltersEligible(f)
+}
+
+function reportDashboardProjectionContextEligible(
+  f: SalesFilters, includeDeliveryFees: boolean, scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions, dashboardDateContext: boolean,
+): boolean {
+  if (dashboardDateContext) return reportDashboardDateContextEligible(f, includeDeliveryFees, scalarScope, options, 'dashboard')
+  return !includeDeliveryFees && scalarScope === null
+    && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+    && reportDashboardAllTimeProjectionEligible(f)
+}
+
+function reportEmptyGroups(): ReportReadGroups {
+  return { sales: [], voidSales: [], items: [], returns: [], returnItems: [], deliveryFees: [] }
+}
+
+function reportSnapshotFromPlan(plan: ReportReadPlan, groups: ReportReadGroups): SalesReportSnapshot {
+  const legacy = !plan.preciseSales || !plan.preciseReturns
+    || groups.sales.some(row => Number(row.money_precision_version) === 0)
+    || groups.returns.some(row => Number(row.money_precision_version) === 0)
+  return { ...groups, precision_mode: legacy ? 'exact_recorded' : 'canonical_v1',
+    row_count: Object.values(groups).reduce((sum, rows) => sum + rows.length, 0) }
+}
+
+async function buildSalesReportReadPlan(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions,
+  purpose: ReportReadPurpose,
+  dashboardDateContext = false,
+): Promise<ReportReadPlan> {
+  if (purpose === 'dashboard' && !reportDashboardProjectionContextEligible(f, includeDeliveryFees, scalarScope, options, dashboardDateContext)) purpose = 'full'
+  const datedDashboard = dashboardDateContext && reportDashboardDateContextEligible(f, includeDeliveryFees, scalarScope, options, purpose)
+  const db = getDb(env)
+  const salesColumns = await reportTableColumns(db, 'sales')
+  const itemColumns = await reportTableColumns(db, 'sale_items')
+  const returnColumns = await reportTableColumns(db, 'returns')
+  const returnItemColumns = await reportTableColumns(db, 'return_items')
+  const feeColumns = await reportTableColumns(db, 'fees')
+  const customerColumns = await reportTableColumns(db, 'customers')
+  const contactColumns = await reportTableColumns(db, 'delivery_contacts')
+  const preciseSales = salesColumns.has('money_precision_version')
+    && salesColumns.has('calculated_total_usd') && salesColumns.has('rounding_adjustment_usd')
+  const preciseReturns = returnColumns.has('money_precision_version')
+    && returnColumns.has('calculated_refund_usd') && returnColumns.has('rounding_adjustment_usd')
+  // Never name 0158 columns in SQL prepared against a pre-0158 database.
+  // Missing properties naturally select the version-0 exact-recorded path.
+  const returnPrecision = preciseReturns
+    ? ',r.money_precision_version,r.calculated_refund_usd,r.rounding_adjustment_usd'
+    : ''
+  const customerAnonymous = customerColumns.has('is_anonymous')
+    ? 'COALESCE((SELECT is_anonymous FROM customers WHERE customers.id=s.customer_id),0)'
+    : '0'
+  const itemColumn = (name: string, fallback: string) => itemColumns.has(name) ? `si.${name}` : `${fallback} AS ${name}`
+  const saleColumn = (name: string, fallback: string) => salesColumns.has(name) ? `s.${name}` : `${fallback} AS ${name}`
+  const linkedDeliveryFee = feeColumns.has('sale_id') && feeColumns.has('fee_type')
+    ? "EXISTS(SELECT 1 FROM fees WHERE fees.sale_id=s.id AND COALESCE(fees.fee_type,'')='delivery')" : '0'
+  const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
+  const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
+  const groups: ReportReadGroup[] = []
+  const saleSelect = reportSelectForPurpose({
+    id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', status_before_return: saleColumn('status_before_return', 'NULL'),
+    branch_id: 's.branch_id', branch_name: 's.branch_name', cashier_id: 's.cashier_id', cashier_name: 's.cashier_name',
+    customer_id: 's.customer_id', customer_name: 's.customer_name', customer_phone: 's.customer_phone', receipt_number: 's.receipt_number',
+    payment_method: 's.payment_method', customer_is_anonymous: `${customerAnonymous} AS customer_is_anonymous`,
+    subtotal_usd: 's.subtotal_usd', discount_usd: 's.discount_usd', membership_discount_usd: 's.membership_discount_usd',
+    tax_usd: 's.tax_usd', total_usd: 's.total_usd', delivery_fee_usd: 's.delivery_fee_usd', delivery_fee_paid_by: 's.delivery_fee_paid_by',
+    delivery_actual_cost_usd: 's.delivery_actual_cost_usd', is_delivery: 's.is_delivery', source_return_id: 's.source_return_id',
+    amount_paid_usd: 's.amount_paid_usd', amount_paid_khr: saleColumn('amount_paid_khr', '0'), exchange_rate: saleColumn('exchange_rate', 'NULL'),
+    ...(preciseSales ? {
+      money_precision_version: 's.money_precision_version', calculated_total_usd: 's.calculated_total_usd',
+      rounding_adjustment_usd: 's.rounding_adjustment_usd',
+    } : {}),
+    delivery_contact_id: saleColumn('delivery_contact_id', 'NULL'), delivery_contact_name: saleColumn('delivery_contact_name', "''"),
+    delivery_has_linked_fee: `${linkedDeliveryFee} AS delivery_has_linked_fee`,
+  }, purpose, REPORT_TOTALS_SALE_FIELDS, REPORT_DASHBOARD_OMITTED_HEADER_FIELDS)
+  const voidSelect = reportSelectForPurpose({
+    id: 's.id', created_at: 's.created_at', sale_status: 's.sale_status', branch_id: 's.branch_id', branch_name: 's.branch_name',
+    cashier_id: 's.cashier_id', cashier_name: 's.cashier_name', customer_id: 's.customer_id', customer_name: 's.customer_name',
+    customer_phone: 's.customer_phone', payment_method: 's.payment_method', customer_is_anonymous: `${customerAnonymous} AS customer_is_anonymous`,
+  }, purpose, REPORT_TOTALS_VOID_FIELDS, REPORT_DASHBOARD_OMITTED_HEADER_FIELDS)
+  const itemSelect = reportSelectForPurpose({
+    id: 'si.id', sale_id: 'si.sale_id', product_id: itemColumn('product_id', 'NULL'), product_name: itemColumn('product_name', "''"),
+    quantity: 'si.quantity', total_usd: itemColumn('total_usd', '0'), cost_price_usd: 'si.cost_price_usd',
+    product_discount_usd: itemColumn('product_discount_usd', '0'), manual_discount_usd: itemColumn('manual_discount_usd', '0'),
+  }, purpose, REPORT_TOTALS_ITEM_FIELDS)
+  groups.push({ kind: 'sales', sql: `SELECT ${saleSelect.sql}
+    FROM sales s WHERE ${primary.sql}`, idExpr: 's.id', params: primary.params, columns: saleSelect.columns })
+  if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales', sql: `SELECT ${voidSelect.sql}
+    FROM sales s WHERE ${voids.sql}`, idExpr: 's.id', params: voids.params, columns: voidSelect.columns })
+  const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
+    : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
+  groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
+    FROM ${itemFrom} WHERE ${primary.sql}`,
+    idExpr: 'si.id', params: primary.params, columns: itemSelect.columns })
+  // The debt half of a refund (0260); absent columns read as a pre-0260 row.
+  const returnDebt = returnColumns.has('owed_reduction_usd') && returnColumns.has('refund_currency') ? ',r.owed_reduction_usd,r.refund_currency' : ''
+  groups.push({ kind: 'returns', sql: `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}
+    FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
+      AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
+      AND (${primary.sql})`, idExpr: 'r.id', params: primary.params,
+    columns: ['id', 'sale_id', 'total_refund_usd', 'status', 'return_scope',
+      ...(returnDebt ? ['owed_reduction_usd', 'refund_currency'] : []),
+      ...(preciseReturns ? ['money_precision_version', 'calculated_refund_usd', 'rounding_adjustment_usd'] : [])] })
+  const returnItemPrecision = returnItemColumns.has('refund_snapshot_json')
+    ? ',ri.sale_item_id,ri.total_usd,ri.refund_snapshot_json'
+    : ''
+  groups.push({ kind: 'returnItems', sql: `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock${returnItemPrecision}
+    FROM return_items ri NOT INDEXED CROSS JOIN returns r ON r.id=ri.return_id CROSS JOIN sales s ON s.id=r.sale_id
+      WHERE COALESCE(r.status,'completed')<>'cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer' AND (${primary.sql})`, idExpr: 'ri.id', params: primary.params,
+    columns: ['id', 'return_id', 'cost_price_usd', 'quantity', 'stock_action', 'return_to_stock',
+      ...(returnItemPrecision ? ['sale_item_id', 'total_usd', 'refund_snapshot_json'] : [])] })
+  const deliveryFeeColumns = ['id', 'delivery_contact_id', 'amount_usd', 'amount_khr', 'created_at']
+  if (includeDeliveryFees && deliveryFeeColumns.every((name) => feeColumns.has(name))) {
+    const feeClauses = ['f.delivery_contact_id IS NOT NULL']
+    const feeParams: Record<string, unknown> = {}
+    const feeCreatedFrom = shiftWindowBound(f.createdFrom)
+    const feeCreatedTo = shiftWindowBound(f.createdTo)
+    if (feeCreatedFrom && feeCreatedTo) {
+      feeClauses.push('datetime(f.created_at) >= @feeCreatedFrom', 'datetime(f.created_at) < @feeCreatedTo')
+      feeParams.feeCreatedFrom = feeCreatedFrom
+      feeParams.feeCreatedTo = feeCreatedTo
+    } else {
+      if (f.startDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
+      if (f.endDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+    }
+    if (f.branchId && feeColumns.has('branch_id')) { feeClauses.push('f.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
+
+    if (!feeCreatedFrom && !feeCreatedTo && isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
+      feeClauses.push(localTimeRangeClause('f.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
+      feeParams.feeStartTime = String(f.startTime || '').trim()
+      feeParams.feeEndTime = String(f.endTime || '').trim()
+    }
+    if (f.contactId != null && f.contactId !== '') {
+      feeClauses.push('f.delivery_contact_id = @feeContactId')
+      feeParams.feeContactId = f.contactId
+    }
+    const contactName = feeColumns.has('delivery_contact_name')
+      ? "COALESCE(NULLIF(TRIM(f.delivery_contact_name),''),'')"
+      : contactColumns.has('id') && contactColumns.has('name') ? "COALESCE(NULLIF(TRIM(dc.name),''),'')" : "''"
+    const joinContacts = contactName.includes('dc.') ? 'LEFT JOIN delivery_contacts dc ON dc.id=f.delivery_contact_id' : ''
+    groups.push({ kind: 'deliveryFees', sql: `SELECT f.id,f.delivery_contact_id,${contactName} AS delivery_contact_name,
+        f.amount_usd,f.amount_khr,f.created_at
+      FROM fees f ${joinContacts} WHERE ${feeClauses.join(' AND ')}`, idExpr: 'f.id', params: feeParams,
+      columns: ['id', 'delivery_contact_id', 'delivery_contact_name', 'amount_usd', 'amount_khr', 'created_at'] })
+  }
+  const plan: ReportReadPlan = { groups, primary, preciseSales, preciseReturns }
+  if (datedDashboard) plan.itemBand = {
+    sql: `SELECT MIN(si.id) AS lo,MAX(si.id) AS hi FROM sales s
+      CROSS JOIN sale_items si ON si.sale_id=s.id WHERE ${primary.sql}`, params: primary.params,
+  }
+  return plan
+}
+
 async function readSalesReportPass(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  scalarScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions, purpose: ReportReadPurpose,
+): Promise<SalesReportSnapshot> {
+  const db = getDb(env)
+  const plan = await buildSalesReportReadPlan(env, f, includeDeliveryFees, scalarScope, options, purpose)
+  const groups = reportEmptyGroups()
+  const rowBudget = { count: 0 }
+  for (const group of plan.groups) {
+    groups[group.kind] = group.kind === 'items'
+      ? await readReportSaleItems(db, f, plan.primary, rowBudget, group.sql)
+      : await reportKeysetRows(db, group.sql, group.idExpr, group.params, rowBudget, group.kind === 'sales' ? options.maxReceipts : undefined)
+  }
+  return reportSnapshotFromPlan(plan, groups)
+}
+
+type ReportBatchStatement = { sql: string; params?: Record<string, unknown> }
+type ReportTotalsPolicy = { maxRows: number; maxBytes: number; maxRowBytes: number; maxControlRowBytes: number }
+const REPORT_TOTALS_POLICY: Readonly<ReportTotalsPolicy> = Object.freeze({
+  maxRows: REPORT_MONEY_MAX_ROWS, maxBytes: 32 * 1024 * 1024, maxRowBytes: 1_800_000, maxControlRowBytes: 16 * 1024 * 1024,
+})
+const REPORT_TOTALS_FRAME_BYTES = 4096
+const REPORT_FLAG_META_BYTES = 256
+const REPORT_FLAG_MAX_ROWS = 100_000
+const REPORT_FLAG_WHERE = "key IN ('maintenance','maintenance_mode')"
+class ReportAtomicPlanUnsupported extends Error {}
+class ReportAtomicResourceMiss extends Error {}
+type ReportRestoreFlag = { key: string; kind: 'text' | 'blob'; bytes: ArrayBuffer }
+type ReportRestoreState = { flags: ReportRestoreFlag[]; atomicSupported: boolean; firstRestoreChecked: true; flagRows: number; payloadUpper: number; bindUpper: number; postUpper: number; requestUpper: number; postRequestUpper: number }
+
+function reportTotalsPolicy(input: ReportTotalsPolicy): ReportTotalsPolicy {
+  for (const key of ['maxRows', 'maxBytes', 'maxRowBytes', 'maxControlRowBytes'] as const) {
+    if (!Number.isSafeInteger(input[key]) || input[key] < 0 || input[key] > REPORT_TOTALS_POLICY[key]) throw new ReportAtomicPlanUnsupported()
+  }
+  return { ...input }
+}
+
+function reportGuardFailure(error: unknown, marker: string): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /bad JSON path|JSON path error/i.test(message) && message.includes(marker)
+}
+
+function reportJsonBytes(value: string): number { return new TextEncoder().encode(JSON.stringify(value)).byteLength }
+function reportRowFraming(columns: readonly string[]): number {
+  return 2 + Math.max(columns.length - 1, 0) + columns.reduce((sum, key) => sum + reportJsonBytes(key) + 1, 0)
+}
+
+function reportSqlScalarUpper(expression: string, rowKind: 'data' | 'control' = 'control'): string {
+  const integerUpper = rowKind === 'data' ? 20 : 32
+  const rawBytes = `length(CAST(${expression} AS BLOB))`
+  const textUpper = rowKind === 'data'
+    ? `2+(CASE WHEN instr(CAST(${expression} AS BLOB),x'00')=0 AND ${expression} NOT GLOB '*[^ -~]*'
+      THEN ${rawBytes}+(${rawBytes}-length(CAST(replace(${expression},char(34),'') AS BLOB)))+(${rawBytes}-length(CAST(replace(${expression},char(92),'') AS BLOB)))
+      ELSE 6*${rawBytes} END)`
+    : `2+6*${rawBytes}`
+  return `CASE typeof(${expression}) WHEN 'null' THEN 4 WHEN 'integer' THEN ${integerUpper} WHEN 'real' THEN 32
+    WHEN 'text' THEN ${textUpper} WHEN 'blob' THEN 2+4*length(${expression})
+    ELSE json_extract('[1]','$[report_totals_storage]') END`
+}
+
+function reportBindingUpper(value: unknown): number {
+  if (value == null) return 4
+  if (typeof value === 'string') return reportJsonBytes(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value).length
+  if (value instanceof ArrayBuffer) return 2 + 4 * value.byteLength
+  throw new ReportAtomicPlanUnsupported()
+}
+
+function reportStatementControlUpper(statement: ReportBatchStatement): number {
+  const slots = new Map<string, number>()
+  let bindings = 0
+  const translated = statement.sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\r\n]*|\/\*[\s\S]*?\*\/|@(\w+)|(\?\d*)/g, (match, name: string | undefined, positional: string | undefined) => {
+    if (positional !== undefined) throw new ReportAtomicPlanUnsupported()
+    if (name === undefined) return match
+    let slot = slots.get(name)
+    if (slot === undefined) {
+      slot = slots.size + 1
+      slots.set(name, slot)
+      bindings += reportBindingUpper(statement.params?.[name] ?? null) + 16
+    }
+    return `?${slot}`
+  })
+  if (slots.size > 100 || new TextEncoder().encode(translated).byteLength > 100_000) throw new ReportAtomicPlanUnsupported()
+  return reportJsonBytes(translated) + bindings + 64
+}
+
+function reportBatchRows(result: D1Result | undefined): Record<string, unknown>[] {
+  if (!result || result.success !== true || !Array.isArray(result.results)) throw new ReportMoneyPrecisionError('unsupported_row')
+  return result.results as Record<string, unknown>[]
+}
+
+function reportBatchSingleRow(result: D1Result | undefined): Record<string, unknown> {
+  const rows = reportBatchRows(result)
+  if (rows.length !== 1 || !rows[0] || typeof rows[0] !== 'object' || Array.isArray(rows[0])) throw new ReportMoneyPrecisionError('unsupported_row')
+  return rows[0]
+}
+
+function reportNonnegativeInteger(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new ReportMoneyPrecisionError('unsupported_row')
+  return value
+}
+
+function reportFlagBuffer(value: unknown, length: number): ArrayBuffer {
+  if (!reportRestoreBlobSupported(value)) throw new ReportMoneyPrecisionError('unsupported_row')
+  let source: Uint8Array
+  if (value instanceof ArrayBuffer) source = new Uint8Array(value)
+  else if (ArrayBuffer.isView(value)) source = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  else if (Array.isArray(value) && value.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) source = Uint8Array.from(value)
+  else throw new ReportMoneyPrecisionError('unsupported_row')
+  if (source.byteLength !== length) throw new ReportMoneyPrecisionError('unsupported_row')
+  const copy = new Uint8Array(length)
+  copy.set(source)
+  return copy.buffer
+}
+
+function reportRestoreStatements(maxBytes: number, capture: boolean, policy: ReportTotalsPolicy, postRequestReserve = 0): ReportBatchStatement[] {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > policy.maxBytes) throw new ReportAtomicPlanUnsupported()
+  if (!Number.isSafeInteger(postRequestReserve) || postRequestReserve < 0 || postRequestReserve > REPORT_TOTALS_POLICY.maxBytes) throw new ReportAtomicPlanUnsupported()
+  const size = 'length(CAST(value AS BLOB))'
+  const valueRow = `${reportRowFraming(['value'])}+(${reportSqlScalarUpper('value')})`
+  const tokenRow = `${reportRowFraming(['key', 'storage_type', 'raw_bytes', 'byte_length'])}+(2+6*length(CAST(key AS BLOB)))+6+(2+4*${size})+32`
+  const nativeRow = capture ? `COALESCE(SUM(CASE WHEN length(CAST(key AS BLOB))+${size}+64>2000000 THEN 1 ELSE 0 END),0)` : '0'
+  const summary = `SELECT COUNT(*) n,COUNT(DISTINCT key) unique_n,COALESCE(SUM(${valueRow}),0) v,COALESCE(SUM(${tokenRow}),0) t,
+      COALESCE(MAX(${valueRow}),0) vmax,COALESCE(MAX(${tokenRow}),0) tmax,
+      COALESCE(SUM((2+6*length(CAST(key AS BLOB)))+6+(2+4*${size})+64),0) b,
+      COALESCE(SUM(CASE WHEN typeof(value) IN ('text','blob') THEN 0 ELSE 1 END),0) bad,
+      COALESCE(SUM(CASE WHEN CAST(key AS BLOB) IN (CAST('maintenance' AS BLOB),CAST('maintenance_mode' AS BLOB)) THEN 0 ELSE 1 END),0) bad_key,
+      ${nativeRow} native_over FROM system_flags WHERE ${REPORT_FLAG_WHERE}`
+  const supported = capture ? '(n<=2 AND unique_n=n AND bad=0 AND bad_key=0 AND native_over=0)' : '0'
+  const values = `2+v+MAX(n-1,0)+${REPORT_FLAG_META_BYTES}`
+  const payload = capture ? `(${values})+CASE WHEN ${supported} THEN 2+t+MAX(n-1,0) ELSE 2 END` : values
+  const bind = capture ? `CASE WHEN ${supported} THEN b ELSE 0 END` : '0'
+  const post = capture ? `CASE WHEN ${supported} THEN (${values}) ELSE 0 END` : '0'
+  const reserve = capture ? `CASE WHEN ${supported} THEN ${postRequestReserve} ELSE 0 END` : '0'
+  const largest = capture ? `CASE WHEN ${supported} THEN MAX(vmax,tmax) ELSE vmax END` : 'vmax'
+  const total = capture ? `(${payload})+(${bind})+(${post})+(${reserve})+${REPORT_TOTALS_FRAME_BYTES}` : payload
+  const guard: ReportBatchStatement = { sql: `SELECT CASE WHEN n>${REPORT_FLAG_MAX_ROWS} THEN json_extract('[1]','$[report_flags_rows]')
+      WHEN (${total})>${maxBytes} OR (${largest})>${policy.maxControlRowBytes} THEN json_extract('[1]','$[report_flags_bytes]') ELSE 1 END AS allowed,
+      CASE WHEN ${supported} THEN 1 ELSE 0 END AS atomic_supported,
+      n AS flag_rows,(${payload}) AS payload_upper,(${bind}) AS bind_upper,(${post}) AS post_upper FROM (${summary})` }
+  const statements = [guard, { sql: `SELECT value FROM system_flags WHERE ${REPORT_FLAG_WHERE} ORDER BY key` }]
+  if (capture) statements.push({ sql: `SELECT key,typeof(value) AS storage_type,CAST(value AS BLOB) AS raw_bytes,
+    length(CAST(value AS BLOB)) AS byte_length FROM system_flags WHERE ${REPORT_FLAG_WHERE}
+      AND (SELECT CASE WHEN ${supported} THEN 1 ELSE 0 END FROM (${summary}))=1 ORDER BY key` })
+  return statements
+}
+
+function reportRestoreBlobSupported(value: unknown): boolean {
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true
+  if (!Array.isArray(value)) return false
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !Number.isInteger(value[index]) || value[index] < 0 || value[index] > 255) return false
+  }
+  return true
+}
+
+function reportRestoreValueSupported(value: unknown): boolean {
+  if (value === null || typeof value === 'string') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  return reportRestoreBlobSupported(value)
+}
+
+async function readBoundedReportRestoreState(
+  db: ReturnType<typeof getDb>, maxBytes: number, capture: boolean, policy: ReportTotalsPolicy,
+  resourceBehavior: 'refuse' | 'fallback' = 'refuse',
+): Promise<ReportRestoreState | null> {
+  const columns = await reportTableColumns(db, 'system_flags')
+  if (!columns.has('key') || !columns.has('value')) return null
+  const postRequestUpper = capture
+    ? reportRestoreStatements(policy.maxBytes, false, policy).reduce((sum, statement) => sum + reportStatementControlUpper(statement), 0) + 128 : 0
+  const requestUpper = reportRestoreStatements(maxBytes, capture, policy, postRequestUpper).reduce((sum, statement) => sum + reportStatementControlUpper(statement), 0) + 128
+  const payloadBudget = maxBytes - requestUpper
+  if (payloadBudget < 0) throw new ReportMoneyPrecisionError('too_many_rows')
+  const statements = reportRestoreStatements(payloadBudget, capture, policy, postRequestUpper)
+  if (statements.reduce((sum, statement) => sum + reportStatementControlUpper(statement), 0) > requestUpper) throw new ReportAtomicPlanUnsupported()
+  let results: D1Result[]
+  try { results = await db.batch(statements) } catch (error) {
+    if (reportGuardFailure(error, 'report_flags_bytes') || reportGuardFailure(error, 'report_flags_rows')) {
+      if (resourceBehavior === 'fallback') throw new ReportAtomicResourceMiss()
+      throw new ReportMoneyPrecisionError('too_many_rows')
+    }
+    throw error
+  }
+  if (results.length !== statements.length) throw new ReportMoneyPrecisionError('unsupported_row')
+  const admission = reportBatchSingleRow(results[0])
+  if (!admission || admission.allowed !== 1) throw new ReportMoneyPrecisionError('unsupported_row')
+  const count = reportNonnegativeInteger(admission.flag_rows)
+  if (count > REPORT_FLAG_MAX_ROWS || (admission.atomic_supported !== 0 && admission.atomic_supported !== 1)) throw new ReportMoneyPrecisionError('unsupported_row')
+  const atomicSupported = capture && admission.atomic_supported === 1
+  const values = reportBatchRows(results[1])
+  if (values.length !== count || values.some(row => !row || typeof row !== 'object' || Array.isArray(row) || !Object.hasOwn(row, 'value') || !reportRestoreValueSupported(row.value))) throw new ReportMoneyPrecisionError('unsupported_row')
+  const flags: ReportRestoreFlag[] = []
+  if (capture) {
+    const tokens = reportBatchRows(results[2])
+    if (tokens.length !== (atomicSupported ? count : 0) || (atomicSupported && count > 2)) throw new ReportMoneyPrecisionError('unsupported_row')
+    const seen = new Set<string>()
+    for (let index = 0; index < tokens.length; index += 1) {
+      const row = tokens[index]
+      if (typeof row.key !== 'string' || !['maintenance', 'maintenance_mode'].includes(row.key)
+        || (row.storage_type !== 'text' && row.storage_type !== 'blob')) throw new ReportMoneyPrecisionError('unsupported_row')
+      if (seen.has(row.key)) throw new ReportMoneyPrecisionError('unsupported_row')
+      seen.add(row.key)
+      if (row.storage_type === 'text' && typeof values[index].value !== 'string') throw new ReportMoneyPrecisionError('unsupported_row')
+      if (row.storage_type === 'blob' && !reportRestoreBlobSupported(values[index].value)) throw new ReportMoneyPrecisionError('unsupported_row')
+      flags.push({ key: row.key, kind: row.storage_type, bytes: reportFlagBuffer(row.raw_bytes, reportNonnegativeInteger(row.byte_length)) })
+    }
+  }
+  if (reportRestoreValuesActive(values as Array<{ value: unknown }>)) throw new ReportMoneyPrecisionError('maintenance_restore')
+  return { flags, atomicSupported, firstRestoreChecked: true, flagRows: count,
+    payloadUpper: reportNonnegativeInteger(admission.payload_upper), bindUpper: reportNonnegativeInteger(admission.bind_upper), postUpper: reportNonnegativeInteger(admission.post_upper),
+    requestUpper, postRequestUpper: atomicSupported ? postRequestUpper : 0 }
+}
+
+function reportRestoreFence(state: ReportRestoreState): ReportBatchStatement {
+  const params: Record<string, unknown> = {}
+  const matches = state.flags.map((flag, index) => {
+    params[`flagKey${index}`] = flag.key
+    params[`flagKind${index}`] = flag.kind
+    params[`flagBytes${index}`] = flag.bytes
+    return `(key=@flagKey${index} AND typeof(value)=@flagKind${index} AND CAST(value AS BLOB) IS @flagBytes${index})`
+  })
+  return { sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM system_flags WHERE ${REPORT_FLAG_WHERE})=${state.flags.length}
+    AND NOT EXISTS(SELECT 1 FROM system_flags WHERE ${REPORT_FLAG_WHERE} AND NOT(${matches.join(' OR ') || '0'}))
+    THEN 1 ELSE json_extract('[1]','$[report_restore_state_changed]') END AS allowed`, params }
+}
+
+function reportNamespacePlans(
+  groups: readonly ReportReadGroup[], itemBand?: ReportReadBand,
+): { groups: ReportReadGroup[]; params: Record<string, unknown>; itemBand?: string } {
+  const values: unknown[] = []
+  const params: Record<string, unknown> = {}
+  const remap = (sql: string, bindings: Record<string, unknown>) => sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\r\n]*|\/\*[\s\S]*?\*\/|@(\w+)|(\?\d*)/g, (match, name: string | undefined, positional: string | undefined) => {
+    if (positional !== undefined) throw new ReportAtomicPlanUnsupported()
+    if (name === undefined) return match
+    const value = bindings[name] ?? null
+    let index = values.findIndex(known => Object.is(known, value))
+    if (index < 0) { index = values.length; values.push(value); params[`reportBound${index}`] = value }
+    return `@reportBound${index}`
+  })
+  const remapped = groups.map(group => ({ ...group, sql: remap(group.sql, group.params) }))
+  if (itemBand) return { groups: remapped, params, itemBand: remap(itemBand.sql, itemBand.params) }
+  return { groups: remapped, params }
+}
+
+function reportTotalsBatchStatements(plan: ReportReadPlan, state: ReportRestoreState, options: SalesReportReadOptions, policy: ReportTotalsPolicy) {
+  policy = reportTotalsPolicy(policy)
+  const named = reportNamespacePlans(plan.groups, plan.itemBand)
+  const summaries = named.groups.map(group => {
+    const values = group.columns.map(key => key === 'delivery_has_linked_fee' && group.kind === 'sales' ? '1' : reportSqlScalarUpper(`q."${key}"`, 'data'))
+    const row = `${reportRowFraming(group.columns)}+${values.join('+')}`
+    const bandColumn = plan.itemBand ? ',0 AS invalid_item_band' : ''
+    const summary = `SELECT '${group.kind}' kind,COUNT(*) n,COALESCE(SUM(b),0) bytes,COALESCE(MAX(b),0) largest${bandColumn} FROM
+      (SELECT ${row} b FROM (${group.sql} AND ${group.idExpr}>0 LIMIT ${policy.maxRows + 1}) q)`
+    if (!plan.itemBand || group.kind !== 'items') return summary
+    return `SELECT sized.kind,sized.n,sized.bytes,sized.largest,
+      CASE WHEN band.lo IS NULL OR band.hi IS NULL THEN 0
+        WHEN typeof(band.lo)<>'integer' OR typeof(band.hi)<>'integer'
+          OR band.lo<1 OR band.hi<band.lo OR band.lo>9007199254740991 OR band.hi>9007199254740991
+        THEN 1 ELSE 0 END AS invalid_item_band
+      FROM (${summary}) sized CROSS JOIN (${named.itemBand}) band`
+  })
+  let summaryLevel = summaries
+  while (summaryLevel.length > 5) {
+    const chunks: string[] = []
+    for (let index = 0; index < summaryLevel.length; index += 5) {
+      chunks.push(`SELECT * FROM (${summaryLevel.slice(index, index + 5).join(' UNION ALL ')})`)
+    }
+    summaryLevel = chunks
+  }
+  const summarySql = summaryLevel.join(' UNION ALL ')
+  const details: ReportBatchStatement[] = plan.groups.map(group => {
+    // Unary plus preserves ID order while allowing dated headers to use the date index.
+    const orderExpr = plan.itemBand && (group.kind === 'sales' || group.kind === 'voidSales') ? `+${group.idExpr}` : group.idExpr
+    return { sql: `${group.sql} AND ${group.idExpr}>0 ORDER BY ${orderExpr} LIMIT ${policy.maxRows + 1}`, params: group.params }
+  })
+  const fence = reportRestoreFence(state)
+  const baseControl = reportStatementControlUpper(fence) + details.reduce((sum, statement) => sum + reportStatementControlUpper(statement), 0)
+    + state.payloadUpper + state.requestUpper + REPORT_TOTALS_FRAME_BYTES
+  const arrays = `SUM(bytes+2+MAX(n-1,0))+${2 + Math.max(plan.groups.length - 1, 0)}`
+  const counts = ['sales', 'voidSales', 'items', 'returns', 'returnItems', 'deliveryFees'].map(kind => `SUM(CASE WHEN kind='${kind}' THEN n ELSE 0 END) AS rows_${kind}`).join(',')
+  const receipt = options.maxReceipts === undefined ? '' : `WHEN SUM(CASE WHEN kind='sales' THEN n ELSE 0 END)>${options.maxReceipts} THEN json_extract('[1]','$[report_totals_receipts]')`
+  const bandGuard = plan.itemBand ? `
+      WHEN SUM(CASE WHEN kind IN ('sales','voidSales') THEN n ELSE 0 END)>${policy.maxRows}
+        THEN json_extract('[1]','$[report_totals_rows]')
+      WHEN SUM(invalid_item_band)>0 THEN json_extract('[1]','$[report_totals_storage]')` : ''
+  const make = (control: number): ReportBatchStatement => ({ sql: `SELECT CASE ${receipt}${bandGuard}
+      WHEN SUM(n)>${policy.maxRows} THEN json_extract('[1]','$[report_totals_rows]')
+      WHEN (${arrays})+${control}+${state.postUpper}+${state.postRequestUpper}>${policy.maxBytes} OR MAX(largest)>${policy.maxRowBytes}
+        THEN json_extract('[1]','$[report_totals_bytes]') ELSE 1 END AS allowed,
+      SUM(n) AS data_rows,(${arrays}) AS detail_upper,${counts} FROM (${summarySql})`, params: named.params })
+  const allowance = reportStatementControlUpper(make(baseControl)) + 128
+  const control = baseControl + allowance
+  const admission = make(control)
+  if (reportStatementControlUpper(admission) > allowance) throw new ReportAtomicPlanUnsupported()
+  const statements = [fence, admission, ...details]
+  return { statements, control, postBudget(detailUpper: number) { return policy.maxBytes - control - detailUpper } }
+}
+
+async function readSalesReportAtomicTotalsSnapshot(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  capturedScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions, purpose: ReportReadPurpose,
+  dashboardDateContext = false,
+): Promise<SalesReportSnapshot> {
+  const fullFamily = purpose !== 'totals'
+  const fallbackPurpose: ReportReadPurpose = purpose === 'dashboard' ? 'full' : purpose
+  if (purpose === 'dashboard' && !reportDashboardProjectionContextEligible(f, includeDeliveryFees, capturedScope, options, dashboardDateContext)) {
+    return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
+  }
+  if (dashboardDateContext && !reportDashboardDateContextEligible(f, includeDeliveryFees, capturedScope, options, purpose)) {
+    return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
+  }
+  const db = getDb(env)
+  const policy = reportTotalsPolicy(REPORT_TOTALS_POLICY)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let state: ReportRestoreState | null
+    try { state = await readBoundedReportRestoreState(db, policy.maxBytes, true, policy, fullFamily ? 'fallback' : 'refuse') } catch (error) {
+      if (fullFamily && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, false)
+      throw error
+    }
+    if (!state) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose)
+    if (!state.atomicSupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
+    const plan = await buildSalesReportReadPlan(env, f, includeDeliveryFees, capturedScope, options, purpose, dashboardDateContext)
+    let batch: ReturnType<typeof reportTotalsBatchStatements>
+    try { batch = reportTotalsBatchStatements(plan, state, options, policy) } catch (error) {
+      if (error instanceof ReportAtomicPlanUnsupported) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
+      throw error
+    }
+    let results: D1Result[]
+    try { results = await db.batch(batch.statements) } catch (error) {
+      if (reportGuardFailure(error, 'report_restore_state_changed')) continue
+      if (reportGuardFailure(error, 'report_totals_receipts')) throw new SalesReportExportTooLargeError()
+      if (reportGuardFailure(error, 'report_totals_rows')) throw new ReportMoneyPrecisionError('too_many_rows')
+      if (fullFamily && reportGuardFailure(error, 'report_totals_bytes')) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, state.firstRestoreChecked)
+      if (reportGuardFailure(error, 'report_totals_bytes')) throw new ReportMoneyPrecisionError('too_many_rows')
+      if (reportGuardFailure(error, 'report_totals_storage')) throw new ReportMoneyPrecisionError('unsupported_row')
+      throw error
+    }
+    if (results.length !== batch.statements.length || reportBatchSingleRow(results[0]).allowed !== 1) throw new ReportMoneyPrecisionError('unsupported_row')
+    const admission = reportBatchSingleRow(results[1])
+    if (!admission || admission.allowed !== 1) throw new ReportMoneyPrecisionError('unsupported_row')
+    const groups = reportEmptyGroups()
+    for (let index = 0; index < plan.groups.length; index += 1) {
+      const group = plan.groups[index]
+      const rows = reportBatchRows(results[index + 2]) as ReportScalarRow[]
+      if (rows.length !== reportNonnegativeInteger(admission[`rows_${group.kind}`])) throw new ReportMoneyPrecisionError('unsupported_row')
+      let previous = 0
+      for (const row of rows) {
+        const id = Number(row.id)
+        if (!Number.isSafeInteger(id) || id <= previous) throw new ReportMoneyPrecisionError('unsupported_row')
+        previous = id
+      }
+      groups[group.kind] = rows
+    }
+    const snapshot = reportSnapshotFromPlan(plan, groups)
+    if (snapshot.row_count !== reportNonnegativeInteger(admission.data_rows) || snapshot.row_count > policy.maxRows) throw new ReportMoneyPrecisionError('unsupported_row')
+    let post: ReportRestoreState | null
+    try { post = await readBoundedReportRestoreState(db, batch.postBudget(reportNonnegativeInteger(admission.detail_upper)), false, policy, fullFamily ? 'fallback' : 'refuse') } catch (error) {
+      if (fullFamily && error instanceof ReportAtomicResourceMiss) return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, fallbackPurpose, false)
+      throw error
+    }
+    if (!post) continue
+    return snapshot
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+
+function validateReportReadOptions(options: SalesReportReadOptions): void {
+  if (options.maxReceipts !== undefined && (!Number.isSafeInteger(options.maxReceipts)
+    || options.maxReceipts < 1 || options.maxReceipts > 10_000)) throw new SalesReportExportTooLargeError()
+}
+
+async function readSalesReportSnapshotForPurpose(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined, options: SalesReportReadOptions, purpose: ReportReadPurpose,
+): Promise<SalesReportSnapshot> {
+  validateReportReadOptions(options)
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
+  return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, purpose)
+}
+
+/** Full readers and unsupported atomic scopes retain both scalar passes. */
+async function readSalesReportCapturedSnapshot(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  capturedScope: CapturedSalesReportScalarScope | null, options: SalesReportReadOptions, purpose: ReportReadPurpose,
+  initialRestoreChecked = false,
+): Promise<SalesReportSnapshot> {
+  const db = getDb(env)
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt !== 0 || !initialRestoreChecked) await assertReportReadable(db)
+    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options, purpose)
+    await assertReportReadable(db)
+    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options, purpose)
+    await assertReportReadable(db)
+    if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
+  }
+  throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+async function readSalesReportPassLegacy(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees: boolean,
@@ -1185,7 +1928,7 @@ async function readSalesReportPass(
 
 /** Two complete ordered scalar passes are compared directly. A changed pass
  * is discarded in full, retried once, and never leaks a partial aggregate. */
-export async function readSalesReportSnapshot(
+async function readSalesReportSnapshotLegacy(
   env: Env,
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees = false,
@@ -1201,13 +1944,100 @@ export async function readSalesReportSnapshot(
   const capturedScope = captureSalesReportScalarScope(scalarScope)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await assertReportReadable(db)
-    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
+    const first = await readSalesReportPassLegacy(env, f, includeDeliveryFees, capturedScope, options)
     await assertReportReadable(db)
-    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
+    const second = await readSalesReportPassLegacy(env, f, includeDeliveryFees, capturedScope, options)
     await assertReportReadable(db)
     if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
   }
   throw new ReportMoneyPrecisionError('snapshot_changed')
+}
+
+// Imported on demand: dozens of pure harnesses transpile this file alone and have no such sibling. Without the module every
+// reader runs the legacy path, which is what those harnesses were written against; in the Worker the import always succeeds.
+async function routeReportRead<T>(
+  env: Env, route: string, legacy: () => Promise<T>, atomic: () => Promise<T>, options: { compare?: boolean; switch?: 'report_atomic' | 'report_atomic_long' } = {},
+): Promise<T> {
+  let router: typeof import('./reportAtomicSwitch')
+  try { router = await import('./reportAtomicSwitch') } catch { return legacy() }
+  return router.routeReportRead(env, route, legacy, atomic, options)
+}
+
+/** A plain data object: nothing inherited, no accessor, no symbol, so every read of a field answers the same. */
+function reportPlainFilters(f: SalesFilters): boolean {
+  if (Object.getPrototypeOf(f) !== Object.prototype || Object.getOwnPropertySymbols(f).length) return false
+  return Object.getOwnPropertyNames(f).every((key) => Object.hasOwn(Object.getOwnPropertyDescriptor(f, key) ?? {}, 'value'))
+}
+
+/** The full report family behind report_atomic_long: one bounded batch for an undated window or a plain dated Dashboard-style window
+ * (no scope, no courier fees, no export cap); every other request keeps the two scalar passes and their compare. */
+async function readSalesReportSnapshotAtomic(
+  env: Env, f: SalesFilters & { contactId?: number | string | null }, includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined, options: SalesReportReadOptions,
+): Promise<SalesReportSnapshot> {
+  validateReportReadOptions(options)
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
+  const bare = !includeDeliveryFees && capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+  if (bare && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+  if (bare && reportDashboardDateFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
+  return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'full')
+}
+
+export async function readSalesReportSnapshot(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
+): Promise<SalesReportSnapshot> {
+  return routeReportRead(env, 'snapshot',
+    () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
+    () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options),
+    { switch: 'report_atomic_long' })
+}
+
+export interface SalesReportTotalsResult {
+  totals: SalesTotals
+  sale_count: number
+  cancelled_count: number
+  precision_mode: ReportMoneyPrecisionMode
+  row_count: number
+}
+
+export async function readSalesReportTotals(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees = false,
+  scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
+): Promise<SalesReportTotalsResult> {
+  return routeReportRead(env, 'totals',
+    async () => {
+      const snapshot = await readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options)
+      return { totals: salesTotalsFromSnapshot(snapshot), sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length,
+        precision_mode: snapshot.precision_mode, row_count: snapshot.row_count }
+    },
+    () => readSalesReportTotalsAtomic(env, f, includeDeliveryFees, scalarScope, options))
+}
+
+async function readSalesReportTotalsAtomic(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined,
+  options: SalesReportReadOptions,
+): Promise<SalesReportTotalsResult> {
+  validateReportReadOptions(options)
+  const capturedScope = captureSalesReportScalarScope(scalarScope)
+  const eligible = reportAtomicFiltersEligible(f) && (scalarScope === undefined
+    || (capturedScope !== null && reportAtomicScopeProvenanceEligible(scalarScope, capturedScope)))
+  const snapshot = eligible
+    ? await readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals')
+    : await readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'totals')
+  return {
+    totals: salesTotalsFromSnapshot(snapshot), sale_count: snapshot.sales.length, cancelled_count: snapshot.voidSales.length,
+    precision_mode: snapshot.precision_mode, row_count: snapshot.row_count,
+  }
 }
 
 const REPORT_EXACT_KEYS = [
@@ -1274,6 +2104,7 @@ function reportRestocked(row: ReportScalarRow): boolean {
 
 type ReportSaleFacts = {
   sale: ReportScalarRow; version: 0 | 1; recognized: boolean; awaiting: boolean; valued: boolean
+  subtotal: ReportExactDecimal; storeDiscount: ReportExactDecimal; membershipDiscount: ReportExactDecimal
   net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
@@ -1457,7 +2288,8 @@ function deriveReportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[]
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     const owed = recognized && awaiting ? reportStillOwed(sale, returns.get(Number(sale.id)) || []) : ReportExactDecimal.zero()
-    return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
+    return { sale, version, recognized, awaiting, valued, subtotal, storeDiscount, membershipDiscount,
+      net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
       cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, knownCostLines, owed }
   })
 }
@@ -1503,9 +2335,7 @@ function aggregateReportSnapshot(
     const { sale, version } = fact
     const bucket = getBucket(bucketForSale(sale))
     bucket.tx += 1
-    const subtotal = reportMoney(sale, 'subtotal_usd', version)
-    const storeDiscount = reportMoney(sale, 'discount_usd', version)
-    const membershipDiscount = reportMoney(sale, 'membership_discount_usd', version)
+    const { subtotal, storeDiscount, membershipDiscount } = fact
     const tax = reportMoney(sale, 'tax_usd', version)
     const deliveryFee = reportMoney(sale, 'delivery_fee_usd', version)
     const storeDelivery = String(sale.delivery_fee_paid_by || 'customer') === 'store' ? deliveryFee : ReportExactDecimal.zero()
@@ -1936,7 +2766,14 @@ const VOID_ONLY_LEVEL: Record<string, number> = { tx_count: 0, recognized_net_us
 
 /** The totals of one verified window without the removal-loss block, for a comparison that reads revenue and sale count only. */
 export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  return salesTotalsFromSnapshot(await readSalesReportSnapshot(env, f))
+  return routeReportRead(env, 'totals_without_losses',
+    async () => salesTotalsFromSnapshot(await readSalesReportSnapshotLegacy(env, f)),
+    async () => {
+      const snapshot = reportDashboardDateFiltersEligible(f)
+        ? await readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
+        : await readSalesReportSnapshotForPurpose(env, f, false, undefined, {}, 'full')
+      return salesTotalsFromSnapshot(snapshot)
+    })
 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
@@ -1994,23 +2831,35 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
 // window with years of imported sales this serialized enough D1 round trips
 // to blow past the Worker's request budget before it could finish, which is
 // what the owner saw as a hang rather than a fast, honest error. One shared
-// snapshot read (still double-checked once) now backs both figures.
+// snapshot read now backs both figures; non-temporal reads use the bounded atomic path.
 export async function getSalesTotalsAndPeriodSeries(
   env: Env,
   f: SalesFilters,
   granularity: 'day' | 'week' | 'month',
   rankingLimit = DASHBOARD_TOP_ROWS,
 ): Promise<{ totals: SalesTotals; periodSeries: SalesPeriodRow[]; byPayment: DashboardPaymentRow[]; byBranch: DashboardBranchRow[] } & DashboardRankings> {
-  const [snapshot, loss] = await Promise.all([
-    readSalesReportSnapshot(env, f),
-    removalLossesFor(env, f),
-  ])
-  return {
+  const fromSnapshot = (snapshot: SalesReportSnapshot, loss: RemovalLossSummary | null) => ({
     totals: withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss),
     periodSeries: salesPeriodRowsFromSnapshot(snapshot, granularity),
     ...dashboardSplitsFromSnapshot(snapshot),
     ...dashboardRankingsFromSnapshot(snapshot, rankingLimit),
-  }
+  })
+  return routeReportRead(env, 'totals_and_series',
+    async () => {
+      const [snapshot, loss] = await Promise.all([readSalesReportSnapshotLegacy(env, f), removalLossesFor(env, f)])
+      return fromSnapshot(snapshot, loss)
+    },
+    async () => {
+      const [snapshot, loss] = await Promise.all([
+        reportAtomicFiltersEligible(f)
+          ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, reportDashboardAllTimeProjectionEligible(f) ? 'dashboard' : 'full')
+          : reportDashboardDateFiltersEligible(f)
+            ? readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'dashboard', true)
+            : readSalesReportSnapshotForPurpose(env, f, false, undefined, {}, 'full'),
+        removalLossesFor(env, f),
+      ])
+      return fromSnapshot(snapshot, loss)
+    })
 }
 
 // The Dashboard's payment-method and branch cards read the SAME snapshot and the SAME grouped buckets as
@@ -2930,8 +3779,6 @@ function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; 
 
 function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { key: string; label: string; entity_id: number | null } {
   const customerId = row.customer_id == null || Number(row.customer_is_anonymous) !== 0 ? null : Number(row.customer_id)
-  const rawDate = String(row.created_at || '')
-  const local = new Date(new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(rawDate) ? rawDate : `${rawDate.replace(' ', 'T')}Z`).getTime() + 7 * 3_600_000)
   if (groupBy === 'customer') return { key: customerId == null ? 'general' : `id:${customerId}`, label: customerId == null ? '' : String(row.customer_name || '').trim(), entity_id: customerId }
   if (groupBy === 'cashier') {
     const id = row.cashier_id == null ? null : Number(row.cashier_id)
@@ -2942,8 +3789,12 @@ function reportGroupIdentity(row: ReportScalarRow, groupBy: SalesGroupKey): { ke
     const label = String(row.payment_method || '').trim() || 'Unknown'
     return { key: label.toLowerCase(), label: String(row.payment_method || '').trim(), entity_id: null }
   }
-  if (groupBy === 'hour') { const key = String(local.getUTCHours()).padStart(2, '0'); return { key, label: key, entity_id: null } }
-  if (groupBy === 'weekday') { const key = String(local.getUTCDay()); return { key, label: key, entity_id: null } }
+  if (groupBy === 'hour' || groupBy === 'weekday') {
+    const rawDate = String(row.created_at || '')
+    const local = new Date(new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(rawDate) ? rawDate : `${rawDate.replace(' ', 'T')}Z`).getTime() + 7 * 3_600_000)
+    if (groupBy === 'hour') { const key = String(local.getUTCHours()).padStart(2, '0'); return { key, label: key, entity_id: null } }
+    if (groupBy === 'weekday') { const key = String(local.getUTCDay()); return { key, label: key, entity_id: null } }
+  }
   const id = row.branch_id == null ? null : Number(row.branch_id)
   return { key: String(id || 0), label: String(row.branch_name || ''), entity_id: id }
 }

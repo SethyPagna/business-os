@@ -39,6 +39,8 @@ app.onError((error, c) => {
   if (/^Cache version for [a-z_]+ is unreadable: KV failed and D1 does not hold it$/.test(String(error?.message))) return c.json({ tripwire: true }, 598)
   throw error
 })
+// routes/feesCatalog.ts (labels, types) mounts ahead of routes/fees.ts and hands every other request on, matching index.ts.
+app.route('/api/fees', load(path.join(root, 'routes/feesCatalog.ts')).default)
 // routes/sales.ts mounts before compat, matching index.ts.
 for (const name of ['returns', 'fees', 'reports', 'batches', 'sales']) {
   app.route(`/api/${name}`, load(path.join(root, `routes/${name}.ts`)).default)
@@ -53,7 +55,7 @@ const staff = (role = {}, overrides = {}) => ({
 async function request(url, session, options = {}, fixture) {
   user = session
   opens = reads = 0
-  db = fixture || { prepare() { reads++; throw new Tripwire('Data access reached') } }
+  db = fixture || { prepare() { reads++; throw new Tripwire('Data access reached') }, batch() { reads++; throw new Tripwire('Data access reached') } }
   // The KV cache-version read is data access too (sales list/stats read it
   // before D1), so it trips the same wire and counts against a denial.
   const env = { CACHE: { get() { reads++; throw new Tripwire('KV reached') } } }

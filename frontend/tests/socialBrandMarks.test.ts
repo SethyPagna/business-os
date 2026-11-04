@@ -24,6 +24,7 @@ const legalContent = await import('../src/components/catalog/legal/legalContent.
 const aiProviderDisclosure = await import('../src/components/catalog/legal/aiProviderDisclosure.ts') as Record<string, any>
 const Icon = () => null
 const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
+const portalSocialLinks = await import('../src/components/catalog/portalSocialLinks.ts') as Record<string, any>
 const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
 const socialRow = compile('../src/components/catalog/PortalSocialRow.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
@@ -32,6 +33,7 @@ const socialRow = compile('../src/components/catalog/PortalSocialRow.tsx', (id) 
   if (id.endsWith('/BrandIcons.tsx')) return brand
   if (id.endsWith('/scriptTypography.ts')) return scriptTypography
   if (id.endsWith('/socialHandles.ts')) return socialHandles
+  if (id.endsWith('/portalSocialLinks.ts')) return portalSocialLinks
   throw new Error(`PortalSocialRow.tsx imports ${id}, which this harness does not provide`)
 })
 const legal = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => {

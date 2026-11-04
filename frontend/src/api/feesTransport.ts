@@ -4,6 +4,7 @@ import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { directMutationRefusedBeforeWrite } from '../utils/directMutationRefusal.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
+import { BUILTIN_FEE_TYPES, FEE_TYPE_NAME_MAX_CHARS, type BuiltinFeeType } from '../utils/feeTypeName.ts'
 import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from './retryRecordScope.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
@@ -15,9 +16,12 @@ import { adoptLegacyRetryRecord, assertRetryRecordAccount, retryRecordKey } from
 // 4,240 historical expense entries carry fee_type='expense', and manual
 // entry offers it too. The column is free text in D1; this union is the
 // frontend's vocabulary.
-export type FeeType = 'tax' | 'delivery' | 'change' | 'expense' | 'other'
+// The five built-in names plus any custom type an administrator added (routes/feesCatalog.ts): the Worker decides which are valid.
+export type FeeType = BuiltinFeeType | (string & {})
 
 export type FeeRecord = {
+  /** 'sale_delivery' = the courier cost recorded on a sale (read-only here; edited on the sale); absent or 'expense' = a stored expense. */
+  kind?: 'expense' | 'sale_delivery'
   id: number
   fee_type: FeeType
   label: string | null
@@ -44,15 +48,21 @@ export type FeeSummaryRow = {
   total_khr: number
 }
 
+export type SaleDeliveryTotals = { count: number; usd: number; khr: number }
+
 export type FeeListResult = {
   fees: FeeRecord[]
   total: number
   limit: number
   offset: number
   summary: FeeSummaryRow[]
+  /** Present only while the Worker's sale-rows switch is on: the courier cost on sales for the filtered window, or null when the caller may not read it. */
+  sale_delivery?: SaleDeliveryTotals | null
 }
 
 export type FeeListParams = {
+  /** 'all' asks for the stored expenses plus the sale courier rows; omitted = stored expenses only (the Worker ignores it while its switch is off). */
+  source?: 'all' | 'sale' | 'recorded'
   search?: string
   fee_type?: string
   from?: string
@@ -208,12 +218,15 @@ export function normalizeFeeCreateBody(payload: FeePayload): FeeCreateBody {
   const version = feeMoneyVersion(payload)
   const amountUsd = feeMoney(payload, 'usd', version), amountKhr = feeMoney(payload, 'khr', version)
   if (version && amountUsd === 0 && amountKhr === 0) throw new MoneyPrecisionError('invalid_decimal')
-  const type = String(payload.fee_type || '').trim().toLowerCase()
+  const typed = String(payload.fee_type || '').trim().replace(/\s+/g, ' ')
+  const type = (BUILTIN_FEE_TYPES as readonly string[]).includes(typed.toLowerCase())
+    ? typed.toLowerCase()
+    : (typed.length > 0 && typed.length <= FEE_TYPE_NAME_MAX_CHARS ? typed : 'other')
   const rawLabel = typeof payload.label === 'string' ? payload.label.trim().replace(/\s+/g, ' ') : ''
   const label = rawLabel.split(' ').slice(0, 6).join(' ').slice(0, 60).trim()
   const notes = typeof payload.notes === 'string' ? payload.notes.trim() : ''
   return {
-    fee_type: (['tax', 'delivery', 'change', 'expense', 'other'].includes(type) ? type : 'other') as FeeType,
+    fee_type: type as FeeType,
     label: label || null,
     amount_usd: amountUsd,
     amount_khr: amountKhr,
@@ -238,7 +251,7 @@ function readPendingFeeCreate(storage: FeeCreateStorage, actorId: string): Pendi
     const version = feeMoneyVersion(body)
     const keys = ['fee_type','label','amount_usd','amount_khr','fee_date','sale_id','branch_id','delivery_contact_id','notes', ...(version ? ['fee_money_version'] : [])]
     if (Object.keys(body).length !== keys.length || keys.some(key => !Object.prototype.hasOwnProperty.call(body,key))) return null
-    if (!['tax','delivery','change','expense','other'].includes(body.fee_type) || typeof body.fee_date !== 'string') return null
+    if (typeof body.fee_type !== 'string' || !body.fee_type.trim() || body.fee_type.length > FEE_TYPE_NAME_MAX_CHARS || typeof body.fee_date !== 'string') return null
     if ([body.label,body.notes].some(value => value !== null && typeof value !== 'string')) return null
     if ([body.sale_id,body.branch_id,body.delivery_contact_id].some(value => value !== null && (!Number.isSafeInteger(value) || value <= 0))) return null
     if ([body.amount_usd,body.amount_khr].some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) return null
@@ -462,20 +475,24 @@ export async function getAllFeesForExport(
   return all
 }
 
-// Every distinct saved label with its usage count and dominant fee type,
-// most-used first (GET /api/fees/labels). FeeForm offers these as
-// suggestions and auto-picks the dominant type when a known label is chosen.
+// Every label with its usage count and default type, most-used first (GET /api/fees/labels). FeeForm offers the active ones as
+// suggestions and auto-picks the type when a known label is chosen; the manager asks for the archived too and can add one
+// that no expense carries yet.
 export type FeeLabelSuggestion = {
   label: string
   uses: number
   fee_type: FeeType
   type_counts?: Array<{ fee_type: FeeType; uses: number }>
+  id?: number | null
+  registered?: boolean
+  archived?: boolean
 }
 
-export function getFeeLabels(): Promise<{ labels: FeeLabelSuggestion[] }> {
+export function getFeeLabels(options: { includeArchived?: boolean } = {}): Promise<{ labels: FeeLabelSuggestion[] }> {
+  const all = options.includeArchived === true
   return route(
-    'fees:labels',
-    () => apiFetch('GET', '/api/fees/labels'),
+    all ? 'fees:labels:all' : 'fees:labels',
+    () => apiFetch('GET', all ? '/api/fees/labels?include_archived=1' : '/api/fees/labels'),
     () => ({ labels: [] }),
     { raceLocalFallback: false },
   ) as Promise<{ labels: FeeLabelSuggestion[] }>
@@ -486,8 +503,14 @@ export function getFeeLabelImpact(from: string, to: string): Promise<unknown> {
   return apiFetch('GET', `/api/fees/labels/impact?${query.toString()}`)
 }
 
+// Catalog writes go through route() as writes: they are refused while the server is unreachable, and once the Worker answers
+// every cached fees read (the list, the labels, the types) is dropped, so the next open of the form or the manager is current.
+function feeCatalogWrite<T>(channel: string, path: string, body: unknown): Promise<T> {
+  return route(channel, () => apiFetch('POST', path, body), null, true) as Promise<T>
+}
+
 export function replaceFeeLabel(from: string, to: string): Promise<unknown> {
-  return apiFetch('POST', '/api/fees/labels/replace', { from, to })
+  return feeCatalogWrite('fees:labels:replace', '/api/fees/labels/replace', { from, to })
 }
 
 export type FeeLabelTypeImpact = {
@@ -503,7 +526,77 @@ export function getFeeLabelTypeImpact(label: string): Promise<FeeLabelTypeImpact
 }
 
 export function classifyFeeLabel(label: string, feeType: FeeType): Promise<{ success: boolean; changed: number; label: string; fee_type: FeeType }> {
-  return apiFetch('POST', '/api/fees/labels/classify', { label, fee_type: feeType }) as Promise<{ success: boolean; changed: number; label: string; fee_type: FeeType }>
+  return feeCatalogWrite('fees:labels:classify', '/api/fees/labels/classify', { label, fee_type: feeType })
+}
+
+/** Adds a label that no expense carries yet (the Worker refuses a duplicate, an archived name and anything over 6 words or 60 characters). */
+export function addFeeLabel(label: string, feeType?: FeeType): Promise<{ success: boolean; label: string; uses: number }> {
+  return feeCatalogWrite('fees:labels:add', '/api/fees/labels', feeType ? { label, fee_type: feeType } : { label })
+}
+
+/** Archive hides a label from the suggestions; its expenses keep their text. Restore undoes it. Neither deletes anything. */
+export function setFeeLabelArchived(label: string, archived: boolean): Promise<{ success: boolean; label: string; archived: boolean; changed: number }> {
+  return feeCatalogWrite('fees:labels:archive', `/api/fees/labels/${archived ? 'archive' : 'restore'}`, { label })
+}
+
+// Expense types: the five built-in ones plus the custom ones an administrator adds (GET /api/fees/types).
+export type FeeTypeEntry = {
+  value: string
+  name: string
+  builtin: boolean
+  id: number | null
+  registered: boolean
+  archived: boolean
+  uses?: number
+}
+
+export function getFeeTypes(options: { uses?: boolean; includeArchived?: boolean } = {}): Promise<{ types: FeeTypeEntry[] }> {
+  const query = new URLSearchParams()
+  if (options.uses) query.set('uses', '1')
+  if (options.includeArchived) query.set('include_archived', '1')
+  const suffix = query.toString()
+  return route(
+    suffix ? `fees:types:${suffix}` : 'fees:types',
+    () => apiFetch('GET', suffix ? `/api/fees/types?${suffix}` : '/api/fees/types'),
+    () => ({ types: [] }),
+    { raceLocalFallback: false },
+  ) as Promise<{ types: FeeTypeEntry[] }>
+}
+
+export function getFeeTypeImpact(name: string): Promise<{ name: string; linked_records: number; registered: boolean; archived: boolean }> {
+  const query = new URLSearchParams({ name })
+  return apiFetch('GET', `/api/fees/types/impact?${query.toString()}`) as Promise<{ name: string; linked_records: number; registered: boolean; archived: boolean }>
+}
+
+export function addFeeType(name: string): Promise<{ success: boolean; name: string }> {
+  return feeCatalogWrite('fees:types:add', '/api/fees/types', { name })
+}
+
+export function renameFeeType(from: string, to: string): Promise<{ success: boolean; changed: number; name: string }> {
+  return feeCatalogWrite('fees:types:rename', '/api/fees/types/rename', { from, to })
+}
+
+export function setFeeTypeArchived(name: string, archived: boolean): Promise<{ success: boolean; name: string; archived: boolean; changed: number }> {
+  return feeCatalogWrite('fees:types:archive', `/api/fees/types/${archived ? 'archive' : 'restore'}`, { name })
+}
+
+/** The choices for an expense's type picker: built-in, then active custom, then the type the open expense already carries (even archived or unknown) so editing never drops it. */
+export function feeTypeChoices(types: readonly FeeTypeEntry[] | null | undefined, current?: string | null): Array<{ value: string; builtin: boolean }> {
+  const out: Array<{ value: string; builtin: boolean }> = BUILTIN_FEE_TYPES.map((value) => ({ value, builtin: true }))
+  for (const entry of types || []) {
+    if (entry.builtin || entry.archived || out.some((option) => option.value.toLowerCase() === entry.value.toLowerCase())) continue
+    out.push({ value: entry.value, builtin: false })
+  }
+  const kept = String(current || '').trim()
+  if (kept && !out.some((option) => option.value === kept)) out.push({ value: kept, builtin: false })
+  return out
+}
+
+/** True when a type name is one the Worker would accept as a choice for a label or expense. */
+export function feeTypeIsChoosable(types: readonly FeeTypeEntry[] | null | undefined, value: string): boolean {
+  const key = value.trim().toLowerCase()
+  if ((BUILTIN_FEE_TYPES as readonly string[]).includes(key)) return true
+  return (types || []).some((entry) => !entry.archived && entry.value.trim().toLowerCase() === key)
 }
 
 export function getFee(id: number): Promise<{ fee: FeeRecord }> {

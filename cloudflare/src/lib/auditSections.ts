@@ -43,7 +43,7 @@ export const AUDIT_SECTION_ENTITIES: Record<AuditSectionId, readonly string[]> =
   settings: [
     'settings', 'branch', 'ai_provider_config', 'telegram', 'telegram_webhook', 'telegram_summary',
   ],
-  expenses: ['fee', 'fees', 'fee_label'],
+  expenses: ['fee', 'fees', 'fee_label', 'fee_type'],
   returns: [
     'return', 'returns', 'return_create', 'return_reason', 'return_reason_presets', 'supplier_return',
   ],

@@ -19,8 +19,7 @@ import bcrypt from 'bcryptjs'
 // Legacy bcrypt hashes ($2a$/$2b$/$2y$) still verify on every plan -- refusing
 // them would lock out whoever has not signed in since this shipped, the owner
 // included. A successful sign-in on one reports needsRehash, and the caller
-// rewrites it once (compare-and-set on the old value). See
-// Records/Lanes/2026-10-05/E6-HASH-REPORT.md for the Free-move campaign.
+// rewrites it once (compare-and-set on the old value).
 //
 // Iterations: OWASP's Password Storage Cheat Sheet recommends 600,000 for
 // PBKDF2-HMAC-SHA256; NIST SP 800-63B says "as large as verification server
@@ -39,7 +38,7 @@ import bcrypt from 'bcryptjs'
 // it current; keep the old secret until every hash has signed in again
 // (each sign-in rewrites to the current version).
 // Losing PASSWORD_PEPPER makes every peppered hash unverifiable: the owner
-// keeps a backup copy outside Cloudflare (see E6-HASH-REPORT.md).
+// keeps a backup copy outside Cloudflare.
 // When PASSWORD_PEPPER is unset (or shorter than 32 characters) nobody is
 // locked out: unpeppered and bcrypt hashes verify as before, new hashes are
 // written unpeppered, a warning is logged (never the value), and

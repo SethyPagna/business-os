@@ -1,6 +1,6 @@
 // RET-D (owner, 5 Oct 2026): "Stock changes: when Revert is not allowed, say
 // concisely WHY and WHERE (destination), with an in-built link; Revert must
-// never be able to break data." TRANSITION-MATRIX-AUDIT.md section 2.4.
+// never be able to break data."
 //
 // A refusing stock guard already knows THAT the stock moved on; this module
 // names WHICH record moved it, so the refusal can read "Sale #R used 3 of

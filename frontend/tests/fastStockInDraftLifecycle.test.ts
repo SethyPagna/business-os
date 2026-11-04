@@ -6,7 +6,7 @@ import { canRestoreMinimizedWork } from '../src/utils/minimizedWork.ts'
 // The Stock Session (FastStockInModal, rewritten by UI-STOCK-2): X asks through
 // the shared guard, the minus preserves, Discard clears, and the draft keeps
 // the protected receipt values. Repointed by UI-STOCK-3 from the old modal's
-// shape; the retired pins are listed in the UI-STOCK-3 lane report.
+// shape.
 const read = (rel: string): string => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const modal = read('../src/components/inventory/FastStockInModal.tsx')
 const header = read('../src/components/stock-session/StockSessionHeader.tsx')

@@ -8,6 +8,7 @@ import { formatUsd4 } from '../../utils/reportMoney.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { STATS_PRESETS } from '../shared/statsStripPresets.ts'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
@@ -2121,20 +2122,13 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           lg+, where each group's `lg:block` forces every group to render as the
           normal grid. Full-width segmented chips (flex-1); overflow-x-auto is a
           safety valve for long translated labels. */}
-      <div className="lg:hidden flex gap-1 overflow-x-auto" role="tablist" aria-label={t('dashboard') || 'Dashboard'}>
+      <ChipRail role="tablist" stretch label={t('dashboard') || 'Dashboard'} className="lg:hidden">
         {MOBILE_SECTIONS.map(s => (
-          <button
-            key={s.id}
-            type="button"
-            role="tab"
-            aria-selected={mobileSection === s.id}
-            onClick={() => setMobileSection(s.id)}
-            className={`min-h-8 flex-1 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobileSection === s.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
-          >
+          <RailChip key={s.id} tab selected={mobileSection === s.id} onClick={() => setMobileSection(s.id)}>
             {s.label}
-          </button>
+          </RailChip>
         ))}
-      </div>
+      </ChipRail>
 
       {/* Charts */}
       <section className={`${mobileSection === 'overview' ? '' : 'hidden'} lg:block`}>
@@ -2142,20 +2136,17 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         <div className="lg:col-span-2 card flex flex-col p-3 sm:p-3.5">
           <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
-            <div className="inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90 sm:w-auto">
-              <div className="flex min-w-0 gap-1 overflow-x-auto">
+            <ChipRail label={t('analytics')} className="w-full sm:w-auto">
               {([
                 ['revenue', revenueFlowLabel],
                 ...(aHasProfit ? [['profit', profitVsCogsLabel]] as Array<[DashboardChartMode, string]> : []),
                 ['volume', salesCountLabel],
               ] satisfies Array<[DashboardChartMode, string]>).map(([id,lbl]) => (
-                <button key={id} onClick={() => setActiveChart(id)}
-                  className={`min-h-7 shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${chartMode===id ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
+                <RailChip key={id} selected={chartMode===id} onClick={() => setActiveChart(id)}>
                   {lbl}
-                </button>
+                </RailChip>
               ))}
-              </div>
-            </div>
+            </ChipRail>
           </div>
           {/* P11-15: this wrapper (and each branch's chart sub-wrapper below)
               is flex-1 so the plot grows to fill whatever height the
@@ -2251,32 +2242,18 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         <div className="card flex flex-col p-3 sm:p-4">
           <div className="flex min-w-0 flex-col items-start gap-2 mb-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
-            <div className="max-w-full overflow-x-auto pb-0.5">
-            {/* Segmented-control style aligned with the Analytics tabs
-                above (revenue/profit/volume) instead of this row's own
-                separate, cruder bg-gray-100/bg-blue-600 combo -- same
-                pill container, same white-chip-on-active look, so the two
-                toggles on this page read as one consistent control
-                pattern rather than two different ones. The revenue option
-                also used to splice a literal "$" character into the
-                translated label string (`$ ${t('revenue')}`) -- fragile
-                for translation and looked like a stray typo next to the
-                text (user-reported: "bad color and button design and the
-                icon $"). Replaced with a real DollarSign icon rendered
-                next to the label instead of baked into the string. */}
-            <div className="inline-flex min-w-max rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90">
+            {/* A real DollarSign icon on Revenue: a "$" spliced into the translated label read as a stray typo. */}
+            <ChipRail label={t('top_products')} className="w-full sm:w-auto">
               {([
                 ['revenue', t('revenue')],
                 ['qty', t('quantity')],
               ] satisfies Array<[DashboardTopMode, string]>).map(([m,lbl]) => (
-                <button key={m} onClick={() => setTopMode(m)}
-                  className={`inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-semibold leading-tight transition-colors sm:px-3 sm:text-sm ${topMode===m ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
-                  {m === 'revenue' ? <DollarSign className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                <RailChip key={m} selected={topMode===m} onClick={() => setTopMode(m)}
+                  icon={m === 'revenue' ? <DollarSign className="h-3.5 w-3.5" aria-hidden="true" /> : null}>
                   {lbl}
-                </button>
+                </RailChip>
               ))}
-            </div>
-            </div>
+            </ChipRail>
           </div>
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>

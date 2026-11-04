@@ -363,7 +363,7 @@ export function buildSaleRecordEventsInsert(events: SaleRecordEventInput[]): { s
 export const SALE_RECORD_BATCH_MAX_STATEMENTS = 500
 /** A SINGLE sale's status change is one atomic batch: cancelling restores every line's lots, stock and movements (about 19 + 8 per line), so a
  * 62-line sale needs about 515 and a 200-line sale (MAX_PRICING_LINES) about 1,620. Cloudflare counts a batch as ONE call and documents a
- * 2,000-statement batch as a single Worker invocation (Records/Incidents/2026-11-01/FREE-LIMITS.md section 0); the batch stays atomic. */
+ * 2,000-statement batch as a single Worker invocation; the batch stays atomic. */
 export const SALE_STATUS_BATCH_MAX_STATEMENTS = 2000
 
 export function assertSaleRecordBatchBounds(statementCount: number, snapshot: unknown, eventsBytes: number, maxStatements: number = SALE_RECORD_BATCH_MAX_STATEMENTS): void {

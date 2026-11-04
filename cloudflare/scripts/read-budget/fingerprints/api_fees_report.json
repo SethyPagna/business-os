@@ -20,5 +20,83 @@
    "81a7fc9cf696",
    "SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label, COUNT(*) AS count, ROUND"
   ]
+ ],
+ "fees-report-with-sale-delivery-include-sales": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "23b5ef6272bc",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr)"
+  ],
+  [
+   "b5863f84be44",
+   "SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COAL"
+  ],
+  [
+   "ce4ec237f102",
+   "SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND("
+  ],
+  [
+   "81a7fc9cf696",
+   "SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label, COUNT(*) AS count, ROUND"
+  ],
+  [
+   "d28bf616a82c",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ]
+ ],
+ "fees-report-with-sale-delivery-all-time-branch-include-sales": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9a1d21952647",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr)"
+  ],
+  [
+   "f81383cb8f1d",
+   "SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COAL"
+  ],
+  [
+   "caf828873533",
+   "SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND("
+  ],
+  [
+   "a7122f846dfc",
+   "SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label, COUNT(*) AS count, ROUND"
+  ],
+  [
+   "4a1eefd1618b",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ]
+ ],
+ "fees-report-with-sale-delivery-month-branch-include-sales": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "3331f17a4447",
+   "SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr)"
+  ],
+  [
+   "c80e8fdbd307",
+   "SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COAL"
+  ],
+  [
+   "c16470db7e19",
+   "SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND("
+  ],
+  [
+   "8ddb1855a53c",
+   "SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label, COUNT(*) AS count, ROUND"
+  ],
+  [
+   "dde3c2145ab9",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ]
  ]
 }

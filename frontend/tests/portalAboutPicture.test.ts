@@ -48,7 +48,7 @@ await runTest('AF-1 markup: the About page shows the picture whole, in a square 
   const about = between(tabs(), 'function CatalogAboutSection(', '\nfunction CatalogFaqSection(')
   const figureAt = about.indexOf('data-portal-about-picture')
   assert.ok(figureAt > about.indexOf('data-portal-about-hero'), 'after the shop-name card')
-  assert.ok(figureAt < about.indexOf('lg:grid-cols-[1fr,1.4fr]'), 'before the story and contact row')
+  assert.ok(figureAt < about.indexOf('<OwnerText text={storyText} />'), 'before the story and the contact row')
   const figure = about.slice(about.lastIndexOf('<figure', figureAt), about.indexOf('</figure>', figureAt))
   assert.match(figure, /className="[^"]*\baspect-square\b[^"]*"/, 'a square box')
   assert.match(figure, /\bmax-w-\[640px\]/)

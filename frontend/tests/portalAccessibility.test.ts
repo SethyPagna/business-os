@@ -48,6 +48,7 @@ const PUBLIC_STOREFRONT_FILES = [
   'PortalFilterCombobox.tsx',
   'PortalPromoStrip.tsx',
   'PortalPromotionsBanner.tsx',
+  'PortalAnnouncementStrip.tsx',
   'PortalSocialRow.tsx',
   'PortalNoPaymentNotice.tsx',
   'catalogUi.tsx',
@@ -107,7 +108,7 @@ runTest('a product image is described by the product, never by the word "Product
 runTest('the logo and cover images name the business or hide themselves', () => {
   const secondary = read('CatalogSecondaryTabs.tsx')
   // The cover is a backdrop; the logo IS the business identity.
-  assert.match(secondary, /src=\{versionedBusinessCover\}\s*\r?\n\s*alt=""\s*\r?\n\s*aria-hidden="true"/, 'the cover backdrop is decorative')
+  assert.match(secondary, /src=\{src\}\s*\r?\n\s*alt=""\s*\r?\n\s*aria-hidden="true"/, 'the cover photo is decorative')
   assert.match(secondary, /alt=\{previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\)\}/, 'the logo names the business')
 })
 

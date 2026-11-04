@@ -26,6 +26,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
+import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -1144,25 +1145,16 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       {/* Compact one-row "mini section" chips (user, Part 567: "for sections
           make them one row, mini sections") -- tighter padding + text than the
           old px-3/py-1.5/text-sm pills, kept on a single scrollable line. */}
-      <div className="flex items-center gap-2 overflow-x-auto">
-        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
-          {sectionChips.map((chip) => {
-            const Icon = chip.icon
-            const isActive = section === chip.key
-            return (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => setSection(chip.key)}
-                aria-pressed={isActive}
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {chip.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      <ChipRail label={tr('sections', 'Sections')}>
+        {sectionChips.map((chip) => {
+          const Icon = chip.icon
+          return (
+            <RailChip key={chip.key} selected={section === chip.key} onClick={() => setSection(chip.key)} icon={<Icon className="h-3.5 w-3.5" />}>
+              {chip.label}
+            </RailChip>
+          )
+        })}
+      </ChipRail>
 
       {section === 'invoices' ? (
         <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>

@@ -14,7 +14,7 @@
 //   * Never a request after the sheet is gone: not the fallback to the default camera, and not a restart from a page return
 //     while the first request is still waiting for an answer (6.0.961, release review c2f27dce6, P3-1 and P3-2).
 //
-// One test per scenario row of the lane report (Records/Consolidation/2026-10-21/LANE-953.md).
+// One test per camera-scanner scenario.
 //
 // Run: node tests/scannerCameraScenarios.test.ts
 import assert from 'node:assert/strict'

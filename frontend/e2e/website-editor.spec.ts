@@ -289,13 +289,13 @@ test.describe('Website Editor fixes (ED-0)', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test('E2E-11: computer columns stop at 8 in the input, the preview and the Save; a stored 1 phone column shows 2 and is sent back as 1', async ({ page, context }, testInfo) => {
+  test('E2E-11: with automatic columns off, computer columns stop at 8 in the input, the preview and the Save; a stored 1 phone column shows 2 and is sent back as 1', async ({ page, context }, testInfo) => {
     // CATCHES: max="10" -- the preview showed 9 or 10 columns the shop never
     // shows -- and the phone input offering 1, which the shop renders as 2.
     const desktop = testInfo.project.name === DESKTOP_PROJECT
     if (desktop) await page.setViewportSize(PREVIEW_GRID_WIDTH)
     const health = collectPageHealth(page)
-    await openEditor(page, context, { seed: { customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '4' } })
+    await openEditor(page, context, { seed: { customer_portal_grid_columns_auto: 'false', customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '4' } })
     await openSection(page, 'Display settings')
     const computerColumns = page.locator('#portal-grid-desktop')
     await computerColumns.fill('10')
@@ -307,8 +307,122 @@ test.describe('Website Editor fixes (ED-0)', () => {
     }
     const saved = await saveAndCapture(page)
     expect(saved.customer_portal_grid_columns_desktop).toBe('8')
-    expect(saved.customer_portal_grid_columns_mobile, 'the untouched stored value round-trips').toBe('1')
+    expect(saved.customer_portal_grid_columns_mobile ?? '1', 'the untouched stored 1 is never rewritten as the 2 the input shows (a Save sends only changed keys)').toBe('1')
+    expect(saved.customer_portal_grid_columns_auto ?? 'false', 'the switch stays off').toBe('false')
     expectNoRuntimeErrors(health)
+  })
+
+  test('E2E-11b: automatic columns are on by default, grey out the fixed counts, drive the preview, and turning them off frees the inputs', async ({ page, context }, testInfo) => {
+    // CATCHES: a column input that still looks editable while it does nothing (the old "looks wired but is not"
+    // gap), an unset switch read as off (a stored 2 would keep the old grid), and a Save that drops the switch.
+    const desktop = testInfo.project.name === DESKTOP_PROJECT
+    if (desktop) await page.setViewportSize(PREVIEW_GRID_WIDTH)
+    const health = collectPageHealth(page)
+    await openEditor(page, context, { seed: { customer_portal_grid_columns_mobile: '1', customer_portal_grid_columns_desktop: '2' } })
+    await openSection(page, 'Display settings')
+    const automatic = page.locator('#portal-grid-auto')
+    await expect(automatic).toBeChecked()
+    await expect(page.locator('#portal-grid-desktop')).toBeDisabled()
+    await expect(page.locator('#portal-grid-mobile')).toBeDisabled()
+    if (desktop) {
+      const grid = page.locator('article[data-product-card="true"]').first().locator('xpath=..')
+      await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length), { message: 'the preview grid at 1280 px follows the screen, not the stored 2' }).toBe(5)
+    }
+    await automatic.uncheck()
+    await expect(page.locator('#portal-grid-desktop')).toBeEnabled()
+    await expect(page.locator('#portal-grid-mobile')).toBeEnabled()
+    if (desktop) {
+      const grid = page.locator('article[data-product-card="true"]').first().locator('xpath=..')
+      await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').length), { message: 'off: the stored 2 applies again' }).toBe(2)
+    }
+    const saved = await saveAndCapture(page)
+    expect(saved.customer_portal_grid_columns_auto).toBe('false')
+    expectNoRuntimeErrors(health)
+  })
+
+  test('E2E-11c: announcement bar -- the stored message fills the fields, the preview follows typing and cannot be closed, bad input is flagged, and the Save carries all six', async ({ page, context }) => {
+    // CATCHES: a field that does not load what is stored, a preview that ignores typing or draws a close button
+    // (the owner could not tell what visitors see), a javascript: link or a reversed range saved without a warning,
+    // and a Save that drops one of the six settings.
+    const health = collectPageHealth(page)
+    await openEditor(page, context, {
+      seed: {
+        customer_portal_announcement_enabled: 'true',
+        customer_portal_announcement_text_en: 'Sample sale',
+        customer_portal_announcement_text_km: 'ការលក់',
+        customer_portal_announcement_link: 'https://example.test/news',
+        customer_portal_announcement_start: '2026-11-10',
+        customer_portal_announcement_end: '2026-11-12',
+      },
+    })
+    await openSection(page, 'Display settings')
+    await expect(page.locator('#portal-announcement-enabled')).toBeChecked()
+    await expect(page.locator('#portal-announcement-text-en')).toHaveValue('Sample sale')
+    await expect(page.locator('#portal-announcement-text-km')).toHaveValue('ការលក់')
+    await expect(page.locator('#portal-announcement-link')).toHaveValue('https://example.test/news')
+    await expect(page.locator('#portal-announcement-start')).toHaveValue('10/11/2026')
+    await expect(page.locator('#portal-announcement-end')).toHaveValue('12/11/2026')
+
+    const preview = page.locator('[data-portal-announcement="true"]')
+    await expect(preview).toContainText('Sample sale')
+    await expect(preview.locator('button'), 'the preview has no close button').toHaveCount(0)
+    await page.locator('#portal-announcement-text-en').fill('Sample sale extended')
+    await expect(preview).toContainText('Sample sale extended')
+
+    const link = page.locator('#portal-announcement-link')
+    await link.fill('javascript:alert(1)')
+    await expect(page.getByTestId('portal-announcement-link-issue')).toBeVisible()
+    await expect(preview.locator('a'), 'the preview does not make a link of it').toHaveCount(0)
+    await link.fill('https://example.test/new')
+    await expect(page.getByTestId('portal-announcement-link-issue')).toHaveCount(0)
+    await expect(preview.locator('a[href="https://example.test/new"]')).toHaveCount(1)
+
+    const end = page.locator('#portal-announcement-end')
+    await end.fill('01/11/2026')
+    await end.press('Tab')
+    await expect(page.getByTestId('portal-announcement-range-issue')).toBeVisible()
+    await end.fill('12/11/2026')
+    await end.press('Tab')
+    await expect(page.getByTestId('portal-announcement-range-issue')).toHaveCount(0)
+
+    await page.locator('#portal-announcement-text-km').fill('ការលក់ថ្មី')
+    const start = page.locator('#portal-announcement-start')
+    await start.fill('11/11/2026')
+    await start.press('Tab')
+    await end.fill('13/11/2026')
+    await end.press('Tab')
+    await page.locator('#portal-announcement-enabled').uncheck()
+    await expect(preview, 'switched off, the preview bar goes').toHaveCount(0)
+    await page.locator('#portal-announcement-enabled').check()
+    await expect(preview).toContainText('Sample sale extended')
+    await page.locator('#portal-announcement-enabled').uncheck()
+
+    const saved = await saveAndCapture(page)
+    expect(saved, 'a Save sends the changed keys; all six changed here').toMatchObject({
+      customer_portal_announcement_enabled: 'false',
+      customer_portal_announcement_text_en: 'Sample sale extended',
+      customer_portal_announcement_text_km: 'ការលក់ថ្មី',
+      customer_portal_announcement_link: 'https://example.test/new',
+      customer_portal_announcement_start: '2026-11-11',
+      customer_portal_announcement_end: '2026-11-13',
+    })
+    expectNoRuntimeErrors(health)
+  })
+
+  test('E2E-11d: announcement bar -- a new bar starts off and empty, clearing a field clears the preview', async ({ page, context }) => {
+    // CATCHES: a bar that starts on with nothing to say, a cleared text box that the preview keeps showing (an
+    // "||" fallback to the saved value).
+    await openEditor(page, context)
+    await openSection(page, 'Display settings')
+    await expect(page.locator('#portal-announcement-enabled')).not.toBeChecked()
+    await expect(page.locator('#portal-announcement-text-en')).toHaveValue('')
+    const preview = page.locator('[data-portal-announcement="true"]')
+    await expect(preview).toHaveCount(0)
+    await page.locator('#portal-announcement-enabled').check()
+    await page.locator('#portal-announcement-text-en').fill('Sample message')
+    await expect(preview).toContainText('Sample message')
+    await page.locator('#portal-announcement-text-en').fill('')
+    await expect(preview, 'cleared text, no bar').toHaveCount(0)
   })
 
   test('E2E-12: a new post gets a web link and a product link, and the Save carries both', async ({ page, context }) => {

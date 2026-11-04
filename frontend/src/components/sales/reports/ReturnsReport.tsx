@@ -14,7 +14,8 @@ import { getReturnsReport } from '../../../api/returnsReadTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
-import { Button, Chip, Fold, OverflowMenu } from '../../shared/kit'
+import { Button, Fold, OverflowMenu } from '../../shared/kit'
+import { RailChip } from '../../shared/kit/ChipRail.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
@@ -186,12 +187,13 @@ export default function ReturnsReport(p: ReportViewProps) {
       title={title}
       titleControl={p.titleControl}
       hint={{ label: title, text: tr('rpt_hint_returns', 'Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the display currency, like revenue; the same refunds are already subtracted from Revenue.') }}
+      secondaryLabel={title}
       secondaryActions={
         <>
           {MODES.map((m) => (
-            <Chip key={m.id} selected={mode === m.id} onClick={() => { setMode(m.id); setSort(null); setOpenRow(null) }}>
+            <RailChip key={m.id} selected={mode === m.id} onClick={() => { setMode(m.id); setSort(null); setOpenRow(null) }}>
               {tr(m.key, m.fallback)}
-            </Chip>
+            </RailChip>
           ))}
         </>
       }

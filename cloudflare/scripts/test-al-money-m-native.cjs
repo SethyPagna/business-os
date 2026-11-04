@@ -1,5 +1,5 @@
 'use strict'
-// AL-M (side finding M, Records/Lanes/2026-10-12/AL-MONEY-REPRO.md): a sale
+// AL-M (side finding M): a sale
 // cancellation must never block a customer return, against the WHOLE Worker
 // on workerd + D1.
 //

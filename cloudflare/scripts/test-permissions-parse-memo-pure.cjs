@@ -1,4 +1,4 @@
-// CPU item (Records/Performance/2026-09-25 I1): permission JSON is parsed
+// CPU item: permission JSON is parsed
 // once per user object, not on every check.
 //
 // hasPermission() ran isAdminControlUser() (merge = 2 JSON.parse) and then

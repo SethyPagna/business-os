@@ -57,12 +57,15 @@ export default function PortalEmbedConsent({
   title,
   address = '',
   frameClassName = 'h-72 w-full border-0',
+  className = '',
 }: {
   copy: CopyFn
   src: string
   title: string
   address?: string
   frameClassName?: string
+  // Lets the caller's card stretch the embed (the About page puts it beside the contacts).
+  className?: string
 }) {
   const [granted, setGranted] = useState(false)
 
@@ -95,7 +98,7 @@ export default function PortalEmbedConsent({
 
   if (granted) {
     return (
-      <div className="flex flex-col gap-2">
+      <div className={`flex flex-col gap-2 ${className}`.trim()}>
         <div className="flex justify-end px-3 pt-3">
           <button
             type="button"
@@ -123,7 +126,7 @@ export default function PortalEmbedConsent({
   }
 
   return (
-    <div className="flex flex-col items-start gap-3 px-5 py-6 text-sm text-slate-600 dark:text-neutral-300">
+    <div className={`flex flex-col items-start justify-center gap-3 px-5 py-6 text-sm text-slate-600 dark:text-neutral-300 ${className}`.trim()}>
       <p className="max-w-prose text-xs leading-6">
         {copy('portal_legal_map_consent_b', MAP_CONSENT_BODY_EN, MAP_CONSENT_BODY_KM)}
       </p>

@@ -1,5 +1,5 @@
 // Companion for cloudflare/migrations/0236_branch_history_label_columns.sql
-// (cutover lane LA; design G12-HISTORY-UNDO-DESIGN.md sections 3.4 and 4.2 F7).
+// (cutover lane LA).
 //
 // Real chain, real SQLite at D1's limits, each file applied in one transaction
 // as D1 does. The live database already holds 0001-0226 (+0229 in this

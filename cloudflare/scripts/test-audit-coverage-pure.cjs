@@ -58,7 +58,14 @@ for (const file of files) {
 // likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
   if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts' || file === 'productCost.ts' || file === 'inventoryChecks.ts') continue
+  // The expense routes commit every audit row INSIDE the mutation's own batch (a stronger contract than audit()); checked below.
+  if (file === 'fees.ts' || file === 'feesCatalog.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
+}
+
+for (const file of ['fees.ts', 'feesCatalog.ts']) {
+  const src = fs.readFileSync(path.join(routesDir, file), 'utf8')
+  ok(!/\baudit\(/.test(src) && /\b(buildAuditStatement|feeCreateAuditStatement)\(/.test(src), `${file} writes every audit row in its mutation's own batch (no best-effort audit() call)`)
 }
 
 const inventoryChecks = fs.readFileSync(path.join(routesDir, 'inventoryChecks.ts'), 'utf8')
