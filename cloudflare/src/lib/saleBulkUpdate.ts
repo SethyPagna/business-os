@@ -31,7 +31,11 @@ export const BULK_UPDATE_KIND = 'sale.fields.bulk'
 export const BULK_CUSTOMER_UPDATE_KIND = 'sale.customer.bulk'
 export const MULTI_CUSTOMER_UPDATE_KIND = 'sale.customer.v2.bulk'
 export const SINGLE_CUSTOMER_UPDATE_KIND = 'sale.customer.single'
-export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND])
+// One sale's driver is edited with the same authority as its delivery cost
+// (sales:amend). Earlier single-sale driver changes were saved under
+// BULK_UPDATE_KIND and stay replayable under it, gated by sales:bulk.
+export const SINGLE_DELIVERY_UPDATE_KIND = 'sale.delivery.single'
+export const SALE_BULK_UPDATE_KINDS = new Set([BULK_UPDATE_KIND, BULK_CUSTOMER_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, SINGLE_DELIVERY_UPDATE_KIND])
 
 type Row = Record<string, unknown>
 type BulkUpdateItem = { id: number; expected_updated_at: string | null }
@@ -48,6 +52,7 @@ export type SaleBulkUpdateRequest = {
 }
 
 export function saleBulkUpdateApplier(action: SaleBulkUpdateAction, itemCount = 2): string {
+  if (action.kind === 'delivery_contact' && itemCount === 1) return SINGLE_DELIVERY_UPDATE_KIND
   return action.kind === 'customer' || action.kind === 'customer_name'
     ? itemCount === 1 ? SINGLE_CUSTOMER_UPDATE_KIND : MULTI_CUSTOMER_UPDATE_KIND
     : BULK_UPDATE_KIND
@@ -115,7 +120,8 @@ function optionalId(value: unknown, label: string): number | null {
 
 function permission(user: SessionUser, action: SaleBulkUpdateAction, itemCount: number): void {
   const customerAction = action.kind === 'customer' || action.kind === 'customer_name'
-  const actionKey = customerAction && itemCount === 1 ? 'customer' : 'bulk'
+  const singleSale = itemCount === 1
+  const actionKey = customerAction && singleSale ? 'customer' : action.kind === 'delivery_contact' && singleSale ? 'amend' : 'bulk'
   const underlyingAction = customerAction ? 'customer' : 'amend'
   if (getActionTier(user, 'sales', actionKey) !== 'full' || getActionTier(user, 'sales', underlyingAction) !== 'full') {
     fail('No permission to change the selected sales.', 403)
@@ -668,7 +674,8 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT) fail('Unsupported bulk update snapshot.')
   const expectedApplier = saleBulkUpdateApplier(snapshot.action, snapshot.members.length)
   const legacyCustomerApplier = snapshot.action.kind === 'customer' && payload.applier === BULK_CUSTOMER_UPDATE_KIND
-  if (payload.applier !== expectedApplier && !legacyCustomerApplier) fail('This group does not match its saved permission scope.')
+  const legacyDriverApplier = snapshot.action.kind === 'delivery_contact' && payload.applier === BULK_UPDATE_KIND
+  if (payload.applier !== expectedApplier && !legacyCustomerApplier && !legacyDriverApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'

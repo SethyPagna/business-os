@@ -229,6 +229,20 @@ check(`paid_by_method reports only what was actually taken (${JSON.stringify(rit
 check('POSITIVE CONTROL: the unpaid delivery was on a DIFFERENT method, so an unfiltered breakdown would list two',
   db.prepare("SELECT COUNT(DISTINCT payment_method) AS n FROM sales WHERE delivery_contact_id = 9").get().n === 2)
 
+// A sale's driver edited afterwards (SALE-DELIVERY-EDIT) moves the delivery with it: the report groups on the sale row's
+// live delivery_contact_id, so no stored aggregate needs repair.
+db.prepare('INSERT INTO delivery_contacts (id, name) VALUES (?,?)').run(10, 'Sophea')
+db.prepare("UPDATE sales SET delivery_contact_id = 10, delivery_contact_name = 'Sophea' WHERE id = 7").run()
+const movedCouriers = await lib.getDeliveryContactTotals(env, AUG)
+const rithAfter = movedCouriers.find((r) => r.delivery_contact_id === 9)
+const sopheaAfter = movedCouriers.find((r) => r.delivery_contact_id === 10)
+check(`the re-assigned delivery leaves the old driver (${rithAfter.deliveries}) and joins the new one (${sopheaAfter && sopheaAfter.deliveries})`,
+  rithAfter.deliveries === 1 && sopheaAfter && sopheaAfter.deliveries === 1 && sopheaAfter.delivery_contact_name === 'Sophea')
+check('the fees follow it and the all-driver total does not move',
+  Math.round((rithAfter.charged_fee_usd + sopheaAfter.charged_fee_usd) * 100) / 100 === rith.charged_fee_usd)
+db.prepare('UPDATE sales SET delivery_contact_id = 9, delivery_contact_name = ? WHERE id = 7').run(db.prepare('SELECT name FROM delivery_contacts WHERE id = 9').get().name)
+db.prepare('DELETE FROM delivery_contacts WHERE id = 10').run()
+
 // ---- 6. overview / periods totals ------------------------------------------
 const days = await lib.getBusinessSummaryDayRows(env, AUG)
 check(`cancelled_tx_count is on the day rows the /periods roll-up sums (${days.reduce((n, r) => n + r.cancelled_tx_count, 0)})`,

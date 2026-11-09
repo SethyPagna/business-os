@@ -14,7 +14,8 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 //   - change and clear work on a Completed, Not Paid and awaiting-delivery sale,
 //     each writing one driver_changed record with the before/after driver;
 //   - Undo restores the previous driver and records the undo;
-//   - the grants are the group path's (sales:bulk + sales:amend);
+//   - the grant is the delivery cost's, sales:amend alone (sales:bulk stays the
+//     multi-sale switch);
 //   - a cancelled sale is refused (owner rule: every status except cancelled).
 //
 // DISCRIMINATING: on 0293aeb0 the cancelled case answers 200 and re-points the
@@ -115,7 +116,7 @@ async function runTest(name, fn) {
       assert.deepEqual(driverOf(f, id), { id: 2, name: 'Driver B', phone: '222', address: 'B road' })
       assert.deepEqual(events(f, id), [{ kind: 'driver_changed', via: 'apply', changes: [{ field: 'driver', before: A, after: B }] }])
       const row = f.sql.prepare("SELECT status,json_extract(undo_payload,'$.applier') applier FROM action_history WHERE id=?").get(changed.body.actionHistoryId)
-      assert.deepEqual(row, { status: 'undoable', applier: 'sale.fields.bulk' })
+      assert.deepEqual(row, { status: 'undoable', applier: 'sale.delivery.single' })
       const undone = await f.call(history, `/${changed.body.actionHistoryId}/undo`, { require_applied: true, expected_generation: 0 })
       assert.equal(undone.status, 200, JSON.stringify(undone))
       assert.deepEqual(driverOf(f, id), { id: 1, name: 'Driver A', phone: '111', address: 'A road' })
@@ -147,12 +148,16 @@ async function runTest(name, fn) {
     assert.deepEqual(events(f, 1), [])
   })
 
-  await runTest('the single change needs the group path\'s grants (sales:bulk + sales:amend)', async () => {
+  await runTest('the single change needs sales:amend, and sales:bulk alone is not enough', async () => {
     const f = fixture()
-    user = { id: 2, name: 'Amender', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, 'sales:bulk': false }) }
-    const denied = await f.call(sales, '/bulk-update', single('no-bulk-grant', 2, 1, 2))
+    user = { id: 2, name: 'Bulk only', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': false, 'sales:bulk': true }) }
+    const denied = await f.call(sales, '/bulk-update', single('no-amend-grant', 2, 1, 2))
     assert.equal(denied.status, 403, JSON.stringify(denied))
     assert.equal(driverOf(f, 2).id, 1)
+    user = { id: 3, name: 'Amender', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, 'sales:bulk': false }) }
+    const allowed = await f.call(sales, '/bulk-update', single('amend-grant', 2, 1, 2))
+    assert.equal(allowed.status, 200, JSON.stringify(allowed))
+    assert.equal(driverOf(f, 2).id, 2)
   })
 
   if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

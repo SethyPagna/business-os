@@ -50,7 +50,7 @@ function seedHistoryFamilies(raw, { source, target, other }, base = 9000) {
     rows.push({ id, applier, expected }); return id
   }
   // leave: no stock at any branch in their replay
-  for (const applier of ['customer.gender_restore', 'sale.fields.bulk', 'sale.customer.bulk', 'sale.customer.v2.bulk', 'sale.customer.single', 'sale.settlement', 'supplier.backfill']) {
+  for (const applier of ['customer.gender_restore', 'sale.fields.bulk', 'sale.customer.bulk', 'sale.customer.v2.bulk', 'sale.customer.single', 'sale.delivery.single', 'sale.settlement', 'supplier.backfill']) {
     history(applier, 'leave'); history(applier, 'leave', { status: 'redoable' })
   }
   // branch.update: either branch closes; a third branch leaves
@@ -125,7 +125,7 @@ async function main() {
       for (const m of fs.readFileSync(path.join(root, 'src/lib', file), 'utf8').matchAll(/export const ([A-Z_]+_KIND) = '([^']+)'/g)) constants[m[1]] = m[2]
     }
     const kinds = [...block.matchAll(/^  (?:'([^']+)'|\[([A-Z_]+)\]): /gm)].map(m => m[1] || constants[m[2]])
-    assert.equal(kinds.length, 21); assert.ok(kinds.every(Boolean))
+    assert.equal(kinds.length, 22); assert.ok(kinds.every(Boolean))
     assert.deepEqual([...kinds].sort(), Object.keys(history.CUTOVER_HISTORY_RULES).sort())
   })
 
@@ -138,7 +138,7 @@ async function main() {
     for (const touch of [-1, 4, 1.5, 'x', null]) assert.throws(() => history.classifyCutoverHistory({ applier: 'stock.session', touch }), /history_touch_invalid/)
     // the leave set is exactly the design's seven money/metadata-only kinds plus the Conflicts mark
     assert.deepEqual(Object.entries(history.CUTOVER_HISTORY_RULES).filter(([, rule]) => rule === 'leave').map(([k]) => k).sort(),
-      ['customer.gender_restore', 'product.conflict_mark', 'return.legacy_convert', 'sale.customer.bulk', 'sale.customer.single', 'sale.customer.v2.bulk', 'sale.fields.bulk', 'sale.settlement', 'supplier.backfill'])
+      ['customer.gender_restore', 'product.conflict_mark', 'return.legacy_convert', 'sale.customer.bulk', 'sale.customer.single', 'sale.customer.v2.bulk', 'sale.delivery.single', 'sale.fields.bulk', 'sale.settlement', 'supplier.backfill'])
   })
 
   await check('SQL projection and JS classifier agree for every family at source, target and neither (depth 100)', () => {

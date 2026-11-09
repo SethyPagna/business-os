@@ -232,6 +232,43 @@ async function run(){
   assert.deepEqual(f.sql.prepare('SELECT delivery_contact_id,delivery_contact_phone,delivery_actual_cost_usd FROM sales WHERE id=1').get(),{delivery_contact_id:1,delivery_contact_phone:null,delivery_actual_cost_usd:2})
   console.log('PASS delivery reassignment preserves historical sale snapshots and actual cost while replay guards canonical contacts')
 
+  // SALE-DELIVERY-EDIT: one sale's driver is edited with the authority of its
+  // delivery cost (sales:amend), not the multi-sale sales:bulk switch.
+  f=fixture()
+  const moneyColumns='SELECT total_usd,total_khr,amount_paid_usd,amount_paid_khr,delivery_fee_usd,delivery_fee_khr,delivery_actual_cost_usd,delivery_actual_cost_khr,sale_status FROM sales WHERE id=1'
+  const moneyBefore=f.sql.prepare(moneyColumns).get()
+  const movementsBefore=f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n
+  user={id:3,name:'Amend only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':false})}
+  const singleDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'single-driver-1',[1]))
+  assert.equal(singleDriver.status,200,JSON.stringify(singleDriver))
+  assert.deepEqual(f.sql.prepare('SELECT delivery_contact_id,delivery_contact_name,delivery_contact_phone,delivery_contact_address FROM sales WHERE id=1').get(),{delivery_contact_id:2,delivery_contact_name:'Driver B',delivery_contact_phone:'222',delivery_contact_address:'B road'})
+  assert.deepEqual(f.sql.prepare(moneyColumns).get(),moneyBefore,'changing the driver moves no money')
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,movementsBefore,'changing the driver moves no stock')
+  assert.equal(f.sql.prepare('SELECT json_extract(undo_payload,\'$.applier\') applier FROM action_history WHERE id=?').get(singleDriver.body.actionHistoryId).applier,'sale.delivery.single')
+  assert.deepEqual(f.sql.prepare("SELECT kind,via,subject FROM sale_record_events WHERE sale_id=1").all(),[{kind:'driver_changed',via:'apply',subject:'R1'}])
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='sale_fields_bulk' AND user_id=3").get().n,1)
+  assert.deepEqual([1,2].map(id=>f.sql.prepare('SELECT COUNT(*) n FROM sales WHERE delivery_contact_id=?').get(id).n),[2,1],'per-driver reads key on delivery_contact_id, which moved')
+  assert.equal((await replay(f,singleDriver.body.actionHistoryId)).status,200,'the same amend-only user can undo it')
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver A')
+  assert.equal((await replay(f,singleDriver.body.actionHistoryId,'redo',1)).status,200)
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver B')
+  const deniedBefore=snapshot(f)
+  user={id:4,name:'Bulk only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':false,'sales:bulk':true})}
+  const noAmend=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'single-driver-denied',[1]))
+  assert.equal(noAmend.status,403,JSON.stringify(noAmend))
+  user={id:3,name:'Amend only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':false})}
+  const manyNoBulk=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'multi-driver-denied',[1,2]))
+  assert.equal(manyNoBulk.status,403,JSON.stringify(manyNoBulk))
+  assert.equal(snapshot(f),deniedBefore,'refusals leave sale, audit, receipt and history untouched')
+  // Single-sale driver changes saved before this split carry the bulk applier name and stay replayable.
+  user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
+  const legacyDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'legacy-driver-1',[1]))
+  assert.equal(legacyDriver.status,200)
+  f.sql.prepare("UPDATE action_history SET undo_payload=json_set(undo_payload,'$.applier','sale.fields.bulk'),redo_payload=json_set(redo_payload,'$.applier','sale.fields.bulk') WHERE id=?").run(legacyDriver.body.actionHistoryId)
+  assert.equal((await replay(f,legacyDriver.body.actionHistoryId)).status,200)
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver B')
+  console.log('PASS one-sale driver change needs sales:amend only, writes snapshot/record/audit with no money or stock change, undo follows amend, legacy bulk-applier rows replay')
+
   f=fixture()
   user={id:2,name:'Customer editor',role_code:'user',permissions:JSON.stringify({sales:true,'sales:status':true,'sales:customer':true,'sales:bulk':false})}
   const customerOnly=await f.call(sales,'/bulk-update',request(f,{kind:'customer',source_id:1,target_id:3},'customer-permission-1',[1]))
