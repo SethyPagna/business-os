@@ -96,7 +96,9 @@ const same = async (sent, twin, actor = ADMIN) => {
   assert.equal(b.status, 200, `the live page's own request ${twin}`)
   assert.equal(a.status, 200, `${sent} -> ${JSON.stringify(a.body)}`)
   assert.equal(JSON.stringify(a.body), JSON.stringify(b.body), `${sent} answers byte for byte as ${twin}`)
-  assert.deepEqual(a.queries, b.queries, `${sent} reads exactly what ${twin} reads`)
+  // The read-switch memo can expire between the two requests on a slow runner; its refresh is not part of either view.
+  const own = (queries) => queries.filter((sql) => sql !== 'SELECT key, value FROM system_flags WHERE key IN (?1, ?2)')
+  assert.deepEqual(own(a.queries), own(b.queries), `${sent} reads exactly what ${twin} reads`)
   assert.match(a.cache, /no-store/)
   return b.body
 }
