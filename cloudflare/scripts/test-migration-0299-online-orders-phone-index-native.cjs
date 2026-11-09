@@ -26,7 +26,7 @@ check('applies on the real chain; the index exists; no row changes', () => {
 check('a second apply aborts at PRE; PRE and POST are real (mutated file)', () => {
   const db = fresh(); db.exec(sql)
   assert.throws(() => db.exec(sql), (error) => abortName(error) === 'online_orders_phone_index_0299_pre')
-  const noCreate = sql.replace(/CREATE INDEX idx_online_orders_phone[^\n]*\n/, '')
+  const noCreate = sql.replace(/CREATE INDEX idx_online_order_events_refund[^\n]*\n/, '')
   assert.notEqual(noCreate, sql)
   assert.throws(() => fresh().exec(noCreate), (error) => abortName(error) === 'online_orders_phone_index_0299_post')
 })
@@ -35,10 +35,16 @@ check('a phone prefix search plans through the index, never a scan of the table'
   const plan = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM online_orders WHERE customer_phone >= '01234' AND customer_phone < '01234~' ORDER BY created_at DESC, id DESC LIMIT 51").all().map((r) => r.detail).join(' | ')
   assert.match(plan, /idx_online_orders_phone/); assert.doesNotMatch(plan, /SCAN online_orders(?! USING)/)
 })
-check('RECOVERY removes the index and nothing else', () => {
+check('the refund report plans through idx_online_order_events_refund, never a scan of the Records', () => {
+  const db = fresh(); db.exec(sql)
+  const plan = db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*), SUM(amount_usd) FROM online_order_events e WHERE e.event = 'refund_noted' AND e.created_at >= '2026-11-01'").all().map((r) => r.detail).join(' | ')
+  assert.match(plan, /idx_online_order_events_refund/); assert.doesNotMatch(plan, /SCAN online_order_events(?! USING)/)
+})
+
+check('RECOVERY removes both indexes and nothing else', () => {
   const db = fresh(); db.exec(sql)
   const names = () => db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name)
-  const after = names(); db.exec('DROP INDEX IF EXISTS idx_online_orders_phone;')
-  assert.deepEqual(after.filter((n) => !names().includes(n)), ['idx_online_orders_phone'])
+  const after = names(); db.exec('DROP INDEX IF EXISTS idx_online_orders_phone; DROP INDEX IF EXISTS idx_online_order_events_refund;')
+  assert.deepEqual(after.filter((n) => !names().includes(n)), ['idx_online_order_events_refund', 'idx_online_orders_phone'])
 })
 console.log(`${passed} passed`)

@@ -47,6 +47,27 @@ async function main() {
     const filtered = (await h.call('GET', H.fresh(`/api/reports/overview?startDate=${DAY3}&endDate=${DAY3}&status=completed`), undefined, 'overview filtered')).body.sales
     assert.equal(filtered.totals.collected_total_usd, 37.5, 'a filtered view is the kernel figure, unadjusted')
     console.log('PASS control: a narrowed view (status filter) is left as the sale-dated kernel figure')
+
+    // ---- the two report blocks: "Paid online, to fulfil" (by paid_at) and "Refunds sent through ABA" (by the Records row's date); neither is revenue.
+    const before2 = await overview(DAY2)
+    assert.deepEqual(before2.online, { paid_to_fulfil_orders: 0, paid_to_fulfil_usd: 0, aba_refund_count: 0, aba_refund_usd: 0 })
+    await h.db.prepare(`INSERT INTO online_orders (order_no, token_hash, state, fulfilment, branch_id, customer_name, customer_phone, currency, goods_total_usd, items_json, pricing_version, revision, paid_at, created_at, updated_at)
+      VALUES ('LB-DAY2', 'day2-hash', 'paid', 'pickup', 1, 'Sok', '012888777', 'USD', 25, '[]', 1, 3, '${DAY2} 05:00:00', '${DAY2} 04:55:00', '${DAY2} 05:00:00')`).run()
+    const day2Order = (await h.one('SELECT MAX(id) id FROM online_orders')).id
+    await h.db.prepare(`INSERT INTO online_order_payments (order_id, tran_id, purpose, amount, currency, state, paid_amount, paid_currency, paid_at, qr_string, revision, created_at)
+      VALUES (?, 'WDAY200000000002', 'order', 25, 'USD', 'paid', 25, 'USD', '${DAY2} 05:00:00', 'QR', 1, '${DAY2} 04:55:00')`).bind(day2Order).run()
+    await h.db.prepare("INSERT INTO online_order_events (order_id, event, source, amount_usd, created_at) VALUES (?, 'refund_noted', 'staff', 10, ?)").bind(orderId, `${DAY3} 06:00:00`).run()
+    const after2 = await overview(DAY2), after3 = await overview(DAY3), after1 = await overview(DAY1)
+    assert.deepEqual(after2.online, { paid_to_fulfil_orders: 1, paid_to_fulfil_usd: 25, aba_refund_count: 0, aba_refund_usd: 0 }, 'day 2: one order paid and waiting to be handed over')
+    assert.deepEqual(after3.online, { paid_to_fulfil_orders: 0, paid_to_fulfil_usd: 0, aba_refund_count: 1, aba_refund_usd: 10 }, 'day 3: the refund sent through ABA; the day-1 order was fulfilled, so it is not "to fulfil"')
+    assert.deepEqual(after1.online, { paid_to_fulfil_orders: 0, paid_to_fulfil_usd: 0, aba_refund_count: 0, aba_refund_usd: 0 })
+    // Revenue is identical before and after a paid, unfulfilled order and a refund note; the money is only RECEIVED (collected) on its paid day.
+    assert.equal(after2.totals.revenue_usd, before2.totals.revenue_usd, 'revenue does not move for an order nobody has handed over'); assert.equal(after2.totals.revenue_usd, 0)
+    assert.equal(after2.totals.collected_total_usd, 25, 'day 2 received the online money'); assert.equal(after3.totals.revenue_usd, d3.totals.revenue_usd)
+    // A narrowed view carries no blocks (the same rule as the received overlay).
+    const narrowed = (await h.call('GET', H.fresh(`/api/reports/overview?startDate=${DAY2}&endDate=${DAY2}&status=completed`), undefined, 'overview narrowed')).body.sales
+    assert.equal(narrowed.online, null)
+    console.log('PASS report blocks: Paid online to fulfil by paid_at, Refunds sent through ABA by date, revenue untouched, none on a narrowed view')
   } finally { await h.mf.dispose() }
 }
 main().then(() => { console.log('online received by payment day: ok'); process.exit(0) }).catch((e) => { console.error(e); process.exit(1) })

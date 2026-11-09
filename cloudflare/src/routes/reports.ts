@@ -36,7 +36,7 @@ import { costViewProfit } from '../lib/reportProfitView'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
-import { collectedByPaymentDay, onlineReceivedOverlay } from '../lib/onlineOrderReceived'
+import { collectedByPaymentDay, onlineReceivedOverlay, onlineReportBlocks } from '../lib/onlineOrderReceived'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -450,10 +450,11 @@ app.get('/overview', async (c) => {
     // The payments fold is the SAME grouped kernel the "Payment methods" view
     // reads (case-insensitive method key, canonical revenue / collected
     // figures), so the two can never disagree. It shares the totals' snapshot.
-    const [{ totals, paymentMethods: payments, couriers }, previous, onlineReceived] = await Promise.all([
+    const [{ totals, paymentMethods: payments, couriers }, previous, onlineReceived, onlineBlocks] = await Promise.all([
       getSalesOverviewBlocks(c.env, f),
       prev ? getSalesTotals(c.env, prev) : Promise.resolve(null),
       onlineReceivedOverlay(c.env, f),
+      onlineReportBlocks(c.env, f),
     ])
     const paymentMethods = payments.rows
     // KHQR online orders (lead condition 2): collected is by the day the money was received, so the online money PayWay took in this window is added and the part that
@@ -473,6 +474,8 @@ app.get('/overview', async (c) => {
       totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), 2, canViewCourierCost(user)),
       previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), 2, canViewCourierCost(user)) : null,
       payment_methods_total_groups: payments.total_groups,
+      // KHQR online orders: two blocks beside the totals, never inside revenue (null on a narrowed view).
+      online: onlineBlocks ? { paid_to_fulfil_orders: onlineBlocks.paidToFulfil.orders, paid_to_fulfil_usd: onlineBlocks.paidToFulfil.usd, aba_refund_count: onlineBlocks.abaRefunds.count, aba_refund_usd: onlineBlocks.abaRefunds.usd } : null,
       payment_methods_truncated: payments.total_groups > paymentMethods.length,
       payment_methods: paymentMethods.map((r) => ({
         key: r.key,

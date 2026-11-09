@@ -29,17 +29,17 @@ export const overlayApplies = (f: SalesFilters): boolean =>
   !String(f.status ?? '').trim() && !String(f.paymentMethod ?? '').trim() && !String(f.startTime ?? '').trim() && !String(f.endTime ?? '').trim()
 
 /** The paid_at window, mirroring whereActiveSales's window on sales.created_at: exact moments when given, else local business days. */
-function paidWindow(f: SalesFilters): { clauses: string[]; params: Record<string, unknown> } {
+function paidWindow(f: SalesFilters, column = 'op.paid_at', branchColumn: string | null = 'o.branch_id'): { clauses: string[]; params: Record<string, unknown> } {
   const clauses: string[] = []
   const params: Record<string, unknown> = {}
   const from = shiftWindowBound(f.createdFrom)
   const to = shiftWindowBound(f.createdTo)
-  if (from) { clauses.push('datetime(op.paid_at) >= @createdFrom'); params.createdFrom = from }
-  if (to) { clauses.push('datetime(op.paid_at) < @createdTo'); params.createdTo = to }
-  if (f.startDate && f.endDate) { params.startDate = f.startDate; params.endDate = f.endDate; clauses.push(localDateRangeClause('op.paid_at')) }
-  else if (f.startDate) { params.startDate = f.startDate; clauses.push(localDateAtOrAfter('op.paid_at')) }
-  else if (f.endDate) { params.endDate = f.endDate; clauses.push(localDateAtOrBefore('op.paid_at')) }
-  if (f.branchId) { clauses.push('o.branch_id = @branchId'); params.branchId = f.branchId }
+  if (from) { clauses.push(`datetime(${column}) >= @createdFrom`); params.createdFrom = from }
+  if (to) { clauses.push(`datetime(${column}) < @createdTo`); params.createdTo = to }
+  if (f.startDate && f.endDate) { params.startDate = f.startDate; params.endDate = f.endDate; clauses.push(localDateRangeClause(column)) }
+  else if (f.startDate) { params.startDate = f.startDate; clauses.push(localDateAtOrAfter(column)) }
+  else if (f.endDate) { params.endDate = f.endDate; clauses.push(localDateAtOrBefore(column)) }
+  if (f.branchId && branchColumn) { clauses.push(`${branchColumn} = @branchId`); params.branchId = f.branchId }
   return { clauses, params }
 }
 
@@ -85,4 +85,39 @@ export function collectedByPaymentDay(collectedUsd: number, overlay: Pick<Online
 export function receivedWithOnlinePaid<T extends { digital: { usd: number } }>(received: T, overlay: Pick<OnlineReceivedOverlay, 'paidInWindowUsd'>): T {
   if (!(overlay.paidInWindowUsd > 0)) return received
   return { ...received, digital: { ...received.digital, usd: round4(received.digital.usd + overlay.paidInWindowUsd) } }
+}
+
+// ---- the two report blocks -------------------------------------------------------------------------------------------------------------------------------------
+
+export type OnlineReportBlocks = {
+  /** Money PayWay took in the window for orders still waiting to be handed over (paid, no sale yet): by paid_at. Not revenue; it becomes revenue on the sale date at Fulfil. */
+  paidToFulfil: { orders: number; usd: number }
+  /** Refunds staff wrote down as sent back through ABA in the window (the Records row's own date). */
+  abaRefunds: { count: number; usd: number }
+}
+
+/**
+ * The Reports overview's two online blocks, ONE statement: "Paid online, to fulfil" walks the paid orders (the partial attention index: the size of the queue) and
+ * "Refunds sent through ABA" the refund_noted Records (idx_online_order_events_refund, migration 0299). Neither touches revenue. Null where the overview is narrowed by
+ * something these cannot honour (same rule as the received overlay); zeros where the tables do not exist.
+ */
+export async function onlineReportBlocks(env: Env, f: SalesFilters): Promise<OnlineReportBlocks | null> {
+  const zero: OnlineReportBlocks = { paidToFulfil: { orders: 0, usd: 0 }, abaRefunds: { count: 0, usd: 0 } }
+  if (!overlayApplies(f)) return null
+  try {
+    const orders = paidWindow(f, 'o.paid_at', 'o.branch_id')
+    const refunds = paidWindow(f, 'e.created_at', null)
+    const refundBranch = f.branchId ? ' AND e.order_id IN (SELECT id FROM online_orders WHERE branch_id = @branchId)' : ''
+    const where = (clauses: string[]) => (clauses.length ? ` AND ${clauses.join(' AND ')}` : '')
+    const row = await getDb(env).prepare(`SELECT
+        (SELECT COUNT(*) FROM online_orders o INDEXED BY idx_online_orders_attention WHERE o.state IN ('paid','review') AND o.state = 'paid' AND o.sale_id IS NULL${where(orders.clauses)}) AS orders,
+        (SELECT COALESCE(SUM(COALESCE(op.paid_amount, op.amount)), 0) FROM online_orders o INDEXED BY idx_online_orders_attention JOIN online_order_payments op ON op.order_id = o.id AND op.state = 'paid'
+          WHERE o.state IN ('paid','review') AND o.state = 'paid' AND o.sale_id IS NULL${where(orders.clauses)}) AS paid_usd,
+        (SELECT COUNT(*) FROM online_order_events e WHERE e.event = 'refund_noted'${where(refunds.clauses)}${refundBranch}) AS refunds,
+        (SELECT COALESCE(SUM(e.amount_usd), 0) FROM online_order_events e WHERE e.event = 'refund_noted'${where(refunds.clauses)}${refundBranch}) AS refund_usd`)
+      .get<{ orders: unknown; paid_usd: unknown; refunds: unknown; refund_usd: unknown }>({ ...orders.params, ...refunds.params })
+    return { paidToFulfil: { orders: Number(row?.orders) || 0, usd: money(row?.paid_usd) }, abaRefunds: { count: Number(row?.refunds) || 0, usd: money(row?.refund_usd) } }
+  } catch {
+    return zero
+  }
 }
