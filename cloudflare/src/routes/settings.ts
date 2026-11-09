@@ -29,6 +29,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // the SAME validator the Settings form runs -- twin modules whose shared block
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
+import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -1192,6 +1193,17 @@ app.post('/', async (c) => {
           ? 'Low stock alert scope must be "product" or "global".'
           : 'Low stock alert switch must be on or off.',
       code: lowStockError,
+    }, 400)
+  }
+
+  // Online order timing (KHQR): refused with its reason, never clamped, like the low-stock numbers above.
+  const onlineOrderError = validateOnlineOrderSettingsWrite(body)
+  if (onlineOrderError) {
+    return c.json({
+      error: onlineOrderError === 'invalid_online_order_payment_minutes'
+        ? `Online order payment time must be a whole number of minutes between ${PAYMENT_MINUTES_MIN} and ${PAYMENT_MINUTES_MAX}.`
+        : `Online order change window must be a whole number of days between 1 and ${REQUEST_WINDOW_DAYS_MAX}.`,
+      code: onlineOrderError,
     }, 400)
   }
 

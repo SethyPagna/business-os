@@ -143,10 +143,38 @@ export function nudgeCheckDue(lastCheckedAt: string | null | undefined, now: Dat
 }
 export const adminPageRows = (env: Pick<Env, 'PLAN_TIER'>): number => getPlanLimits(env as Env).onlineOrderAdminPageRows
 
+export const PAYMENT_MINUTES_KEY = 'online_order_payment_minutes'
+export const PAYMENT_MINUTES_DEFAULT = 15
+/** ABA's own floor for a QR lifetime is 3 minutes; an hour is the longest the page keeps a QR open. */
+export const PAYMENT_MINUTES_MIN = 3
+export const PAYMENT_MINUTES_MAX = 60
 export const REQUEST_WINDOW_DAYS_KEY = 'online_order_request_days'
 export const REQUEST_WINDOW_DAYS_DEFAULT = 7
 /** ABA refunds a KHQR payment for 30 days, so the window never exceeds that. */
 export const REQUEST_WINDOW_DAYS_MAX = 30
+
+export type OnlineOrderSettingsWriteError = 'invalid_online_order_payment_minutes' | 'invalid_online_order_request_days'
+const wholeNumberInRange = (value: unknown, min: number, max: number): boolean => {
+  if (value === null || value === undefined) return true // cleared: the default applies
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : null
+  if (text === null) return false
+  if (text === '') return true // cleared: the default applies
+  if (!/^\d{1,3}$/.test(text)) return false
+  const n = Number(text)
+  return n >= min && n <= max
+}
+/**
+ * Settings writes that carry an online order key are validated, never clamped (the same rule as the low-stock settings): a payment lifetime of 2 minutes or a request
+ * window of 45 days is refused with its reason, not silently turned into the default the reader would fall back to. Empty clears the row (the default applies).
+ * routes/settings.ts calls this for every write; the resolve* functions below stay the tolerant readers.
+ */
+export function validateOnlineOrderSettingsWrite(body?: Record<string, unknown> | null): OnlineOrderSettingsWriteError | null {
+  const payload = body || {}
+  if (Object.prototype.hasOwnProperty.call(payload, PAYMENT_MINUTES_KEY) && !wholeNumberInRange(payload[PAYMENT_MINUTES_KEY], PAYMENT_MINUTES_MIN, PAYMENT_MINUTES_MAX)) return 'invalid_online_order_payment_minutes'
+  if (Object.prototype.hasOwnProperty.call(payload, REQUEST_WINDOW_DAYS_KEY) && !wholeNumberInRange(payload[REQUEST_WINDOW_DAYS_KEY], 1, REQUEST_WINDOW_DAYS_MAX)) return 'invalid_online_order_request_days'
+  return null
+}
+
 /** The owner's setting, read raw: a whole number of days 1..30; anything else falls back to the default of 7. */
 export function resolveRequestWindowDays(raw: unknown): number {
   const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : ''

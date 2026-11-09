@@ -24,7 +24,7 @@ import {
   type ParsedCheck, type PaywayCredentials, type PaywayFailureReason, type PaywayTransport,
 } from './payway'
 import {
-  REQUEST_WINDOW_DAYS_KEY, canTransition, classifyCheck, createOrderToken, hashOrderToken, makeOrderNo, nudgeCheckDue, onlineOrderView,
+  PAYMENT_MINUTES_DEFAULT, PAYMENT_MINUTES_KEY, PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_KEY, canTransition, classifyCheck, createOrderToken, hashOrderToken, makeOrderNo, nudgeCheckDue, onlineOrderView,
   openUnpaidAllowed, orderLinesError, priceOrder, requestAllowed, requestKindsForStage, requestStates, requestStage, resolveRequestWindowDays,
   type EventRow, type OrderLineInput, type OrderRow, type PaymentRow, type PricedOrder, type RequestKind, type RequestRow, type ReturnRow, type SaleRow,
 } from './onlineOrders'
@@ -130,8 +130,7 @@ export type OrderBundle = {
 
 // ---- settings --------------------------------------------------------------------------------------------------------------------
 
-export const PAYMENT_MINUTES_KEY = 'online_order_payment_minutes'
-export const PAYMENT_MINUTES_DEFAULT = 15
+export { PAYMENT_MINUTES_KEY, PAYMENT_MINUTES_DEFAULT }
 export type OrderSettings = { exchangeRate: number; taxPercent: number; showPrices: boolean; paymentMinutes: number; requestWindowDays: number }
 const SETTING_KEYS = ['exchange_rate', 'tax_enabled', 'tax_rate', 'customer_portal_show_prices', PAYMENT_MINUTES_KEY, REQUEST_WINDOW_DAYS_KEY] as const
 
@@ -140,7 +139,7 @@ export function resolvePaymentMinutes(raw: unknown): number {
   const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : ''
   if (!/^\d{1,3}$/.test(text)) return PAYMENT_MINUTES_DEFAULT
   const minutes = Number(text)
-  return minutes >= 3 && minutes <= 60 ? minutes : PAYMENT_MINUTES_DEFAULT
+  return minutes >= PAYMENT_MINUTES_MIN && minutes <= PAYMENT_MINUTES_MAX ? minutes : PAYMENT_MINUTES_DEFAULT
 }
 
 /** One keyed read: never loadSettingsMap, which reads every settings row. */
