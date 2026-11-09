@@ -68,6 +68,8 @@ const NAMED_COMPANIONS = {
   296: 'test-migration-0296-roles-online-orders-default-native.cjs',
   // 0297 replaces the append-only update trigger of online_order_events with one narrow exception for the 90 day privacy scrub (clear the two free-text columns of a scrubbed order); the companion pins every other update and delete as still refused.
   297: 'test-migration-0297-online-order-events-scrub-exception-native.cjs',
+  // 0298 adds the trigger that stops a cancelled sale of an online order from being reopened once an ABA refund was noted for it; the companion applies the real chain and pins both the block and the controls.
+  298: 'test-migration-0298-sales-uncancel-online-refund-native.cjs',
   // 0285 is the index the simplified Inventory Check (ic_simple) reads each product's latest observation through; schema only.
   285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0286 is the approval row a submitted Inventory Check count waits for (ic_fix_stock); a new table, no existing row changes.

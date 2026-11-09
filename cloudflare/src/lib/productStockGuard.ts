@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import { OnlineRefundNotedError } from './onlineRefundGuard'
 
 export const PRODUCT_HAS_STOCK_CODE = 'product_has_stock'
 export const PRODUCT_HAS_STOCK_MESSAGE = 'Products with stock cannot be removed. Stock can only be added to products that have not been removed.'
@@ -27,15 +28,17 @@ export class ProductStockGuardError extends Error {
   }
 }
 
-export function productStockGuardError(error: unknown): ProductStockGuardError | ProductStatusUnsupportedError | null {
+/** The shared classifier of a D1 guard failure: stock guards, and the online refund rule of migration 0298 (see lib/onlineRefundGuard.ts). */
+export function productStockGuardError(error: unknown): ProductStockGuardError | ProductStatusUnsupportedError | OnlineRefundNotedError | null {
   const seen = new Set<unknown>()
   let current = error
   while (current && !seen.has(current)) {
-    if (current instanceof ProductStockGuardError || current instanceof ProductStatusUnsupportedError) return current
+    if (current instanceof ProductStockGuardError || current instanceof ProductStatusUnsupportedError || current instanceof OnlineRefundNotedError) return current
     seen.add(current)
     const message = current instanceof Error ? current.message : String(current)
     if (/\bproduct_has_stock\b/.test(message)) return new ProductStockGuardError()
     if (/\bproduct_status_unsupported\b/.test(message)) return new ProductStatusUnsupportedError()
+    if (/\bonline_refund_noted\b/.test(message)) return new OnlineRefundNotedError()
     current = typeof current === 'object' && 'cause' in current ? current.cause : null
   }
   return null
