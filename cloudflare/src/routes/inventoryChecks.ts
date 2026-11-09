@@ -48,14 +48,15 @@ async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionU
   return { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
 }
 // Every Inventory Check writer moves the inventory_checks version, AWAITED before the answer leaves (the check-state sets and every restricted list key on it). Only a
-// request that wrote or may have written: a refusal before the write (4xx) moves nothing. With ic_wired OFF nothing is cached from these tables, so nothing is bumped and the
-// write's statements are exactly what they were; a cached copy lives at most the cache lifetime, so a flip back ON cannot serve one for long.
+// request that wrote or may have written: a refusal before the write (4xx) moves nothing. The bump does NOT depend on ic_wired: a write made while the switch is OFF must still move
+// the version, because the sets and the restricted rankings cached while it was ON live productListCacheSeconds (an hour on Free) and a flip back ON would otherwise serve them
+// stale (test-read-switches-bump-outside-pure: a bump inside a switched block is a violation). The bump is a cache-version write, not a D1 statement: the write's statements are what they were.
 app.use('*', async (c, next) => {
   await next()
   if (c.req.method === 'GET' || c.req.method === 'HEAD') return
   const status = c.res.status
   if (status >= 400 && status < 500) return
-  if (await readSwitch(c.env, 'ic_wired')) await bumpVersion(c.env, 'inventory_checks')
+  await bumpVersion(c.env, 'inventory_checks')
 })
 
 // ---- ic_wired: the Inventory Check list and overlay over the shared Products reader (INV-A S4a) ----------------------------------------------------------
