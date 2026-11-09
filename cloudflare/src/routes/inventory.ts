@@ -1731,7 +1731,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
     // Loaded on first use, like undoAppliers.ts loads it: only a scoped Set
     // needs it, and every other /adjust stays byte-identical.
-    const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
+    const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
     const result = await applyStockLotSet(getDb(c.env), user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
       productId, branchId, batchId: Number(body.batchId), quantity,
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
@@ -1740,6 +1740,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       ...(variance ? { variance } : {}),
     }, markWritten, () => branchRedirectTarget(c), atomicMark)
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
+      // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
+      const bumped = await scopedSetBump(c.env, result.body)
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
           // A variance line names no figure of its own: the figure written is the writer's, from its answer.
@@ -1749,7 +1751,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         }),
         broadcast(c.env, 'products', { action: 'update', id: productId }),
         broadcast(c.env, 'inventory', { action: 'adjust', id: productId }),
-        bumpVersion(c.env, 'products'),
+        bumpVersion(c.env, bumped),
       ]))
     }
     return c.json(result.body as never, result.status as never)

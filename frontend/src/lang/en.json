@@ -5625,6 +5625,7 @@
   "read_switch_name_ic_wired": "Inventory check: wired list and overlay",
   "read_switch_name_ic_lot_counts": "Inventory check: count per received date",
   "read_switch_name_ledger_keyset": "Stock Changes: paging by cursor",
+  "read_switch_name_stock_bump_narrow": "Stock: refresh only stock after a Set",
   "read_switch_stale": "The switches changed elsewhere. Showing the current ones.",
   "read_switch_state_off": "Off",
   "read_switch_state_on": "On",

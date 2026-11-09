@@ -90,6 +90,7 @@ import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
+import { readSwitch } from './readSwitches'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -517,6 +518,18 @@ export async function applyStockLotSet(
   if (!recordOperation) return { status: 200, body: response }
   const stored = await previous()
   return { status: 200, body: stored ? JSON.parse(stored.response_json) : response }
+}
+
+/**
+ * The cache version a scoped Set bumps (read switch stock_bump_narrow, default OFF). OFF: 'products', as every Set always did. ON: 'stock' alone -- the version a sale bumps, so every cached read
+ * already follows it (a page's membership is cached, its stock is refreshed live; stock-dependent memberships key on both) -- but only for a Set that changed quantities and nothing else. A date that
+ * gained or lost its row at the branch, a branch that gained or lost its aggregate row, or a retired date the Set put back in use is more than a sale ever does, so it keeps bumping 'products'.
+ */
+export async function scopedSetBump(env: Env, body: Record<string, unknown>): Promise<'stock' | 'products'> {
+  if (!await readSwitch(env, 'stock_bump_narrow')) return 'products'
+  const before = body.before as Partial<Snapshot> | undefined, after = body.after as Partial<Snapshot> | undefined
+  const structural = !before || !after || body.reactivated === true || before.lotExists !== after.lotExists || before.branchExists !== after.branchExists
+  return structural ? 'products' : 'stock'
 }
 
 export async function notifyStockLotSet(env: Env): Promise<void> {
