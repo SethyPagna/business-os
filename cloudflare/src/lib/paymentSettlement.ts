@@ -91,6 +91,8 @@ function isExactNonNegativeAmount(value: unknown, decimals: number): boolean {
 
 export type SettlementPlan = {
   paymentDetails: NativeTenderRow[]
+  /** Only the rows this request added: the request rows that matched no recorded row. The money taken now, never the old money again. */
+  addedPaymentDetails: NativeTenderRow[]
   paymentDetailsJson: string
   paymentMethod: string
   paymentCurrency: 'USD' | 'KHR' | 'MIXED'
@@ -197,6 +199,7 @@ export function planSaleSettlement(input: {
     }
   }
   const paymentDetails: NativeTenderRow[] = []
+  const addedPaymentDetails: NativeTenderRow[] = []
   let paidUsdUnits = 0n
   let paidKhrUnits = 0n
   for (const [index, raw] of input.paymentDetailsRaw.entries()) {
@@ -251,11 +254,13 @@ export function planSaleSettlement(input: {
     }
     paidUsdUnits += usdUnits
     paidKhrUnits += khrUnits
-    paymentDetails.push({
+    const row = {
       method,
       amount_usd: calculationUnitsValue(usdUnits),
       amount_khr: calculationUnitsValue(khrUnits),
-    })
+    }
+    paymentDetails.push(row)
+    if (!preserved) addedPaymentDetails.push({ ...row })
   }
 
   if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
@@ -317,6 +322,7 @@ export function planSaleSettlement(input: {
   }
   return {
     paymentDetails,
+    addedPaymentDetails,
     paymentDetailsJson: JSON.stringify(paymentDetails),
     paymentMethod: distinctMethods.join(' + '),
     paymentCurrency: paidUsdUnits > 0n && paidKhrUnits > 0n ? 'MIXED' : paidKhrUnits > 0n ? 'KHR' : 'USD',
