@@ -46,6 +46,7 @@ const boundaries: Array<[string, string]> = [
   ['components/catalog/portalAccount.ts', 'catalog-account-core'],
   ['components/catalog/portalBucket.ts', 'catalog-account-core'],
   ['components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
+  ['components/catalog/legal/legalOrderContent.ts', 'catalog-legal-orders'],
   // Online ordering (KHQR): the link helper rides the storefront's utils chunk (the root and page read it before first paint);
   // everything else under orders/ is lazy and has chunks of its own, never the admin 'catalog' chunk (the generic catalog/ rule).
   ['components/catalog/orders/orderPath.ts', 'catalog-public-utils'],
@@ -236,8 +237,8 @@ if (process.argv.includes('--bundle')) {
     ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker', 'money-core']],
     // Online ordering (KHQR) is reached only through dynamic imports (an /order link, the cart's Checkout button): no storefront entry may load any of
     // its four chunks statically, and none of them may pull the admin app, the Website Editor, SheetJS or the file and import code.
-    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']],
-    ['PublicCatalogRoot', ['catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']],
+    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes', 'catalog-legal-orders']],
+    ['PublicCatalogRoot', ['catalog-legal-orders', 'catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']],
     ['catalog-order-page', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],
     ['catalog-order-checkout', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],
     ['catalog-order-changes', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],

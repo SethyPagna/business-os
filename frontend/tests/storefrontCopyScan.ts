@@ -7,7 +7,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { PORTAL_LEGAL_EN, legalText } from '../src/components/catalog/legal/legalContent.ts'
+import { PORTAL_LEGAL_EN, legalText, registerLegalTexts } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROW_ORDERS, ORDER_LEGAL_EN, ORDER_LEGAL_KM } from '../src/components/catalog/legal/legalOrderContent.ts'
 
 export const FRONTEND_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 export const SRC = path.join(FRONTEND_ROOT, 'src')
@@ -182,7 +183,9 @@ function keyFallbackTuples(file: string, site: string): StorefrontCopyEntry[] {
   return entries
 }
 
-export const LEGAL_KEYS = new Set(Object.keys(PORTAL_LEGAL_EN))
+// The ordering-only policy text loads lazily in the app (legalOrderContent.ts); the scan covers it as shoppers see it once the reader has fetched it.
+registerLegalTexts(ORDER_LEGAL_EN, ORDER_LEGAL_KM, { sections: LEGAL_PAGE_SECTIONS_ONLINE, row: LEGAL_STORAGE_ROW_ORDERS })
+export const LEGAL_KEYS = new Set([...Object.keys(PORTAL_LEGAL_EN), ...Object.keys(ORDER_LEGAL_EN)])
 const legalEntries = (site: string): StorefrontCopyEntry[] =>
   [...LEGAL_KEYS].map((key) => ({ key, en: legalText('en', key), km: legalText('km', key), site }))
 

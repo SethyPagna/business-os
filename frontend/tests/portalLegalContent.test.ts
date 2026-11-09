@@ -22,19 +22,24 @@ import { fileURLToPath } from 'node:url'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
-  LEGAL_PAGE_SECTIONS_ONLINE,
   LEGAL_PAGE_TITLE_KEY,
   LEGAL_STORAGE_ROWS,
-  LEGAL_STORAGE_ROW_ORDERS,
   PORTAL_LEGAL_CONSENT_VERSION,
-  PORTAL_LEGAL_EN,
-  PORTAL_LEGAL_KM,
+  PORTAL_LEGAL_EN as BASE_LEGAL_EN,
+  PORTAL_LEGAL_KM as BASE_LEGAL_KM,
   PORTAL_LEGAL_LAST_UPDATED_ISO,
   formatLegalLastUpdated,
   interpolateLegal,
   isLegalPageKey,
   legalText,
+  registerLegalTexts,
 } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROW_ORDERS, ORDER_LEGAL_EN, ORDER_LEGAL_KM } from '../src/components/catalog/legal/legalOrderContent.ts'
+
+// The ordering-only text lives in its own lazily loaded module (first-paint size); every lock below covers base + ordering text together.
+registerLegalTexts(ORDER_LEGAL_EN, ORDER_LEGAL_KM, { sections: LEGAL_PAGE_SECTIONS_ONLINE, row: LEGAL_STORAGE_ROW_ORDERS })
+const PORTAL_LEGAL_EN = { ...BASE_LEGAL_EN, ...ORDER_LEGAL_EN }
+const PORTAL_LEGAL_KM = { ...BASE_LEGAL_KM, ...ORDER_LEGAL_KM }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const readPack = (name: string): Record<string, unknown> =>

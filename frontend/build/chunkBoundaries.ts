@@ -75,6 +75,8 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/catalog/PortalNoPaymentNotice.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/legalContent.ts', 'catalog-legal'],
+  // The ordering-only policy text: loaded by the policy reader (a dynamic import) when ordering is on, so it is in nobody's first-paint closure.
+  ['/src/components/catalog/legal/legalOrderContent.ts', 'catalog-legal-orders'],
   ['/src/components/catalog/legal/PortalEmbedConsent.tsx', 'catalog-legal'],
   // Online ordering (KHQR). The order link helper is read by the storefront root and page before first paint, so that one tiny module rides the
   // storefront's own utils chunk. Everything else under orders/ loads only when asked for (an /order link, or Checkout): left to the

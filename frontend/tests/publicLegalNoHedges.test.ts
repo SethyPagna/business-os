@@ -10,8 +10,12 @@
 //
 // Run: node tests/publicLegalNoHedges.test.ts
 import assert from 'node:assert/strict'
-import { LEGAL_PAGE_SECTIONS, LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN as BASE_LEGAL_EN, PORTAL_LEGAL_KM as BASE_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROW_ORDERS, ORDER_LEGAL_EN, ORDER_LEGAL_KM } from '../src/components/catalog/legal/legalOrderContent.ts'
 import fs from 'node:fs'
+
+const PORTAL_LEGAL_EN = { ...BASE_LEGAL_EN, ...ORDER_LEGAL_EN }
+const PORTAL_LEGAL_KM = { ...BASE_LEGAL_KM, ...ORDER_LEGAL_KM }
 
 const embedSource = fs.readFileSync(new URL('../src/components/catalog/legal/PortalEmbedConsent.tsx', import.meta.url), 'utf8')
 const MAP_CONSENT_BODY_EN = /export const MAP_CONSENT_BODY_EN = '([^']*)'/.exec(embedSource)?.[1] ?? ''

@@ -8,11 +8,16 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  LEGAL_PAGE_ORDER, LEGAL_PAGE_SECTIONS, LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM,
-  legalSections, legalStorageRows,
+  LEGAL_PAGE_ORDER, LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS,
+  PORTAL_LEGAL_EN as BASE_LEGAL_EN, PORTAL_LEGAL_KM as BASE_LEGAL_KM, hasOrderLegalTexts, legalSections, legalStorageRows, legalText, registerLegalTexts,
 } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROW_ORDERS, ORDER_LEGAL_EN, ORDER_LEGAL_KM } from '../src/components/catalog/legal/legalOrderContent.ts'
 import { buildCheckoutBody, emptyCheckoutForm } from '../src/components/catalog/orders/orderLogic.ts'
 import { ORDER_HISTORY_STORAGE_KEY } from '../src/components/catalog/orders/orderPath.ts'
+
+registerLegalTexts(ORDER_LEGAL_EN, ORDER_LEGAL_KM, { sections: LEGAL_PAGE_SECTIONS_ONLINE, row: LEGAL_STORAGE_ROW_ORDERS })
+const PORTAL_LEGAL_EN = { ...BASE_LEGAL_EN, ...ORDER_LEGAL_EN }
+const PORTAL_LEGAL_KM = { ...BASE_LEGAL_KM, ...ORDER_LEGAL_KM }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (...parts: string[]) => fs.readFileSync(path.join(here, '..', ...parts), 'utf8')
@@ -101,10 +106,40 @@ test('the Khmer is Khmer, shares the English placeholders, and cross-refers to t
 test('the footer reads the switch: LegalPages renders the variant it is told, and the storefront tells it', () => {
   // CATCHES: new sections that exist but are never rendered, or rendered for every shop.
   const pages = read('src', 'components', 'catalog', 'legal', 'LegalPages.tsx')
-  assert.doesNotMatch(pages, /LEGAL_PAGE_SECTIONS|LEGAL_STORAGE_ROWS/, 'the reader no longer reads the static (ordering-off) tables directly')
+  assert.doesNotMatch(pages, /LEGAL_PAGE_SECTIONS(?!_ONLINE)|LEGAL_STORAGE_ROWS/, 'the reader no longer reads the static (ordering-off) tables directly')
   assert.match(pages, /legalSections\(page, onlineOrders\)/)
   assert.match(pages, /legalStorageRows\(onlineOrders\)/)
   assert.match(pages, /onlineOrders = false,/, 'a footer given no flag shows the shortlist wording')
   const page = read('src', 'components', 'catalog', 'PublicCatalogPage.tsx')
   assert.match(page, /<PortalFooter [^>]*onlineOrders=\{onlineOrders\}/)
+})
+
+test('the ordering-only text is not in the first-paint legal module: it loads only when the policy reader opens with ordering on', () => {
+  // CATCHES: the order wording folded back into legalContent.ts (every shopper downloads it again) or imported statically by the reader.
+  assert.deepEqual(Object.keys(BASE_LEGAL_EN).filter((key) => ORDER_KEY.test(key)), [])
+  assert.deepEqual(Object.keys(BASE_LEGAL_KM).filter((key) => ORDER_KEY.test(key)), [])
+  assert.ok(Object.keys(ORDER_LEGAL_EN).length >= 10 && Object.keys(ORDER_LEGAL_EN).join() === Object.keys(ORDER_LEGAL_KM).join(), 'the lazy module carries both languages, the same keys')
+  const content = read('src', 'components', 'catalog', 'legal', 'legalContent.ts')
+  assert.doesNotMatch(content, /^(?:import|export)[^\n]*legalOrderContent/m, 'legalContent.ts never imports the ordering text (it is registered by the reader)')
+  const pages = read('src', 'components', 'catalog', 'legal', 'LegalPages.tsx')
+  assert.doesNotMatch(pages, /^import[^\n]*legalOrderContent/m, 'the reader imports it dynamically only')
+  assert.match(pages, /import\('\.\/legalOrderContent\.ts'\)/)
+  assert.match(pages, /activePage && \(!onlineOrders \|\| orderTextsReady\)/, 'with ordering on, the reader waits for the text instead of showing the shortlist wording')
+  assert.match(read('build', 'chunkBoundaries.ts'), /legalOrderContent\.ts', 'catalog-legal-orders'/)
+  assert.equal(hasOrderLegalTexts() || legalText('en', 'portal_legal_terms_online_b') === '', true, 'nothing resolves the ordering text before it is registered')
+  // Resolution after registering: the ordering text resolves and the base text still wins for its own keys.
+  assert.equal(hasOrderLegalTexts(), true)
+  assert.equal(legalText('km', 'portal_legal_terms_online_b'), ORDER_LEGAL_KM.portal_legal_terms_online_b)
+  assert.equal(legalText('en', 'portal_legal_terms_returns_b'), BASE_LEGAL_EN.portal_legal_terms_returns_b)
+})
+
+test('owner ruling 10 Nov: the staff chat shows the full phone, and never the address, social contacts or note (both languages)', () => {
+  // CATCHES: the old "masked phone" sentence, and a sentence that lets the address or note into the chat.
+  const en = PORTAL_LEGAL_EN.portal_legal_privacy_sharing_orders
+  assert.match(en, /shows your name, your phone number and the comments you send with a request\. It never shows your address, social contacts or note\./)
+  assert.doesNotMatch(en, /masked|hidden/i)
+  const km = PORTAL_LEGAL_KM.portal_legal_privacy_sharing_orders
+  assert.match(km, /លេខទូរស័ព្ទរបស់អ្នក/)
+  assert.match(km, /វាមិនដែលបង្ហាញអាសយដ្ឋាន ទំនាក់ទំនងបណ្តាញសង្គម ឬកំណត់ចំណាំរបស់អ្នកឡើយ/)
+  assert.doesNotMatch(km, /បិទបាំង/)
 })

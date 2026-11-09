@@ -21,11 +21,13 @@ import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_TITLE_KEY,
   formatLegalLastUpdated,
+  hasOrderLegalTexts,
   interpolateLegal,
   isLegalPageKey,
   legalSections,
   legalStorageRows,
   legalText,
+  registerLegalTexts,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
 import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
@@ -252,6 +254,18 @@ export default function PortalFooter({
     } catch { /* see openPage */ }
   }, [])
 
+  // With ordering on, the policies carry ordering-only text that lives in its own chunk (legalOrderContent.ts), so a shopper who never opens a policy
+  // never downloads it. The reader waits for it rather than showing the shortlist wording ("no payment") for a moment: it is a few KB and arrives at once.
+  const [orderTextsReady, setOrderTextsReady] = useState(() => hasOrderLegalTexts())
+  useEffect(() => {
+    if (!activePage || !onlineOrders || orderTextsReady) return undefined
+    let live = true
+    import('./legalOrderContent.ts')
+      .then((module) => { registerLegalTexts(module.ORDER_LEGAL_EN, module.ORDER_LEGAL_KM, { sections: module.LEGAL_PAGE_SECTIONS_ONLINE, row: module.LEGAL_STORAGE_ROW_ORDERS }); if (live) setOrderTextsReady(true) })
+      .catch(() => { if (live) closePage() })
+    return () => { live = false }
+  }, [activePage, onlineOrders, orderTextsReady, closePage])
+
   // Any surface can ask for a policy page (the sign-up consent line does).
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -442,7 +456,7 @@ export default function PortalFooter({
         </div>
       </footer>
 
-      {activePage ? (
+      {activePage && (!onlineOrders || orderTextsReady) ? (
         <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} onlineOrders={onlineOrders} />
       ) : null}
     </>
