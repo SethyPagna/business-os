@@ -235,7 +235,11 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/catalogCostRecompute': { recordManualCostEntry: async () => null, recomputeCatalogCost: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {}, cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev' },
-  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32) },
+  // INV-A S4a/S7: products.ts reads two switches and the ranked scope (lib/rankedScope.ts -> cacheKey -> cache is an import cycle the unstubbed recursive loader cannot take). All three are
+  // off in this test: no switch is on, so the ranked path is never reached.
+  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32), readSwitch: async () => false },
+  '../lib/cacheKey': { unsafeVersionToken: () => 'unsafe' },
+  '../lib/rankedScope': { nextPromotionEdge: async () => null, readPromotionEdge: async (_scope, produce) => produce(), readRankedScope: async (_scope, produce) => produce() },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => ({ ok: true }) },
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
