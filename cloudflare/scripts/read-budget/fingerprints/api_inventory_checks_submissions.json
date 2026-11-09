@@ -104,5 +104,139 @@
    "53a9954da045",
    "B| WITH current_actor AS (SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,"
   ]
+ ],
+ "w-inventory-check-submission-lots-20": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5a7bcc37603",
+   "SELECT key, value FROM system_flags WHERE key IN (?1, ?2)"
+  ],
+  [
+   "8fb7be0ee091",
+   "SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_lot_lines','inventory_check_lot_lines_"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "a736bb1a1508",
+   "SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_"
+  ],
+  [
+   "3d0de332b3d9",
+   "SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active, r.code AS role_code,r.per"
+  ],
+  [
+   "a1bae9cbf78a",
+   "SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ( 'inventory_check_sessions','inventory_check_items','in"
+  ],
+  [
+   "b9c940983876",
+   "SELECT * FROM inventory_check_events WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "287d0bf22313",
+   "SELECT p.id FROM products p WHERE p.id IN (SELECT value FROM json_each(?1)) AND (p.is_active = 1 OR (COALESCE("
+  ],
+  [
+   "0e261aeb505b",
+   "SELECT id,name,image_path,unit,parent_id,is_group FROM products WHERE id IN (SELECT value FROM json_each(?1)) "
+  ],
+  [
+   "144f554bef20",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=?1 AND u.is_ac"
+  ],
+  [
+   "d8086a94126c",
+   "B| SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=?1 AND is_active=1) THEN 1 ELSE json_extract('[]','"
+  ],
+  [
+   "54623a956f35",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(?1) e LEFT JOIN products p ON p.id=json_extract(e.value"
+  ],
+  [
+   "53a2f5e3e91f",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(?1) e WHERE json_extract(e.value,'$.scope')='lot' AND N"
+  ],
+  [
+   "1239e9e573ee",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(?1) e WHERE json_extract(e.value,'$.scope')='branch' AN"
+  ],
+  [
+   "98c48c7cb104",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(?1) e WHERE abs(CASE json_extract(e.value,'$.scope') WH"
+  ],
+  [
+   "d07a64b7d48e",
+   "B| SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM inventory_check_approvals a JOIN inventory_check_items i ON i.ses"
+  ],
+  [
+   "12b4518e7f33",
+   "B| UPDATE inventory_check_approvals SET superseded_json=json_patch(superseded_json,(SELECT json_group_object(C"
+  ],
+  [
+   "ce19e564a195",
+   "B| UPDATE inventory_check_approvals SET status='rejected',decided_by=NULL,decided_by_name=NULL,decided_at=?1,d"
+  ],
+  [
+   "2e7adbc3968a",
+   "B| INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash"
+  ],
+  [
+   "f99d9cf974cf",
+   "B| INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_js"
+  ],
+  [
+   "eeb30786520b",
+   "B| INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,b"
+  ],
+  [
+   "fb6e0cda3c5f",
+   "B| INSERT INTO inventory_check_lot_lines(session_id,product_id,branch_id,batch_id,scope,seen_quantity,counted_"
+  ],
+  [
+   "adb75dd3242f",
+   "B| INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash"
+  ],
+  [
+   "2524728e3e21",
+   "B| INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash"
+  ],
+  [
+   "9f59778f511f",
+   "B| INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submit"
+  ],
+  [
+   "b9c940983876",
+   "SELECT * FROM inventory_check_events WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "e64bb7daf2f1",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+   "53a9954da045",
+   "B| WITH current_actor AS (SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,"
+  ],
+  [
+   "181e6ea3be07",
+   "SELECT session_id,status,lines,submitted_by,submitted_at,decided_by,decided_by_name,decided_at,decision_note,d"
+  ]
  ]
 }
