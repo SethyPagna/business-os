@@ -205,7 +205,7 @@ export async function approvalRows(db: D1Compat, actor: Actor, ids: string[], de
     AND session_id IN (SELECT value FROM json_each(@ids))`).all<ApprovalRow>({ organization: actor.organization_id, ids: JSON.stringify(ids) })
 }
 /** A line waits when its approval is pending, it is a difference, no stock write for it has been recorded and no newer count of the product has replaced it. */
-const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
+export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND ${i}.baseline_quantity IS NOT NULL AND ${i}.counted_quantity IS NOT NULL AND abs(${i}.baseline_quantity-${i}.counted_quantity)>0.000000001
   AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL`
 const WAITING_LINE_SQL = waitingLineSql('a', 'i')
 /** Does this one count line still wait for approval? (Fix stock is held while it does.) */

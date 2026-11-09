@@ -10,6 +10,7 @@ const ts = require('typescript')
 const { Hono } = require('hono')
 const { openDb } = require('./d1compat.cjs')
 const { loadAll } = require('./load_migrations.cjs')
+const { createHash } = require('node:crypto')
 const { seedStockFixture } = require('./seed-stock-fixture.cjs')
 
 const SRC = path.join(__dirname, '..', '..', 'src')
@@ -26,6 +27,8 @@ const USERS = {
   blind: person(73, 'employee', { inventory_checks: true, inventory_checks_check: true, inventory_check_show_brand: true, inventory_check_show_category: true }),
   // Inventory Check with stock but no Products page, no price, no barcode.
   stockOnly: person(74, 'employee', { inventory_checks: true, inventory_checks_check: true, inventory_check_show_stock: true, inventory_check_show_received: true }),
+  // Received dates but no stock, no price, no barcode, no Products page.
+  receivedOnly: person(76, 'employee', { inventory_checks: true, inventory_checks_check: true, inventory_check_show_received: true }),
   // No Inventory Check at all.
   none: person(75, 'employee', { products: true }),
 }
@@ -34,6 +37,7 @@ function createInvApp({ mount, seed, users = USERS }) {
   const moduleCache = new Map()
   let current = users.admin
   const statements = []
+  const batches = []
   const stubs = {
     'lib/audit.ts': { audit: async () => {} },
     'durable-objects/broadcastHub.ts': { broadcast: async () => {} },
@@ -66,22 +70,30 @@ function createInvApp({ mount, seed, users = USERS }) {
     },
   }
   const kv = new Map()
-  const CACHE = { get: async (k) => (kv.has(k) ? kv.get(k) : null), put: async (k, v) => { kv.set(k, String(v)) }, delete: async (k) => { kv.delete(k) } }
+  let kvDelayMs = 0 // a test can make KV writes slow, to tell an awaited write from one that is only started
+  const CACHE = { get: async (k) => (kv.has(k) ? kv.get(k) : null), put: async (k, v) => { if (kvDelayMs) await new Promise((resolve) => setTimeout(resolve, kvDelayMs)); kv.set(k, String(v)) }, delete: async (k) => { kv.delete(k) } }
 
   const raw = openDb(loadAll())
   seedStockFixture(raw.db, () => {
     raw.prepare("INSERT OR IGNORE INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
     raw.prepare("INSERT OR IGNORE INTO branches(id,name,is_default,is_active) VALUES(2,'Store',0,1)").run()
   })
+  // The real actor rows the Inventory Check session routes read (a cookie, a role, a user, a session), one per harness user, with the permissions the user object carries.
+  for (const user of Object.values(users)) {
+    raw.prepare('INSERT OR IGNORE INTO roles(id,name,code,permissions) VALUES(?,?,?,?)').run([user.id, `R${user.id}`, user.role_code, user.role_permissions])
+    raw.prepare('INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,organization_id,is_active) VALUES(?,?,?,?,?,?,?,1)').run([user.id, user.username, user.name, 'unused', user.id, user.permissions, user.organization_id])
+    raw.prepare("INSERT INTO user_sessions(user_id,token_hash,expires_at,last_seen_at) VALUES(?,?,'2099-01-01T00:00:00.000Z',CURRENT_TIMESTAMP)").run([user.id, createHash('sha256').update(`token-${user.id}`).digest('hex')])
+  }
   if (seed) seed(raw, seedStockFixture)
 
   const counters = { pageQueries: 0 }
   const db = {
     prepare(sql) { statements.push(String(sql)); if (/\bmatched AS\b/.test(sql)) counters.pageQueries++; return raw.prepare(sql) },
-    batch: async (list) => { for (const s of list) statements.push(String(s.sql)); if (list.some((s) => /\bmatched AS\b/.test(s.sql))) counters.pageQueries++; return raw.batch(list) },
+    batch: async (list) => { for (const s of list) { statements.push(String(s.sql)); batches.push({ sql: String(s.sql), params: s.params }) }; if (list.some((s) => /\bmatched AS\b/.test(s.sql))) counters.pageQueries++; return raw.batch(list) },
     exec: (sql) => raw.exec(sql),
   }
   db.staging = db
+  db.batchOnce = db.batch // lib/db.ts batchOnce: the same one-transaction batch, without the retry
   const env = { DB: db, CACHE, ENVIRONMENT: 'test' }
   const app = new Hono()
   for (const [prefix, rel] of Object.entries(mount)) app.route(prefix, typeof rel === 'string' ? load(rel).default : rel(load))
@@ -89,7 +101,8 @@ function createInvApp({ mount, seed, users = USERS }) {
   async function request(method, url, body, withEnv = env) {
     load('lib/planTier.ts').__resetPlanTierCacheForTests()
     const waits = []
-    const init = { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }) }
+    const headers = { cookie: `bos_session=token-${current.id}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }
+    const init = { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }
     const response = await app.request(`http://localhost${url}`, init, withEnv, { waitUntil: (p) => waits.push(p), passThroughOnException() {} })
     const text = await response.text()
     await Promise.all(waits)
@@ -102,16 +115,16 @@ function createInvApp({ mount, seed, users = USERS }) {
     const doc = raw.prepare("SELECT value FROM system_flags WHERE key='read_switches'").get()
     const parsed = doc ? JSON.parse(doc.value) : { epoch: 1, set_at: '2026-11-04T00:00:00.000Z', set_by: 1, switches: {} }
     if (value === undefined) delete parsed.switches[name]; else parsed.switches[name] = value
-    raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify(parsed))
+    raw.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").run([JSON.stringify(parsed)])
     load('lib/readSwitches.ts').resetReadSwitchMemo?.()
   }
 
   return {
-    raw, env, load, users, statements, counters, cacheStore, kv, seedStockFixture,
+    raw, env, load, users, statements, batches, counters, cacheStore, kv, seedStockFixture,
     setUser: (user) => { current = user },
     get: (url, withEnv) => request('GET', url, undefined, withEnv),
     send: (method, url, body, withEnv) => request(method, url, body, withEnv),
-    setSwitch,
+    setSwitch, delayKvWrites: (ms) => { kvDelayMs = ms },
     mark: () => statements.length,
     since: (mark) => statements.slice(mark),
     clearCaches: () => { cacheStore.clear() },

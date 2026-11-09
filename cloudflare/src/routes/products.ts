@@ -1443,8 +1443,8 @@ function productSearchIncludes(query: Record<string, string>): Set<string> {
 // /api/inventory/tagged-lots; they sit beside `items`, never inside a row, so
 // they still cannot reach a group total or a picker. A caller without
 // Inventory view gets no key and keeps the separate request's refusal.
-async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T): Promise<T & { tagged_lots?: unknown[] }> {
-  if (!include.has('tagged_lots') || getActionTier(user, 'inventory', 'view') === 'none') return payload
+async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T, admitted = false): Promise<T & { tagged_lots?: unknown[] }> {
+  if (!include.has('tagged_lots') || !admitted && getActionTier(user, 'inventory', 'view') === 'none') return payload
   const pageIds = (payload.items as Array<Record<string, unknown>>).map((row) => Number(row.id))
   return { ...payload, tagged_lots: await readTaggedLotGroups(getDb(env), pageIds) }
 }
@@ -1468,9 +1468,11 @@ function compareLotsFifo(a: { expiry_date: string | null; received_at: string | 
   if ((a.expiry_date === null) !== (b.expiry_date === null)) return a.expiry_date === null ? 1 : -1
   return compareText(a.expiry_date, b.expiry_date) || compareText(a.received_at, b.received_at) || a.id - b.id
 }
-async function attachLotRows<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T): Promise<T> {
+// `admitted`: the caller has already decided this viewer may read lots (the Inventory Check routes admit by the Inventory Check received-date grant, which does not
+// require the Inventory page); the quantities are then cut by that route's own projection.
+export async function attachLotRows<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T, admitted = false): Promise<T> {
   if (!include.has('lots')
-    || !(getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full')) return payload
+    || !(admitted || getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full')) return payload
   const items = payload.items as Array<Record<string, unknown>>
   const ids = [...new Set(items.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
   if (!ids.length) return payload
@@ -1519,6 +1521,9 @@ export type ProductSearchListOptions = {
   excludeIdsJson?: string
   setKey?: string
   setVersion?: string
+  /** The caller has already admitted this viewer to the lots / held-stock attachments (see attachLotRows). */
+  lotsAdmitted?: boolean
+  taggedLotsAdmitted?: boolean
 }
 export async function readProductSearchList(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, query: Record<string, string>, options: ProductSearchListOptions = {}) {
   const user = c.get('user')
@@ -1548,7 +1553,7 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
-  const [withTagged, withLots] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, payload), attachLotRows(c.env, user, include, payload)])
+  const [withTagged, withLots] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, payload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, payload, options.lotsAdmitted === true)])
   return withLots === payload ? withTagged : { ...withTagged, items: withLots.items }
 }
 
