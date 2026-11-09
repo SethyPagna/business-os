@@ -650,7 +650,7 @@ async function main() {
     assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${rejected.body.item.id}_910002_a1b2c3d4e5f60718`), false, 'a rejected count leaves the Issue to be fixed by hand')
     // The adjust kernel asks before it claims a receipt, and only for such an id.
     const kernel = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
-    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,700}startsWith\('icfix_'\)[\s\S]{0,700}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
+    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,700}startsWith\('icfix_'\)[\s\S]{0,1400}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
   })
 
   await check('the approval cannot be forged around the API: its rows are immutable once decided and never deleted', async () => {

@@ -33,8 +33,9 @@ export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH
 // and stamped with the time it was computed (lib/dashboardStockOverview.ts); ic_wired is the wired Inventory Check read path: GET /api/inventory-checks/list
 // and /overlay over the shared Products reader (lib/inventoryCheckList.ts, lib/inventoryCheckOverlay.ts). OFF, both answer 404 and the page keeps its old path; catalog_ranked_scope is the shared ranked scope of the Products list: the ranking of a window of pages
 // is cached once and every page reads its rows by key (lib/rankedScope.ts). OFF, GET /api/products/search runs the seek-page statement it always ran.
-// ledger_keyset is the Stock Changes list paged by cursor, with the count and summary on page 1 only (lib/stockLedgerKeyset.ts, routes/products.ts GET /stock-ledger).
-export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired', 'catalog_ranked_scope', 'ledger_keyset'] as const
+// ic_lot_counts is the Inventory Check count per received date (lib/inventoryCheckSessions.ts createInventoryCheckLotSubmission, migration 0294) and the widened hold of a direct Set
+// while any count of the product at the branch waits; OFF, a submission carries no lots and the hold names only the count a Fix stock request names. ledger_keyset is the Stock Changes list paged by cursor, with the count and summary on page 1 only (lib/stockLedgerKeyset.ts, routes/products.ts GET /stock-ledger).
+export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired', 'catalog_ranked_scope', 'ledger_keyset', 'ic_lot_counts'] as const
 /** How long one isolate remembers the flags read: planTier.ts readSwitchMemoSeconds (Free 15 s, Paid 5 s). */
 export const readSwitchMemoMs = (env: Env): number => getPlanLimits(env).readSwitchMemoSeconds * 1000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1

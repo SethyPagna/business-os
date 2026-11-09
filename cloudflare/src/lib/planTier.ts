@@ -329,6 +329,11 @@ export type PlanLimits = {
   // a page plus the prefetch pages after it). Above it the request is refused 400, so the statements stay bounded by a number the client was told.
   inventoryOverlayMaxRows: number
 
+  // lib/inventoryCheckSessions.ts createInventoryCheckLotSubmission (INV-B S5; behind the read switch `ic_lot_counts`): the most received-date lines ONE count submission
+  // carries across all its products (a branch-total line counts as one). Above it the submission is refused 400, so its insert statements stay bounded by a number the client was
+  // told. A ceiling like the ones above: Paid carries 4 times what Free does.
+  inventoryCheckLotLinesPerSubmission: number
+
   // lib/inventoryCheckOverlay.ts: the most movement rows read per product to find its last recorded stock change. The newest day's rows are read in index order
   // (created_at mixes 'YYYY-MM-DD HH:MM:SS' and ISO 'T...Z', so the text order alone puts ISO 09:00 above 14:00) and the latest by julianday among these wins.
   inventoryLastChangeMaxRows: number
@@ -441,6 +446,7 @@ const PAID_LIMITS: PlanLimits = {
   expenseReportFoldUnboundedWindows: true,
   productListLotsPerRow: 50,
   inventoryOverlayMaxRows: 300,
+  inventoryCheckLotLinesPerSubmission: 240,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
   productListCacheSeconds: 60,
@@ -487,6 +493,7 @@ const FREE_LIMITS: PlanLimits = {
   expenseReportFoldUnboundedWindows: false,
   productListLotsPerRow: 20,
   inventoryOverlayMaxRows: 150,
+  inventoryCheckLotLinesPerSubmission: 60,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
   productListCacheSeconds: 3_600,

@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { approvalsAvailable, lineWaitsForApproval } from './inventoryCheckSessions'
+import { approvalsAvailable, lineWaitsForApproval, productWaitsForApproval } from './inventoryCheckSessions'
 
 /*
  * Fix stock (ic_fix_stock) opens the Set session for a count that shows an Issue. While that count waits for approval it must not be settled around the
@@ -21,8 +21,11 @@ export const FIX_STOCK_COUNT_PENDING = {
 } as const
 
 /** True when the count the request names still waits for approval. A count that does not exist, or an approval table that is not there yet, holds nothing; a read that fails is not guessed. */
-export async function fixStockHeldByApproval(db: D1Compat, requestId: unknown): Promise<boolean> {
+export async function fixStockHeldByApproval(db: D1Compat, requestId: unknown, widened?: { productId: number; branchId: number }): Promise<boolean> {
   const count = fixStockCountOf(requestId)
   if (!count) return false
-  return await approvalsAvailable(db) && await lineWaitsForApproval(db, count.sessionId, count.productId)
+  if (!await approvalsAvailable(db)) return false
+  if (await lineWaitsForApproval(db, count.sessionId, count.productId)) return true
+  // ic_lot_counts widens the hold from the named count to ANY count of that product at that branch that still waits: a direct Set never settles stock around a queued count.
+  return widened ? productWaitsForApproval(db, widened.productId, widened.branchId) : false
 }

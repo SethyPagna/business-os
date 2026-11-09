@@ -17,7 +17,7 @@ import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
 import { getActionTier } from '../lib/permissions'
 import { attachLotRows, readProductSearchList } from './products'
-import { approvalsAvailable, createInventoryCheckSession, createInventoryCheckSubmission, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
+import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, REPLACED_NOTE } from '../lib/inventoryCheckSessions'
 
 // A global hook, not an import: the alert module is installed by index.ts, many tests load this route alone, and an absent hook is a no-op
@@ -42,6 +42,8 @@ app.onError((error,c) => {
 })
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
+/** ic_lot_counts counts as ON only once migration 0294 is applied: with the switch on and the table missing every lot count would fail, so it answers exactly as OFF. */
+const lotCountsOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_lot_counts') && await lotLinesAvailable(getDb(c.env))
 async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>) {
   const token = getCookie(c, 'bos_session')
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
@@ -87,6 +89,7 @@ app.get('/list', async c => {
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   const payload = await readProductSearchList(c, productsQuery, { include, keyRequest: canonicalProductsRequest(productsQuery), ...restriction,
     ...(plan.checkState ? { setKey: plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
+  const lotCounts = await lotCountsOn(c)
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
   const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
   const total = Number((payload as { total?: unknown }).total) || 0
@@ -95,7 +98,9 @@ app.get('/list', async c => {
     ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
   return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, ...(summary ? { summary } : {}),
-    ...(fixStock ? { capabilities: { fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) } } : {}) })
+    ...(fixStock || lotCounts ? { capabilities: { ...(fixStock ? { fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) } : {}),
+      // ic_lot_counts: counts are typed per received date; a holder of Full stock-adjust who sees stock may also Set a received date or the branch total straight from the row.
+      ...(lotCounts ? { lotCounts: true, ...(access.fields.stock && getActionTier(user, 'inventory', 'adjust') === 'full' ? { directSet: true } : {}) } : {}) } } : {}) })
 })
 app.get('/overlay', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
@@ -126,7 +131,13 @@ app.post('/sessions', async c => {
 // The owner's way to count (ic_simple): pick products, type counts in the rows, submit once. With the switch off the route does not exist.
 app.post('/submissions', async c => {
   if (!await readSwitch(c.env, 'ic_simple')) throw new InventoryCheckSessionError(404, 'inventory_check_not_available')
-  const result = await createInventoryCheckSubmission(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env),
+  const input = await c.req.json().catch(()=>null)
+  // A submission whose lines carry received dates (`lots`) is the ic_lot_counts writer's; with the switch off the older writer refuses the key exactly as it always did.
+  const withLots = Array.isArray((input as { lines?: unknown } | null)?.lines) && ((input as { lines: unknown[] }).lines).some(line => !!line && typeof line === 'object' && Object.hasOwn(line, 'lots'))
+  const lotCounts = withLots && await lotCountsOn(c)
+  const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
+    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission }) : createInventoryCheckSubmission
+  const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).
       onApprovalsReplaced: async ({ sessionIds }) => { for (const sessionId of sessionIds) await announceCount(c.env, c.get('user'), { kind: 'rejected', sessionId, reason: REPLACED_NOTE, system: true }) } })
