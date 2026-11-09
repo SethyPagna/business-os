@@ -33,6 +33,7 @@ const h = createProductsRouteHarness({ overrides: { '../lib/cache': cacheOverrid
 h.setUser({ id: 1, username: 'tester', name: 'Test User', role_code: 'admin', role_id: 1, permissions: '{}', organization_id: null, is_active: 1 })
 const inventory = h.load('routes/inventory.ts').default
 const batches = h.load('routes/batches.ts').default
+const sales = h.load('routes/sales.ts').default
 const { resetReadSwitchMemo } = h.load('lib/readSwitches.ts')
 const ctx = { waitUntil: promise => { promise?.catch?.(() => {}) }, passThroughOnException: () => {} }
 const send = async (app, method, url, body) => {
@@ -53,6 +54,8 @@ const SHAPES = [
   [h.app, '/'], [h.app, '/search?page=1&pageSize=20'], [h.app, '/search?page=1&pageSize=20&branchId=1'], [h.app, '/search?page=1&pageSize=20&stockState=out'],
   [h.app, '/search?page=1&pageSize=20&stockState=low'], [h.app, '/search?page=1&pageSize=20&include=lots&branchId=1'], [h.app, '/filters'], [h.app, '/possible-duplicates'],
   [h.app, '/search-index'], [batches, '/tracked-product-ids?branchId=1'],
+  // The Sales page's stats strip and stats carry the stock removal loss, read from the movements a Set writes: keyed on the sales, returns, customers, products AND stock versions.
+  [sales, '/stats-strip?startDate=2020-01-01&endDate=2099-12-31'], [sales, '/stats?startDate=2020-01-01&endDate=2099-12-31'],
 ]
 const answers = async () => { const out = []; for (const [app, url] of SHAPES) { const got = await send(app, 'GET', url); out.push([url, got.status, got.json]) } return out }
 async function equalsFresh(label) {
@@ -95,7 +98,7 @@ async function main() {
         UPDATE products SET stock_quantity=10 WHERE id=1; UPDATE products SET stock_quantity=4 WHERE id=2; UPDATE products SET stock_quantity=0 WHERE id=3;
         DELETE FROM stock_lot_adjustment_operations; DELETE FROM stock_mutation_receipts`)
       // The reset above is a write the app did not make: forget every cached entry, as a restore or an import does.
-      versions.products = (versions.products || 0) + 1; versions.stock = (versions.stock || 0) + 1; store.clear()
+      store.clear() // no version is bumped here: a reader keyed on neither version must be caught by the Set under test, not rescued by this reset
       await equalsFresh(`${tag}: before the Set`) // warm every shape at the current versions
       bumps.length = 0
       const done = await run()
