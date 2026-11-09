@@ -1545,10 +1545,10 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
   const callCounting = (await metrics?.callCounting?.()) === true
-  // A direct Set is held while any count of that product at that branch waits for approval (owner rule), whatever the request says: every scoped Set asks, and a request that names its
+  // A direct Set is held while any count of that product at that branch waits for approval (owner rule), whatever the request says: EVERY Set asks (scoped, or the older branch-total Set that is converted to an add or a remove: lot-less Set-session lines and fast stock-in lines arrive that way), and a request that names its
   // count (icfix_..., Fix stock) is held for that count on any /adjust. The approval's own writes carry their approvalClaim and step over that approval only. Loaded only for such a request,
   // like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
-  const scopedSet = body.type === 'set' && body.setScope !== undefined
+  const scopedSet = body.type === 'set'
   const namesCount = typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')
   if (scopedSet || namesCount) {
     const { fixStockHeldByApproval, approvalClaimSession, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')

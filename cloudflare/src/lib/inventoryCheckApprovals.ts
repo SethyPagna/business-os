@@ -528,7 +528,7 @@ const sinceCountStatement = (branchId: number, productIds: number[], count: { se
       WHERE a.branch_id=@branchId AND COALESCE(a.decided_at,a.applying_at)>@submittedAt AND a.session_id<>@sessionId AND CAST(j.key AS INTEGER) IN (SELECT value FROM json_each(@ids)) AND json_extract(j.value,'$.at')>@submittedAt
     UNION
     SELECT 'adjusted',product_id FROM inventory_movements INDEXED BY idx_inventory_movements_product_created_pg WHERE branch_id=@branchId AND product_id IN (SELECT value FROM json_each(@ids))
-      AND movement_type IN ('set','adjustment','remove') AND COALESCE(reason,'') NOT LIKE 'Inventory check approved:%'
+      AND (movement_type IN ('set','adjustment','remove') OR (movement_type='add' AND COALESCE(reason,'') LIKE '%(Set to %)')) AND COALESCE(reason,'') NOT LIKE 'Inventory check approved:%'
       AND created_at>=date(@submittedFrom,'-1 day') AND julianday(created_at)>=julianday(@submittedFrom)
     ORDER BY 1,2`,
   // Movements are stamped to the second and the count to the millisecond: comparing from the start of the count's second never misses a correction made right after it (a false refusal is safe, a missed one applies a shortage twice).

@@ -47,6 +47,7 @@ function createLotSetWorld(options = {}) {
   const app = new Hono()
   app.route('/api/inventory', load('routes/inventory.ts').default)
   app.route('/api/batches', load('routes/batches.ts').default)
+  app.route('/api/fast-stock-in', load('routes/stockInCommit.ts').default)
   if (options.admin) app.route('/api/inventory-checks', load('routes/inventoryChecks.ts').default)
 
   // Fixture: product 1 with received dates 10 (3 units, 2026-09-02) and 11 (7 units, 2026-09-09) at branch 1; branch 2 exists and is empty.
