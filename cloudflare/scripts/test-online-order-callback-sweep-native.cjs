@@ -141,21 +141,22 @@ async function main() {
   })
 
   // ------------------------------------------------------------------------------------------------------------------------ sweep
-  await check('sweep: an idle tick is THREE statements (open payments, stuck qr_failed orders, late candidates), each through its partial index, reads no row and makes no PayWay call', async () => {
+  await check('sweep: an idle tick is FOUR statements (open payments, stuck qr_failed orders, the hold marker, late candidates): the three lists each through their partial index, the marker by its primary key, no PayWay call', async () => {
     const h = world()
     h.clearStatements()
     const s = await h.sweep()
     assert.deepEqual(s, { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0, deferred: false })
-    assert.equal(h.statements.length, 3); assert.equal(h.d1.calls, 3); assert.equal(h.calls.length, 0)
+    assert.equal(h.statements.length, 4); assert.equal(h.d1.calls, 4); assert.equal(h.calls.length, 0)
     assert.match(h.statements[0], /INDEXED BY idx_online_order_payments_open/)
     assert.match(h.statements[1], /INDEXED BY idx_online_orders_qr_failed/)
-    assert.match(h.statements[2], /INDEXED BY idx_online_order_payments_expired/)
+    assert.match(h.statements[2], /FROM system_flags WHERE key = @key/, 'the maintenance-hold marker: one primary-key read')
+    assert.match(h.statements[3], /INDEXED BY idx_online_order_payments_expired/)
     await place(h); h.clearStatements()
     await h.sweep()
-    assert.equal(h.statements.length, 3, 'a payment still inside its lifetime is not even read as a candidate'); assert.equal(h.calls.filter((c) => c.op === 'check').length, 0)
-    const bind = (sql) => sql.replace(/@(\w+)/g, (_, n) => ({ expiredBefore: "'2026-11-09 03:00:00'", now: "'2026-11-09 03:00:00'", minutesKey: "'k'", minutesDefault: '15', grace: '120', limit: '5', windowStart: "'2026-11-08 03:00:00'", recheckBefore: "'2026-11-09 03:00:00'" }[n]))
+    assert.equal(h.statements.length, 4, 'a payment still inside its lifetime is not even read as a candidate'); assert.equal(h.calls.filter((c) => c.op === 'check').length, 0)
+    const bind = (sql) => sql.replace(/@(\w+)/g, (_, n) => ({ expiredBefore: "'2026-11-09 03:00:00'", now: "'2026-11-09 03:00:00'", minutesKey: "'k'", minutesDefault: '15', grace: '120', limit: '5', key: "'online_orders_late_recheck_due'", windowStart: "'2026-11-08 03:00:00'", recheckBefore: "'2026-11-09 03:00:00'" }[n]))
     const plans = h.statements.map((s) => h.all(`EXPLAIN QUERY PLAN ${bind(s)}`).map((r) => r.detail).join(' | '))
-    assert.match(plans[0], /idx_online_order_payments_open/); assert.match(plans[1], /idx_online_orders_qr_failed/); assert.match(plans[2], /idx_online_order_payments_expired/)
+    assert.match(plans[0], /idx_online_order_payments_open/); assert.match(plans[1], /idx_online_orders_qr_failed/); assert.match(plans[2], /system_flags/); assert.match(plans[3], /idx_online_order_payments_expired/)
     for (const plan of plans) assert.doesNotMatch(plan, /SCAN (p|o|online_order_payments|online_orders)(?! USING)/)
   })
 

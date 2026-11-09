@@ -82,6 +82,9 @@ export type SweepSummary = {
   late: number; qrFailedExpired: number
   /** True when the tick's D1 budget ran out: what is left waits for the next tick. */
   deferred: boolean
+  /** True when this tick ran the recovery pass after a maintenance hold; recoveryDone when that pass finished and removed its marker. */
+  recovery?: boolean
+  recoveryDone?: boolean
 }
 
 /** The owner's QR lifetime in minutes (settings, 3..60, else the default) plus the grace, in seconds, read inside the same statement that uses it. */
@@ -135,6 +138,53 @@ export async function findLateCandidates(db: D1Compat, now: Date, env: OrderDeps
     recheckBefore: sqlTime(new Date(now.getTime() - limits.onlineOrderLateCheckEveryMinutes * 60_000)), limit,
   })
   return rows || []
+}
+
+// ---- recovery after a maintenance hold ----------------------------------------------------------------------------------------------------
+//
+// While a restore (or any maintenance hold) is on, the cron skips its whole tick and the callback cannot land, so money paid during the hold is not seen by anyone.
+// scheduled() leaves a marker in system_flags (never in settings: settings is restored over). The first sweep after the hold clears finds the marker and runs the
+// late re-check ONCE over every payment that could still be paid (awaiting, expired or cancelled, with a QR that was issued, inside the plan's late window),
+// ignoring the per-payment interval: it was asked about before the hold, and the hold is what made that answer stale. It is bounded by the tick's D1 budget and the
+// batch size; what does not fit continues on the next ticks, and the marker is removed only when nothing is left, and only if no newer hold wrote it again meanwhile.
+export const RECHECK_DUE_FLAG = 'online_orders_late_recheck_due'
+
+/** Called by the cron when it skips a tick for maintenance. Never throws: a missing table or a failed write must not break the hold's own skip. */
+export async function markLateRecheckDue(db: D1Compat, now: Date): Promise<void> {
+  try {
+    const at = sqlTime(now)
+    await db.prepare(`INSERT INTO system_flags (key, value, updated_at) VALUES (@key, @at, @at) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run({ key: RECHECK_DUE_FLAG, at })
+  } catch { /* the sweep falls back to its ordinary late re-check */ }
+}
+
+async function readRecheckDue(db: D1Compat): Promise<string | null> {
+  try { return (await db.prepare('SELECT value FROM system_flags WHERE key = @key').get<{ value: string }>({ key: RECHECK_DUE_FLAG }))?.value ?? null } catch { return null }
+}
+
+/** Every payment that could still be paid and was last asked about at or before the hold's last skipped tick (a payment this recovery already asked about leaves the list). */
+export async function findRecoveryCandidates(db: D1Compat, now: Date, env: OrderDeps['env'], since: string, limit: number): Promise<PaymentWithOrder[]> {
+  const windowStart = sqlTime(new Date(now.getTime() - getPlanLimits(env).onlineOrderLateCheckHours * 3_600_000))
+  const rows = await db.prepare(`
+    SELECT * FROM (
+      SELECT p.*, o.state AS order_state FROM online_order_payments p INDEXED BY idx_online_order_payments_expired JOIN online_orders o ON o.id = p.order_id
+      WHERE p.state IN ('expired','cancelled') AND p.qr_string IS NOT NULL AND p.expires_at >= @windowStart AND (p.last_checked_at IS NULL OR p.last_checked_at <= @since)
+      UNION ALL
+      SELECT p.*, o.state AS order_state FROM online_order_payments p INDEXED BY idx_online_order_payments_open JOIN online_orders o ON o.id = p.order_id
+      WHERE p.state = 'awaiting' AND p.qr_string IS NOT NULL AND p.expires_at >= @windowStart AND (p.last_checked_at IS NULL OR p.last_checked_at <= @since)
+    ) ORDER BY expires_at ASC, id ASC LIMIT @limit
+  `).all<PaymentWithOrder>({ windowStart, since, limit })
+  return rows || []
+}
+
+/** Like claimCheck without the interval: one request wins the payment for this recovery pass. The claim is undone when PayWay could not be asked. */
+async function claimRecovery(deps: OrderDeps, payment: Pick<PaymentRecord, 'id' | 'state' | 'last_checked_at'>, since: string): Promise<string | null> {
+  const at = sqlTime(deps.now())
+  const claim = await deps.db.prepare(`UPDATE online_order_payments SET last_checked_at = @at WHERE id = @pid AND state = @state AND (last_checked_at IS NULL OR last_checked_at <= @since)`)
+    .run({ at, pid: payment.id, state: payment.state, since })
+  return Number(claim.changes ?? 0) === 1 ? at : null
+}
+async function releaseRecovery(deps: OrderDeps, payment: Pick<PaymentRecord, 'id' | 'last_checked_at'>, at: string): Promise<void> {
+  await deps.db.prepare('UPDATE online_order_payments SET last_checked_at = @old WHERE id = @pid AND last_checked_at = @at').run({ old: payment.last_checked_at, pid: payment.id, at })
 }
 
 /** Expire one payment that PayWay says was not paid. The order follows only when no other payment of it is still waiting (an edit may have issued a newer QR). */
@@ -228,9 +278,30 @@ export async function sweepOrders(deps: OrderDeps, creds: PaywayCredentials | nu
     if (spent()) { summary.deferred = true; break }
     if (await expireQrFailed(deps, order)) { summary.qrFailedExpired += 1; summary.expired.push({ orderId: order.id, paymentId: 0, purpose: 'order' }) }
   }
-  // Late money: the remaining PayWay budget of this tick goes to expired payments, each at most once per plan interval.
+  // Recovery after a maintenance hold: ask about every payment that could still be paid, once, whatever its interval (see the comment above RECHECK_DUE_FLAG).
   const remaining = Math.max(0, batch - summary.checked)
-  if (remaining > 0) {
+  const since = remaining > 0 ? await readRecheckDue(deps.db) : null
+  if (since) {
+    summary.recovery = true
+    const candidates = await findRecoveryCandidates(deps.db, deps.now(), deps.env, since, remaining)
+    let stopped = false
+    for (const payment of candidates) {
+      if (spent()) { summary.deferred = true; stopped = true; break }
+      const claimedAt = await claimRecovery(deps, payment, since)
+      if (!claimedAt) continue
+      const check = await checkQuietly(deps, creds, payment.tran_id)
+      summary.late += 1
+      if (!check.ok) { summary.skipped += 1; await releaseRecovery(deps, payment, claimedAt); stopped = true; continue }
+      settle(await applyCheckResult(deps, { id: payment.order_id, state: payment.order_state }, payment, check, 'sweep', creds))
+    }
+    // Done only when this pass saw the end of the list and every ask got an answer; otherwise the marker stays and the next tick continues.
+    if (!stopped && candidates.length < remaining) {
+      await deps.db.prepare('DELETE FROM system_flags WHERE key = @key AND value = @since').run({ key: RECHECK_DUE_FLAG, since })
+      summary.recoveryDone = true
+    }
+  }
+  // Late money: the remaining PayWay budget of this tick goes to expired payments, each at most once per plan interval.
+  if (remaining > 0 && !since) {
     for (const payment of await findLateCandidates(deps.db, deps.now(), deps.env, remaining)) {
       if (spent()) { summary.deferred = true; break }
       if (!(await claimCheck(deps, payment))) continue

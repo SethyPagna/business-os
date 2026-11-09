@@ -8,7 +8,7 @@ import paywayCallbackRoute from './routes/paywayCallback'
 import { orderNotifier } from './lib/onlineOrderAlerts'
 import onlineOrdersRoute from './routes/onlineOrders'
 import { getOnlineOrderAccess } from './lib/onlineOrdersAccess'
-import { sweepOrders } from './lib/onlineOrderSweep'
+import { markLateRecheckDue, sweepOrders } from './lib/onlineOrderSweep'
 import { scrubUnpaidOrders } from './lib/onlineOrderScrub'
 import { getDb } from './lib/db'
 import { paywayCredentialsFor } from './lib/paywayConfig'
@@ -795,7 +795,11 @@ export default {
       // DURING a restore would snapshot the half-restored database as if it
       // were a good state; the sweeps behind it write too. The next tick runs
       // normally once maintenance clears.
-      if (await getMaintenance(env)) return
+      if (await getMaintenance(env)) {
+        // Money paid while the hold is on is seen by no one: leave a marker so the first sweep after it clears re-checks every payment that could still be paid.
+        await markLateRecheckDue(getDb(env), new Date())
+        return
+      }
 
       // ONE job per invocation (lib/cronRotation.ts). This handler used to run
       // about ten steps in a single invocation; a cron invocation has the same
