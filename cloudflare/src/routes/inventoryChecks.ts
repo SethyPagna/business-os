@@ -56,7 +56,14 @@ app.use('*', async (c, next) => {
   if (c.req.method === 'GET' || c.req.method === 'HEAD') return
   const status = c.res.status
   if (status >= 400 && status < 500) return
-  await bumpVersion(c.env, 'inventory_checks')
+  // ON, a bump that did not land fails the write's answer (its outcome is unknown to the caller, and a stale set must never be served as fresh). OFF, nothing is being served from these
+  // versions right now, so an unreachable cache store must not turn a committed Inventory Check write into an error: the failure is logged and the next flip ON starts from a bumped version
+  // anyway (the version is also moved by every later writer).
+  const wired = await readSwitch(c.env, 'ic_wired')
+  try { await bumpVersion(c.env, 'inventory_checks') } catch (error) {
+    if (wired) throw error
+    console.error('[inventory_checks] version not advanced while ic_wired is OFF', error)
+  }
 })
 
 // ---- ic_wired: the Inventory Check list and overlay over the shared Products reader (INV-A S4a) ----------------------------------------------------------

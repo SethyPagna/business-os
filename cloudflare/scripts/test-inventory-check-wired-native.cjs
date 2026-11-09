@@ -349,5 +349,17 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   app.setSwitch('ic_wired', 'on')
   const flipped = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
   check('flipping ON again serves the set with the row written while OFF (110 now counted), not the copy cached before', idSet(flipped) === '100,101,106,110,111', idSet(flipped))
+  // A version that cannot be advanced: ON the writer's answer says so (5xx, outcome unknown); OFF nothing is served from the version, so a committed write stays a success.
+  const realBump = cache.bumpVersion
+  cache.bumpVersion = async () => { throw new Error('cache store unreachable') }
+  const quiet = console.error; console.error = () => {}
+  try {
+    const revisionNow = async () => (await app.get('/api/inventory-checks/sessions/sA')).json.item.revision
+    const onFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'close', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-on1' })
+    check('ON: a writer whose version bump fails does not answer success', onFail.status >= 500, JSON.stringify({ s: onFail.status, b: onFail.json }))
+    app.setSwitch('ic_wired', 'off')
+    const offFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-off' })
+    check('OFF: the same failure does not turn the write into an error', offFail.status < 500, String(offFail.status))
+  } finally { cache.bumpVersion = realBump; console.error = quiet; app.setSwitch('ic_wired', 'on') }
   console.log(`\n${checks} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })
