@@ -99,7 +99,7 @@ async function main() {
     assert.equal(sent.length, 0, 'an idle tick says nothing')
   })
 
-  await check('a change request is announced with its kind and the customer words cut short; a withdrawal sends nothing', async () => {
+  await check('a change request is announced with its kind and the customer words cut short; a refused request announces nothing', async () => {
     const h = world(); const res = await place(h, { phone: PHONE }); h.script.check = () => h.approved(25); await h.callback(tranOf(h)); sent.length = 0
     const long = 'please '.repeat(40)
     const ok = await h.request(`/${res.body.token}/requests`, 'POST', { kind: 'note', phone: PHONE, comment: long, after: { note: 'gate' } })
@@ -107,9 +107,6 @@ async function main() {
     assert.equal(sent.length, 1); const text = textOf(sent[0])
     assert.match(text, /Change note/); assert.match(text, KHMER); assert.ok(text.length < 700, 'the comment is cut')
     sent.length = 0
-    const rid = h.one('SELECT MAX(id) id FROM online_order_requests').id
-    await h.request(`/${res.body.token}/requests/${rid}/withdraw`, 'POST', { phone: PHONE })
-    assert.equal(sent.length, 0)
     const refused = await h.request(`/${res.body.token}/requests`, 'POST', { kind: 'note', phone: '012 999 999', after: { note: 'x' } })
     assert.equal(refused.status, 403); assert.equal(sent.length, 0, 'a refused request announces nothing')
   })
@@ -149,6 +146,60 @@ async function main() {
     noChat.run("INSERT INTO branches (name, role, is_active, is_default) VALUES ('Shop','shop',1,1)")
     seedStockFixture(noChat.raw.db, () => { const id = Number(noChat.run('INSERT INTO products (name, selling_price_usd, is_active, stock_quantity) VALUES (?, ?, 1, 9)', 'Serum', 12.5).lastInsertRowid); noChat.run('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?, 1, 9)', id) })
     sent.length = 0; await place(noChat); assert.equal(sent.length, 0)
+  })
+
+  await check('a customer edit, a cancel, a withdrawal and a failed QR each announce once; a re-issued QR and a declined check announce nothing to the chat', async () => {
+    const h = world(); const res = await place(h, { phone: PHONE }); const token = res.body.token
+    sent.length = 0
+    await h.request(`/${token}/edit`, 'POST', { name: 'Dara Two' })
+    assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /edited/i); assert.match(textOf(sent[0]), KHMER); assert.match(textOf(sent[0]), /Dara Two/)
+    await h.request(`/${token}/edit`, 'POST', { name: 'Dara Two' })
+    assert.equal(sent.length, 1, 'an edit that changes nothing announces nothing')
+    sent.length = 0
+    await h.request(`/${token}/cancel`, 'POST', {})
+    assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /cancelled/i); assert.match(textOf(sent[0]), KHMER)
+    await h.request(`/${token}/cancel`, 'POST', {})
+    assert.equal(sent.length, 1, 'cancelling twice announces once')
+    // a failed QR at creation
+    const f = world(); f.script.generate = () => ({ status: { code: '5' } }); sent.length = 0
+    const failed = await f.request('/', 'POST', { lines: [{ product_id: 1, quantity: 1 }], name: 'Sok', phone: '012600001', fulfilment: 'pickup' })
+    assert.equal(failed.status, 502)
+    assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /could not start/i); assert.match(textOf(sent[0]), KHMER)
+    // withdraw
+    const w = world(); const wr = await place(w, { phone: PHONE }); w.script.check = () => w.approved(25); await w.callback(tranOf(w))
+    await w.request(`/${wr.body.token}/requests`, 'POST', { kind: 'note', phone: PHONE, after: { note: 'gate' } }); sent.length = 0
+    const rid = w.one('SELECT MAX(id) id FROM online_order_requests').id
+    await w.request(`/${wr.body.token}/requests/${rid}/withdraw`, 'POST', { phone: PHONE })
+    assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /withdrawn/i); assert.match(textOf(sent[0]), /Change note/)
+    // a declined check: the screens move, the chat does not
+    const d = world(); await place(d); sent.length = 0; d.bumps.length = 0
+    d.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 3, original_amount: 25 } })
+    await d.callback(tranOf(d))
+    assert.equal(sent.length, 0); assert.equal(d.bumps.length, 1)
+  })
+
+  await check('a payment on a QR the customer had replaced is announced ONCE as review, saying so, with what was paid and the order total', async () => {
+    const h = world(); const res = await place(h, { phone: PHONE }); const first = tranOf(h)
+    await h.request(`/${res.body.token}/edit`, 'POST', { lines: [{ product_id: 1, quantity: 3 }] }); sent.length = 0
+    h.script.check = () => h.approved(25)
+    await h.callback(first); h.advance(MIN); await h.callback(first)
+    assert.equal(sent.length, 1, sent.map(textOf).join(' | ')); const text = textOf(sent[0])
+    assert.match(text, /replaced QR/i); assert.match(text, KHMER); assert.match(text, /[$]25[.]00/)
+    assert.ok(!text.includes(first), 'no transaction id')
+  })
+
+  await check('a valid callback for a transaction this shop has no record of raises ONE alert per transaction per day and writes nothing; only the tail of the id is shown', async () => {
+    const h = world(); await place(h); sent.length = 0
+    h.sweepModule.resetUnknownAlertsForTests()
+    const tran = 'WNEVERISSUED000042'
+    const token = (await h.paywayModule.callbackUrlFor(h.env, 'https://shop.example.test', tran)).split('s=')[1]
+    const before = h.one('SELECT (SELECT COUNT(*) FROM online_orders) o, (SELECT COUNT(*) FROM online_order_payments) p, (SELECT COUNT(*) FROM online_order_events) e')
+    for (let i = 0; i < 3; i += 1) assert.equal((await h.callback(tran, { token })).status, 200)
+    assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /not recognised/i); assert.match(textOf(sent[0]), KHMER)
+    assert.ok(textOf(sent[0]).includes('...D000042') || textOf(sent[0]).includes('...000042'), 'the tail only'); assert.ok(!textOf(sent[0]).includes(tran))
+    assert.deepEqual(h.one('SELECT (SELECT COUNT(*) FROM online_orders) o, (SELECT COUNT(*) FROM online_order_payments) p, (SELECT COUNT(*) FROM online_order_events) e'), before, 'no order write')
+    h.advance(24 * 60 * MIN); await h.callback(tran, { token })
+    assert.equal(sent.length, 2, 'the next day is a new alert')
   })
 
   global.fetch = realFetch

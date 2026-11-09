@@ -17,6 +17,7 @@ import { canonicalizePhone } from './phone'
 import { normalizePromotionRule, isRuleActive, type PromotionRule } from './promotionRules'
 import { percentageMoney4 } from './moneyPrecision'
 import { getPlanLimits } from './planTier'
+import { getMaintenance } from './maintenance'
 import { resolveTaxSettings } from './saleAmendments'
 import {
   PaywayError, callbackUrlFor, checkTransaction, closeTransaction, generateQr, makeTranId,
@@ -74,11 +75,18 @@ export type OrderDeps = {
    */
   notify?: (event: OrderAlertEvent) => Promise<void>
 }
+/**
+ * Every committed change an order goes through, once per guarded transition. The same stream feeds the shop's Telegram (lib/onlineOrderAlerts.ts,
+ * which composes nothing for the kinds the shop does not need to read) and the live refresh (version bump + broadcast), so a staff tab never shows
+ * an order the customer's payment already moved.
+ */
 export type OrderAlertEvent =
-  | { kind: 'created'; orderId: number }
-  | { kind: 'paid' | 'review'; orderId: number; paymentId: number }
+  | { kind: 'created' | 'qr_failed' | 'edited' | 'cancelled' | 'changed'; orderId: number }
+  | { kind: 'paid' | 'review' | 'failed'; orderId: number; paymentId: number }
   | { kind: 'request'; orderId: number; requestId: number; requestKind: string }
+  | { kind: 'withdrawn'; orderId: number; requestId: number; requestKind: string }
   | { kind: 'expired'; expired: Array<{ orderId: number; paymentId: number; purpose: string }> }
+  | { kind: 'unknown_payment'; tranId: string }
 const announce = async (deps: OrderDeps, event: OrderAlertEvent): Promise<void> => {
   if (!deps.notify) return
   try { await deps.notify(event) } catch { /* an alert must never fail the order */ }
@@ -389,26 +397,36 @@ const paywayReason = (error: unknown): PaywayFailureReason => (error instanceof 
  */
 export async function applyCheckResult(
   deps: OrderDeps, order: Pick<OrderRecord, 'id' | 'state'>, payment: Pick<PaymentRecord, 'id' | 'amount' | 'currency' | 'revision' | 'state'>,
-  check: ParsedCheck, source: 'payway' | 'sweep',
+  check: ParsedCheck, source: 'payway' | 'sweep', creds: PaywayCredentials | null = null,
 ): Promise<'paid' | 'review' | 'failed' | 'pending' | 'noop'> {
-  const outcome = await applyCheckResultRows(deps, order, payment, check, source)
-  // The one place a check becomes Paid or Review, so the one place the shop hears of it: whichever of the poll, the callback or the sweep got there first.
-  if (outcome === 'paid' || outcome === 'review') await announce(deps, { kind: outcome, orderId: order.id, paymentId: payment.id })
+  const outcome = await applyCheckResultRows(deps, order, payment, check, source, creds)
+  // The one place a check becomes Paid, Review or Failed, so the one place the shop hears of it: whichever of the poll, the callback or the sweep got there first.
+  if (outcome === 'paid' || outcome === 'review' || outcome === 'failed') await announce(deps, { kind: outcome, orderId: order.id, paymentId: payment.id })
   return outcome
 }
 
 async function applyCheckResultRows(
   deps: OrderDeps, order: Pick<OrderRecord, 'id' | 'state'>, payment: Pick<PaymentRecord, 'id' | 'amount' | 'currency' | 'revision' | 'state'>,
-  check: ParsedCheck, source: 'payway' | 'sweep',
+  check: ParsedCheck, source: 'payway' | 'sweep', creds: PaywayCredentials | null,
 ): Promise<'paid' | 'review' | 'failed' | 'pending' | 'noop'> {
   if (!check.ok) return 'pending'
-  const verdict = classifyCheck({ amount: Number(payment.amount), currency: payment.currency }, check)
+  let verdict = classifyCheck({ amount: Number(payment.amount), currency: payment.currency }, check)
   if (verdict === 'pending') return 'pending'
+  // Money that arrives on a payment we had already given up on (its QR was replaced by an edit, the order was cancelled, the check had said declined) is
+  // never dropped and never silently accepted either: it is held in review with what PayWay says it took, and the shop is told. A decline on such a
+  // payment changes nothing.
+  const dead = payment.state === 'cancelled' || payment.state === 'failed'
+  if (dead) {
+    if (verdict === 'failed') return 'pending'
+    verdict = 'review'
+  }
   const { db } = deps
   const at = sqlTime(deps.now())
   const rev = Number(payment.revision)
   const paidGuard = `EXISTS (SELECT 1 FROM online_order_payments WHERE id = @pid AND state = @pstate AND revision = @newRev)`
   if (verdict === 'failed') {
+    const orderMoves = canTransition(order.state, 'qr_failed', source)
+    const failedGuard = `EXISTS (SELECT 1 FROM online_order_payments WHERE id = @pid AND state = 'failed' AND revision = @newRev)`
     const [result] = await db.batch([
       { sql: `UPDATE online_order_payments SET state = 'failed', last_checked_at = @at, revision = revision + 1, updated_at = @at WHERE id = @pid AND state = 'awaiting'`, params: { pid: payment.id, at } },
       {
@@ -416,25 +434,50 @@ async function applyCheckResultRows(
               SELECT @oid, @pid, 'note', @source, @detail, @at WHERE changes() = 1`,
         params: { oid: order.id, pid: payment.id, source, detail: JSON.stringify({ payment: check.state }), at },
       },
+      // An order whose own (only) payment was declined is not waiting for anything: it becomes qr_failed (the customer can ask for a new QR, the
+      // sweep expires it later) instead of staying "awaiting payment" for ever, outside every cap and every sweep.
+      {
+        sql: `UPDATE online_orders SET state = 'qr_failed', revision = revision + 1, updated_at = @at
+              WHERE id = @oid AND state = 'awaiting_payment' AND @moves = 1 AND ${failedGuard}
+                AND (SELECT purpose FROM online_order_payments WHERE id = @pid) = 'order'
+                AND NOT EXISTS (SELECT 1 FROM online_order_payments WHERE order_id = @oid AND state = 'awaiting')`,
+        params: { oid: order.id, pid: payment.id, at, moves: orderMoves ? 1 : 0, newRev: rev + 1 },
+      },
+      {
+        sql: `INSERT INTO online_order_events (order_id, payment_id, event, from_state, to_state, source, detail_json, created_at)
+              SELECT @oid, @pid, 'qr_failed', 'awaiting_payment', 'qr_failed', @source, @detail, @at
+              WHERE ${failedGuard} AND (SELECT state FROM online_orders WHERE id = @oid) = 'qr_failed'
+                AND NOT EXISTS (SELECT 1 FROM online_order_events WHERE payment_id = @pid AND event = 'qr_failed')`,
+        params: { oid: order.id, pid: payment.id, source, at, newRev: rev + 1, detail: JSON.stringify({ reason: 'declined' }) },
+      },
     ])
     return Number(result.meta?.changes ?? 0) === 1 ? 'failed' : 'noop'
   }
   const amount = check.originalAmount ?? check.totalAmount ?? 0
   if (verdict === 'review') {
     const orderMoves = canTransition(order.state, 'review', source)
+    // What PayWay actually took, kept on the row (paid_at stays empty: the order is not paid): the money read counts it, so a refund can be noted for it.
+    const held = check.state === 'refunded' ? 0 : (check.totalAmount ?? check.originalAmount ?? 0)
     const [result] = await db.batch([
-      { sql: `UPDATE online_order_payments SET state = 'review', paid_at = NULL, last_checked_at = @at, revision = revision + 1, updated_at = @at WHERE id = @pid AND state IN ('awaiting','expired')`, params: { pid: payment.id, at } },
+      {
+        sql: `UPDATE online_order_payments SET state = 'review', paid_at = NULL, paid_amount = @held, paid_currency = @currency, payway_apv = @apv,
+                     payway_bank_ref = @bankRef, payway_payment_type = @paymentType, payway_bank_name = @bankName,
+                     last_checked_at = @at, revision = revision + 1, updated_at = @at
+              WHERE id = @pid AND state IN ('awaiting','expired','cancelled','failed')`,
+        params: { pid: payment.id, at, held, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
+      },
       {
         sql: `UPDATE online_orders SET state = 'review', revision = revision + 1, updated_at = @at
-              WHERE id = @oid AND state = 'awaiting_payment' AND @moves = 1 AND ${paidGuard}`,
+              WHERE id = @oid AND state IN ('awaiting_payment','expired') AND @moves = 1 AND ${paidGuard}`,
         params: { oid: order.id, pid: payment.id, at, moves: orderMoves ? 1 : 0, pstate: 'review', newRev: rev + 1 },
       },
       {
         sql: `INSERT INTO online_order_events (order_id, payment_id, event, from_state, to_state, source, amount_usd, detail_json, created_at)
-              SELECT @oid, @pid, 'mismatch', @from, @to, @source, @amount, @detail, @at WHERE ${paidGuard}`,
+              SELECT @oid, @pid, 'mismatch', @from, @to, @source, @amount, @detail, @at WHERE ${paidGuard}
+                AND NOT EXISTS (SELECT 1 FROM online_order_events WHERE payment_id = @pid AND event = 'mismatch')`,
         params: {
           oid: order.id, pid: payment.id, from: order.state, to: orderMoves ? 'review' : order.state, source, amount: check.state === 'refunded' ? 0 : amount, at,
-          detail: JSON.stringify({ check: check.state, expected: Number(payment.amount), currency: payment.currency }), pstate: 'review', newRev: rev + 1,
+          detail: JSON.stringify({ check: check.state, expected: Number(payment.amount), currency: payment.currency, ...(dead ? { reason: 'paid_after_cancel', payment_state: payment.state } : {}) }), pstate: 'review', newRev: rev + 1,
         },
       },
     ])
@@ -442,12 +485,20 @@ async function applyCheckResultRows(
   }
   const orderMoves = canTransition(order.state, 'paid', source)
   const event = order.state === 'expired' ? 'late_paid' : 'verified_paid'
+  // The other QRs of this order that ABA may still take money on. They are cancelled in the same batch below, and closed at ABA after it commits: a
+  // customer who scans the older QR anyway would otherwise pay twice, onto a payment we no longer watch.
+  const siblings = creds
+    ? (await db.prepare(`SELECT tran_id FROM online_order_payments WHERE order_id = @oid AND id <> @pid AND state = 'awaiting' AND qr_string IS NOT NULL`).all<{ tran_id: string }>({ oid: order.id, pid: payment.id })).map((row) => row.tran_id)
+    : []
   const [result] = await db.batch([
     {
+      // 'review' is not here on purpose: a payment held in review is resolved by staff (which keeps the real amount), never flipped to paid by a later
+      // check that happens to match, or a payment on a cancelled QR would pay an order whose price had since changed.
       sql: `UPDATE online_order_payments SET state = 'paid', paid_at = @at, paid_amount = @amount, paid_currency = @currency, payway_apv = @apv,
+                   payway_bank_ref = @bankRef, payway_payment_type = @paymentType, payway_bank_name = @bankName,
                    last_checked_at = @at, revision = revision + 1, updated_at = @at
-            WHERE id = @pid AND state IN ('awaiting','expired','review')`,
-      params: { pid: payment.id, at, amount, currency: payment.currency, apv: check.apv },
+            WHERE id = @pid AND state IN ('awaiting','expired')`,
+      params: { pid: payment.id, at, amount, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
     },
     {
       sql: `UPDATE online_orders SET state = 'paid', paid_at = COALESCE(paid_at, @at), revision = revision + 1, updated_at = @at
@@ -461,7 +512,9 @@ async function applyCheckResultRows(
     },
     {
       sql: `INSERT INTO online_order_events (order_id, payment_id, event, from_state, to_state, source, amount_usd, detail_json, created_at)
-            SELECT @oid, @pid, @event, @from, @to, @source, @usd, @detail, @at WHERE ${paidGuard}`,
+            SELECT @oid, @pid, @event, @from, @to, @source, @usd, @detail, @at WHERE ${paidGuard}
+              -- a payment turns paid once: a twin that raced the first writer (same revision) finds the Records row already there and adds none
+              AND NOT EXISTS (SELECT 1 FROM online_order_events WHERE payment_id = @pid AND event IN ('verified_paid','late_paid'))`,
       params: {
         oid: order.id, pid: payment.id, event, from: order.state, to: orderMoves ? 'paid' : order.state, source, at,
         usd: payment.currency === 'USD' ? amount : null, detail: JSON.stringify(orderMoves ? { currency: payment.currency } : { currency: payment.currency, extra_payment: true, order_state: order.state }),
@@ -469,7 +522,9 @@ async function applyCheckResultRows(
       },
     },
   ])
-  return Number(result.meta?.changes ?? 0) === 1 ? 'paid' : 'noop'
+  if (Number(result.meta?.changes ?? 0) !== 1) return 'noop'
+  await closeQuietly(deps, creds, siblings)
+  return 'paid'
 }
 
 async function closeQuietly(deps: OrderDeps, creds: PaywayCredentials | null, tranIds: string[]): Promise<void> {
@@ -488,7 +543,7 @@ async function paidMeanwhile(deps: OrderDeps, creds: PaywayCredentials | null, b
   for (const payment of bundle.payments.filter((p) => p.state === 'awaiting' && p.qr_string)) {
     let check: ParsedCheck
     try { check = await checkTransaction(deps.transport, creds, deps.now(), payment.tran_id) } catch { continue }
-    const outcome = await applyCheckResult(deps, bundle.order, payment, check, 'payway')
+    const outcome = await applyCheckResult(deps, bundle.order, payment, check, 'payway', creds)
     if (outcome === 'paid' || outcome === 'review') return true
   }
   return false
@@ -499,6 +554,11 @@ async function paidMeanwhile(deps: OrderDeps, creds: PaywayCredentials | null, b
 const NUDGE_AFTER_MS = 60_000
 const isolateNudges = new Map<number, number>()
 export function resetNudgeThrottleForTests(): void { isolateNudges.clear() }
+
+/** True while any maintenance hold is set, and when that cannot be read: an unreadable hold is treated as a hold. */
+async function maintenanceHolds(env: Env): Promise<boolean> {
+  try { return (await getMaintenance(env)) !== null } catch { return true }
+}
 
 /**
  * A poll or page load may ask PayWay whether an order has been paid, once the QR has been out for a minute and at most once per
@@ -517,12 +577,15 @@ export async function nudgeOrder(deps: OrderDeps, creds: PaywayCredentials | nul
   isolateNudges.set(order.id, now.getTime())
   const payment = await deps.db.prepare(`SELECT * FROM online_order_payments WHERE order_id = @id AND state = 'awaiting' ORDER BY id DESC LIMIT 1`).get<PaymentRecord>({ id: order.id })
   if (!payment || !payment.qr_string || !nudgeCheckDue(payment.last_checked_at, now, deps.env)) return 'none'
+  // A GET must never write while a restore or a branch cutover holds the database (the write gate only covers write methods, and this nudge is a write
+  // behind a GET). Checked only when a check is actually due, so the common poll pays nothing for it.
+  if (await maintenanceHolds(deps.env)) return 'none'
   const claim = await deps.db.prepare(`UPDATE online_order_payments SET last_checked_at = @at WHERE id = @pid AND state = 'awaiting' AND last_checked_at IS @last`)
     .run({ at: sqlTime(now), pid: payment.id, last: payment.last_checked_at })
   if (Number(claim.changes ?? 0) !== 1) return 'none'
   let check: ParsedCheck
   try { check = await checkTransaction(deps.transport, creds, now, payment.tran_id) } catch { return 'none' }
-  const outcome = await applyCheckResult(deps, order, payment, check, 'payway')
+  const outcome = await applyCheckResult(deps, order, payment, check, 'payway', creds)
   return outcome === 'paid' || outcome === 'review' || outcome === 'failed' ? outcome : 'none'
 }
 
@@ -662,7 +725,7 @@ export async function createOrder(
   const order = { id: 0, order_no: orderNo }
   order.id = Number((await db.prepare('SELECT id FROM online_orders WHERE order_no = @no').get<{ id: number }>({ no: orderNo }))?.id)
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: facts.priced.goodsTotalUsd, currency: 'USD', purpose: 'order' }, settings, 'awaiting_payment')
-  if (!issued.ok) return qrFailure(issued.reason, token, orderNo)
+  if (!issued.ok) { await announce(deps, { kind: 'qr_failed', orderId: order.id }); return qrFailure(issued.reason, token, orderNo) }
   const bundle = (await loadBundle(db, hash))!
   await announce(deps, { kind: 'created', orderId: bundle.order.id })
   return { token, bundle }
@@ -721,6 +784,7 @@ export async function editOrder(deps: OrderDeps, creds: PaywayCredentials | null
       },
     ])
     if (Number(result.meta?.changes ?? 0) !== 1) return refuse(409, 'order_changed', 'This order changed while you were editing it. Please reload and try again.')
+    await announce(deps, { kind: 'edited', orderId: order.id })
     return (await loadBundle(deps.db, order.token_hash))!
   }
   const credentials = creditsOrRefuse(creds)
@@ -752,8 +816,9 @@ export async function editOrder(deps: OrderDeps, creds: PaywayCredentials | null
   ])
   if (Number(result.meta?.changes ?? 0) !== 1) return refuse(409, 'order_changed', 'This order changed while you were editing it. Please reload and try again.')
   await closeQuietly(deps, credentials, bundle.payments.filter((p) => p.state === 'awaiting').map((p) => p.tran_id))
+  await announce(deps, { kind: 'edited', orderId: order.id })
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: facts.priced.goodsTotalUsd, currency: 'USD', purpose: 'order' }, settings, order.state)
-  if (!issued.ok) return qrFailure(issued.reason, token, order.order_no)
+  if (!issued.ok) { await announce(deps, { kind: 'qr_failed', orderId: order.id }); return qrFailure(issued.reason, token, order.order_no) }
   return (await loadBundle(deps.db, order.token_hash))!
 }
 
@@ -776,6 +841,7 @@ export async function cancelOrder(deps: OrderDeps, creds: PaywayCredentials | nu
   ])
   if (Number(result.meta?.changes ?? 0) !== 1) return refuse(409, 'order_changed', 'This order changed just now. Please reload and try again.')
   await closeQuietly(deps, creds, bundle.payments.filter((p) => p.state === 'awaiting').map((p) => p.tran_id))
+  await announce(deps, { kind: 'cancelled', orderId: order.id })
   return (await loadBundle(deps.db, order.token_hash))!
 }
 
@@ -805,7 +871,8 @@ export async function retryOrderQr(deps: OrderDeps, creds: PaywayCredentials | n
   if (Number(result.meta?.changes ?? 0) !== 1) return refuse(409, 'order_changed', 'This order changed just now. Please reload and try again.')
   await closeQuietly(deps, credentials, bundle.payments.filter((p) => p.state === 'awaiting').map((p) => p.tran_id))
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: order.goods_total_usd, currency: order.currency, purpose: 'order' }, settings, order.state)
-  if (!issued.ok) return qrFailure(issued.reason, token, order.order_no)
+  if (!issued.ok) { await announce(deps, { kind: 'qr_failed', orderId: order.id }); return qrFailure(issued.reason, token, order.order_no) }
+  await announce(deps, { kind: 'changed', orderId: order.id })
   return (await loadBundle(deps.db, order.token_hash))!
 }
 
@@ -846,6 +913,7 @@ export async function retryTopUpQr(deps: OrderDeps, creds: PaywayCredentials | n
     const failure = paymentFailureMessage(issued.reason)
     return refuse(502, failure.code, failure.message, { retryable: failure.retryable, token, order_no: order.order_no })
   }
+  await announce(deps, { kind: 'changed', orderId: order.id })
   return (await loadBundle(deps.db, order.token_hash))!
 }
 
@@ -961,5 +1029,6 @@ export async function withdrawRequest(deps: OrderDeps, token: string, requestId:
     },
   ])
   if (Number(result.meta?.changes ?? 0) !== 1) return refuse(409, 'request_not_pending', 'The shop has already answered this request, so it cannot be withdrawn.')
+  await announce(deps, { kind: 'withdrawn', orderId: order.id, requestId: id, requestKind: request.kind })
   return (await loadBundle(deps.db, order.token_hash))!
 }

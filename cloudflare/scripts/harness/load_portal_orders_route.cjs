@@ -61,7 +61,12 @@ function createOrdersHarness(options = {}) {
     return answer && typeof answer === 'object' && 'httpStatus' in answer ? { status: answer.httpStatus, json: answer.json ?? null } : { status: 200, json: answer }
   }
 
+  // The live-refresh side effects, recorded instead of sent: every committed order change bumps the data version and broadcasts (lib/onlineOrderAlerts.ts).
+  const bumps = []
+  const broadcasts = []
   const overrides = {
+    './cache': { bumpVersions: async (_env, namespaces) => { bumps.push(...namespaces) } },
+    '../durable-objects/broadcastHub': { broadcast: async (_env, channel, payload) => { broadcasts.push({ channel, payload }) } },
     '../lib/db': { getDb: () => db },
     './db': { getDb: () => db },
     '../lib/readSwitches': { readSwitch: async () => state.switchOn },
@@ -99,7 +104,11 @@ function createOrdersHarness(options = {}) {
   const paywayModule = load('lib/payway.ts')
   const callbackApp = load('routes/paywayCallback.ts').createPaywayCallbackRoute({ transport, now: () => new Date(state.nowMs) })
 
-  const env = { DB: raw, ...FAKE_ENV, ...(options.env || {}) }
+  // The raw D1 binding code outside getDb reaches for (the maintenance read): prepare().bind().first()/all(), over the same in-memory database.
+  const rawBinding = {
+    prepare: (sql) => { const make = (params) => ({ first: async () => raw.db.prepare(sql).get(...params) ?? null, all: async () => ({ results: raw.db.prepare(sql).all(...params) }), bind: (...next) => make(next) }); return make([]) },
+  }
+  const env = { DB: rawBinding, ...FAKE_ENV, ...(options.env || {}) }
   const limits = []
   if (options.limiter) env.ORDER_LIMITER = { limit: async ({ key }) => { limits.push(key); return { success: options.limiter(key, limits.length) } } }
 
@@ -119,26 +128,27 @@ function createOrdersHarness(options = {}) {
   }
 
   // The callback exactly as ABA would post it: the per-transaction token from the URL the Worker gave it, and a body nobody reads.
-  async function callback(tranId, { token, body = { status: 'approved' }, method = 'POST', envOverride, query } = {}) {
+  async function callback(tranId, { token, body = { status: 'approved' }, method = 'POST', envOverride, query, headers = {} } = {}) {
     planTier.__resetPlanTierCacheForTests?.()
     const merged = { ...env, ...(envOverride || {}) }
     const s = token !== undefined ? token : (await paywayModule.callbackUrlFor(merged, 'https://shop.example.test', tranId)).split('s=')[1]
     const url = query !== undefined ? `/callback?${query}` : `/callback?t=${encodeURIComponent(tranId)}&s=${encodeURIComponent(s ?? '')}`
-    const response = await callbackApp.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'POST' ? JSON.stringify(body) : undefined }, merged, { waitUntil() {}, passThroughOnException() {} })
+    const response = await callbackApp.request(url, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: method === 'POST' ? JSON.stringify(body) : undefined }, merged, { waitUntil() {}, passThroughOnException() {} })
     let json = null
     try { json = await response.json() } catch (_) { json = null }
     return { status: response.status, body: json }
   }
   const alertsModule = load('lib/onlineOrderAlerts.ts')
-  const deps = (over = {}) => { const merged = { ...env, ...(over.env || {}) }; return { db, env: merged, now: () => new Date(state.nowMs), random, transport, origin: null, notify: alertsModule.orderNotifier(merged) } }
-  const credentials = (over = {}) => paywayModule.paywayCredentials({ ...env, ...(over.env || {}) })
+  const deps = (over = {}) => { const merged = { ...env, ...(over.env || {}) }; return { db, env: merged, now: () => new Date(state.nowMs), random, transport, origin: null, notify: over.notify ?? alertsModule.orderNotifier(merged) } }
+  const configModule = load('lib/paywayConfig.ts')
+  const credentials = (over = {}) => configModule.paywayCredentialsFor({ ...env, ...(over.env || {}) })
   async function sweep(over = {}) { planTier.__resetPlanTierCacheForTests?.(); return sweepModule.sweepOrders(deps(over), over.noCredentials ? null : credentials(over)) }
   const one = (sql, ...params) => raw.db.prepare(sql).get(...params)
   const all = (sql, ...params) => raw.db.prepare(sql).all(...params)
   const run = (sql, ...params) => raw.db.prepare(sql).run(...params)
 
   return {
-    callback, sweep, sweepModule, paywayModule, load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
+    bumps, broadcasts, deps, credentials, callback, sweep, sweepModule, paywayModule, load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
     setNow: (ms) => { state.nowMs = ms },
     advance: (ms) => { state.nowMs += ms },
     clearStatements: () => { statements.length = 0; d1.calls = 0 },

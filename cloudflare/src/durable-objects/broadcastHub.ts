@@ -17,7 +17,7 @@
 
 import type { Env } from '../index'
 
-export type BroadcastChannel = 'products' | 'units' | 'categories' | 'users' | 'roles' | 'branches' | 'inventory' | 'sales' | 'returns' | 'settings' | 'notifications' | 'customers' | 'suppliers' | 'deliveryContacts' | 'promotions' | 'portalSubmissions' | 'files' | 'fees' | 'pendingActions'
+export type BroadcastChannel = 'products' | 'units' | 'categories' | 'users' | 'roles' | 'branches' | 'inventory' | 'sales' | 'returns' | 'settings' | 'notifications' | 'customers' | 'suppliers' | 'deliveryContacts' | 'promotions' | 'portalSubmissions' | 'files' | 'fees' | 'pendingActions' | 'onlineOrders'
 
 // Keep-alive frames. The client (frontend/src/api/websocket.ts, WS_PING_FRAME)
 // sends exactly this ping string every 25 s per open tab. Answering it from

@@ -25,7 +25,7 @@ const money = (o, payments, events, s, returns) => O.orderMoney(o, payments, eve
 // ---- before a sale ------------------------------------------------------------------------------------------------------------
 check('awaiting payment: nothing in, nothing due; a QR that is only awaiting is not money', () => {
   const m = money(order({ state: 'awaiting_payment' }), [{ id: 1, state: 'awaiting', amount: 24.5 }], [], null)
-  assert.deepEqual(m, { onlineInUsd: 0, recordedOnSaleUsd: 0, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
+  assert.deepEqual(m, { onlineInUsd: 0, heldInReviewUsd: 0, recordedOnSaleUsd: 0, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
 })
 
 check('paid, not fulfilled: refund due only for what exceeds the goods (an order lowered after payment); notes reduce it', () => {
@@ -60,7 +60,7 @@ check('fulfilled and covered: Completed, nothing owed, nothing to record, no chi
   assert.equal(view.phase, 'after_sale')
   assert.equal(view.status, 'completed')
   assert.deepEqual(view.chips, [])
-  assert.deepEqual(view.money, { onlineInUsd: 24.5, recordedOnSaleUsd: 24.5, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
+  assert.deepEqual(view.money, { onlineInUsd: 24.5, heldInReviewUsd: 0, recordedOnSaleUsd: 24.5, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
 })
 
 check('a delivery fee agreed at fulfilment makes the sale Not Paid for the fee only: Balance due, and the online money stays recorded', () => {
@@ -145,6 +145,26 @@ check('a return cancelled while its ABA refund stands raises the Check refund ch
   assert.ok(O.onlineOrderView(fulfilled(), [orderPay()], [recorded(1)], sale(), [cancelledAba]).chips.includes('check_refund'))
   assert.ok(!O.onlineOrderView(fulfilled(), [orderPay()], [recorded(1)], sale(), [{ ...cancelledAba, refund_channel: 'drawer' }]).chips.includes('check_refund'))
   assert.ok(!O.onlineOrderView(fulfilled(), [orderPay()], [recorded(1)], sale(), [{ ...cancelledAba, status: 'completed' }]).chips.includes('check_refund'))
+})
+
+// Money PayWay took that did not match is still money: it is held on the payment, the money read counts it, and cancelling the order makes it refundable.
+check('review money: $20 taken on a $25 order is held, counted, and refundable on cancel (a build that counts only paid rows reads 0)', () => {
+  const review = { id: 1, state: 'review', amount: 25, paid_amount: 20 }
+  const held = money(order({ state: 'review', goods_total_usd: 25 }), [review], [], null)
+  assert.equal(held.heldInReviewUsd, 20); assert.equal(held.onlineInUsd, 0); assert.equal(held.refundDueUsd, 0, 'short of the goods: nothing is due while the order is open')
+  assert.equal(money(order({ state: 'cancelled', goods_total_usd: 25 }), [review], [], null).refundDueUsd, 20)
+  assert.equal(money(order({ state: 'cancelled', goods_total_usd: 25 }), [review], [noted(5)], null).refundDueUsd, 15)
+  assert.equal(money(order({ state: 'review', goods_total_usd: 25 }), [{ id: 1, state: 'review', amount: 25, paid_amount: 30 }], [], null).refundDueUsd, 5, 'an over-payment is refundable before anything else happens')
+  assert.equal(money(order({ state: 'cancelled', goods_total_usd: 25 }), [{ id: 1, state: 'review', amount: 25 }], [], null).refundDueUsd, 0, 'a review row that never stored an amount holds nothing we can name')
+  assert.equal(money(order({ state: 'cancelled', goods_total_usd: 25 }), [review, { id: 2, state: 'paid', amount: 25, paid_amount: 25 }], [], null).refundDueUsd, 45, 'held money adds to paid money')
+})
+
+check('the needs-review chip follows the money, not only the order state: a mismatched top-up on a paid order, and a payment on a cancelled QR, both raise it', () => {
+  const topUpReview = { id: 2, state: 'review', amount: 3, paid_amount: 2, purpose: 'top_up' }
+  assert.ok(O.onlineOrderView(order({ state: 'paid' }), [orderPay(), topUpReview], [], null).chips.includes('needs_review'))
+  assert.ok(O.onlineOrderView(order({ state: 'cancelled' }), [{ id: 1, state: 'review', amount: 24.5, paid_amount: 24.5 }], [], null).chips.includes('needs_review'))
+  assert.ok(!O.onlineOrderView(order({ state: 'paid' }), [orderPay()], [], null).chips.includes('needs_review'))
+  assert.ok(O.onlineOrderView(fulfilled(), [orderPay(), topUpReview], [], sale()).chips.includes('needs_review'), 'after the sale too')
 })
 
 check('chips before a sale: review, late payment, pending and accepted-not-applied requests', () => {

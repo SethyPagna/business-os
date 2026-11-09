@@ -42,6 +42,8 @@ const EXPECTED = [
   ['awaiting_payment', 'awaiting_payment', 'customer'], ['awaiting_payment', 'qr_failed', 'customer'],
   ['awaiting_payment', 'paid', 'payway'], ['awaiting_payment', 'paid', 'sweep'],
   ['awaiting_payment', 'review', 'payway'], ['awaiting_payment', 'review', 'sweep'],
+  // a declined check leaves an order with nothing to wait for: qr_failed (so it can be retried and swept), by the check and by the sweep
+  ['awaiting_payment', 'qr_failed', 'payway'], ['awaiting_payment', 'qr_failed', 'sweep'],
   ['awaiting_payment', 'expired', 'sweep'],
   ['awaiting_payment', 'cancelled', 'customer'], ['awaiting_payment', 'cancelled', 'staff'],
   ['qr_failed', 'awaiting_payment', 'customer'], ['qr_failed', 'expired', 'sweep'],
@@ -49,6 +51,8 @@ const EXPECTED = [
   ['paid', 'paid', 'staff'], ['paid', 'cancelled', 'staff'], ['paid', 'fulfilled', 'staff'],
   ['review', 'paid', 'staff'], ['review', 'cancelled', 'staff'],
   ['expired', 'awaiting_payment', 'customer'], ['expired', 'paid', 'payway'], ['expired', 'paid', 'sweep'],
+  // late money that does not match the order still lands in review instead of leaving an expired order with held money nobody sees
+  ['expired', 'review', 'payway'], ['expired', 'review', 'sweep'],
 ].map((row) => row.join('>'))
 
 check('every (from, to, source) triple: exactly the expected ones are allowed, nothing else', () => {
@@ -57,7 +61,7 @@ check('every (from, to, source) triple: exactly the expected ones are allowed, n
     if (O.canTransition(from, to, source)) allowed.push([from, to, source].join('>'))
   }
   assert.deepEqual(allowed.sort(), [...EXPECTED].sort())
-  assert.equal(allowed.length, 21)
+  assert.equal(allowed.length, 25)
 })
 
 check('POSITIVE CONTROL: the matrix is not trivially empty or full, and junk inputs are refused', () => {

@@ -41,14 +41,16 @@ const DECISION_EVENTS: readonly string[] = ['request_accepted', 'request_rejecte
 /** Who may move an order from one stored state to another (design A1.2). A self-loop is an edit that keeps the state. */
 export const ORDER_TRANSITIONS: Readonly<Record<OrderState, Readonly<Partial<Record<OrderState, readonly EventSource[]>>>>> = Object.freeze({
   awaiting_payment: {
-    awaiting_payment: ['customer'], qr_failed: ['customer'], paid: ['payway', 'sweep'], review: ['payway', 'sweep'],
+    // qr_failed also by a declined check: an order whose only payment was declined is not waiting for anything, and must not stay "awaiting" forever.
+    awaiting_payment: ['customer'], qr_failed: ['customer', 'payway', 'sweep'], paid: ['payway', 'sweep'], review: ['payway', 'sweep'],
     expired: ['sweep'], cancelled: ['customer', 'staff'],
   },
   qr_failed: { awaiting_payment: ['customer'], expired: ['sweep'], cancelled: ['customer', 'staff'] },
   paid: { paid: ['staff'], cancelled: ['staff'], fulfilled: ['staff'] },
   review: { paid: ['staff'], cancelled: ['staff'] },
   // A customer whose QR ran out asks for a new one ("Get a new QR"); a late payment of the old one is still accepted (late_paid).
-  expired: { awaiting_payment: ['customer'], paid: ['payway', 'sweep'] },
+  // A late payment that does not match the order (a short, a discount) still lands in review: the money is real and a person must look.
+  expired: { awaiting_payment: ['customer'], paid: ['payway', 'sweep'], review: ['payway', 'sweep'] },
   cancelled: {},
   fulfilled: {},
 })
@@ -290,6 +292,8 @@ const abaCashOut = (row: ReturnRow): number => (row.refund_channel === 'aba' && 
 export type OrderMoney = {
   /** Money PayWay confirmed (sum of paid payment rows). */
   onlineInUsd: number
+  /** Money PayWay took that did not match (a short, a discount, a payment on a QR we had cancelled), held until staff resolve it. Counts toward a refund. */
+  heldInReviewUsd: number
   /** The part of it a staff action recorded as tender on the sale. */
   recordedOnSaleUsd: number
   /** Paid online but not yet recorded on the sale (a top-up waiting for the cashier). 0 without a sale. */
@@ -315,6 +319,8 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   const paid = payments.filter((p) => p.state === 'paid')
   const amountOf = (p: PaymentRow): number => num(p.paid_amount ?? p.amount)
   const onlineInUsd = sumMoney4(paid.map(amountOf))
+  // Only what PayWay actually took: a review row without a stored amount (written before it was kept) holds nothing we can name.
+  const heldInReviewUsd = sumMoney4(payments.filter((p) => p.state === 'review').map((p) => num(p.paid_amount)))
   const recordedIds = new Set(events.filter((e) => e.event === 'payment_recorded_on_sale' && e.payment_id != null).map((e) => Number(e.payment_id)))
   const recordedOnSaleUsd = sumMoney4(paid.filter((p) => recordedIds.has(Number(p.id))).map(amountOf))
   const refunds = events.filter((e) => e.event === 'refund_noted')
@@ -325,7 +331,8 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   let balanceDueUsd = 0
   let toRecordUsd = 0
   if (!sale) {
-    refundDue = order.state === 'cancelled' ? onlineInUsd - notedUsd : Math.max(0, roundMoney4(onlineInUsd - goods)) - notedUsd
+    const receivedUsd = sumMoney4([onlineInUsd, heldInReviewUsd])
+    refundDue = order.state === 'cancelled' ? receivedUsd - notedUsd : Math.max(0, roundMoney4(receivedUsd - goods)) - notedUsd
   } else {
     toRecordUsd = Math.max(0, roundMoney4(onlineInUsd - recordedOnSaleUsd))
     const stored = saleStoredState(sale)
@@ -340,7 +347,7 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
       }
     }
   }
-  return { onlineInUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }
+  return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }
 }
 export const refundDueUsd = (order: OrderRow, payments: readonly PaymentRow[], events: readonly EventRow[], sale: SaleRow | null, returns: readonly ReturnRow[] = []): number =>
   orderMoney(order, payments, events, sale, returns).refundDueUsd
@@ -446,7 +453,6 @@ export function onlineOrderView(
   let phase: OnlineOrderView['phase'] = 'before_sale'
   if (!sale) {
     status = order.state as ViewStatus
-    if (order.state === 'review') chips.push('needs_review')
   } else {
     phase = 'after_sale'
     const stored = saleStoredState(sale)
@@ -460,6 +466,9 @@ export function onlineOrderView(
     if (money.toRecordUsd > 0) chips.push('to_record')
     if (returns.some((r) => !isActiveReturn(r) && r.refund_channel === 'aba' && num(r.total_refund_usd) > 0)) chips.push('check_refund')
   }
+  // Review is about money, not only the order's own state: a mismatched top-up, or a payment that arrived on a QR we had cancelled, leaves the order
+  // `paid` or `cancelled` but still needs a person.
+  if (order.state === 'review' || payments.some((p) => p.state === 'review')) chips.push('needs_review')
   if (money.refundDueUsd > 0) chips.push('refund_due')
   if (events.some((e) => e.event === 'late_paid')) chips.push('late')
   if (options.requests) {

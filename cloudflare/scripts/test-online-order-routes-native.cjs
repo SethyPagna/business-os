@@ -419,7 +419,8 @@ async function main() {
     assert.equal(payments(h)[0].state, 'awaiting', 'a PayWay error is not an answer')
     h.advance(40_000); h.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 3, original_amount: 25 } })
     await poll(h, tokenOf(res))
-    assert.equal(payments(h)[0].state, 'failed'); assert.equal(order(h).state, 'awaiting_payment')
+    // A declined payment leaves the order with nothing to wait for: qr_failed (retryable, swept later), no longer an "awaiting" order that nothing ever moves.
+    assert.equal(payments(h)[0].state, 'failed'); assert.equal(order(h).state, 'qr_failed')
     const retried = await h.request(`/${tokenOf(res)}/retry`, 'POST', {})
     assert.equal(retried.status, 200); assert.equal(payments(h)[1].state, 'awaiting')
   })
@@ -679,12 +680,13 @@ async function main() {
   // ---------------------------------------------------------------------------------------------------------------------------- budgets
   await check('D1 shape of every route stays inside its budget (calls count as the Free plan counts them: a batch is one; ceilings are the measured figure plus a little)', async () => {
     const h = world({ env: { PLAN_TIER: 'free' } })
+    const over = [] // every route is measured before the verdict, so one overrun shows all of them
     const shape = async (label, call, ceilings) => {
       h.clearStatements(); const before = h.calls.length
       const r = await call()
       const used = { calls: h.d1.calls, statements: h.statements.length, payway: h.calls.length - before }
       assert.ok(r.status < 400, `${label}: ${r.status} ${JSON.stringify(r.body).slice(0, 120)}`)
-      for (const key of Object.keys(ceilings)) assert.ok(used[key] <= ceilings[key], `${label}: ${key} ${used[key]} > ${ceilings[key]}`)
+      for (const key of Object.keys(ceilings)) if (!(used[key] <= ceilings[key])) over.push(`${label}: ${key} ${used[key]} > ${ceilings[key]}`)
       assert.ok(used.calls <= 50, `${label}: inside the Free 50-call limit`)
       return r
     }
@@ -701,9 +703,12 @@ async function main() {
     await shape('cancel', () => h.request(`/${token}/cancel`, 'POST', {}), { calls: 5, statements: 14, payway: 2 })
     const paid = await create(h, { phone: '099 111 222' })
     payOnPayway(h, 25); h.advance(61_000)
-    await shape('poll that settles a payment', () => poll(h, tokenOf(paid)), { calls: 6, statements: 9, payway: 1 })
+    // +1 read and +1 statement over the S3 figure: the paid transition reads the order's other live QRs (to close them at ABA). The deferred notice (its settings read)
+    // shares the invocation's D1 budget; measured 7 calls / 10 statements.
+    await shape('poll that settles a payment', () => poll(h, tokenOf(paid)), { calls: 8, statements: 11, payway: 1 })
     await shape('request', () => h.request(`/${tokenOf(paid)}/requests`, 'POST', { kind: 'note', phone: '099 111 222', after: { note: 'n' } }), { calls: 6, statements: 13, payway: 0 })
     await shape('withdraw', () => h.request(`/${tokenOf(paid)}/requests/${h.one('SELECT MAX(id) id FROM online_order_requests').id}/withdraw`, 'POST', { phone: '099 111 222' }), { calls: 5, statements: 11, payway: 0 })
+    assert.deepEqual(over, [])
   })
 
   console.log(`\n${passed} checks passed`)

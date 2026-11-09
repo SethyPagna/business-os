@@ -5,6 +5,13 @@
 //   review    ABA's answer did not match what we asked for: a person must look        (`new`)
 //   expired   ONE digest per sweep tick of the orders nobody paid in time             (`expired`)
 //   request   the customer asked to change, cancel or return a paid order             (`requests`)
+//   withdrawn / edited / cancelled   the customer took a request back, changed a waiting order, or cancelled it  (`requests`)
+//   qr_failed the payment could not be started and the customer is stuck                (`new`)
+//   unknown_payment  ABA reported a payment for a transaction this shop has no record of (after a restore: money with no order)  (`new`)
+// A declined check ('failed') and a QR re-issue ('changed') are announced to the screens only: no message.
+//
+// Every committed event also bumps the `online_orders` data version and broadcasts, whatever the Telegram switches say: staff screens must refresh
+// even when nobody wants the messages.
 //
 // The whole family sits behind the `online_orders` category and its own sub-switches (all unset = on), and goes to the Orders topic, or the Sales
 // topic until one is set. A notice is built from the committed rows AFTER the write (OrderDeps.notify, called once per guarded transition by
@@ -19,6 +26,8 @@ import { maskPhone } from './phoneMask'
 import { sendTelegramEventWhenOn, type TelegramEvent, type TelegramOnlineOrderSub } from './telegram'
 import { firstCharacters } from './telegramLang'
 import { deferRequestWork } from './requestDefer'
+import { bumpVersions } from './cache'
+import { broadcast } from '../durable-objects/broadcastHub'
 import { runBackground } from './requestMetrics'
 import type { OrderAlertEvent, OrderRecord, PaymentRecord, RequestRecord } from './onlineOrderStore'
 import type { Env } from '../index'
@@ -72,11 +81,32 @@ export function composePaidAlert(order: OrderRecord, payment: PaymentRecord): Co
   }
 }
 
-export function composeReviewAlert(order: OrderRecord, payment: PaymentRecord): Composed {
+/** `reason` is the mismatch event's: a payment that arrived on a QR the customer had replaced or cancelled says so, because the order itself may look fine. */
+export function composeReviewAlert(order: OrderRecord, payment: PaymentRecord, reason?: string | null): Composed {
   return {
     heading: '⚠️ Online payment needs review',
-    lines: [...orderRows(order), `Status: Needs review`, `Total: ${money(payment.amount)}`],
+    lines: [
+      ...orderRows(order), `Status: ${reason === 'paid_after_cancel' ? 'Paid on a replaced QR' : 'Needs review'}`,
+      ...(payment.paid_amount != null ? [`Paid: ${money(payment.paid_amount)}`] : []), `Total: ${money(payment.amount)}`,
+    ],
   }
+}
+
+export function composeQrFailedAlert(order: OrderRecord): Composed {
+  return { heading: '⚠️ Online payment could not start', lines: [...orderRows(order), `Status: Payment not started`, `Total: ${money(order.goods_total_usd)}`] }
+}
+export function composeEditedAlert(order: OrderRecord): Composed {
+  return { heading: '📝 Online order edited', lines: [...orderRows(order), `Total: ${money(order.goods_total_usd)}`] }
+}
+export function composeCancelledAlert(order: OrderRecord): Composed {
+  return { heading: '🚫 Online order cancelled', lines: [...orderRows(order), `Total: ${money(order.goods_total_usd)}`] }
+}
+export function composeWithdrawnAlert(order: OrderRecord, kind: string): Composed {
+  return { heading: '🔙 Online order request withdrawn', lines: [...orderRows(order), `Change requested: ${REQUEST_KIND_WORDS[kind] ?? kind}`] }
+}
+/** Only the tail of the transaction id: enough to find it at ABA, nothing that would let anyone else use it. */
+export function composeUnknownPaymentAlert(tranId: string): Composed {
+  return { heading: '❓ Online payment not recognised', lines: [`Reference: ...${String(tranId).slice(-6)}`, `Status: Needs review`] }
 }
 
 export function composeRequestAlert(order: OrderRecord, request: Pick<RequestRecord, 'kind' | 'customer_comment'>): Composed {
@@ -109,15 +139,25 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
     const db = getDb(env)
     const send = (sub: TelegramOnlineOrderSub, compose: () => Promise<Composed | null>) =>
       sendTelegramEventWhenOn(env, 'online_orders', compose, { retryOnce: true, onlineOrders: sub })
+    const withOrder = (sub: TelegramOnlineOrderSub, orderId: number, build: (order: OrderRecord) => Composed) =>
+      send(sub, async () => { const order = await loadOrder(db, orderId); return order ? build(order) : null })
     switch (event.kind) {
-      case 'created':
-        return await send('new', async () => { const order = await loadOrder(db, event.orderId); return order ? composeCreatedAlert(order) : null })
+      case 'created': return await withOrder('new', event.orderId, composeCreatedAlert)
+      case 'qr_failed': return await withOrder('new', event.orderId, composeQrFailedAlert)
+      case 'edited': return await withOrder('requests', event.orderId, composeEditedAlert)
+      case 'cancelled': return await withOrder('requests', event.orderId, composeCancelledAlert)
+      case 'withdrawn': return await withOrder('requests', event.orderId, (order) => composeWithdrawnAlert(order, event.requestKind))
+      case 'unknown_payment': return await send('new', async () => composeUnknownPaymentAlert(event.tranId))
       case 'paid':
       case 'review':
         return await send('new', async () => {
           const [order, payment] = await Promise.all([loadOrder(db, event.orderId), loadPayment(db, event.paymentId)])
           if (!order || !payment) return null
-          return event.kind === 'paid' ? composePaidAlert(order, payment) : composeReviewAlert(order, payment)
+          if (event.kind === 'paid') return composePaidAlert(order, payment)
+          const mismatch = await db.prepare(`SELECT detail_json FROM online_order_events WHERE payment_id = @pid AND event = 'mismatch' ORDER BY id DESC LIMIT 1`).get<{ detail_json: string | null }>({ pid: event.paymentId })
+          let reason: string | null = null
+          try { reason = (JSON.parse(mismatch?.detail_json || '{}') as { reason?: string }).reason ?? null } catch { reason = null }
+          return composeReviewAlert(order, payment, reason)
         })
       case 'request':
         return await send('requests', async () => {
@@ -133,6 +173,7 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
           const rows = found.filter((order): order is OrderRecord => !!order)
           return rows.length ? composeExpiredDigest(rows) : null
         })
+      default: return false // 'failed' and 'changed' move the screens, not the chat
     }
   } catch (error) {
     console.warn(`[online-order-alert] ${event.kind} notice not sent:`, error instanceof Error ? error.name : 'error')
@@ -140,10 +181,17 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
   }
 }
 
+/** Staff screens refresh whatever the Telegram switches say. Best effort: a failed bump costs a staler screen, never the order. */
+export async function announceOrderChange(env: Env, event: OrderAlertEvent): Promise<void> {
+  if (event.kind === 'unknown_payment') return
+  try { await bumpVersions(env, ['online_orders']) } catch { /* the cache layer already logs */ }
+  try { await broadcast(env, 'onlineOrders', { kind: event.kind }) } catch { /* nobody connected is not an error */ }
+}
+
 /**
  * The `notify` every entry point hands to OrderDeps: deferred past the response in a request, awaited in the cron and in tests (lib/requestDefer.ts),
  * under its own background metrics label so the notice's reads never count against the order route's budget.
  */
 export function orderNotifier(env: Env): (event: OrderAlertEvent) => Promise<void> {
-  return (event) => deferRequestWork(() => runBackground(env, 'online-order-alert', () => sendOrderAlert(env, event)))
+  return (event) => deferRequestWork(() => runBackground(env, 'online-order-alert', async () => { await announceOrderChange(env, event); await sendOrderAlert(env, event) }))
 }

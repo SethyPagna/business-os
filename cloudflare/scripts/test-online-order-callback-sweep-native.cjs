@@ -95,6 +95,7 @@ async function main() {
     assert.equal((await h.callback(tran)).status, 200); assert.deepEqual(rowsOf(h), before, 'a PayWay error is not an answer')
     h.script.check = () => { throw new Error('socket hang up') }
     assert.equal((await h.callback(tran)).status, 200); assert.deepEqual(rowsOf(h), before)
+    h.advance(60_000) // the per-payment throttle: one check per interval, however many callbacks arrive
     h.script.check = () => h.approved(25)
     const tokenFor = async (t) => (await h.paywayModule.callbackUrlFor(h.env, 'https://shop.example.test', t)).split('s=')[1]
     const unknown = await h.callback('WNEVERISSUED000001', { token: await tokenFor('WNEVERISSUED000001') })
@@ -113,34 +114,49 @@ async function main() {
     assert.equal(order(h).state, 'paid'); assert.equal(payment(h).state, 'paid'); assert.ok(events(h).includes('late_paid'))
   })
 
-  await check('callback on a second QR: the first payment is cancelled and its late callback does not pay a cancelled payment; paying the old QR after an edit pays the order once', async () => {
+  await check('callback on a payment the customer had replaced: the money is never dropped and never auto-accepted - it lands in review with what PayWay took, the order goes to review, a replay changes nothing (a wrong build answers "closed" and loses it)', async () => {
     const h = world(); const res = await place(h); const token = res.body.token
     const first = payment(h).tran_id
     const edited = await h.request(`/${token}/edit`, 'POST', { lines: [{ product_id: 1, quantity: 3 }] })
     assert.equal(edited.status, 200)
     assert.equal(h.one('SELECT state FROM online_order_payments WHERE tran_id = ?', first).state, 'cancelled')
     h.script.check = () => h.approved(25)
-    const before = rowsOf(h)
     await h.callback(first)
-    assert.deepEqual(rowsOf(h), before, 'a cancelled payment is final')
-    h.script.check = () => h.approved(37.5)
-    await h.callback(payment(h).tran_id)
-    assert.equal(order(h).state, 'paid'); assert.equal(order(h).goods_total_usd, 37.5)
+    const held = h.one('SELECT * FROM online_order_payments WHERE tran_id = ?', first)
+    assert.equal(held.state, 'review'); assert.equal(held.paid_amount, 25); assert.equal(held.payway_apv, 'APV123'); assert.equal(held.paid_at, null)
+    assert.equal(order(h).state, 'review', 'a person must look at an order whose customer paid the old price')
+    const mismatch = h.one("SELECT * FROM online_order_events WHERE event = 'mismatch'")
+    assert.equal(JSON.parse(mismatch.detail_json).reason, 'paid_after_cancel'); assert.equal(mismatch.source, 'payway'); assert.equal(mismatch.amount_usd, 25)
+    const money = h.orders.orderMoney(order(h), h.all('SELECT * FROM online_order_payments'), h.all('SELECT * FROM online_order_events'), null)
+    assert.equal(money.heldInReviewUsd, 25, 'the money read counts the held money')
+    const before = rowsOf(h)
+    h.advance(60_000); await h.callback(first); await h.callback(first)
+    assert.deepEqual(rowsOf(h), before, 'a replay changes nothing: review is final for every automatic path (staff resolve it)')
+    // a decline on a replaced QR changes nothing either
+    const h2 = world(); const r2 = await place(h2); const f2 = payment(h2).tran_id
+    await h2.request(`/${r2.body.token}/edit`, 'POST', { lines: [{ product_id: 1, quantity: 3 }] })
+    h2.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 3, original_amount: 25 } })
+    const rows2 = rowsOf(h2); await h2.callback(f2)
+    assert.deepEqual(rowsOf(h2), rows2); assert.equal(h2.one('SELECT state FROM online_order_payments WHERE tran_id = ?', f2).state, 'cancelled')
   })
 
   // ------------------------------------------------------------------------------------------------------------------------ sweep
-  await check('sweep: an idle tick is ONE statement that reads no row and makes no PayWay call (the open-payments index)', async () => {
+  await check('sweep: an idle tick is THREE statements (open payments, stuck qr_failed orders, late candidates), each through its partial index, reads no row and makes no PayWay call', async () => {
     const h = world()
     h.clearStatements()
     const s = await h.sweep()
-    assert.deepEqual(s, { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0 })
-    assert.equal(h.statements.length, 1); assert.equal(h.d1.calls, 1); assert.equal(h.calls.length, 0)
+    assert.deepEqual(s, { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0 })
+    assert.equal(h.statements.length, 3); assert.equal(h.d1.calls, 3); assert.equal(h.calls.length, 0)
     assert.match(h.statements[0], /INDEXED BY idx_online_order_payments_open/)
+    assert.match(h.statements[1], /INDEXED BY idx_online_orders_qr_failed/)
+    assert.match(h.statements[2], /INDEXED BY idx_online_order_payments_expired/)
     await place(h); h.clearStatements()
     await h.sweep()
-    assert.equal(h.statements.length, 1, 'a payment still inside its lifetime is not even read as a candidate'); assert.equal(h.calls.filter((c) => c.op === 'check').length, 0)
-    const plan = h.all(`EXPLAIN QUERY PLAN ${h.statements[0].replace(/@(\w+)/g, (_, n) => ({ expiredBefore: "'2026-11-09 03:00:00'", now: "'2026-11-09 03:00:00'", minutesKey: "'k'", minutesDefault: '15', grace: '120', limit: '5' }[n]))}`).map((r) => r.detail).join(' | ')
-    assert.match(plan, /idx_online_order_payments_open/); assert.doesNotMatch(plan, /SCAN (p|online_order_payments)\b(?! USING)/)
+    assert.equal(h.statements.length, 3, 'a payment still inside its lifetime is not even read as a candidate'); assert.equal(h.calls.filter((c) => c.op === 'check').length, 0)
+    const bind = (sql) => sql.replace(/@(\w+)/g, (_, n) => ({ expiredBefore: "'2026-11-09 03:00:00'", now: "'2026-11-09 03:00:00'", minutesKey: "'k'", minutesDefault: '15', grace: '120', limit: '5', windowStart: "'2026-11-08 03:00:00'", recheckBefore: "'2026-11-09 03:00:00'" }[n]))
+    const plans = h.statements.map((s) => h.all(`EXPLAIN QUERY PLAN ${bind(s)}`).map((r) => r.detail).join(' | '))
+    assert.match(plans[0], /idx_online_order_payments_open/); assert.match(plans[1], /idx_online_orders_qr_failed/); assert.match(plans[2], /idx_online_order_payments_expired/)
+    for (const plan of plans) assert.doesNotMatch(plan, /SCAN (p|o|online_order_payments|online_orders)(?! USING)/)
   })
 
   await check('sweep: inside the lifetime and the grace nothing expires; after both, PayWay is asked once and a not-paid payment expires with its order and one Records row', async () => {

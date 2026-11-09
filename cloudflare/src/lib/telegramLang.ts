@@ -380,6 +380,7 @@ const LABELS = {
   order: { en: 'Order', km: 'ការបញ្ជាទិញ' },                             // km.json order_* (ការបញ្ជាទិញ)
   fulfilment: { en: 'Fulfilment', km: 'ការទទួលទំនិញ', localizeValue: true },
   changeRequested: { en: 'Change requested', km: 'សំណើកែប្រែ', localizeValue: true },
+  reference: { en: 'Reference', km: 'យោង' },                                // km.json reference
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -433,6 +434,11 @@ const HEADINGS = {
   '⚠️ Online payment needs review': 'ការទូទាត់អនឡាញត្រូវពិនិត្យ',
   '⌛ Online orders not paid in time': 'ការបញ្ជាទិញអនឡាញមិនបានបង់ទាន់ពេល',
   '✏️ Online order change requested': 'សំណើកែប្រែការបញ្ជាទិញអនឡាញ',
+  '🔙 Online order request withdrawn': 'សំណើកែប្រែត្រូវបានដកវិញ',
+  '📝 Online order edited': 'ការបញ្ជាទិញអនឡាញត្រូវបានកែ',
+  '🚫 Online order cancelled': 'ការបញ្ជាទិញអនឡាញត្រូវបានបោះបង់',
+  '⚠️ Online payment could not start': 'ការទូទាត់អនឡាញមិនអាចចាប់ផ្តើមបាន',
+  '❓ Online payment not recognised': 'មិនស្គាល់ការទូទាត់អនឡាញ',
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
@@ -508,6 +514,8 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
   'Home delivery': 'ដឹកជញ្ជូនដល់ផ្ទះ',
   'Waiting for payment': 'កំពុងរង់ចាំការបង់ប្រាក់',
   'Needs review': 'ត្រូវពិនិត្យ',
+  'Paid on a replaced QR': 'បានបង់លើ QR ដែលត្រូវបានប្តូរ',
+  'Payment not started': 'ការទូទាត់មិនទាន់ចាប់ផ្តើម',
   'Not paid in time': 'មិនបានបង់ទាន់ពេល',
   'Change items': 'ប្តូរទំនិញ',
   'Change pickup or delivery': 'ប្តូរការទទួលទំនិញ',
