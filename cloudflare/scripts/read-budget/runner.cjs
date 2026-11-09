@@ -68,7 +68,7 @@ async function ensureOrderToken(world) {
     await db.prepare("INSERT INTO online_order_requests (order_id, kind, stage, before_json, after_json, customer_comment) VALUES (?, 'note', 'paid', '{}', '{}', 'budget')").bind(id).run()
     for (const event of ['created', 'qr_issued', 'verified_paid', 'request_submitted']) await db.prepare('INSERT INTO online_order_events (order_id, event, source) VALUES (?, ?, ?)').bind(id, event, event === 'verified_paid' ? 'payway' : 'customer').run()
   }
-  world.state = { ...world.state, orderToken: ORDER_TOKEN }
+  world.state = { ...world.state, orderToken: ORDER_TOKEN, orderId: (await world.all('SELECT id FROM online_orders WHERE token_hash = ?', hash))[0].id }
   return ORDER_TOKEN
 }
 
@@ -85,6 +85,7 @@ async function resolveUrl(world, url) {
   if (out.includes('{{checkId}}')) out = out.replaceAll('{{checkId}}', await ensureCheckId(world))
   if (out.includes('{{stockKey}}')) out = out.replaceAll('{{stockKey}}', encodeURIComponent(await ensureStockKey(world)))
   if (out.includes('{{orderToken}}')) out = out.replaceAll('{{orderToken}}', await ensureOrderToken(world))
+  if (out.includes('{{orderId}}')) { await ensureOrderToken(world); out = out.replaceAll('{{orderId}}', String(world.state.orderId)) }
   if (out.includes('{{feeCursor}}')) out = out.replaceAll('{{feeCursor}}', await ensureFeeCursor(world))
   return out
 }

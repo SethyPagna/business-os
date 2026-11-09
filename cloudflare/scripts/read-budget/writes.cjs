@@ -128,6 +128,33 @@ function approvalStep({ id, label, offset, counting }) {
     } }
 }
 
+// KHQR S6: a fresh online order in the state a staff action needs, written straight to the database (setup, not a Worker request).
+let orderSeq = 0
+async function seedOrder(world, { state = 'paid', paymentState = 'paid', request = null } = {}) {
+  orderSeq += 1
+  const n = String(orderSeq).padStart(4, '0')
+  const items = JSON.stringify([{ product_id: 1000, name: 'Budget product', quantity: 2, unit_price_usd: 12.5, line_total_usd: 25 }])
+  await world.db.prepare(`INSERT INTO online_orders (order_no, token_hash, state, fulfilment, branch_id, customer_name, customer_phone, currency, goods_total_usd, goods_total_khr, exchange_rate,
+    items_json, pricing_version, network_key, revision, paid_at, created_at) VALUES (?, ?, ?, 'pickup', 1, 'Budget Customer', '0120000000', 'USD', 25, 100000, 4000, ?, 1, 'budget', 1,
+    datetime('now','-1 hours'), datetime('now','-2 hours'))`).bind(`W2611WR${n}`, `budget-write-hash-${n}`, state, items).run()
+  const id = (await world.all('SELECT id FROM online_orders WHERE token_hash = ?', `budget-write-hash-${n}`))[0].id
+  await world.db.prepare("INSERT INTO online_order_payments (order_id, tran_id, purpose, amount, currency, state, qr_string, paid_at, paid_amount, revision) VALUES (?, ?, 'order', 25, 'USD', ?, 'qr', datetime('now','-1 hours'), 25, 1)").bind(id, `WBUDGETWRITE${n}`, paymentState).run()
+  for (const event of ['created', 'qr_issued', 'verified_paid']) await world.db.prepare('INSERT INTO online_order_events (order_id, event, source) VALUES (?, ?, ?)').bind(id, event, event === 'verified_paid' ? 'payway' : 'customer').run()
+  if (request) {
+    await world.db.prepare("INSERT INTO online_order_requests (order_id, kind, stage, before_json, after_json, customer_comment) VALUES (?, 'note', 'paid', '{}', '{\"note\":\"budget\"}', 'budget')").bind(id).run()
+    const requestId = (await world.all('SELECT MAX(id) AS id FROM online_order_requests'))[0].id
+    await world.db.prepare("INSERT INTO online_order_events (order_id, request_id, event, source) VALUES (?, ?, 'request_submitted', 'customer')").bind(id, requestId).run()
+    if (request === 'accepted') await world.db.prepare("INSERT INTO online_order_events (order_id, request_id, event, source) VALUES (?, ?, 'request_accepted', 'staff')").bind(id, requestId).run()
+    return { id, requestId }
+  }
+  return { id }
+}
+const orderShape = (id, label, route, prepareOptions, body, { after } = {}) => ({
+  id, label: `POST /api/online-orders/:id/${label}`, method: 'POST', url: `/api/online-orders/:id/${route}`,
+  prepare: async (world) => { const seeded = await seedOrder(world, prepareOptions); if (after) await after(world, seeded); return seeded },
+  run: async (world, send, seeded) => send('POST', `/api/online-orders/${seeded.id}/${route.replace(':rid', seeded.requestId)}`, typeof body === 'function' ? body(seeded) : body),
+})
+
 function writeShapes() {
   const shapes = [
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
@@ -210,6 +237,14 @@ function writeShapes() {
         try { return Number(JSON.parse(row.value).epoch) || 0 } catch { return 0 }
       },
       run: async (world, send, epoch) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: epoch }) },
+    // KHQR S6 staff actions on an online order (lib/onlineOrderStaff.ts). recheck asks PayWay, which the budget world has no keys for: it is measured as the refusal it answers there.
+    orderShape('w-online-order-note', 'note', 'note', {}, { note: 'budget note' }),
+    orderShape('w-online-order-recheck', 'recheck', 'recheck', {}, {}),
+    orderShape('w-online-order-cancel', 'cancel', 'cancel', {}, { reason: 'budget' }),
+    orderShape('w-online-order-resolve', 'resolve', 'resolve', { state: 'review', paymentState: 'review' }, { note: 'budget' }),
+    orderShape('w-online-order-refund-note', 'refund-note', 'refund-note', { state: 'cancelled' }, { amount_usd: 25, reference: 'ABA-BUDGET', note: 'budget' }),
+    orderShape('w-online-order-request-decide', 'requests/:rid/decide', 'requests/:rid/decide', { request: 'pending' }, { decision: 'accept', public_comment: 'ok' }),
+    orderShape('w-online-order-request-apply', 'requests/:rid/apply', 'requests/:rid/apply', { request: 'accepted' }, {}),
     { id: 'w-logout', label: 'POST /api/auth/logout', method: 'POST', url: '/api/auth/logout', body: {} },
   ]
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))

@@ -147,6 +147,11 @@ function getEntries(ctx) {
     // the full view reads the order, its payments, its Records and its requests in one batch. The nudge never reaches PayWay here: the world has no PayWay keys.
     ['portal/orders/:token/status (online_orders ON)', '/api/portal/orders/{{orderToken}}/status', { anon: true, switches: ['online_orders'] }],
     ['portal/orders/:token (online_orders ON)', '/api/portal/orders/{{orderToken}}', { anon: true, switches: ['online_orders'] }],
+    // KHQR S6: the staff Orders screen. The default list walks the partial attention index; a search walks the order_no unique index or idx_online_orders_phone; refund_due reads a
+    // window of candidates and ONE batch of money rows per round; the detail is the order's own bundle plus the money read.
+    ['online-orders (staff list, attention)', '/api/online-orders'], ['online-orders search by order number', '/api/online-orders?q=W261109'], ['online-orders search by phone', '/api/online-orders?q=012000'],
+    ['online-orders filter refund_due', '/api/online-orders?filter=refund_due'], ['online-orders filter requests', '/api/online-orders?filter=requests'],
+    ['online-orders/:id (staff detail)', '/api/online-orders/{{orderId}}'],
     ['portal/submissions/review', '/api/portal/submissions/review'], ['portal/submissions/:id/screenshot/:i', '/api/portal/submissions/1/screenshot/0'],
     ['inventory-checks/products all-time name page, page 2', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20`],
     ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`],
