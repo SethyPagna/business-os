@@ -32,10 +32,16 @@ const PUBLIC_SMALL_POST_PATTERNS = [
   /^\/api\/portal\/orders\/[A-Za-z0-9_-]{22}\/requests\/\d{1,12}\/withdraw$/,
 ]
 
+// The staff order API (routes/onlineOrders.ts): small JSON actions on one order, matched by shape. The list, detail and other reads are GETs and never match.
+const STAFF_SMALL_POST_PATTERNS = [
+  /^\/api\/online-orders\/\d{1,12}\/(?:recheck|note|cancel|resolve|refund-note)$/,
+  /^\/api\/online-orders\/\d{1,12}\/requests\/\d{1,12}\/(?:decide|apply)$/,
+]
+
 export function smallBodyAccess(method: string, path: string): 'public' | 'staff' | null {
   if (method !== 'POST') return null
   if (PUBLIC_SMALL_POSTS.has(path) || PUBLIC_SMALL_POST_PATTERNS.some((pattern) => pattern.test(path))) return 'public'
-  if (STAFF_SMALL_POSTS.has(path)) return 'staff'
+  if (STAFF_SMALL_POSTS.has(path) || STAFF_SMALL_POST_PATTERNS.some((pattern) => pattern.test(path))) return 'staff'
   return null
 }
 

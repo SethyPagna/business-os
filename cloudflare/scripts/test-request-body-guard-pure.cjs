@@ -254,6 +254,14 @@ async function main() {
     assert.deepEqual(calls, before, 'the host gate answers before body admission, bootstrap or any handler')
   }
   assert.equal(smallBodyAccess('POST', '/api/system/finalize-migration'), 'staff')
+  // KHQR S5: the staff order actions are small staff POSTs, matched by exact shape; reads, other methods and look-alikes are not.
+  for (const route of ['/api/online-orders/1/recheck', '/api/online-orders/12/note', '/api/online-orders/7/cancel', '/api/online-orders/7/resolve', '/api/online-orders/7/refund-note', '/api/online-orders/7/requests/3/decide', '/api/online-orders/7/requests/3/apply']) {
+    assert.equal(smallBodyAccess('POST', route), 'staff', route)
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) assert.equal(smallBodyAccess(method, route), null, method + ' ' + route)
+  }
+  for (const route of ['/api/online-orders', '/api/online-orders/1', '/api/online-orders/abc/cancel', '/api/online-orders/1/unknown', '/api/online-orders/1/cancel/extra', '/api/online-orders/1/requests/x/apply', '/api/online-orders/1234567890123/cancel', '/api/online-orders/%31/cancel', '/api/portal/orders/1/cancel']) {
+    assert.equal(smallBodyAccess('POST', route), null, route)
+  }
   const repairPath = '/api/system/finalize-migration'
   assert.equal((await send(repairPath, repairLimit + 1)).status, 401)
   authenticated = true

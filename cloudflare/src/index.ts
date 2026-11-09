@@ -7,6 +7,7 @@ import portalOrdersRoute from './routes/portalOrders'
 import paywayCallbackRoute from './routes/paywayCallback'
 import { orderNotifier } from './lib/onlineOrderAlerts'
 import onlineOrdersRoute from './routes/onlineOrders'
+import { getOnlineOrderAccess } from './lib/onlineOrdersAccess'
 import { sweepOrders } from './lib/onlineOrderSweep'
 import { scrubUnpaidOrders } from './lib/onlineOrderScrub'
 import { getDb } from './lib/db'
@@ -549,6 +550,8 @@ app.use('/api/*', async (c, next) => {
   const user = await getSessionUser(c)
   if (!user) return next()
   if (c.req.path === '/api/auth/devices/sessions/revoke-user' && !isAdminControlUser(user)) return next()
+  // The staff order actions: a user who may not even view online orders gets the route's own 403, body unread (the route checks the exact action).
+  if (c.req.path.startsWith('/api/online-orders/') && !getOnlineOrderAccess(user as never).canView) return next()
   if (c.req.path.startsWith('/api/backups')) {
     if (!hasPermission(user, 'backup')) return next()
     if (c.req.path === '/api/backups/maintenance/clear' && !hasPermission(user, 'backup_restore')) return next()

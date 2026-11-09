@@ -66,8 +66,8 @@ function check(name, fn) {
 const gateSource = readAt(`cloudflare/${GATE}`)
 const indexSource = readAt('cloudflare/src/index.ts')
 
-const STAFF_ONLY = ['/api/auth/login', '/api/auth/bootstrap', '/api/products', '/api/products/search', '/api/settings', '/api/sales', '/api/customers', '/api/sync/owner', '/api/telegram/webhook', '/api/portal/submissions/review', '/api/portal/submissions/7/review', '/api/portal/submissions/7/screenshot/0', '/api', '/ws']
-const STOREFRONT = ['/api/portal/config', '/api/portal/bootstrap', '/api/portal/auth/signin', '/api/portal/auth/signup', '/api/portal/ai/chat', '/api/portal/catalog/products/search', '/api/portal/submissions', '/api/system/client-error', '/uploads/products/a.jpg', '/', '/login', '/products', '/admin', '/assets/index-abc.js', '/robots.txt', '/health']
+const STAFF_ONLY = ['/api/online-orders', '/api/online-orders/1', '/api/online-orders/1/recheck', '/api/online-orders/1/decide', '/api/online-orders/1/refund-note', '/api/auth/login', '/api/auth/bootstrap', '/api/products', '/api/products/search', '/api/settings', '/api/sales', '/api/customers', '/api/sync/owner', '/api/telegram/webhook', '/api/portal/submissions/review', '/api/portal/submissions/7/review', '/api/portal/submissions/7/screenshot/0', '/api', '/ws']
+const STOREFRONT = ['/api/portal/orders', '/api/portal/orders/sometoken', '/api/portal/orders/sometoken/edit', '/api/portal/config', '/api/portal/bootstrap', '/api/portal/auth/signin', '/api/portal/auth/signup', '/api/portal/ai/chat', '/api/portal/catalog/products/search', '/api/portal/submissions', '/api/system/client-error', '/uploads/products/a.jpg', '/', '/login', '/products', '/admin', '/assets/index-abc.js', '/robots.txt', '/health']
 
 function gateSuite(gate) {
   for (const host of ['leangbeauty.com', 'www.leangbeauty.com', 'business-os.example.workers.dev']) {
@@ -143,6 +143,9 @@ const ENCODED_STAFF = [
   '/api/portal/%53ubmissions/1/review', // %53 = S: mixed case
   '/api/portal/SUBMISSIONS/1/review',
   '/API/auth/login',
+  '/API/online-orders/1', // KHQR: the staff order API stays off the shop host in any case or encoding
+  '/api/online%2Dorders/1',
+  '/api/%6Fnline-orders',
   '/Api/portal/config',
   '/%77s', // %77 = w: the socket
   '/WS',
