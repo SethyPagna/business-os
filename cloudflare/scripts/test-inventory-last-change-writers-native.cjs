@@ -46,7 +46,7 @@ async function main() {
   console.log(`${results.length} write shapes, ${evaluated.length} answered, ${movers.length} moved stock, ${movers.filter((r) => wroteMovement(r.changed)).length} of them recorded a movement`)
   console.log(`not measured (no shape): ${WRITERS_WITHOUT_SHAPE.join(', ')}`)
   assert.ok(movers.length >= 10, `the run must observe stock-moving writers (saw ${movers.length}), or it proves nothing`)
-  assert.ok(['w-adjust', 'w-sale-cancel-3-lines', 'w-return-3-lines', 'w-stock-session-5-lines', 'w-fast-stock-in-1-line', 'w-adjust-set-lot', 'w-inventory-check-approval-step'].every((id) => movers.some((r) => r.id === id)),
+  assert.ok(['w-adjust', 'w-sale-cancel-3-lines', 'w-return-3-lines', 'w-stock-session-5-lines', 'w-fast-stock-in-1-line', 'w-adjust-set-lot', 'w-inventory-check-approval-step-counted', 'w-inventory-check-approval-lot-line'].every((id) => movers.some((r) => r.id === id)),
     'the main stock writers are among the observed movers')
   const { silent, stale } = classify(evaluated, ALLOWED_WITHOUT_MOVEMENT)
   assert.deepEqual(silent, [], `these write shapes moved stock and recorded no movement: ${silent.join(', ')}. Record the movement in the writer, or (if it is a known exception) allowlist it with the reason.`)
