@@ -513,6 +513,19 @@ async function main() {
     for (const [t, columns] of Object.entries(lib.REDACTIONS)) for (const c of Object.keys(columns)) assert.ok(cols.some((x) => x.t === t && x.c === c), `${t}.${c} no longer exists`)
   })
 
+  await check('the online order link hash is redacted to a value that stays UNIQUE per row and is stable (a constant would collide when the table is rebuilt)', async () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE online_orders (id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE)')
+    db.exec("INSERT INTO online_orders (token_hash) VALUES ('aaaaaaaa'), ('bbbbbbbb'), ('cccccccc')")
+    const expression = lib.redactionFor('online_orders', 'token_hash')
+    assert.ok(expression && !expression.includes('aaaaaaaa'))
+    const redacted = db.prepare(`SELECT ${expression} AS v FROM online_orders ORDER BY id`).all().map((r) => r.v)
+    assert.deepStrictEqual(redacted, ['redacted-1', 'redacted-2', 'redacted-3'])
+    db.exec(`UPDATE online_orders SET token_hash = ${expression}`) // the rebuilt table holds the replacement: re-applying it must not change it or collide
+    assert.deepStrictEqual(db.prepare(`SELECT ${expression} AS v FROM online_orders ORDER BY id`).all().map((r) => r.v), redacted)
+    assert.ok(!lib.redactionsFor('online_orders', ['id', 'token_hash']).some((r) => r.kind === 'literal'), 'it depends on the row, so the manifest says conditional')
+  })
+
   await check('engine: three CPU resets abort the whole export; nothing is sent after the third', async () => {
     const db = fixtureDatabase()
     let sent = 0

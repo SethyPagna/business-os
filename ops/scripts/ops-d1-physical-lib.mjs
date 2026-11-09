@@ -66,6 +66,9 @@ const SETTING_SENSITIVE_SQL = `(lower("key") IN (${SENSITIVE_SETTING_KEYS.map((k
 export const REDACTIONS = Object.freeze({
   users: Object.freeze({ password: "'redacted'", otp_secret: 'NULL', otp_pending_secret: 'NULL' }),
   portal_accounts: Object.freeze({ password_hash: "'redacted'" }),
+  // The order link's token hash (lib/onlineOrderStore.ts): the hash alone opens nothing, but it is the credential's own column, so it is replaced. UNIQUE, so the
+  // replacement keeps the row's id in it (a constant would collide on the rebuilt table) and is the same on the rebuilt table, which is what the loader's re-hash needs.
+  online_orders: Object.freeze({ token_hash: `'redacted-' || "id"` }),
   ai_provider_configs: Object.freeze({ api_key_encrypted: "''" }),
   branch_cutovers: Object.freeze({ maintenance_token: "'00000000-0000-4000-8000-000000000000'", maintenance_flag_json: "'{}'" }),
   import_jobs: Object.freeze({ lease_token: 'NULL' }),
