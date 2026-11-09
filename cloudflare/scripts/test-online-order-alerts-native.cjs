@@ -160,7 +160,7 @@ async function main() {
     sent.length = 0; await place(noChat); assert.equal(sent.length, 0)
   })
 
-  await check('a customer edit, a cancel, a withdrawal and a failed QR each announce once; a re-issued QR and a declined check announce nothing to the chat', async () => {
+  await check('a customer edit, a cancel, a withdrawal and a failed QR each announce once; a re-issued QR announces nothing to the chat', async () => {
     const h = world(); const res = await place(h, { phone: PHONE }); const token = res.body.token
     sent.length = 0
     await h.request(`/${token}/edit`, 'POST', { name: 'Dara Two' })
@@ -183,11 +183,11 @@ async function main() {
     const rid = w.one('SELECT MAX(id) id FROM online_order_requests').id
     await w.request(`/${wr.body.token}/requests/${rid}/withdraw`, 'POST', { phone: PHONE })
     assert.equal(sent.length, 1); assert.match(textOf(sent[0]), /withdrawn/i); assert.match(textOf(sent[0]), /Change note/)
-    // a declined check: the screens move, the chat does not
-    const d = world(); await place(d); sent.length = 0; d.bumps.length = 0
+    // a declined check: the screens move AND the chat is told once, however many callbacks follow
+    const d = world(); await place(d, { phone: PHONE }); sent.length = 0; d.bumps.length = 0
     d.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 3, original_amount: 25 } })
-    await d.callback(tranOf(d))
-    assert.equal(sent.length, 0); assert.equal(d.bumps.length, 1)
+    await d.callback(tranOf(d)); await d.callback(tranOf(d))
+    assert.equal(sent.length, 1, sent.map(textOf).join(' | ')); assert.match(textOf(sent[0]), /declined/i); assert.match(textOf(sent[0]), KHMER); assert.equal(d.bumps.length, 1)
   })
 
   await check('a payment on a QR the customer had replaced is announced ONCE as review, saying so, with what was paid and the order total', async () => {

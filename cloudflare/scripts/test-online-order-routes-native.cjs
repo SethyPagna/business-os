@@ -627,6 +627,19 @@ async function main() {
     assert.deepEqual(ok.body.order.requests[0].attachments, ['/uploads/cap.jpg'])
   })
 
+  await check('top-up: when PayWay cannot issue the new QR the customer is refused AND the staff screens are told (the failed row is committed), the order stays paid', async () => {
+    const h = world()
+    const token = tokenOf(await paidOrder(h))
+    h.run("INSERT INTO online_order_requests (order_id, kind, stage, before_json, after_json) VALUES (1, 'items', 'paid', '{}', '{}')")
+    h.run("INSERT INTO online_order_payments (order_id, tran_id, purpose, request_id, amount, currency, state) VALUES (1, 'WTOPUPFAIL01', 'top_up', 1, 12.5, 'USD', 'expired')")
+    h.script.generate = () => ({ status: { code: '5' } })
+    const before = h.bumps.length
+    const res = await h.request(`/${token}/topup`, 'POST', { request_id: 1 })
+    assert.equal(res.status, 502, JSON.stringify(res.body))
+    assert.equal(h.bumps.length, before + 1, 'the version moved so open staff screens refresh')
+    assert.equal(order(h).state, 'paid')
+  })
+
   await check('top-up: a new QR repeats the amount staff asked for; nothing due, already paid or a QR still valid is refused', async () => {
     const h = world()
     const token = tokenOf(await paidOrder(h))

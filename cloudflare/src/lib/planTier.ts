@@ -52,6 +52,9 @@ import type { Env } from '../index'
 
 export type PlanTier = 'free' | 'paid'
 
+/** What an online order converts dollars to riel with when the shop has no valid `exchange_rate` setting. One named default instead of a literal inside the order code. */
+export const ONLINE_ORDER_FALLBACK_EXCHANGE_RATE = 4100
+
 /**
  * Every plan-sensitive number in the app, resolved for one deployment.
  *
@@ -271,6 +274,8 @@ export type PlanLimits = {
   //                                 (nudgeCheckDue). A longer gap means fewer reads and calls, so Free is the LARGER number: Paid 15, Free 30.
   //   onlineOrderAdminPageRows      rows per page of the staff order list (adminPageRows). Paid 100, Free 50.
   //   onlineOrderRequestMax         change/return requests one order may ever hold (requestAllowed). Paid 10, Free 5.
+  //   onlineOrderOpenPerPhoneMax    unpaid orders (QR still live) one phone number may hold at once (createOrder refuses the next with too_many_open_orders). 2 on both plans.
+  //   onlineOrderNudgeAfterSeconds  a poll or page load only asks PayWay once the QR has been out this long (nudgeOrder). 60 on both plans.
   //   onlineOrderSweepMaxD1Calls    D1 calls one */5 tick may spend (its own statements plus an estimate per notice it sends), so a busy tick stops and the
   //                                 rest waits for the next one instead of running into the 50-call limit of the invocation (which also drains Telegram). Paid 150, Free 25.
   //   onlineOrderLateCheckHours     how long after its QR ran out an EXPIRED payment is still re-checked with PayWay by the cron, so a payment whose
@@ -286,6 +291,8 @@ export type PlanLimits = {
   onlineOrderNudgeCheckSeconds: number
   onlineOrderAdminPageRows: number
   onlineOrderRequestMax: number
+  onlineOrderOpenPerPhoneMax: number
+  onlineOrderNudgeAfterSeconds: number
   onlineOrderSweepMaxD1Calls: number
   onlineOrderLateCheckHours: number
   onlineOrderLateCheckEveryMinutes: number
@@ -427,6 +434,8 @@ const PAID_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 15,
   onlineOrderAdminPageRows: 100,
   onlineOrderRequestMax: 10,
+  onlineOrderOpenPerPhoneMax: 2,
+  onlineOrderNudgeAfterSeconds: 60,
   onlineOrderSweepMaxD1Calls: 150,
   onlineOrderLateCheckHours: 72,
   onlineOrderLateCheckEveryMinutes: 10,
@@ -476,6 +485,8 @@ const FREE_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 30,
   onlineOrderAdminPageRows: 50,
   onlineOrderRequestMax: 5,
+  onlineOrderOpenPerPhoneMax: 2,
+  onlineOrderNudgeAfterSeconds: 60,
   onlineOrderSweepMaxD1Calls: 25,
   onlineOrderLateCheckHours: 24,
   onlineOrderLateCheckEveryMinutes: 30,

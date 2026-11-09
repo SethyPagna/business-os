@@ -442,6 +442,7 @@ const HEADINGS = {
   '📝 Online order edited': 'ការបញ្ជាទិញអនឡាញត្រូវបានកែ',
   '🚫 Online order cancelled': 'ការបញ្ជាទិញអនឡាញត្រូវបានបោះបង់',
   '⚠️ Online payment could not start': 'ការទូទាត់អនឡាញមិនអាចចាប់ផ្តើមបាន',
+  '⛔ Online payment declined': 'ការទូទាត់អនឡាញត្រូវបានបដិសេធ',
   '❓ Online payment not recognised': 'មិនស្គាល់ការទូទាត់អនឡាញ',
 } as const
 /** Exported for the pure test. */
@@ -520,6 +521,7 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
   'Needs review': 'ត្រូវពិនិត្យ',
   'Paid on a replaced QR': 'បានបង់លើ QR ដែលត្រូវបានប្តូរ',
   'Payment not started': 'ការទូទាត់មិនទាន់ចាប់ផ្តើម',
+  'Payment declined': 'ការទូទាត់ត្រូវបានបដិសេធ',
   'Not paid in time': 'មិនបានបង់ទាន់ពេល',
   'Change items': 'ប្តូរទំនិញ',
   'Change pickup or delivery': 'ប្តូរការទទួលទំនិញ',

@@ -16,7 +16,7 @@ import type { Env } from '../index'
 import { canonicalizePhone } from './phone'
 import { normalizePromotionRule, isRuleActive, type PromotionRule } from './promotionRules'
 import { percentageMoney4 } from './moneyPrecision'
-import { getPlanLimits } from './planTier'
+import { getPlanLimits, ONLINE_ORDER_FALLBACK_EXCHANGE_RATE } from './planTier'
 import { getMaintenance } from './maintenance'
 import { resolveTaxSettings } from './saleAmendments'
 import {
@@ -152,7 +152,7 @@ export async function loadOrderSettings(db: D1Compat): Promise<OrderSettings> {
   const tax = resolveTaxSettings(map.tax_enabled, map.tax_rate, 1)
   const shows = String(map.customer_portal_show_prices ?? '').trim().toLowerCase()
   return {
-    exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : 4100,
+    exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : ONLINE_ORDER_FALLBACK_EXCHANGE_RATE,
     taxPercent: tax.enabled ? (tax.percent ?? 0) : 0,
     showPrices: shows === '' ? true : ['1', 'true', 'yes', 'on'].includes(shows),
     paymentMinutes: resolvePaymentMinutes(map[PAYMENT_MINUTES_KEY]),
@@ -308,7 +308,6 @@ export async function countOpenPaymentsForPhone(db: D1Compat, phone: string): Pr
   `).get<{ n: number }>({ phone })
   return Number(row?.n ?? 0)
 }
-export const OPEN_UNPAID_PER_PHONE_MAX = 2
 
 // ---- loading an order ---------------------------------------------------------------------------------------------------------------
 
@@ -568,7 +567,6 @@ async function paidMeanwhile(deps: OrderDeps, creds: PaywayCredentials | null, b
 
 // ---- the throttled nudge ----------------------------------------------------------------------------------------------------------------
 
-const NUDGE_AFTER_MS = 60_000
 const isolateNudges = new Map<number, number>()
 export function resetNudgeThrottleForTests(): void { isolateNudges.clear() }
 
@@ -586,7 +584,7 @@ export async function nudgeOrder(deps: OrderDeps, creds: PaywayCredentials | nul
   if (!creds || order.state !== 'awaiting_payment') return 'none'
   const now = deps.now()
   const createdMs = Date.parse(`${String(order.created_at).replace(' ', 'T')}Z`)
-  if (!Number.isFinite(createdMs) || now.getTime() - createdMs < NUDGE_AFTER_MS) return 'none'
+  if (!Number.isFinite(createdMs) || now.getTime() - createdMs < getPlanLimits(deps.env).onlineOrderNudgeAfterSeconds * 1000) return 'none'
   const seconds = getPlanLimits(deps.env).onlineOrderNudgeCheckSeconds
   const last = isolateNudges.get(order.id)
   if (last !== undefined && now.getTime() - last < seconds * 1000) return 'none'
@@ -692,7 +690,7 @@ export async function createOrder(
   }
   const [settings, open, openForPhone] = await Promise.all([loadOrderSettings(db), countOpenPayments(db), countOpenPaymentsForPhone(db, input.phone)])
   if (!openUnpaidAllowed(open, env)) return refuse(503, 'busy', 'We are busy right now. Please try again in a few minutes.')
-  if (openForPhone >= OPEN_UNPAID_PER_PHONE_MAX) {
+  if (openForPhone >= getPlanLimits(env).onlineOrderOpenPerPhoneMax) {
     return refuse(429, 'too_many_open_orders', 'You already have orders waiting for payment. Please pay or cancel them first.')
   }
   const facts = await priceAndCheckStock(deps, input.lines, settings)
@@ -927,6 +925,8 @@ export async function retryTopUpQr(deps: OrderDeps, creds: PaywayCredentials | n
   ])
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: last.amount, currency: last.currency, purpose: 'top_up' }, settings, order.state)
   if (!issued.ok) {
+    // The failed top-up row is a committed change the staff screens show: bump the version even though the customer gets a refusal.
+    await announce(deps, { kind: 'changed', orderId: order.id })
     const failure = paymentFailureMessage(issued.reason)
     return refuse(502, failure.code, failure.message, { retryable: failure.retryable, token, order_no: order.order_no })
   }

@@ -8,7 +8,7 @@
 //   withdrawn / edited / cancelled   the customer took a request back, changed a waiting order, or cancelled it  (`requests`)
 //   qr_failed the payment could not be started and the customer is stuck                (`new`)
 //   unknown_payment  ABA reported a payment for a transaction this shop has no record of (after a restore: money with no order)  (`new`)
-// A declined check ('failed'), a QR re-issue ('changed') and a staff action with nothing to tell ('staff': a note, a resolved review) are announced to the screens only: no message.
+// A QR re-issue ('changed') and a staff action with nothing to tell ('staff': a note, a resolved review) are announced to the screens only: no message. A declined check ('failed') also tells the chat: the customer's attempt to pay was refused by the bank.
 // Staff decisions, applied changes and refund notes (S5) are messages in the `requests` family.
 //
 // Every committed event also bumps the `online_orders` data version and broadcasts, whatever the Telegram switches say: staff screens must refresh
@@ -99,6 +99,10 @@ export function composeReviewAlert(order: OrderRecord, payment: PaymentRecord, r
 export function composeQrFailedAlert(order: OrderRecord): Composed {
   return { heading: '⚠️ Online payment could not start', lines: [...orderRows(order), `Status: Payment not started`, `Total: ${money(order.goods_total_usd)}`] }
 }
+/** A check PayWay answered with a decline: nothing was taken, the customer may ask for a new QR. */
+export function composeDeclinedAlert(order: OrderRecord): Composed {
+  return { heading: '⛔ Online payment declined', lines: [...orderRows(order), `Status: Payment declined`, `Total: ${money(order.goods_total_usd)}`] }
+}
 export function composeEditedAlert(order: OrderRecord): Composed {
   return { heading: '📝 Online order edited', lines: [...orderRows(order), `Total: ${money(order.goods_total_usd)}`] }
 }
@@ -157,6 +161,7 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
     switch (event.kind) {
       case 'created': return await withOrder('new', event.orderId, composeCreatedAlert)
       case 'qr_failed': return await withOrder('new', event.orderId, composeQrFailedAlert)
+      case 'failed': return await withOrder('new', event.orderId, composeDeclinedAlert)
       case 'edited': return await withOrder('requests', event.orderId, composeEditedAlert)
       case 'cancelled': return await withOrder('requests', event.orderId, composeCancelledAlert)
       case 'withdrawn': return await withOrder('requests', event.orderId, (order) => composeWithdrawnAlert(order, event.requestKind))
@@ -189,7 +194,7 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
           const rows = found.filter((order): order is OrderRecord => !!order)
           return rows.length ? composeExpiredDigest(rows) : null
         })
-      default: return false // 'failed' and 'changed' move the screens, not the chat
+      default: return false // 'changed' and 'staff' move the screens, not the chat
     }
   } catch (error) {
     console.warn(`[online-order-alert] ${event.kind} notice not sent:`, error instanceof Error ? error.name : 'error')
