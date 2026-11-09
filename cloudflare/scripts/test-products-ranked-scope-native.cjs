@@ -36,6 +36,11 @@ const app = createInvApp({
           VALUES(?,?,?,?,?,?,?,3,9.5,38000,4,16000,1,?,?)`).run([id, name, `SKU${id}`, `88500000${id}`, BRANDS[index % 3], CATEGORIES[index % 4], stock, created, created])
         raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run([id, stock])
       })
+      // Child rows and a blank-named root: the candidate sets a page reads by key are the rows of the name_key, the children of those rows, a blank-named 'id:N' root and its children.
+      for (const [id, name, parent] of [[150, '', null], [151, 'Blank Child', 150], [152, 'Aloe Child', 104], [153, 'Powder Child', 100], [99, '', null], [155, '', null]]) {
+        raw.prepare(`INSERT INTO products(id,name,sku,barcode,brand,category,stock_quantity,low_stock_threshold,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,parent_id,created_at,updated_at)
+          VALUES(?,?,?,?,'Alpha','Face',4,3,5,20000,2,8000,1,?,'2026-09-05 08:00:00','2026-09-05 08:00:00')`).run([id, name, `SKU${id}`, `88500000${id}`, parent])
+      }
       // a product-level discount that is live now, and one with a rule behind it
       raw.prepare("UPDATE products SET discount_enabled=1, discount_type='percent', discount_percent=10 WHERE id IN (104, 111)").run()
       // Inventory Check: one open session with one issue (the latest state of product 101 is issue)
@@ -75,7 +80,7 @@ async function answer(on, shape) {
     check(`parity ${shape}: the hit is the same bytes`, on.second.text === off.first.text)
   }
   const sample = (await answer(false, url('page=1&pageSize=10&sort=name_asc'))).first.json
-  check('control: the fixture has promoted rows (promoted-first is exercised) and more than one page', sample.total === NAMES.length && sample.items.length === 10)
+  check('control: the fixture has promoted rows (promoted-first is exercised) and more than one page', sample.total === NAMES.length + 3 && sample.items.length > 10)
   const firstNames = sample.items.map((r) => r.name)
   check('control: promoted rows lead the unfiltered name sort', ['Aloe Toner', 'Powder Brush', 'Hair Oil'].every((n) => firstNames.includes(n)) || firstNames.slice(0, 3).length === 3)
 
@@ -101,7 +106,13 @@ async function answer(on, shape) {
   let m = app.mark()
   await app.get(url('page=1&pageSize=10&sort=name_asc'))
   const rankingsOf = (mk) => app.since(mk).filter((sql) => /SELECT family_root_id FROM families ORDER BY/.test(sql)).length
+  const edgeScans = (mk) => app.since(mk).filter((sql) => /datetime\(discount_starts_at\) > datetime/.test(sql)).length
   check('the first read of a scope ranks once', rankingsOf(m) === 1)
+  const rankingSql = app.since(m).find((sql) => /SELECT family_root_id FROM families ORDER BY/.test(sql))
+  // Tied families (the two blank-named roots) come out of the GROUP BY in key order on this plan, so the order alone cannot tell a missing tie-break; the statement must carry it, as the seek-page statement does.
+  check('the ranking statement ends its ORDER BY with the family key (a total order: tied families never swap between reads)', /ORDER BY[^;]*, family_root_id ASC$/.test(rankingSql.trim()))
+  const tied = (await app.get(url('page=1&pageSize=60&sort=name_asc'))).json.items.filter((row) => row.name === '').map((row) => row.id)
+  check('the blank-named roots tie on name and keep the key string order id:150 < id:155 < id:99, the same as OFF', tied.slice(0, 3).join() === '150,155,99')
   m = app.mark()
   await app.get(url('page=3&pageSize=10&sort=name_asc'))
   await app.get(url('page=2&pageSize=7&sort=name_asc'))
@@ -123,7 +134,7 @@ async function answer(on, shape) {
   // ---- 4. the entry's lifetime: plan field, and the version vector moves it
   app.clearCaches(); app.cachePuts.length = 0
   await app.get(url('page=1&pageSize=10&sort=name_asc'))
-  check('the entry is stored once under the Paid plan figure (productListCacheSeconds 60, no promotion edge ahead)', app.cachePuts.length === 1 && /max-age=60$/.test(app.cachePuts[0].cacheControl))
+  check('the ranking and the promotion edge are stored, each under the Paid plan figure (productListCacheSeconds 60, no promotion edge ahead)', app.cachePuts.length === 2 && app.cachePuts.every((put) => /max-age=60$/.test(put.cacheControl)))
   m = app.mark()
   await app.send('PUT', '/api/products/999999', {}) // no such product: a write that must not move anything
   app.raw.prepare('UPDATE products SET name=name WHERE id=100').run()
@@ -142,29 +153,36 @@ async function answer(on, shape) {
   // an entry that is not a ranking (older build, truncated write) is ignored, not trusted
   app.clearCaches()
   await app.get(url('page=1&pageSize=10&sort=name_asc'))
-  const [storedKey] = [...app.cacheStore.keys()]
+  const storedKey = [...app.cacheStore.keys()].find((key) => Array.isArray(JSON.parse(app.cacheStore.get(key)).keys))
   const goodEntry = JSON.parse(app.cacheStore.get(storedKey))
   app.cacheStore.set(storedKey, JSON.stringify({ keys: goodEntry.keys.slice(0, 3), edgeAt: null }))
   m = app.mark()
   const healed = await app.get(url('page=1&pageSize=10&sort=name_asc'))
-  check('an entry with no total is not served: it ranks again and answers the whole scope', rankingsOf(m) === 1 && healed.json.total === NAMES.length)
+  check('an entry with no total is not served: it ranks again and answers the whole scope', rankingsOf(m) === 1 && healed.json.total === sample.total)
 
   // ---- 5. the promotion edge: a window that opens soon ends the entry
   app.raw.prepare("UPDATE products SET discount_enabled=1, discount_type='percent', discount_percent=20, discount_starts_at=?, discount_ends_at=NULL WHERE id=122").run([utc(3)])
   await bump(app.env, 'products'); await bump(app.env, 'promotions')
   app.clearCaches(); app.cachePuts.length = 0
   const before = await app.get(url('page=1&pageSize=25&sort=name_asc'))
-  const edge = app.cachePuts[0]
-  check('with an edge 3 s ahead the entry is stored for at most the time left, not the plan figure', Boolean(edge) && Number(/max-age=(\d+)/.exec(edge.cacheControl)[1]) <= 3)
+  check('with an edge 3 s ahead both entries are stored for at most the time left, not the plan figure', app.cachePuts.length === 2 && app.cachePuts.every((put) => Number(/max-age=(\d+)/.exec(put.cacheControl)[1]) <= 3))
   await new Promise((resolve) => setTimeout(resolve, 3600))
   m = app.mark()
   const after = await app.get(url('page=1&pageSize=25&sort=name_asc'))
   app.setSwitch('catalog_ranked_scope', 'off'); app.clearCaches()
   const reference = await app.get(url('page=1&pageSize=25&sort=name_asc'))
-  check('past the edge the entry is not served (it ranks again)', rankingsOf(m) === 1)
+  check('past the edge neither the ranking nor the stored edge is served (both are read again)', rankingsOf(m) === 1 && edgeScans(m) === 1)
   check('and the order after the edge is the order OFF gives (the discount is live and promoted-first)', after.text === reference.text)
   check('the order before the edge differed (the fixture moved something)', before.text !== reference.text)
   app.raw.prepare("UPDATE products SET discount_enabled=0, discount_starts_at=NULL WHERE id=122").run()
+
+  // the edge is read once and shared by every scope and page, not scanned per ranking (it reads every discount-enabled product)
+  app.setSwitch('catalog_ranked_scope', 'on'); app.clearCaches(); await bump(app.env, 'products')
+  m = app.mark()
+  await app.get(url('page=1&pageSize=10&sort=name_asc'))
+  await app.get(url('page=1&pageSize=10&sort=name_desc&brand=Alpha'))
+  await app.get(url('page=1&pageSize=10&sort=created_asc&category=Face'))
+  check('three scopes ranked (three rankings) but the promotion edge was scanned once', rankingsOf(m) === 3 && edgeScans(m) === 1)
 
   // ---- 6. fail closed: a version that cannot be read means nothing is stored
   app.setSwitch('catalog_ranked_scope', 'on'); app.clearCaches(); app.cachePuts.length = 0
@@ -194,11 +212,16 @@ async function answer(on, shape) {
 
   // ---- 7b. a restricted scope is keyed on the Inventory Check version
   app.setSwitch('ic_wired', 'on'); app.clearCaches()
+  m = app.mark()
   const issues1 = await app.get('/api/inventory-checks/list?branchId=1&checkState=issue')
   app.raw.prepare("UPDATE inventory_check_items SET state='done', reason=NULL, counted_quantity=2, updated_at='2026-11-02T00:00:00.000Z', revision=2 WHERE session_id='sA' AND product_id=101").run()
   await bump(app.env, 'inventory_checks')
   const issues2 = await app.get('/api/inventory-checks/list?branchId=1&checkState=issue')
   check('the issue scope has the issue row, then none after the check moves (the ic version is in the key)', issues1.status === 200 && issues1.json.total === 1 && issues2.status === 200 && issues2.json.total === 0)
+  app.raw.prepare("UPDATE inventory_check_items SET state='issue', reason='Again', counted_quantity=1, updated_at='2026-11-03T00:00:00.000Z', revision=3 WHERE session_id='sA' AND product_id=101").run()
+  await bump(app.env, 'inventory_checks')
+  const issues3 = await app.get('/api/inventory-checks/list?branchId=1&checkState=issue')
+  check('the issue is back at the newer check version (re-ranked), and the promotion edge was scanned once for both versions (an Inventory Check change cannot move an edge)', issues3.json.total === 1 && edgeScans(m) === 1)
 
   // ---- 8. the Inventory Check list shares the ranking with Products
   app.setSwitch('ic_wired', 'on'); app.clearCaches()

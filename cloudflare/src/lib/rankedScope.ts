@@ -22,6 +22,8 @@ export type RankedScope = {
   request: Request
   /** The version vector the entry is valid for, or an unsafe token when one could not be read (then nothing is cached). */
   versions: string
+  /** The vector the promotion edge is valid for: the same without the Inventory Check version, which cannot move an edge. */
+  edgeVersions: string
   identity: CacheIdentity
   ttlSeconds: number
 }
@@ -42,6 +44,24 @@ export async function nextPromotionEdge(db: D1Compat, now: Date = new Date()): P
   ])
   const edges = [products?.starts, products?.ends, rules?.starts, rules?.ends].filter((edge): edge is string => typeof edge === 'string' && edge.length > 0)
   return edges.length ? edges.sort()[0] : null
+}
+
+/** The next promotion boundary, read once per products and promotions version and shared by every scope and page: the scan behind it reads every discount-enabled product, which is the whole cost of a tiny scope's ranking. */
+export async function readPromotionEdge(scope: RankedScope, produce: () => Promise<string | null>, now: () => number = Date.now): Promise<string | null> {
+  const key = await cacheKeyRequest('https://ranked.invalid/__bos/promo-edge?rk_edge=1', scope.edgeVersions, scope.identity)
+  if (key) {
+    const hit = await caches.default.match(key)
+    if (hit) {
+      const value = await hit.json<{ edgeAt?: unknown }>()
+      if (value.edgeAt === null || (typeof value.edgeAt === 'string' && now() < utcDate(value.edgeAt))) return value.edgeAt
+    }
+  }
+  const edgeAt = await produce()
+  if (key) {
+    const ttl = Math.min(scope.ttlSeconds, edgeAt === null ? Infinity : Math.floor((utcDate(edgeAt) - now()) / 1000))
+    if (ttl > 0) scope.ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify({ edgeAt }), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } })))
+  }
+  return edgeAt
 }
 
 const usable = (value: unknown, now: number): value is RankedWindow => {
