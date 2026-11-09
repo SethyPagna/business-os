@@ -47,7 +47,8 @@ export const ORDER_TRANSITIONS: Readonly<Record<OrderState, Readonly<Partial<Rec
   qr_failed: { awaiting_payment: ['customer'], expired: ['sweep'], cancelled: ['customer', 'staff'] },
   paid: { paid: ['staff'], cancelled: ['staff'], fulfilled: ['staff'] },
   review: { paid: ['staff'], cancelled: ['staff'] },
-  expired: { paid: ['payway', 'sweep'] },
+  // A customer whose QR ran out asks for a new one ("Get a new QR"); a late payment of the old one is still accepted (late_paid).
+  expired: { awaiting_payment: ['customer'], paid: ['payway', 'sweep'] },
   cancelled: {},
   fulfilled: {},
 })

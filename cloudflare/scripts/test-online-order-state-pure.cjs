@@ -48,7 +48,7 @@ const EXPECTED = [
   ['qr_failed', 'cancelled', 'customer'], ['qr_failed', 'cancelled', 'staff'],
   ['paid', 'paid', 'staff'], ['paid', 'cancelled', 'staff'], ['paid', 'fulfilled', 'staff'],
   ['review', 'paid', 'staff'], ['review', 'cancelled', 'staff'],
-  ['expired', 'paid', 'payway'], ['expired', 'paid', 'sweep'],
+  ['expired', 'awaiting_payment', 'customer'], ['expired', 'paid', 'payway'], ['expired', 'paid', 'sweep'],
 ].map((row) => row.join('>'))
 
 check('every (from, to, source) triple: exactly the expected ones are allowed, nothing else', () => {
@@ -57,7 +57,7 @@ check('every (from, to, source) triple: exactly the expected ones are allowed, n
     if (O.canTransition(from, to, source)) allowed.push([from, to, source].join('>'))
   }
   assert.deepEqual(allowed.sort(), [...EXPECTED].sort())
-  assert.equal(allowed.length, 20)
+  assert.equal(allowed.length, 21)
 })
 
 check('POSITIVE CONTROL: the matrix is not trivially empty or full, and junk inputs are refused', () => {
