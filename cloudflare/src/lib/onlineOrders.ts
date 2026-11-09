@@ -363,6 +363,9 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   if (!sale) {
     const receivedUsd = sumMoney4([onlineInUsd, heldInReviewUsd])
     refundDue = order.state === 'cancelled' ? receivedUsd - notedUsd : Math.max(0, roundMoney4(receivedUsd - goods)) - notedUsd
+    // A PAID order the goods cost more than the customer has paid (a short payment staff resolved as received, or a price increase whose top-up is still unpaid) is
+    // not "paid, to fulfil": the difference is owed, and Fulfil collects it (Not Paid, or at the till).
+    if (order.state === 'paid') balanceDueUsd = Math.max(0, roundMoney4(goods - onlineInUsd))
   } else {
     toRecordUsd = Math.max(0, roundMoney4(onlineInUsd - recordedOnSaleUsd))
     const stored = saleStoredState(sale)
@@ -486,7 +489,8 @@ export function onlineOrderView(
   let status: ViewStatus
   let phase: OnlineOrderView['phase'] = 'before_sale'
   if (!sale) {
-    status = order.state as ViewStatus
+    status = order.state === 'paid' && money.balanceDueUsd > 0 ? 'balance_due' : order.state as ViewStatus
+    if (money.balanceDueUsd > 0) chips.push('balance_due')
   } else {
     phase = 'after_sale'
     const stored = saleStoredState(sale)

@@ -247,8 +247,8 @@ const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
     km: salesSummaryCopy,
   },
   notification_online_orders_summary: {
-    en: ({ reviewCount, toFulfilCount }) => [reviewCount ? `${reviewCount} payment${reviewCount === 1 ? '' : 's'} to review` : null, toFulfilCount ? `${toFulfilCount} paid, to fulfil` : null].filter(Boolean).join(' • '),
-    km: ({ reviewCount, toFulfilCount }) => [reviewCount ? `${reviewCount} ការទូទាត់ត្រូវពិនិត្យ` : null, toFulfilCount ? `${toFulfilCount} បានបង់ ត្រូវរៀបចំ` : null].filter(Boolean).join(' • '),
+    en: ({ reviewCount, toFulfilCount, partPaidCount }) => [reviewCount ? `${reviewCount} payment${reviewCount === 1 ? '' : 's'} to review` : null, partPaidCount ? `${partPaidCount} part paid` : null, toFulfilCount ? `${toFulfilCount} paid, to fulfil` : null].filter(Boolean).join(' • '),
+    km: ({ reviewCount, toFulfilCount, partPaidCount }) => [reviewCount ? `${reviewCount} ការទូទាត់ត្រូវពិនិត្យ` : null, partPaidCount ? `${partPaidCount} បានបង់មួយផ្នែក` : null, toFulfilCount ? `${toFulfilCount} បានបង់ ត្រូវរៀបចំ` : null].filter(Boolean).join(' • '),
   },
   notification_loyalty_summary: {
     en: ({ count, threshold }) => `${count} customer${count === 1 ? '' : 's'} reached ${threshold}+ points`,
@@ -274,6 +274,10 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
   notification_online_orders_review: {
     en: ({ totalUsd }) => `Payment needs review • $${totalUsd}`,
     km: ({ totalUsd }) => `ការទូទាត់ត្រូវពិនិត្យ • $${totalUsd}`,
+  },
+  notification_online_orders_part_paid: {
+    en: ({ totalUsd }) => `Part paid, $${totalUsd} to collect`,
+    km: ({ totalUsd }) => `បានបង់មួយផ្នែក នៅសល់ $${totalUsd}`,
   },
   notification_online_orders_to_fulfil: {
     en: ({ totalUsd }) => `Paid, to fulfil • $${totalUsd}`,

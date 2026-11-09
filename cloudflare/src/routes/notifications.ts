@@ -662,16 +662,20 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
 async function buildOnlineOrdersSection(env: Env): Promise<NotificationSection | null> {
   const rows = await getDb(env).prepare(`
     SELECT o.id, o.order_no, o.state, o.goods_total_usd, o.fulfilment,
+      (SELECT COALESCE(SUM(COALESCE(p.paid_amount, p.amount)), 0) FROM online_order_payments p WHERE p.order_id = o.id AND p.state = 'paid') AS paid_usd,
       COUNT(*) OVER () AS total, SUM(CASE WHEN o.state = 'review' THEN 1 ELSE 0 END) OVER () AS review_total
     FROM online_orders o INDEXED BY idx_online_orders_attention
     WHERE o.state IN ('paid','review')
     ORDER BY CASE o.state WHEN 'review' THEN 0 ELSE 1 END, o.created_at ASC, o.id ASC
     LIMIT ${ONLINE_ORDERS_PREVIEW_ITEMS}
-  `).all<{ id: number; order_no: string; state: string; goods_total_usd: number; fulfilment: string; total: number; review_total: number }>()
+  `).all<{ id: number; order_no: string; state: string; goods_total_usd: number; fulfilment: string; paid_usd: number; total: number; review_total: number }>()
   if (!rows.length) return null
   const total = Number(rows[0].total || rows.length)
   const reviewCount = Number(rows[0].review_total || 0)
-  const toFulfilCount = total - reviewCount
+  // A paid order the customer has not paid in full (a short payment resolved as received) is NOT "to fulfil": it is part paid, with the rest to collect at Fulfil.
+  const owes = (order: { state: string; goods_total_usd: number; paid_usd: number }) => order.state === 'paid' && Number(order.goods_total_usd) - Number(order.paid_usd) > 0.004
+  const partPaidCount = rows.filter(owes).length
+  const toFulfilCount = total - reviewCount - partPaidCount
   return {
     id: 'online_orders',
     label: 'Online orders',
@@ -679,21 +683,23 @@ async function buildOnlineOrdersSection(env: Env): Promise<NotificationSection |
     count: total,
     summary: joinSummary([
       reviewCount ? `${reviewCount} payment${reviewCount === 1 ? '' : 's'} to review` : null,
+      partPaidCount ? `${partPaidCount} part paid` : null,
       toFulfilCount ? `${toFulfilCount} paid, to fulfil` : null,
     ]),
     summaryKey: 'notification_online_orders_summary',
-    summaryParams: { reviewCount, toFulfilCount },
+    summaryParams: { reviewCount, toFulfilCount, partPaidCount },
     items: rows.map((order) => {
       const review = order.state === 'review'
+      const owed = owes(order) ? Math.round((Number(order.goods_total_usd) - Number(order.paid_usd)) * 100) / 100 : 0
       const totalUsd = Number(order.goods_total_usd || 0).toFixed(2)
       return {
         id: `online-order-${order.id}`,
         tone: review ? 'danger' as const : 'warning' as const,
         label: order.order_no,
-        meta: `${review ? 'Payment needs review' : 'Paid, to fulfil'}${SUMMARY_SEPARATOR}$${totalUsd}`,
-        metaKey: review ? 'notification_online_orders_review' : 'notification_online_orders_to_fulfil',
-        metaParams: { totalUsd },
-        kind: review ? 'online_order_review' : 'online_order_to_fulfil',
+        meta: `${review ? 'Payment needs review' : owed ? 'Part paid' : 'Paid, to fulfil'}${SUMMARY_SEPARATOR}$${owed ? owed.toFixed(2) : totalUsd}`,
+        metaKey: review ? 'notification_online_orders_review' : owed ? 'notification_online_orders_part_paid' : 'notification_online_orders_to_fulfil',
+        metaParams: { totalUsd: owed ? owed.toFixed(2) : totalUsd },
+        kind: review ? 'online_order_review' : owed ? 'online_order_part_paid' : 'online_order_to_fulfil',
         pageId: 'sales',
       }
     }),

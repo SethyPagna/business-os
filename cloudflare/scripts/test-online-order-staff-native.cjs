@@ -192,6 +192,15 @@ async function main() {
     const ev = events(h).filter((e) => e.event === 'resolved'); assert.equal(ev.length, 1); assert.equal(ev[0].actor_name, 'Decider'); assert.equal(ev[0].amount_usd, 20); assert.equal(ev[0].from_state, 'review'); assert.equal(ev[0].to_state, 'paid')
     assert.equal(money(h).onlineInUsd, 20, 'the real amount counts as paid money'); assert.equal(money(h).heldInReviewUsd, 0)
     assert.equal((await ask(h, DECIDER, '/1/resolve', 'POST', {})).body.code, 'nothing_to_resolve')
+    // G7: a short payment resolved as received is NOT "paid, to fulfil": the order reads balance due ($5 of $25 still owed), the money view says so, and Fulfil collects it.
+    const shown = await ask(h, VIEWER, '/1')
+    assert.equal(shown.status, 200, JSON.stringify(shown.body))
+    assert.equal(shown.body.status, 'balance_due'); assert.ok(shown.body.chips.includes('balance_due')); assert.equal(shown.body.money.balanceDueUsd, 5)
+    assert.equal(shown.body.money.refundDueUsd, 0, 'nothing is refundable: the customer owes, not the shop')
+    const full = world(); const fr = await place(full); full.script.check = () => full.approved(25); await full.callback(tranOf(full))
+    const fullShown = await ask(full, VIEWER, '/1')
+    assert.equal(fullShown.body.status, 'paid'); assert.ok(!fullShown.body.chips.includes('balance_due')); assert.equal(fullShown.body.money.balanceDueUsd, 0)
+    void fr
     const legacy = world(); await place(legacy)
     legacy.run("UPDATE online_order_payments SET state = 'review', paid_amount = NULL WHERE id = 1"); legacy.run("UPDATE online_orders SET state = 'review' WHERE id = 1")
     assert.equal((await ask(legacy, DECIDER, '/1/resolve', 'POST', {})).body.code, 'no_amount_held')

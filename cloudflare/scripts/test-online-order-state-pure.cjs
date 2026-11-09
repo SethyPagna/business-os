@@ -262,8 +262,10 @@ check('requestAllowed: stage, kind, window, one pending, the cap, and closed ord
   assert.deepEqual(O.requestAllowed({ ...base, order: fulfilled, sale, kind: 'return' }, FREE), { ok: true, stage: 'after_sale' })
   assert.equal(O.requestAllowed({ ...base, order: fulfilled, sale, now: new Date(Date.UTC(2026, 10, 16, 8, 59, 0)), kind: 'return' }, FREE).ok, true,
     'a return window starts at hand-over (the sale), not at payment')
-  refuse({ order: fulfilled, sale: { ...sale, return_state: 'full' }, kind: 'return' }, 'closed_order')
-  refuse({ order: fulfilled, sale: { ...sale, sale_status: 'cancelled' }, kind: 'note' }, 'closed_order')
+  // A fulfilled order always has its payment recorded on the sale (Fulfil writes the event); without it the money would read as unrecorded online money and refundable.
+  const recordedEvent = { event: 'payment_recorded_on_sale', payment_id: 1, sale_id: 9 }
+  refuse({ order: fulfilled, sale: { ...sale, return_state: 'full' }, kind: 'return', events: [recordedEvent] }, 'closed_order')
+  refuse({ order: fulfilled, sale: { ...sale, sale_status: 'cancelled' }, kind: 'note', events: [{ event: 'refund_noted', amount_usd: 24.5, sale_id: 9 }, recordedEvent] }, 'closed_order')
   const cancelledSale = { ...base, order: fulfilled, sale: { ...sale, sale_status: 'cancelled' }, kind: 'note', payments: [{ id: 1, state: 'paid', paid_amount: 24.5 }] }
   const recorded = { event: 'payment_recorded_on_sale', payment_id: 1, sale_id: 9 }
   assert.equal(O.requestAllowed({ ...cancelledSale, events: [recorded] }, FREE).ok, true, 'cancelled but money still to refund: the customer may still write')

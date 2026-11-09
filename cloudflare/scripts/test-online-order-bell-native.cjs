@@ -61,7 +61,7 @@ async function main() {
     assert.deepEqual(s.items.map((i) => i.kind), ['online_order_review', 'online_order_to_fulfil'])
     assert.deepEqual(s.items.map((i) => i.id), [`online-order-${held}`, `online-order-${paid}`])
     assert.equal(s.summaryKey, 'notification_online_orders_summary')
-    assert.deepEqual(s.summaryParams, { reviewCount: 1, toFulfilCount: 1 })
+    assert.deepEqual(s.summaryParams, { reviewCount: 1, toFulfilCount: 1, partPaidCount: 0 })
     assert.equal(s.items[0].metaKey, 'notification_online_orders_review'); assert.equal(s.items[1].metaKey, 'notification_online_orders_to_fulfil')
     assert.match(s.summary, /1 payment to review/); assert.match(s.summary, /1 paid, to fulfil/)
     assert.equal(s.enabledKey, undefined, 'a queue someone must act on has no mute switch')
@@ -70,6 +70,21 @@ async function main() {
     assert.equal(section(await summary(h, ADMIN)).count, 1, 'a cancelled order leaves the queue')
     h.run("UPDATE online_orders SET state = 'cancelled' WHERE id = ?", held)
     assert.equal(section(await summary(h, ADMIN)), undefined, 'an empty queue shows no section')
+  })
+
+  await check('G7: a paid order that is only part paid (a short payment resolved as received) reads Part paid with the amount to collect, never Paid, to fulfil', async () => {
+    const h = world()
+    const short = await review(h)
+    h.run("UPDATE online_order_payments SET state = 'paid', paid_at = '2026-11-09 04:00:00' WHERE order_id = ?", short)
+    h.run("UPDATE online_orders SET state = 'paid', paid_at = '2026-11-09 04:00:00' WHERE id = ?", short)
+    const whole = await pay(h)
+    const s = section(await summary(h, ADMIN))
+    assert.equal(s.count, 2)
+    const byId = Object.fromEntries(s.items.map((i) => [i.id, i]))
+    assert.equal(byId[`online-order-${short}`].kind, 'online_order_part_paid'); assert.equal(byId[`online-order-${short}`].metaKey, 'notification_online_orders_part_paid'); assert.deepEqual(byId[`online-order-${short}`].metaParams, { totalUsd: '5.00' })
+    assert.equal(byId[`online-order-${whole}`].kind, 'online_order_to_fulfil')
+    assert.deepEqual(s.summaryParams, { reviewCount: 0, toFulfilCount: 1, partPaidCount: 1 })
+    assert.match(s.summary, /1 part paid/); assert.match(s.summary, /1 paid, to fulfil/)
   })
 
   await check('only people who may VIEW online orders see the section; the decide action alone does not open it (a wrong build shows it to everyone)', async () => {
