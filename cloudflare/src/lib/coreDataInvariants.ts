@@ -712,6 +712,12 @@ export const FACTORY_RESET_TABLES = [
   // Immutable Sales Records must be cleared before their sales/receipt
   // parents, under the atomic reset guard in routes/system.ts.
   'sale_record_events',
+  // Online orders (0293) hold personal data. Requests and events are append-only and clear under the same reset guard as the
+  // sale record events; the order and its payments carry the money record and go with them.
+  'online_order_events',
+  'online_order_requests',
+  'online_order_payments',
+  'online_orders',
   'return_mutation_receipts',
   'return_create_receipts',
   'return_create_guards',

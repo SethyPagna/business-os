@@ -256,6 +256,12 @@ export const BACKUP_TABLES = [
   'inventory_check_events',
   'inventory_check_approvals',
   'branch_cutovers',
+  // Online orders (0293): no foreign keys, so position is free. The payments and the append-only requests and events are the
+  // money and consent record of a paid order; a restore without them would forget money already taken.
+  'online_orders',
+  'online_order_payments',
+  'online_order_requests',
+  'online_order_events',
   'audit_logs',
   'custom_tables',
   'custom_fields',

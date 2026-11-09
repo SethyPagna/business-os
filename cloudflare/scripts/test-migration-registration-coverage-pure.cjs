@@ -59,6 +59,9 @@ const NAMED_COMPANIONS = {
   273: 'test-migration-0273-conflict-marks-native.cjs',
   // 0292 creates the expense label and type catalogs and the partial index on sales that carry a courier cost; its companion applies the real chain.
   292: 'test-migration-0292-expense-catalogs-native.cjs',
+  // 0293 creates the four online order tables and returns.refund_channel; its companion applies the real chain and drives every
+  // constraint, the append-only triggers, PRE/POST (by mutating the file) and RECOVERY.
+  293: 'test-migration-0293-online-orders-native.cjs',
   // 0285 is the index the simplified Inventory Check (ic_simple) reads each product's latest observation through; schema only.
   285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0286 is the approval row a submitted Inventory Check count waits for (ic_fix_stock); a new table, no existing row changes.

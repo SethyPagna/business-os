@@ -274,6 +274,38 @@ async function main() {
     await restoreOwned(f.env, withEvents.key)
     assert.equal(f.sql.prepare('SELECT COUNT(*) AS n FROM stock_crossing_alerts').get().n, 0, 'a restore clears the crossing log')
     console.log('PASS a restore clears stock_crossing_alerts')
+
+    // 0293 online orders: the four tables and returns.refund_channel round-trip through a backup, and a pre-0293 document leaves them alone.
+    const onlineRows = () => Object.fromEntries(['online_orders', 'online_order_payments', 'online_order_requests', 'online_order_events']
+      .map(t => [t, f.sql.prepare(`SELECT * FROM ${t} ORDER BY id`).all()]))
+    f.sql.prepare("INSERT INTO online_orders(order_no,token_hash,state,fulfilment,branch_id,customer_name,customer_phone,customer_address,contact_telegram,currency,goods_total_usd,items_json,pricing_version) VALUES('W-RT','h-rt','paid','delivery',1,'Round Trip','012000111','House 1','@rt','USD',9.5,'[{\"product_id\":1}]',1)").run()
+    f.sql.prepare("INSERT INTO online_order_payments(order_id,tran_id,purpose,amount,currency,state,paid_at,paid_amount,payway_apv) VALUES(1,'TRANRT1','order',9.5,'USD','paid','2026-11-09 08:00:00',9.5,'APV1')").run()
+    f.sql.prepare("INSERT INTO online_order_requests(order_id,kind,stage,before_json,after_json,customer_comment) VALUES(1,'address','paid','{}','{\"address\":\"House 2\"}','please')").run()
+    f.sql.prepare("INSERT INTO online_order_events(order_id,payment_id,event,source,amount_usd) VALUES(1,1,'verified_paid','payway',9.5)").run()
+    f.sql.prepare("UPDATE returns SET refund_channel='aba' WHERE id=991").run()
+    const orderedBefore = onlineRows()
+    assert.equal(orderedBefore.online_orders.length + orderedBefore.online_order_events.length, 2, 'control: the fixture really holds rows')
+    const withOrders = await backup.createCloudflareBackup(f.env, 'manual')
+    const ordersDoc = JSON.parse(f.env.ASSETS._store.get(withOrders.key).body)
+    for (const table of ['online_orders', 'online_order_payments', 'online_order_requests', 'online_order_events']) assert.equal(ordersDoc.tables[table].rows.length, 1, `the backup carries ${table}`)
+    f.sql.prepare("INSERT INTO online_orders(order_no,token_hash,state,fulfilment,branch_id,customer_name,customer_phone,currency,goods_total_usd,items_json,pricing_version) VALUES('W-LATE','h-late','paid','pickup',1,'Late','013','USD',1,'[]',1)").run()
+    f.sql.prepare("INSERT INTO online_order_events(order_id,event,source) VALUES(2,'created','customer')").run()
+    f.sql.prepare("UPDATE returns SET refund_channel='drawer' WHERE id=991").run()
+    await restoreOwned(f.env, withOrders.key)
+    assert.deepEqual(onlineRows(), orderedBefore, 'a restore brings back exactly the saved orders, payments, requests and events and drops later ones')
+    assert.equal(f.sql.prepare('SELECT refund_channel v FROM returns WHERE id=991').get().v, 'aba', 'refund_channel is restored with the return')
+    const pre0293 = structuredClone(ordersDoc)
+    for (const table of ['online_orders', 'online_order_payments', 'online_order_requests', 'online_order_events']) delete pre0293.tables[table]
+    pre0293.summary.tableCount = Object.keys(pre0293.tables).length
+    pre0293.summary.rowCount = Object.values(pre0293.tables).reduce((n, t) => n + t.rows.length, 0)
+    const pre0293Key = 'backups/cloudflare/pre-0293-no-online-orders.json'
+    await f.env.ASSETS.put(pre0293Key, JSON.stringify(pre0293), { customMetadata: { format: document.format } })
+    assert.equal((await backup.validateCloudflareBackup(f.env, pre0293Key)).restorable, true, 'a pre-0293 backup is still restorable')
+    await restoreOwned(f.env, pre0293Key)
+    // Unlike sale_payment_events these are NOT cleared by a document that predates them: they hold money already taken, and the
+    // general rule for a table the document lacks is neither cleared nor restored (restore reports it, reconciliation re-checks it).
+    assert.deepEqual(Object.values(onlineRows()).map(rows => rows.length), [1, 1, 1, 1], 'a pre-0293 document leaves the live online order records alone')
+    console.log('PASS online orders, payments, requests, events and returns.refund_channel round-trip through a backup; a pre-0293 document leaves them untouched')
     console.log('PASS native-change provenance roundtrips, while pre-0127 sales rows restore marker/rate defaults without inference')
 
     const dependencyOwner = await maintenance.beginMaintenance(f.env, { backupKey: 'dependency-fixture.json', startedBy: 'legacy restore fixture' })

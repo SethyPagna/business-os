@@ -134,6 +134,10 @@ const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 's
   'variant', 'damaged', 'undo', 'reverses'])
 /** Columns whose owner cannot be read off the name alone. */
 const CHILD_SCOPED = {
+  // 0293 online orders: the four tables hang off one order (no foreign keys; the reset clears them together).
+  'online_order_payments.order_id': 'online_orders',
+  'online_order_requests.order_id': 'online_orders',
+  'online_order_events.order_id': 'online_orders',
   'portal_sessions.account_id': 'portal_accounts',
   'portal_password_resets.account_id': 'portal_accounts',
   'rfid_tags.last_seen_session_id': 'rfid_scan_sessions',
