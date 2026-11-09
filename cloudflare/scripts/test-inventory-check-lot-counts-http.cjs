@@ -253,6 +253,29 @@ async function lotMain() {
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910001, branchId: 2 }), false, 'another branch is not held')
     assert.equal(await fixStockHeldByApproval(handle, 'not-a-fix-request', { productId: 910001, branchId: 1 }), false, 'a request that names no count is never held')
   })
+
+  await check('alerts: a differing lot count tells the approvers once, a matching one tells nobody, a replaced approval is told as rejected, a replay announces nothing', async () => {
+    reset(); twoLots(); on()
+    const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
+    const { createInventoryCheckLotSubmission } = load(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'))
+    const { inventoryCheckDigest } = load(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'))
+    const handle = getDb({ DB: binding() })
+    planTier.__resetPlanTierCacheForTests()
+    const who = { id: COUNTER, tokenHash: await inventoryCheckDigest(`token-${COUNTER}`) }
+    const told = []
+    const options = { approvals: true, maxLines: 60, onApprovalCreated: async created => { told.push(['created', created.sessionId]) }, onApprovalsReplaced: async replaced => { told.push(['replaced', ...replaced.sessionIds]) } }
+    const matching = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-01', lines: [lotLine(910001, [lot(910001, 5, 5), lot(920001, 4, 4)])] }, options)
+    assert.equal(matching.created, true); assert.deepEqual(told, [], 'counts that match stock queue nothing and tell nobody')
+    const first = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-02', lines: [lotLine(910001, [lot(910001, 4, 5), lot(920001, 4, 4)])] }, options)
+    assert.deepEqual(told, [['created', first.item.id]], 'a differing count is announced once, by its session')
+    const second = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-03', lines: [lotLine(910001, [lot(910001, 3, 5), lot(920001, 4, 4)])] }, options)
+    assert.ok(told.some(entry => entry[0] === 'replaced' && entry[1] === first.item.id), 'the replaced approval is announced as replaced')
+    assert.ok(told.some(entry => entry[0] === 'created' && entry[1] === second.item.id), 'and the newer count as created')
+    const size = told.length
+    const replay = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-03', lines: [lotLine(910001, [lot(910001, 3, 5), lot(920001, 4, 4)])] }, options)
+    assert.equal(replay.created, false); assert.equal(told.length, size, 'a replay announces nothing')
+    planTier.__resetPlanTierCacheForTests()
+  })
 }
 
 lotMain().then(() => { console.log(`PASS test-inventory-check-lot-counts-http: ${groups} groups`) }).catch(error => { console.error(error); process.exit(1) })

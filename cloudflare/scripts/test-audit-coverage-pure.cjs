@@ -83,17 +83,20 @@ assert.deepEqual([...inventoryChecks.matchAll(/\bapp\.(post|patch|put|delete)\('
   ['post', '/sessions'], ['post', '/submissions'], ['post', '/sessions/:id/approval'], ['patch', '/sessions/:id/items/:productId'], ['patch', '/sessions/:id'],
 ])
 for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'decideInventoryCheckApproval', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
-  ok(inventoryChecks.includes(`await ${writer}(getDb(c.env), await principal(c),`), `Inventory mutation delegates to authenticated ${writer}`)
+  // POST /submissions picks its writer (the per-received-date one while ic_lot_counts is on) and calls it as `writer`; both writers are named in the route.
+  const call = writer === 'createInventoryCheckSubmission' ? 'writer' : writer
+  ok(inventoryChecks.includes(`await ${call}(getDb(c.env), await principal(c),`), `Inventory mutation delegates to authenticated ${writer}`)
 }
+ok(inventoryChecks.includes('createInventoryCheckLotSubmission(db, who, body,') && inventoryChecks.includes(': createInventoryCheckSubmission'), 'the submissions route reaches both submission writers')
 const inventoryWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckSessions.ts'), 'utf8')
-for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
+for (const writer of ['createInventoryCheckSession', 'createInventoryCheckSubmission', 'createInventoryCheckLotSubmission', 'patchInventoryCheckObservation', 'patchInventoryCheckSession']) {
   const body = inventoryWriter.split(`export async function ${writer}(`)[1]?.split('export async function ')[0] || ''
   ok(body.includes('eventStatement(actor, {') && body.includes('await commit(db, principal, actor,'), `${writer} commits its own immutable event with its mutation`)
 }
 ok(/INSERT INTO inventory_check_events\(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at\)/.test(inventoryWriter),
   'Inventory audit stores actor, request identity, before/after and result in its dedicated event ledger')
-ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 4 && (inventoryWriter.match(/await commit\(db, principal, actor,/g) || []).length === 4,
-  'all four Inventory mutation writers include their event in the atomic commit')
+ok((inventoryWriter.match(/eventStatement\(actor, \{/g) || []).length === 5 && (inventoryWriter.match(/await commit\(db, principal, actor,/g) || []).length === 5,
+  'all five Inventory mutation writers include their event in the atomic commit')
 ok(inventoryWriter.includes('await db.batchOnce([authorityGuard(actor), ...statements])'), 'Inventory event and mutation share the authority-guarded transaction')
 // The counts approval (6.0.1045) records through its own writer: every decision and every applied line commits its immutable event with the approval row, under the same authority guard.
 const approvalWriter = fs.readFileSync(path.join(routesDir, '../lib/inventoryCheckApprovals.ts'), 'utf8')
