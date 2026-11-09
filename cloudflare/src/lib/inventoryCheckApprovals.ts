@@ -527,12 +527,12 @@ const sinceCountStatement = (branchId: number, productIds: number[], count: { se
     SELECT 'superseded',CAST(j.key AS INTEGER) FROM inventory_check_approvals a, json_each(a.applied_json,'$.lines') j
       WHERE a.branch_id=@branchId AND COALESCE(a.decided_at,a.applying_at)>@submittedAt AND a.session_id<>@sessionId AND CAST(j.key AS INTEGER) IN (SELECT value FROM json_each(@ids)) AND json_extract(j.value,'$.at')>@submittedAt
     UNION
-    SELECT 'adjusted',product_id FROM inventory_movements WHERE branch_id=@branchId AND product_id IN (SELECT value FROM json_each(@ids))
+    SELECT 'adjusted',product_id FROM inventory_movements INDEXED BY idx_inventory_movements_product_created_pg WHERE branch_id=@branchId AND product_id IN (SELECT value FROM json_each(@ids))
       AND movement_type IN ('set','adjustment','remove') AND COALESCE(reason,'') NOT LIKE 'Inventory check approved:%'
       AND created_at>=date(@submittedFrom,'-1 day') AND julianday(created_at)>=julianday(@submittedFrom)
     ORDER BY 1,2`,
   // Movements are stamped to the second and the count to the millisecond: comparing from the start of the count's second never misses a correction made right after it (a false refusal is safe, a missed one applies a shortage twice).
-  // created_at mixes ISO and space forms, so julianday() decides; the plain comparison with the day before is only the floor that lets the (product, created_at) index skip the product's whole history.
+  // created_at mixes ISO and space forms, so julianday() decides; the plain comparison with the day before is only the floor that lets the (product, created_at) index skip the product's whole history. The index is NAMED: left to choose, the planner walked every movement of the branch since that day (+96 rows a day in the read-budget world, 4x the rows of the whole step).
   params: { branchId, sessionId: count.sessionId, submittedAt: count.submittedAt, submittedFrom: count.submittedAt.slice(0, 19).replace('T', ' '), ids: JSON.stringify(productIds) } })
 
 /**
