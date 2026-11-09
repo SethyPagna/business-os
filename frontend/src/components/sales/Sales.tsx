@@ -29,7 +29,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
+import { buildBulkSaleCancelInput, getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip, SALES_LIST_REQUEST_TIMEOUT_MS, previewSalesBulkField, updateSalesBulkField, updateSalesBulkStatus, type BulkSaleStatusItem, type BulkSaleStatusPayload, type BulkSaleUpdatePayload, type PreparedSaleStatusRequest, type SaleAmendmentRequest } from '../../api/salesTransport.ts'
 import { getSalesCustomerPicker, getDeliveryContacts } from '../../api/contactReadTransport.ts'
 import { customerRequestIsCurrent, saleCustomerMode } from '../../utils/saleCustomerMode.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
@@ -2421,12 +2421,22 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
     }
   }
 
+  const driverWindowClosedMessage = (): string => translateOr('sale_driver_window_closed', 'The edit window for this sale has closed. An admin can still change the driver.', 'រយៈពេលកែប្រែការលក់នេះបានបិទហើយ។ អ្នកគ្រប់គ្រងនៅតែអាចប្ដូរអ្នកដឹកជញ្ជូនបាន។')
   const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload): Promise<boolean> => {
     // One sale's driver needs sales:amend alone, like its delivery cost; every other field change here is a group action.
     const oneSaleDriver = field === 'delivery_contact' && (retryRequest ? retryRequest.items.length : frozenSales.length) === 1
     if (!canBulkSales && !oneSaleDriver) return false
     if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return false
     if (!retryRequest && !matched.length) return false
+    // A driver change follows the sale edit window like the delivery-cost edit: outside it only an admin may change
+    // a sale's driver (the Worker refuses the same way; this says so before sending).
+    if (field === 'delivery_contact' && !retryRequest && !isAdmin) {
+      const matchedIds = new Set(matched.map((row) => row.id))
+      if (frozenSales.some((sale) => matchedIds.has(Number(sale.id)) && !saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, sale.created_at, isAdmin))) {
+        notify(driverWindowClosedMessage(), 'error')
+        return false
+      }
+    }
     if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return false
     setBulkFieldSaving(true)
     try {
@@ -2456,6 +2466,10 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         setBulkChangePrompt(null)
         void loadSales(true)
       }
+      if ((error as { code?: string } | null)?.code === 'window') {
+        notify(driverWindowClosedMessage(), 'error')
+        return false
+      }
       // A relabel to cash of riel that is not whole 100៛ notes: a group action has no field to mark.
       if ((error as { code?: string } | null)?.code === 'riel_cash_not_hundreds') {
         notify(translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។'), 'error')
@@ -2469,16 +2483,52 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
     }
   }
 
-  // G3: change or clear ONE sale's driver from its detail. It is the group
-  // driver change with one sale, so it writes the same before/after record,
-  // passes the same permission checks and gets the same Undo.
+  // G3: change or clear ONE sale's driver from its detail. It is the group driver change with one sale (the Worker
+  // names it sale.delivery.single): the same before/after record and Undo, but authorised like the delivery cost
+  // (sales:amend alone) and closed outside the sale edit window for a non-admin. The delivery expenses linked to the
+  // sale and its old driver move to the new driver in the same write.
   const changeSaleDriver = async (sale: SaleRecord, target: { id: number; name: string } | null): Promise<boolean> => {
     if (pendingBulkFieldRequest) {
       notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
       return false
     }
     const source = choiceForSale(sale, 'delivery_contact')
-    return submitBulkFieldChange('delivery_contact', source, linkedChoice(target?.id, target?.name, ''), [{ id: Number(sale.id), receipt: String(sale.receipt_number || sale.id), currentKeys: [source.key] }], [sale])
+    const changed = await submitBulkFieldChange('delivery_contact', source, linkedChoice(target?.id, target?.name, ''), [{ id: Number(sale.id), receipt: String(sale.receipt_number || sale.id), currentKeys: [source.key] }], [sale])
+    // The detail can be open on a sale that is not on the visible list page (opened from Records, a search or a
+    // report), where no list refresh reaches it: read the sale again so the open detail shows its new driver.
+    if (changed && !visibleSales.some((row) => Number(row.id) === Number(sale.id))) {
+      const fresh = await readAuthoritativeSale(Number(sale.id), (row) => Number(row.delivery_contact_id ?? 0) === Number(target?.id ?? 0)).catch(() => null)
+      if (fresh) {
+        const replace = (row: SaleRecord | null) => Number(row?.id) === Number(sale.id) ? fresh : row
+        setDetailSale(replace)
+        setSelectedSale(replace)
+      }
+    }
+    return changed
+  }
+
+  // What the review dialog lists before the write: the delivery expenses that would move with the driver. The Worker
+  // runs every refusal of the real write (edit window, cancelled, permission) and writes nothing; null = refused.
+  const previewSaleDriver = async (sale: SaleRecord, target: { id: number; name: string } | null): Promise<{ expenseCount: number } | null> => {
+    if (pendingBulkFieldRequest) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return null
+    }
+    const source = choiceForSale(sale, 'delivery_contact')
+    try {
+      const result = await previewSalesBulkField({
+        client_request_id: crypto.randomUUID(),
+        items: [{ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }],
+        action: { kind: 'delivery_contact', source_id: source.id ?? null, target_id: target?.id ?? null },
+      })
+      return { expenseCount: Number(result.movedExpenseCount) || 0 }
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code
+      const cancelled = saleCancelledRefusal(error)
+      notify(code === 'window' ? driverWindowClosedMessage() : cancelled ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      void loadSales(true)
+      return null
+    }
   }
 
   const customerRows = (result: unknown): Array<Record<string, unknown>> => {
@@ -3006,8 +3056,10 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             // can open the sale can see how it got that way (the Worker
             // gates it on read access), so it is passed unconditionally.
             onAmend={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? handleAmendSale : undefined}
-            // Same grants as the group Driver change it reuses (sales:bulk + sales:amend).
-            onDriverChange={canAmendSales ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
+            // A one-sale driver change is authorised like the delivery cost above: sales:amend alone, and closed outside
+            // the sale edit window for a non-admin (returned sales stay editable). Hide-by-omission, the Worker refuses the same.
+            onDriverChange={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
+            onDriverPreview={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? (sale, target) => previewSaleDriver(sale as SaleRecord, target) : undefined}
             onLoadAmendments={loadSaleAmendments}
             onOpenRecords={(sale) => {
               setRecordsSale(sale as SaleRecord)

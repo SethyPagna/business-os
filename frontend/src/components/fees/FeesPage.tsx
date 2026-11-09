@@ -378,7 +378,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    if (syncChannel.channel === 'fees') void load(true)
+    // A sale edit (a driver or courier cost) changes the courier rows this list shows through the sale.
+    if (syncChannel.channel === 'fees' || syncChannel.channel === 'sales') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):

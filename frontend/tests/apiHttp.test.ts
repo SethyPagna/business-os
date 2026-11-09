@@ -1556,6 +1556,28 @@ await runTest('Y18: derived dashboard/analytics caches die with their entity gro
   assert.match(httpSource, /cacheInvalidateWithDerived\(refreshChannel\)/)
 })
 
+await runTest('G4: a sales change also clears the Expenses read, and an open Expenses page reloads on it', () => {
+  // The Expenses list carries each sale's courier rows (driver name, cost) through the sale itself, so a driver or
+  // courier-cost edit made while it is cached would keep showing the old driver for the cache's 20 s.
+  cacheSet('fees:get:all', { marker: 'old driver' })
+  cacheSet('fees:get-one:7', { marker: 'old driver' })
+  cacheSet('settings:get', { keep: true })
+  cacheInvalidateWithDerived('sales')
+  assert.equal(cacheGet('fees:get:all'), null, 'the Expenses list cache dies with a sales change')
+  assert.equal(cacheGet('fees:get-one:7'), null)
+  assert.deepEqual(cacheGet('settings:get'), { keep: true }, 'unrelated groups survive')
+  cacheInvalidate('settings')
+  // CONTROL: a fees-only change does not clear sales reads.
+  cacheSet('sales:get:', [1])
+  cacheInvalidateWithDerived('fees')
+  assert.deepEqual(cacheGet('sales:get:'), [1])
+  cacheInvalidate('sales')
+  const feesPage = fs.readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
+  assert.ok(feesPage.includes("if (syncChannel.channel === 'fees' || syncChannel.channel === 'sales') void load(true)"), 'FeesPage reloads on a sales push too')
+  const reportModal = fs.readFileSync(new URL('../src/components/contacts/DeliveryContactReportModal.tsx', import.meta.url), 'utf8')
+  assert.ok(reportModal.includes("syncChannel?.channel === 'sales' || syncChannel?.channel === 'deliveryContacts') void load()"), 'an open Deliveries report reloads on a sale or driver change (G8)')
+})
+
 function deferredRead<T>() {
   let resolve!: (value: T) => void
   let reject!: (error: Error) => void
