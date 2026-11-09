@@ -112,6 +112,34 @@ test.describe('Checkout', () => {
     expectNoRuntimeErrors(health)
   })
 
+  test('the policies follow the switch, and the ordering-only text is fetched only when a policy is opened', async ({ page }) => {
+    // CATCHES: "You cannot pay on this site" next to a Checkout button, the ordering text downloaded at first paint, and a shop with ordering off publishing it.
+    const fetched: string[] = []
+    page.on('request', (request) => { if (/catalog-legal-orders/.test(request.url())) fetched.push(request.url()) })
+    await openCatalogue(page)
+    expect(fetched, 'nothing of the ordering policy before a policy is opened').toEqual([])
+    const policies = page.locator('[data-portal-footer-policies="true"]')
+    await policies.getByRole('link', { name: /Terms/ }).click()
+    const reader = page.getByRole('dialog').last()
+    await expect(reader.getByText('Ordering and paying online')).toBeVisible()
+    await expect(reader.getByText('No payment on this site')).toHaveCount(0)
+    expect(fetched.length, 'fetched once the reader opened').toBe(1)
+    await reader.getByRole('button', { name: /Privacy Policy/ }).click()
+    await expect(reader.getByText('your phone number and the comments you send with a request. It never shows your address, social contacts or note.')).toBeVisible()
+  })
+
+  test('with the switch off the policies keep saying there is no payment, and never fetch the ordering text', async ({ page }) => {
+    // CATCHES: ordering wording published by a shop that has not turned ordering on.
+    const fetched: string[] = []
+    page.on('request', (request) => { if (/catalog-legal-orders/.test(request.url())) fetched.push(request.url()) })
+    await openCatalogue(page, { online: false })
+    await page.locator('[data-portal-footer-policies="true"]').getByRole('link', { name: /Terms/ }).click()
+    const reader = page.getByRole('dialog').last()
+    await expect(reader.getByText('No payment on this site')).toBeVisible()
+    await expect(reader.getByText('Ordering and paying online')).toHaveCount(0)
+    expect(fetched).toEqual([])
+  })
+
   test('a switch that is not exactly true counts as off (a missing or odd answer never opens checkout)', async ({ page }) => {
     // CATCHES: a truthy check (the string "false", 1, "yes") that opens checkout for a shop that never turned it on.
     await openCatalogue(page, { online: false })

@@ -119,10 +119,11 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // rules (utils/posOrdersSchema.ts) stay out of it; serverSignals, dataEpoch and readBudgetShed join api-http-core, which imports them.
 const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
 const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
-// KHQR S7 (online ordering): the storefront's eager share of it, measured against the same tree without it (979,656 -> 981,082 bytes, +1,426; +466 gzip): the cart's
-// Checkout and My orders controls, the saved-orders check (orders/orderPath.ts), the order notice copy and three icons (qr-code, receipt, pencil) in shared-ui. The
-// checkout, the order page, the QR drawing, edit and requests are four lazy chunks outside this closure (chunkBoundaryPolicy forbids a static path to them).
-const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_500
+// KHQR S7 (online ordering): the storefront's eager share, measured against the same tree without it (979,656 -> 981,070 bytes, +1,414 raw; +473 gzip): the cart's
+// Checkout and My orders controls, the saved-orders check (orders/orderPath.ts) and two icons (qr-code, receipt) in shared-ui. The base was already 409 bytes under the
+// ceiling, so the allowance is exactly what is left over (1,005 bytes) plus 45. Everything else is lazy and outside this closure: the checkout, the order page, the QR
+// drawing, edit and requests are four chunks, and the ordering-only policy text and structure are a fifth (legalOrderContent.ts, loaded when the policy reader opens).
+const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_050
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10

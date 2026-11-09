@@ -630,7 +630,6 @@ const routeSharedIconNames = new Set([
   'map-pin',
   'medal',
   'moon',
-  'pencil',
   'phone',
   'plus',
   // Online ordering (KHQR): the cart Checkout and My orders controls (storefront, eager) and the order screens (lazy) use these. Left unnamed,
