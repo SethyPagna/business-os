@@ -458,7 +458,27 @@ export async function applyStockLotSet(
     ...(after.lotQuantity > 0 && Number(facts.lot_active) !== 1 && lotDelta !== 0 ? { reactivated: true } : {}),
     ...(variance ? { variance } : {}),
   }
-  if (lotDelta === 0) return { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after } }
+  if (lotDelta === 0) {
+    const unchanged: StockLotSetResult = { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after, issue_closed: false } }
+    if (!closeIssue || request.variance || !recordOperation) return unchanged
+    // A Set to the figure stock already has (a sale got there first) changes nothing, but it can still be what makes every line of the latest Issue match: the close runs alone, pinned by the
+    // same state guard, and the answer says whether it landed. There is no operation and no history row: there is nothing to undo.
+    const sessionId = crypto.randomUUID()
+    const closing = closeIssueStatements({ productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: operationRequestId, generation: 0, actorId: user.id,
+      actorName: actorSnapshot(user) ?? '' }, undefined, { sessionId, answer: false })
+    if (!atomicMark) await markWritten()
+    try {
+      if (atomicMark?.execute) await atomicMark.execute(db, addressedStatements(landing, [stateGuard(before), ...closing]))
+      else await executeStockTransaction(db, addressedStatements(landing, [stateGuard(before), ...closing]), 'retry')
+    } catch (error) {
+      if (atomicMark?.answered?.(error)) throw error
+      if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+      if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
+      return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
+    }
+    const made = await db.prepare('SELECT 1 AS closed FROM inventory_check_sessions WHERE id=@sid').get<{ closed: number }>({ sid: sessionId })
+    return { status: 200, body: { ...unchanged.body, issue_closed: made?.closed === 1 } }
+  }
   if (lotDelta > 0) {
     try { await requireReceivingBranch(db, request.branchId) } catch (error) {
       if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }

@@ -42,8 +42,8 @@ const MADE_BY_OPERATION = `json_extract((SELECT scope_json FROM (${LATEST})),'$.
 
 export type SetCloseArgs = { productId: number; branchId: number; organization: number | null; operation: string; generation: number; actorId: number; actorName: string }
 
-function parameters(args: SetCloseArgs, now: string) {
-  return { sid: crypto.randomUUID(), now, product: args.productId, branch: args.branchId, organization: args.organization ?? null, operation: args.operation, actor: args.actorId, actorName: args.actorName,
+function parameters(args: SetCloseArgs, now: string, sid = crypto.randomUUID()) {
+  return { sid, now, product: args.productId, branch: args.branchId, organization: args.organization ?? null, operation: args.operation, actor: args.actorId, actorName: args.actorName,
     title: SET_CLOSE_TITLE, key: `stock-set-${args.operation}-g${args.generation}`, hash: `stock-set:${args.operation}` }
 }
 function eventStatements(params: Record<string, unknown>, note: string): Statement[] {
@@ -57,8 +57,8 @@ function eventStatements(params: Record<string, unknown>, note: string): Stateme
 }
 
 /** The statements that close the Issue after a Set's quantity statements (apply, or redo): all conditional, no effect when the Issue stays open. The last one writes issue_closed into the stored answer. */
-export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOString()): Statement[] {
-  const params = parameters(args, now)
+export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOString(), options: { sessionId?: string; answer?: boolean } = {}): Statement[] {
+  const params = parameters(args, now, options.sessionId)
   return [
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
       SELECT @sid,@organization,@branch,@actor,@title,'closed',0,
@@ -68,8 +68,9 @@ export function closeIssueStatements(args: SetCloseArgs, now = new Date().toISOS
         json_object('quantity',${BRANCH_NOW},'operation',@operation),'done',${BRANCH_NOW},NULL,1,@actor,@now
       FROM products p WHERE p.id=@product AND EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid)`, params },
     ...eventStatements(params, 'Set closed the Issue'),
-    { sql: `UPDATE stock_lot_adjustment_operations SET response_json=json_set(response_json,'$.issue_closed',json(CASE WHEN EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid) THEN 'true' ELSE 'false' END))
-      WHERE id=@operation`, params },
+    // A Set that changed nothing has no operation (and no stored answer): the caller reads whether the session exists.
+    ...(options.answer === false ? [] : [{ sql: `UPDATE stock_lot_adjustment_operations SET response_json=json_set(response_json,'$.issue_closed',json(CASE WHEN EXISTS(SELECT 1 FROM inventory_check_sessions WHERE id=@sid) THEN 'true' ELSE 'false' END))
+      WHERE id=@operation`, params }]),
   ]
 }
 

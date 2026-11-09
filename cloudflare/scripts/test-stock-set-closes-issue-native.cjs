@@ -114,6 +114,22 @@ async function main() {
     assert.equal(added(f).length, 1); assert.equal(events(f).length, 2); assert.equal(lotQuantity(f, 11), 5)
   })
 
+  await check('a Set to the figure stock already has (a sale got there first) still closes the Issue when every line now matches; and does nothing when one does not', async () => {
+    const f = w.world({ switches: ON }); issue(f, { lines: [[10, 3, 3], [11, 5, 7]] })
+    w.seed(f, 'UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=11 AND branch_id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=8 WHERE id=1')
+    const movements = f.raw.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n
+    const done = await adjust(f, { quantity: 5, expectedLotQuantity: 5 })
+    assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.quantity, 0, 'nothing moved'); assert.equal(done.body.issue_closed, true)
+    assert.equal(added(f).length, 1); assert.equal(latest(f).state, 'done'); assert.equal(latest(f).counted_quantity, 8)
+    assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, movements, 'no movement, no history row: nothing to undo')
+    const again = await adjust(f, { quantity: 5, expectedLotQuantity: 5, client_request_id: 'inventory_set_again001' })
+    assert.equal(again.body.issue_closed, false, 'the Issue is already closed'); assert.equal(added(f).length, 1)
+    const g = w.world({ switches: ON }); issue(g, { lines: [[10, 3, 3], [11, 4, 7]] })
+    w.seed(g, 'UPDATE branch_batch_stock SET quantity=5 WHERE batch_id=11 AND branch_id=1; UPDATE branch_stock SET quantity=8 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=8 WHERE id=1')
+    const kept = await adjust(g, { quantity: 5, expectedLotQuantity: 5 })
+    assert.equal(kept.body.issue_closed, false); assert.equal(sessions(g).length, 1)
+  })
+
   await check('Undo reopens the Issue (a copy of the closed count and its lines), once; Redo closes it again', async () => {
     const f = w.world({ switches: ON }); issue(f, { lines: [[10, 3, 3], [11, 5, 7]] })
     await adjust(f)
