@@ -189,6 +189,13 @@ export type Env = {
   // setting: chat IDs may be configured by an admin, but a bot token grants
   // control of the bot and must never be returned to the browser.
   TELEGRAM_BOT_TOKEN?: string
+  // ABA PayWay (lib/payway.ts). Merchant id and API key are Worker secrets set by the owner per deployment; the callback
+  // secret only if ABA names a different key for callback headers; PAYWAY_ENV is a plain var ('sandbox' | 'production',
+  // anything else reads as sandbox). Without the first two, online checkout stays off.
+  PAYWAY_MERCHANT_ID?: string
+  PAYWAY_API_KEY?: string
+  PAYWAY_CALLBACK_SECRET?: string
+  PAYWAY_ENV?: string
   // Google identity login (Sign in with Google) -- see lib/googleOauth.ts.
   // CLIENT_ID/REDIRECT_URI are plain vars (not secret); CLIENT_SECRET should
   // be set with `wrangler secret put GOOGLE_LOGIN_CLIENT_SECRET` in
