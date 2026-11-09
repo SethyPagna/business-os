@@ -73,10 +73,11 @@ const setSwitch = value => {
   if (value) db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: typeof value === 'object' ? value : { ic_simple: value } }))
   resetReadSwitchMemo()
 }
+// The writers move the inventory_checks cache version before they answer (fatal when ic_wired is ON), so the harness has a cache store; a missing one used to print a stack trace above every PASS.
 async function send(route, method, url, body, actor = ADMIN, env = {}) {
   queries = []
   const tasks = []
-  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), ...env }, { waitUntil: task => tasks.push(task) })
+  const response = await route.request(`http://local${url}`, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Cookie: `bos_session=token-${actor}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }, { DB: binding(), CACHE: { get: async () => null, put: async () => {}, delete: async () => {} }, ...env }, { waitUntil: task => tasks.push(task) })
   await Promise.allSettled(tasks)
   return { status: response.status, body: await response.json(), queries: queries.slice() }
 }
