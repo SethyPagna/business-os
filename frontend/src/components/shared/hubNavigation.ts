@@ -31,6 +31,7 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['sales', 'sales', 'Sales', can('sales')],
     ['returns', 'returns', 'Returns', can('returns')],
     ['fees', 'fees', 'Expenses', can('fees')],
+    ['orders', 'oo_tab', 'Orders', can('online_orders')],
     ['reports', 'reports', 'Reports', can('sales') || can('returns') || can('fees')],
   ] : page === 'contacts' ? [
     ['customers', 'customers', 'Customers', can('contacts')],

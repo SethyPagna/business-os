@@ -4,6 +4,7 @@ import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
+import Inbox from 'lucide-react/dist/esm/icons/inbox.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
 import Skeleton from '../shared/kit/Skeleton.tsx'
@@ -25,6 +26,8 @@ const FeesSection = lazyRetry(() => import('../fees/FeesPage.tsx'), 'sales-hub-f
 // the Sales / Returns / Fees reports over one shared range. Shown to anyone
 // who can see at least one of those areas.
 const ReportsSection = lazyRetry(() => import('./ReportsHub'), 'sales-hub-reports')
+// Online orders (KHQR): what customers paid for on the website and what staff do with each. Opened only from its own tab, so no other section loads it.
+const OrdersSection = lazyRetry(() => import('../online-orders/OnlineOrdersPage.tsx'), 'sales-hub-online-orders')
 
 type SalesHubAppContext = {
   navigateTo: (pageId: string, anchor?: string) => void
@@ -35,24 +38,26 @@ type SalesHubAppContext = {
 }
 const useApp = useAppHook as unknown as () => SalesHubAppContext
 
-type SalesHubSection = 'sales' | 'returns' | 'fees' | 'reports'
+type SalesHubSection = 'sales' | 'returns' | 'fees' | 'reports' | 'orders'
 
 const SALES_HUB_STORAGE_KEY = 'bos:hub:sales:active'
 
-function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean): SalesHubSection {
+function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean, canOrders: boolean): SalesHubSection {
   // Old standalone URLs retain their section; the shared hook also resolves hub anchors.
   if (typeof window !== 'undefined') {
     const segment = String(window.location.pathname || '').toLowerCase()
     if (segment.includes('return') && canReturns) return 'returns'
     if (segment.includes('fee') && canFees) return 'fees'
+    if (segment.includes('order') && canOrders) return 'orders'
   }
-  const validIds = (['sales', 'returns', 'fees', 'reports'] as SalesHubSection[]).filter((id) =>
-    (id === 'sales' && canSales) || (id === 'returns' && canReturns) || (id === 'fees' && canFees) || (id === 'reports' && (canSales || canReturns || canFees)))
+  const validIds = (['sales', 'returns', 'fees', 'reports', 'orders'] as SalesHubSection[]).filter((id) =>
+    (id === 'sales' && canSales) || (id === 'returns' && canReturns) || (id === 'fees' && canFees) || (id === 'reports' && (canSales || canReturns || canFees)) || (id === 'orders' && canOrders))
   const stored = readStoredHubSection(SALES_HUB_STORAGE_KEY, validIds) as SalesHubSection | null
   if (stored) return stored
   if (canSales) return 'sales'
   if (canReturns) return 'returns'
-  return 'fees'
+  if (canFees) return 'fees'
+  return 'orders'
 }
 
 export default function SalesHubPage() {
@@ -62,15 +67,17 @@ export default function SalesHubPage() {
   const canSales = can('sales', 'view')
   const canReturns = can('returns', 'view')
   const canFees = can('fees', 'view')
+  const canOrders = can('online_orders', 'view')
   // Reports draws on all three areas, so anyone who can see any one of them
   // gets the tab (the hub then only offers the report types they can view).
   const canReports = canSales || canReturns || canFees
-  const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees), getHubDestinations('sales', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
+  const [section, setSection] = useHubSection<SalesHubSection>('sales', () => initialSection(canSales, canReturns, canFees, canOrders), getHubDestinations('sales', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
 
   const tabs: HubSectionDef[] = [
     { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
     { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, hidden: !canReturns, description: trh('hub_desc_sales_returns', 'Process customer returns') },
     { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, hidden: !canFees, description: trh('hub_desc_sales_fees', 'Track business expenses') },
+    { id: 'orders', label: trh('oo_tab', 'Orders'), icon: Inbox, hidden: !canOrders, description: trh('oo_tab_desc', 'Orders paid for on the website') },
     { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, hidden: !canReports, description: trh('hub_desc_sales_reports', 'Sales, returns and expense reports') },
   ]
 
@@ -93,9 +100,11 @@ export default function SalesHubPage() {
           {section === 'returns' && canReturns ? <ReturnsSection embedded />
             : section === 'fees' && canFees ? <FeesSection embedded />
             : section === 'reports' && canReports ? <ReportsSection embedded />
+            : section === 'orders' && canOrders ? <OrdersSection embedded />
             : canSales ? <SalesSection embedded />
             : canReturns ? <ReturnsSection embedded />
-            : canFees ? <FeesSection embedded /> : null}
+            : canFees ? <FeesSection embedded />
+            : canOrders ? <OrdersSection embedded /> : null}
         </Suspense>
       </div>
       </HubSectionNav>

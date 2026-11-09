@@ -2531,7 +2531,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // E2: returns and fees retired as standalone pages into the Sales hub,
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
-    if (pageId === 'sales' && (can('returns', 'view') || can('fees', 'view'))) return true
+    // Online orders (KHQR) are a section of the same hub, behind their own strict grant.
+    if (pageId === 'sales' && (can('returns', 'view') || can('fees', 'view') || can('online_orders', 'view'))) return true
     // Legacy RFID and saved Inventory transfers still live under Branches.
     if (pageId === 'branches' && can('inventory', 'view')) return true
     // 'settings' page (alongside routes/settings.ts's per-field
