@@ -953,7 +953,7 @@ export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
 export type TelegramTopicFamily = {
   family: string
   key: 'telegram_topic_shift' | 'telegram_topic_sales' | 'telegram_topic_status' | 'telegram_topic_returns'
-    | 'telegram_topic_expenses' | 'telegram_topic_stock' | 'telegram_topic_reports' | 'telegram_topic_alerts'
+    | 'telegram_topic_expenses' | 'telegram_topic_stock' | 'telegram_topic_reports' | 'telegram_topic_alerts' | 'telegram_topic_orders'
   en: string
   km: string
   aliases: readonly string[]
@@ -967,6 +967,7 @@ export const TELEGRAM_TOPIC_FAMILIES: readonly TelegramTopicFamily[] = [
   { family: 'stock', key: 'telegram_topic_stock', en: 'Stock in/out', km: 'ស្តុកចូល/ចេញ', aliases: ['stockin', 'stockout', 'ស្តុក'] },
   { family: 'reports', key: 'telegram_topic_reports', en: "Day's summary", km: 'សេចក្តីសង្ខេបប្រចាំថ្ងៃ', aliases: ['report', 'summary', 'daily', 'សង្ខេប', 'របាយការណ៍'] },
   { family: 'alerts', key: 'telegram_topic_alerts', en: 'Test & alerts', km: 'សាកល្បង និងការជូនដំណឹង', aliases: ['alert', 'test', 'ជូនដំណឹង', 'ការជូនដំណឹង'] },
+  { family: 'orders', key: 'telegram_topic_orders', en: 'Online orders', km: 'ការបញ្ជាទិញអនឡាញ', aliases: ['order', 'online', 'shop', 'ការបញ្ជាទិញ', 'បញ្ជាទិញ', 'អនឡាញ'] },
 ]
 
 // Khmer keyboards put zero-width spaces between words; a typed `លក់` often

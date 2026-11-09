@@ -5777,6 +5777,7 @@
   "telegram_help_commands_label": "Owner / manager commands:",
   "telegram_help_commands_note": "Keep this chat private to owners/managers; sending a test message automatically connects commands.",
   "telegram_topic_alerts_label": "Test & alerts",
+  "telegram_topic_orders_label": "Online orders",
   "telegram_topic_expenses_label": "Expenses & fees",
   "telegram_topic_placeholder": "Empty = Group (General)",
   "telegram_topic_reports_label": "Day's summary",

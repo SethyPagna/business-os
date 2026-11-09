@@ -331,6 +331,7 @@ const TELEGRAM_TOPIC_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
   telegram_topic_stock: ['telegram_topic_stock_label', 'Stock in/out'],
   telegram_topic_reports: ['telegram_topic_reports_label', "Day's summary"],
   telegram_topic_alerts: ['telegram_topic_alerts_label', 'Test & alerts'],
+  telegram_topic_orders: ['telegram_topic_orders_label', 'Online orders'],
 }
 
 /**

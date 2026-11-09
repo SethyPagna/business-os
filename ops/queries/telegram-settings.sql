@@ -12,6 +12,7 @@ WHERE key IN (
   'telegram_summary_sales_enabled', 'telegram_summary_cashiers_enabled', 'telegram_summary_products_enabled',
   'telegram_summary_returns_enabled', 'telegram_summary_expenses_enabled', 'telegram_summary_compare_enabled',
   'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_returns',
-  'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts'
+  'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
+  'telegram_topic_orders'
 )
 ORDER BY key

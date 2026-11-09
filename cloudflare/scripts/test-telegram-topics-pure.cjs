@@ -153,13 +153,13 @@ const baseSettings = [
   assert.equal(bare.parseTelegramTopicId('abc'), undefined, 'non-numeric is rejected')
   console.log('PASS parseTelegramTopicId: integer-or-empty, defensively')
 
-  // ---- 2. TELEGRAM_TOPIC_KEYS names all eight settings the UI/backend share -
+  // ---- 2. TELEGRAM_TOPIC_KEYS names all nine settings the UI/backend share -
   // (returns joined 27 Sep 2026: customer returns got their own family)
   assert.deepEqual([...bare.TELEGRAM_TOPIC_KEYS].sort(), [
-    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_reports', 'telegram_topic_returns',
+    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_orders', 'telegram_topic_reports', 'telegram_topic_returns',
     'telegram_topic_sales', 'telegram_topic_shift', 'telegram_topic_stock', 'telegram_topic_status',
   ].sort())
-  console.log('PASS TELEGRAM_TOPIC_KEYS: the eight settings keys the UI, backend validation, and config reader all share')
+  console.log('PASS TELEGRAM_TOPIC_KEYS: the nine settings keys the UI, backend validation, and config reader all share')
 
   // ---- 3-5. every outbound send path carries the right topic, or none -----
   const realFetch = globalThis.fetch
@@ -337,6 +337,19 @@ const baseSettings = [
     await run(baseSettings.filter((row) => row.key !== 'telegram_topic_alerts'))
     assert.ok(!('message_thread_id' in attempts[0]), 'no Alerts topic configured: General, no thread key at all')
     assert.ok(!attempts[0].hasSignal, 'a plain send carries no timeout signal')
+
+    // -- online orders: the Orders topic once one is set, the Sales topic until then (KHQR S5) ------------------------------------------------
+    const orderEvent = { type: 'online_orders', heading: '🛒 Online order', lines: ['Order: LB-1'] }
+    const sendOrder = async (settings) => { attempts.length = 0; script = []; return wireTelegram(settings).sendTelegramEvent(reviewEnv, orderEvent) }
+    assert.equal(await sendOrder(baseSettings), true)
+    assert.equal(attempts[0].body.message_thread_id, 22, 'no Orders topic: the Sales topic, exactly as before')
+    assert.equal(await sendOrder([...baseSettings, { key: 'telegram_topic_orders', value: '88' }]), true)
+    assert.equal(attempts[0].body.message_thread_id, 88, 'an Orders topic set: online orders go there')
+    assert.equal(await sendOrder([...baseSettings, { key: 'telegram_topic_orders', value: 'nope' }]), true)
+    assert.equal(attempts[0].body.message_thread_id, 22, 'an Orders value that is not a topic id falls back to Sales')
+    await run([...baseSettings, { key: 'telegram_topic_orders', value: '88' }])
+    assert.equal(attempts[0].body.message_thread_id, 77, 'setting an Orders topic moves nothing else (reviews stay on Alerts)')
+    console.log('PASS online orders: Orders topic when set, Sales topic until then, nothing else moves')
 
     // -- the switch: on when unset, off only when set to false -----------------------
     for (const [value, expected] of [[undefined, true], ['true', true], ['', true], ['false', false], ['FALSE', false], [' false ', false]]) {

@@ -88,7 +88,7 @@ type TelegramUpdate = { message?: TelegramMessage }
 // migration). Empty means "send to General", exactly as before this existed.
 export const TELEGRAM_TOPIC_KEYS = [
   'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_returns',
-  'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
+  'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts', 'telegram_topic_orders',
 ] as const
 export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
 
@@ -463,6 +463,8 @@ async function deliverTelegramEvent(config: TelegramConfig, event: TelegramEvent
   // still assembles its lines inline -- routes/fees.ts's fee -- is covered
   // without editing a file another lane owns, and any line added later is
   // covered the moment its label is in the table.
+  // Online orders go to the Orders topic once the owner sets one (/settopic orders, or Settings), and stay in the Sales topic until then.
+  const topicKey: TelegramTopicKey = event.type === 'online_orders' && config.topics.telegram_topic_orders ? 'telegram_topic_orders' : eventTopic[event.type]
   await postTelegram(config, withLanguage(config.language, () => [
     localizeTelegramHeading(event.heading || heading[event.type] || ''),
     // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
@@ -477,7 +479,7 @@ async function deliverTelegramEvent(config: TelegramConfig, event: TelegramEvent
       : line.startsWith(EVENT_SECTION_MARKER)
         ? sectionHeader(line.slice(EVENT_SECTION_MARKER.length) as TelegramLabelKey, REPORT_SECTION_EDGE)
         : localizeTelegramLine(cleanLine(line, 400)))),
-  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]], eventTopic[event.type], options)
+  ].filter(Boolean).join('\n')), config.chatId, config.topics[topicKey], topicKey, options)
   return true
 }
 

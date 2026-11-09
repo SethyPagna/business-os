@@ -4,7 +4,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //
 // Pins, over a real SQLite settings table and a fetch stub that only RECORDS
 // (nothing is sent to any chat, no real token exists here):
-//   1. The family list: eight families, each named with the Settings screen's
+//   1. The family list: nine families, each named with the Settings screen's
 //      own words from BOTH lang packs (telegram_topic_<family>_label), so the
 //      bot and the app cannot drift; English and Khmer aliases resolve;
 //      `general` is the reset word, not a family.
@@ -96,7 +96,7 @@ const ALERTS_CHAT = '-1001111111111' // a made-up forum group id, not the shop's
 const OTHER_APPROVED_CHAT = '-1002222222222'
 // Made-up topic ids, a different one per family, so an assertion that tells two
 // families apart cannot pass by coincidence.
-const TOPIC = { shift: 9001, sales: 9002, status: 9003, returns: 9004, expenses: 9005, stock: 9006, reports: 9007, alerts: 9008 }
+const TOPIC = { shift: 9001, sales: 9002, status: 9003, returns: 9004, expenses: 9005, stock: 9006, reports: 9007, alerts: 9008, orders: 9009 }
 function makeDb(settings) {
   const sql = new Database(':memory:')
   sql.exec(`
@@ -177,7 +177,7 @@ globalThis.fetch = async (url, init) => {
   try {
     // ---- 1. families ----------------------------------------------------------
     const families = lang.TELEGRAM_TOPIC_FAMILIES
-    assert.deepEqual(families.map((entry) => entry.family), ['shift', 'sales', 'status', 'returns', 'expenses', 'stock', 'reports', 'alerts'])
+    assert.deepEqual(families.map((entry) => entry.family), ['shift', 'sales', 'status', 'returns', 'expenses', 'stock', 'reports', 'alerts', 'orders'])
     assert.deepEqual([...families.map((entry) => entry.key)].sort(), [...telegram.TELEGRAM_TOPIC_KEYS].sort(), 'one family per settings key')
     assert.deepEqual(Object.keys(TOPIC), families.map((entry) => entry.family), 'the fixture names every family')
     assert.equal(new Set(Object.values(TOPIC)).size, families.length, 'every family has its own fixture topic id')
@@ -194,9 +194,11 @@ globalThis.fetch = async (url, init) => {
     assert.deepEqual(r('​ប្រគល់'), { f: ['returns'], u: [], reset: false }, 'a Khmer keyboard zero-width space is ignored')
     assert.deepEqual(r('stock, expenses stock'), { f: ['stock', 'expenses'], u: [], reset: false }, 'several at once, no duplicates')
     assert.deepEqual(r('summary'), { f: ['reports'], u: [], reset: false }, "the owner's 'Summary' topic name is the reports family")
+    assert.deepEqual(r('orders'), { f: ['orders'], u: [], reset: false }, 'the Orders family by its own name')
+    assert.deepEqual(r('online អនឡាញ ការបញ្ជាទិញ'), { f: ['orders'], u: [], reset: false }, 'English and Khmer aliases, one family')
     assert.deepEqual(r('sales general'), { f: ['sales'], u: [], reset: true })
     assert.deepEqual(r('telegram_topic_shift'), { f: ['shift'], u: [], reset: false }, 'the settings key itself is accepted')
-    pass('families: eight, named with both packs\' Settings labels; English + Khmer aliases; "general" resets')
+    pass('families: nine, named with both packs\' Settings labels; English + Khmer aliases; "general" resets')
 
     // ---- 2. composed text -----------------------------------------------------
     lang.setTelegramLanguage('both')
@@ -211,6 +213,7 @@ globalThis.fetch = async (url, init) => {
       '· Stock in/out/ស្តុកចូល/ចេញ: Group (General)/ក្រុម (General)',
       "· Day's summary/សេចក្តីសង្ខេបប្រចាំថ្ងៃ: Group (General)/ក្រុម (General)",
       '· Test & alerts/សាកល្បង និងការជូនដំណឹង: Group (General)/ក្រុម (General)',
+      '· Online orders/ការបញ្ជាទិញអនឡាញ: Group (General)/ក្រុម (General)',
       '',
       'Change it inside the topic/ប្ដូរនៅក្នុងប្រធានបទនោះ: /settopic sales',
       'Back to the group/ត្រឡប់ទៅក្រុមវិញ: /settopic sales general',

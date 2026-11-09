@@ -10,7 +10,8 @@ WITH ws(chars) AS (
   FROM settings AS s, ws
   WHERE s.key IN (
     'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_returns',
-    'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts'
+    'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
+    'telegram_topic_orders'
   )
 ), topic AS (
   SELECT key, (v <> '' AND v NOT GLOB '*[^0-9]*' AND CAST(v AS INTEGER) BETWEEN 1 AND 9007199254740991) AS is_set
@@ -45,4 +46,5 @@ SELECT
   COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_expenses'), 0) AS topic_expenses,
   COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_stock'), 0) AS topic_stock,
   COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_reports'), 0) AS topic_reports,
-  COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_alerts'), 0) AS topic_alerts
+  COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_alerts'), 0) AS topic_alerts,
+  COALESCE((SELECT is_set FROM topic WHERE key = 'telegram_topic_orders'), 0) AS topic_orders

@@ -2374,6 +2374,7 @@ export default function Settings() {
                     ['telegram_topic_stock', t('telegram_topic_stock_label') || 'Stock in/out'],
                     ['telegram_topic_reports', t('telegram_topic_reports_label') || "Day's summary"],
                     ['telegram_topic_alerts', t('telegram_topic_alerts_label') || 'Test & alerts'],
+                    ['telegram_topic_orders', t('telegram_topic_orders_label') || 'Online orders'],
                   ].map(([key, label]) => (
                     <div key={key}>
                       <label htmlFor={`settings-${key.replace(/_/g, '-')}`} className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{label}</label>
