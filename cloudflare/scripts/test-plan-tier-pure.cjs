@@ -405,10 +405,12 @@ check('no test or harness keeps its own literal copy of a plan query budget', as
 check('Inventory Check bounds come from the plan: no numeric literal caps the lines per product or the ids of a list read', async () => {
   const sessions = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'), 'utf8')
   const list = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckList.ts'), 'utf8')
-  assert.ok(!/LOT_LINES_PER_PRODUCTs*=s*d/.test(sessions), 'the per-product line cap is the plan field')
+  assert.ok(!/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test(sessions), 'the per-product line cap is the plan field')
   assert.ok(sessions.includes('line.lots.length > perProduct'), 'and it is what the writer compares against')
-  assert.ok(!/ids.lengths*>s*d/.test(list), 'the ids of a /list read are bounded by the plan, not by a literal')
+  assert.ok(!/ids\.length\s*>\s*\d/.test(list), 'the ids of a /list read are bounded by the plan, not by a literal')
   assert.ok(list.includes('ids.length > options.maxIds'))
+  // the negative pins must be able to fire: the same patterns match the literal forms they forbid
+  assert.ok(/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test('const LOT_LINES_PER_PRODUCT = 50') && /ids\.length\s*>\s*\d/.test('ids.length > 100'), 'the control: both patterns match what they forbid')
   const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
   assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
 })

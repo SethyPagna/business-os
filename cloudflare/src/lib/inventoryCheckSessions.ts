@@ -159,8 +159,9 @@ let lotLinesSchemaReady = false
 export async function lotLinesAvailable(db: D1Compat): Promise<boolean> {
   if (lotLinesSchemaReady) return true
   try {
-    const ready = await db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_lot_lines','inventory_check_lot_lines_no_update','inventory_check_lot_lines_no_delete')`).get<{ n: number }>()
-    lotLinesSchemaReady = ready?.n === 3
+    // A zero-row probe of the table itself (the migration creates the table, its index and its two triggers together): it reads no schema rows, which a cold isolate pays for with a sqlite_master scan.
+    await db.prepare('SELECT 1 FROM inventory_check_lot_lines LIMIT 0').all()
+    lotLinesSchemaReady = true
   } catch { lotLinesSchemaReady = false }
   return lotLinesSchemaReady
 }
@@ -244,7 +245,7 @@ async function sessionApproval(db: D1Compat, actor: Actor, id: string, options: 
   const row = (await approvalRows(db, actor, [id], true))[0]
   return row ? { approval: projectApproval(actor, row, true) } : {}
 }
-export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean } = {}) {
+export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean; lotLines?: boolean } = {}) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
   const items = await db.prepare(`SELECT i.*,CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN 1 ELSE 0 END AS current_product_available,
@@ -256,7 +257,20 @@ export async function getInventoryCheckSession(db: D1Compat, principal: Inventor
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
   const byId = new Map(current.map(row => [row.product_id, row]))
   const approval = await sessionApproval(db, actor, session.id, options)
-  return { item: await projectSession(db, actor, session), items: items.map(item => projectObservation(actor, item, session.created_by === actor.id, byId.get(item.product_id))), ...approval }
+  // ic_lot_counts: what was typed per received date (by the table's key, one read), shown under the counts of this session; the figures follow the counted/seen rules of the item itself.
+  const linesOf = new Map<number, Array<Record<string, unknown>>>()
+  const access = getInventoryCheckAccess(actor), ownSession = session.created_by === actor.id
+  if (options.lotLines && (access.fields.stock || ownSession) && await lotLinesAvailable(db)) {
+    const rows = await db.prepare(`SELECT l.product_id,l.batch_id,l.scope,l.counted_quantity,l.seen_quantity,pb.received_at FROM inventory_check_lot_lines l LEFT JOIN product_batches pb ON pb.id=l.batch_id
+      WHERE l.session_id=@id ORDER BY l.product_id,l.batch_id`).all<{ product_id: number; batch_id: number; scope: string; counted_quantity: number; seen_quantity: number | null; received_at: string | null }>({ id })
+    for (const row of rows) {
+      const list = linesOf.get(Number(row.product_id)) ?? []
+      list.push({ batch_id: Number(row.batch_id), scope: row.scope === 'branch' ? 'branch' : 'lot', counted: Number(row.counted_quantity),
+        ...(access.fields.stock && row.seen_quantity != null ? { seen: Number(row.seen_quantity) } : {}), ...(access.fields.received && row.received_at ? { received_at: row.received_at } : {}) })
+      linesOf.set(Number(row.product_id), list)
+    }
+  }
+  return { item: await projectSession(db, actor, session), items: items.map(item => ({ ...projectObservation(actor, item, ownSession, byId.get(item.product_id)), ...(linesOf.has(item.product_id) ? { lot_lines: linesOf.get(item.product_id) } : {}) })), ...approval }
 }
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 function businessDay(value: unknown): string | null {

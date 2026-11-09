@@ -288,6 +288,20 @@ async function lotMain() {
     assert.ok(older.status === 409 || (older.status === 201 && itemOf(910003).baseline_quantity === 7), 'the control: the older writer measures 5 + 2 held = 7 (a 409 or a baseline of 7), so the wired answer above is the routing, not the fixture ' + older.status)
   })
 
+  await check('G4 remainder: the session view lists the per-date lines of each item (received date, counted, saw) while ic_lot_counts is ON, and nothing while OFF', async () => {
+    reset(); twoLots(); on()
+    const made = await lotSubmit([lotLine(910001, [lot(910001, 5, 5), lot(920001, 2, 4)])], { requestId: 'g4-session-0001' })
+    const view = await send(sessionsRoute, 'GET', '/sessions/' + made.body.item.id, undefined, COUNTER)
+    assert.equal(view.status, 200, JSON.stringify(view.body))
+    const lines = view.body.items.find(item => item.product_id === 910001).lot_lines
+    assert.deepEqual(lines.map(line => [line.batch_id, line.counted, line.seen]), [[910001, 5, 5], [920001, 2, 4]])
+    assert.ok(lines.every(line => typeof line.received_at === 'string'), 'each date carries its received date')
+    setSwitch({ ic_simple: 'on', ic_fix_stock: 'on' })
+    const off = await send(sessionsRoute, 'GET', '/sessions/' + made.body.item.id, undefined, COUNTER)
+    assert.equal(off.body.items.find(item => item.product_id === 910001).lot_lines, undefined, 'OFF: the item is exactly what it was')
+    assert.ok(!off.queries.some(sql => /inventory_check_lot_lines/.test(sql.sql || sql)), 'and the table is not read')
+  })
+
   await check('N3: offsetting date errors (A counted 6 of 5, B counted 3 of 4: the sums agree) are an Issue and reach the approval queue, not "done"', async () => {
     reset(); twoLots(); on()
     const made = await lotSubmit([lotLine(910001, [lot(910001, 6, 5), lot(920001, 3, 4)])], { requestId: 'n3-offset-0001' })

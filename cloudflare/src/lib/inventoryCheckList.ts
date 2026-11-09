@@ -90,6 +90,8 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
     if (!ids.length || ids.length > options.maxIds || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)
   }
+  // The date order cuts its pages from the check-state ids before any search or filter could narrow them, so a narrowed list would come back short, empty or with a total that counts products the filter removed: the combination is refused, and the page drops the order when a search or filter is set.
+  if (sortBy === 'checked' && (productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState)) invalid('sortBy')
   const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState)
   return { access, branchId, checkState, checkedOrder: sortBy === 'checked' ? { direction: direction === 'asc' ? 'asc' : 'desc' } : null, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
 }
@@ -125,7 +127,7 @@ export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: 
   const limit = getPlanLimits(env).inventoryCheckFilterMaxIds
   const version = await inventoryChecksVersion(env)
   const organization = user.organization_id ?? null
-  const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}`, { method: 'GET' }), c.executionCtx,
+  const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}&order=1`, { method: 'GET' }), c.executionCtx,
     `ic:${version}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckStateSets> => {
       const latest = await db.prepare(LATEST_ITEMS_SQL).all<{ product_id: number; state: string }>({ organization, branchId, limit: limit + 1 })
       const pending = withPending ? await db.prepare(PENDING_ITEMS_SQL).all<{ product_id: number }>({ organization, branchId, limit: limit + 1 }) : []
