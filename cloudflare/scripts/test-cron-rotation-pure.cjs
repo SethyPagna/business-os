@@ -65,6 +65,7 @@ const COST = {
   'drive-sync': 2, 'audit-log-retention': 3, 'reap-stalled-imports': 2, 'import-retention': 3,
   'import-incoming-sweep': 2, 'orphan-staging-cleanup': 2, 'ephemeral-retention:rate_limit': 2, 'ephemeral-retention:auth': 3,
   'ephemeral-retention:logs': 2, 'ephemeral-retention:history': 3, 'ephemeral-retention:submissions': 2,
+  'online-order-scrub': 2,
 }
 assert.deepStrictEqual(Object.keys(COST), [...ids], 'simulation covers exactly the shipped step ids')
 const TOTAL = Object.values(COST).reduce((a, b) => a + b, 0)

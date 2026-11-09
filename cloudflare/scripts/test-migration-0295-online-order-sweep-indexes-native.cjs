@@ -25,15 +25,16 @@ const figures = (db) => db.prepare('SELECT (SELECT COUNT(*) FROM online_orders) 
 
 check('the file is LF-only', () => assert.ok(!sql.includes('\r')))
 
-check('applies on the real chain; both indexes exist and are partial; no row changes', () => {
+check('applies on the real chain; all four indexes exist and are partial; no row changes', () => {
   const db = fresh()
   const before = figures(db)
   db.exec(sql)
   assert.deepEqual(figures(db), before)
-  const defs = Object.fromEntries(db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name IN ('idx_online_orders_qr_failed','idx_online_order_payments_expired','idx_online_order_events_payment')").all().map((r) => [r.name, r.sql]))
+  const defs = Object.fromEntries(db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name IN ('idx_online_orders_qr_failed','idx_online_order_payments_expired','idx_online_order_events_payment','idx_online_orders_scrub')").all().map((r) => [r.name, r.sql]))
   assert.match(defs.idx_online_orders_qr_failed, /ON online_orders \(updated_at\) WHERE state = 'qr_failed'/)
   assert.match(defs.idx_online_order_payments_expired, /ON online_order_payments \(expires_at, last_checked_at\) WHERE state IN \('expired','cancelled'\)/)
   assert.match(defs.idx_online_order_events_payment, /ON online_order_events \(payment_id, event\) WHERE payment_id IS NOT NULL/)
+  assert.match(defs.idx_online_orders_scrub, /ON online_orders \(updated_at, id\) WHERE scrubbed_at IS NULL AND state IN \('expired','cancelled','qr_failed'\)/)
 })
 
 check('a second apply aborts at the PRE bound and changes nothing', () => {
@@ -58,12 +59,18 @@ check('the two sweep statements plan through their index, never a scan', () => {
   assert.match(late, /idx_online_order_payments_expired/); assert.doesNotMatch(late, /SCAN p(?! USING)/)
 })
 
-check('RECOVERY removes both indexes and nothing else', () => {
+check('the scrub candidate list plans through idx_online_orders_scrub, never a scan or a sort', () => {
+  const db = fresh(); db.exec(sql)
+  const plan = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM online_orders INDEXED BY idx_online_orders_scrub WHERE scrubbed_at IS NULL AND state IN ('expired','cancelled','qr_failed') AND updated_at <= '2026-08-01 00:00:00' ORDER BY updated_at ASC, id ASC LIMIT 25").all().map((r) => r.detail).join(' | ')
+  assert.match(plan, /idx_online_orders_scrub/); assert.doesNotMatch(plan, /SCAN online_orders(?! USING)/); assert.doesNotMatch(plan, /TEMP B-TREE/)
+})
+
+check('RECOVERY removes all four indexes and nothing else', () => {
   const db = fresh(); db.exec(sql)
   const names = () => db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name)
   const after = names()
-  db.exec('DROP INDEX IF EXISTS idx_online_orders_qr_failed; DROP INDEX IF EXISTS idx_online_order_payments_expired; DROP INDEX IF EXISTS idx_online_order_events_payment;')
-  assert.deepEqual(after.filter((n) => !names().includes(n)), ['idx_online_order_events_payment', 'idx_online_order_payments_expired', 'idx_online_orders_qr_failed'])
+  db.exec('DROP INDEX IF EXISTS idx_online_orders_qr_failed; DROP INDEX IF EXISTS idx_online_order_payments_expired; DROP INDEX IF EXISTS idx_online_order_events_payment; DROP INDEX IF EXISTS idx_online_orders_scrub;')
+  assert.deepEqual(after.filter((n) => !names().includes(n)), ['idx_online_order_events_payment', 'idx_online_order_payments_expired', 'idx_online_orders_qr_failed', 'idx_online_orders_scrub'])
 })
 
 console.log(`migration 0295: ${passed} checks passed`)

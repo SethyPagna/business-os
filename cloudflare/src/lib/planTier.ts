@@ -276,6 +276,8 @@ export type PlanLimits = {
   //   onlineOrderRequestMax         change/return requests one order may ever hold (requestAllowed). Paid 10, Free 5.
   //   onlineOrderOpenPerPhoneMax    unpaid orders (QR still live) one phone number may hold at once (createOrder refuses the next with too_many_open_orders). 2 on both plans.
   //   onlineOrderNudgeAfterSeconds  a poll or page load only asks PayWay once the QR has been out this long (nudgeOrder). 60 on both plans.
+  //   onlineOrderScrubAfterDays     days after an UNPAID order (expired, cancelled, qr_failed) last changed before its contact details are overwritten
+  //                                 (lib/onlineOrderScrub.ts). 90 on both plans: a privacy promise, not a capacity number.
   //   onlineOrderSweepMaxD1Calls    D1 calls one */5 tick may spend (its own statements plus an estimate per notice it sends), so a busy tick stops and the
   //                                 rest waits for the next one instead of running into the 50-call limit of the invocation (which also drains Telegram). Paid 150, Free 25.
   //   onlineOrderLateCheckHours     how long after its QR ran out an EXPIRED payment is still re-checked with PayWay by the cron, so a payment whose
@@ -293,6 +295,7 @@ export type PlanLimits = {
   onlineOrderRequestMax: number
   onlineOrderOpenPerPhoneMax: number
   onlineOrderNudgeAfterSeconds: number
+  onlineOrderScrubAfterDays: number
   onlineOrderSweepMaxD1Calls: number
   onlineOrderLateCheckHours: number
   onlineOrderLateCheckEveryMinutes: number
@@ -436,6 +439,7 @@ const PAID_LIMITS: PlanLimits = {
   onlineOrderRequestMax: 10,
   onlineOrderOpenPerPhoneMax: 2,
   onlineOrderNudgeAfterSeconds: 60,
+  onlineOrderScrubAfterDays: 90,
   onlineOrderSweepMaxD1Calls: 150,
   onlineOrderLateCheckHours: 72,
   onlineOrderLateCheckEveryMinutes: 10,
@@ -487,6 +491,7 @@ const FREE_LIMITS: PlanLimits = {
   onlineOrderRequestMax: 5,
   onlineOrderOpenPerPhoneMax: 2,
   onlineOrderNudgeAfterSeconds: 60,
+  onlineOrderScrubAfterDays: 90,
   onlineOrderSweepMaxD1Calls: 25,
   onlineOrderLateCheckHours: 24,
   onlineOrderLateCheckEveryMinutes: 30,

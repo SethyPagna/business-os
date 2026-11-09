@@ -8,6 +8,7 @@ import paywayCallbackRoute from './routes/paywayCallback'
 import { orderNotifier } from './lib/onlineOrderAlerts'
 import onlineOrdersRoute from './routes/onlineOrders'
 import { sweepOrders } from './lib/onlineOrderSweep'
+import { scrubUnpaidOrders } from './lib/onlineOrderScrub'
 import { getDb } from './lib/db'
 import { paywayCredentialsFor } from './lib/paywayConfig'
 import { fetchPaywayTransport } from './lib/paywayTransport'
@@ -717,6 +718,8 @@ export function cronRotationSteps(env: Env, label: (name: string, step: () => Pr
     step('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env), UNGATED_STEP_MIN_INTERVAL_MS),
     step('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }), UNGATED_STEP_MIN_INTERVAL_MS),
     ...EPHEMERAL_RETENTION_GROUPS.map((group) => step(`ephemeral-retention:${group}`, () => maybeRunScheduledEphemeralRetention(env, group))),
+    // Online orders never paid, 90 days after they last changed: contact details overwritten (lib/onlineOrderScrub.ts). Cheap and bounded; due at most every few hours.
+    step('online-order-scrub', () => scrubUnpaidOrders({ db: getDb(env), env, now: () => new Date() }), UNGATED_STEP_MIN_INTERVAL_MS),
   ]
 }
 
