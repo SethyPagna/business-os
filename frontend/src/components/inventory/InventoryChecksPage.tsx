@@ -91,7 +91,6 @@ type Scan = { token: number; query: string; target: InventoryCheckFocusRequest['
 const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_count_requires_issue: { key: 'inventory_check_error_count_requires_issue', fallback: 'Counted quantity differs from stock. Report it as an issue.' },
   inventory_check_lot_counts_off: { key: 'inventory_check_error_lot_counts_off', fallback: 'Counting by received date was turned off. Count again.' },
-  inventory_check_count_pending: { key: 'inventory_check_error_count_pending', fallback: 'A count of this product is waiting for approval.' },
   branch_redirect_required: { key: 'branch_redirect_required', fallback: 'This change is addressed to a disabled branch.' },
   maintenance_active: { key: 'inventory_check_error_maintenance', fallback: 'Maintenance is in progress. Try again shortly.' },
   selected_lot_unavailable: { key: 'inventory_check_error_lot_unavailable', fallback: 'This received date no longer has that stock.' },
