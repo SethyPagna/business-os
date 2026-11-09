@@ -64,6 +64,8 @@ const NAMED_COMPANIONS = {
   293: 'test-migration-0293-online-orders-native.cjs',
   // 0295 adds the two partial indexes the online order sweep reads through (qr_failed orders, expired payments); schema only.
   295: 'test-migration-0295-online-order-sweep-indexes-native.cjs',
+  // 0296 backfills online_orders:true onto the built-in Employee and Manager roles (defaults never reach stored rows); same shape as 0172.
+  296: 'test-migration-0296-roles-online-orders-default-native.cjs',
   // 0285 is the index the simplified Inventory Check (ic_simple) reads each product's latest observation through; schema only.
   285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0286 is the approval row a submitted Inventory Check count waits for (ic_fix_stock); a new table, no existing row changes.
