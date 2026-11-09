@@ -46,6 +46,7 @@ Module._load = function(request, parent, isMain) {
     whereActiveSales: () => ({ sql: '1=1', params: {} }),
   }, { get: (target, key) => key in target ? target[key] : harmless })
   if (request === '../lib/reportMoneyPrecision') return { ReportMoneyPrecisionError: class extends RangeError {}, reportMoneyHttpError: () => ({ status: 422, message: 'bad' }) }
+  if (request === '../lib/phoneSearchGuard' || request === '../lib/phoneAccess' || request === '../lib/phoneMask') return require('./harness/phone_real_modules.cjs').phoneModule(request)
   if (request.startsWith('../lib/') || request === '../index') return new Proxy({}, { get: () => harmless })
   return originalLoad.call(this, request, parent, isMain)
 }

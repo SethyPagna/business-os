@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { ACQUISITION_COST_TEXT_PATTERNS, acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { cacheIdentity } from '../lib/cacheKey'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
@@ -12,6 +13,8 @@ import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
+import { canSeeFullPhones } from '../lib/phoneAccess'
+import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { readAuditLogPage } from '../lib/auditLogPage'
 import { COURIER_COST_TEXT_PATTERN, canViewCourierCost, redactAuditRows } from '../lib/courierCostAccess'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
@@ -297,6 +300,8 @@ async function dashboardSummary(env: Env, query: Record<string, string>, overvie
     out_of_stock_preview_truncated: stockOverview.out.hasMore,
     expiring_products: stockOverview.expiring || [],
     expiring_count: num(stockOverview.expiringCount),
+    // When the stock figures above were computed (UTC ISO): they may be a few minutes old, and the Dashboard says so.
+    stock_as_of: stockOverview.asOf,
     recent_sales: (recentSales || []).map((sale) => ({
       ...sale,
       // The relational sale_items table is canonical.  Do not derive this
@@ -451,12 +456,18 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 // The shared stock overview's cache key lives on this request's origin, and
 // its cache write runs after the response (waitUntil). A context without an
 // execution context (a pure test calling app.request) simply skips the wait.
-function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
+// The asker (organisation, the branch the Dashboard was opened on, whether they may see costs) is what read switch dash_overview_5m keys its
+// five-minute copy on, so a body is shared only between askers who may see the same thing; the switch OFF never reads these.
+function dashboardOverviewContext(c: { req: { url: string; query(name: string): string | undefined }; env: Env; get(key: 'user'): any; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext & DashboardRankingsCacheContext {
   return {
     requestUrl: c.req.url,
+    user: c.get('user') as DashboardRankingsCacheContext['user'],
     waitUntil(promise) {
       try { c.executionCtx.waitUntil(promise) } catch { void promise.catch(() => {}) }
     },
+    org: cacheIdentity(c).org,
+    branchScope: String(c.req.query('branchId') || '').trim(),
+    costGrant: canViewAcquisitionCosts(c.get('user')) ? 'cost' : 'nocost',
   }
 }
 
@@ -584,6 +595,7 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
       // The responses below redact these costs after the query, so the search must not be able to find them either.
+      phoneTextBlocked: !canSeeFullPhones(user),
       hiddenTextPatterns: [...(canViewCourierCost(user) ? [] : [COURIER_COST_TEXT_PATTERN]), ...(canViewAcquisitionCosts(user) ? [] : ACQUISITION_COST_TEXT_PATTERNS)],
     })
     // The courier's actual cost leaves here by the same permission as everywhere else.
@@ -656,8 +668,11 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   const conditions: string[] = []
   const params: Record<string, unknown> = {}
   const cashier = String(query.cashier || '').trim()
+  // An account without the full-phone grant reads a cashier saved under a number, and a reason that quotes one, as empty: the response
+  // masks both, so the filter and the search read what the screen shows (the projection's own rule, searchableColumnSql; review E2).
+  const phoneAccess = { fullPhone: canSeeFullPhones(c.get('user')) }
   if (cashier && cashier !== 'all') {
-    conditions.push("lower(trim(COALESCE(d.cashier_name, d.deleted_by, ''))) = lower(trim(@cashier))")
+    conditions.push(`lower(trim(${searchableColumnSql({ sql: "COALESCE(d.cashier_name, d.deleted_by, '')", key: 'cashier_name' }, phoneAccess)})) = lower(trim(@cashier))`)
     params.cashier = cashier
   }
   const search = String(query.search || '').trim().toLowerCase()
@@ -668,8 +683,8 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
       OR lower(COALESCE(d.source_code, '')) LIKE @search
       OR lower(COALESCE(d.invoice_no, '')) LIKE @search
       OR lower(COALESCE(d.reference_no, '')) LIKE @search
-      OR lower(COALESCE(d.deletion_reason, '')) LIKE @search
-      OR lower(COALESCE(d.bill_delete_reason, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.deletion_reason', phoneAccess)}, '')) LIKE @search
+      OR lower(COALESCE(${searchableColumnSql('d.bill_delete_reason', phoneAccess)}, '')) LIKE @search
     )`)
     params.search = `%${search}%`
   }

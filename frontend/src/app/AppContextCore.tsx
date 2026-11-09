@@ -63,10 +63,12 @@ export type SyncContextCoreValue = {
   syncServerUnreachable: boolean
 }
 
+// The no-provider fallback of fmtUSD / fmtKHR: displayed money at the nearest cent, half away from zero. Shifting the decimal point in the
+// number's text ("10.075e2") keeps 10.075 at 10.08 where Math.round(x * 100) sees the float 1007.4999...; NaN, an exponent form (1e-7)
+// and the infinities read 0. Kept local and small on purpose: this chunk is on the boot path and stays free of imports from utils/.
 function normalizePriceValue(value: unknown): number {
-  const numberValue = Number(value)
-  if (!Number.isFinite(numberValue)) return 0
-  return Math.round((numberValue + Number.EPSILON) * 100) / 100
+  const n = Number(value)
+  return (Math.sign(n) || 0) * Math.round(+(Math.abs(n) + 'e2') || 0) / 100 + 0
 }
 
 export function isBrokenLocalizedString(value: unknown): boolean {

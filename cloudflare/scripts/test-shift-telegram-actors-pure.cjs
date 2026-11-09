@@ -151,7 +151,7 @@ async function main() {
   const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
   const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
-  const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
     './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': dbModule, './removalLosses': loadReal('lib/removalLosses.ts'),
     './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
@@ -199,10 +199,11 @@ async function main() {
   const waited = []
   const sends = []
   const route = loadReal('routes/shifts.ts', {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
-    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),

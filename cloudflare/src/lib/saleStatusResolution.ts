@@ -66,6 +66,16 @@
 // so their sales still land. Refunds, change and overpayment are not coverage
 // questions and do not take the band.
 //
+// AND A RIEL TENDER SHORT BY LESS THAN ONE 100-RIEL NOTE IS PAID (owner ruling,
+// 27 Oct 2026: "a riel payment that leaves under 100 riel unpaid is accepted as
+// fully paid"). When the tender includes any riel and the shortfall, at the
+// sale's rate, is under 100 riel (99 riel is paid; 100 riel still owes), the
+// sale is covered: Completed, owing 0, no review flag. A USD-only tender keeps
+// the half-cent band. The same shortfallCovered answer is asked by every
+// coverage question above, the settlement, instalment and correction paths and
+// the POS included. Refund rounding (riel refunds round down to 100) is a
+// separate rule and does not use this.
+//
 // Neither half moves a sale by itself -- the resolver only picks the status a
 // sale is BORN with, and the guard only refuses -- so a pending
 // `sale.add_items` undo (which requires the sale to still be in the status it
@@ -179,6 +189,58 @@ export function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVer
  */
 export const PAID_STATUS_SHORTFALL_TOLERANCE_UNITS = 50n
 
+/**
+ * RIEL CASH COMES IN WHOLE HUNDREDS (owner ruling, 27 Oct 2026: "there's no such thing as double digit riel so if we
+ * input that it is invalid for cash. other payment method is fine. make sure it is consistent."). No riel coin exists
+ * below the 100-riel note, so a CASH amount in riel is 0 or a whole multiple of 100: a tender row paid by a cash
+ * method, change handed back, a shift's float and counted cash, an expense paid from the drawer. A non-cash method
+ * (bank, QR, card) paid in riel may hold any whole riel.
+ *
+ * Every writer refuses a NEW or CHANGED cash riel amount that is not whole hundreds with RIEL_CASH_NOT_HUNDREDS and
+ * writes nothing. Amounts stored before the ruling are read, reported, kept through edits of other fields and
+ * restored by undo as they are. A riel figure the app computes for cash (riel change) rounds DOWN to whole hundreds
+ * (rielCashFloor): the till keeps up to 99 riel (owner, 21 Oct 2026).
+ *
+ * The coverage band above is not changed by this rule: it asks how much was tendered, not whether the notes exist.
+ */
+export const RIEL_CASH_STEP_KHR = 100
+
+/** The one refusal code every writer and the frontend use for a cash riel amount that is not whole hundreds. */
+export const RIEL_CASH_NOT_HUNDREDS = 'riel_cash_not_hundreds'
+
+/**
+ * May this riel amount be cash? 0 and whole multiples of 100 only. A blank or a value that is not a number is not
+ * this rule's question (true): the amount's own validator refuses it with its own code.
+ */
+export function rielCashAmountValid(khr: unknown): boolean {
+  if (khr == null || (typeof khr === 'string' && khr.trim() === '')) return true
+  const value = Number(khr)
+  return !Number.isFinite(value) || value % RIEL_CASH_STEP_KHR === 0
+}
+
+/** The index of the first tender row paid by a cash method whose riel is not whole hundreds, or -1. */
+export function rielCashRowRefused(rows: readonly { method?: unknown; amount_khr?: unknown }[], isCash: (method: unknown) => boolean): number {
+  return rows.findIndex((row) => !rielCashAmountValid(row.amount_khr) && isCash(row.method))
+}
+
+/** A cash riel figure the app computes, rounded DOWN to whole hundreds; 0 for nothing. */
+export function rielCashFloor(khr: number): number {
+  return Number.isFinite(khr) && khr > 0 ? Math.floor(khr / RIEL_CASH_STEP_KHR + 1e-9) * RIEL_CASH_STEP_KHR : 0
+}
+
+/** One 100-riel note in calculation units (four decimals): a riel tender short by LESS than this is paid (owner, 27 Oct 2026). */
+export const RIEL_REMAINDER_ACCEPTED_KHR_UNITS = 1_000_000n
+
+/**
+ * THE covered answer on a scaled shortfall (USD units x rate numerator minus KHR units x rate denominator, the
+ * shape scaledShortfall and the payment allocation both compute). Covered when short by at most half a cent, or
+ * when the tender includes riel (paidKhrUnits > 0) and the shortfall is under one 100-riel note at the sale's rate.
+ */
+export function shortfallCovered(scaled: bigint, ratio: { numerator: bigint; denominator: bigint }, paidKhrUnits: bigint): boolean {
+  if (scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * ratio.numerator) return true
+  return paidKhrUnits > 0n && scaled < RIEL_REMAINDER_ACCEPTED_KHR_UNITS * ratio.denominator
+}
+
 type UnitsTender = SaleCoverageInput & { paidUsdUnits: bigint; paidKhrUnits: bigint }
 type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKhr: FinancialDecimalInput }
 
@@ -187,10 +249,10 @@ type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKh
  * (total - tender, in calculation units) multiplied by the rate numerator, so
  * no division and no rounding ever happens. Positive means short.
  */
-function scaledShortfall(input: UnitsTender): { scaled: bigint; numerator: bigint } {
+function scaledShortfall(input: UnitsTender): { scaled: bigint; numerator: bigint; denominator: bigint } {
   const { numerator, denominator } = rateRatio(input.exchangeRate, input.moneyPrecisionVersion)
   const totalUsdUnits = financialCalculationUnits(input.totalUsd)
-  return { scaled: (totalUsdUnits - input.paidUsdUnits) * numerator - input.paidKhrUnits * denominator, numerator }
+  return { scaled: (totalUsdUnits - input.paidUsdUnits) * numerator - input.paidKhrUnits * denominator, numerator, denominator }
 }
 
 function unitsTender(input: AmountTender): UnitsTender {
@@ -218,8 +280,8 @@ function unitsTender(input: AmountTender): UnitsTender {
  * is not evidence of a payment.
  */
 export function paymentCoversSaleTotalUnits(input: UnitsTender): boolean {
-  const { scaled, numerator } = scaledShortfall(input)
-  return scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
+  const { scaled, numerator, denominator } = scaledShortfall(input)
+  return shortfallCovered(scaled, { numerator, denominator }, input.paidKhrUnits)
 }
 
 /** Number-taking convenience over paymentCoversSaleTotalUnits. Same formula. */
@@ -238,8 +300,9 @@ export function paymentCoversSaleTotal(input: AmountTender): boolean {
  * decides what an unreadable sale owes.
  */
 export function saleOutstandingUsd(input: AmountTender): number {
-  const { scaled, numerator } = scaledShortfall(unitsTender(input))
-  if (scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator) return 0
+  const tender = unitsTender(input)
+  const { scaled, numerator, denominator } = scaledShortfall(tender)
+  if (shortfallCovered(scaled, { numerator, denominator }, tender.paidKhrUnits)) return 0
   return Number((2n * scaled + numerator) / (2n * numerator)) / 10_000
 }
 

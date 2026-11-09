@@ -127,7 +127,7 @@ async function main() {
   })
   const paymentMethodRegistry = loadReal('lib/paymentMethodRegistry.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+  const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
     './db': dbModule,
     './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
     ...analyticsPrecision,
@@ -140,10 +140,11 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   })
   const permissions = loadReal('lib/permissions.ts')
   const route = loadReal('routes/shifts.ts', {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
-  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
     '../lib/permissions': permissions,

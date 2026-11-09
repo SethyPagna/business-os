@@ -31,7 +31,8 @@ import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { keepUnresolvedPosCheckouts } from './utils/posUnresolvedCheckout.ts'
 import { effectivePermissions, type PermissionTier } from './utils/permissions.ts'
 import { getInventoryCheckAccess } from './utils/inventoryCheckAccess.ts'
-import { normalizePriceValue } from './utils/pricing.ts'
+import { normalizePriceValue, toFiniteNumber } from './utils/pricing.ts'
+import { roundDisplayMoney } from './utils/displayMoney.ts'
 import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
@@ -2745,11 +2746,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // display preferences.
   const displayTimezone = BUSINESS_TIME_ZONE
 
+  // Displayed money rounds to the NEAREST cent (owner, 24 Sep 2026); only a selling price rounds up (normalizePriceValue).
   const fmtUSD = useCallback((n: unknown): string => {
-    return `${usdSymbol}${normalizePriceValue(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
+    return `${usdSymbol}${roundDisplayMoney(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
   }, [usdSymbol])
   const fmtKHR = useCallback((n: unknown): string => {
-    return `${normalizePriceValue(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}${khrSymbol}`
+    return `${roundDisplayMoney(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}${khrSymbol}`
   }, [khrSymbol])
   const formatPrice = useCallback((usd: unknown, khr?: unknown): string => {
     const u = normalizePriceValue(usd || 0)
@@ -2758,8 +2760,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (displayCurrency === 'both') return `${fmtUSD(u)} / ${fmtKHR(k)}`
     return fmtUSD(u)
   }, [displayCurrency, fmtUSD, fmtKHR, exchangeRate])
-  const usdToKhr = useCallback((usd: unknown): number => normalizePriceValue(usd || 0) * exchangeRate, [exchangeRate])
-  const khrToUsd = useCallback((khr: unknown): number => normalizePriceValue(khr || 0) / exchangeRate, [exchangeRate])
+  // The reports' currency fold (display only): the exact amount converted at the main rate. It used to take the amount UP to a
+  // cent first (the selling-price rounder), which put a report figure of 2.161 dollars at 2.17 x rate.
+  const usdToKhr = useCallback((usd: unknown): number => toFiniteNumber(usd || 0) * exchangeRate, [exchangeRate])
+  const khrToUsd = useCallback((khr: unknown): number => toFiniteNumber(khr || 0) / exchangeRate, [exchangeRate])
   const formatDateTime = useCallback((value: unknown, options: Intl.DateTimeFormatOptions = {}): string => {
     const date = normalizeDateInput(value)
     if (!date) return '--'

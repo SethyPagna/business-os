@@ -146,8 +146,19 @@ function getEntries(ctx) {
     ['portal/submissions/review', '/api/portal/submissions/review'], ['portal/submissions/:id/screenshot/:i', '/api/portal/submissions/1/screenshot/0'],
     ['inventory-checks/products all-time name page, page 2', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20`],
     ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`],
+    ['inventory-checks/products page 2 with summary=0 (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20&summary=0`],
+    ['inventory-checks/products Issues by checkState (ic_simple page, switch off)', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`],
     ['inventory-checks/products Issues in session', `/api/inventory-checks/products?sessionId={{checkId}}&state=issue&page=1&pageSize=20`],
     ['inventory-checks/products stock sort ascending', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=asc&page=1&pageSize=20`],
+    // ic_simple ON (lane 6.0.1044, the owner's list): the switch row is set around the measured request only; the shapes above stay the OFF path.
+    ['inventory-checks/products ic_simple name page', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple page step', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20&summary=0`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple search', `/api/inventory-checks/products?branchId=1&query=serum&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple stock sort', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=desc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple low stock', `/api/inventory-checks/products?branchId=1&stockState=low_stock&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple issues', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
   ]
 }
 
@@ -160,7 +171,7 @@ function getShapes(ctx) {
     let id = slug(label)
     if (seen.has(id)) id += '-' + [...seen].filter((x) => x.startsWith(id)).length
     seen.add(id)
-    return { id, kind: 'get', method: 'GET', label, url, anon: Boolean(opt.anon), longRange: LONG_RANGE.test(label) }
+    return { id, kind: 'get', method: 'GET', label, url, anon: Boolean(opt.anon), longRange: LONG_RANGE.test(label), ...(opt.switches ? { switches: opt.switches } : {}) }
   })
 }
 

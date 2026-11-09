@@ -938,7 +938,7 @@ function ProductFormContent({
   // Compact review rows for the save confirm dialog.
   const saveReviewItems = (): ConfirmReviewItem[] => {
     const items: ConfirmReviewItem[] = [
-      { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
+      { label: tr('label_selling_price', 'Selling price'), value: `${usdSymbol}${normalizePriceValue(Number(form.selling_price_usd || 0)).toFixed(2)}` },
       ...(canViewCosts ? [{ label: tr('label_cost', 'Cost'), value: costInputPreview(form.cost_price_usd) === null ? tr('cost_unknown', 'Unknown cost') : `${usdSymbol}${Number(costInputPreview(form.cost_price_usd)).toFixed(2)}` }] : []),
     ]
     const barcode = String(form.barcode || '').trim()

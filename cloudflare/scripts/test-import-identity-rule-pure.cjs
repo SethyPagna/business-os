@@ -29,8 +29,10 @@ const REAL = new Set([
   // fold the bounded catalog query uses. Stubbing it would let this test pass
   // over a query that never folds.
   'productIdentity',
-  'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
+  'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions', 'phoneWriteGuard', 'phoneMask',
   'importImageMatch', 'searchMatch',
+  // importEngine scrubs masked request values with phoneAccess.scrubMaskedInput (P2.8): a stub without it breaks classifySales.
+  'phoneAccess',
 ])
 const asyncNoop = async () => {}
 const STUBS = {

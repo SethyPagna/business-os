@@ -217,6 +217,12 @@ export type PlanLimits = {
   // 1000-call limit never binds a batch, so no request pays the switch read and admission keeps counting statements.
   callCountingSwitchApplies: boolean
 
+  // lib/inventoryCheckApprovals.ts: how long an Inventory Check approval that has been claimed (stock may already have moved for it) can sit without
+  // progress before ANOTHER approver may take it over and finish it. A claimer who is deactivated or has lost the right can always be replaced at once;
+  // this window is for a claimer who is merely gone. It is a lease, so like the other lifetimes Free is the LONGER one: a Free request applies one line and a
+  // slow phone is normal there. Paid 5 min, Free 15 min.
+  inventoryCheckApprovalTakeoverSeconds: number
+
   // ---- Read-cost lifetimes (G39 efficiency) -------------------------------
   //
   // These are LIFETIMES, so unlike every ceiling above, Free's number is the
@@ -240,6 +246,12 @@ export type PlanLimits = {
   // window's clock. Paid 30 s (the order of the 20 s product-search cache),
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
+
+  // lib/dashboardStockOverview.ts, read switch `dash_overview_5m` ON: the longest the Dashboard stock overview is ever served after it was
+  // computed (the owner's "up to 5 minutes old, with the time it was calculated"). It is also the length of the time bucket in the key, so a
+  // sale does not recompute it: only a product or inventory write (they bump the 'products' version), a low-stock setting, a deploy, a restore
+  // or this window moving does. Paid 300 s, Free 300 s: a freshness promise to the owner, not a plan-sized saving.
+  dashboardOverviewMaxAgeSeconds: number
 
   // lib/readSwitches.ts: how long one isolate remembers the one system_flags read that carries the in-app read switches AND the
   // data epoch (X-BOS-Switches, X-BOS-Epoch, every cache key). A kill switch or a restore's new epoch reaches every isolate within
@@ -374,8 +386,10 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 24,
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
+  inventoryCheckApprovalTakeoverSeconds: 5 * 60,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
@@ -411,8 +425,10 @@ const FREE_LIMITS: PlanLimits = {
   stockInLinesPerRequest: 1,
   stockInLinesPerRequestByCalls: 2,
   callCountingSwitchApplies: true,
+  inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,

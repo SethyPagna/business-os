@@ -108,7 +108,8 @@ runTest('the row does not get taller in exchange for staying on one line', () =>
 
 runTest('no value on the strip is hidden, clipped or dropped', () => {
   const strip = stripMarkup()
-  for (const marker of ['fmtUSD(sellingUsd)', 'fmtUSD(wholesaleUsd)', 'fmtUSD(costUsd)', 'String(qty || 0)', 'renderUnitChip(unitName)']) {
+  // Selling and wholesale are PRICES (shown rounded up through priceText, as the till charges them); cost is an amount.
+  for (const marker of ['priceText(fmtUSD, sellingUsd)', 'priceText(fmtUSD, wholesaleUsd)', 'fmtUSD(costUsd)', 'String(qty || 0)', 'renderUnitChip(unitName)']) {
     assert.ok(strip.includes(marker), `the strip must still render ${marker}`)
   }
   assert.equal((strip.match(/price-strip-divider/g) || []).length, 3, 'all three "|" dividers stay visible')

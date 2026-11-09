@@ -48,17 +48,19 @@ export default function StatsRangeRow({
   const rangeLabel = t('date_time_range')
   const controls = (
     <>
-      {/* Existing action-heavy callers wrap so dates retain a readable minimum width. */}
+      {/* Existing action-heavy callers wrap so dates retain a readable minimum width.
+          With `showTime` the picker sizes itself to its full date+time text (min-w-max in
+          DateTimeRangePicker), so the fixed 10.5rem/14rem floors below apply to date-only rows. */}
       {leading}
       <DateTimeRangePicker
         value={range} onChange={onRangeChange} t={t} showTime={showTime} continuous={continuous} disabled={disabled}
         showCalendarIcon={false}
         compactTriggerLabels={compactRange}
         showQuickRanges={!showPresets}
-        className={scrolling ? 'w-56 min-w-[14rem] shrink-0' : 'min-w-[10.5rem] flex-1'}
+        className={scrolling ? `w-56 shrink-0 ${showTime ? '' : 'min-w-[14rem]'}` : `flex-1 ${showTime ? '' : 'min-w-[10.5rem]'}`}
         triggerClassName={compactRange
-          ? 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 text-[11px]'
-          : 'flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md px-1 py-0 sm:gap-2 sm:px-3'}
+          ? `flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md ${showTime ? 'px-0.5' : 'px-1'} py-0 text-[11px]`
+          : `flex h-10 !min-h-10 min-w-0 w-full items-center justify-center gap-1 rounded-md ${showTime ? 'px-0.5' : 'px-1'} py-0 sm:gap-2 sm:px-3`}
       />
       {scrolling ? presets : null}
       {actions ? <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">{actions}</div> : null}

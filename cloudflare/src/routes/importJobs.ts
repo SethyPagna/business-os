@@ -18,6 +18,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
 import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
 import { importSourceUnavailableForRetry, purgeImportIncomingFiles, IMPORT_FILE_PURGED_STATUS } from '../lib/importIncomingFiles'
+import { canSeeFullPhones } from '../lib/phoneAccess'
+import { maskQuotedPhones } from '../lib/phoneMask'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -591,7 +593,7 @@ app.get('/:id/review', async (c) => {
   // plan's 10ms-per-invocation limit can't tolerate for a sizeable import.
   const db = getDb(c.env)
   const actionFilter: RowAction | null = (['create', 'update', 'skip', 'error'] as const).includes(filter as RowAction) ? filter as RowAction : null
-  const where = buildImportReviewWhere({ jobId: id, action: actionFilter, query, warningKinds })
+  const where = buildImportReviewWhere({ jobId: id, action: actionFilter, query, warningKinds, phoneTextBlocked: !canSeeFullPhones(c.get('user')) })
   const totalRow = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${where.sql}`)
     .get<{ n: number }>(where.params)
   const total = Number(totalRow?.n || 0)
@@ -1746,7 +1748,9 @@ app.get('/:id/errors.csv', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
-  const csv = await buildErrorsCsv(c.env, id)
+  // The error messages quote the number a row matched; without the full-phone permission they read masked, as in the JSON views.
+  const rawCsv = await buildErrorsCsv(c.env, id)
+  const csv = canSeeFullPhones(c.get('user')) ? rawCsv : maskQuotedPhones(rawCsv)
   // BOM: errors.csv is opened in Excel, whose codepage guess without one
   // turns the Khmer product names inside error messages into '?' (the same
   // reason every frontend CSV download carries it -- M7).

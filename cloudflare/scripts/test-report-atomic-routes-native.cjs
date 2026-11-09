@@ -106,7 +106,7 @@ async function main() {
     const volatile = new Map()
     for (const [key, a] of off1) { if (!off2.has(key)) continue; const paths = diffPaths(a.json, off2.get(key).json); if (paths.length) { volatile.set(key, paths); volatile.set(key.replace(/^admin /, 'employee '), paths) } }
     const volatileNames = [...new Set([...volatile.values()].flat().map(p => p.split('.').pop()))]
-    assert.ok(volatileNames.every(name => /^(generated_at|server_time|now|timestamp|as_of|computed_at|updated_at|fetched_at|duration_ms|elapsed_ms|request_id|ts)$/i.test(name)),
+    assert.ok(volatileNames.every(name => /^(generated_at|server_time|now|timestamp|as_of|computed_at|updated_at|fetched_at|duration_ms|elapsed_ms|request_id|ts|stock_as_of)$/i.test(name)),
       'only clock-like fields may move between two identical OFF requests: ' + volatileNames.join(','))
     notes.push(`two OFF sweeps (second: administrator only, ${off2.size} requests): ${volatile.size} request keys with moving fields ${JSON.stringify(volatileNames)}`)
 

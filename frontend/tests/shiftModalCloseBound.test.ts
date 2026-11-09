@@ -50,6 +50,7 @@ globalThis.window = Object.assign(new EventTarget(), {
   sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 }) as unknown as Window & typeof globalThis
 const transportModule = await import('../src/api/shiftTransport.ts')
+const shiftCountRules = await import('../src/components/shifts/shiftCountRules.ts') // the riel rule ShiftGate / ShiftHistoryModal ask
 const formatters = await import('../src/utils/formatters.ts')
 
 // One account, one branch: a drawer left open on an earlier day, with today's
@@ -122,6 +123,7 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name.includes('ShiftSummary')) return { default: SummaryMarker }
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
     if (name.includes('pos/ShiftGate')) return { SHIFT_BRANCH_CHANGED_EVENT: 'shift-branch', SHIFT_STATE_CHANGED_EVENT: 'shift-state' }
+    if (name.includes('shiftCountRules')) return shiftCountRules
     if (name.includes('shiftTransport')) return {
       ...transportModule,
       listShifts: async () => ({ shifts: [listRow], scope: 'all', page: 1, page_size: 20, total: 1 }),

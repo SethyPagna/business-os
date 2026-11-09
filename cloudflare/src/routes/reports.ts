@@ -33,6 +33,8 @@ import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMo
 import { parseReportExport, readRecordExport, recordExportTotals, reportExportStamp, reportExportToken } from '../lib/reportExport'
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { costViewProfit } from '../lib/reportProfitView'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
@@ -333,10 +335,8 @@ export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin
 
 /** The searched receipts define both detail and exact totals. Preserve the
  * snapshot rows themselves: spreading a shaped row loses its diagnostic. */
-export function salesExportCohort(snapshot: SalesReportSnapshot, search: string): SalesReportSnapshot {
-  const selected = businessSummarySalesRowsFromSnapshot(snapshot).filter((row) => !search
-    || ['receipt_number', 'customer', 'customer_phone', 'cashier', 'branch', 'payment_method']
-      .some((key) => String(row[key] || '').toLowerCase().includes(search)))
+export function salesExportCohort(snapshot: SalesReportSnapshot, search: string, access: PhoneSearchAccess): SalesReportSnapshot {
+  const selected = businessSummarySalesRowsFromSnapshot(snapshot).filter(salesReportSearchMatcher(search, access))
   const ids = new Set(selected.map((row) => Number(row.id)))
   const voidIds = new Set(selected.filter((row) => row.status === 'cancelled').map((row) => Number(row.id)))
   const sales = snapshot.sales.filter((row) => ids.has(Number(row.id)))
@@ -631,7 +631,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
           throw error
         }
         const maximum = snapshotMaxId ?? snapshot.sales.reduce((max, row) => Math.max(max, Number(row.id)), 0)
-        const cohort = salesExportCohort(snapshot, search)
+        const cohort = salesExportCohort(snapshot, search, phoneSearchAccessOf(user))
         const canViewCosts = canViewAcquisitionCosts(user)
         const canViewCourier = canViewCourierCost(user)
         const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, isAdmin, canViewCosts, canViewCourier))
@@ -663,8 +663,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
       if (!snapshot) return c.json({ rows: [], snapshot_max_id: 0, has_more: false, next_cursor: null })
       if (query.q?.trim()) {
         const search = query.q.trim().toLowerCase()
-        rows = rows.filter((row) => ['receipt_number','customer','customer_phone','cashier','branch','payment_method']
-          .some((key) => String(row[key] || '').toLowerCase().includes(search)))
+        rows = rows.filter(salesReportSearchMatcher(search, phoneSearchAccessOf(user)))
       }
       const stamp = (row: Record<string, unknown>) => {
         const raw = String(row.cursor_at || '')
@@ -696,7 +695,11 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
     if (query.q?.trim()) {
       const fields = kind === 'returns' ? ['return_number', 'receipt_number', 'customer_name', 'reason'] : ['label', 'notes', 'fee_type']
-      clauses.push(`instr(lower(${fields.map((name) => `COALESCE(${alias}.${name}, '')`).join(" || ' ' || ")}), lower(@search)) > 0`)
+      // Without the full-phone permission a field the response masks (a customer, label or note that is a number, a reason that
+      // quotes one) reads as empty to the search: the projection's own rule (restrictedColumnSql), not a list of columns kept here.
+      const unrestricted = phoneSearchAccessOf(user).fullPhone
+      const fieldSql = (name: string) => (unrestricted ? `COALESCE(${alias}.${name}, '')` : restrictedColumnSql(`${alias}.${name}`))
+      clauses.push(`instr(lower(${fields.map(fieldSql).join(" || ' ' || ")}), lower(@search)) > 0`)
       params.search = query.q.trim()
     }
     let select: string; let joins = ''

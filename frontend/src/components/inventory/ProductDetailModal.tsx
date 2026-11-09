@@ -9,7 +9,7 @@ import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
-import { calculateProductDiscount } from '../../utils/pricing.ts'
+import { calculateProductDiscount, priceText } from '../../utils/pricing.ts'
 import { getVisibleProductBatches, isDepletedLot, mergeBranchLots } from '../../utils/productBatches.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
@@ -298,15 +298,15 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
               </button> : null}
               <div className="rounded-xl bg-indigo-50 p-3 dark:bg-indigo-900/20">
                 <div className="mb-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">{T('wholesale_price', 'Wholesale price')}</div>
-                <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? fmtUSD(wholesalePriceUsd) : '—'}</div>
-                {wholesalePriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(wholesalePriceKhr)}</div> : null}
+                <div className="text-sm font-semibold tabular-nums text-indigo-700 dark:text-indigo-300">{wholesalePriceUsd > 0 ? priceText(fmtUSD, wholesalePriceUsd) : '—'}</div>
+                {wholesalePriceKhr > 0 ? <div className="text-xs text-gray-400">{priceText(fmtKHR, wholesalePriceKhr)}</div> : null}
               </div>
             </div>
             <div className={`grid ${canViewCosts ? 'grid-cols-2' : 'grid-cols-1'} gap-2 sm:gap-3`} data-detail-price-row="selling-margin">
               <div className="rounded-xl bg-green-50 p-3 dark:bg-green-900/20">
                 <div className="mb-1 text-xs font-semibold text-green-600 dark:text-green-400">{T('label_selling_price', 'Selling price')}</div>
-                <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{fmtUSD(sellingPriceUsd)}</div>
-                {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sellingPriceKhr)}</div> : null}
+                <div className="text-sm font-semibold tabular-nums text-green-700 dark:text-green-300">{priceText(fmtUSD, sellingPriceUsd)}</div>
+                {sellingPriceKhr > 0 ? <div className="text-xs text-gray-400">{priceText(fmtKHR, sellingPriceKhr)}</div> : null}
               </div>
               {canViewCosts ? <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
                 <div className="mb-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{T('margin', 'Margin')}</div>
@@ -329,8 +329,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             {promotion.active ? (
               <div className="rounded-xl bg-rose-50 p-3 dark:bg-rose-950/30">
                 <div className="mb-1 text-xs font-semibold text-rose-600 dark:text-rose-300">{T('discounts', 'Discounts')}</div>
-                <div className="font-bold text-rose-700 dark:text-rose-200">{fmtUSD(promotion.applied_price_usd || 0)}</div>
-                {(promotion.applied_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr || 0)}</div> : null}
+                <div className="font-bold text-rose-700 dark:text-rose-200">{priceText(fmtUSD, promotion.applied_price_usd || 0)}</div>
+                {(promotion.applied_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{priceText(fmtKHR, promotion.applied_price_khr || 0)}</div> : null}
               </div>
             ) : null}
           </div>

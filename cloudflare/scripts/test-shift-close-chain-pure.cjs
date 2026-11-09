@@ -123,7 +123,7 @@ const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrec
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => db }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const reconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': { getDb: () => db },
   './nativeSaleChange': nativeSaleChange,
@@ -134,10 +134,11 @@ const reconciliation = loadReal('lib/shiftReconciliation.ts', {
 let user = { id: 21, username: 'za', name: 'Roune Rath', permissions: JSON.stringify({ pos: true }) }
 let telegramReportsFor = []
 const route = loadReal('routes/shifts.ts', {
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
-  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
   '../lib/permissions': loadReal('lib/permissions.ts'),

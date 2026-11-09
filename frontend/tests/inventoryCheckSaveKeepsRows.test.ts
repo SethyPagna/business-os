@@ -104,7 +104,7 @@ try {
   await openSession(surface)
   // Lane 6.0.933: under a Check status filter the saved row still stays where it is -- a tick reads neither the products nor the session again.
   await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
-  const stateSection = surface.find(node => node.getAttribute('data-filter-menu-section') === 'state', 'Check status section')
+  const stateSection = surface.find(node => node.getAttribute('data-filter-menu-section') === 'checkState', 'Check status section')
   if (!stateSection.querySelectorAll('[role="option"]').length) await surface.click(surface.button(/./, stateSection))
   await surface.click(surface.find(node => node.getAttribute('role') === 'option' && stateSection.contains(node) && node.textContent === 'issues', 'Issues option'))
   const root = surface.find(node => node.getAttribute('data-inventory-check-page') !== null, 'page root') as MemoryNode & { scrollTop?: number }
@@ -140,21 +140,17 @@ try {
   assert.equal(propsOf(action(surface, 12, 'done')).disabled, false, 'other rows stay enabled during the reload')
   assert.equal(propsOf(action(surface, 13, 'done')).disabled, false)
   assert.ok(!surface.findAll(node => node.getAttribute('role') === 'status').some(node => node.textContent.includes('loading')), 'no loading line is inserted above the rows')
-  // The explicit Refresh button still reloads both reads; the held reload proves rows stay mounted through it.
-  holdReloadNext = true
-  await surface.click(surface.button('refresh'))
-  assert.ok(holdReload, 'the Refresh reload is in flight')
-  assert.equal(rowOf(surface, 12), row12, 'rows survive the Refresh reload')
-  assert.equal(rowOf(surface, 13), row13)
-  holdReload!(productsBody())
-  await surface.settle()
-  assert.equal(productReads.length, readsBefore + 1, 'Refresh reads products once')
-  assert.equal(sessionReads, sessionReadsBefore + 1, 'Refresh reads the session once')
+  assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'refresh').length, 0, 'there is no Refresh button: the page reads again when it learns it is behind')
 
   // A definite 409 means the page is behind the server: one reload of both reads. A permission refusal is not staleness.
   const beforeConflict = [productReads.length, sessionReads]
+  holdReloadNext = true
   saveRefusal = 'inventory_check_baseline_changed'
   await surface.click(surface.button('Mark done', rowOf(surface, 12)))
+  assert.ok(holdReload, 'the conflict reload is in flight')
+  assert.equal(rowOf(surface, 12), row12, 'rows survive the reload')
+  assert.equal(rowOf(surface, 13), row13)
+  holdReload!(productsBody())
   await surface.settle()
   assert.deepEqual([productReads.length, sessionReads], [beforeConflict[0] + 1, beforeConflict[1] + 1], 'a 409 conflict reloads products and the session once')
   saveRefusal = 'inventory_check_owner_required'

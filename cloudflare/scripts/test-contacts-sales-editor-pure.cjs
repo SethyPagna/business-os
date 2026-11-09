@@ -37,6 +37,7 @@ function load(filename) {
     if (name === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', actor); return next() } }
     if (name === '../lib/db' || name === './db') return { getDb: () => db }
     if (name === '../lib/cache') return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => '1', cachedJsonResponse: async (_r, _c, _v, _t, run) => run(), cacheIdentity: () => undefined }
+    if (name === '../lib/phoneCache') return { cachedPhoneJson: async (_r, _c, _u, _v, _t, run) => run() }
     if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
     if (name === '../lib/importMaintenanceFence') return { getImportFencedDb: async () => db, isImportMaintenanceFenceError: () => false }
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), `${name}.ts`))

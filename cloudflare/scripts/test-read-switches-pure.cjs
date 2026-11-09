@@ -41,10 +41,10 @@ function fakeEnv(rows, epoch = null) {
   return state
 }
 const stored = (obj) => JSON.stringify(obj)
-// Every switch any slice reads lives in this store (P0.3 'probe', P1.4 report_atomic / report_atomic_long, P1.1 call_counting, E1-F expense_reads): the header lists them all, in this order.
-const REPORT_NAMES = ['report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads']
-const REPORT_OFF = { report_atomic: { state: 'off', rate: 0 }, report_atomic_long: { state: 'off', rate: 0 }, call_counting: { state: 'off', rate: 0 }, expense_reads: { state: 'off', rate: 0 } }
-const REPORT_HEADER = ';report_atomic=0;report_atomic_long=0;call_counting=0;expense_reads=0'
+// Every switch any slice reads lives in this store (P0.3 'probe', P1.4 report_atomic / report_atomic_long, P1.1 call_counting, E1-F expense_reads, IC ic_simple / ic_fix_stock, TIME-1 dash_overview_5m): the header lists them all, in this order.
+const REPORT_NAMES = ['report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m']
+const REPORT_OFF = { report_atomic: { state: 'off', rate: 0 }, report_atomic_long: { state: 'off', rate: 0 }, call_counting: { state: 'off', rate: 0 }, expense_reads: { state: 'off', rate: 0 }, ic_simple: { state: 'off', rate: 0 }, ic_fix_stock: { state: 'off', rate: 0 }, dash_overview_5m: { state: 'off', rate: 0 } }
+const REPORT_HEADER = ';report_atomic=0;report_atomic_long=0;call_counting=0;expense_reads=0;ic_simple=0;ic_fix_stock=0;dash_overview_5m=0'
 let clock = 1_000_000
 const newStore = (extra = {}) => sw.createReadSwitchStore({ now: () => clock, ...extra })
 
@@ -91,9 +91,9 @@ async function main() {
   await check('serializing a flip keeps known names, bumps nothing by itself, and carries tokens a newer build wrote', () => {
     const previous = stored({ epoch: 4, set_at: 'a', set_by: 1, switches: { probe: 'shadow:0.05', future_slice: 'on', 'Bad Name': 'on', other: 7 } })
     const next = JSON.parse(sw.serializeReadSwitches(previous, { name: 'probe', entry: { state: 'on', rate: 0 } }, { epoch: 5, setAt: '2026-11-02T01:00:00.000Z', setBy: 9 }))
-    assert.deepEqual(next, { epoch: 5, set_at: '2026-11-02T01:00:00.000Z', set_by: 9, switches: { future_slice: 'on', probe: 'on', report_atomic: 'off', report_atomic_long: 'off', call_counting: 'off', expense_reads: 'off' } })
+    assert.deepEqual(next, { epoch: 5, set_at: '2026-11-02T01:00:00.000Z', set_by: 9, switches: { future_slice: 'on', probe: 'on', report_atomic: 'off', report_atomic_long: 'off', call_counting: 'off', expense_reads: 'off', ic_simple: 'off', ic_fix_stock: 'off', dash_overview_5m: 'off' } })
     const fresh = JSON.parse(sw.serializeReadSwitches('garbage', { name: 'probe', entry: { state: 'shadow', rate: 0.1 } }, { epoch: 1, setAt: 't', setBy: 2 }))
-    assert.deepEqual(fresh, { epoch: 1, set_at: 't', set_by: 2, switches: { probe: 'shadow:0.1', report_atomic: 'off', report_atomic_long: 'off', call_counting: 'off', expense_reads: 'off' } })
+    assert.deepEqual(fresh, { epoch: 1, set_at: 't', set_by: 2, switches: { probe: 'shadow:0.1', report_atomic: 'off', report_atomic_long: 'off', call_counting: 'off', expense_reads: 'off', ic_simple: 'off', ic_fix_stock: 'off', dash_overview_5m: 'off' } })
     assert.equal(sw.parseReadSwitches(sw.serializeReadSwitches(null, { name: 'probe', entry: { state: 'on', rate: 0 } }, { epoch: 1, setAt: 't', setBy: 2 })).switches.probe.state, 'on', 'round trip')
   })
 

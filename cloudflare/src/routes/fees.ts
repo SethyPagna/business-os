@@ -33,6 +33,7 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
 import { expenseReadsOn, foldFeeGroups, type FeeGroupRow, type FeeReportParts } from '../lib/expenseReads'
 import { getPlanLimits } from '../lib/planTier'
+import type { PhoneActor } from '../lib/phoneAccess'
 import {
   canonicalFeeCreateRequest,
   feeCreateAuditStatement,
@@ -44,6 +45,7 @@ import {
   type FeeCreateIntent,
 } from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -143,6 +145,8 @@ function toNumber(value: unknown, fallback = 0): number {
 
 // Missing version is deliberately legacy-compatible, including frozen requests
 // that have not reached the server yet. It is not a fresh-input admission proof.
+const FEE_RIEL_CASH_REFUSAL = { error: 'Riel paid in cash must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS }
+
 function feeMoneyVersion(body: Record<string, unknown>): 1 | undefined {
   if (!Object.prototype.hasOwnProperty.call(body, 'fee_money_version')) return undefined
   if (body.fee_money_version !== 1) throw new Error('invalid_fee_money_version')
@@ -431,8 +435,9 @@ export type FeeKeyset = { upToId?: number | null; after?: { feeDate: string; id:
  * Search matches label/notes/fee_type, the same "one field, several columns" pattern sales.ts's list endpoint already uses
  * rather than a bespoke per-page search implementation. Throws RangeError for a bad date parameter.
  * routes/feesCatalog.ts calls this for the expense half of the merged list, so the two lists filter identically.
+ * `viewer` is the signed-in account: what its search may match depends on the full-phone grant (lib/phoneSearchGuard.ts); absent = without the grant.
  */
-export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset): Promise<FeeListPage> {
+export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset, viewer?: PhoneActor): Promise<FeeListPage> {
   const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId } = query
 
   const range = feeRangePredicate(query)
@@ -450,7 +455,10 @@ export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<s
   }
 
   if (search && search.trim()) {
-    conditions.push('(f.label LIKE @search OR f.notes LIKE @search OR f.fee_type LIKE @search)')
+    // A label or note that is a number shows masked to an account without the full-phone permission, so it reads as empty here.
+    const [{ phoneSearchAccessOf }, { searchableColumnSql }] = await Promise.all([import('../lib/phoneAccess'), import('../lib/phoneSearchGuard')])
+    const access = phoneSearchAccessOf(viewer)
+    conditions.push(`(${searchableColumnSql('f.label', access)} LIKE @search OR ${searchableColumnSql('f.notes', access)} LIKE @search OR f.fee_type LIKE @search)`)
     params.search = `%${search.trim()}%`
   }
   if (feeType && feeType.trim() && feeType !== 'all') {
@@ -508,7 +516,7 @@ app.get('/', async (c) => {
   const offset = Math.max(toNumber(query.offset, 0), 0)
   let page: FeeListPage
   try {
-    page = await queryFeeList(getDb(c.env), query, limit, offset)
+    page = await queryFeeList(getDb(c.env), query, limit, offset, undefined, c.get('user'))
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     throw error
@@ -697,6 +705,9 @@ app.post('/', async (c) => {
     }
     return c.json(feeOperationReceiptResponse(priorReceipt))
   }
+  // An expense is paid out of the drawer: its riel is whole 100-riel notes (owner, 27 Oct 2026). Asked after the receipt
+  // lookup, so a request committed before the rule still replays its receipt.
+  if (!rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
 
   let saleId: number | null
   let branchId: number
@@ -827,6 +838,8 @@ app.put('/:id', async (c) => {
   } catch {
     return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
   }
+  // Only a riel amount this edit changes is asked; one stored before the rule is kept as it is.
+  if (amountKhr !== Number(existing.amount_khr) && !rielCashAmountValid(amountKhr)) return c.json(FEE_RIEL_CASH_REFUSAL, 400)
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
   let saleId: number | null
   let branchId: number

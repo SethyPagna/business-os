@@ -20,7 +20,8 @@ const SAMPLE = [
 ]
 // Their SQL list depends on which cache versions the run has already read (date and order), so only OFF versus ON is compared.
 const NOT_REPLAYABLE = new Set(['sales-list-today', 'sales-stats-today', 'dashboard-startup-today'])
-const RESTART_VOLATILE = new Set(['/bootedAt'])
+// /summary/stock_as_of (TIME-1, 6.0.1252) is the instant the Dashboard stock figures were computed: a run that computes them and one that is served a copy differ by it, whatever the switches.
+const RESTART_VOLATILE = new Set(['/bootedAt', '/summary/stock_as_of'])
 const FINGERPRINTS = path.join(__dirname, 'read-budget', 'fingerprints')
 
 function leaves(value, prefix = '', out = new Map()) {
@@ -61,6 +62,10 @@ async function main() {
   let compared = 0
   try {
     await prepareWorld(world)
+    // The recorded lists are those of a request that finds the flags memo cold (the first read of a fresh isolate pays the one flags statement, in auth-bootstrap).
+    // prepareWorld now sends Inventory Check requests, which read their switches and warm that memo for 15 s, so the comparison starts on a fresh isolate, as it does in production.
+    await world.restart()
+    await world.login()
     const shapes = getShapes(world.ctx).filter((s) => SAMPLE.includes(s.id))
     if (shapes.length !== SAMPLE.length) reds.push(`the sample names ${SAMPLE.length} shapes, ${shapes.length} exist: ${SAMPLE.filter((id) => !shapes.some((s) => s.id === id)).join(', ')}`)
     const urls = new Map()

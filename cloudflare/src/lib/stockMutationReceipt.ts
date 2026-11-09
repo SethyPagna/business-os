@@ -93,6 +93,36 @@ import { executeStockTransaction, stockTransactionStatementCount, StockTransacti
 /** Long enough that a truncated or hand-typed value cannot collide by accident. */
 const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 
+// A stock line written for a counts approval (ic_fix_stock) names the claim it is written under: `approvalClaim: { sessionId, key }`, the key being the stock request key the
+// approval is applying under; the claiming approver is the acting user. The stock commits only while that claim is still the writer's own. The check rides INSIDE the batch
+// that writes the stock -- in this receipt's written mark, so it costs no statement -- which makes a takeover or a close by another approver and the original write strictly
+// ordered: whichever commits first wins and the other writes nothing. A write that has lost its claim is rolled back whole, its receipt is released, and the answer is 409.
+// Nothing here grants anything: a request that carries a claim it does not hold simply writes nothing. Kept in this module (no import) because tests load it with stub maps.
+type ApprovalClaim = { sessionId: string; key: string }
+
+export const APPROVAL_CLAIM_LOST = 'inventory_check_claim_lost'
+
+const APPROVAL_CLAIM_LOST_BODY = {
+  code: APPROVAL_CLAIM_LOST,
+  error: 'This count was taken over or closed by another approver, so nothing was written for this line. Reload the count.',
+}
+
+const APPROVAL_CLAIM_INVALID = { error: 'approvalClaim is not valid.', code: 'invalid_approval_claim' }
+
+/** True while the approval is pending and still claimed by this request key and this acting user (@actor is the receipt's own parameter). */
+export const APPROVAL_CLAIM_HELD_SQL = `EXISTS(SELECT 1 FROM inventory_check_approvals WHERE session_id=@claimSession AND status='pending' AND applying_request_id=@claimKey AND applying_by=@actor)`
+
+const approvalClaimParams = (claim: ApprovalClaim): Record<string, string> => ({ claimSession: claim.sessionId, claimKey: claim.key })
+
+/** undefined: the request carries no claim. null: it carries a malformed one (refused before anything is claimed). Otherwise the claim. */
+function approvalClaimOf(body: Record<string, unknown>): ApprovalClaim | null | undefined {
+  const value = body.approvalClaim
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const { sessionId, key } = value as Record<string, unknown>
+  return typeof sessionId === 'string' && sessionId.length > 0 && sessionId.length <= 120 && typeof key === 'string' && STOCK_MUTATION_REQUEST_ID.test(key) ? { sessionId, key } : null
+}
+
 /** A claim younger than this is treated as a request that is still running. */
 const STOCK_MUTATION_STALE_SECONDS = 120
 
@@ -116,6 +146,12 @@ export type StockMutationAtomicMark = {
   /** Execute a full statement plan once with this marker, then confirm commit. */
   execute?(db: D1Compat, statements: StockWriteStatement[]): Promise<void>
   admit?(statements: number): void
+  /**
+   * True when the wrapper answers this error itself, so a kernel must rethrow it untouched instead of turning it into its own refusal: the request ran out of its invocation's statements
+   * before the batch was sent (503, nothing written, the receipt released; a stock-in commit then answers the line 'deferred'), or the write belonged to a counts approval that was taken
+   * over or closed first (409, the batch rolled back whole).
+   */
+  answered?(error: unknown): boolean
 }
 
 const NO_ATOMIC_MARK: StockMutationAtomicMark = { statement: () => null, committed: () => {} }
@@ -355,27 +391,33 @@ async function claimStockMutation(
   return { state: 'claimed' }
 }
 
-/** Abort the whole transaction if another attempt already used or replaced its receipt. */
-const MARK_STOCK_MUTATION_WRITTEN_SQL =
-  `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written)
-   VALUES(@actor,@request,@kind,@canonical,json_extract('1',CASE WHEN EXISTS(
+/**
+ * What the written mark asserts, evaluated inside the physical transaction: the receipt is still this attempt's own and unwritten, and, for a line written under a counts
+ * approval, the approval is still claimed by this approver (see the approvalClaim note above). Anything else is a bad JSON path, which aborts and rolls back the whole batch.
+ * The claim rides in the same statement, so a claimed write costs no statement more than an unclaimed one.
+ */
+const ASSERT_UNWRITTEN_SQL = (claimed: boolean) => `json_extract('1',CASE WHEN EXISTS(
      SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request
        AND kind=@kind AND request_json=@canonical AND written=0 AND completed_at IS NULL
-   ) THEN '$' ELSE 'stock_request_claim_lost' END))
+   ) THEN ${claimed ? `CASE WHEN ${APPROVAL_CLAIM_HELD_SQL} THEN '$' ELSE '${APPROVAL_CLAIM_LOST}' END` : "'$'"} ELSE 'stock_request_claim_lost' END)`
+
+/** Abort the whole transaction if another attempt already used or replaced its receipt. */
+const markWrittenSql = (claimed: boolean) =>
+  `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written)
+   VALUES(@actor,@request,@kind,@canonical,${ASSERT_UNWRITTEN_SQL(claimed)})
    ON CONFLICT(actor_id,request_id) DO UPDATE SET written=excluded.written`
+const MARK_STOCK_MUTATION_WRITTEN_SQL = markWrittenSql(false)
 
 /** The written mark plus the final answer, in one statement: the receipt completes with the stock it describes. */
-const MARK_STOCK_MUTATION_COMPLETED_SQL =
+const markCompletedSql = (claimed: boolean) =>
   `INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at)
-   VALUES(@actor,@request,@kind,@canonical,json_extract('1',CASE WHEN EXISTS(
-     SELECT 1 FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request
-       AND kind=@kind AND request_json=@canonical AND written=0 AND completed_at IS NULL
-   ) THEN '$' ELSE 'stock_request_claim_lost' END),@status,@response,CURRENT_TIMESTAMP)
+   VALUES(@actor,@request,@kind,@canonical,${ASSERT_UNWRITTEN_SQL(claimed)},@status,@response,CURRENT_TIMESTAMP)
    ON CONFLICT(actor_id,request_id) DO UPDATE SET written=excluded.written,response_status=excluded.response_status,
      response_json=excluded.response_json,completed_at=excluded.completed_at`
+const MARK_STOCK_MUTATION_COMPLETED_SQL = markCompletedSql(false)
 
-async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string, kind: StockMutationKind, canonical: string): Promise<void> {
-  await db.prepare(MARK_STOCK_MUTATION_WRITTEN_SQL).run({ actor: actorId, request: requestId, kind, canonical })
+async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string, kind: StockMutationKind, canonical: string, claim?: ApprovalClaim): Promise<void> {
+  await db.prepare(markWrittenSql(Boolean(claim))).run({ actor: actorId, request: requestId, kind, canonical, ...(claim ? approvalClaimParams(claim) : {}) })
 }
 
 async function completeStockMutation(
@@ -453,6 +495,8 @@ export async function withStockMutationReceipt(
     if (options.requireReceipt) return json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
     return run(async () => {}, NO_ATOMIC_MARK)
   }
+  const approvalClaim = approvalClaimOf(body)
+  if (approvalClaim === null) return json(APPROVAL_CLAIM_INVALID, 400)
   if (actorId == null) return options.requireReceipt ? json(STOCK_RECEIPT_UNAVAILABLE, 503) : run(async () => {}, NO_ATOMIC_MARK)
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
@@ -480,21 +524,25 @@ export async function withStockMutationReceipt(
   }
   const markWritten = async () => {
     if (wrote) return
-    await markStockMutationWritten(db, actorId, requestId, kind, canonical)
+    await markStockMutationWritten(db, actorId, requestId, kind, canonical, approvalClaim)
     wrote = true
   }
+  const claimed = approvalClaim ? approvalClaimParams(approvalClaim) : {}
   const atomicMark: StockMutationAtomicMark = {
-    statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical } }),
-    completedStatement: (outcome) => (wrote ? null : { sql: MARK_STOCK_MUTATION_COMPLETED_SQL,
-      params: { actor: actorId, request: requestId, kind, canonical, status: outcome.status, response: JSON.stringify(outcome.body) } }),
+    statement: () => (wrote ? null : { sql: approvalClaim ? markWrittenSql(true) : MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId, kind, canonical, ...claimed } }),
+    completedStatement: (outcome) => (wrote ? null : { sql: approvalClaim ? markCompletedSql(true) : MARK_STOCK_MUTATION_COMPLETED_SQL,
+      params: { actor: actorId, request: requestId, kind, canonical, status: outcome.status, response: JSON.stringify(outcome.body), ...claimed } }),
     committed: () => { wrote = true },
     execute: (db, statements) => executeStockMutationBatch(db, statements, atomicMark),
     admit,
+    answered: (error) => error instanceof StockMutationBudgetError || String(error).includes(APPROVAL_CLAIM_LOST),
   }
   let response: Response
   try {
     response = await run(markWritten, atomicMark)
   } catch (error) {
+    // The approval was taken over or closed first: the batch rolled back whole, nothing was written, and the receipt this attempt made is released.
+    if (String(error).includes(APPROVAL_CLAIM_LOST)) { await releaseStockMutation(db, actorId, requestId).catch(() => {}); return json(APPROVAL_CLAIM_LOST_BODY, 409) }
     if (String(error).includes('stock_request_claim_lost')) return json(STOCK_MUTATION_IN_FLIGHT, 409)
     if (!wrote && error instanceof StockTransactionUnavailableError) {
       await releaseStockMutation(db, actorId, requestId)
@@ -515,6 +563,7 @@ export async function withStockMutationReceipt(
   }
   if (response.status < 200 || response.status >= 300) {
     const failure = await response.clone().json().catch(() => ({})) as Record<string, unknown>
+    if (String(failure.error || '').includes(APPROVAL_CLAIM_LOST)) { await releaseStockMutation(db, actorId, requestId).catch(() => {}); return json(APPROVAL_CLAIM_LOST_BODY, 409) }
     if (String(failure.error || '').includes('stock_request_claim_lost')) return json(STOCK_MUTATION_IN_FLIGHT, 409)
     const rolledBack = failure.code === 'stock_schema_unavailable'
       || /constraint failed|malformed JSON|bad JSON path|no such (table|column|function)|syntax error|datatype mismatch|too many SQL variables/i.test(String(failure.error || ''))

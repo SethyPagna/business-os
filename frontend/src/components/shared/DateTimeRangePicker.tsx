@@ -11,7 +11,7 @@ import AppSelect from './AppSelect'
 import ChipRail, { RailChip } from './kit/ChipRail.tsx'
 import DateEntryInput, { TimeEntryInput } from './DateEntryInput.tsx'
 import { useDialogKeyboard } from './useDialogKeyboard.ts'
-import { fmtDateOnly } from '../../utils/formatters.ts'
+import { rangeTriggerEndpoints, type TriggerEndpoint } from './dateRangeTriggerText.ts'
 import { activeStatsPreset, statsPresetRange, STATS_PRESETS, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
@@ -27,8 +27,11 @@ import { activeStatsPreset, statsPresetRange, STATS_PRESETS, type StatsPresetKey
 //
 // The trigger pill never spells out the words "Start Date"/"End Date"
 // (user, Aug 31): it always reads DD/MM/YYYY → DD/MM/YYYY -- the literal
-// display format as a placeholder when empty, the real dates once picked --
-// while times remain editable inside the panel, never on the trigger.
+// display format as a placeholder when empty, the real dates once picked.
+// A surface that filters by time (`showTime`) shows each endpoint's own
+// 24-hour time beside its date on the same line (DD/MM/YYYY HH:MM → ...), so
+// the button always says which hours it covers; times are still edited inside
+// the panel. See dateRangeTriggerText.ts.
 //
 // Times are entered and shown in 24-hour HH:MM on purpose. The native
 // <input type="time"> was dropped because it renders 12-hour AM/PM under the
@@ -350,11 +353,13 @@ export default function DateTimeRangePicker({
 
   // Trigger labels: always the literal DD/MM/YYYY format -- as a placeholder
   // when a side is empty, as the real date once picked -- never the words
-  // "Start Date"/"End Date" (user, Aug 31). Times stay inside the picker;
-  // hiding them here must not clear or change the caller's time filters.
-  const startTriggerDate = value.startDate ? fmtDateOnly(value.startDate) : 'DD/MM/YYYY'
-  const endTriggerDate = value.endDate ? fmtDateOnly(value.endDate) : 'DD/MM/YYYY'
-  // Both date endpoints stay on one line each, without a time suffix.
+  // "Start Date"/"End Date" (user, Aug 31). With `showTime` each side also
+  // carries its own 24-hour HH:MM (a blank side reads as the day's edge), so
+  // the button shows the time scope the page is actually filtering by.
+  const triggerEndpoints = rangeTriggerEndpoints(value, showTime)
+  // Each endpoint stays on ONE line, date and time together -- never stacked
+  // (user, Sep 15: "i want them same compact one row"). When it is tight the
+  // answer is a smaller font or less padding, never a wrap or a hidden time.
   //
   // P9 (Sep 16 2026), owner verbatim: "the date start and date end are not
   // responsive in the button row. too small and out of bounds." The floor
@@ -364,10 +369,14 @@ export default function DateTimeRangePicker({
   // the text kept its viewport-sized floor and spilled past the box edge.
   // Floor is now 11px everywhere (never below, per the rule), and
   // `overflow-hidden` below is the hard guard: text can never paint outside
-  // the row even if a future host still under-sizes the box.
-  const triggerEndpoint = (date: string) => (
-    <span className={`inline-flex min-w-0 items-baseline justify-center gap-1 whitespace-nowrap tabular-nums leading-none overflow-hidden ${compactTriggerLabels ? 'text-[clamp(11px,2.75vw,12px)]' : 'text-[clamp(11px,3vw,14px)]'}`}>
+  // the row even if a future host still under-sizes the box. With `showTime`
+  // the root below also asks for its own max-content width (`min-w-max`), so
+  // a wrapping host moves its neighbouring buttons down before it would ever
+  // squeeze a time out of the box -- measured from the real text, in any font.
+  const triggerEndpoint = ({ date, time }: TriggerEndpoint) => (
+    <span className={`inline-flex min-w-0 items-baseline justify-center ${time ? 'gap-0.5 tracking-tight' : 'gap-1'} whitespace-nowrap tabular-nums leading-none overflow-hidden ${compactTriggerLabels ? 'text-[clamp(11px,2.75vw,12px)]' : 'text-[clamp(11px,3vw,14px)]'}`}>
       <span>{date}</span>
+      {time ? <span className="font-medium opacity-80">{time}</span> : null}
     </span>
   )
 
@@ -422,7 +431,7 @@ export default function DateTimeRangePicker({
   }
 
   return (
-    <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`}>
+    <div ref={rootRef} className={`relative max-w-full ${showTime ? 'min-w-max' : 'min-w-0'} ${className}`}>
       {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
           -- the user asked for LARGER dates on the OUTSIDE pill specifically
           (Aug 30), while the panel inside stays compact.
@@ -449,10 +458,14 @@ export default function DateTimeRangePicker({
         aria-label={t('date_time_range') || 'Date and time range'}
       >
         {showCalendarIcon && <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />}
-        <span className={`grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 overflow-hidden ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
-          {triggerEndpoint(startTriggerDate)}
-          <ArrowRight className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
-          {triggerEndpoint(endTriggerDate)}
+        {/* With a time on the button the track is `[display:grid]`, not `grid`:
+            below 768px main.css forces `.grid { gap: .75rem !important }`,
+            which would add 16px of air around the arrow and push the time out
+            of a tight row. The date-only track keeps its existing look. */}
+        <span className={`${showTime ? '[display:grid] gap-0.5' : 'grid gap-1'} min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center overflow-hidden ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`} data-date-range-trigger-values>
+          {triggerEndpoint(triggerEndpoints.start)}
+          <ArrowRight className={`${showTime ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-blue-500 dark:text-blue-400`} strokeWidth={2.5} aria-hidden="true" />
+          {triggerEndpoint(triggerEndpoints.end)}
         </span>
       </button>
 

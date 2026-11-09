@@ -6,10 +6,13 @@ import { launchResolveFixture } from './resolveBrowserFixture.ts'
 // row to row and with the header; a count typed on the sheet saves or opens the editor; the editor has a stepper, the difference and
 // reason chips; a scan request rings and focuses one row. At 360px (English and Khmer) nothing scrolls sideways and every row button
 // is 44px. Rows are mounted straight from the component with a stateful fake of the page's save, so what is measured is the rows.
+// The columns are the owner's (1 Nov 2026): product, stock now (damaged as a chip beside it), start, count in a session; status, counted quantity and
+// last checked in the list (mode=list: its own rows, a check box before each image, the count typed in the row, one selection bar). Price, cost, sold and customers no longer exist anywhere.
 const fixture = String.raw`
   import React, { useState } from 'react'
   import { createRoot } from 'react-dom/client'
   import * as RowsModule from '/src/components/inventory/InventoryCheckRows.tsx'
+  import * as ListModule from '/src/components/inventory/InventoryCheckListRows.tsx'
   import { offsetDate } from '/src/utils/dateHelpers.ts'
   import en from '/src/lang/en.json'
   import km from '/src/lang/km.json'
@@ -18,7 +21,7 @@ const fixture = String.raw`
   const params = new URLSearchParams(location.search)
   const language = params.get('lang') || 'en'
   const sidebar = Number(params.get('sidebar') || 0)
-  const showCost = params.get('cost') !== '0'
+  const list = params.get('mode') === 'list'
   const showStock = params.get('stock') !== '0'
   const editable = params.get('check') !== '0'
   const external = params.get('header') === 'external'
@@ -28,18 +31,18 @@ const fixture = String.raw`
   const khmer = language === 'km'
   const longName = khmer ? 'ទឹកអប់ក្លិនផ្កាម្លិះធម្មជាតិ ១០០មីលីលីត្រ ផលិតផលសាកល្បងឈ្មោះវែងបំផុត' : 'Synthetic long product name for the narrow phone layout check 100ml'
   const reasons = khmer ? ['ខូច', 'បាត់', 'ផុតកំណត់', 'ខូច', 'បាកូដខុស', 'ហូរ', 'ប្រអប់រហែក', 'ជិតផុត', 'ផ្សេងៗ', 'ទីប្រាំបួន'] : ['Damaged', 'Missing', 'Expired', 'damaged', 'Wrong barcode', 'Leaking', 'Torn box', 'Short dated', 'Other', 'Ninth']
-  const base = (id, name, extra = {}) => ({ id, name, barcode: '88500011122' + String(id).padStart(2, '0'), brand: khmer ? 'ម៉ាកសាកល្បង' : 'Synthetic brand', category: khmer ? 'ប្រភេទ' : 'Category', quantity: 10, unit: khmer ? 'ដប' : 'pcs', damaged_quantity: 0, qty_sold: 4, customer_count: 3, selling_price_usd: 4.5, cost_price_usd: 2.1, ...extra })
+  const base = (id, name, extra = {}) => ({ id, name, barcode: '88500011122' + String(id).padStart(2, '0'), brand: khmer ? 'ម៉ាកសាកល្បង' : 'Synthetic brand', category: khmer ? 'ប្រភេទ' : 'Category', quantity: 10, unit: khmer ? 'ដប' : 'pcs', damaged_quantity: 0, ...extra })
   const products = [
     base(1, 'Garnier Micellar 400ml', { quantity: 10 }),
-    base(2, longName, { quantity: 12, damaged_quantity: 1, qty_sold: 120, customer_count: 31 }),
+    base(2, longName, { quantity: 12, damaged_quantity: 1 }),
     base(3, 'Short', { quantity: 10, stock_consistent: false, unit: khmer ? 'កញ្ចប់ធំបំផុត' : 'bottles' }),
     base(4, 'Expired lot', { quantity: 5, next_expiry_date: '2001-01-31' }),
     base(5, 'Soon lot', { quantity: 1234, next_expiry_date: offsetDate(10) }),
-    base(6, 'Far lot', { quantity: 7, next_expiry_date: '2099-03-15', selling_price_usd: 1234.5678 }),
-    base(7, 'Under review', { quantity: 0, cost_needs_review: true, unit: null }),
+    base(6, 'Far lot', { quantity: 7, next_expiry_date: '2099-03-15' }),
+    base(7, 'Under review', { quantity: 0, unit: null }),
     base(8, 'Done row', { quantity: 10 }),
-    base(9, 'Issue row', { quantity: 10, selling_price_usd: null, cost_price_usd: null }),
-    base(10, 'No sales row', { quantity: 3, qty_sold: null, customer_count: null }),
+    base(9, 'Issue row', { quantity: 10 }),
+    base(10, 'Small stock row', { quantity: 3 }),
     base(11, 'Row eleven', { quantity: 8 }),
     base(12, 'Row twelve', { quantity: 9 }),
     base(13, 'Row thirteen', { quantity: 9 }),
@@ -48,6 +51,12 @@ const fixture = String.raw`
     base(21, 'Family small', { parent_id: 20, quantity: 8 }),
     base(22, 'Family large', { parent_id: 20, quantity: 12 }),
   ]
+  const listFacts = {
+    1: { check_status: 'ok', check_counted_quantity: 10, check_by: 'amy', check_at: '2026-10-30 08:15:00' },
+    2: { check_status: 'issue', check_counted_quantity: 9, check_note: khmer ? 'ធ្លាក់ពីធ្នើ' : 'Fell off the shelf', check_by: 'ben', check_at: '2026-10-31 09:00:00' },
+    3: { check_status: 'in_check' },
+  }
+  const listProducts = products.map(product => ({ ...product, check_status: 'not_checked', ...(listFacts[product.id] ?? {}) }))
   const startState = (product) => ({ product_id: product.id, state: 'unstarted', counted_quantity: null, reason: null, revision: 0, baseline_quantity: product.quantity, current_quantity: product.quantity, stock_changed: false })
   const initial = Object.fromEntries(products.filter(product => product.id !== 20).map(product => [product.id, startState(product)]))
   initial[2] = { ...initial[2], baseline_quantity: 14, stock_changed: true }
@@ -66,16 +75,41 @@ const fixture = String.raw`
       if (window.__refuse === 'requires_issue') { window.__refuse = ''; throw Object.assign(new Error('refused'), { code: 'inventory_check_count_requires_issue', status: 409 }) }
       setObservations(previous => ({ ...previous, [id]: { ...previous[id], state: patch.state, ...(Object.hasOwn(patch, 'counted_quantity') ? { counted_quantity: patch.counted_quantity } : {}), reason: patch.reason ?? null, revision: previous[id].revision + 1 } }))
     }
-    const flags = { canCheck: editable, canViewStock: showStock, canViewCounts: true, canViewPrice: true, canViewCost: showCost, canViewSales: true, canViewCustomers: true }
+    const flags = { canCheck: editable, canViewStock: showStock, canViewCounts: true }
     return <>
       {external ? <InventoryCheckSheetHeader {...flags} inSession t={t} /> : null}
       <InventoryCheckRows products={products} observations={observations} sheetHeader={external ? 'external' : 'inline'} {...flags} t={t}
         reasonSuggestions={reasons} focusRequest={focusRequest} onOpenProduct={() => {}} onSave={onSave} />
     </>
   }
+  // The list: what the page does with the list rows, kept small so what is measured is the rows and the bar.
+  function ListFixture() {
+    const [drafts, setDrafts] = useState({})
+    const [focusRequest, setFocusRequest] = useState(undefined)
+    window.__scan = (id, target) => setFocusRequest({ id, token: String(Math.random()), target })
+    window.__drafts = drafts
+    const patch = (product, change) => setDrafts(previous => {
+      const current = previous[String(product.id)] ?? { selected: false, count: '', checked: false, note: '' }
+      return { ...previous, [String(product.id)]: { ...current, ...change(current) } }
+    })
+    const selectable = listProducts.filter(product => !product.is_group)
+    const selectedCount = Object.values(drafts).filter(draft => draft.selected).length
+    const onPage = selectable.filter(product => drafts[String(product.id)]?.selected).length
+    return <>
+      {editable ? <ListModule.InventoryCheckSelectionBar pageState={onPage === 0 ? 'none' : onPage === selectable.length ? 'all' : 'some'} selectedCount={selectedCount} blocked="" busy={false} canMarkChecked={showStock}
+        onTogglePage={() => setDrafts(Object.fromEntries(selectable.map(product => [String(product.id), { selected: onPage !== selectable.length, count: '', checked: false, note: '' }])))}
+        onMarkChecked={() => {}} onClear={() => setDrafts({})} onSubmit={() => { window.__submitted = (window.__submitted || 0) + 1 }} t={t} /> : null}
+      <ListModule.InventoryCheckListHeader selecting={editable} canViewStock={showStock} canViewCounts={showStock} t={t} />
+      <ListModule.default products={listProducts} drafts={drafts} selecting={editable} canViewStock={showStock} canViewCounts={showStock} focusRequest={focusRequest} t={t} onOpenProduct={() => {}}
+        onToggle={(product, selected) => patch(product, () => ({ selected }))}
+        onCount={(product, value) => patch(product, current => ({ count: value, checked: false, selected: value.trim() !== '' ? true : current.selected }))}
+        onChecked={product => patch(product, () => ({ count: String(product.quantity), checked: true, selected: true }))}
+        onNote={(product, value) => patch(product, () => ({ note: value }))} />
+    </>
+  }
   createRoot(document.getElementById('root')).render(<div style={{ display: 'flex', height: '100vh' }}>
     {sidebar ? <aside style={{ width: sidebar, flex: 'none', background: '#e5e7eb' }} /> : null}
-    <div className="page-scroll min-w-0 flex-1 p-3" data-fixture-scroller><Fixture /></div>
+    <div className="page-scroll min-w-0 flex-1 p-3" data-fixture-scroller>{list ? <ListFixture /> : <Fixture />}</div>
   </div>)
 `
 
@@ -94,13 +128,13 @@ const noSidewaysScroll = async (label: string) => {
   assert.ok(measured.document <= 0 && measured.scroller <= 0 && measured.rows <= 1, `${label}: no sideways scroll (${JSON.stringify(measured)})`)
 }
 
-await browser.run('PASS Inventory count sheet: aligned columns, count entry, editor, scan focus and 44px phone rows in English and Khmer', async () => {
+await browser.run('PASS Inventory count sheet and list: aligned columns, count entry, editor, scan focus, selection bar and 44px phone rows in English and Khmer', async () => {
   // ---- 1280px beside the 220px sidebar: every column on the sheet ---------------------------------------------------------
   // The first load pays Vite's cold transform of the whole row tree; on a busy machine that can outlast open()'s wait, and the retry is warm.
   await browser.open(1280, 'lang=en&sidebar=220', ready, 760).catch(() => browser.open(1280, 'lang=en&sidebar=220', ready, 760))
   await noSidewaysScroll('1280 sheet')
   const columns: Record<string, number[]> = {}
-  for (const field of ['now', 'start', 'damaged', 'price', 'cost', 'sold', 'customers', 'count-input']) columns[field] = await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)
+  for (const field of ['now', 'start', 'count-input']) columns[field] = await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)
   columns.actions = await lefts('[data-inventory-check-row] [data-check-actions]')
   for (const [field, xs] of Object.entries(columns)) {
     assert.ok(xs.length >= 10, `${field}: drawn on every row, empty cells included (${xs.length})`)
@@ -108,9 +142,12 @@ await browser.run('PASS Inventory count sheet: aligned columns, count entry, edi
     assert.equal(new Set(xs).size, 1, `${field}: every row starts the cell at the same x (${[...new Set(xs)].join(', ')})`)
   }
   const headerLefts = await browser.evaluate<number[]>(`Array.from(document.querySelector('[data-inventory-check-sheet-header]').children, node => Math.round(node.getBoundingClientRect().left * 10) / 10)`)
-  assert.deepEqual(headerLefts.slice(1, 10), [columns.now[0], columns.start[0], columns.damaged[0], columns.price[0], columns.cost[0], columns.sold[0], columns.customers[0], columns['count-input'][0], columns.actions[0]], 'the header titles sit over the cells they name')
-  assert.deepEqual(await browser.evaluate('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => node.textContent).slice(1, 9)'), ['Now', 'Start', 'Damaged', 'Price', 'Cost', 'Sold', 'Cust', 'Count'])
+  assert.deepEqual(headerLefts.slice(1, 5), [columns.now[0], columns.start[0], columns['count-input'][0], columns.actions[0]], 'the header titles sit over the cells they name')
+  assert.deepEqual(await browser.evaluate('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => node.textContent)'), ['Product', 'Now', 'Start', 'Count', ''], 'the owner’s session columns, nothing about money or sales')
   assert.equal(await browser.evaluate('document.querySelectorAll("[data-inventory-check-sheet-header]").length'), 1, 'one inline header over a list of several products')
+  // Damage is a chip beside Now on the one row that has it, and the cell still holds it.
+  assert.deepEqual(await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-damaged]'), node => node.textContent + '|' + node.closest('[data-cell]').dataset.cell + '|' + node.closest('[data-inventory-check-row]').dataset.inventoryCheckRow)`), ['Damaged 1|now|2'])
+  assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('[data-inventory-check-row] [data-cell="now"]')).filter(node => node.scrollWidth > node.clientWidth + 1).length`), 0, 'the damaged chip fits inside the Now cell')
   // On the sheet a title is the column header, not a label beside every figure.
   assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('${row(1)} [data-cell="now"] > span:first-child > span')).position`), 'absolute', 'row titles are screen-reader only on the sheet')
 
@@ -210,15 +247,13 @@ await browser.run('PASS Inventory count sheet: aligned columns, count entry, edi
   assert.equal(await inView(1), true)
   await waitFor('ring fades', `document.querySelector('[data-scan-hit]') === null`)
 
-  // ---- 1280px, no cost right: the Cost cell and title do not exist --------------------------------------------------------
-  await browser.open(1280, 'lang=en&sidebar=220&cost=0', ready, 760)
-  assert.equal(await browser.evaluate(`document.querySelectorAll('[data-cell="cost"]').length`), 0, 'no cost cells without the cost right')
-  assert.equal(await browser.evaluate(`document.querySelector('[data-fixture-scroller]').textContent.includes('Cost')`), false, 'no Cost text, in a row or in the header')
-  assert.equal(await browser.evaluate(`document.querySelector('[data-fixture-scroller]').textContent.includes('2.1000')`), false)
-  await noSidewaysScroll('1280 without cost')
+  // ---- Nothing about money or sales exists on the sheet ---------------------------------------------------------------------
+  for (const field of ['price', 'cost', 'sold', 'customers', 'damaged']) assert.equal(await browser.evaluate(`document.querySelectorAll('[data-cell="${field}"]').length`), 0, `no ${field} cell`)
+  assert.equal(await browser.evaluate(`/Price|Cost|Sold|Cust|4\\.5|2\\.1/.test(document.querySelector('[data-fixture-scroller]').textContent)`), false, 'no price, cost, sold or customer figure or title')
   // Stock hidden: blind counting keeps its editor and drops the Count input, Now, Start and Damaged.
   await browser.open(1280, 'lang=en&sidebar=220&stock=0', ready, 760)
-  for (const field of ['now', 'start', 'damaged', 'count-input']) assert.equal(await browser.evaluate(`document.querySelectorAll('[data-cell="${field}"]').length`), 0, `blind: no ${field} cell`)
+  for (const field of ['now', 'start', 'count-input']) assert.equal(await browser.evaluate(`document.querySelectorAll('[data-cell="${field}"]').length`), 0, `blind: no ${field} cell`)
+  assert.equal(await browser.evaluate(`document.querySelectorAll('[data-damaged]').length`), 0, 'blind: no damaged chip either')
   await browser.mouseClick(`${row(1)} [data-check-action="issue"]`)
   await waitFor('blind editor', `!!document.querySelector('${row(1)} [data-inventory-check-editor]')`)
   assert.equal(await browser.evaluate(`document.querySelector('#inventory-check-count-1').value`), '', 'a blind counter starts from nothing')
@@ -228,14 +263,15 @@ await browser.run('PASS Inventory count sheet: aligned columns, count entry, edi
   // ---- 1024px beside the sidebar: the columns that fit, still aligned, no sideways scroll ---------------------------------------
   await browser.open(1024, 'lang=en&sidebar=220', ready, 760)
   await noSidewaysScroll('1024 sheet')
-  for (const field of ['damaged', 'sold', 'customers']) assert.equal((await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)).length, 0, `${field} waits for 1280px`)
-  for (const field of ['now', 'start', 'price', 'cost', 'count-input']) assert.equal(new Set(await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)).size, 1, `${field} lines up at 1024px`)
-  assert.equal(await browser.evaluate(`Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(${visible}).length`), 7, 'the header shows product, Now, Start, Price, Cost, Count and the actions cell')
+  for (const field of ['now', 'start', 'count-input']) assert.equal(new Set(await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)).size, 1, `${field} lines up at 1024px`)
+  assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('[data-inventory-check-row] [data-cell="now"]')).filter(node => node.scrollWidth > node.clientWidth + 1).length`), 0, 'the damaged chip fits inside the Now cell at 1024px')
+  assert.equal(await browser.evaluate(`Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(${visible}).length`), 5, 'the header shows product, Now, Start, Count and the actions cell')
 
   // ---- 1280px in Khmer: the same columns, titles that fit their cells, glyphs with room ------------------------------------
   await browser.open(1280, 'lang=km&sidebar=220', ready, 760)
   await noSidewaysScroll('km 1280 sheet')
-  for (const field of ['now', 'start', 'price', 'cost', 'count-input']) assert.equal(new Set(await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)).size, 1, `km: ${field} lines up beside a long Khmer unit and name`)
+  for (const field of ['now', 'start', 'count-input']) assert.equal(new Set(await lefts(`[data-inventory-check-row] [data-cell="${field}"]`)).size, 1, `km: ${field} lines up beside a long Khmer unit and name`)
+  assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('[data-inventory-check-row] [data-cell="now"]')).filter(node => node.scrollWidth > node.clientWidth + 1).length`), 0, 'km: the damaged chip fits inside the Now cell')
   const clippedTitles = await browser.evaluate<string[]>(`Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent)`)
   assert.deepEqual(clippedTitles, [], 'km: every column title fits its column')
   await browser.khmerRoom('1280px count sheet', '[data-fixture-scroller]', 12)
@@ -243,6 +279,87 @@ await browser.run('PASS Inventory count sheet: aligned columns, count entry, edi
   // ---- An external header is the page's to mount: the list draws none -------------------------------------------------------
   await browser.open(1280, 'lang=en&sidebar=220&header=external', ready, 760)
   assert.equal(await browser.evaluate(`document.querySelectorAll('[data-inventory-check-sheet-header]').length`), 1, 'only the page-mounted header')
+
+  // ---- The list: the owner's columns, a check box before each image, counts typed in the rows, one selection bar -----------------
+  await browser.open(1280, 'lang=en&sidebar=220&mode=list', ready, 760)
+  await noSidewaysScroll('1280 list')
+  const listColumns: Record<string, number[]> = {}
+  for (const field of ['now', 'status', 'counted', 'count-input', 'last']) listColumns[field] = await lefts('[data-inventory-check-row] [data-cell="' + field + '"]')
+  for (const [field, xs] of Object.entries(listColumns)) {
+    assert.ok(xs.length >= 10, 'list ' + field + ': drawn on every row, empty cells included (' + xs.length + ')')
+    assert.equal(new Set(xs).size, 1, 'list ' + field + ': every row starts the cell at the same x (' + [...new Set(xs)].join(', ') + ')')
+  }
+  assert.deepEqual(await browser.evaluate('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => node.textContent)'), ['', '', 'Product', 'Now', 'Status', 'Counted', 'Count', 'Last checked'], 'the owner’s list columns, after the check box and image cells')
+  assert.deepEqual(await browser.evaluate<number[]>('Array.from(document.querySelector("[data-inventory-check-sheet-header]").children, node => Math.round(node.getBoundingClientRect().left * 10) / 10)').then(xs => xs.slice(3)), [listColumns.now[0], listColumns.status[0], listColumns.counted[0], listColumns['count-input'][0], listColumns.last[0]], 'and each title sits over its cells')
+  const nameLeft = await browser.evaluate<number>('Math.round(document.querySelector("[data-inventory-check-row=\\"1\\"] [data-check-image]").getBoundingClientRect().right)')
+  assert.ok(await browser.evaluate<number>('Math.round(document.querySelector("[data-inventory-check-sheet-header]").children[1].getBoundingClientRect().right)') <= nameLeft + 1, 'the header leaves room for the image')
+  const order = await browser.evaluate<number[]>('(() => { const r = document.querySelector("[data-inventory-check-row=\\"1\\"]"); return [r.querySelector("[data-check-select-box]").getBoundingClientRect().left, r.querySelector("[data-check-image]").getBoundingClientRect().left] })()')
+  assert.ok(order[0] < order[1], 'the check box sits before the product image (' + order.join(' < ') + ')')
+  assert.deepEqual(await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-check-status-text]'), node => node.dataset.checkStatusText).slice(0, 4)"), ['ok', 'issue', 'in_check', 'not_checked'])
+  assert.equal(await browser.evaluate("document.querySelector('" + row(1) + " [data-cell=\"last\"]').textContent.includes('@amy') && document.querySelector('" + row(1) + " [data-cell=\"last\"]').textContent.includes(':')"), true, 'who checked it, and the date and time')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(2) + " [data-check-note]').textContent"), 'Fell off the shelf', 'an issue shows its note under the row')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-note]').length"), 1, 'and only an issue does')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select]').length"), 16, 'a check box on every real product, none on the family header')
+  assert.equal(await browser.evaluate("document.querySelectorAll('" + row(20) + " [data-check-select], " + row(20) + " [data-check-count]').length"), 0)
+  // A count typed in the row picks it; the check button fills the stock; a differing count asks for a note; select-all picks the page.
+  await browser.mouseClick(row(1) + ' [data-check-count]')
+  await type('10')
+  await waitFor('row 1 picked', 'window.__drafts[1] && window.__drafts[1].selected === true && window.__drafts[1].count === "10"')
+  assert.equal(await browser.evaluate("document.querySelector('[data-selected-count]').textContent"), '1 selected')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(1) + " [data-check-select]').checked"), true, 'typing a count ticks the row’s box')
+  await browser.mouseClick(row(3) + ' [data-check-action="checked"]')
+  await waitFor('row 3 checked', 'window.__drafts[3] && window.__drafts[3].checked === true')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(3) + " [data-check-count]').value"), '10', 'the check button fills the stock')
+  assert.equal(await browser.evaluate("document.querySelector('" + row(3) + " [data-check-action=\"checked\"]').getAttribute('aria-pressed')"), 'true')
+  await browser.mouseClick(row(2) + ' [data-check-count]')
+  await type('7')
+  await waitFor('difference note', "document.querySelector('" + row(2) + " [data-check-draft-note]') !== null")
+  assert.equal(await browser.evaluate("document.querySelector('" + row(2) + " [data-check-difference]').textContent"), '−5', 'the difference is shown with its sign')
+  await noSidewaysScroll('1280 list with a note open')
+  await browser.mouseClick('[data-check-select-all]')
+  await waitFor('select all', 'document.querySelector("[data-selected-count]").textContent === "16 selected"')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select]:checked').length"), 16)
+  assert.equal(await browser.evaluate("document.querySelector('[data-check-select-all]').checked"), true)
+  await browser.mouseClick('[data-selection-action="submit"]')
+  assert.equal(await browser.evaluate('window.__submitted'), 1, 'Submit reaches the page')
+  await browser.mouseClick('[data-selection-action="clear"]')
+  await waitFor('cleared', 'document.querySelector("[data-selected-count]").textContent === ""')
+  const bar = await browser.evaluate<{ height: number; sub: number; overflow: number }>("(() => { const bar = document.querySelector('[data-inventory-check-selection-bar]'); return { height: bar.getBoundingClientRect().height, sub: document.querySelector('[data-selection-action=\"submit\"]').getBoundingClientRect().height, overflow: bar.scrollWidth - bar.clientWidth } })()")
+  assert.ok(bar.height <= 48 && bar.overflow <= 0, 'the selection bar is one line (' + JSON.stringify(bar) + ')')
+  await browser.open(1024, 'lang=en&sidebar=220&mode=list', ready, 760)
+  await noSidewaysScroll('1024 list')
+  assert.deepEqual(await browser.evaluate("Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(" + visible + ").map(node => node.textContent)"), ['', '', 'Product', 'Now', 'Status', 'Counted', 'Count'], 'Last checked waits for 1280px')
+  // Stock hidden: no Now, no Counted, no check button; counting stays. A viewer who may not count has no controls at all.
+  await browser.open(1280, 'lang=en&sidebar=220&mode=list&stock=0', ready, 760)
+  for (const field of ['now', 'counted']) assert.equal(await browser.evaluate("document.querySelectorAll('[data-cell=\"" + field + "\"]').length"), 0, 'blind list: no ' + field + ' cell')
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-action], [data-damaged]').length"), 0, 'blind list: no check button, no damaged chip')
+  assert.ok(await browser.evaluate<number>("document.querySelectorAll('[data-check-count]').length") > 0, 'blind list: the count input stays')
+  await browser.open(1280, 'lang=en&sidebar=220&mode=list&check=0', ready, 760)
+  assert.equal(await browser.evaluate("document.querySelectorAll('[data-check-select], [data-check-count], [data-check-action], [data-inventory-check-selection-bar]').length"), 0, 'a viewer who may not count has no controls')
+  // Phone: the image on the left as tall as the facts beside it, the count line full width, every control 44px.
+  await browser.open(360, 'lang=en&mode=list', ready, 740)
+  await noSidewaysScroll('en 360 list')
+  const listFacts = await browser.evaluate<string>("document.querySelector('" + row(1) + " [data-inventory-check-meta]').textContent.replace(/\\s+/g, ' ').trim()")
+  assert.ok(listFacts.includes('Checked OK') && listFacts.includes('Counted 10') && listFacts.includes('Last checked @amy'), 'a phone reads the same facts in one line (' + listFacts + ')')
+  const tall = await browser.evaluate<{ image: number[]; info: number[]; box: number[]; count: boolean }>("(() => { const r = document.querySelector('" + row(2) + "'); const box = node => { const b = node.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.left), Math.round(b.right)] }; const meta = r.querySelector('[data-inventory-check-meta]'); return { image: box(r.querySelector('[data-check-image]')), info: box(meta.parentElement), box: box(r.querySelector('[data-check-select-box]')), count: r.querySelector('[data-check-count]').getClientRects().length > 0 } })()")
+  assert.ok(tall.image[0] <= tall.info[0] + 1 && tall.image[1] >= tall.info[1] - 1, 'the image runs the full height of the info beside it (' + JSON.stringify(tall) + ')')
+  assert.ok(tall.box[3] <= tall.image[2], 'the check box is left of the image')
+  assert.equal(tall.count, true, 'the count input is on the phone row')
+  const small = await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-inventory-check-row] button, [data-inventory-check-row] input, [data-check-select-box], [data-inventory-check-selection-bar] button, [data-check-select-all]')).filter(node => !node.closest('[data-cell=\"now\"]')).filter(node => { const r = (node.closest('label') || node).getBoundingClientRect(); return r.width > 0 && (r.width < 40 || r.height < 40) }).map(node => node.getAttribute('aria-label') || node.tagName)")
+  assert.deepEqual(small, [], 'every tap target on the phone list is at least 40px each way')
+  const smallButtons = await browser.evaluate<string[]>("Array.from(document.querySelectorAll('[data-inventory-check-row] button, [data-inventory-check-selection-bar] button')).filter(node => !node.closest('[data-cell=\"now\"]')).filter(node => { const r = node.getBoundingClientRect(); return r.width > 0 && (r.width < 44 || r.height < 44) }).map(node => node.getAttribute('aria-label') || node.textContent)")
+  assert.deepEqual(smallButtons, [], 'and every button is 44px')
+  await browser.mouseClick(row(2) + ' [data-check-count]')
+  await type('7')
+  await waitFor('phone note', "document.querySelector('" + row(2) + " [data-check-draft-note]') !== null")
+  await noSidewaysScroll('en 360 list with a note open')
+  await browser.open(1280, 'lang=km&sidebar=220&mode=list', ready, 760)
+  await noSidewaysScroll('km 1280 list')
+  assert.equal(await browser.evaluate("Array.from(document.querySelector('[data-inventory-check-sheet-header]').children).filter(node => node.scrollWidth > node.clientWidth + 1).length"), 0, 'km list: every column title fits its column')
+  await browser.khmerRoom('1280px list', '[data-fixture-scroller]', 12)
+  await browser.open(360, 'lang=km&mode=list', ready, 740)
+  await noSidewaysScroll('km 360 list')
+  await browser.khmerRoom('360px list', '[data-fixture-scroller]', 12)
 
   // ---- 360px, English and Khmer ------------------------------------------------------------------------------------------------
   for (const lang of ['en', 'km']) {
@@ -256,7 +373,8 @@ await browser.run('PASS Inventory count sheet: aligned columns, count entry, edi
     const gap = await browser.evaluate<number>(`(() => { const [tick, issue] = document.querySelectorAll('${row(1)} [data-check-action]'); return issue.getBoundingClientRect().left - tick.getBoundingClientRect().right })()`)
     assert.ok(gap >= 3 && gap <= 6, `${lang}: ✓ and ! keep a small gap, not a touching pair (${gap}px)`)
     const facts = await browser.evaluate<string>(`document.querySelector('${row(3)} [data-inventory-check-meta]').textContent.replace(/\\s+/g, ' ').trim()`)
-    assert.ok(facts.startsWith(`${pack.inventory_check_now} 10`) && facts.indexOf(pack.inventory_check_start) > facts.indexOf(pack.inventory_check_now) && facts.indexOf(pack.inventory_check_sold) > facts.indexOf(pack.inventory_check_cost), `${lang}: counting facts first, then money, then sales (${facts})`)
+    assert.ok(facts.startsWith(`${pack.inventory_check_now} 10`) && facts.indexOf(pack.inventory_check_start) > facts.indexOf(pack.inventory_check_now), `${lang}: counting facts first, Now then Start (${facts})`)
+    assert.ok(!/Price|Cost|Sold|Cust/.test(facts), `${lang}: and nothing about money or sales`)
     await browser.mouseClick(`${row(2)} [data-check-action="issue"]`)
     await waitFor('phone editor', `!!document.querySelector('${row(2)} [data-inventory-check-editor]')`)
     await noSidewaysScroll(`${lang} 360 editor`)

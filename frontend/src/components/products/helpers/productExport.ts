@@ -1,4 +1,5 @@
 import { formatPriceNumber } from '../../../utils/pricing.ts'
+import { formatMoneyNumber } from '../../../utils/displayMoney.ts'
 import { knownCost } from '../../../utils/costDisplay.ts'
 
 interface BranchStockRecord {
@@ -111,7 +112,8 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
   const priceCsv = (value: unknown) => formatPriceNumber(value || 0)
   const costCsv = (value: unknown) => {
     const cost = knownCost(value)
-    return cost === null ? '' : formatPriceNumber(cost)
+    // A cost is not a selling price: displayed money, to the nearest cent (owner, 24 Sep 2026).
+    return cost === null ? '' : formatMoneyNumber(cost)
   }
   const branchId = options.branchId != null && String(options.branchId) !== 'all' ? options.branchId : null
   const allowedColumns = options.groups

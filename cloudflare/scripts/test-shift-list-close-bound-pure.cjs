@@ -112,10 +112,11 @@ const ADMIN = { id: 9, name: 'Boss', username: 'boss', role_code: 'admin', permi
 function harness(sqlite, routeSource = source) {
   const state = { user: CASHIER }
   const route = compile(routeSource, routePath, {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
-    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),

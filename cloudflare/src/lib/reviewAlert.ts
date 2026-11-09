@@ -17,8 +17,8 @@ export const REVIEW_ALERT_HOOK_KEY = 'business-os.review-alert.v1'
 
 export type ReviewAlertKind = 'created' | 'approved' | 'rejected' | 'resubmitted'
 
-/** The part of a pending_actions row an alert reads. `created` builds one before the row is read back. */
-export type ReviewAlertRow = Pick<PendingActionRow, 'section' | 'action_type' | 'entity_type' | 'entity_id' | 'payload_json' | 'requested_by_name'>
+/** The part of a pending_actions row an alert reads. `created` builds one before the row is read back. A count's approval (not a pending_actions row) names its session by id. */
+export type ReviewAlertRow = Pick<PendingActionRow, 'section' | 'action_type' | 'entity_type' | 'payload_json' | 'requested_by_name'> & { entity_id: PendingActionRow['entity_id'] | string }
 
 export type ReviewAlertEvent = {
   kind: ReviewAlertKind
@@ -50,6 +50,8 @@ const REQUEST_PHRASES = new Map<string, ReviewRequestPhrase>([
   ['fees:delete:fee', 'Delete expense'],
   ['inventory:update:inventory_reason', 'Edit stock reasons'],
   ['branches:update:branch', 'Edit branch'],
+  // A submitted Inventory Check count waiting for an approver (ic_fix_stock): not an applier, it has its own decision route (lib/inventoryCheckApprovals.ts).
+  ['inventory_checks:approve:count', 'Count approval'],
 ])
 export const REVIEW_ALERT_REQUEST_KEYS: readonly string[] = [...REQUEST_PHRASES.keys()]
 
@@ -104,12 +106,16 @@ const NAME_READS = new Map<string, string>([
   ['products:conflict_mark:product', 'SELECT name FROM products WHERE id = @id'],
   ['fees:delete:fee', `SELECT COALESCE(NULLIF(trim(label), ''), fee_type) AS name FROM fees WHERE id = @id`],
   ['branches:update:branch', 'SELECT name FROM branches WHERE id = @id'],
+  // A count is named by its branch; its id is the session's.
+  ['inventory_checks:approve:count', 'SELECT b.name AS name FROM inventory_check_sessions s JOIN branches b ON b.id = s.branch_id WHERE s.id = @id'],
 ])
+const SESSION_ID = /^[A-Za-z0-9-]{1,64}$/
 
 async function readRecordName(env: Env, row: ReviewAlertRow): Promise<string | null> {
-  const sql = NAME_READS.get(requestKey(row))
-  const id = Number(row.entity_id)
-  if (!sql || !Number.isSafeInteger(id) || id <= 0) return null
+  const key = requestKey(row)
+  const sql = NAME_READS.get(key)
+  const id = key === 'inventory_checks:approve:count' ? (SESSION_ID.test(String(row.entity_id)) ? String(row.entity_id) : 0) : Number(row.entity_id)
+  if (!sql || (typeof id === 'number' && (!Number.isSafeInteger(id) || id <= 0))) return null
   try {
     return reviewAlertName((await getDb(env).prepare(sql).get<{ name?: unknown }>({ id }))?.name)
   } catch { return null }

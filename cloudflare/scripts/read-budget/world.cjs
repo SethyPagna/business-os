@@ -17,6 +17,7 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const bcrypt = require('bcryptjs')
 const { seedSql, seedContext, ADMIN } = require('./seed.cjs')
+const { attachSwitchRows } = require('./switches.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const ORIGIN = 'http://127.0.0.1:4391'
@@ -278,10 +279,9 @@ async function bootWorld({ tier = 'free', seedVariant = 'base', persistDir, seed
   // restart(extra) starts a fresh isolate on the same storage; `extra` bindings (CF_VERSION_METADATA: { id } simulates a deploy) stay for later restarts.
   world.extra = {}
   world.restart = async (extra) => { if (extra !== undefined) world.extra = extra; await mf.setOptions(options({ tier, script, persist, extra: world.extra, callLimit })); await refresh() }
-  // The switches row, in the shape lib/readSwitches.ts reads. A later isolate restart reads it afresh.
-  world.setSwitches = async (map) => {
-    await world.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: map })).run()
-  }
+  // The switches row, in the shape lib/readSwitches.ts reads (setSwitches for the whole pass; addSwitches / restoreSwitches for a shape that needs more
+  // around its own request: read-budget/switches.cjs). A later isolate restart reads it afresh.
+  attachSwitchRows(world)
   world.all = async (sql, ...values) => (await world.db.prepare(sql).bind(...values).all()).results
   // One request through the counting proxy. Past the deadline the isolate is restarted (a runaway statement dies with it).
   world.send = async (method, url, body, opts = {}) => {

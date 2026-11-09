@@ -5,6 +5,7 @@ import { beginSingleAction, finishSingleAction } from '../src/utils/actionGuards
 import { omitUnauthorizedCatalogCosts } from '../src/utils/acquisitionCostAccess.ts'
 import { normalizeProductGallery } from '../src/components/products/helpers/productGalleryHelpers.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../src/utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue } from '../src/utils/hiddenValueUndo.ts'
 
 // Execute the actual wired closure and its actual gallery uploader. Only the
 // network and surrounding React state are fixtures; no copied save algorithm.
@@ -80,7 +81,7 @@ function fixture(options: { edit?: boolean; granted?: boolean; pending?: boolean
     pinnedEditedProductsRef: { current: new Map() },
     actionHistory: { pushAction: (value: unknown) => history.push(value) },
     pushCreatedProductHistory: (value: unknown) => history.push(value),
-    restoreProductSnapshots: async () => {}, load: async () => {},
+    restoreProductSnapshots: async () => {}, load: async () => {}, undoNeedsHiddenValue, UNDO_HIDDEN_VALUE_FALLBACK,
     getErrorMessage: (_error: unknown, fallback: string) => fallback,
     console: { error() {}, warn() {} },
   }

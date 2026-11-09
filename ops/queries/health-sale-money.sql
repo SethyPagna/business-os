@@ -21,7 +21,8 @@
 --   v0_header_drift        legacy headers off their lines + components by more than a cent (INFO)
 --   completed_short        paid-reading sales short by more than half a cent at the sale's rate,
 --                          after the debt its active returns lowered (lib/returnRefundSplit.ts
---                          returnDebtLoweredSql; lib/saleStatusResolution.ts coverage rule)
+--                          returnDebtLoweredSql; lib/saleStatusResolution.ts coverage rule), except a
+--                          riel tender short by under 100 riel, which is paid (owner ruling 27 Oct 2026)
 --   not_paid_but_covered   Not Paid sales the TENDER alone already covers (a return that
 --                          lowered the debt to 0 leaves a legitimate Not Paid sale owing 0)
 --   system_sales_without_lines, negative_totals, bad_rate
@@ -88,8 +89,8 @@ FROM (SELECT
     COALESCE(SUM(mpv = 1 AND (calc IS NULL OR ABS(total - calc - adj) > 0.00005 OR ABS(adj) > 0.00505 OR ABS(total * 100 - ROUND(total * 100)) > 0.00005)), 0) AS v1_payable_equation,
     COALESCE(SUM(mpv = 1 AND rate > 0 AND ABS(total_khr - total * rate) > 0.00005), 0) AS v1_khr_twin,
     COALESCE(SUM(mpv = 0 AND pay <> 'cancelled' AND n_lines > 0 AND ABS(total - (lines_usd - disc - mdisc + tax + cust_fee)) > 0.01), 0) AS v0_header_drift,
-    COALESCE(SUM(pay = 'completed' AND imported = 0 AND rate > 0 AND total - lowered - paid_usd - paid_khr / rate > 0.005000001), 0) AS completed_short,
-    COALESCE(SUM(pay = 'awaiting_payment' AND rate > 0 AND total - paid_usd - paid_khr / rate <= 0.005000001), 0) AS not_paid_but_covered,
+    COALESCE(SUM(pay = 'completed' AND imported = 0 AND rate > 0 AND total - lowered - paid_usd - paid_khr / rate > 0.005000001 AND NOT (paid_khr > 0 AND (total - lowered - paid_usd) * rate - paid_khr < 99.9999)), 0) AS completed_short,
+    COALESCE(SUM(pay = 'awaiting_payment' AND rate > 0 AND (total - paid_usd - paid_khr / rate <= 0.005000001 OR (paid_khr > 0 AND (total - paid_usd) * rate - paid_khr < 99.9999))), 0) AS not_paid_but_covered,
     COALESCE(SUM(imported = 0 AND n_lines = 0 AND pay <> 'cancelled'), 0) AS system_sales_without_lines,
     COALESCE(SUM(total < 0 OR subtotal < 0), 0) AS negative_totals,
     COALESCE(SUM(rate IS NULL OR rate <= 0), 0) AS bad_rate

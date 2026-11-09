@@ -94,10 +94,11 @@ function database() {
 
 function route(sqlite, source, getUser) {
   const loaded = loadText(ROUTE_PATH, source, {
+    '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
-    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', getUser()); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),

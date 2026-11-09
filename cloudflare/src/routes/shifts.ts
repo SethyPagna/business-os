@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
@@ -13,6 +15,7 @@ import {
   type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
+import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
 import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect, type BranchEffect } from '../lib/branchRedirectWrite'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -255,6 +258,8 @@ function additionalMoney(value: unknown): { ok: true; value: number } | { ok: fa
   const parsed = countedMoney(value)
   return parsed.ok ? { ok: true, value: parsed.value ?? 0 } : parsed
 }
+/** Counted riel is drawer cash: whole 100-riel notes (owner, 27 Oct 2026; lib/saleStatusResolution.ts). */
+const RIEL_COUNT_REFUSAL = { error: 'Riel cash counts must be whole 100 riel notes.', code: RIEL_CASH_NOT_HUNDREDS }
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
@@ -1118,7 +1123,7 @@ app.get('/', async (c) => {
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
       ${openingWindow ? `AND ${continuousReadWindowSql('opened_at')}` : ''}
-      AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
+      AND (@search IS NULL OR ${searchableColumnSql('user_name', phoneSearchAccessOf(user))} LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
         WITH RECURSIVE hit(id) AS (
           SELECT segment.id FROM shift_sessions segment WHERE segment.shift_code LIKE @search ESCAPE '\\'
           UNION SELECT later.id FROM shift_sessions later JOIN hit ON later.parent_shift_id = hit.id)
@@ -1222,6 +1227,8 @@ app.post('/open', async (c) => {
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const existing = await readCurrent(db, policy, user.id, branchId)
   if (existing && !existing.cancelled_at) return c.json({ ...currentResponse(user, existing, policy, false), already_registered: true }, 200)
+  // Asked only of a float that is about to be written: a retried open answers already_registered as before.
+  if (!rielCashAmountValid(floatKhr)) return c.json(RIEL_COUNT_REFUSAL, 400)
   if (existing?.cancelled_at) {
     const inheritedReason = `Replacement after cancellation: ${existing.cancel_reason || 'Cancelled by administrator'}`.slice(0, 500)
     const replacement = await writeContinuation(db, user, existing, { reason: inheritedReason, floatUsd, floatKhr,
@@ -1417,6 +1424,8 @@ app.post('/close', async (c) => {
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  // Asked last, of counts about to be written: a retried or refused close answers as it did before the rule.
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1469,6 +1478,7 @@ app.post('/:id/close', async (c) => {
   const closedAt = new Date(timing.closedAtMs).toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
     additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
@@ -1634,6 +1644,9 @@ app.patch('/:id', async (c) => {
   const openingUsd = openingUsdParsed.value; const openingKhr = openingKhrParsed.value
   const additionalUsd = additionalUsdParsed.value; const additionalKhr = additionalKhrParsed.value
   const closingUsd = closingUsdParsed.value; const closingKhr = closingKhrParsed.value
+  // Only a riel count this amend changes is asked; a count stored before the rule is kept as it is.
+  if ([[openingKhr, before.opening_float_khr], [additionalKhr, before.additional_cash_khr ?? 0], [closingKhr, before.closing_counted_khr]]
+    .some(([next, stored]) => !sameCountValue(next, stored, 0.5) && !rielCashAmountValid(next))) return c.json(RIEL_COUNT_REFUSAL, 400)
   if (before.has_reopened_child && closedAt
     && (!sameCountValue(closingUsd, before.closing_counted_usd, 0.005) || !sameCountValue(closingKhr, before.closing_counted_khr, 0.5))) {
     return c.json(SHIFT_COUNT_LOCKED_BY_REOPEN, 409)

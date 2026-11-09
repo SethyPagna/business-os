@@ -316,6 +316,7 @@ const GATE = 'src/lib/reviewGate.ts'
 const TELEGRAM = 'src/lib/telegram.ts'
 const ALERT = 'src/lib/reviewAlert.ts'
 const PRODUCTS = 'src/routes/products.ts'
+const COUNTS = 'src/routes/inventoryChecks.ts'
 const APPROVED_ANNOUNCE = "  await announceReview(c.env, {\n    kind: 'approved', row: updatedRow ?? row, by: actorSnapshot(user), recordName: recordNameBefore,\n    merged: mergedInto ? { retired: mergedInto.mergedName, kept: mergedInto.survivorName } : null,\n  })\n"
 const APPLY_CALL = '    const outcome = await applyApprovedPendingAction('
 const PATCHES = {
@@ -500,6 +501,13 @@ async function main() {
       { heading: '🕒 Review requested', lines: ['Request: New product · Lip Tint 05', 'Requested by: sokha'] })
     t.eq('resubmitted', lib.formatReviewAlert({ kind: 'resubmitted', row: row({ section: 'branches', action_type: 'update', entity_type: 'branch' }) }, 'LC Store'),
       { heading: '🔁 Review resubmitted', lines: ['Request: Edit branch · LC Store', 'Requested by: sokha'] })
+    // A submitted Inventory Check count waiting for an approver (ic_fix_stock): named by its branch, one row each for who asked and who decided.
+    const count = (extra = {}) => ({ section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: 'a1b2c3d4-0000-4000-8000-000000000000', payload_json: '{}', requested_by_name: null, ...extra })
+    t.eq('count created', lib.formatReviewAlert({ kind: 'created', row: count({ requested_by_name: 'counter' }) }, 'LC Store'), { heading: '🕒 Review requested', lines: ['Request: Count approval · LC Store', 'Requested by: counter'] })
+    t.eq('count approved', lib.formatReviewAlert({ kind: 'approved', row: count(), by: 'lead' }, 'LC Store'), { heading: '✅ Review approved', lines: ['Request: Count approval · LC Store', 'By: lead'] })
+    t.eq('count rejected', lib.formatReviewAlert({ kind: 'rejected', row: count(), by: 'lead', reason: 'Recount first' }, 'LC Store'), { heading: '❌ Review rejected', lines: ['Request: Count approval · LC Store', 'Reason: Recount first', 'By: lead'] })
+    t.eq('count replaced by a newer count (decided by the system: the same rejection alert, its reason, no person)', lib.formatReviewAlert({ kind: 'rejected', row: count(), reason: 'Replaced by a newer count' }, 'LC Store'), { heading: '❌ Review rejected', lines: ['Request: Count approval · LC Store', 'Reason: Replaced by a newer count'] })
+    t.eq('Khmer phrase for a count', lib.TELEGRAM_REVIEW_REQUEST_PHRASES['Count approval'], 'ការអនុម័តការរាប់')
     t.eq('a stock-reasons request has no record name', lib.formatReviewAlert({ kind: 'created', row: row({ section: 'inventory', action_type: 'update', entity_type: 'inventory_reason' }) }, null).lines[0], 'Request: Edit stock reasons')
     // No more than four rows under any heading, whatever the event carries.
     for (const kind of ['created', 'approved', 'rejected', 'resubmitted']) {
@@ -575,11 +583,12 @@ async function main() {
     t.ok('reviewGate reads the hook key', read(GATE).includes(key))
     t.ok('reviewQueue reads the hook key', read(QUEUE).includes(key))
     t.ok('products.ts (removal requests are queued by its own insert) reads the hook key', read(PRODUCTS).includes(key))
+    t.ok('inventoryChecks.ts (a count waiting for approval is announced from its two routes) reads the hook key', read(COUNTS).includes(key))
     t.ok('reviewAlert defines the same key', read(ALERT).includes("export const REVIEW_ALERT_HOOK_KEY = 'business-os.review-alert.v1'"))
     t.ok('index.ts installs the alerts', /^installReviewAlerts\(\)$/m.test(read('src/index.ts')))
     t.ok('index.ts registers the request scope', read('src/index.ts').includes('runWithRequestDefer(waitUntil'))
     // The two route files must not import the alert module (they are loaded in isolation by many tests); a type import is erased.
-    for (const rel of [GATE, QUEUE, PRODUCTS]) {
+    for (const rel of [GATE, QUEUE, PRODUCTS, COUNTS]) {
       t.ok(rel + ' has no value import of reviewAlert', !/^import (?!type )[^\n]*['"][./]+\/?(lib\/)?reviewAlert['"]/m.test(read(rel)), rel)
       t.ok(rel + ' has no value import of requestDefer', !/^import (?!type )[^\n]*requestDefer['"]/m.test(read(rel)), rel)
     }
@@ -592,8 +601,10 @@ async function main() {
     const NEVER_APPROVABLE = ['branches:create:branch', 'branches:delete:branch']
     t.ok('found the appliers', appliers.length >= 8, appliers)
     for (const applier of appliers) t.ok('applier ' + applier + ' has a request phrase or is never approvable', lib.REVIEW_ALERT_REQUEST_KEYS.includes(applier) || NEVER_APPROVABLE.includes(applier), applier)
-    for (const mapped of lib.REVIEW_ALERT_REQUEST_KEYS) t.ok('phrase key ' + mapped + ' is a real applier', appliers.includes(mapped), mapped)
-    t.eq('seven request phrases', lib.REVIEW_ALERT_REQUEST_KEYS.length, 7)
+    // A count's approval has its own decision route (lib/inventoryCheckApprovals.ts), not an applier: the one phrase key that is not one.
+    const NOT_APPLIERS = ['inventory_checks:approve:count']
+    for (const mapped of lib.REVIEW_ALERT_REQUEST_KEYS) t.ok('phrase key ' + mapped + ' is a real applier or the count approval', appliers.includes(mapped) || NOT_APPLIERS.includes(mapped), mapped)
+    t.eq('eight request phrases', lib.REVIEW_ALERT_REQUEST_KEYS.length, 8)
   })
 
   // ---- the Worker --------------------------------------------------------------------------
@@ -1246,6 +1257,63 @@ async function main() {
         t.eq(url + ': refused 400 invalid_fields', [bad.status, bad.body && bad.body.code], [400, 'invalid_fields'])
       }
       t.eq('listing sends nothing to Telegram beyond the three created alerts', (await H.tg.calls()).length, 3)
+    })
+
+    await check('C20', 'a count waiting for approval: announced once when submitted, once when approved, once when rejected (with its reason); never on a replay, a matching count or a refusal', 'high', async t => {
+      const stocked = async (name, quantity) => {
+        const id = await seedProduct(H, name)
+        await executeRawStockTransaction(H.db, [H.db.prepare('UPDATE products SET stock_quantity=? WHERE id=?').bind(quantity, id), H.db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').bind(id, quantity),
+          H.db.prepare("INSERT INTO product_batches(variant_product_id,batch_key,received_at) VALUES(?,?,'2026-10-19')").bind(id, 'alert-batch-' + id)])
+        const lot = (await H.q1('SELECT id FROM product_batches WHERE variant_product_id = ?', id)).id
+        await executeRawStockTransaction(H.db, [H.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').bind(lot, quantity)])
+        return id
+      }
+      const counting = { inventory_checks: true, inventory_check_show_stock: true, inventory_check_show_barcode: true, inventory_check_show_brand: true, inventory_check_show_category: true, inventory_check_show_received: true }
+      await H.addUser(31, 'counter', counting, { name: 'Counter Fullname' })
+      await H.addUser(32, 'approver', { ...counting, inventory: true, inventory_check_approve: true }, { name: 'Approver Fullname' })
+      await H.db.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES('read_switches',?)").bind(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches: { ic_simple: 'on', ic_fix_stock: 'on' } })).run()
+      const first = await stocked('Count alert A', 5), second = await stocked('Count alert B', 5)
+      await reset()
+      // The approval also moves stock, and the stock writers send their own message: only the review alerts are counted here.
+      const reviewCalls = async () => (await H.tg.calls()).filter(call => /Review (requested|approved|rejected)/.test(String(call.body && call.body.text)))
+      const submit = (requestId, lines) => H.api('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId, lines }, { as: 'counter' })
+      const made = await submit('count-alert-submit-1', [{ productId: first, countedQuantity: 3, seenQuantity: 5, checked: false }, { productId: second, countedQuantity: 5, seenQuantity: 5, checked: true }])
+      t.eq('submitted', made.status, 201)
+      const created = only(await reviewCalls(), t, 'created')
+      t.eq('created text', lines(created).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· Requested by/បានស្នើសុំដោយ: counter'])
+      await reset()
+      t.eq('a replay of the submission is a 200', (await submit('count-alert-submit-1', [{ productId: first, countedQuantity: 3, seenQuantity: 5, checked: false }, { productId: second, countedQuantity: 5, seenQuantity: 5, checked: true }])).status, 200)
+      t.eq('and announces nothing', (await reviewCalls()).length, 0)
+      t.eq('a count that matches stock creates no approval', (await submit('count-alert-submit-2', [{ productId: second, countedQuantity: 5, seenQuantity: 5, checked: true }])).status, 201)
+      t.eq('and announces nothing', (await reviewCalls()).length, 0)
+      const id = made.body.item.id, url = '/api/inventory-checks/sessions/' + id + '/approval'
+      t.eq('the counter may not decide', (await H.api('POST', url, { decision: 'approve', requestId: 'count-alert-refused' }, { as: 'counter' })).status, 403)
+      t.eq('a refusal announces nothing', (await H.tg.calls()).length, 0)
+      const approved = await H.api('POST', url, { decision: 'approve', requestId: 'count-alert-approve-1' }, { as: 'approver' })
+      t.eq('approved', [approved.status, approved.body && approved.body.done], [200, true])
+      const decision = only(await reviewCalls(), t, 'approved')
+      t.eq('approved text', lines(decision).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· By/ដោយ: approver'])
+      await reset()
+      t.eq('the same request again is a replay', (await H.api('POST', url, { decision: 'approve', requestId: 'count-alert-approve-1' }, { as: 'approver' })).body.replayed, true)
+      t.eq('and announces nothing', (await reviewCalls()).length, 0)
+      const other = await submit('count-alert-submit-3', [{ productId: second, countedQuantity: 2, seenQuantity: 5, checked: false }])
+      t.eq('a second count submitted', other.status, 201)
+      await reset()
+      const rejected = await H.api('POST', '/api/inventory-checks/sessions/' + other.body.item.id + '/approval', { decision: 'reject', requestId: 'count-alert-reject-1', note: 'Recount first' }, { as: 'approver' })
+      t.eq('rejected', [rejected.status, rejected.body && rejected.body.done], [200, true])
+      const rejection = only(await reviewCalls(), t, 'rejected')
+      t.eq('rejected text', lines(rejection).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· Reason/មូលហេតុ: Recount first', '· By/ដោយ: approver'])
+      // A newer count of a product whose count waits replaces it: the system rejects the older approval, and that review is announced like any other (the same rejection alert, its reason, no person named).
+      const third = await stocked('Count alert C', 5)
+      await reset()
+      t.eq('a count of the product waits', (await submit('count-alert-submit-4', [{ productId: third, countedQuantity: 3, seenQuantity: 5, checked: false }])).status, 201)
+      await reset()
+      const newer = await H.api('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: 'count-alert-submit-5', lines: [{ productId: third, countedQuantity: 2, seenQuantity: 5, checked: false }] }, { as: 'approver' })
+      t.eq('a newer count of the same product replaces it', newer.status, 201)
+      const afterReplace = await reviewCalls()
+      t.eq('two reviews are announced: the newer count requested, the older one replaced', afterReplace.map(call => /Review requested/.test(String(call.body.text)) ? 'requested' : 'rejected').sort(), ['rejected', 'requested'])
+      t.eq('replaced text', lines(only(afterReplace.filter(call => /Review rejected/.test(String(call.body.text))), t, 'replaced')).slice(1), ['· Request/សំណើ: Count approval/ការអនុម័តការរាប់ · LC Store', '· Reason/មូលហេតុ: Replaced by a newer count'])
+      for (const text of await H.tg.texts()) t.ok('no full name', !/Fullname/.test(text), text)
     })
   } finally {
     await H.dispose()

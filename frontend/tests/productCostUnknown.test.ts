@@ -299,6 +299,8 @@ await runTest('actual Products bulk callbacks show catalog before/after and pin 
       summarizeProductRun: (result: any) => ({ done: result.successes.length, failed: 0, failedIds: [] }),
       pinnedEditedProductsRef: { current: pinned }, load: async () => {}, actionHistory: { pushAction: () => {} }, restoreProductSnapshots: async () => {}, getErrorMessage: String,
       omitUnauthorizedCatalogCosts: require('../src/utils/acquisitionCostAccess.ts').omitUnauthorizedCatalogCosts,
+      undoNeedsHiddenValueIn: require('../src/utils/hiddenValueUndo.ts').undoNeedsHiddenValueIn,
+      UNDO_HIDDEN_VALUE_FALLBACK: require('../src/utils/hiddenValueUndo.ts').UNDO_HIDDEN_VALUE_FALLBACK,
     }
     await productCallback(mode === 'relative' ? 'runBulkProductPriceAdjustment' : 'runBulkProductUpdates', scope)({ [field]: 6 })
     assert.ok(confirmation.items.some((item: any) => item.value === '5 → 6'), `${mode} ${field} shows actual catalog before-value`)

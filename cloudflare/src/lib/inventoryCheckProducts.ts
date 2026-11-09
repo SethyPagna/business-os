@@ -54,9 +54,32 @@ function observationWhere(filter: NonNullable<InventoryCheckProductsOptions['obs
     AND (@observationReason IS NULL OR i.state='issue' AND instr(lower(i.reason),@observationReason)>0)`
 }
 
-function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[], observationFilter?: InventoryCheckProductsOptions['observationFilter'], costReviewKeyAvailable = false) {
+/** ic_simple: whose checks the status filter reads, and the one session a session view is restricted to. */
+export type InventoryCheckSimpleScope = { organizationId: number | null; sessionId?: string }
+
+// A product's check facts in one branch scope. Items of other organizations and items whose branch differs from their session's are never read.
+const CHECK_SCOPE_SQL = 's.organization_id IS @checkOrg AND i.branch_id=s.branch_id AND (@branchId IS NULL OR i.branch_id=@branchId)'
+const CHECK_ITEM_STATE = { in_check: 'unstarted', ok: 'done', issue: 'issue' } as const
+const IN_OPEN_CHECK_SQL = (id: string) => `EXISTS (SELECT 1 FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
+  WHERE i.product_id=${id} AND i.state='unstarted' AND s.status='open' AND ${CHECK_SCOPE_SQL})`
+const LATEST_STATE_SQL = (id: string) => `(SELECT i.state FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
+  WHERE i.product_id=${id} AND i.state IN ('done','issue') AND ${CHECK_SCOPE_SQL} ORDER BY i.updated_at DESC,i.session_id DESC LIMIT 1)`
+
+function checkStateCondition(state: string, simple: InventoryCheckSimpleScope, params: Record<string, unknown>): string {
+  if (simple.sessionId) {
+    if (!Object.hasOwn(CHECK_ITEM_STATE, state)) invalid('checkState')
+    params.checkItemState = CHECK_ITEM_STATE[state as keyof typeof CHECK_ITEM_STATE]
+    return 'EXISTS (SELECT 1 FROM inventory_check_items it WHERE it.session_id=@checkSession AND it.product_id=p.id AND it.state=@checkItemState)'
+  }
+  if (state === 'in_check') return IN_OPEN_CHECK_SQL('p.id')
+  if (state === 'ok' || state === 'issue') return `(NOT ${IN_OPEN_CHECK_SQL('p.id')} AND ${LATEST_STATE_SQL('p.id')}=${state === 'ok' ? "'done'" : "'issue'"})`
+  if (state === 'not_checked') return `(NOT ${IN_OPEN_CHECK_SQL('p.id')} AND ${LATEST_STATE_SQL('p.id')} IS NULL)`
+  return invalid('checkState')
+}
+
+function population(rawQuery: Record<string, unknown>, access: InventoryCheckAccess, lowStock: LowStockConfig, productIds?: readonly number[], observationFilter?: InventoryCheckProductsOptions['observationFilter'], costReviewKeyAvailable = false, simple?: InventoryCheckSimpleScope) {
   if (productIds !== undefined && (!Array.isArray(productIds) || productIds.length > 500 || productIds.some(id => !Number.isSafeInteger(id) || id <= 0))) invalid('productIds')
-  const query = validateInventoryCheckQuery(rawQuery, access)
+  const query = validateInventoryCheckQuery(rawQuery, access, simple !== undefined)
   const page = integer(query.page, 1, 100000, 'page')
   const pageSize = integer(query.pageSize, 20, 100, 'pageSize')
   const branchId = query.branchId && query.branchId !== 'all' ? integer(query.branchId, 1, Number.MAX_SAFE_INTEGER, 'branchId') : undefined
@@ -69,6 +92,13 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
       SELECT 1 FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id WHERE i.product_id=p.id AND ${where})`)
   }
   if (productIds !== undefined) { params.admittedIds = JSON.stringify([...new Set(productIds)]); conditions.push('p.id IN (SELECT value FROM json_each(@admittedIds))') }
+  if (simple) {
+    if (simple.sessionId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(simple.sessionId)) invalid('sessionId')
+    if (simple.organizationId !== null && (!Number.isSafeInteger(simple.organizationId) || simple.organizationId <= 0)) invalid('organizationId')
+    params.checkOrg = simple.organizationId
+    if (simple.sessionId) { params.checkSession = simple.sessionId; conditions.push('p.id IN (SELECT product_id FROM inventory_check_items WHERE session_id=@checkSession)') }
+    if (query.checkState) conditions.push(checkStateCondition(query.checkState, simple, params))
+  }
   const saleClauses: string[] = []
   let receivedFrom = query.startDate || '', receivedTo = query.endDate || ''
   if (receivedFrom && !validDay(receivedFrom)) invalid('startDate')
@@ -133,18 +163,25 @@ function population(rawQuery: Record<string, unknown>, access: InventoryCheckAcc
   if (access.fields.barcode) columns.push('p.barcode', 'p.sku')
   if (access.fields.brand) columns.push('p.brand', 'p.brands')
   if (access.fields.category) columns.push('p.category', 'p.categories')
-  if (access.fields.price) columns.push('p.selling_price_usd', 'p.selling_price_khr')
-  if (access.fields.cost) columns.push('p.cost_price_usd', 'p.cost_price_khr',
+  // ic_simple carries neither price nor cost, and reads the latest received date for the page rows only (see readInventoryCheckProductsSimple).
+  if (access.fields.price && !simple) columns.push('p.selling_price_usd', 'p.selling_price_khr')
+  if (access.fields.cost && !simple) columns.push('p.cost_price_usd', 'p.cost_price_khr',
     `${costReviewKeyAvailable ? "(COALESCE(p.cost_review_key,'')<>'')" : '0'} AS cost_needs_review`)
-  if (access.fields.received) columns.push('(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=p.id) AS latest_received_at')
+  if (access.fields.received && !simple) columns.push('(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=p.id) AS latest_received_at')
+  // A product with children is a header, not a row. The list path asks "is this id a parent of another product" once, as a set: after ANALYZE the per-row form
+  // below made SQLite scan the whole parent index for every product (8,652 x 8,652 rows in the P0.1 world); the set form reads the index once.
+  const leafOnly = simple ? 'p.id NOT IN (SELECT child.parent_id FROM products child WHERE child.parent_id IS NOT NULL AND child.id<>child.parent_id)'
+    : 'NOT EXISTS (SELECT 1 FROM products child WHERE child.parent_id=p.id AND child.id<>p.id)'
   // Stock-free ranking keeps the stock columns as NULL so the caller can fill them for the page rows only.
-  const ctes = (withStock: boolean) => `${withStock ? `stock AS (${stock.rowsSql}), ` : ''}base AS (
+  // ic_simple builds the whole-catalogue ledger once (MATERIALIZED): a stock filter makes the LEFT JOIN an inner join, and after ANALYZE SQLite then flattened the ledger into
+  // the cohort and scanned ordinary_totals once per product (8,652 x 8,394 rows, three times a request). The legacy path keeps its text byte for byte.
+  const ctes = (withStock: boolean) => `${withStock ? `stock AS ${simple ? 'MATERIALIZED ' : ''}(${stock.rowsSql}), ` : ''}base AS (
     SELECT ${columns.join(',')}, ${FAMILY_ROOT_KEY_SQL} AS family_key, parent.name AS parent_name,
       COALESCE(p.out_of_stock_threshold,0) AS __out, ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')} AS __low,
       ${stockColumnsSql(withStock ? 'stock' : null)},
       CASE WHEN parent.id IS NOT NULL THEN json_object('id',parent.id,'name',parent.name,'image_path',parent.image_path,'unit',parent.unit,'is_group',1) END AS __header
     FROM products p LEFT JOIN products parent ON parent.id=p.parent_id${withStock ? ' LEFT JOIN stock ON stock.product_id=p.id' : ''}
-    WHERE ${stockVisibleProductSql('p')} AND NOT EXISTS (SELECT 1 FROM products child WHERE child.parent_id=p.id AND child.id<>p.id)
+    WHERE ${stockVisibleProductSql('p')} AND ${leafOnly}
       AND (@branchId IS NULL OR EXISTS (SELECT 1 FROM branches allowed WHERE allowed.id=@branchId AND allowed.is_active=1))
   ), cohort AS MATERIALIZED (SELECT * FROM base p WHERE ${[...conditions, ...withStock ? stockConditions : []].join(' AND ')}),
     requested_ids(product_id) AS (SELECT id FROM cohort)`
@@ -161,9 +198,9 @@ const PAGE_STOCK_PREFIX = '__page_stock_'
 const stockColumnsSql = (source: string | null, prefix = '') => [['quantity', '__quantity'], ...STOCK_ROW_COLUMNS.map(column => [column, column]), ['consistent', 'stock_consistent']]
   .map(([from, to]) => `${source ? `${source}.${from}` : 'NULL'} AS ${prefix}${to}`).join(',')
 
-export function buildInventoryCheckProductMembershipQuery(rawQuery: Record<string, unknown>, productIds: readonly number[], access: InventoryCheckAccess, lowStock: LowStockConfig) {
+export function buildInventoryCheckProductMembershipQuery(rawQuery: Record<string, unknown>, productIds: readonly number[], access: InventoryCheckAccess, lowStock: LowStockConfig, simple?: InventoryCheckSimpleScope) {
   if (!Array.isArray(productIds) || productIds.length > 500 || productIds.some(id => !Number.isSafeInteger(id) || id <= 0)) invalid('productIds')
-  const plan = population(rawQuery, access, lowStock, productIds)
+  const plan = population(rawQuery, access, lowStock, productIds, undefined, false, simple)
   return { rowsSql: `WITH ${plan.ctes(plan.stockFiltered)} SELECT id FROM cohort WHERE id IN (SELECT value FROM json_each(@membershipIds)) ORDER BY id`,
     params: { ...plan.params, membershipIds: JSON.stringify([...new Set(productIds)]) } }
 }
@@ -327,4 +364,118 @@ export async function readInventoryCheckProducts(db: Pick<D1Compat, 'batch'>, us
     ...(access.fields.stock ? { stockDiagnostics: diagnostics } : {}),
     ...(limit ? { rankings: { ...(access.fields.sales ? { products: JSON.parse(String(summary.product_ranking || '[]')) as unknown[] } : {}),
       ...(options.customerRanking ? { customers: JSON.parse(String(summary.customer_ranking || '[]')) as unknown[] } : {}) } } : {}) }
+}
+
+export type InventoryCheckSimpleOptions = {
+  lowStock: LowStockConfig
+  /** Whose checks are read: the viewer's organization and id, the session when a session is open, and the staff-name rule. */
+  check: InventoryCheckSimpleScope & { viewerId: number; canSeeStaffIdentity: (accountId: number) => boolean }
+}
+
+// The latest done/issue observation and the open-session flag for the page rows only (ids come from the __page CTE of the enclosing statement).
+const PAGE_CHECK_CTES = `latest AS (SELECT product_id,state,counted_quantity,reason,updated_by,updated_at,session_id,branch_id,created_by,by_name FROM (
+    SELECT i.product_id,i.state,i.counted_quantity,i.reason,i.updated_by,i.updated_at,i.session_id,i.branch_id,s.created_by,u.username AS by_name,
+      ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC,i.session_id DESC) AS rn
+    FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id LEFT JOIN users u ON u.id=i.updated_by
+    WHERE i.state IN ('done','issue') AND i.product_id IN (SELECT id FROM __page) AND ${CHECK_SCOPE_SQL}) WHERE rn=1),
+  open_check AS (SELECT DISTINCT i.product_id FROM inventory_check_items i JOIN inventory_check_sessions s ON s.id=i.session_id
+    WHERE i.state='unstarted' AND s.status='open' AND i.product_id IN (SELECT id FROM __page) AND ${CHECK_SCOPE_SQL})`
+const PAGE_CHECK_COLUMNS = `CASE WHEN __page.id IN (SELECT product_id FROM open_check) THEN 'in_check' WHEN latest.state='issue' THEN 'issue'
+    WHEN latest.state='done' THEN 'ok' ELSE 'not_checked' END AS check_status,
+  latest.counted_quantity AS __check_count,latest.reason AS check_note,latest.updated_by AS __check_by_id,latest.by_name AS __check_by_name,
+  latest.updated_at AS check_at,latest.session_id AS check_session_id,latest.branch_id AS check_branch_id,latest.created_by AS __check_creator`
+
+/**
+ * The owner's Inventory Check list (ic_simple): the same cohort as readInventoryCheckProducts without its financial CTEs, a closed query,
+ * the page rows' check facts, and (page 1 and filter changes) the four check counts plus the brand/category facets.
+ * Nothing here reads sales, customers, price or cost, and nothing is written.
+ */
+export async function readInventoryCheckProductsSimple(db: Pick<D1Compat, 'batch'>, user: PermissionUser, rawQuery: Record<string, unknown>, options: InventoryCheckSimpleOptions) {
+  const access = getInventoryCheckAccess(user), { check } = options
+  if (!Number.isSafeInteger(check.viewerId) || check.viewerId <= 0) invalid('viewerId')
+  const plan = population(rawQuery, access, options.lowStock, undefined, undefined, false, { organizationId: check.organizationId, sessionId: check.sessionId })
+  const direction = plan.query.sortDirection === 'desc' ? 'DESC' : 'ASC'
+  const byStock = (plan.query.sortBy || 'name') === 'stock'
+  const familyOrder = (name: string, number: string) => byStock ? `(${number} IS NULL) ASC,${number} ${direction},${name} ASC` : `${name} ${direction}`
+  const rankWithStock = plan.stockFiltered || byStock
+  const inSession = !!check.sessionId
+  const wantFacets = plan.query.summary !== '0'
+  const wantCounts = wantFacets && !inSession
+  const pageStock = access.fields.stock && !rankWithStock ? buildInventoryCheckStockQuery({ branchId: plan.branchId }, 'SELECT id FROM __page') : null
+  const showNextExpiry = access.fields.received && access.fields.stock
+  const facets = (field: 'brand' | 'category') => access.fields[field] ? `(SELECT json_group_array(value) FROM (SELECT DISTINCT trim(choice.value) AS value
+    FROM cohort c,json_each(replace(json_array(COALESCE(c.${field},'')||'||'||COALESCE(c.${field === 'brand' ? 'brands' : 'categories'},'')),'||','","')) choice
+    WHERE trim(choice.value)<>'' ORDER BY value COLLATE NOCASE,value LIMIT 201))` : "'[]'"
+  const summarySql = `WITH ${plan.ctes(plan.stockFiltered)}${wantCounts ? `,
+    obs AS MATERIALIZED (SELECT i.product_id,i.state,i.updated_at,i.session_id,s.status AS session_status FROM inventory_check_items i
+      JOIN inventory_check_sessions s ON s.id=i.session_id WHERE i.product_id IN (SELECT id FROM cohort) AND ${CHECK_SCOPE_SQL}),
+    open_check AS (SELECT DISTINCT product_id FROM obs WHERE state='unstarted' AND session_status='open'),
+    latest AS (SELECT product_id,state FROM (SELECT product_id,state,ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY updated_at DESC,session_id DESC) AS rn
+      FROM obs WHERE state IN ('done','issue')) WHERE rn=1)` : ''}
+    SELECT (SELECT COUNT(*) FROM cohort) AS total_variants,
+    ${wantCounts ? `(SELECT COUNT(*) FROM open_check) AS in_check,
+    (SELECT COUNT(*) FROM latest WHERE state='done' AND product_id NOT IN (SELECT product_id FROM open_check)) AS ok,
+    (SELECT COUNT(*) FROM latest WHERE state='issue' AND product_id NOT IN (SELECT product_id FROM open_check)) AS issue,` : ''}
+    ${facets('brand')} AS brand_facets,${facets('category')} AS category_facets`
+  const branchesSql = `SELECT (SELECT json_group_array(json_object('id',id,'name',name)) FROM branches WHERE is_active=1) AS branches,
+    (SELECT COUNT(*) FROM branches WHERE id=@branchId AND is_active=1) AS selected_branch_exists`
+  let branchRow: Record<string, unknown> = {}, summary: Record<string, unknown> = {}
+  const paged = await paginateProductFamilies<Record<string, unknown>>({
+    db: { batch: async statements => {
+      const pageSql = `${statements[1].sql}\nLIMIT 501`
+      const wrappedPageSql = `WITH __page AS MATERIALIZED (${pageSql})${pageStock ? `, stock AS (${pageStock.rowsSql})` : ''}${inSession ? '' : `, ${PAGE_CHECK_CTES}`}
+        SELECT __page.*${pageStock ? `,${stockColumnsSql('stock', PAGE_STOCK_PREFIX)}` : ''}${showNextExpiry ? `,${NEXT_EXPIRY_SQL} AS next_expiry_date` : ''}${access.fields.received ? ',(SELECT MAX(received_at) FROM product_batches rb WHERE rb.variant_product_id=__page.id) AS latest_received_at' : ''}${inSession ? '' : `,${PAGE_CHECK_COLUMNS}`}
+        FROM __page${pageStock ? ' LEFT JOIN stock ON stock.product_id=__page.id' : ''}${inSession ? '' : ' LEFT JOIN latest ON latest.product_id=__page.id'}
+        WINDOW family AS (PARTITION BY __page.__family_root_id)
+        ORDER BY ${familyOrder('MIN(__page.__family_name) OVER family', 'MAX(__page.__family_num) OVER family')},__page.__family_root_id ASC,__page.id ASC`
+      const result = await schemaBatch(db, [statements[0], { ...statements[1], sql: wrappedPageSql }, { sql: branchesSql, params: { branchId: plan.branchId ?? null } },
+        ...wantFacets ? [{ sql: summarySql, params: plan.params }] : []])
+      branchRow = (result[2].results?.[0] || {}) as Record<string, unknown>
+      summary = (result[3]?.results?.[0] || {}) as Record<string, unknown>
+      if (pageStock) for (const row of (result[1].results || []) as Array<Record<string, unknown>>) {
+        for (const key of Object.keys(row)) if (key.startsWith(PAGE_STOCK_PREFIX)) { row[key.slice(PAGE_STOCK_PREFIX.length)] = row[key]; delete row[key] }
+      }
+      return result.slice(0, 2)
+    } } as D1Compat,
+    // Ranking by name needs no stock: rank stock-free and read stock for the page rows only. A stock sort or stock filter ranks over every row's stock.
+    rankCteSql: rankWithStock ? `${plan.ctes(true)}, product_metrics AS (SELECT * FROM cohort),
+      family_metrics AS (SELECT c.family_key,CASE WHEN COUNT(c.__quantity)=COUNT(*) THEN SUM(c.__quantity) END AS stock_quantity FROM cohort c GROUP BY c.family_key)`
+      : `${plan.ctes(false)}, product_metrics AS (SELECT * FROM cohort), family_metrics AS (SELECT DISTINCT family_key FROM cohort)`,
+    selectColumns: 'c.*', joinSql: 'JOIN product_metrics c ON c.id=p.id JOIN family_metrics f ON f.family_key=c.family_key', whereSql: 'WHERE 1=1',
+    params: plan.params, page: plan.page, pageSize: plan.pageSize,
+    familyOrderSql: familyOrder('family_name', 'family_num_sort'),
+    familyNumericSortSql: byStock ? 'f.stock_quantity' : undefined, intraFamilyOrderSql: 'id ASC',
+  })
+  if (plan.branchId && Number(branchRow.selected_branch_exists) !== 1) invalid('branchId')
+  if (paged.items.length > 500) throw new InventoryCheckProductsLimitError()
+  const items: Array<Record<string, unknown>> = [], diagnostics: Array<Record<string, unknown>> = []
+  const headers = new Set<number>()
+  for (const row of paged.items) {
+    if (row.__header) {
+      const header = JSON.parse(String(row.__header)) as Record<string, unknown>
+      if (!headers.has(Number(header.id))) { headers.add(Number(header.id)); items.push({ ...projectInventoryCheckProduct(header, access, true), checkable: false, matches_filters: false }) }
+    }
+    const flags = ['invalid_quantity', 'negative_quantity', 'lot_exceeds_ordinary', 'cache_mismatch', 'invalid_allocation', 'unallocated_damaged', 'missing_branch_allocation'].filter(key => Number(row[key]) > 0)
+    const byId = row.__check_by_id == null ? null : Number(row.__check_by_id)
+    const facts = inSession ? {} : { check_status: row.check_status, check_note: row.check_note ?? null, check_at: row.check_at ?? null,
+      check_session_id: row.check_session_id ?? null, check_branch_id: row.check_branch_id ?? null,
+      // Counted quantities follow the stock field or the session's creator (as the Issues list always did); names follow the staff-identity rule.
+      ...(row.__check_count != null && (access.fields.stock || Number(row.__check_creator) === check.viewerId) ? { check_counted_quantity: Number(row.__check_count) } : {}),
+      ...(byId !== null && row.__check_by_name != null && check.canSeeStaffIdentity(byId) ? { check_by: String(row.__check_by_name) } : {}) }
+    const projected = projectInventoryCheckProduct({ ...row, ...facts, quantity: row.__quantity, display_quantity: row.__quantity,
+      damaged_quantity: row.recorded_damaged_quantity, stock_consistent: Number(row.stock_consistent) === 1, stock_diagnostics: flags.join(',') }, access, true)
+    items.push({ ...projected, checkable: true, matches_filters: true })
+    if (access.fields.stock) diagnostics.push({ product_id: row.id, stock_diagnostics: flags.join(',') })
+  }
+  if (items.length > 500) throw new InventoryCheckProductsLimitError()
+  const known = (key: string) => Number(summary[key]) || 0
+  const total = Number(summary.total_variants) || 0
+  const checkCounts = wantCounts ? { in_check: known('in_check'), ok: known('ok'), issue: known('issue') } : null
+  const facetValues = (column: string) => JSON.parse(String(summary[column] || '[]')) as string[]
+  const brands = access.fields.brand ? facetValues('brand_facets') : [], categories = access.fields.category ? facetValues('category_facets') : []
+  return { ...paged, items, simple: true, branches: JSON.parse(String(branchRow.branches || '[]')) as Array<{ id: number; name: string }>,
+    ...(checkCounts ? { summary: { ...checkCounts, not_checked: Math.max(0, total - checkCounts.in_check - checkCounts.ok - checkCounts.issue), total } } : {}),
+    ...(wantFacets ? { facets: { ...(access.fields.brand ? { brands: brands.slice(0, 200) } : {}), ...(access.fields.category ? { categories: categories.slice(0, 200) } : {}) },
+      facetsLimited: { brands: brands.length > 200, categories: categories.length > 200 } } : {}),
+    ...(access.fields.stock ? { stockDiagnostics: diagnostics } : {}) }
 }

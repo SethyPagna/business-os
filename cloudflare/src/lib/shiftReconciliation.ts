@@ -88,9 +88,10 @@ function refundCashUsdSql(alias: string): string {
 export function refundDrawerUsdSql(alias: string): string {
   return `(CASE WHEN ${alias}.refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
 }
+/** A riel refund's cash share, rounded DOWN to whole 100-riel notes (owner, 21 and 27 Oct 2026; rielCashFloor). */
 export function refundDrawerKhrSql(alias: string): string {
   return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
-    THEN ROUND(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd) ELSE 0 END)`
+    THEN MAX(0, CAST(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd / 100 + 1e-9 AS INTEGER)) * 100 ELSE 0 END)`
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100
@@ -260,10 +261,18 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
       changeKhr: row.change_khr,
       changeExchangeRate: row.change_exchange_rate,
     })
+    // A riel tender over the total by less than one 100-riel note leaves nothing to hand back: no note exists for it (owner
+    // ruling 27 Oct 2026, the same rule that accepts a riel tender short by under 100 riel as fully paid --
+    // lib/saleStatusResolution.ts shortfallCovered), so the till's computed (unmarked) change of that size is not an unknown
+    // amount of change given, and the over-tender is not an incomplete tender. A recorded change marker, or a larger
+    // over-tender, is judged as before.
+    const overUsd = row.total_usd == null ? 0 : paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) - Number(row.total_usd)
+    const underOneRielNote = paidKhr > 0 && rate > 0 && overUsd * rate < 100
+    const unmarkedChange = row.change_is_actual == null || Number(row.change_is_actual) === 0
     if (change.kind === 'actual') { usd -= change.usd; khr -= change.khr }
-    else if (change.kind === 'unknown') codes.add(SHIFT_REVIEW.change)
-    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011
-      && change.kind !== 'actual') codes.add(SHIFT_REVIEW.tender)
+    else if (change.kind === 'unknown' && !(underOneRielNote && unmarkedChange)) codes.add(SHIFT_REVIEW.change)
+    // Over-tender with no change recorded is flagged, except the sub-note one above.
+    if (row.total_usd != null && overUsd > 0.011 && change.kind !== 'actual' && !underOneRielNote) codes.add(SHIFT_REVIEW.tender)
   }
   // The rename guard. Only meaningful once money has actually been tendered:
   // an empty shift with a misconfigured list is not evidence of a lost drawer.

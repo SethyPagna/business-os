@@ -19,7 +19,7 @@ import {
   MODULE_ROWS, applyModuleLevel, chipStates, levelsOf, moduleCanDo, moduleChanged, moduleIsOn, moduleState, searchRow, toggleGrant,
   type ChipMark, type ChipState, type ControlState, type Level, type ModuleRow, type ModuleState, type PermissionState,
 } from './permissionSummary.ts'
-import { effectivePermissions, normalizePermissionState } from '../../utils/permissions.ts'
+import { normalizePermissionState } from '../../utils/permissions.ts'
 import { isActionOverriddenOff, toggleActionOverrideMap, type ActionRequirement } from '../../utils/permissionActions.ts'
 
 type Filter = 'all' | 'on' | 'changed'
@@ -215,7 +215,6 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
     setFlipped(new Set())
   }
 
-  const authority = effectivePermissions({ permissions: perms })
 
   // The tooltip of an action chip: its full name, what it does now, and what a tap does.
   const chipTitle = (chip: ChipState, label: string): string => {
@@ -306,7 +305,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
   const fieldChips = (heading: string, fields: PermissionDefinition[], ringed: Set<string>, needs?: Record<string, string>) => (
     <PermissionFieldChips
       heading={heading}
-      fields={fields.map((entry) => ({ key: entry.key, label: labelFor(entry), active: !!perms[entry.key], needs: needs?.[entry.key], matched: ringed.has(`grant:${entry.key}`) }))}
+      fields={fields.filter((entry) => !entry.retired).map((entry) => ({ key: entry.key, label: labelFor(entry), active: !!perms[entry.key], needs: needs?.[entry.key], matched: ringed.has(`grant:${entry.key}`) }))}
       onToggle={toggleFlag}
     />
   )
@@ -320,7 +319,6 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
       ...chips.filter((chip) => chip.mark === 'needs').map((chip) => ({ label: translate(chip.action.tKey, chip.action.label), list: needsList(chip.missing) })),
       ...chips.flatMap((chip) => chip.controls.filter((control) => control.mark === 'needs').map((control) => ({ label: translate(control.action.tKey, control.action.label), list: needsList(control.missing) }))),
     ].slice(0, 3)
-    const costViewHeld = authority.hasPermission('product_cost_view')
     const imageOnly = row.imageOnly && state.level === 'none' ? row.imageOnly : null
     return (
       <div id={`perm-panel-${row.id}`} className="mx-1 mb-1.5 rounded-lg bg-gray-50 p-2 dark:bg-zinc-800/70">
@@ -356,7 +354,7 @@ export default function PermissionEditor({ permissions, baseline, onChange, t }:
                 {perms[imageOnly.toggle.key] ? fieldChips(translate('perm_fields_shown', 'Fields shown'), imageOnly.fields, ringed) : null}
               </div>
             ) : null}
-            {row.fields.length && state.level === 'full' ? fieldChips(translate('perm_fields_shown', 'Fields shown'), row.fields, ringed, costViewHeld ? undefined : { inventory_check_show_cost: translate('perm_action_also_needs', 'Also needs: {list}').replace('{list}', translate('perm_product_cost_view', 'View product costs')) }) : null}
+            {row.fields.length && state.level === 'full' ? fieldChips(translate('perm_fields_shown', 'Fields shown'), row.fields, ringed) : null}
             {needLines.map((line) => (
               <p key={line.label} className="text-xs text-amber-700 dark:text-amber-300">
                 {translate('perm_action_control_also_needs', '{control} also needs: {list}').replace('{control}', line.label).replace('{list}', line.list)}

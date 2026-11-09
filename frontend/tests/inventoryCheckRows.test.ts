@@ -8,8 +8,8 @@ import type { InventoryCheckProduct, InventoryCheckObservation, InventoryCheckPa
 
 const products: InventoryCheckProduct[] = [
   { id: 10, name: 'Synthetic family', quantity: 7, is_group: true },
-  { id: 11, parent_id: 10, name: 'Synthetic small variant', quantity: 0, sku: 'VARIANT-11', selling_price_usd: 192.75, cost_price_usd: 87.25, qty_sold: 3 },
-  { id: 12, parent_id: 10, name: 'Synthetic large variant', quantity: 7, barcode: 'VARIANT-12', damaged_quantity: 1, customer_count: 2 },
+  { id: 11, parent_id: 10, name: 'Synthetic small variant', quantity: 0, sku: 'VARIANT-11' },
+  { id: 12, parent_id: 10, name: 'Synthetic large variant', quantity: 7, barcode: 'VARIANT-12', damaged_quantity: 1 },
 ]
 const originalProducts = JSON.stringify(products)
 const calls: Array<{ productId: number | string; patch: InventoryCheckPatch; revision: number }> = []
@@ -17,7 +17,7 @@ const harness = await createHarness({ observe: ['utils/dirtyWork.ts'] })
 let rejectSave = false
 const base = {
   products, observations: {} as Record<string, InventoryCheckObservation>, pending: {}, errors: {},
-  canCheck: true, canViewPrice: false, canViewCost: false, t: (key: string) => key,
+  canCheck: true, t: (key: string) => key,
   onOpenProduct: (product: InventoryCheckProduct) => { opened.push(product.id) },
   onSave: async (productId: number | string, patch: InventoryCheckPatch, revision: number) => {
     calls.push({ productId, patch, revision })
@@ -43,7 +43,7 @@ try {
   const metaOf = (surface: MountedSurface, id: number) => surface.find(node => node.getAttribute('data-inventory-check-meta') !== null && row(surface, id).contains(node), `facts of ${id}`).textContent.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim()
   const differences = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('role') === 'img' && (node.getAttribute('aria-label') || '').startsWith('Difference')).map(node => node.getAttribute('aria-label'))
   const sheetProducts: InventoryCheckProduct[] = [
-    { id: 301, name: 'Count one', quantity: 10, unit: 'pcs', damaged_quantity: 1, qty_sold: 4, customer_count: 3, selling_price_usd: 2.5, cost_price_usd: 1.2 },
+    { id: 301, name: 'Count one', quantity: 10, unit: 'pcs', damaged_quantity: 1 },
     { id: 302, name: 'Count two', quantity: 12 },
     { id: 303, name: 'Count three', quantity: 5 },
   ]
@@ -51,9 +51,9 @@ try {
   const inSession = Object.fromEntries(sheetProducts.map(product => [product.id, started(Number(product.id))])) as Record<string, InventoryCheckObservation>
   const refusal = (code: string) => Object.assign(new Error('refused'), { code, status: 409 })
   const cases: Array<[string, () => Promise<void>]> = [
-    ['the phone line counts first: Now with its unit, Start, Counted, Damaged, then price, cost, Sold, Cust', async () => {
-      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301, { state: 'done', counted_quantity: 9, revision: 2, stock_changed: true, baseline_quantity: 12 }) }, canViewPrice: true, canViewCost: true, fmtUSD: (value: number) => `$${value}`, canCheck: false })
-      assert.equal(metaOf(s, 301), 'Now 10 pcs · Start 12 (−2) · Counted 9 · Damaged 1 · Price $2.5 · Cost $1.2 · Sold 4 · Cust 3')
+    ['the phone line counts first: Now with its unit and damaged chip, Start, Counted, and nothing about money or sales', async () => {
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301, { state: 'done', counted_quantity: 9, revision: 2, stock_changed: true, baseline_quantity: 12 }) }, canCheck: false })
+      assert.equal(metaOf(s, 301), 'Now 10 pcs Damaged 1 · Start 12 (−2) · Counted 9')
       await s.unmount()
     }],
     ['the state icon of a read-only row sits with the actions, not in the facts; the left edge carries the state', async () => {
@@ -270,21 +270,18 @@ try {
       await s.unmount()
     }],
     ['the sheet header names the columns this viewer has, and the list draws one only above several products', async () => {
-      const flags = { canCheck: true, inSession: true, canViewStock: true, canViewCounts: true, canViewPrice: true, canViewCost: true, canViewSales: true, canViewCustomers: true, t: base.t }
+      const flags = { canCheck: true, inSession: true, canViewStock: true, canViewCounts: true, t: base.t }
       const header = (props: Record<string, unknown>) => track(harness.mount({ component: 'components/inventory/InventoryCheckRows.tsx', exportName: 'InventoryCheckSheetHeader', props: { ...flags, ...props }, app: {}, doubles: { 'utils/dirtyWork.ts': dirtyWork } }))
       let h = await header({})
-      assert.deepEqual(titlesOf(h), ['Product', 'Now', 'Start', 'Damaged', 'Price', 'Cost', 'Sold', 'Cust', 'Count', ''])
+      assert.deepEqual(titlesOf(h), ['Product', 'Now', 'Start', 'Count', ''], 'a session counts: the owner’s columns, no price, cost, sold or customers')
       assert.equal(headerOf(h).getAttribute('aria-hidden'), 'true')
       assert.ok(headerOf(h).className.includes('lg:flex'), 'a sheet header exists from 1024px up')
       await h.unmount()
-      h = await header({ canViewCost: false })
-      assert.ok(!titlesOf(h).includes('Cost'), 'no Cost title without the cost right')
-      await h.unmount()
       h = await header({ canViewStock: false, canCheck: false })
-      assert.deepEqual(titlesOf(h), ['Product', 'Price', 'Cost', 'Sold', 'Cust', 'Count', ''], 'blind: no stock columns')
+      assert.deepEqual(titlesOf(h), ['Product', 'Count', ''], 'blind: no stock columns')
       await h.unmount()
       h = await header({ inSession: false, canCheck: false })
-      assert.deepEqual(titlesOf(h), ['Product', 'Now', 'Damaged', 'Price', 'Cost', 'Sold', 'Cust'], 'outside a session there is no Start, Count or actions column')
+      assert.deepEqual(titlesOf(h), ['Product', 'Now'], 'outside a session there is no Start, Count or actions column (the list has its own rows and header)')
       await h.unmount()
       const headers = (surface: MountedSurface) => surface.findAll(node => node.getAttribute('data-inventory-check-sheet-header') !== null).length
       const list = await mount({ products: sheetProducts, observations: inSession })
@@ -295,13 +292,15 @@ try {
       assert.equal(headers(list), 0, 'a list of one has nothing to line up with')
       await list.unmount()
     }],
-    ['without the cost right there is no Cost cell, title or figure; an empty value keeps its cell on the sheet', async () => {
-      const s = await mount({ products: [sheetProducts[0], sheetProducts[1]], observations: inSession, canViewPrice: true, canViewCost: false, fmtUSD: (value: number) => `$${value}` })
-      assert.ok(!s.text().includes('Cost') && !s.text().includes('1.2'), 'no cost anywhere')
-      assert.equal(s.findAll(node => node.getAttribute('data-cell') === 'cost').length, 0)
-      const placeholder = s.find(node => node.getAttribute('data-cell') === 'damaged' && row(s, 302).contains(node), 'damaged cell of a row without damage')
-      assert.equal(placeholder.getAttribute('aria-hidden'), 'true')
-      assert.ok(placeholder.className.includes('hidden') && placeholder.className.includes('xl:block'), 'it is there for the sheet, not on a phone')
+    ['damage is a chip beside Now on the rows that have it; no price, cost, sold or customer figure exists on any row', async () => {
+      const legacy = { ...sheetProducts[0], selling_price_usd: 2.5, cost_price_usd: 1.2, qty_sold: 4, customer_count: 3 } as unknown as InventoryCheckProduct
+      const s = await mount({ products: [legacy, sheetProducts[1]], observations: inSession, fmtUSD: () => { throw new Error('no money is formatted on this list') } })
+      const text = s.text()
+      for (const word of ['Price', 'Cost', 'Sold', 'Cust', '2.5', '1.2']) assert.ok(!text.includes(word), `no ${word} anywhere, even when an older server still sends it`)
+      assert.equal(s.findAll(node => node.getAttribute('data-cell') === 'cost' || node.getAttribute('data-cell') === 'price' || node.getAttribute('data-cell') === 'damaged').length, 0, 'no money or damaged column cells')
+      const chip = s.find(node => node.getAttribute('data-damaged') !== null && row(s, 301).contains(node), 'damaged chip of 301')
+      assert.equal(chip.textContent, 'Damaged 1')
+      assert.equal(s.findAll(node => node.getAttribute('data-damaged') !== null && row(s, 302).contains(node)).length, 0, 'a row without damage draws no chip')
       assert.ok(!metaOf(s, 302).includes('Damaged'))
       await s.unmount()
     }],
@@ -346,15 +345,14 @@ try {
   const surface = await mount()
   assert.equal(state(surface, 11), 'Not started')
   assert.equal(surface.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('data-check-action') === 'done').length, 2, 'a family header cannot be checked instead of its two real variants')
-  assert.ok(!surface.text().includes('192.75') && !surface.text().includes('87.25'), 'denied price/cost values are absent')
+  assert.ok(!surface.text().includes('192.75') && !surface.text().includes('87.25'), 'no price or cost values on the list')
   await surface.click(surface.button('Mark done', row(surface, 11)))
   assert.deepEqual(calls.at(-1), { productId: 11, patch: { state: 'done', counted_quantity: null, reason: null }, revision: 0 })
   assert.equal(state(surface, 11), 'Not started', 'a callback does not create fake optimistic completion')
   const done = { product_id: 11, state: 'done', counted_quantity: 0, reason: null, revision: 3 } satisfies InventoryCheckObservation
-  await surface.render({ ...base, observations: { 11: done }, canViewPrice: true, canViewCost: true })
+  await surface.render({ ...base, observations: { 11: done } })
   assert.equal(state(surface, 11), 'Done')
   assert.ok(row(surface, 11).textContent.includes('Counted 0'), 'checked zero is visible and distinct from unstarted')
-  assert.ok(surface.text().includes('192.75') && surface.text().includes('87.25'), 'explicit grants expose their own values')
   await surface.click(surface.button('Clear check', row(surface, 11)))
   assert.deepEqual(calls.at(-1), { productId: 11, patch: { state: 'unstarted', counted_quantity: null, reason: null }, revision: 3 })
   await surface.click(surface.button('Synthetic small variant', row(surface, 11)))
@@ -456,21 +454,6 @@ try {
   const implicitHeader = await mount({ products: [{ ...products[0], is_group: undefined }, products[1], products[2]] })
   assert.equal(implicitHeader.findAll(node => node.getAttribute('data-check-action') === 'done').length, 2, 'real member relationships identify headers without trusting optional display flags')
   await implicitHeader.unmount()
-  const formatCalls: number[] = []
-  const money = await mount({ products: [{ ...products[1], selling_price_usd: 0, cost_price_usd: null }], canViewPrice: true, canViewCost: true,
-    fmtUSD: (value: number) => { formatCalls.push(value); return `APP[${value}]` } })
-  assert.deepEqual(formatCalls, [0], 'only genuine known money reaches the app formatter; unknown cost never becomes zero')
-  assert.ok(money.text().includes('APP[0]') && money.text().includes('Cost —'), 'a known zero price shows, an unknown cost is a dash and never $0')
-  await money.render({ ...base, products: [products[1]], fmtUSD: () => { throw new Error('denied money must not be formatted') } })
-  assert.ok(!money.text().includes('Price') && !money.text().includes('Cost') && !money.text().includes('APP['), 'denied money shows no price or cost at all')
-  await money.unmount()
-  const review = await mount({ products: [{ ...products[1], cost_needs_review: true }], canViewCost: true })
-  assert.ok(review.text().includes('87.25') && review.text().includes('Cost needs review'), 'a saved known fallback cost still displays its review tag')
-  await review.render({ ...base, products: [{ ...products[1], cost_needs_review: true }], canViewCost: false })
-  assert.ok(!review.text().includes('Cost needs review') && !review.text().includes('87.25'), 'a hidden cost cannot leak its derived review status')
-  await review.render({ ...base, products: [{ ...products[1], cost_needs_review: false }], canViewCost: true })
-  assert.ok(!review.text().includes('Cost needs review'), 'confirmed cost control has no review tag')
-  await review.unmount()
   const blind = await mount({ products: [{ id: 91, name: 'Synthetic blind check', quantity: 4444, damaged_quantity: 3333 }],
     canViewStock: false, observations: { 91: { product_id: 91, state: 'done', counted_quantity: 0, reason: null, revision: 1, baseline_quantity: 2222 } } })
   assert.ok(!blind.text().includes('Now') && !blind.text().includes('Start') && !blind.text().includes('Damaged') && !blind.text().includes('4444') && !blind.text().includes('3333') && !blind.text().includes('2222'), 'blind checks hide stock, damage and baseline without deriving mismatch signals')
@@ -507,11 +490,10 @@ try {
   await guarded.unmount()
   assert.ok(!dirtyWork.getRegisteredWork().some(entry => entry.label === 'Unsaved physical count'), 'scope teardown removes the old row’s registry entry')
   // Board A-M5/A-M6/A-R3: one compact metric line, a drift that shows its size, copyable identity, icon-only buttons, one Retry.
-  const full = await mount({ products: [{ id: 301, name: 'Full line product', barcode: '885000111', brand: 'Brand B', category: 'Cat C', quantity: 10, damaged_quantity: 1, qty_sold: 4, customer_count: 3, selling_price_usd: 2.5, cost_price_usd: 1.2 }],
-    canViewPrice: true, canViewCost: true, fmtUSD: (value: number) => `$${value}`,
+  const full = await mount({ products: [{ id: 301, name: 'Full line product', barcode: '885000111', brand: 'Brand B', category: 'Cat C', quantity: 10, damaged_quantity: 1 }],
     observations: { 301: { product_id: 301, state: 'done', counted_quantity: 9, reason: null, revision: 2, baseline_quantity: 12, stock_changed: true } } })
   const meta = full.find(node => node.getAttribute('data-inventory-check-meta') !== null, 'metric line').textContent
-  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim(), 'Now 10 · Start 12 (−2) · Counted 9 · Damaged 1 · Price $2.5 · Cost $1.2 · Sold 4 · Cust 3','Now, Start with drift size, the count, Damaged, price, cost, Sold and Cust read in one line')
+  assert.equal(meta.replace(/\s+/g, ' ').replace(/ ?· ?/g, ' · ').trim(), 'Now 10 Damaged 1 · Start 12 (−2) · Counted 9', 'Now with its damaged chip, Start with drift size and the count read in one line')
   assert.equal(full.find(node => node.getAttribute('role') === 'img', 'drift marker').getAttribute('aria-label'), 'Stock changed −2')
   const copyValues = full.findAll(node => node.getAttribute('data-copy-value') !== null).map(node => node.getAttribute('data-copy-value'))
   assert.deepEqual(copyValues, ['Full line product', '885000111', 'Brand B'], 'name, barcode and brand open the shared copy float')

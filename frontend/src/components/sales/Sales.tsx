@@ -1416,6 +1416,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         const code = String((error as { code?: unknown } | null)?.code || '')
         const detail = directMutationOutcomeIsUnknown(error)
           ? translateOr('write_outcome_unknown', 'The request did not finish. Its result may be unknown. Check the sale and Records before retrying.', 'សំណើមិនទាន់បញ្ចប់។ លទ្ធផលអាចមិនទាន់ប្រាកដ។ សូមពិនិត្យការលក់ និងកំណត់ត្រា មុនសាកល្បងម្ដងទៀត។')
+          : code === 'riel_cash_not_hundreds'
+            ? translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។')
           : code === 'customer_state_conflict'
             ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
             : saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
@@ -1433,6 +1435,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingDirectStatus(saleId, null)
       if (isWriteConflict(error)) {
         await loadSales()
+        return false
+      }
+      // A cancel whose lost fee holds riel that is not whole 100៛ notes (riel_cash_not_hundreds; the fee field marks it inline first).
+      if (problem.code === 'riel_cash_not_hundreds') {
+        notify(translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។'), 'error')
         return false
       }
       // S4-41: the Worker will not give a Not Paid sale that still owes money a
@@ -2405,6 +2412,8 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       }
       notify(unpaid
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        // A group cancel whose lost fee holds riel that is not whole 100៛ notes (the fee field marks it inline first).
+        : (error as { code?: string } | null)?.code === 'riel_cash_not_hundreds' ? translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។')
         : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
@@ -2444,6 +2453,11 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         savePendingBulkFieldRequest(null)
         setBulkChangePrompt(null)
         void loadSales(true)
+      }
+      // A relabel to cash of riel that is not whole 100៛ notes: a group action has no field to mark.
+      if ((error as { code?: string } | null)?.code === 'riel_cash_not_hundreds') {
+        notify(translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។'), 'error')
+        return false
       }
       notify(cancelled ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
       return false

@@ -14,6 +14,13 @@ assert.equal(formatPhoneInputValue('(+855) 12 345 678'), '+855 12 345 678', 'Cam
 assert.equal(formatPhoneInputValue('+855 96 234 5678'), '+855 96 234 5678')
 assert.equal(formatPhoneInputValue('+123456789012345'), '+123 456 789 012 345', 'valid international length is not truncated')
 
+// A masked number is not a number to re-group: formatting must leave it exactly as the Worker sent it (P2.8).
+for (const masked of ['012 *** 678', '087 *** 321', '12 *** 78', '1 *** 5', '***', '+855 12 *** 678']) {
+  assert.equal(formatPhoneInputValue(masked), masked, `a masked phone survives the formatter: ${masked}`)
+  assert.equal(formatPhoneInputEdit(masked, 4, 4).value, masked, `and an edit that does not change it: ${masked}`)
+}
+assert.equal(formatPhoneInputValue('012 345 678'), '012 345 678', 'a typed number is still grouped')
+
 assert.deepEqual(
   formatPhoneInputEdit('012345', 3, 3),
   { value: '012 345', selectionStart: 3, selectionEnd: 3 },

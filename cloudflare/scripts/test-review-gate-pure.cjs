@@ -255,6 +255,8 @@ const feesRoute = loadReal('routes/fees.ts', {
   // CUTOVER-LR: fees.ts resolves a disabled-branch redirect through the real branchEffect module.
   '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
+  // The expense's riel cash rule (whole 100-riel notes, owner 27 Oct 2026): the real module, not a copy.
+  '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   ...dbStub,
   ...auditStub,
   ...broadcastStub,

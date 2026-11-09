@@ -14,7 +14,8 @@
 //     strip around the toolbar gets no scrollbar and nothing is clipped.
 //
 // Two kinds of fixture, both on the app's own CSS and its real components:
-//   - the Inventory products table and the Products Add button are the REAL components;
+//   - the Inventory products table, the Inventory Check list rows (a count waiting for approval
+//     carries the same tag, as PendingReviewMark) and the Products Add button are the REAL components;
 //   - the Products row/card, expense row/card and branch card live in files too large to
 //     mount, so each is rebuilt from the host class strings and the tag offsets READ OUT OF
 //     THAT SOURCE FILE (a change to either changes this test's input), around content of
@@ -76,6 +77,7 @@ import InventoryProductsSurface from './src/components/inventory/InventoryProduc
 import ProductsHeaderActions from './src/components/products/surfaces/HeaderActions.tsx'
 import PendingReviewTag from './src/components/shared/PendingReviewTag.tsx'
 import PendingReviewSync from './src/components/shared/PendingReviewSync.tsx'
+import InventoryCheckListRows from './src/components/inventory/InventoryCheckListRows.tsx'
 import { refreshPendingReviewTargets } from './src/utils/pendingReviewTargets.ts'
 import { AppContext, FALLBACK_APP_CONTEXT } from './src/app/AppContextCore.tsx'
 
@@ -105,6 +107,22 @@ const items = [
 ]
 const noop = () => {}
 const Tag = (props) => <PendingReviewTag {...props} />
+
+// Inventory Check list rows. Product 22's count differs and waits for approval only when ?pending=1; the rows are otherwise the same.
+const checkedAt = '2026-10-30T08:15:00.000Z'
+const checkProducts = [
+  { id: 21, name: 'Rose water', barcode: '885000021', quantity: 8, unit: 'pcs', check_status: 'ok', check_counted_quantity: 8, check_by: 'amy', check_at: checkedAt },
+  { id: 22, name: 'Hand cream', barcode: '885000022', quantity: 5, check_status: 'issue', check_counted_quantity: 3, check_note: 'Two tubes crushed', check_by: 'ben', check_at: checkedAt, check_pending: waiting },
+  { id: 23, name: 'Lip balm', barcode: '885000023', quantity: 4, check_status: 'not_checked' },
+]
+function CheckList({ selecting }) {
+  return (
+    <div className="w-full" data-fixture={selecting ? 'ic-list' : 'ic-list-readonly'}>
+      <InventoryCheckListRows products={checkProducts} drafts={{}} selecting={selecting} canViewStock canViewCounts t={t}
+        onOpenProduct={noop} onToggle={noop} onCount={noop} onChecked={noop} onNote={noop} />
+    </div>
+  )
+}
 
 function ProductsRow({ indented }) {
   return (
@@ -198,6 +216,8 @@ function Page() {
       <main style={{ padding: 12, maxWidth: 1180 }} data-ready={ready ? '1' : '0'}>
         <Toolbar />
         <InventoryTable />
+        <CheckList selecting />
+        <CheckList selecting={false} />
         <ProductsRow indented={false} />
         <ProductsRow indented />
         <div className="flex flex-wrap gap-3"><ProductsCard indented={false} /><ProductsCard indented /></div>
@@ -215,7 +235,7 @@ const built = await build({
   bundle: true, format: 'iife', platform: 'browser', write: false, jsx: 'automatic', logLevel: 'error',
 })
 const bundle = built.outputFiles[0].text
-const sources = [header, products, fees, branches, read('src/components/inventory/InventoryProductsSurface.tsx'), read('src/components/shared/PendingReviewTag.tsx'), fixture, read('src/components/shared/toolbarButtonStyles.ts')].join('\n')
+const sources = [header, products, fees, branches, read('src/components/inventory/InventoryProductsSurface.tsx'), read('src/components/inventory/InventoryCheckListRows.tsx'), read('src/components/pos/ProductImage.tsx'), read('src/components/shared/ProductNameRail.tsx'), read('src/components/shared/InfoHint.tsx'), read('src/components/shared/PendingReviewTag.tsx'), fixture, read('src/components/shared/toolbarButtonStyles.ts')].join('\n')
 const css = (await postcss([tailwindcss({ ...tailwindConfig, content: [{ raw: sources, extension: 'tsx' }] })]).process(read('src/styles/main.css'), { from: path.join(root, 'src/styles/main.css') })).css
 const server = http.createServer((request, response) => {
   response.setHeader('cache-control', 'no-store')
@@ -366,13 +386,16 @@ try {
       assert.equal(byFixture('fees-row').length, 1, `${label}: expense row tag`)
       assert.equal(byFixture('fees-card').length, 1, `${label}: expense card tag`)
       assert.equal(byFixture('branch-card').length, 1, `${label}: branch card tag`)
+      assert.equal(byFixture('ic-list').length, 1, `${label}: Inventory Check list: the one count waiting for approval, and no other row, carries the mark`)
+      assert.equal(byFixture('ic-list-readonly').length, 1, `${label}: Inventory Check list for a viewer who cannot count`)
       // Inventory draws a desktop row AND a phone card for each product, and CSS shows one of the two sets. Two display
       // rows wait: the merged Tea row (ids 1 and 2, id 2 waiting) and Soap (id 7); Salt (id 8) does not.
       assert.equal(withTags.tags.filter((tag) => tag.fixture === 'inventory').length, 4, `${label}: Tea and Soap carry a tag on both the row and the card, Salt on neither`)
       assert.equal(byFixture('inventory').length, 2, `${label}: the two tags of the visible layout are on screen`)
       for (const tag of visible) {
         const where = `${label} ${tag.fixture}`
-        assert.equal(tag.name, (language === 'km' ? km : en).pending_review_tag, `${where}: the tag is named in the page's language`)
+        const pack = language === 'km' ? km : en
+        assert.equal(tag.name, tag.fixture.startsWith('ic-list') ? pack.inventory_check_approval_pending : pack.pending_review_tag, `${where}: the tag is named in the page's language`)
         assert.equal(tag.position, 'absolute', `${where}: out of the flow`)
         assert.equal(tag.pointerEvents, 'none', `${where}: a tap goes to the row`)
         assert.ok(Math.abs(tag.box.width - 10) < 0.01 && Math.abs(tag.box.height - 10) < 0.01, `${where}: a 10px box, was ${tag.box.width} x ${tag.box.height}`)

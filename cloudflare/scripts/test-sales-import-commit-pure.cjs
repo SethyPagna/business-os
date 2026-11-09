@@ -27,6 +27,8 @@ function compileSubject() {
     if (request === './db') return {}
     if (request === './loyaltyEligibility') return compileLib('loyaltyEligibility',localRequire)
     if (request === './saleStatusResolution') return compileLib('saleStatusResolution', localRequire)
+    // The riel cash rule asks which method is cash (owner, 27 Oct 2026): the real registry, a pure module.
+    if (request === './paymentMethodRegistry') return compileLib('paymentMethodRegistry', localRequire)
     if (request === './financialPrecision') return compileLib('financialPrecision', localRequire)
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)

@@ -293,11 +293,10 @@ test('a riel cash tender in whole hundreds is recorded as riel, not converted to
 })
 
 test('a 150 riel cash row is refused by the till and no sale is recorded', async ({ page, request }) => {
-  // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the till offers Completed and sends the 150 riel cash row, and
-  // POST /api/sales answers 200 -- no multiple-of-100 check on the cash path (frontend/src/components/pos/posCore.ts:24, cloudflare/src/routes/sales.ts:1259).
-  // The case is declared expected-red only while that signature (ONE new sale in the database, holding the 150 riel row) is observed in
-  // the run itself, below. Anything else that goes wrong (a timeout, a missing control) stays plainly red, and once the rule is enforced
-  // the case simply passes. The evidence is the stored row, not the timing of one HTTP response, which a slow machine can miss.
+  // Owner rule 27 Oct 2026 #15: riel CASH is whole hundreds. Until MONEY-1 (4 Nov 2026) the till offered Completed and sent the 150 riel
+  // cash row and POST /api/sales answered 200 (posCore.ts, sales.ts); now the cash row is marked at the field with the translated
+  // refusal and nothing is sent, and the Worker answers a stale till with 400 riel_cash_not_hundreds. The evidence is the stored row,
+  // not the timing of one HTTP response, which a slow machine can miss.
   await configure(request, { tax: false, rate: 4000 })
   const before = await readState(request)
   await signInAndOpenPos(page)
@@ -319,11 +318,7 @@ test('a 150 riel cash row is refused by the till and no sale is recorded', async
   const response = refusedByPicker ? null : await Promise.race([posted, page.getByRole('alert').first().waitFor({ timeout: 45_000 }).then(() => null, () => null)])
   await page.waitForTimeout(1_000)
   const after = await readState(request)
-  const storedByTill = after.sales.find(row => !before.saleIds.includes(row.id))
   try {
-    test.fail(
-      after.saleIds.length - before.saleIds.length === 1 && storedByTill != null && JSON.stringify(paymentRows(storedByTill)) === JSON.stringify([{ method: 'Cash', amount_usd: 4.71, amount_khr: 150 }]),
-      'owner rule 27 Oct #15 not enforced: till and POST /api/sales accept a 150 riel cash row (posCore.ts:24, sales.ts:1259)')
     // Wrong implementation caught: the 150 riel accepted (owner, 27 Oct: riel cash that is not a whole 100 is invalid on every cash path).
     if (response) expect(response.status(), 'a cash riel amount that is not a multiple of 100 must be refused').toBeGreaterThanOrEqual(400)
     expect(after.saleIds, 'no sale may be recorded').toEqual(before.saleIds)
@@ -362,10 +357,9 @@ async function postSale(page: Page, body: unknown): Promise<{ status: number; bo
 }
 
 test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, and takes the same sale with whole hundreds', async ({ page, request }) => {
-  // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the whole-hundred control below is taken (200), and so is the
-  // 150 riel cash row (200, a sale is created) -- the Worker normalises every payment row to whole riel and checks nothing more
-  // (cloudflare/src/routes/sales.ts:1259; lib/paymentMethodRegistry.ts:273 isCashPaymentMethod already tells cash from digital).
-  // Declared expected-red only while the signature (the 150 riel row answered 200) is observed below; once the rule is enforced it passes.
+  // Owner rule 27 Oct 2026 #15, enforced in the Worker (MONEY-1, 4 Nov 2026): the whole-hundred control below is taken (200) and the
+  // 150 riel cash row is refused (400 riel_cash_not_hundreds). Before the fix the Worker normalised every payment row to whole riel and
+  // checked nothing more (sales.ts), so this row answered 200 and a sale was created.
   const ready = await loadReady(request)
   await configure(request, { tax: false, rate: 4000 })
   await signInAs(page, 'cashier', seed)
@@ -382,7 +376,6 @@ test('the Worker refuses a 150 riel cash row sent straight to POST /api/sales, a
   try {
     const refused = await postSale(page, saleBody(ready, { rows: [{ method: 'Cash', amount_usd: 4.71, amount_khr: 150 }], usd: 4.71, khr: 150, currency: 'MIXED' }, 'm1-riel-150'))
     refusedStatus = refused.status
-    test.fail(refused.status === 200, 'owner rule 27 Oct #15 not enforced in the Worker: POST /api/sales takes a 150 riel cash row (sales.ts:1259)')
     // Wrong implementation caught: backend validation missing -- the till refuses, the API takes it (frontend rule without backend enforcement).
     expect(refused.status, `the Worker must refuse a 150 riel cash row: ${JSON.stringify(refused.body)}`).toBe(400)
     const after = await readState(request)
@@ -653,11 +646,9 @@ test('a dollar discount comes off before tax is charged, so tax is on the smalle
 })
 
 test('the summary the cashier reads foots: subtotal - discount + tax is the total, each line at the nearest cent', async ({ page, request }) => {
-  // APP BUG, seen in the browser 3 Nov 2026 (desktop-chromium): the Tax line reads "$2.17" for a stored tax of 2.161 (total 23.77), so
-  // the summary lines add to 23.78. fmtUSD formats with normalizePriceValue, which rounds UP (frontend/src/AppContext.tsx:2760 ->
-  // frontend/src/utils/pricing.ts:22 roundUpToDecimals); owner rule 24 Sep: displayed money rounds to the NEAREST cent, only selling
-  // prices round up. Declared expected-red only while that signature (the line reads $2.17) is observed below; once the display follows
-  // the rule the case passes with no edit, and a timeout or a missing line stays plainly red.
+  // Owner rule 24 Sep 2026: displayed money rounds to the NEAREST cent, only selling prices round up. Until MONEY-1 (4 Nov 2026) the Tax
+  // line read "$2.17" for a stored tax of 2.161 (total 23.77), so the summary lines added to 23.78: fmtUSD formatted with
+  // normalizePriceValue, the selling-price rounder (AppContext.tsx, utils/pricing.ts). It now formats with roundDisplayMoney.
   await configure(request, { tax: true, rate: 4000 })
   await signInAndOpenPos(page)
   await addToCart(page, rose, lotOf(rose, 'M1-ROSE-AUG'), 2)
@@ -668,8 +659,6 @@ test('the summary the cashier reads foots: subtotal - discount + tax is the tota
   // = 23.77 foots. Shown rounded UP ($2.17) the lines add to $23.78 and disagree with the total beside them by a cent.
   // Wrong implementation caught: a display formatter that rounds up (utils/pricing.ts roundUpToDecimals via fmtUSD).
   const taxLine = page.getByText(/^Tax \(10%\)/).locator('xpath=..')
-  const shownTax = await taxLine.innerText({ timeout: 15_000 })
-  test.fail(/\$2\.17(?!\d)/.test(shownTax), 'displayed money rounds UP, owner rule 24 Sep says nearest: Tax $2.161 reads $2.17 (AppContext.tsx:2760, pricing.ts:22)')
   await expect(taxLine).toContainText('$2.16')
   await expect(taxLine).not.toContainText('$2.17')
 })

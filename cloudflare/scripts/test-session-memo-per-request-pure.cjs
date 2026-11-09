@@ -197,13 +197,23 @@ async function main() {
     assert.equal(db.lookups, 2)
   })
 
-  await check('a failed lookup is not memoized: the next call on the request retries', async () => {
+  await check('a failed lookup is shared for the rest of the request: one D1 call, not one per caller (the cap or an overload would otherwise cost two calls per request)', async () => {
     reset()
     const c = context()
     db.fail = true
     await assert.rejects(() => auth.getSessionUser(c), /network/)
     db.fail = false
-    assert.equal((await auth.getSessionUser(c)).id, 7)
+    await assert.rejects(() => auth.getSessionUser(c), /network/, 'the second caller of the same request gets the same outcome')
+    assert.equal(db.lookups, 1)
+  })
+
+  await check('the next request starts clean after a failed one: the shared failure belongs to its request only', async () => {
+    reset()
+    const failed = context()
+    db.fail = true
+    await assert.rejects(() => auth.getSessionUser(failed), /network/)
+    db.fail = false
+    assert.equal((await auth.getSessionUser(context())).id, 7)
     assert.equal(db.lookups, 2)
   })
 

@@ -163,11 +163,14 @@ const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyP
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
+// salesAnalytics asks the one coverage answer for what a Not Paid sale still owes (6.0.982, riel rule).
+const saleStatusResolution = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': financialPrecision })
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const dbModule = { getDb: (env) => env.DB }
 const salesAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
   './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': dbModule, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision,
+  './saleStatusResolution': saleStatusResolution,
 })
 
 const kernelCalls = []

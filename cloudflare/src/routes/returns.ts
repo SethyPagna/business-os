@@ -1,3 +1,5 @@
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -640,7 +642,7 @@ export function returnRangePredicate(query: Record<string, string>, column: 'r.c
  * time predicate (the list's own range, or the export's exact one-year window).
  */
 type ReturnsFilter = { scope: string; where: string[]; params: Record<string, unknown> }
-function returnsFilter(query: Record<string, string>, range: { sql: string; params: Record<string, unknown> }): ReturnsFilter {
+function returnsFilter(query: Record<string, string>, range: { sql: string; params: Record<string, unknown> }, access: PhoneSearchAccess): ReturnsFilter {
   const scope = normalizeScope(query.scope, CUSTOMER_SCOPE)
   const search = String(query.search || query.q || '').trim().toLowerCase()
   const typeValues = String(query.type || query.returnType || '')
@@ -709,13 +711,25 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(rip.barcode, '') || ' ' || COALESCE(rip.brand, '') || ' ' ||
       COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
     )`
+    // A return carries no phone column, but a customer, a supplier, a cashier or a note can be a phone number (saved by it), and the
+    // projection masks that. Without the full-phone permission a digit word reads those columns through the projection's own rule
+    // (restrictedColumnSql) and never the folded copy (lib/phoneSearchGuard.ts); the haystack is computed once per row
+    // (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+    const guardDigitWords = !access.fullPhone
+    const digitWordHaystack = `(${restrictedHaystackParts([
+      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name', 'r.customer_name',
+      'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type', 'r.supplier_settlement',
+    ]).join(" || ' ' || ")})`
+    let usesRestrictedHaystack = false
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
       let wordIndex = 0
       const wordClauses = words.map((word) => {
         const keyBase = `rsrch${groupIndex}_${wordIndex}`
         wordIndex += 1
-        const flatClause = buildLikeAliasClause(word, [flatHaystack], params, `${keyBase}_f`, true)
+        const restricted = guardDigitWords && hasDigit(word)
+        if (restricted) usesRestrictedHaystack = true
+        const flatClause = buildLikeAliasClause(word, restricted ? restrictedWordHaystacks(word, RESTRICTED_HAYSTACK) : [flatHaystack], params, `${keyBase}_f`, true)
         const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
         return `(${flatClause} OR EXISTS (
           SELECT 1 FROM return_items rii
@@ -727,7 +741,8 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       return wordClauses.length > 1 ? `(${wordClauses.join(' AND ')})` : wordClauses[0]
     })
     const joiner = searchMode === 'OR' ? ' OR ' : ' AND '
-    where.push(groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0])
+    const combined = groupClauses.length > 1 ? groupClauses.map((c) => `(${c})`).join(joiner) : groupClauses[0]
+    where.push(usesRestrictedHaystack ? restrictedSearchScope(combined, digitWordHaystack) : combined)
   }
 
   return { scope, where, params }
@@ -741,7 +756,7 @@ app.get('/', async (c) => {
 
   let range: ReturnType<typeof returnRangePredicate>
   try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
-  const filter = returnsFilter(query, range)
+  const filter = returnsFilter(query, range, phoneSearchAccessOf(c.get('user')))
   const where = filter.where
   const params: Record<string, unknown> = { limit, ...filter.params }
 
@@ -860,7 +875,7 @@ app.get('/export', async (c) => {
   // the rows that range reads (test-sargable-date-filters-pure carries the allowlist entry); it never drives a scan.
   const seekFrom = seekBound(window.createdFrom, -SEEK_MARGIN_HOURS, ' '), seekTo = seekBound(window.createdTo, SEEK_MARGIN_HOURS, 'T')
   const buildFilter = (upper: string) => {
-    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } })
+    const built = returnsFilter(query, { sql: `r.created_at >= @seekFrom AND r.created_at ${upper} AND datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo`, params: { createdFrom: window.createdFrom, createdTo: window.createdTo, seekFrom, seekTo } }, phoneSearchAccessOf(c.get('user')))
     if (ids) { built.where.push('r.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@exportIds))'); built.params.exportIds = JSON.stringify(ids) }
     return built
   }

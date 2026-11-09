@@ -249,6 +249,7 @@ const returnsRouteOverrides = {
   // undefined and would make the assertion below agree with itself.
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
   '../lib/anonymousCustomer': anonymousCustomerKernel,
+  ...require('./harness/phone_real_modules.cjs').routePhoneDeps(),
   '../lib/db': { getDb: () => db },
   '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   // routes/returns.ts buckets return dates in UTC+7 through the pure

@@ -31,6 +31,11 @@ export function roundUpToDecimals(value: unknown, decimals = 2): number {
   return rounded
 }
 
+/**
+ * A SELLING PRICE to the cent: rounds UP, so the shop never undercharges by a fraction (owner, 24 Sep 2026). It is for a price
+ * a product is sold at, never for a figure to be shown: tax, a total, change, a discount or a report figure is DISPLAYED money
+ * and rounds to the nearest cent (roundDisplayMoney, utils/displayMoney.ts).
+ */
 export function normalizePriceValue(value: unknown, fallback = 0): number {
   return roundUpToDecimals(toFiniteNumber(value, fallback), 2)
 }
@@ -49,12 +54,21 @@ export function editableMoneyValue(value: unknown, fallback = 0): string {
   return String(normalizeInternalMoney(value, fallback))
 }
 
+/** A selling price as a two-decimal string (rounds UP). A figure that is not a price uses formatMoneyNumber (utils/displayMoney.ts). */
 export function formatPriceNumber(value: unknown): string {
   return normalizePriceValue(value, 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
 }
+
+/**
+ * THE one way to SHOW a selling, wholesale, promotion or unit price through a display formatter (fmtUSD / fmtKHR, from the app context or a
+ * prop): the price rounds UP first, with the rule the till charges it by (normalizePriceValue / sellingPriceCeilCent), and the formatter then
+ * prints that cent-valued figure. So a product stored at 2.161 reads $2.17 on its card, in the cart and on the receipt -- the same figure it is
+ * sold at. An AMOUNT (a total, tax, change, a line total, a report figure) goes straight to fmtUSD, which rounds to the nearest cent.
+ */
+export const priceText = (format: (amount: number) => string, price: unknown): string => format(normalizePriceValue(price))
 
 export function normalizeDiscountPercent(value: unknown): number {
   const num = toFiniteNumber(value, 0)

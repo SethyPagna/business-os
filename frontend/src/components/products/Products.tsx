@@ -1,4 +1,5 @@
 import type { MergeCostReview } from '../../api/productWriteTransport.ts'
+import { priceText } from '../../utils/pricing.ts'
 import ProductNameRail from '../shared/ProductNameRail'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -86,6 +87,7 @@ import { noteQueuedForReview } from '../../utils/pendingReviewTargets.ts'
 import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
+import { UNDO_HIDDEN_VALUE_FALLBACK, undoNeedsHiddenValue, undoNeedsHiddenValueIn } from '../../utils/hiddenValueUndo.ts'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
 import { toggleIdSet } from '../../utils/recordFilters.ts'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.ts'
@@ -941,7 +943,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     const supplierLockTip = canEditSupplier ? undefined : tr('product_supplier_read_only', 'You do not have permission to change the supplier.', 'អ្នកគ្មានសិទ្ធិប្ដូរអ្នកផ្គត់ផ្គង់ទេ។')
     const promotionLine = promotion.active && !shownColumns.has('discount') ? (
       <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-        {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+        {String(p.discount_label || tr('discounts', 'Discounts'))} {priceText(fmtUSD, promotion.applied_price_usd)}
       </div>
     ) : null
     const renderDataCell = (column: ProductColumn): ReactNode => {
@@ -1399,7 +1401,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 digit size (tabular-nums, tighter tracking) rather than in a
                 second line; no value is dropped or hidden. */}
             <div className="price-strip mt-1">
-              <span className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+              <span className="font-semibold text-green-700 dark:text-green-400">{priceText(fmtUSD, sellingUsd)}</span>
               {wholesaleUsd > 0 ? (
                 // The wholesale price (wholesale_price_usd). This used to read
                 // special_price_usd and be labelled "VIP"; the 2026-09-04
@@ -1416,13 +1418,13 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 <>
                   <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
                   <span className="font-medium text-primary-700 dark:text-primary-400">
-                    {fmtUSD(wholesaleUsd)}
+                    {priceText(fmtUSD, wholesaleUsd)}
                   </span>
                 </>
               ) : null}
               {promotion.active ? (
                 <span className="font-medium text-rose-600 dark:text-rose-300">
-                  {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
+                  {String(p.discount_label || tr('discounts', 'Discounts'))} {priceText(fmtUSD, promotion.applied_price_usd)}
                 </span>
               ) : null}
               {/* Same as the desktop cost cell: the cost opens its calculation,
@@ -2672,9 +2674,12 @@ function ProductsFullEditor() {
               }).snapshot
 
           if (previousSnapshot && targetProductId) {
+            // A field shown masked (a supplier saved under a number) that the edit changed cannot be put back from a masked snapshot.
+            const undoBlocked = undoNeedsHiddenValue(previousSnapshot, latestProductSnapshot)
             actionHistory.pushAction({
               label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-              undo: () => restoreProductSnapshots([previousSnapshot]),
+              undoRefused: undoBlocked,
+              undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : () => restoreProductSnapshots([previousSnapshot]),
               redo: () => restoreProductSnapshots([latestProductSnapshot]),
             })
           } else if (latestProductSnapshot?.id && !foldedIntoName) {
@@ -4602,9 +4607,11 @@ function ProductsFullEditor() {
       await load(true)
       const restoredSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
       if (done > 0 && restoredSnapshots.length) {
+        const undoBlocked = undoNeedsHiddenValueIn(restoredSnapshots, nextUpdates)
         actionHistory.pushAction({
           label: `Update ${done} product${done === 1 ? '' : 's'}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots),
+          undoRefused: undoBlocked,
+          undo: undoBlocked ? () => { throw new Error(tr('contact_undo_phone_hidden', UNDO_HIDDEN_VALUE_FALLBACK)) } : () => restoreProductSnapshots(restoredSnapshots),
           redo: async () => {
             const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
               if (!snapshot.id) return

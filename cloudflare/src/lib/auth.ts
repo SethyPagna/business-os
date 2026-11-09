@@ -372,8 +372,12 @@ export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env
 // app.route(). It is a WeakMap entry, never a header, cookie or module-level
 // value, so it cannot outlive the request or leak into another one. The
 // in-flight promise is stored, so concurrent lookups share one query, and it
-// is bound to the token it was computed for. A rejected lookup is dropped so
-// a later call in the same request retries; revokeSession() drops it too.
+// is bound to the token it was computed for. A REJECTED lookup is kept for the
+// rest of the request too: the phone-mask middleware looks the session up
+// first and swallows a failure, then requireAuth asks again, and at the D1
+// daily cap (or when D1 is overloaded) that was two failing calls for every
+// signed-in request. Whoever asks next in this request gets the same outcome;
+// the next request starts clean, and revokeSession() drops the entry.
 const sessionLookupMemo = new WeakMap<object, { token: string; lookup: Promise<SessionUser | null> }>()
 
 // True when the request carries a session cookie at all. Not authentication:
@@ -390,9 +394,7 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   if (memo && memo.token === token) return memo.lookup
   const lookup = lookupSessionUser(c, token)
   sessionLookupMemo.set(c, { token, lookup })
-  lookup.catch(() => {
-    if (sessionLookupMemo.get(c)?.lookup === lookup) sessionLookupMemo.delete(c)
-  })
+  lookup.catch(() => {}) // the rejection is delivered to every caller below; this only keeps it from being reported as unhandled
   return lookup
 }
 

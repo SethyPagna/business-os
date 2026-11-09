@@ -141,8 +141,10 @@ const PAID = {
   stockInLinesPerRequest: 24,
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
+  inventoryCheckApprovalTakeoverSeconds: 300,
   coreInvariantsReverifySeconds: 21600,
   dashboardStockOverviewCacheSeconds: 30,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
@@ -177,8 +179,10 @@ const FREE = {
   stockInLinesPerRequest: 1,
   stockInLinesPerRequestByCalls: 2,
   callCountingSwitchApplies: true,
+  inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
   dashboardStockOverviewCacheSeconds: 300,
+  dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
@@ -216,7 +220,9 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // The buildShare durations (lib/buildShare.ts) are in it too: Free waits longer for the first builder's result because a duplicate build costs
 // reads, and polls more coarsely because a Free invocation has 10 ms of CPU. buildShareMemoMaxEntries is a ceiling (Free 16 < Paid 32), so it
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs']
+// inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
+// approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
@@ -227,7 +233,9 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows']
+// dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
+// the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

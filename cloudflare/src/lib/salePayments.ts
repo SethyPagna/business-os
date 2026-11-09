@@ -17,7 +17,7 @@
 // $0 leaves a Not Paid sale Not Paid.
 //
 // NOTHING HERE RE-DERIVES THE COVERAGE ARITHMETIC. "Covered" is saleOutstandingUsd's answer (short by at
-// most half a cent, exact integers) reached through recordedSaleOutstandingUsd; this file only decides what
+// most half a cent, or a riel tender short by under 100 riel; exact integers) reached through recordedSaleOutstandingUsd; this file only decides what
 // money and what debt are handed to it.
 //
 // MONEY IN AND OUT. The paid figure is SUM(in) - SUM(out) per currency over the sale's events, gross of
@@ -30,11 +30,11 @@
 import { exactDecimalRatio, financialCalculationUnits, formatScaledUnits, type FinancialDecimalInput } from './financialPrecision'
 import {
   NOT_PAID_STATUS,
-  PAID_STATUS_SHORTFALL_TOLERANCE_UNITS,
   rateRatio,
   recordedMoneyPrecisionVersion,
   recordedSaleOutstandingUsd,
   saleStoredState,
+  shortfallCovered,
   type RecordedSaleMoney,
 } from './saleStatusResolution'
 
@@ -515,7 +515,9 @@ export function allocatePaymentsToGroups(input: {
   }
 
   const owed = groups.map((_, index) => need[index] - paid[index])
-  const saleCovered = owed.reduce((sum, value) => sum + value, 0n) + shortfall <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
+  // The same covered answer as the sale's status (half a cent, or a riel tender short by under one 100-riel note).
+  const paidKhrUnits = input.events.reduce((sum, event) => sum + (event.direction === 'out' ? -1n : 1n) * financialCalculationUnits(Number(event.amount_paid_khr) || 0), 0n)
+  const saleCovered = shortfallCovered(owed.reduce((sum, value) => sum + value, 0n) + shortfall, { numerator, denominator }, paidKhrUnits)
   return {
     groups: groups.map((group, index) => {
       const tag: PaymentGroupTag = saleCovered || owed[index] === 0n ? 'paid' : paid[index] > 0n ? 'part_paid' : 'unpaid'

@@ -193,7 +193,9 @@ check('partitionSalesGroups is still the reference for the bounded preflight pat
   // Kept deliberately: it is the rule the SQL mirrors, and the synchronous
   // preflight path is bounded so it has no reason to change.
   assert.match(engine, /function partitionSalesGroups\(/)
-  assert.match(engine, /const groups = partitionSalesGroups\(rows\)/)
+  // P2.8 hands each row through scrubMaskedInput first (a masked name or note is dropped, never saved). It returns the very same row when nothing is masked and never
+  // touches the receipt_number / order_reference grouping keys, so the partition is still partitionSalesGroups over the rows.
+  assert.match(engine, /const groups = partitionSalesGroups\(rows\.map\(\(row\) => scrubMaskedInput\(row\) as ParsedCsvRow\)\)/)
 })
 
 async function main() {

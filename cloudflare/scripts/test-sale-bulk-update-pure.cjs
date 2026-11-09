@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['loyaltyEligibility','businessMaintenanceGuard','acquisitionCostAccess','courierCostAccess','saleCustomerAssignmentGuard','customerPointsReturn','actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions','failureText'])
+const actual = new Set(['loyaltyEligibility','businessMaintenanceGuard','acquisitionCostAccess','courierCostAccess','saleCustomerAssignmentGuard','customerPointsReturn','actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions','failureText','phone','phoneMask','phoneAccess','phoneSearchGuard','phoneWriteGuard','phoneCache'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -19,7 +19,7 @@ function load(rel) {
   const req = name => {
     if (name==='hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async(c,next)=>{c.set('user',user);return next()} }
-    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0}
+    if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0,cachedJsonResponse:async(_r,_c,_k,_t,loader)=>loader()}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
     if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }

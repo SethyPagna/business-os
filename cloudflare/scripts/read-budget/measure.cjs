@@ -11,7 +11,7 @@ const { getShapes } = require('./shapes.cjs')
 const { writeShapes, measureWrite } = require('./writes.cjs')
 const { registeredRoutes, matchRoute } = require('./routes.cjs')
 const { roundUp, BUDGETS_FILE, FREE_CALL_LIMIT } = require('./budgets.cjs')
-const { measureGet, prepareWorld, codeOf } = require('./runner.cjs')
+const { measureGet, prepareWorld, codeOf, switchFence } = require('./runner.cjs')
 
 const FINGERPRINTS = path.join(__dirname, 'fingerprints')
 const CACHE = path.join(os.tmpdir(), 'read-budget-measure.jsonl')
@@ -141,7 +141,9 @@ async function main() {
       await prepareWorld(world)
       await world.analyze()
       await world.restart(); await world.login()
+      const fence = switchFence()
       for (const shape of getShapeList.filter((s) => !done.has(`analyze:${s.id}`))) {
+        await fence(world, shape)
         const m = await measureGet(world, shape, { cold: false })
         remember('analyze', shape.id, { rowsRead: m.warm.rowsRead })
         process.stdout.write(`${shape.id}: ANALYZE warm-miss ${m.warm.rowsRead} rows\n`)

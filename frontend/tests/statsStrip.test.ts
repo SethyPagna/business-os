@@ -197,7 +197,7 @@ test('compact Stats and range chrome are opt-in, accessible, and preserve full e
   // bounded clamp(), never a fixed intrinsic-width floor.
   assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(11px,2\.75vw,12px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
   assert.match(picker, /data-date-range-trigger-values/, 'both complete endpoint values share one shrinkable three-column track')
-  assert.match(picker, /triggerEndpoint\(startTriggerDate\)/, 'the closed trigger shows the full date without a time suffix')
+  assert.match(picker, /triggerEndpoint\(triggerEndpoints\.start\)/, 'the closed trigger shows the full date, and on timed surfaces its time on the same line')
   assert.match(picker, /<TimeEntryInput value=\{value\.startTime\}/, 'selected time remains editable through the shared field inside the picker')
   assert.doesNotMatch(picker, /min-w-0 truncate/, 'range endpoints must not be silently ellipsized')
 })

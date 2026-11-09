@@ -127,6 +127,18 @@ async function main() {
     assert.equal(sql.prepare('SELECT stock_quantity q FROM products WHERE id=1002').get().q, 1)
     assert.equal(sql.prepare("SELECT written FROM stock_mutation_receipts WHERE request_id='bridge-native-receipt'").get().written, 1)
   })
+  await check('the receipt wrapper answers a budget refusal itself: a kernel that rethrows what it calls answered gives 503, writes nothing and leaves no receipt', async () => {
+    const before = state(), json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
+    const mark = { current: null }
+    const answer = await receipts.withStockMutationReceipt(() => db, 7, 'adjust', { productId: 1002, client_request_id: 'bridge-native-answered' }, json, async (_markWritten, atomicMark) => {
+      mark.current = atomicMark
+      try { await atomicMark.execute(db, [{ sql: 'UPDATE products SET stock_quantity=9 WHERE id=1002' }]) } catch (error) { if (atomicMark.answered?.(error)) throw error; return json({ error: 'the kernel turned it into its own refusal' }, 409) }
+      return json({ ok: true })
+    }, { requireReceipt: true, budget: { used: () => 60, limit: 50, reserve: 16 } })
+    assert.equal(answer.status, 503); assert.equal((await answer.json()).code, 'stock_request_query_budget_exceeded')
+    assert.equal(state(), before, 'nothing was written and the receipt this attempt made is released')
+    assert.equal(mark.current.answered(new receipts.StockMutationBudgetError()), true); assert.equal(mark.current.answered(new Error('stock_transaction_failed')), false)
+  })
   await check('budget refusal remains before permit and receipt writes', async () => {
     const before = state(), beforeCalls = calls
     const mark = { statement: () => ({ sql: 'SELECT 1' }), admit: n => { assert.equal(n,4); throw new receipts.StockMutationBudgetError() }, committed: () => assert.fail('must not commit') }

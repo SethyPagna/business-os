@@ -115,14 +115,16 @@ check('drawer SQL and its JS twin agree: legacy dollars, split dollars, split ri
     [1, 4, 16000, 0, null, 1], [2, 4, 16000, 3, 'USD', 1], [3, 4, 16000, 3, 'KHR', 1], [4, 1.2, 4700, 0.99, 'KHR', 1],
     [5, 4, 16000, 4, 'KHR', 1], [6, 4, 16000, 0, 'KHR', 2], [7, 0, 0, 0, 'KHR', 2], [8, 2.5, 10250, 0, 'USD', 2],
     [9, 4, 16000, 0, null, 2], [10, 3, 12000, 0, null, 3], [11, 3, 12000, 0, null, 4],
+    // Riel cash leaves in whole 100-riel notes, rounded DOWN (owner, 21 and 27 Oct 2026): 9,717 -> 9,700, never up to 4,000 from 3,990.
+    [12, 1, 9717, 0, 'KHR', 2], [13, 1, 3990, 0, 'KHR', 2],
   ]
   const insert = db.prepare('INSERT INTO returns VALUES (?,?,?,?,?,?)')
   for (const row of rows) insert.run(...row)
   const read = db.prepare(`SELECT id, total_refund_usd, total_refund_khr, owed_reduction_usd, refund_currency,
       ${shift.refundDrawerUsdSql('returns')} AS usd, ${shift.refundDrawerKhrSql('returns')} AS khr,
       ${split.returnDebtLoweredSql('returns')} AS lowered FROM returns ORDER BY id`).all()
-  const expected = { 1: [4, 0, 4], 2: [1, 0, 3], 3: [0, 4000, 3], 4: [0, 822, 0.99], 5: [0, 0, 4], 6: [0, 16000, 0], 7: [0, 0, 0], 8: [2.5, 0, 0],
-    9: [4, 0, 0], 10: [3, 0, 3], 11: [3, 0, 0] }
+  const expected = { 1: [4, 0, 4], 2: [1, 0, 3], 3: [0, 4000, 3], 4: [0, 800, 0.99], 5: [0, 0, 4], 6: [0, 16000, 0], 7: [0, 0, 0], 8: [2.5, 0, 0],
+    9: [4, 0, 0], 10: [3, 0, 3], 11: [3, 0, 0], 12: [0, 9700, 0], 13: [0, 3900, 0] }
   for (const row of read) {
     assert.deepEqual([Number(Number(row.usd).toFixed(4)), row.khr, row.lowered], expected[row.id], `row ${row.id}`)
     const twin = split.refundCashOut(row)

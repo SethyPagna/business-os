@@ -50,7 +50,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', {
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
   './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': noDb, './removalLosses': loadReal('lib/removalLosses.ts'),
   './businessDateWindow': businessDateWindow, './saleMoneyPrecision': saleMoneyPrecision,
   './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement,

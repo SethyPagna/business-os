@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
+import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -966,7 +967,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 ? (previewConfig.priceDisplay === 'KHR' ? item.selling_price_khr : item.selling_price_usd)
                 : undefined
               const priceLabel = typeof servedPrice === 'number' && Number.isFinite(servedPrice)
-                ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${servedPrice.toFixed(2)}`)
+                ? (previewConfig.priceDisplay === 'KHR' ? `${servedPrice.toLocaleString()}៛` : `$${normalizePriceValue(servedPrice).toFixed(2)}`)
                 : ''
               const productId = Number(item.product_id)
               const canOpen = Boolean(openProductById) && Number.isFinite(productId)

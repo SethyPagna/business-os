@@ -1,4 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { priceText } from '../../utils/pricing.ts'
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -428,7 +429,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLates
                       <div className="flex items-center gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-800 dark:text-gray-200 detail-scroll-text">{item.product_name}</div>
-                          <div className="text-xs text-gray-400">{fmtUSD(item.applied_price_usd || 0)} {T('each','each')}</div>
+                          <div className="text-xs text-gray-400">{priceText(fmtUSD, item.applied_price_usd || 0)} {T('each','each')}</div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button onClick={() => updateQty(idx, (item.returnQty || 0) - 1)} title={T('decrease_quantity', 'Decrease quantity')} aria-label={T('decrease_quantity', 'Decrease quantity')}

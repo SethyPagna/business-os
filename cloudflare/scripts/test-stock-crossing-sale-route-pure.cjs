@@ -44,6 +44,9 @@ const overrides = {
   './telegram': { sendTelegramEvent: async (_env, event) => { sent.push(event); return true } },
 }
 const moduleCache = new Map()
+// lib/phoneCache.ts reaches the cache helper as './cache': the same stand-in (the Cache API does not exist in this process).
+overrides['./cache'] = overrides['../lib/cache']
+
 function load(rel) {
   if (moduleCache.has(rel)) return moduleCache.get(rel).exports
   const sourcePath = path.join(__dirname, '..', 'src', rel)

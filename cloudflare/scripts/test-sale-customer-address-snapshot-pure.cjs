@@ -63,6 +63,7 @@ function load(rel) {
   const req = (name) => {
     if (name === 'hono') return require(name)
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
+    if (/\/phone(Mask|Access|WriteGuard|SearchGuard|Cache)$/.test(name)) return name.endsWith('phoneCache') ? { cachedPhoneJson: async (_r, _c, _u, _v, _t, fn) => fn() } : require('./harness/phone_real_modules.cjs').phoneModule(name)
     if (name.endsWith('/cache')) return { cacheIdentity: () => undefined, isUnsafeVersion: () => false, deploymentId: () => 'dev', bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_request, _ctx, _version, _ttl, fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
     if (name.endsWith('/audit')) return { audit: async () => {} }

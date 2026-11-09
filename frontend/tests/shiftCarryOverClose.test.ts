@@ -425,6 +425,7 @@ globalThis.window = Object.assign(new EventTarget(), {
   localStorage: undefined, sessionStorage: undefined,
 }) as unknown as Window & typeof globalThis
 const transportModule = await import('../src/api/shiftTransport.ts')
+const shiftCountRules = await import('../src/components/shifts/shiftCountRules.ts') // the riel rule ShiftGate / ShiftHistoryModal ask
 
 // THREE segments, which is the shape the old seed got wrong: two days left
 // open plus today. The offered row is the OLDEST, and the bound the Worker
@@ -501,6 +502,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
       shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),
       shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
     }
+    if (name.includes('shiftCountRules')) return shiftCountRules
     if (name.includes('shiftTransport')) return {
       ...transportModule,
       // The seed rule is the transport's; a negative control replaces it here

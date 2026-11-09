@@ -8,7 +8,7 @@
 import type { D1Compat } from './db'
 import { roundMoney2, roundMoney4, subtractMoney4 } from './moneyPrecision'
 import {
-  recordedSaleOutstandingUsd, saleReadsNotPaid, saleStoredState, sumRefundsUsd, type RecordedSaleMoney, type SaleReturnState, type SaleStoredState,
+  recordedSaleOutstandingUsd, rielCashFloor, saleReadsNotPaid, saleStoredState, sumRefundsUsd, type RecordedSaleMoney, type SaleReturnState, type SaleStoredState,
 } from './saleStatusResolution'
 import { notPaidSaleSql, saleStatusWord } from './salesStatus'
 import { importedReturnedQuantitySql } from './saleTransitions'
@@ -40,8 +40,8 @@ export function refundCashOut(row: ReturnMoneyColumns): { owedReductionUsd: numb
   const owed = finite(row.owed_reduction_usd)
   const cash = roundMoney4(total - owed)
   if (row.refund_currency !== 'KHR') return { owedReductionUsd: owed, usd: cash, khr: 0 }
-  // SQLite ROUND: half away from zero; the riel figure is never negative.
-  return { owedReductionUsd: owed, usd: 0, khr: total > 0 ? Math.trunc(finite(row.total_refund_khr) * (total - owed) / total + 0.5) : 0 }
+  // Riel cash leaves the drawer in whole 100-riel notes, rounded down (owner, 21 and 27 Oct 2026).
+  return { owedReductionUsd: owed, usd: 0, khr: total > 0 ? rielCashFloor(finite(row.total_refund_khr) * (total - owed) / total) : 0 }
 }
 
 export type SaleReturnMoneyRow = { id: number; status: string; total_refund_usd: unknown; owed_reduction_usd: unknown; refund_currency: unknown }

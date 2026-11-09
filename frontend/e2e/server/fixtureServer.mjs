@@ -607,7 +607,9 @@ function handleApi(pathname, query, req, res, body) {
         all_total: 0, all_total_khr: 0, cost_in: 0, cost_out: 0, cost_in_khr: 0, cost_out_khr: 0,
         product_count: PORTAL_PRODUCTS.length, in_stock_count: PORTAL_PRODUCTS.length,
         low_stock_count: 0, out_of_stock_count: 0, stock_value_usd: 0, stock_value_khr: 0,
-        low_stock: [], out_of_stock: [], expiring_products: [], expiring_count: 0, recent_sales: [],
+        low_stock: [], out_of_stock: [], expiring_products: [], expiring_count: 0,
+        // compat.ts: when the stock figures were computed. A fixed stamp, 14:05 in Phnom Penh, so a spec can assert the printed line.
+        stock_as_of: '2026-11-04T07:05:00.000Z', recent_sales: [],
         low_stock_preview_limit: 10, out_of_stock_preview_limit: 10,
         low_stock_preview_truncated: false, out_of_stock_preview_truncated: false,
       },

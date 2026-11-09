@@ -56,7 +56,7 @@ const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrec
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal, './db': { getDb: () => { throw new Error('no DB in this test') } }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => { throw new Error('no DB in this test') } }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 // Sep 6 2026: the owner's low-stock alert setting reaches this module through
 // lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
 // asserted below are the ones it composes -- while the settings READ answers

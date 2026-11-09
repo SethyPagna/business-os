@@ -1,4 +1,4 @@
-import { getActionTier, getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
+import { getActionTier, getMergedPermissions, hasPermission, isAdminControlUser, type PermissionUser } from './permissions'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess'
 
 export const INVENTORY_CHECK_FIELDS = ['price', 'barcode', 'category', 'brand', 'stock', 'received', 'sales', 'customers', 'cost'] as const
@@ -30,7 +30,17 @@ export function getInventoryCheckAccess(user: PermissionUser): InventoryCheckAcc
   }
 }
 
+/** Approving or rejecting a submitted count (ic_fix_stock) is its own extra, admin by default and never implied by counting. It needs the stock field (the figures being approved) on top of the extra; setting stock also needs Adjust at Full, which the stock writer enforces. */
+export function canApproveInventoryCounts(user: PermissionUser): boolean {
+  const access = getInventoryCheckAccess(user)
+  return access.canView && access.fields.stock && hasPermission(user, 'inventory_check_approve')
+}
+
 const IDENTITY_FIELDS = ['id', 'name', 'image_path', 'image_url', 'unit', 'parent_id', 'is_group', 'is_grouped_cached', 'checkable', 'matches_filters'] as const
+/** The simplified page's per-row check facts (ic_simple). The reader already withholds counts and names the viewer may not see. */
+const CHECK_FIELDS = ['check_status', 'check_counted_quantity', 'check_note', 'check_by', 'check_at', 'check_session_id', 'check_branch_id'] as const
+/** The groups the simplified page no longer carries: sales stats, customers, price and cost leave the row. */
+const SIMPLE_RETIRED: readonly InventoryCheckField[] = ['price', 'sales', 'customers', 'cost']
 const PRODUCT_FIELDS: Record<InventoryCheckField, readonly string[]> = {
   price: ['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr'],
   barcode: ['barcode', 'sku'],
@@ -44,12 +54,13 @@ const PRODUCT_FIELDS: Record<InventoryCheckField, readonly string[]> = {
 }
 type ProductScalar = string | number | boolean | null
 
-export function projectInventoryCheckProduct(product: Record<string, unknown> | null | undefined, access: InventoryCheckAccess): Record<string, ProductScalar> {
+export function projectInventoryCheckProduct(product: Record<string, unknown> | null | undefined, access: InventoryCheckAccess, simple = false): Record<string, ProductScalar> {
   const output: Record<string, ProductScalar> = {}
   if (!access.canView || !product) return output
   const keys: string[] = [...IDENTITY_FIELDS]
-  for (const field of INVENTORY_CHECK_FIELDS) if (access.fields[field]) keys.push(...PRODUCT_FIELDS[field])
-  if (access.fields.stock && access.fields.cost) keys.push('stock_value_usd', 'stock_value_khr', 'stock_value_unknown')
+  if (simple) keys.push(...CHECK_FIELDS)
+  for (const field of INVENTORY_CHECK_FIELDS) if (access.fields[field] && !(simple && SIMPLE_RETIRED.includes(field))) keys.push(...PRODUCT_FIELDS[field])
+  if (!simple && access.fields.stock && access.fields.cost) keys.push('stock_value_usd', 'stock_value_khr', 'stock_value_unknown')
   for (const key of keys) {
     if (!Object.hasOwn(product, key)) continue
     const value = product[key]
@@ -78,17 +89,23 @@ const QUERY_ALIASES: Record<string, string> = {
 }
 const QUERY_KEYS = new Set(['query', 'searchFields', 'branchId', 'category', 'brand', 'barcode', 'stockState', 'groupState', 'initial', 'page', 'pageSize', 'startDate', 'endDate', 'createdFrom', 'createdTo', 'sortBy', 'sortDirection'])
 const SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock', qty_sold: 'sales', customer_count: 'customers', received_date: 'received', price: 'price', cost: 'cost' }
+// ic_simple: the owner's closed list (1 Nov 2026). Dates, sales sorts, price and cost sorts, and the code-only filters have no screen and are refused (400, never a 403 that hints they exist).
+const SIMPLE_QUERY_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'checkState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'summary'])
+const SIMPLE_SORT_FIELDS: Record<string, InventoryCheckField | null> = { name: null, stock: 'stock' }
+export const CHECK_STATES = ['not_checked', 'in_check', 'ok', 'issue'] as const
+export type InventoryCheckState = typeof CHECK_STATES[number]
 
-export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess): Record<string, string> {
+export function validateInventoryCheckQuery(query: Record<string, unknown>, access: InventoryCheckAccess, simple = false): Record<string, string> {
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const result: Record<string, string> = {}
   const invalid = (parameter: string): never => { throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter) }
   const requireField = (field: InventoryCheckField, parameter: string): void => {
     if (!access.fields[field]) throw new InventoryCheckQueryError(403, 'inventory_check_field_hidden', parameter)
   }
+  const keys = simple ? SIMPLE_QUERY_KEYS : QUERY_KEYS, sorts = simple ? SIMPLE_SORT_FIELDS : SORT_FIELDS
   for (const [rawKey, rawValue] of Object.entries(query)) {
     const key = QUERY_ALIASES[rawKey] || rawKey
-    if (!QUERY_KEYS.has(key)) invalid(rawKey)
+    if (!keys.has(key)) invalid(rawKey)
     if (rawValue == null || rawValue === '') continue
     if (typeof rawValue !== 'string' && typeof rawValue !== 'number') invalid(rawKey)
     const value = String(rawValue).trim()
@@ -105,10 +122,12 @@ export function validateInventoryCheckQuery(query: Record<string, unknown>, acce
     if (!['in_stock', 'low_stock', 'out_of_stock'].includes(result.stockState)) invalid('stockState')
   }
   if (result.sortBy) {
-    if (!Object.hasOwn(SORT_FIELDS, result.sortBy)) invalid('sortBy')
-    const field = SORT_FIELDS[result.sortBy]
+    if (!Object.hasOwn(sorts, result.sortBy)) invalid('sortBy')
+    const field = sorts[result.sortBy]
     if (field) requireField(field, 'sortBy')
   }
+  if (result.checkState && !(CHECK_STATES as readonly string[]).includes(result.checkState)) invalid('checkState')
+  if (result.summary && !['0', '1'].includes(result.summary)) invalid('summary')
   if (result.sortDirection) {
     result.sortDirection = result.sortDirection.toLowerCase()
     if (!['asc', 'desc'].includes(result.sortDirection)) invalid('sortDirection')
@@ -117,6 +136,6 @@ export function validateInventoryCheckQuery(query: Record<string, unknown>, acce
     if (result.searchFields === 'barcode') requireField('barcode', 'searchFields')
     invalid('searchFields')
   }
-  result.searchFields = 'name'
+  if (!simple) result.searchFields = 'name'
   return result
 }

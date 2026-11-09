@@ -1,7 +1,7 @@
 import { getDb } from './db'
 import { stockVisibleProductSql } from './productStockGuard'
 import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
-import { customerBilledDeliveryFeeUsd } from './saleTotals'
+import { customerBilledDeliveryFeeUsd, displayMoney2 } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   addCalendarDays, bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
@@ -195,7 +195,8 @@ export function telegramRowLines(head: string, parts: string[] = [], nest = ''):
 
 // Money formatters, kept together with money() below so a new message cannot
 // grow a third way of printing a dollar amount.
-const round2 = (value: number) => Math.round(value * 100) / 100
+// Nearest cent from the exact decimal, through the one shared helper (saleTotals.displayMoney2): 10.075 reads $10.08 here as on the receipt.
+const round2 = (value: number) => displayMoney2(value)
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
 // A split -- the per-cashier, per-branch, per-payment-method or per-courier
 // lines under a figure -- carries 4 places so its lines add up to that figure
@@ -233,7 +234,7 @@ function courierCostPart(costUsd: number | null | undefined, unrecorded?: unknow
 const riel = (value: unknown) => `${Math.round(Number(value) || 0).toLocaleString('en-US')}៛`
 function money(usd: unknown, khr: unknown, separator = ' · '): string {
   const usdValue = Number(usd) || 0; const khrValue = Number(khr) || 0; const parts: string[] = []
-  if (usdValue) parts.push(`$${usdValue.toFixed(2)}`)
+  if (usdValue) parts.push(`$${round2(usdValue).toFixed(2)}`)
   if (khrValue) parts.push(`${Math.round(khrValue).toLocaleString()}៛`)
   return parts.length ? parts.join(separator) : '$0.00'
 }

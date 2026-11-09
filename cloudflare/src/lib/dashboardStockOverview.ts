@@ -26,24 +26,35 @@
 // only the ceiling for a writer that forgets to bump: plan-tiered, longer on
 // Free (planTier.ts dashboardStockOverviewCacheSeconds).
 //
-// LAYERS: an isolate memo (shares a FINISHED answer with later requests in the
-// same isolate; a computation still running is shared as a promise only inside
-// its own request, and with other requests through a "building since" marker
-// and a bounded wait for the finished value, lib/buildShare.ts) and the Workers
-// Cache API (shares it across isolates in a colo). Neither is a correctness
-// dependency: no Cache API, or an error from it, just computes.
+// AS OF: the overview carries `asOf`, the UTC ISO time its figures were computed. It is stamped once, when they are computed, and every
+// copy keeps it: a memo or Cache API hit returns the stored value untouched, so the Dashboard can say "as of 14:05" and mean it.
+//
+// FIVE MINUTES (read switch `dash_overview_5m`, default off; owner 27 Oct / 1 Nov: the overview "may be up to 5 minutes old, with the time
+// it was calculated"). ON, a sale (it bumps 'stock' and 'sales', not 'products') no longer recomputes it: the key drops the 'stock' version and
+// instead carries the deployment, organisation, data epoch, the branch scope and cost grant of the asker, the low-stock config, the 'products'
+// version and a business-time bucket as long as planTier.ts dashboardOverviewMaxAgeSeconds (300 s). A product edit or an inventory
+// adjustment, stock-in or transfer (they bump 'products') still ends it at once.
+// An entry is never served more than that window after `asOf`, whatever the key or the cache headers say. OFF keeps the reads, the key and
+// the lifetimes described above; the only difference in its body is the `asOf` field.
+//
+// LAYERS: an isolate memo (shares a FINISHED answer with later requests in the same isolate; a computation still running is shared as a
+// promise only inside its own request, and with other requests through a "building since" marker and a bounded wait for the finished
+// value, lib/buildShare.ts) and the Workers Cache API (shares it across isolates in a colo). Neither is a correctness dependency: no Cache
+// API, or an error from it, just computes.
 
 import type { Env } from '../index'
 import { getDb } from './db'
 import { productHasStockSql } from './productStockGuard'
 import { getVersionWithFallback } from './cache'
 import { deploymentId, isUnsafeVersion } from './cacheKey'
-import { readDataEpoch } from './readSwitches'
+import { BUSINESS_UTC_OFFSET_MINUTES } from './businessDateWindow'
+import { readDataEpoch, readSwitch } from './readSwitches'
 import { getFamilyStockOverview, type FamilyStockAlertPage, type FamilyStockStats } from './familyStockStats'
 import { loadLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { getPlanLimits } from './planTier'
 
 export const DASHBOARD_STOCK_PREVIEW_SIZE = 10
+export const DASHBOARD_OVERVIEW_SWITCH = 'dash_overview_5m'
 
 export interface DashboardExpiringRow {
   id: number
@@ -60,6 +71,8 @@ export interface DashboardStockOverview {
   out: FamilyStockAlertPage
   expiring: DashboardExpiringRow[]
   expiringCount: number
+  /** UTC ISO time the figures above were computed; a cached copy keeps its own. */
+  asOf: string
 }
 
 const EXPIRY_DATE_WHERE_SQL = `expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
@@ -75,8 +88,10 @@ export function dashboardExpiringProductsSql(limit: number): string {
   ) ORDER BY date(expiry_date) ASC LIMIT ${limit}`
 }
 
-export async function computeDashboardStockOverview(env: Env, lowStock: LowStockConfig): Promise<DashboardStockOverview> {
+export async function computeDashboardStockOverview(env: Env, lowStock: LowStockConfig, now: () => number = Date.now): Promise<DashboardStockOverview> {
   const db = getDb(env)
+  // Stamped before the reads: the figures are no newer than this, so "as of" never claims a moment later than the data.
+  const asOf = new Date(now()).toISOString()
   const [overview, expiring, expiringCount] = await Promise.all([
     getFamilyStockOverview({ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE }),
     db.prepare(dashboardExpiringProductsSql(DASHBOARD_STOCK_PREVIEW_SIZE)).all<DashboardExpiringRow>(),
@@ -91,12 +106,17 @@ export async function computeDashboardStockOverview(env: Env, lowStock: LowStock
     out: overview.out,
     expiring: expiring || [],
     expiringCount: Number(expiringCount?.count || 0),
+    asOf,
   }
 }
 
 // Bump when the cached shape changes, so an old entry can never be read back
-// as the new shape.
-const OVERVIEW_CACHE_SCHEMA = 'dso2'
+// as the new shape. dso3: `asOf` joined the body.
+const OVERVIEW_CACHE_SCHEMA = 'dso3'
+// The switched key lives under its own schema: an entry made one way is never read back the other way.
+const OVERVIEW_5M_CACHE_SCHEMA = 'dso3-5m'
+
+const lowStockToken = (lowStock: LowStockConfig): string => `${lowStock.enabled ? 1 : 0}:${lowStock.mode}:${lowStock.threshold}`
 
 export function dashboardStockOverviewKey(parts: {
   productsVersion: string
@@ -107,9 +127,37 @@ export function dashboardStockOverviewKey(parts: {
   build?: string
   epoch?: string
 }): string {
-  const low = `${parts.lowStock.enabled ? 1 : 0}:${parts.lowStock.mode}:${parts.lowStock.threshold}`
-  return [OVERVIEW_CACHE_SCHEMA, parts.utcDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${low}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`,
+  return [OVERVIEW_CACHE_SCHEMA, parts.utcDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${lowStockToken(parts.lowStock)}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`,
     `b=${parts.build ?? ''}`, `e=${parts.epoch ?? ''}`].join('|')
+}
+
+/**
+ * The key with the read switch ON. No 'stock' version: a stock-only write does not end an entry, the window does. `bucket` is the business-time
+ * bucket index (businessBucket); the UTC date stays because the expiry window reads SQLite's 'now', and a window that does not divide a day
+ * would otherwise let one bucket span midnight.
+ */
+export function dashboardStockOverviewFiveMinuteKey(parts: {
+  productsVersion: string
+  lowStock: LowStockConfig
+  bucket: number
+  utcDate: string
+  build: string
+  epoch: string
+  org: string
+  // The branch the Dashboard was asked for ('' = all) and the asker's cost grant: the body is shared only between askers who may see the same thing.
+  branchScope: string
+  costGrant: string
+}): string {
+  return [OVERVIEW_5M_CACHE_SCHEMA, `b=${parts.build}`, `o=${parts.org}`, `e=${parts.epoch}`, `br=${parts.branchScope}`, `cg=${parts.costGrant}`,
+    `l=${lowStockToken(parts.lowStock)}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`, `p=${parts.productsVersion}`, `d=${parts.utcDate}`, `t=${parts.bucket}`].join('|')
+}
+
+const BUSINESS_OFFSET_MS = BUSINESS_UTC_OFFSET_MINUTES * 60_000
+
+/** Which window of business time `nowMs` falls in, and when that window ends (epoch ms). */
+export function businessBucket(nowMs: number, windowMs: number): { bucket: number; endsAt: number } {
+  const bucket = Math.floor((nowMs + BUSINESS_OFFSET_MS) / windowMs)
+  return { bucket, endsAt: (bucket + 1) * windowMs - BUSINESS_OFFSET_MS }
 }
 
 // A promise belongs to the request that created it (workerd): awaiting another request's can hang for good once that request has
@@ -136,6 +184,11 @@ export type DashboardStockOverviewContext = {
   cache?: Pick<Cache, 'match' | 'put'> | null
   // Injected by tests; defaults to the database's data epoch (null = unreadable: compute, cache nothing).
   epoch?: string | null
+  // Who is asking, for the key with read switch dash_overview_5m ON (compat.ts dashboardOverviewContext). Left out, there is no safe key for
+  // that path: compute, cache nothing.
+  org?: string
+  branchScope?: string
+  costGrant?: string
 }
 
 function defaultCache(): Pick<Cache, 'match' | 'put'> | null {
@@ -147,27 +200,63 @@ function defaultCache(): Pick<Cache, 'match' | 'put'> | null {
   }
 }
 
+// What one load decided about its key before it looks anything up.
+type Plan = {
+  key: string
+  // When a memoised value stops being served (epoch ms).
+  expiresAt: number
+  // The Cache API entry's max-age.
+  cacheSeconds: number
+  // Whether a stored value may still be served. OFF: always (the code before the switch). ON: only inside the max-age window after its `asOf`.
+  usable(value: DashboardStockOverview, at: number): boolean
+}
+
 export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOverviewContext): Promise<DashboardStockOverview> {
   const now = (ctx.now ?? Date.now)()
-  const ttlSeconds = getPlanLimits(env).dashboardStockOverviewCacheSeconds
+  const limits = getPlanLimits(env)
   const lowStockPromise = loadLowStockConfig(env)
-  let versions: [string, string]
+  // One memoised read that also carries the data epoch read below, so a cold isolate pays one statement for both.
+  const fiveMinutes = await readSwitch(env, DASHBOARD_OVERVIEW_SWITCH)
+  let versions: string[]
   try {
-    versions = await Promise.all([getVersionWithFallback(env, 'products'), getVersionWithFallback(env, 'stock')])
+    versions = await Promise.all((fiveMinutes ? ['products'] : ['products', 'stock']).map((namespace) => getVersionWithFallback(env, namespace)))
   } catch {
     // Without the versions there is no safe key: compute, and cache nothing.
-    return computeDashboardStockOverview(env, await lowStockPromise)
+    return computeDashboardStockOverview(env, await lowStockPromise, ctx.now)
   }
   const lowStock = await lowStockPromise
-  const [productsVersion, stockVersion] = versions
   const epoch = ctx.epoch === undefined ? await readDataEpoch(env) : ctx.epoch
   // No epoch or an unsafe version is no safe key: compute, and cache nothing (CACHE-LIFECYCLE R3).
-  if (!epoch || versions.some(isUnsafeVersion)) return computeDashboardStockOverview(env, lowStock)
-  const key = dashboardStockOverviewKey({ productsVersion, stockVersion, lowStock, utcDate: new Date(now).toISOString().slice(0, 10),
-    build: deploymentId(env), epoch })
+  if (!epoch || versions.some(isUnsafeVersion)) return computeDashboardStockOverview(env, lowStock, ctx.now)
+  const utcDate = new Date(now).toISOString().slice(0, 10)
+  const deployment = deploymentId(env)
+
+  let plan: Plan
+  if (fiveMinutes) {
+    const windowMs = limits.dashboardOverviewMaxAgeSeconds * 1000
+    if (!(windowMs > 0) || ctx.org === undefined || ctx.branchScope === undefined || ctx.costGrant === undefined) return computeDashboardStockOverview(env, lowStock, ctx.now)
+    const { bucket, endsAt } = businessBucket(now, windowMs)
+    plan = {
+      key: dashboardStockOverviewFiveMinuteKey({ productsVersion: versions[0], lowStock, bucket, utcDate, build: deployment, epoch, org: ctx.org, branchScope: ctx.branchScope, costGrant: ctx.costGrant }),
+      // Never past the end of the bucket and never past the window: an entry made at the start of a bucket is the oldest one served.
+      expiresAt: Math.min(now + windowMs, endsAt),
+      cacheSeconds: Math.max(1, Math.ceil((Math.min(now + windowMs, endsAt) - now) / 1000)),
+      usable: (value, at) => at - Date.parse(value.asOf) <= windowMs,
+    }
+  } else {
+    const ttlSeconds = limits.dashboardStockOverviewCacheSeconds
+    plan = {
+      key: dashboardStockOverviewKey({ productsVersion: versions[0], stockVersion: versions[1], lowStock, utcDate, build: deployment, epoch }),
+      expiresAt: now + ttlSeconds * 1000,
+      cacheSeconds: ttlSeconds,
+      usable: () => true,
+    }
+  }
+  const { key } = plan
+  const clock = ctx.now ?? Date.now
 
   const current = memo
-  if (current && current.key === key && now < current.expiresAt) return current.value
+  if (current && current.key === key && now < current.expiresAt && plan.usable(current.value, now)) return current.value
   const shared = inRequest.get(ctx)
   if (shared && shared.key === key) return shared.promise
 
@@ -180,16 +269,19 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
         url.searchParams.set('k', key)
         cacheRequest = new Request(url.toString(), { method: 'GET' })
         const hit = await cache.match(cacheRequest)
-        if (hit) return await hit.json<DashboardStockOverview>()
+        if (hit) {
+          const stored = await hit.json<DashboardStockOverview>()
+          if (plan.usable(stored, clock())) return stored
+        }
       } catch {
         // A cache fault is never a request fault: compute instead.
       }
     }
-    const value = await computeDashboardStockOverview(env, lowStock)
+    const value = await computeDashboardStockOverview(env, lowStock, ctx.now)
     if (cache && cacheRequest) {
       try {
         const response = new Response(JSON.stringify(value), {
-          headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
+          headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${plan.cacheSeconds}` },
         })
         ctx.waitUntil(cache.put(cacheRequest, response).catch(() => {}))
       } catch {
@@ -201,7 +293,7 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   const build = async () => {
     const value = await compute()
     // Only a finished value is remembered (a failed computation never is), and an older start never replaces a newer one.
-    if (!memo || memo.startedAt <= now) memo = { key, startedAt: now, expiresAt: now + ttlSeconds * 1000, value }
+    if (!memo || memo.startedAt <= now) memo = { key, startedAt: now, expiresAt: plan.expiresAt, value }
     return value
   }
   // Across requests: the first request to start this key sets a "building since" marker (lib/buildShare.ts) and a request that finds it
@@ -209,7 +301,8 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   // that loads this module alone): every request computes for itself.
   const settled = () => {
     const entry = memo
-    return entry && entry.key === key && (ctx.now ?? Date.now)() < entry.expiresAt ? entry.value : undefined
+    const at = clock()
+    return entry && entry.key === key && at < entry.expiresAt && plan.usable(entry.value, at) ? entry.value : undefined
   }
   const hook = buildShareHook()
   const promise = hook ? hook.run(env, `dashboard-overview:${key}`, build, settled) : build()

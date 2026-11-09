@@ -61,8 +61,13 @@ export function prorateCustomerReturnMoney4(): never { throw new Error('reader_n
 fs.writeFileSync(refundPrecisionPath, `
 export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
 `)
+// salesAnalytics.ts asks the shared coverage rule what a Not Paid sale still owes (lane 6.0.982:
+// a riel tender short by under 100 riel is paid); copy the real module and its one dependency.
+for (const file of ['saleStatusResolution.ts', 'financialPrecision.ts']) {
+  fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
+}
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath} ${path.join(tmpDir, 'saleStatusResolution.ts')} ${path.join(tmpDir, 'financialPrecision.ts')}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

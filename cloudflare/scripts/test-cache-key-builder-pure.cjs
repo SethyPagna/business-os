@@ -1,6 +1,7 @@
 'use strict'
 // CACHE-LIFECYCLE R1 / R2 (lane 6.0.1048): there is ONE server cache-key builder and nothing writes around it.
-//   A. Every cachedJsonResponse() call in src/ passes cacheIdentity(...) as its identity. A call without one would compute uncached
+//   A. Every cachedJsonResponse() call in src/ passes cacheIdentity(...) as its identity (sixth argument), and so does every cachedPhoneJson()
+//      call (seventh; lib/phoneCache.ts folds the full-phone grant into that identity's scope). A call without one would compute uncached
 //      for ever (silently turning a cache off) or, worse, tempt the next author to build a key by hand.
 //   B. Only the files below touch the Cache API. A new one must go through lib/cacheKey.ts and be added here with its key.
 //   C. Each part of the key (layer, build, org, epoch, scope, params, versions, switch salt, time) changes the key; the request Host and
@@ -27,14 +28,18 @@ function sourceFiles(directory) {
     entry.isDirectory() ? sourceFiles(path.join(directory, entry.name)) : entry.name.endsWith('.ts') ? [path.join(directory, entry.name)] : []))
 }
 
-/** The calls of `cachedJsonResponse(...)` in one source text and whether each passes cacheIdentity(...) as its sixth argument. */
+// Where the identity sits in each cached read: cachedJsonResponse(request, ctx, version, ttl, producer, identity); cachedPhoneJson adds the account after ctx,
+// so its identity is the seventh argument.
+const IDENTITY_ARGUMENT = { cachedJsonResponse: 5, cachedPhoneJson: 6 }
+
+/** The calls of `cachedJsonResponse(...)` and `cachedPhoneJson(...)` in one source text and whether each passes cacheIdentity(...) as its identity. */
 function cachedCalls(text, fileName = 'planted.ts') {
   const parsed = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true)
   const out = []
   const visit = (node) => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'cachedJsonResponse') {
-      const sixth = node.arguments[5]
-      const identified = !!sixth && ts.isCallExpression(sixth) && ts.isIdentifier(sixth.expression) && sixth.expression.text === 'cacheIdentity'
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && Object.prototype.hasOwnProperty.call(IDENTITY_ARGUMENT, node.expression.text)) {
+      const identity = node.arguments[IDENTITY_ARGUMENT[node.expression.text]]
+      const identified = !!identity && ts.isCallExpression(identity) && ts.isIdentifier(identity.expression) && identity.expression.text === 'cacheIdentity'
       out.push({ line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1, identified })
     }
     ts.forEachChild(node, visit)
@@ -67,12 +72,13 @@ const CACHE_API_USERS = {
 }
 
 async function main() {
-  await check('A. every cachedJsonResponse() call in src/ passes cacheIdentity(...)', () => {
+  await check('A. every cachedJsonResponse() and cachedPhoneJson() call in src/ passes cacheIdentity(...)', () => {
     const offenders = []
     let total = 0
     for (const file of sourceFiles(SRC)) {
       const relative = path.relative(SRC, file).split(path.sep).join('/')
-      if (relative === 'lib/cache.ts') continue
+      // lib/cache.ts is the builder's caller; lib/phoneCache.ts forwards the caller's identity with the grant folded in (checked by its own group below).
+      if (relative === 'lib/cache.ts' || relative === 'lib/phoneCache.ts') continue
       for (const call of cachedCalls(lf(fs.readFileSync(file, 'utf8')), relative)) { total += 1; if (!call.identified) offenders.push(`${relative}:${call.line}`) }
     }
     assert.ok(total >= 15, `the scan found only ${total} calls; it is looking in the wrong place`)
@@ -86,6 +92,11 @@ async function main() {
     assert.deepEqual(flagged("await cachedJsonResponse(req, ctx, v, 20, () => 1, { org: '1' } as never)"), [false])
     assert.deepEqual(flagged('await cachedJsonResponse(req, ctx, v, 20, () => 1, cacheIdentity(c))'), [true])
     assert.deepEqual(flagged('await cachedJsonResponse(req, ctx, v, 20, async () => { await x(); return 1 }, cacheIdentity(c, { scope: "s" }))'), [true])
+    // cachedPhoneJson carries the account before the version, so its identity is the seventh argument
+    assert.deepEqual(flagged('await cachedPhoneJson(req, ctx, user, v, 20, () => 1)'), [false])
+    assert.deepEqual(flagged('await cachedPhoneJson(req, ctx, user, v, 20, () => 1, undefined)'), [false])
+    assert.deepEqual(flagged('await cachedPhoneJson(req, ctx, user, v, 20, () => 1, cacheIdentity(c))'), [true])
+    assert.deepEqual(flagged('await cachedPhoneJson(req, ctx, user, v, 20, cacheIdentity(c))'), [false], 'an identity in the producer\'s place is not the identity')
   })
 
   await check('B. only the listed files touch the Cache API', () => {
@@ -159,6 +170,49 @@ async function main() {
     assert.equal(await originOf({ BUSINESS_OS_ADMIN_URL: 'not a url', BUSINESS_OS_PUBLIC_URL: 'ftp://leang.test' }), 'https://cache.bos.invalid')
     assert.equal(await originOf({}), 'https://cache.bos.invalid')
     assert.equal(await originOf({ BUSINESS_OS_ADMIN_URL: 'https://admin.leang.test' }, 'https://admin.leang.test/api/sales?a=1'), await originOf({ BUSINESS_OS_ADMIN_URL: 'https://admin.leang.test' }), 'the request Host never steers the origin')
+  })
+
+  // The full-phone grant (lib/phoneCache.ts, P2.8) is part of the key through the identity's scope: the caller passes cacheIdentity(c) and cachedPhoneJson folds
+  // the account's variant into it, so an entry one kind of account warmed is never served to the other.
+  const phoneCacheWith = (replaceInSource) => {
+    const filename = path.join(SRC, 'lib/phoneCache.ts')
+    let text = lf(fs.readFileSync(filename, 'utf8'))
+    if (replaceInSource) { assert.ok(text.includes(replaceInSource[0]), `mutation anchor missing: ${replaceInSource[0]}`); text = text.replace(replaceInSource[0], replaceInSource[1]) }
+    const seen = []
+    const stubs = {
+      './cache': { cachedJsonResponse: async (_request, _ctx, _version, _ttl, producer, identity) => { seen.push(identity); return producer() } },
+      './phoneAccess': { canSeeFullPhones: (user) => !!user && user.full === true, projectPhones: (value) => value },
+    }
+    const { outputText } = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: filename })
+    const mod = { exports: {} }
+    new Function('exports', 'require', 'module', outputText)(mod.exports, (id) => (id in stubs ? stubs[id] : require(id)), mod)
+    const identity = (extra) => cacheKey.cacheIdentity({ env, get: () => ({ organization_id: 1 }) }, extra)
+    const ask = (user, given) => mod.exports.cachedPhoneJson(new Request('https://admin.example.test/api/customers?a=1'), { waitUntil() {} }, user, 'customers:d2:4', 20, () => ({}), given)
+    return { seen, identity, ask }
+  }
+  const phoneKeys = async (seen) => Promise.all(seen.map((identity) => cacheKey.cacheKeyRequest('https://admin.example.test/api/customers?a=1', 'customers:d2:4', identity).then((request) => request && request.url)))
+
+  await check('C. the full-phone grant is part of the key: cachedPhoneJson folds it into the identity scope, so masked and full never share an entry', async () => {
+    const { seen, identity, ask } = phoneCacheWith()
+    await ask({ full: true }, identity())
+    await ask({ full: false }, identity())
+    await ask(null, identity())
+    await ask({ full: false }, identity({ scope: 'grants:cost' }))
+    await ask({ full: true }, undefined)
+    assert.deepEqual(seen.map((given) => given && given.scope), ['phone-full', 'phone-masked', 'phone-masked', 'grants:cost|phone-masked', undefined])
+    const keys = await phoneKeys(seen)
+    assert.notEqual(keys[0], keys[1], 'a holder and an account without the grant do not share an entry')
+    assert.equal(keys[1], keys[2], 'a signed-out reader is without the grant: it shares the masked entry')
+    assert.notEqual(keys[3], keys[1], 'another scope keeps its own entry per variant')
+    assert.equal(keys[4], null, 'no identity, no safe key: the producer runs and nothing is stored')
+  })
+
+  await check('C. a cachedPhoneJson that forgets the grant is caught by the same assertions', async () => {
+    const { seen, identity, ask } = phoneCacheWith(['phoneCacheIdentity(identity, user))', 'identity)'])
+    await ask({ full: true }, identity())
+    await ask({ full: false }, identity())
+    const keys = await phoneKeys(seen)
+    assert.equal(keys[0], keys[1], 'mutant: the masked and the full variant would share one entry (the leak the grant in the key prevents)')
   })
 
   await check('C. a mutant builder without the deployment, the organisation or the epoch is caught by the same assertions', async () => {

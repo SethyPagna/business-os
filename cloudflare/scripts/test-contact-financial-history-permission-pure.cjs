@@ -66,7 +66,11 @@ const forbiddenDb = {
     throw new Error('denied financial-history request reached the database')
   },
 }
+const phoneMaskModule = load('lib/phoneMask.ts')
+const phoneAccessModule = load('lib/phoneAccess.ts', { './permissions': permissionHelpers, './phoneMask': phoneMaskModule })
+const phoneSearchGuardModule = load('lib/phoneSearchGuard.ts', { './phoneMask': phoneMaskModule, './phoneAccess': phoneAccessModule, './phone': load('lib/phone.ts'), './searchMatch': load('lib/searchMatch.ts') })
 const routeDependencies = {
+  '../lib/phoneAccess': phoneAccessModule,
   '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissionHelpers }),
   '../lib/courierCostAccess': load('lib/courierCostAccess.ts', { './permissions': permissionHelpers }),
   '../lib/auth': {
@@ -99,8 +103,10 @@ const posContactsApp = load('routes/contacts.ts', {
   '../lib/contactIds': load('lib/contactIds.ts'),
   '../lib/contactSearch': { buildContactMatchClause: () => undefined },
   '../lib/salesCustomerSearch': load('lib/salesCustomerSearch.ts', {
-    './contactSearch': load('lib/contactSearch.ts', { './searchMatch': load('lib/searchMatch.ts') }),
+    './contactSearch': load('lib/contactSearch.ts', { './searchMatch': load('lib/searchMatch.ts'), './contactOptions': load('lib/contactOptions.ts'), './phoneSearchGuard': phoneSearchGuardModule }),
     './phone': load('lib/phone.ts'),
+    './phoneMask': phoneMaskModule,
+    './phoneSearchGuard': phoneSearchGuardModule,
   }),
 }).default
 

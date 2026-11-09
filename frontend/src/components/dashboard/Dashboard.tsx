@@ -35,6 +35,7 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleLabel, getDashboardSaleTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
+import { stockAsOfText } from './stockAsOf.ts'
 import { showsBranchComparison } from '../../utils/branchScope.ts'
 import { useBranchRows } from '../../utils/useBranchRows.ts'
 import { soleActiveBranch } from '../../utils/branchCollapse.ts'
@@ -211,6 +212,8 @@ interface DashboardSummary {
   out_of_stock: DashboardProduct[]
   expiring_products: DashboardProduct[]
   expiring_count: number
+  // UTC ISO time the stock figures above were computed by the Worker (they can be a few minutes old). Absent from an older Worker.
+  stock_as_of?: string
   recent_sales: DashboardSale[]
   low_stock_preview_limit?: number
   out_of_stock_preview_limit?: number
@@ -1541,6 +1544,8 @@ export default function Dashboard() {
   const lowShortLabel = translateOr('low_stock_short', 'Low')
   const outShortLabel = translateOr('out_of_stock_short', 'Out')
   const matchStockShortLabel = translateOr('matching_stock_short', 'Matching')
+  // The stock cards can be up to 5 minutes old, so the Worker's compute time is shown under the range.
+  const stockAsOfLine = stockAsOfText(summary?.stock_as_of, translateOr('dashboard_stock_as_of', 'Stock as of {time}', 'ស្តុក ត្រឹម {time}'))
   const storeShortLabel = translateOr('store_discounts_short', 'Store')
   const memberShortLabel = translateOr('membership_short', 'Mem')
   const refundShortLabel = translateOr('refunded_short', 'Refund')
@@ -2081,6 +2086,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           showTime
           continuous
           loading={analyticsPending}
+          summary={stockAsOfLine}
           rangeActions={hasPermission('dashboard_export') ? (
             <button
               type="button"

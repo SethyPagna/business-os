@@ -5,6 +5,8 @@ export interface PermissionDefinition {
   tKey: string
   label: string
   sensitivity: PermissionSensitivity
+  // No longer offered as a switch, but still stored on roles and users: reviews and summaries keep naming and counting it, and its value is never touched.
+  retired?: boolean
   section?: string
   // True only for a permission key with a real, end-to-end-wired Review
   // Required tier: getPermissionTier()/isReviewRequired() (cloudflare/src/
@@ -70,6 +72,8 @@ export interface PermissionDefinition {
   lead?: true
   // A second lead key drawn as its own row under the module's main row, with its own None / Full cells.
   subRow?: true
+  // The sub-row this switch belongs to: it is an extra of THAT row (cleared when that row is set to None), not of the module's main row.
+  extraOf?: string
   // The switch chip's word (`short` is the English pack text) and, for a grant that needs a warning, the
   // tooltip that goes with it.
   shortTKey?: string
@@ -308,6 +312,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewDescription: 'Under Review, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
       { key: 'inventory_checks', tKey: 'perm_inventory_checks', label: 'Inventory check sessions', sensitivity: 'normal', lead: true, subRow: true },
+      // Price, cost, units sold and customer counts left the Inventory check list (owner, 1 Nov 2026): no chip offers them, their stored grants stay untouched.
       ...[
         ['price', 'Show selling prices'], ['barcode', 'Show barcodes and SKUs'],
         ['category', 'Show categories'], ['brand', 'Show brands'], ['stock', 'Show recorded stock'],
@@ -316,7 +321,14 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       ].map(([field, label]) => ({
         key: `inventory_check_show_${field}`, tKey: `perm_inventory_check_show_${field}`, label,
         sensitivity: 'normal' as const,
+        ...(['price', 'sales', 'customers', 'cost'].includes(field) ? { retired: true } : {}),
       })),
+      // Approving a submitted count sets stock, so it is its own grant (admin by default), never implied by counting. The server also needs the stock field and Adjust at Full.
+      {
+        key: 'inventory_check_approve', tKey: 'perm_inventory_check_approve', label: 'Approve counts', sensitivity: 'high', extraOf: 'inventory_checks',
+        shortTKey: 'perm_short_approve_counts', short: 'Approve counts',
+        hintTKey: 'perm_hint_approve_counts', hint: 'Applies what a count found to stock. Also needs Adjust / receive stock at Full.',
+      },
     ],
   },
   {
@@ -449,6 +461,10 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // fields=names read stays open) -- this key gates the contact
       // records themselves.
       { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high', shortTKey: 'suppliers', short: 'Suppliers' },
+      // Owner, 2 Nov 2026: a separate grant, off for every role except Administrator until it is given to a role or a
+      // person. Without it the Worker masks every phone (012 *** 678) on every channel (lib/phoneAccess.ts); Contacts
+      // Full, Sales Full and Settings Full do not imply it.
+      { key: 'contacts_full_phone', tKey: 'perm_contacts_full_phone', label: 'See full phone numbers', sensitivity: 'high', shortTKey: 'perm_short_full_phone', short: 'Full phones', hintTKey: 'perm_hint_full_phone', hint: 'Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works.' },
     ],
   },
   // Users & roles management is DELIBERATELY admin-only (Part 557 slice 3):
