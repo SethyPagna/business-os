@@ -59,7 +59,9 @@ function loadReal(relPath, overrides = {}) {
 const dbModule = { getDb: () => db }
 const searchMatch = loadReal('lib/searchMatch.ts')
 // 6.0.1048: the entry keys carry the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
-const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
+// `online_orders` is the read switch /config and /bootstrap publish as onlineOrdersEnabled; the test flips it.
+const switchState = { onlineOrders: false }
+const readSwitches = { readDataEpoch: async () => 'e'.repeat(32), readSwitch: async (_env, name) => name === 'online_orders' && switchState.onlineOrders }
 const cacheKey = loadReal('lib/cacheKey.ts', { './readSwitches': readSwitches })
 const cache = loadReal('lib/cache.ts', { './db': dbModule, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) }, './cacheKey': cacheKey })
 const portalRoute = loadReal('routes/portal.ts', {
@@ -283,6 +285,18 @@ async function run() {
       assert.equal(response.headers.get('cache-control'), 'private, no-store')
       assert.deepEqual(response.sql, [], route)
     }
+  })
+
+  await check('onlineOrdersEnabled follows the online_orders switch on /config and inside /bootstrap, both ways, even while the cached body is served from the edge (KHQR S5)', async () => {
+    switchState.onlineOrders = false
+    const warm = await shop('/bootstrap'); const warmConfig = await shop('/config')
+    assert.equal(warm.json.config.onlineOrdersEnabled, false); assert.equal(warmConfig.json.onlineOrdersEnabled, false)
+    switchState.onlineOrders = true
+    const on = await shop('/bootstrap'); const onConfig = await shop('/config')
+    assert.equal(on.json.config.onlineOrdersEnabled, true, 'the flip shows with no cache bump'); assert.equal(onConfig.json.onlineOrdersEnabled, true)
+    assert.deepEqual(on.sql.filter((s) => !s.includes('cache_versions')), [], 'the flag adds no D1 read to a warm open')
+    assert.deepEqual({ ...on.json.config, onlineOrdersEnabled: false }, warm.json.config, 'nothing else in the config moved')
+    switchState.onlineOrders = false
   })
 
   await check('no storefront route can take stock: the sale is made at POS against live lots', async () => {

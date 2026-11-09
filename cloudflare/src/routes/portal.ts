@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { bumpVersion, getVersionsWithFallback } from '../lib/cache'
 import { deploymentId, isUnsafeVersion } from '../lib/cache'
-import { readDataEpoch } from '../lib/readSwitches'
+import { readDataEpoch, readSwitch } from '../lib/readSwitches'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -1652,10 +1652,19 @@ function portalCatalogTtl(showOutOfStockProducts: boolean): number {
   return showOutOfStockProducts ? PORTAL_BODY_TTL_SECONDS : PORTAL_STOCK_TTL_SECONDS
 }
 
+/**
+ * Whether the storefront may offer online ordering right now: the `online_orders` read switch. It is NOT part of the cached body (the body is keyed by catalog and
+ * settings versions, which a switch flip does not move), so it is added to the answer after the cache, from the switch's own short memo. An unreadable switch reads as
+ * off: the page then hides ordering instead of offering a checkout the Worker would refuse.
+ */
+async function onlineOrdersEnabled(c: PortalContext): Promise<boolean> {
+  try { return await readSwitch(c.env, 'online_orders') } catch { return false }
+}
+
 app.get('/config', (c) => servePortalPublic(c, 'config', false, async () => {
   const settings = await loadSettingsMap(c.env)
   return { value: await withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)), ttl: PORTAL_BODY_TTL_SECONDS }
-}, null))
+}, async (body) => ({ ...body, onlineOrdersEnabled: await onlineOrdersEnabled(c) })))
 
 app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () => {
   const settings = await loadSettingsMap(c.env)
@@ -1673,7 +1682,8 @@ app.get('/bootstrap', (c) => servePortalPublic(c, 'bootstrap', true, async () =>
 }, async (body, versions) => {
   const catalog = (body.catalog || {}) as Record<string, unknown>
   const items = await withLivePortalStock(c, catalog.items, versions)
-  return { config: body.config, meta: body.meta, catalog: { ...catalog, items }, products: items, reviewItems: body.reviewItems, promotions: body.promotions }
+  const config = { ...((body.config || {}) as Record<string, unknown>), onlineOrdersEnabled: await onlineOrdersEnabled(c) }
+  return { config, meta: body.meta, catalog: { ...catalog, items }, products: items, reviewItems: body.reviewItems, promotions: body.promotions }
 }))
 
 // GET /catalog/meta and GET /catalog/products -- previously only reachable
