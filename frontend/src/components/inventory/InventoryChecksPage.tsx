@@ -10,8 +10,11 @@ import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
-import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
+import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
+import { currentDataEpoch } from '../../api/dataEpoch.ts'
+import { peekProductSearch, primeProductSearch, getProductFilters } from '../../api/productReadTransport.ts'
+import { searchProductIndex } from '../../api/productSearchIndex.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { getInventoryCheckAccess, type InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
 import { effectivePermissions, isAdminControlUser } from '../../utils/permissions.ts'
@@ -31,6 +34,7 @@ import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
 import { productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { loadWired, mergeWiredRows, NotWired, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import InventoryCheckApprovalPanel from './InventoryCheckApprovalPanel.tsx'
 import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
@@ -56,6 +60,8 @@ type ProductsResult = {
   branches: Array<{ id: number; name: string }>
   /** Set when the server speaks the check-status contract (ic_simple): rows carry their check facts and the status filter exists. */
   simple?: boolean
+  /** The rows came from the wired list (ic_wired): the Products rows plus the overlay, sorted by created or name. */
+  wired?: boolean
   /** Check counts and filter options come with page 1 and with a filter change, never with a page step (the page keeps the last ones). */
   summary?: CheckSummary
   facets?: { brands?: string[]; categories?: string[] }
@@ -67,8 +73,10 @@ type ProductsResult = {
 }
 /** creatorName rides along from the Sessions list: the single-session read does not send it. */
 type Selection = { branchId: string; sessionId: string; creatorName?: string | null; bootstrapIntent?: ControlIntent }
+/** What the remount after the sole branch was found carries: the open request's answer, so the remount sends no second list request. */
+type WiredSeed = { list: WiredList; branches: Branch[]; extras: WiredExtras }
 type Section = 'products' | 'sessions' | 'issues'
-type ControlIntent = { query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number }
+type ControlIntent = { query: string; filters: InventoryCheckFilters; pagination: { section: Section; page: number }; pageSize: number; wired?: WiredSeed }
 type Attempt = { productId: number; patch: InventoryCheckPatch; revision: number; sessionRevision: number; requestId: string }
 /** A search that came from Enter, the camera or a scanner gun. Nothing is ever saved by it: it narrows the list and points at the one exact row. */
 type Scan = { token: number; query: string; target: InventoryCheckFocusRequest['target'] }
@@ -114,6 +122,16 @@ const MAX_SUBMISSION = 500
 const initialFilters: InventoryCheckFilters = { branchId: '', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc' }
 /** Typing waits for a pause this long before the list is read; Enter, the camera and the scanner gun read at once. */
 const SEARCH_PAUSE_MS = 300
+
+/** The device search index's ranked ids for typed text, or null while the index cannot answer (the server's text search then does). */
+function rankText(text: string) {
+  const result = searchProductIndex(text)
+  return result ? { ids: result.hits.map(hit => Number(hit.id)), total: result.hits.length } : null
+}
+const wiredDeps: WiredDeps = {
+  readList: (params, signal) => readInventoryCheckList<WiredList>(params, signal), readOverlay: (params, signal) => readInventoryCheckOverlay(params, signal),
+  peek: peekProductSearch, prime: primeProductSearch, rank: rankText,
+}
 
 const atLeast = (width: number) => typeof window.matchMedia === 'function' && window.matchMedia(`(min-width: ${width}px)`).matches
 /** Where a scan puts the keyboard: a desktop lands in the row's Count box, a tablet on its tick, a phone only highlights (no keyboard pop-up). */
@@ -236,6 +254,11 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   // whose last answer was the check-status list (ic_simple), which is also what `productsServer` records: the older list has no counts to skip and refuses the key.
   const summaryScope = useRef('')
   const productsServer = useRef<ProductsServer>('unknown')
+  // ic_wired: the raw answers behind `data` (rebuilt into rows after a by-id refresh), what the screen already learned, the open answer handed through a remount, and the visible ids another device changed.
+  const wiredRaw = useRef<WiredRaw | null>(null)
+  const wiredKnown = useRef<{ branches?: Branch[]; extras?: WiredExtras } | null>(bootstrapIntent?.wired ? { branches: bootstrapIntent.wired.branches, extras: bootstrapIntent.wired.extras } : null)
+  const wiredSeed = useRef<WiredSeed | null>(bootstrapIntent?.wired ?? null)
+  const [changedIds, setChangedIds] = useState<number[]>([])
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
   const [approval, setApproval] = useState<InventoryCheckApproval | null>(null)
@@ -297,6 +320,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const canEdit = access.canCheck && !!session && session.can_edit !== false && (isAdminControlUser(user) || Number(session.created_by) === Number(user?.id))
   const canViewCounts = access.fields.stock || (!!session && Number(session.created_by) === Number(user?.id))
   const savedReasons = useSavedStockReasons('adjust')
+  const wiredAccess: WiredAccess = { stock: access.fields.stock, barcode: access.fields.barcode, received: access.fields.received }
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const hasDrafts = Object.keys(drafts).length > 0
@@ -330,6 +354,36 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
           const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
+          // ic_wired: the Products rows plus the overlay. Only the products list of one branch or all branches: a session's own list and the all-branches Issues view keep today's path.
+          if (!sessionId && wiredMode() !== 'old' && (!params.checkState || branchId)) {
+            const epoch = currentDataEpoch()
+            const seed = wiredSeed.current
+            wiredSeed.current = null
+            try {
+              const result = await loadWired({ params: { ...params, branchId }, known: wiredKnown.current, seed: seed?.list ?? null, skipSummary: summaryScope.current === stepScope, bypassStore: refresh > 0, access: wiredAccess, deps: wiredDeps, signal: abort.signal })
+              if (!publish()) return
+              // The data epoch moved while this was in flight: the answer belongs to the old epoch, so it is dropped and the screen reads again.
+              if (currentDataEpoch() !== epoch) { setRefresh(value => value + 1); return }
+              rememberWiredMode('wired')
+              const { raw } = result
+              wiredRaw.current = raw
+              wiredKnown.current = { branches: raw.branches, extras: raw.extras }
+              if (!branchId && raw.branches.length === 1) {
+                onSelect({ branchId: String(raw.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize, wired: { list: raw.list, branches: raw.branches, extras: raw.extras } } })
+                return
+              }
+              if (raw.extras.summary) summaryScope.current = stepScope
+              setChangedIds([])
+              setData(previous => wiredResult(raw, previous))
+              setLoadedKey(scopeKey)
+              return
+            } catch (cause) {
+              if (!(cause instanceof NotWired)) throw cause
+              // The switch is off (or the server is older): this tab keeps today's list, from here on without asking /list again.
+              if (!publish()) return
+              rememberWiredMode('old')
+            }
+          }
           const products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, productsServer.current, summaryScope.current === stepScope), abort.signal)
           if (publish()) {
             if (!branchId && !sessionId && products.branches?.length === 1) {
@@ -363,6 +417,50 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     }).catch(() => { if (publish()) setSessionError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.')) })
     return () => { live = false; abort.abort() }
   }, [sessionId, sessionReload])
+
+  // The wired answer carries no filter options (Inventory uses Products' own, one shared read): fetched once the rows are drawn, never in front of them.
+  const [wiredFacets, setWiredFacets] = useState<{ brands?: string[]; categories?: string[] } | null>(null)
+  const wiredNow = data?.wired === true
+  useEffect(() => {
+    if (!wiredNow || wiredFacets || (!access.fields.brand && !access.fields.category)) return
+    let live = true
+    void getProductFilters({}).then(payload => {
+      const meta = payload as { brands?: unknown[]; categories?: unknown[] } | null
+      const names = (list: unknown[] | undefined) => (Array.isArray(list) ? list.map(value => String(value || '').trim()).filter(Boolean) : [])
+      if (live && current()) setWiredFacets({ brands: names(meta?.brands), categories: names(meta?.categories) })
+    }).catch(() => {})
+    return () => { live = false }
+  }, [wiredNow])
+  // A sync event naming a row on screen is not read: the screen says a row changed elsewhere and a tap reads it (by id).
+  const wiredVisibleKey = wiredNow ? (data?.items ?? []).map(product => product.id).join(',') : ''
+  useEffect(() => {
+    if (!wiredVisibleKey) return
+    const visible = new Set(wiredVisibleKey.split(',').map(Number))
+    const onSync = (event: Event) => {
+      const detail = ((event as CustomEvent).detail || {}) as { channel?: unknown; reason?: unknown; payload?: { id?: unknown } | null }
+      const channel = String(detail.channel || '').split(':')[0]
+      const id = Number(detail.payload?.id)
+      if (detail.reason === 'cache-refresh' || (channel !== 'products' && channel !== 'inventory') || !visible.has(id)) return
+      setChangedIds(previous => previous.includes(id) ? previous : [...previous, id])
+    }
+    window.addEventListener('sync:update', onSync)
+    return () => window.removeEventListener('sync:update', onSync)
+  }, [wiredVisibleKey])
+  // The by-id read behind the hint and behind a Set from the row: the rows and their overlay for those ids only. A late answer (another scope, authority or data epoch) is dropped.
+  async function refreshChanged(rowIds: number[]) {
+    const raw = wiredRaw.current
+    if (!raw || !rowIds.length || !current()) return
+    const epoch = currentDataEpoch(), key = requestKey
+    try {
+      const fresh = await readWiredRows(rowIds, raw.branchId, wiredDeps, wiredAccess)
+      const latest = wiredRaw.current
+      if (!latest || !current() || queryFence.current !== key || currentDataEpoch() !== epoch) return
+      const next = mergeWiredRows(latest, fresh)
+      wiredRaw.current = next
+      setData(previous => wiredResult(next, previous))
+      setChangedIds(previous => previous.filter(id => !rowIds.includes(id)))
+    } catch { if (current()) setWriteError(tr('inventory_check_load_failed', 'Could not load Inventory. Try again.')) }
+  }
 
   function applyQuery(value: string, scanning: boolean) {
     setQuery(value)
@@ -841,8 +939,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
                 <fieldset disabled={controlsLocked} className="min-w-0 lg:w-[26rem] lg:shrink-0" data-inventory-check-query-lock>
                   <InventoryCheckControls query={query} onQueryChange={typeQuery} onQuerySubmit={submitQuery} searchRef={searchRef} scanLabelled={compact && !!sessionId && canCheckRows}
                     filters={filters} onFiltersChange={changeFilters} onClear={clearFilters} fields={access.fields}
-                    inSession={!!sessionId} showStateFilter={statusFilter} limited={facetsLimited}
-                    branches={branches} brands={data?.facets?.brands} categories={data?.facets?.categories} t={t} />
+                    inSession={!!sessionId} showStateFilter={statusFilter} limited={facetsLimited} wired={wiredNow}
+                    branches={branches} brands={data?.facets?.brands ?? wiredFacets?.brands} categories={data?.facets?.categories ?? wiredFacets?.categories} t={t} />
                 </fieldset>
                 {contextBar}
               </div>
@@ -852,6 +950,10 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             </>}
         </div>
         {writeError ? <p role="alert" className="text-xs leading-relaxed text-red-700">{writeError}</p> : null}
+        {wiredNow && fresh && changedIds.length ? <div role="status" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200" data-inventory-check-changed-elsewhere>
+          <span className="min-w-0 break-words">{tr('inventory_check_changed_elsewhere', 'Changed on another device. Tap to refresh.')} ({changedIds.length})</span>
+          <button type="button" className="btn-secondary inline-flex min-h-8 shrink-0 items-center gap-1 px-2 text-xs" disabled={controlsLocked} onClick={() => { void refreshChanged(changedIds) }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{t('refresh')}</button>
+        </div> : null}
         {error || sessionError ? <div role="alert" className="flex items-center justify-between gap-2 text-xs leading-relaxed text-red-700">
           <span className="min-w-0 break-words">{error || sessionError}</span>
           <IconAction label={t('retry')} onClick={reloadAll}><RotateCcw className="h-4 w-4" aria-hidden="true" /></IconAction>
@@ -885,7 +987,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
         {fixStock ? <Suspense fallback={null}><FastStockInModal
           branchOptions={branches.map(branch => ({ value: String(branch.id), label: branch.name }))} defaultBranchId={fixStock.branchId} initialMode="set" initialHeader={{ branchId: String(fixStock.branchId) }}
           initialLines={[{ mode: 'set', quantity: fixStock.quantity, reason: fixStock.reason, ...fixStock.requestId ? { requestId: fixStock.requestId } : {}, product: fixStockCandidate(fixStock, branches.find(branch => branch.id === fixStock.branchId)?.name ?? null) }]}
-          tr={(key: string, fallback?: string) => tr(key, fallback ?? key)} notify={notify} onClose={() => setFixStock(null)} onDone={reloadAll} /></Suspense> : null}
+          tr={(key: string, fallback?: string) => tr(key, fallback ?? key)} notify={notify} onClose={() => setFixStock(null)} onDone={() => { const id = Number(fixStock.product.id); if (wiredRaw.current && wiredNow && Number.isSafeInteger(id)) void refreshChanged([id]); else reloadAll() }} /></Suspense> : null}
         {confirmDialog}
       </div>
     </HubSectionNav>

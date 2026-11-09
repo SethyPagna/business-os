@@ -122,6 +122,7 @@ const doubles = {
   },
   'api/inventoryChecksTransport.ts': {
     captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
+    readInventoryCheckList: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) }, // ic_wired is off here: the older list is what this test is about
     readInventoryCheckProducts: async (params: Record<string, unknown>) => { productRequests.push(params); return response() },
     readInventoryCheckSessions: async () => ({ items: [], total: 0, page: 1, pageSize: 20 }),
     readInventoryCheckSession: async () => { throw new Error('not used') },

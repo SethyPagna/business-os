@@ -49,10 +49,12 @@ type Props = {
   showStateFilter?: boolean
   /** The server capped a facet list: that section says so once, where the person is choosing. */
   limited?: Partial<Record<'brands' | 'categories', boolean>>
+  /** The wired list (ic_wired) has no stock sort: Products has none, and Inventory never reads stock to order by it. */
+  wired?: boolean
   t: (key: string) => string
 }
 
-export default function InventoryCheckControls({ query, onQueryChange, onQuerySubmit, searchRef, scanLabelled = false, filters, onFiltersChange, onClear, fields, branches, brands = [], categories = [], inSession = false, showStateFilter = true, limited = {}, t }: Props) {
+export default function InventoryCheckControls({ query, onQueryChange, onQuerySubmit, searchRef, scanLabelled = false, filters, onFiltersChange, onClear, fields, branches, brands = [], categories = [], inSession = false, showStateFilter = true, limited = {}, wired = false, t }: Props) {
   const soleBranch = branches.length === 1
   const choice = (key: typeof FILTER_KEYS[number], value: string, text: string): FilterOption => ({
     id: value === '' ? 'all' : value, label: text, active: filters[key] === value, onClick: () => onFiltersChange({ [key]: value }),
@@ -71,7 +73,7 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
     sortChoice(sortBy, 'desc', named('sort_field_high_low', field)), sortChoice(sortBy, 'asc', named('sort_field_low_high', field)),
   ]
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
-  if (fields.stock) sortOptions.push(...highLow('stock', t('stock')))
+  if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))
 
   const sections: FilterSection[] = [{ id: 'sort', label: t('sort'), options: sortOptions }]
   if (!soleBranch) sections.push({

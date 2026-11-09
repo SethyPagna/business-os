@@ -7783,6 +7783,7 @@
   "perm_act_inventory_checks_view": "មើលវគ្គរាប់ស្តុកទាំងអស់",
   "perm_act_inventory_checks_check": "រាប់ និងដាក់ស្នើ",
   "inventory_check_load_failed": "មិនអាចផ្ទុកបញ្ជីស្តុកបានទេ។ សូមព្យាយាមម្តងទៀត។",
+  "inventory_check_changed_elsewhere": "ត្រូវបានផ្លាស់ប្តូរនៅឧបករណ៍ផ្សេង។ ចុចដើម្បីផ្ទុកឡើងវិញ។",
   "inventory_check_save_unknown": "មិនទាន់ដឹងលទ្ធផលនៃការរក្សាទុក។ សូមពិនិត្យវគ្គមុនពេលសាកល្បងម្តងទៀត។",
   "inventory_check_page_session": "ផលិតផលនៅទំព័រនេះ",
   "inventory_check_current_stock": "ស្តុកបច្ចុប្បន្ន",
