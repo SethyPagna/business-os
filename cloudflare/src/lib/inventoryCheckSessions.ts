@@ -804,7 +804,10 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
       // The figures of now, read only because the write was refused: per line, what the quantity is at this moment (a few rows, never the ledger).
       const liveRows = await db.prepare(`SELECT json_extract(e.value,'$.product_id') AS productId,json_extract(e.value,'$.batch_id') AS batchId,json_extract(e.value,'$.scope') AS scope,
         json_extract(e.value,'$.seen') AS seen,${LIVE_LINE_SQL('e.value')} AS quantity FROM json_each(@lines) e`).all<{ productId: number; batchId: number; scope: string; seen: number | null; quantity: number }>({ lines: params.lines, branchId }).catch(() => [])
-      const changed = liveRows.filter(row => row.seen === null || Math.abs(Number(row.quantity) - Number(row.seen)) > COUNT_EPSILON)
+      // A plain (whole-product) line is guarded against the branch total, so it answers the same shape: batchId 0, scope 'branch'.
+      const plainRows = await db.prepare(`SELECT json_extract(e.value,'$.product_id') AS productId,0 AS batchId,'branch' AS scope,json_extract(e.value,'$.seen') AS seen,
+        COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(e.value,'$.product_id') AND bs.branch_id=@branchId),0) AS quantity FROM json_each(@plain) e`).all<{ productId: number; batchId: number; scope: string; seen: number | null; quantity: number }>({ plain: params.plain, branchId }).catch(() => [])
+      const changed = [...liveRows, ...plainRows].filter(row => row.seen === null || Math.abs(Number(row.quantity) - Number(row.seen)) > COUNT_EPSILON)
       fail(409, 'inventory_check_stock_changed', { productIds: [...new Set(changed.map(row => Number(row.productId)))], current: changed.map(row => ({ productId: Number(row.productId), batchId: Number(row.batchId), scope: row.scope, quantity: Number(row.quantity) })) })
     }
     throw error

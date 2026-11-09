@@ -269,6 +269,8 @@ async function lotMain() {
     reset(); twoLots(); on()
     const stale = await lotSubmit([lotLine(910001, [lot(910001, 5, 5)]), { productId: 910002, countedQuantity: 4, seenQuantity: 99 }], { requestId: 'lot-request-mixed-2' })
     assert.equal(stale.status, 409); assert.equal(stale.body.code, 'inventory_check_stock_changed'); assert.deepEqual(lotLines(), [], 'nothing written')
+    assert.deepEqual(stale.body.productIds, [910002], 'only the stale plain product is named (the dated one still matched)')
+    assert.deepEqual(stale.body.current, [{ productId: 910002, batchId: 0, scope: 'branch', quantity: 5 }], 'and the 409 carries the figure of now, like a dated line')
     // a plain line with an unknown key is still refused, and the ceiling counts a plain line as one
     const bad = await lotSubmit([{ productId: 910002, countedQuantity: 4, seenQuantity: 4, lots: [] }], { requestId: 'lot-request-mixed-3' })
     assert.equal(bad.status, 400)
