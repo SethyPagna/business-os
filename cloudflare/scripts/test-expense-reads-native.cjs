@@ -642,7 +642,7 @@ async function scenarioPlan(patches = []) {
     assert.equal(off.json.limit, 500)
     assert.equal(off.json.fees.length, 500)
     // The sizes are the plan table's, not a literal in the route: a table whose Free page is 250 and whose Free fold cap is 120 rows moves both.
-    const small = newWorld([...patches, { file: 'src/lib/planTier.ts', from: 'expenseExportPageRows: 500,\n  expenseReportFoldMaxRows: 1_500,', to: 'expenseExportPageRows: 250,\n  expenseReportFoldMaxRows: 120,' }])
+    const small = newWorld([...patches, { file: 'src/lib/planTier.ts', from: 'expenseExportPageRows: 500,\n  stockLedgerExportPageRows: 500,\n  expenseReportFoldMaxRows: 1_500,', to: 'expenseExportPageRows: 250,\n  stockLedgerExportPageRows: 500,\n  expenseReportFoldMaxRows: 120,' }])
     small.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 640)
       INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at)
       SELECT 'other', 'Bulk ' || (i % 7), 1, 0, date('2026-09-01', '+' || (i % 20) || ' days'), 1, '2026-09-01 03:00:00' FROM n`)
