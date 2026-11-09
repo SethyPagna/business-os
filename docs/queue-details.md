@@ -2,7 +2,7 @@
 
 Full text of every open item on the progress.md board (moved verbatim from progress.md on 27 Oct 2026, 6.0.998). Each `### Q###` heading is the anchor the board links to; the source line keeps the 13–19 Oct section and group; a note after `→` was reconciled on 27 Oct from the private lane log. Board numbers can change when the board is reorganised; the item text cannot.
 
-How to read the evidence pointers: `archive L<n>` is line n of the private archive file; `#<n>` is observation n of the 428-row obligation index (`Records/Recovery/HANDOFF-COVERAGE-AUDIT-20261012/obligation-index.json`) with its code status in `Records/Lanes/2026-10-13/BACKLOG-COVERAGE.md` (BC) Appendix A; every other name is a report in `Records/Lanes/2026-10-12/` or `Records/Lanes/2026-10-13/`. Status words: OPEN (live, not done), PARTIAL, MISSING (checked in code, absent), UNCERTAIN (needs a device, data or owner statement), OWNER (waits for an owner decision or action), DEVICE (physical-device acceptance), DATA (production data repair, owner-gated), HOLD (deliberately not shipping), DONE (code verified present, not necessarily deployed).
+How to read the evidence pointers: `archive L<n>` is line n of the private archive file; `#<n>` is observation n of the 428-row obligation index (`private:Recovery/HANDOFF-COVERAGE-AUDIT-20261012/obligation-index.json`) with its code status in `private:Lanes/2026-10-13/BACKLOG-COVERAGE.md` (BC) Appendix A; every other name is a report in `private:Lanes/2026-10-12/` or `private:Lanes/2026-10-13/`. Status words: OPEN (live, not done), PARTIAL, MISSING (checked in code, absent), UNCERTAIN (needs a device, data or owner statement), OWNER (waits for an owner decision or action), DEVICE (physical-device acceptance), DATA (production data repair, owner-gated), HOLD (deliberately not shipping), DONE (code verified present, not necessarily deployed).
 
 Moved from the old "Open task queue" section of progress.md:
 
@@ -78,7 +78,7 @@ Source: Returns, sales money, shifts and expenses › **Data forensics (DATA, ow
 
 Source: Returns, sales money, shifts and expenses › **Data forensics (DATA, owner-gated)** · ready
 
-  - BH-1 bug hunt 27 Sep fix lanes (archive L223, `Records/Bugs/2026-09-27/`).
+  - BH-1 bug hunt 27 Sep fix lanes (archive L223, `private:Bugs/2026-09-27/`).
 
 ### Q011
 
@@ -160,7 +160,7 @@ Source: Added 27 Oct from the lane log · owner-decided
 
 ### Q024
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Exchange replacement sale: loyalty accrual must follow the programme switch. SELECT-only ops audits: pre-6.0.131 replace-all deactivations, pre-6.0.134 grouped-return statuses, and the affected-customer count for the restored loyalty points (run in the postflight).
 
@@ -168,25 +168,25 @@ Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Rec
 
 ### Q025
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - cost-unknown + Conflicts: $0 cost = $0 loss, NULL cost = unknown and flagged, every unknown-cost item and empty-barcode product listed in Conflicts; sweep EVERY cost reader (reports, salesAnalytics, removalLosses, conflicts). Also closes the Reports courier column that prints a hidden figure as $0.00, and multilot NOTE 1 (a $0-cost lot disposal valued at catalog price). → *27 Oct: the Conflicts list is lane 6.0.988 (review).*
 
 ### Q026
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Import approve costs about 2,170 statements against the Paid 1,000-per-invocation limit: HIGH, VERIFY the production path before relying on large imports (multilot r3 refute).
 
 ### Q027
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - A 150-row plain CSV Add becomes one batch of 301 statements, over the 300 chunk (pre-existing, CPU split makes it harmless today): fold into the import lane.
 
 ### Q028
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Multilot: movements written in the deploy window above the watermark revert aggregate-only; the 0250 runbook must cover "migration applied but publish failed" and Worker-only rollback windows.
 
@@ -486,25 +486,25 @@ Source: Stock, catalog, contacts and suppliers › **Contacts and suppliers** ·
 
 ### Q077
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Imports, stock and money** · ready
 
   - Shift-cash leftovers: amend opened_at later, sales between close and reopen (resolved by the round 6 parent-close float), admin time edits that leave money outside a shift.
 
 ### Q078
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Receipt TIN and licences: Khmer and English receipt, TIN and licence fields in settings printed on the receipt (accountant to confirm the invoice format).
 
 ### Q079
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Per-cashier shift report: open and close, per-cashier totals, all-cashier summary (design in the shift-cash report).
 
 ### Q080
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Telegram admin-only check: the full phone number may be shown only where the audience is verified admin-only; add the check and a test.
 
@@ -560,67 +560,67 @@ Source: Telegram and notifications · owner-decided
 
 ### Q089
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Admin reset code: an admin-issued one-time code replaces the authenticator-only reset.
 
 ### Q090
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Forced-change neutral copy: the forced password-change screen says "publicly known", which is wrong for a short seeded password; neutral EN/KM wording.
 
 ### Q091
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Review before/after records: a before/after record for every action and a record viewer (owner 14 Oct).
 
 ### Q092
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)** · ready
 
   - F1/F6: creating a request never broadcasts, so the pending tag appears only on the next visit; the ProductDuplicatesTab conflict apply does not refresh. F2: the second removal-alert site is unpinned. F3: `?fields` edge values (empty, array, case, repeated) are not answered 400. F4: more invisible characters to strip (U+2060, U+00AD, U+3164 and similar; keep ZWSP, ZWNJ, ZWJ and Khmer). F5: a retried create, edit or fee delete with the same client_request_id queues two pending rows and two alerts (`createPendingAction` is not idempotent). → *27 Oct: F3 strict `?fields` and F5 idempotent pending actions are lane 6.0.985 (RC2b, deploying).*
 
 ### Q093
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **review-r3 (refute of review-telegram r2 and pending-tag r2; no blocker, no ?fields leak)** · owner-decided
 
   - Also: a false "Products merged" alert on a removal-only conflict review (pre-existing); 30 alerts in 3 seconds have no rate limit; slice A still open (approve-performs-merge, details name, Khmer reader, bounded duplicate F8, 12-alert burst); create-fold must also require `merge_duplicates` (parity with merge-permission-fold, defaults granted per owner 14 Oct). → *27 Oct: approve-performs-merge (slice A) is lane 6.0.985 (RC2b, deploying).*
 
 ### Q094
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
 
   - Drift-guard hardening: the retention writer scan can be fooled by a dynamic import, a new helper in `lib/audit.ts`, a reused allowlist expression, multi-row VALUES, `.js` files, and migrations are unscanned.
 
 ### Q095
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · needs owner
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · needs owner
 
   - Stock Set undo/redo writes no audit row. Owner questions (all prunable today): promotions, `product/delete` with stock, loyalty `award_points`, whether review rejects matter after 21 days; also award_points and promotion replay receipts after 21 days, a record of the purge itself, and a purge cost that grows.
 
 ### Q096
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
 
   - `sale_refused` is missing from the audit vocabulary (Khmer label); the Server page shows an English refusal text; per-user rate limit on refused sales (refusal rows are already collapsed per account, reason and request id per day).
 
 ### Q097
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
 
   - Courier blind write: an amender with the courier-cost switch off can still write the courier cost through the API (write-side gate).
 
 ### Q098
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
 
   - NOTE C: `actorReadScope.ts` org field shape flip (interacts with the H7 epochs).
 
 ### Q099
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Security and audit follow-ups (sec-settings r5, sec-sale-time r4, app-session)** · ready
 
   - Remaining non-aborting uploads: product, import and avatar uploads still use wrappers that do not abort.
 
@@ -742,13 +742,13 @@ Source: Permissions, review queue, audit and undo › **Correctness hunt R2 foll
 
 ### Q119
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Returns policy page: 7 days, unopened, with receipt, same as the store.
 
 ### Q120
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Storefront minimum age 16.
 
@@ -804,49 +804,49 @@ Source: Consolidation lanes (last recorded state 19 Oct) · ready
 
 ### Q129
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - sheetjs-0.20: 0.20.3 is approved and verified (tarball 2,409,319 bytes, vendored untracked in the sheet worktree). Parity found 30 of 30 .xlsx and 8 of 16 .xls identical; 8 legacy HTML-as-xls differ (numeric cells keep leading zeros, text cells gain spaces around separators, a few text cells become ISO dates) and the `t="d"` date reader reads one day early. Rework the reader, normalise the HTML-export whitespace, decide leading-zero handling (barcodes benefit), re-run parity; then commit PART B separately.
 
 ### Q130
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - LICENSE file: "All rights reserved — Leang Cosmetics".
 
 ### Q131
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Owner-decision lanes (14 Oct)** · owner-decided
 
   - Offline queue removal slices S0, S5, S6 (tills drained; unblocked).
 
 ### Q132
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
 
   - Free-plan paths over 50 statements: the conflict review loop alone, Dashboard startup at about 4.2k sales (view-more lists now 2–3 statements after the card); lanes E-TG, E-RET, E-ECHO, E-SNAP, E-PUT, E-STOCKIN, E-CLEAN stay queued behind slice A.
 
 ### Q133
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
 
   - Comments sweep: mechanical comment cleanup per package (517 to shorten, 50 to remove, the 4-decimal rule stated once), then the tokenizer strip; also one raiseIfSql builder (59 copies), casts through unknown, storage-key constants exported once, shared late-picker queue, BranchField, i18n duplicate-key check (516 duplicate keys per pack), productIdentity LIMIT 200 group cap, importEngine NaN delta, hard-coded Telegram 2000.
 
 ### Q134
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Efficiency (Free 50-statement paths) and hygiene** · ready
 
   - fees-k leftovers N1, N4, N5, N6 and the ProductForm duplicate-warning state; storefront leftovers (pattern filter not exact, unused assistant* keys, stored FAQ text in production settings may still promise something).
 
 ### Q135
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Data and platform** · ready
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Data and platform** · ready
 
   - K8b needs migration number 0249 or later (pending_actions requested_device_name/_tz; 0250 is now taken by the multilot watermark, so pick a free number against `d1_migrations` and every ref's files).
 
 ### Q136
 
-Source: Release 3 queue (opened 14 Oct from the "release 3" items in Records/Recovery/LANES.md since 13 Oct 22:40Z) › **Data and platform** · owner-decided
+Source: Release 3 queue (opened 14 Oct from the "release 3" items in private:Recovery/LANES.md since 13 Oct 22:40Z) › **Data and platform** · owner-decided
 
   - Privacy purge of history (scrub and force-push after the lanes merge; keep the private mirror), see Privacy below; repository private later (owner 14 Oct).
 
@@ -1003,33 +1003,33 @@ Source: Efficiency, performance and Free/Paid › **Release-2 efficiency review 
 
 ### Q162
 
-Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · owner-decided
+Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `private:Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · owner-decided
 
   - A0 metrics (per-request rows_read/rows_written/statements/ms in Server-Timing and Analytics Engine) PARTIAL; A1 hygiene (awaited broadcasts → waitUntil, awaited cache-version bumps, ETag/304) OPEN; A2-RETENTION#45 PARTIAL (`job_runs` table; retention must skip every FK/JSON-referenced `action_history` row, never expire `undo_snapshots`; owner ruling keeps expenses and reverts forever; `ephemeralRetention.ts:233`).
 
 ### Q163
 
-Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · ready
+Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `private:Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · ready
 
   - A3-CATALOG#46 PARTIAL (one scan per page, parallel stock reads, cached filters); A4-DASHBOARD#47 PARTIAL (20 s startup cache keyed by permissions + versions); A5-SEARCH#48 UNCERTAIN (Khmer tokenizer probe, FTS only if confirmed); A6-THUMBNAILS#49 PARTIAL (wire w160/320/640 + srcset, orphan audit report-only); A7-R2-LIFECYCLE#50 UNCERTAIN (imports 7 d, quarantine 30 d, aborted multipart 1 d, backups in their own bucket).
 
 ### Q164
 
-Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · needs owner
+Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `private:Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · needs owner
 
   - A8-READ-MODELS#51 UNCERTAIN (only if 7 days of A0 numbers cross thresholds); F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) OPEN; F2 Durable Object auto-pong and pause polls while the tab is hidden, F3 stop pre-downloading every route on deploy OPEN; B1 backups keyset paging instead of OFFSET, full backup at 03:00 local, separate backups bucket (owner decision) OPEN.
 
 ### Q165
 
-Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · needs owner
+Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `private:Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · needs owner
 
   - W1-W2-W3#53 PARTIAL (sale create 18–20 D1 trips → 3–4, report reader one-batch snapshot, login batching); PROD-Q1-Q9#52 DATA (read-only production counts via ops d1-export); MEASURE-TOKEN#54 OWNER (Account Analytics Read scope); V-location (every binding and external call checked for distance from Cambodia) PARTIAL; PD-1 precomputed search/catalog read model (archive L317) OPEN.
 
 ### Q166
 
-Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · ready
+Source: Efficiency, performance and Free/Paid › **C3v2 data-architecture plan (27 Sep; every change measured A/B, KV flag, rollback in about 60 s; `private:Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`)** · ready
 
-  - U-receipt duplicate receipt numbers possible (no UNIQUE since 0107, probe outside the batch) OPEN; PD-1 audit lanes I1–I10 and adversarial audits A1–A3 of Codex work (archive L368–L380) historical, reports in `Records/Performance/2026-09-25`.
+  - U-receipt duplicate receipt numbers possible (no UNIQUE since 0107, probe outside the batch) OPEN; PD-1 audit lanes I1–I10 and adversarial audits A1–A3 of Codex work (archive L368–L380) historical, reports in `private:Performance/2026-09-25`.
 
 ### Q167
 
@@ -1072,7 +1072,7 @@ Source: Efficiency, performance and Free/Paid › **Legacy ledger leftovers (not
 
 Source: Efficiency, performance and Free/Paid › **Legacy ledger leftovers (not in the register)** · ready
 
-  - U-SYNC PARTIAL (sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers: phase 1 done, refuter was running, shipping not seen, archive L305); C3V4-NEWITEMS OPEN (tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, version bumps into the D1 write batch before the money cache, W2 7-day shadow compare; `Records/Performance/2026-09-27/C3v4-council-synthesis.md`).
+  - U-SYNC PARTIAL (sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers: phase 1 done, refuter was running, shipping not seen, archive L305); C3V4-NEWITEMS OPEN (tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, version bumps into the D1 write batch before the money cache, W2 7-day shadow compare; `private:Performance/2026-09-27/C3v4-council-synthesis.md`).
 
 ### Q174
 

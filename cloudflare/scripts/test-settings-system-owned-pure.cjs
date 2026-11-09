@@ -146,6 +146,10 @@ async function main() {
       '../lib/planTier': { getPlanLimits: () => ({}), resolvePlanTier: () => 'paid' },
       '../lib/cronRotation': cron,
       '../lib/cronStepIds': ids,
+      // 6.0.1041: the read-switch routes added three imports; /cron-health never reaches them, and the switch module is the real one.
+      '../lib/audit': { buildAuditStatement: () => ({ sql: 'SELECT 1', params: {} }), changedFields: () => null },
+      '../lib/maintenance': { getMaintenance: async () => null },
+      '../lib/readSwitches': load('lib/readSwitches.ts', { './analytics': { recordAnalytics: () => {} } }),
     }
     new Function('require', 'module', 'exports', output)((r) => (r in stubs ? stubs[r] : require(r)), mod, mod.exports)
     return mod.exports.default

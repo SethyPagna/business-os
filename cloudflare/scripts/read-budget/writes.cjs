@@ -87,10 +87,11 @@ function stockSession(n, offset) {
     run: async (world, send, body) => send('POST', '/api/inventory/sessions', body) }
 }
 
-function returnOf(n, offset) {
+// saleLines: how many lines the sale being returned has (10 for the budgeted shapes); a loophole test returns a longer sale.
+function returnOf(n, offset, saleLines = 10) {
   return { id: `w-return-${n}-lines`, label: `POST /api/returns ${n} lines (restock)`, method: 'POST', url: '/api/returns',
     prepare: async (world) => {
-      const id = await createSale(world, `ret${n}`, await lots(world, 10, offset))
+      const id = await createSale(world, `ret${n}`, await lots(world, saleLines, offset))
       const lines = (await world.all('SELECT id, product_id FROM sale_items WHERE sale_id = ? ORDER BY id', id)).slice(0, n)
       const quote = await world.send('POST', '/api/returns/quote', { sale_id: id, items: lines.map((l) => ({ sale_item_id: l.id, quantity: 1 })) })
       if (quote.status !== 200) throw new Error(`return quote answered ${quote.status} ${quote.text.slice(0, 200)}`)
@@ -160,6 +161,14 @@ function writeShapes() {
     { id: 'w-product-price-edit', label: 'PUT /api/products/:id price edit', method: 'PUT', url: '/api/products/1003',
       prepare: async (world) => (await world.all('SELECT * FROM products WHERE id=1003'))[0],
       run: async (world, send, p) => send('PUT', '/api/products/1003', { ...p, selling_price_usd: 11, expected_updated_at: p.updated_at, client_request_id: key('edit') }) },
+    { id: 'w-read-switch-flip', label: 'PUT /api/runtime/read-switches', method: 'PUT', url: '/api/runtime/read-switches',
+      // The write pass boots with call_counting stored (P1.1), so the row already carries epoch 1; the flip names the epoch the world holds
+      // instead of assuming an empty row (0), which the route answers 409 read_switch_epoch_stale.
+      prepare: async (world) => {
+        const row = (await world.all("SELECT value FROM system_flags WHERE key='read_switches'"))[0]
+        try { return Number(JSON.parse(row.value).epoch) || 0 } catch { return 0 }
+      },
+      run: async (world, send, epoch) => send('PUT', '/api/runtime/read-switches', { name: 'probe', state: 'on', expectedEpoch: epoch }) },
     { id: 'w-logout', label: 'POST /api/auth/logout', method: 'POST', url: '/api/auth/logout', body: {} },
   ]
   return shapes.map((s) => ({ kind: 'write', variant: 'base', ...s }))
@@ -182,4 +191,7 @@ async function measureWrite(world, shape, { fingerprints = false } = {}) {
   return { ...out, changed: changedTables(out.countsBefore || {}, out.countsAfter || {}) }
 }
 
-module.exports = { writeShapes, measureWrite, rowCounts, lots }
+// Request ids come from one counter, so two worlds that run the same shapes in the same order send the same ids.
+const resetSequence = () => { sequence = 0 }
+
+module.exports = { writeShapes, measureWrite, rowCounts, lots, resetSequence, returnOf }

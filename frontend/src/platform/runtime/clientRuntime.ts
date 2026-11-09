@@ -4,6 +4,9 @@ type RuntimeDescriptor = {
   serverStartTime: string
   storageVersion: string
   dataRootKey: string
+  // The database's data epoch (8 hex characters, api/dataEpoch.ts). Unlike dataRootKey it is NOT a hard key: a restore keeps the
+  // same database, so a new epoch drops caches (api/epochReset.ts) and never the drafts, carts or unsent checkouts a hard reset deletes.
+  dataEpoch: string
   organizationPublicId: string
 }
 
@@ -97,6 +100,7 @@ export function normalizeRuntimeDescriptor(input: RuntimeDescriptorInput = {}): 
     serverStartTime: sanitizeText(input?.serverStartTime),
     storageVersion: sanitizeText(input?.storageVersion),
     dataRootKey: sanitizeText(input?.dataRootKey),
+    dataEpoch: sanitizeText(input?.dataEpoch),
     organizationPublicId: sanitizeText(input?.organizationPublicId || input?.organization_public_id),
   }
 }
@@ -172,6 +176,13 @@ async function deleteBusinessOsCaches(cacheKeys: string[]): Promise<boolean[]> {
   return mapRuntimeCleanup(keys, (key) => window.caches.delete(key).catch(() => false))
 }
 
+// Fired after a reset removed the worker, so the page that did it registers one again and keeps hearing about new builds (index.tsx).
+export const SERVICE_WORKER_RESET_EVENT = 'sync:service-worker-reset'
+
+function announceServiceWorkerReset(): void {
+  try { window.dispatchEvent(new CustomEvent(SERVICE_WORKER_RESET_EVENT)) } catch (_) {}
+}
+
 async function clearServiceWorkersAndCaches(): Promise<void> {
   if (typeof window === 'undefined') return
   try {
@@ -186,6 +197,7 @@ async function clearServiceWorkersAndCaches(): Promise<void> {
       await deleteBusinessOsCaches(cacheKeys)
     }
   } catch (_) {}
+  announceServiceWorkerReset()
 }
 
 function clearStorage(storage: Storage | null, preserveKeys: Set<string>, keepInPlace: readonly string[] = []): void {

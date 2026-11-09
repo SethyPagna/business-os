@@ -1496,6 +1496,18 @@ function ProductsFullEditor() {
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
   const canRemoveProduct = can('products', 'delete')
+  // Edit product opens the product form, so every way into the form from a list (the detail's Edit, the group menu's Add image) needs
+  // it: PUT /api/products/:id answers 403 without it. A Review-tier role keeps it -- its edit is queued for approval.
+  const canEditProduct = can('products', 'edit')
+  // Bulk delete is its own switch (Refused, never queued -- utils/permissionActions.ts). Its row `requires` Delete, so this one can() answers both:
+  // the Worker's bulk job (POST /bulk-delete-jobs, above BULK_DELETE_JOB_THRESHOLD rows) reads Bulk delete and Delete, and a smaller
+  // selection is deleted row by row, which needs Delete. No Delete or no Bulk delete: no bulk Delete.
+  const canBulkDeleteProducts = can('products', 'bulk_delete')
+  // Add variant creates a product row, so the Worker (POST /variant) demands the variant action AND Add. The variant row lists Add as
+  // a requirement (utils/permissionActions.ts), so this one can() answers both: Add alone (the old gate) is not enough.
+  const canAddVariant = can('products', 'variant')
+  // Moving a product's stock to another branch posts to POST /api/branches/transfer, which reads branches:transfer.
+  const canTransferBranchStock = can('branches', 'transfer')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   // Same action the per-product image uploader is gated on: wiring photos
   // in bulk is the same authority as attaching one by hand, just applied
@@ -2935,9 +2947,12 @@ function ProductsFullEditor() {
     // follows, so the review shows from -> to and not only the destination.
     const { buildProductBranchMovePlan } = await loadProductWriteHelpers()
     const sourceBranchNames = new Set<string>()
+    let skippedCount = 0
     for (const id of selectedVisibleIds) {
-      const plan = buildProductBranchMovePlan(productsById.get(Number(id)) || {}, branchId)
+      const plan = buildProductBranchMovePlan(productsById.get(Number(id)) || {}, branchId, { canInitialize: canAdjustInventoryStock })
       if (plan?.action === 'transfer') sourceBranchNames.add(String(branchesById.get(String(plan.fromBranchId))?.name || `#${plan.fromBranchId}`))
+      // No stock anywhere and no Adjust / receive: the Worker would refuse the zero-quantity add, so the row is left out, not failed.
+      if (plan?.action === 'skip') skippedCount += 1
     }
     if (!(await askToConfirm({
       title: tr('bulk_change_branch', 'Change Branch'),
@@ -2945,13 +2960,15 @@ function ProductsFullEditor() {
         { label: tr('products', 'Products'), value: selectedVisibleCount },
         { label: tr('source_branch', 'Source Branch'), value: [...sourceBranchNames].join(', ') || '—' },
         { label: tr('destination_branch', 'Destination branch'), value: branch.name },
+        ...(skippedCount ? [{ label: tr('bulk_branch_skipped_label', 'Skipped (no stock)'), value: skippedCount }] : []),
       ],
       confirmLabel: tr('bulk_change_branch', 'Change Branch'),
     }))) return
     setBulkActionBusy(true)
     try {
-      const { done, failed, failedIds, transfers } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
-      setSelectedIds(new Set(failedIds))
+      const { done, failed, failedIds, skippedIds, transfers } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
+      // A failed row and a skipped one both stay selected, so the person sees which products did not move.
+      setSelectedIds(new Set([...failedIds, ...skippedIds]))
       if (done > 0 && transfers.length) {
         // REVERT-SET: Undo transfers exactly the moved units back; Redo moves
         // exactly those again -- a transfer both ways, never add/remove
@@ -2962,11 +2979,15 @@ function ProductsFullEditor() {
           redo: () => replayRecordedTransfers(transfers, 'redo', 'Redo bulk branch change'),
         })
       }
+      const movedMessage = failed
+        ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
+        : `${done} product(s) branch updated to "${branch.name}"`
+      const skippedMessage = skippedIds.length
+        ? tr('bulk_branch_skipped_note', '{count} product(s) with no stock were skipped -- adding them to a branch needs Adjust / receive stock.').replace('{count}', String(skippedIds.length))
+        : ''
       notify(
-        failed
-          ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
-          : `${done} product(s) branch updated to "${branch.name}"`,
-        failed ? 'warning' : 'success',
+        skippedMessage && !done && !failed ? skippedMessage : [movedMessage, skippedMessage].filter(Boolean).join(' '),
+        failed || skippedIds.length ? 'warning' : 'success',
       )
     } finally {
       setBulkActionBusy(false)
@@ -4460,7 +4481,7 @@ function ProductsFullEditor() {
   const moveProductsToBranch = useCallback(async (productIds: EntityId[] = [], branchId: unknown, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
-      return { done: 0, failed: 0, failedIds: [] as number[], updatedIds: [] as number[], transfers: [] as RecordedStockTransfer[] }
+      return { done: 0, failed: 0, failedIds: [] as number[], updatedIds: [] as number[], skippedIds: [] as number[], transfers: [] as RecordedStockTransfer[] }
     }
     const {
       buildProductBranchMovePlan,
@@ -4471,14 +4492,18 @@ function ProductsFullEditor() {
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     const transfers: RecordedStockTransfer[] = []
+    const skippedIds: number[] = []
 
     const moveRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
       const product = latestMap.get(Number(productId))
       if (!product) {
         throw new Error('Product not found')
       }
-      const movePlan = buildProductBranchMovePlan(product, numericBranchId)
-      if (movePlan?.action === 'transfer') {
+      const movePlan = buildProductBranchMovePlan(product, numericBranchId, { canInitialize: canAdjustInventoryStock })
+      if (movePlan?.action === 'skip') {
+        // No stock anywhere and no Adjust / receive: initialising the branch is a POST /api/inventory/adjust the Worker refuses (403).
+        skippedIds.push(Number(productId))
+      } else if (movePlan?.action === 'transfer') {
         await runProductStockMutation(
           () => productApi.transferStock(buildProductTransferStockPayload(product, movePlan, {
             productId,
@@ -4506,8 +4531,16 @@ function ProductsFullEditor() {
     const summary = summarizeProductRun(moveRun)
 
     await load(true)
-    return { ...summary, transfers }
-  }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
+    // A skipped row ran no call: it is neither done nor failed.
+    const skipped = new Set(skippedIds)
+    return {
+      ...summary,
+      done: summary.done - skippedIds.length,
+      updatedIds: summary.updatedIds.filter((id) => !skipped.has(id)),
+      skippedIds,
+      transfers,
+    }
+  }, [canAdjustInventoryStock, fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -4895,6 +4928,16 @@ function ProductsFullEditor() {
   const productColumnKeys = useMemo(() => productColumns.map((column) => column.key), [productColumns])
   const canEditPrices = canChangeProductPrices(user)
   const canEditSupplier = canChangeProductSupplier(user)
+  // The selection toolbar's actions, each behind the grant of the call it makes (they used to be drawn for every role and 403 for most):
+  // bulk info and pricing are PUT /api/products/:id (Edit, and price or cost for the pricing panel), stock and out-of-stock are inventory
+  // adjustments, the branch move is a branch transfer.
+  const bulkEditOptions = [
+    { id: 'info', label: productChipLabels.info, allowed: canEditProduct },
+    { id: 'pricing', label: productChipLabels.pricing, allowed: canEditProduct && (canEditPrices || canEditCosts) },
+    { id: 'stock', label: productChipLabels.stock, allowed: canAdjustInventoryStock },
+    { id: 'branch', label: productChipLabels.branch, allowed: canTransferBranchStock },
+    { id: 'out', label: productChipLabels.out, allowed: canAdjustInventoryStock, onClick: handleBulkOutOfStock },
+  ].filter((option) => option.allowed)
   const soleBranchName = String(soleActiveBranch(branches)?.name || '')
   const chooserColumns = useMemo(() => productChooserColumns(productColumnDefs, t), [productColumnDefs, t])
   const columnChooser = (
@@ -5009,22 +5052,27 @@ function ProductsFullEditor() {
         />
       </span>
     ) : null
+    // The same Add variant grant as the detail's button: this menu used to offer it to every role with no check at all.
+    const menuItems = [
+      ...(canAddVariant ? [{ label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) }] : []),
+      // Add image opens the product form (Edit) and the picture goes in through products:image.
+      ...(canEditProduct && canWireImages ? [{ label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') }] : []),
+    ]
     return (
       <>
       {hiddenBadge}
-      <PortalMenu
-        align="right"
-        compact
-        triggerWrapperClassName="shrink-0"
-        trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
-        items={[
-          { label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) },
-          { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
-        ]}
-      />
+      {menuItems.length ? (
+        <PortalMenu
+          align="right"
+          compact
+          triggerWrapperClassName="shrink-0"
+          trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
+          items={menuItems}
+        />
+      ) : null}
       </>
     )
-  }, [openProductFormTab, tr])
+  }, [canAddVariant, canEditProduct, canWireImages, openProductFormTab, tr])
 
   // P3-L6. Held rows are keyed off the group's FULL id list, not its display
   // rows: mergeSameDetailRows collapses branch-only duplicates into one
@@ -5333,7 +5381,7 @@ function ProductsFullEditor() {
                     <span className="detail-scroll-text whitespace-nowrap">{productSelectedLabel}</span>
                   </span>
                 ) : null}
-                {hasSelected ? (
+                {hasSelected && canBulkDeleteProducts ? (
                   <button
                     type="button"
                     disabled={bulkActionBusy}
@@ -5345,16 +5393,10 @@ function ProductsFullEditor() {
                 ) : null}
             </div>
           </div>
-          {hasSelected ? (
+          {hasSelected && bulkEditOptions.length ? (
             <div className="border-t border-primary-100/80 px-3 py-2.5 dark:border-primary-900/40">
-              <div className="grid grid-cols-5 gap-1">
-                {[
-                  { id: 'info', label: productChipLabels.info },
-                  { id: 'pricing', label: productChipLabels.pricing },
-                  { id: 'stock', label: productChipLabels.stock },
-                  { id: 'branch', label: productChipLabels.branch },
-                  { id: 'out', label: productChipLabels.out, onClick: handleBulkOutOfStock },
-                ].map(opt => (
+              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${bulkEditOptions.length}, minmax(0, 1fr))` }}>
+                {bulkEditOptions.map(opt => (
                   <button key={opt.id}
                     disabled={bulkActionBusy || !hasSelected}
                     onClick={() => {
@@ -5421,9 +5463,12 @@ function ProductsFullEditor() {
                 ]}
               />
             </div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
-              <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
-            </div>
+            {/* A changed supplier needs products:supplier (the Employee default has it off); the Worker refuses the whole save otherwise. */}
+            {canEditSupplier ? (
+              <div><label className="text-xs text-gray-500 block mb-1">{tr('supplier', 'Supplier')}</label>
+                <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
+              </div>
+            ) : null}
             <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
               <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder={tr('leave_blank_to_keep', 'Leave blank to keep')} />
             </div>
@@ -5818,8 +5863,8 @@ function ProductsFullEditor() {
             navigateTo={navigateTo}
             fmtKHR={fmtKHR}
             t={t}
-            onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
-            onAddVariant={canAddProduct ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
+            onEdit={canEditProduct ? () => { setDetailProduct(null); openProductFormTab(detailProduct, 'basic') } : undefined}
+            onAddVariant={canAddVariant ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
             onAdjustStock={canAdjustInventoryStock ? () => { setDetailProduct(null); setStockSession({ mode: 'add', product: detailProduct }) } : undefined}
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {
@@ -5882,6 +5927,8 @@ function ProductsFullEditor() {
             notify={notify}
             onClose={() => setManageBatchesProduct(null)}
             onChanged={() => load(true)}
+            canEditBatches={canAdjustInventoryStock}
+            canChangeSupplier={canEditSupplier}
             t={t}
             tr={tr}
           />
@@ -5959,7 +6006,9 @@ function ProductsFullEditor() {
               setModal(null); setSelected(null); setFormInitialTab('basic')
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
             }}
-            onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
+            // ProductForm draws its Delete on onDelete alone (its footer comment), so the host decides: only a role with products:delete
+            // is handed one. A Review-tier role keeps it -- its delete is queued for approval.
+            onDelete={selected && canRemoveProduct ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
             khrSymbol={khrSymbol}

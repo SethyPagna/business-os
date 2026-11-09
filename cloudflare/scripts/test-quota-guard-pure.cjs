@@ -251,6 +251,9 @@ function loadModule(name) {
     // ARE the free column -- a stub would make limitsFor() read undefined.
     if (request === './planTier') return loadModule('planTier.ts')
     if (request === '../index') return {}
+    // The key builder is real (cache.ts reads an unsafe version token from it); the epoch store behind it is not under test here.
+    if (request === './cacheKey') return loadModule('cacheKey.ts')
+    if (request === './readSwitches') return { readDataEpoch: async () => null }
     return require(request)
   }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(

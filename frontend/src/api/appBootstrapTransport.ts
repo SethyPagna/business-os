@@ -1,8 +1,9 @@
 import { STORAGE_KEYS } from '../constants'
 import { assertNoUnresolvedSignout } from './unresolvedSignout.ts'
-import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
+import { captureActorReadScope, assertActorReadScope, type ActorReadScope } from './actorReadScope.ts'
 import {
   apiFetch,
+  currentReadEpoch,
   getSyncServerUrl,
   isInvalidSessionError,
   isNetErr,
@@ -52,7 +53,7 @@ function readStoredUser(): unknown {
   }
 }
 
-function readErrorField(error: unknown, field: 'message' | 'status'): unknown {
+function readErrorField(error: unknown, field: 'message' | 'status' | 'code'): unknown {
   if (!error || typeof error !== 'object') return undefined
   return (error as Record<string, unknown>)[field]
 }
@@ -103,7 +104,30 @@ function takeEmbeddedAuthBootstrapPayload(): unknown | null {
   }
 }
 
+// Sign-in, the startup probe and the permission re-check each ask for the bootstrap within the same second, and the
+// page's early/embedded copy can be taken only once, so the others used to go to the network. Callers that overlap
+// share one read; one that starts after a data-change invalidation (a users/roles/settings push) or under another
+// account reads fresh, because the read in flight may predate that change.
+let bootstrapFlight: { scope: ActorReadScope; epoch: number; promise: Promise<unknown> } | null = null
+
 export async function getAppBootstrap(): Promise<unknown> {
+  assertNoUnresolvedSignout()
+  const scope = captureActorReadScope()
+  const epoch = currentReadEpoch()
+  const flight = bootstrapFlight
+  if (flight && flight.epoch === epoch && flight.scope.authority === scope.authority && flight.scope.revision === scope.revision) {
+    const shared = await flight.promise
+    assertActorReadScope(scope, false)
+    assertNoUnresolvedSignout()
+    return typeof structuredClone === 'function' ? structuredClone(shared) : shared
+  }
+  const promise = readAppBootstrapOnce()
+  bootstrapFlight = { scope, epoch, promise }
+  void promise.finally(() => { if (bootstrapFlight?.promise === promise) bootstrapFlight = null }).catch(() => {})
+  return promise
+}
+
+async function readAppBootstrapOnce(): Promise<unknown> {
   assertNoUnresolvedSignout()
   const hasServer = Boolean(ensureBootstrapServerUrl())
   const actorScope = captureActorReadScope()
@@ -144,6 +168,8 @@ export async function getAppBootstrap(): Promise<unknown> {
         authError: typeof message === 'string' && message ? message : 'Please sign in again to continue.',
       }
     }
+    // The daily database limit is not a lost connection: the shell stays up under its own banner (api/http.ts).
+    if (readErrorField(error, 'code') === 'd1_daily_limit') throw error
     const status = readErrorField(error, 'status')
     if (isNetErr(error) || isTransientGatewayError(status)) {
       const localBootstrap = buildLocalBootstrap()

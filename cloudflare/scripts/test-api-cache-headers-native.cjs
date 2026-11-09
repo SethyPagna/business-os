@@ -15,7 +15,7 @@
 //
 // Run (from cloudflare/): node scripts/test-api-cache-headers-native.cjs
 const { randomBytes } = require('node:crypto')
-const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
+const { bootWorld, createReporter, WORLD_BUILD_HASH } = require('./harness/real_worker_world.cjs')
 
 const PROBES = [
   "app.get('/api/__routes', (c) => c.json(app.routes.map((route) => ({ method: route.method, path: route.path }))))",
@@ -40,7 +40,7 @@ const MAINTENANCE_STATE = JSON.stringify({
 })
 
 async function main() {
-  const world = await bootWorld({ adminPassword: randomBytes(12).toString('base64url'), transformEntry: addProbeRoutes })
+  const world = await bootWorld({ adminPassword: randomBytes(12).toString('base64url'), transformEntry: addProbeRoutes, staticAssets: true })
   const { check, finish } = createReporter()
 
   async function send(method, route, { as = 'admin', headers = {}, body, origin = 'http://localhost' } = {}) {
@@ -52,10 +52,11 @@ async function main() {
     const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), REQUEST_TIMEOUT_MS) })
     const response = await Promise.race([request, timeout])
     clearTimeout(timer)
-    if (!response) return { method, route, as, status: 0, cacheControl: null, vary: null, clearSiteData: null }
+    if (!response) return { method, route, as, status: 0, cacheControl: null, vary: null, clearSiteData: null, build: null, epoch: null }
     return {
       method, route, as, status: response.status, cacheControl: response.headers.get('cache-control'),
       vary: response.headers.get('vary'), clearSiteData: response.headers.get('clear-site-data'),
+      build: response.headers.get('x-bos-build'), epoch: response.headers.get('x-bos-epoch'),
     }
   }
   const describe = (r) => `${r.as || 'anonymous'} ${r.method} ${r.route} -> ${r.status} cache-control=${r.cacheControl ?? '(none)'} vary=${r.vary ?? '(none)'}`
@@ -111,6 +112,82 @@ async function main() {
           t.ok(`${as} ${route} no-store + Vary: Cookie`, hasNoStoreOrPrivate(r.cacheControl) && hasCookieVary(r.vary), describe(r))
         }
       }
+    })
+
+    // CACHE-LIFECYCLE T-CL8: the build and epoch signals ride on every /api response and on nothing else. X-BOS-Build names the frontend build
+    // bound to the Worker version (a constant per isolate); X-BOS-Epoch is the memo as it stands, so it is present once a request has loaded it
+    // (a cached read does) and is 8 lower-case hex characters, never the epoch itself.
+    await check('X-BOS-Build and X-BOS-Epoch: on every /api response (200, 4xx, 5xx, 503, 302, raw), hex only, and on no other path', async (t) => {
+      const warmUp = await send('GET', '/api/customers')
+      t.eq('the warm-up read answered', warmUp.status, 200)
+      const epochRow = await world.first("SELECT value FROM system_flags WHERE key = 'data_epoch'")
+      t.ok('migration 0288 gave the database a 32-hex epoch', /^[0-9a-f]{32}$/.test(epochRow && epochRow.value), epochRow)
+      const cases = [
+        ['200 list', await send('GET', '/api/customers')],
+        ['200 admin settings', await send('GET', '/api/settings')],
+        ['401 no session', await send('GET', '/api/customers', { as: null })],
+        ['403 no permission', await send('GET', '/api/customers', { as: 'nobody' })],
+        ['404 unknown route', await send('GET', '/api/definitely-not-a-route')],
+        ['404 unknown route, no session', await send('GET', '/api/definitely-not-a-route', { as: null })],
+        ['413 body too large', await send('POST', '/api/auth/login', { as: null, body: JSON.stringify({ username: 'x', password: 'y'.repeat(70000) }) })],
+        ['500 forced onError', await send('GET', '/api/__boom')],
+        ['302 redirect', await send('GET', '/api/__redirect')],
+        ['200 raw Response', await send('GET', '/api/__raw')],
+      ]
+      for (const [label, r] of cases) {
+        t.eq(`${label}: X-BOS-Build is the bound build`, r.build, WORLD_BUILD_HASH)
+        t.ok(`${label}: X-BOS-Epoch is 8 hex characters`, /^[0-9a-f]{8}$/.test(r.epoch || ''), `got ${r.epoch}`)
+        t.ok(`${label}: the header is not the epoch itself`, !epochRow || r.epoch !== epochRow.value.slice(0, 8), r.epoch)
+      }
+      const statuses = new Set(cases.map(([, r]) => r.status))
+      t.ok('the cases cover 2xx, 3xx, 4xx and 5xx', [200, 302, 401, 403, 404, 413, 500].every((s) => statuses.has(s)), [...statuses])
+      await world.run("INSERT INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'")
+      await world.run('INSERT INTO system_flags (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', 'maintenance', MAINTENANCE_STATE)
+      try {
+        const maintenance = await send('POST', '/api/customers', { body: JSON.stringify({ name: 'Maintenance signal probe' }) })
+        t.eq('maintenance status', maintenance.status, 503)
+        t.eq('the maintenance 503 carries X-BOS-Build', maintenance.build, WORLD_BUILD_HASH)
+        t.ok('the maintenance 503 carries X-BOS-Epoch', /^[0-9a-f]{8}$/.test(maintenance.epoch || ''), `got ${maintenance.epoch}`)
+      } finally {
+        await world.run("DELETE FROM system_flags WHERE key = 'maintenance'")
+        await world.run("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'")
+      }
+      for (const route of ['/health', '/robots.txt', '/definitely-not-a-page']) {
+        const r = await send('GET', route, { as: null })
+        t.eq(`${route}: no X-BOS-Build`, r.build, null)
+        t.eq(`${route}: no X-BOS-Epoch`, r.epoch, null)
+      }
+    })
+
+    // N6 (6.0.1048 review): a restore holds writes for minutes, so the answer every device sees most is the maintenance 503, and a device that
+    // is told nothing about the epoch misses the rotation the restore ends with. The check above has a memo another request just filled; here
+    // the isolate's memo has expired (15 s) and the 503 itself is the first request to need the epoch.
+    await check('the maintenance 503 carries X-BOS-Epoch even when the isolate memo has expired', async (t) => {
+      await new Promise((resolve) => setTimeout(resolve, 15600))
+      await world.run("INSERT INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'")
+      await world.run('INSERT INTO system_flags (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', 'maintenance', MAINTENANCE_STATE)
+      try {
+        const maintenance = await send('POST', '/api/customers', { body: JSON.stringify({ name: 'Maintenance expired-memo probe' }) })
+        t.eq('maintenance status', maintenance.status, 503)
+        t.ok('X-BOS-Epoch is 8 hex characters', /^[0-9a-f]{8}$/.test(maintenance.epoch || ''), `got ${maintenance.epoch}`)
+      } finally {
+        await world.run("DELETE FROM system_flags WHERE key = 'maintenance'")
+        await world.run("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'")
+      }
+    })
+
+    await check('a rotated epoch changes X-BOS-Epoch for the next response; the build header stays', async (t) => {
+      const before = await send('GET', '/api/customers')
+      await world.run("UPDATE system_flags SET value = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE key = 'data_epoch'")
+      // The isolate's memo is 15 s old at most; a rotation made in this isolate resets it at once (lib/dataEpoch.ts), one made behind its back
+      // (Time Travel, another isolate) is picked up when the memo expires. Wait it out so this case needs no private hook.
+      await new Promise((resolve) => setTimeout(resolve, 15500))
+      await send('GET', '/api/customers')
+      const after = await send('GET', '/api/customers')
+      t.ok('before is hex', /^[0-9a-f]{8}$/.test(before.epoch || ''), before.epoch)
+      t.ok('after is hex', /^[0-9a-f]{8}$/.test(after.epoch || ''), after.epoch)
+      t.ok('the epoch tag changed with the epoch', before.epoch !== after.epoch, [before.epoch, after.epoch])
+      t.eq('the build did not', after.build, before.build)
     })
 
     await check("request headers cannot change the response's Cache-Control", async (t) => {

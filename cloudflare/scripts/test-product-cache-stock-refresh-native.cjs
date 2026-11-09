@@ -186,7 +186,8 @@ const version = (namespace) => kv.get(`v2:${namespace}`) ?? null
   check('till A sees the new stock_quantity (7)', row(a2.json, 10).stock_quantity === 7)
   check('till A sees the new branch_stock (7)', row(a2.json, 10).branch_stock.find((b) => b.branch_id === 1).quantity === 7)
   check('till A sees the live updated_at (edit conflict token matches the row)', row(a2.json, 10).updated_at === live.updated_at && live.updated_at !== '2026-09-01 00:00:00')
-  const stored = [...cacheStore.entries()].find(([key]) => key.includes('query=powder'))
+  // 6.0.1048: an entry lives under a hash of its key parts (lib/cacheKey.ts), not under the request URL: find the page by what it holds.
+  const stored = [...cacheStore.entries()].find(([, body]) => { try { return Boolean(row(JSON.parse(body), 10)) } catch { return false } })
   check('POSITIVE CONTROL: the cached page itself still holds the pre-sale stock (10)', stored && row(JSON.parse(stored[1]), 10).stock_quantity === 10)
   check('the untouched row in the same page is unchanged', JSON.stringify(row(a2.json, 11)) === JSON.stringify(row(a1.json, 11)))
 

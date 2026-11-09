@@ -1237,8 +1237,9 @@ app.post('/bulk', async (c) => {
     // here before the write could not tell; see applyReturnBulkActionOutcome.
     // The grouped action is one atomic batch: it is sized against what this invocation has left (Free runs 50 D1 queries) before it is sent.
     const bulkMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+    const bulkCallCounting = (await bulkMetrics?.callCounting?.()) === true
     const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c),
-      bulkMetrics ? { statementsUsed: () => bulkMetrics.attemptedStatements + 1, reserveStatements: 8 } : undefined)
+      bulkMetrics ? { statementsUsed: () => (bulkCallCounting ? bulkMetrics.invocation.attemptedCalls : bulkMetrics.attemptedStatements) + 1, reserveStatements: 8, callCounting: bulkCallCounting } : undefined)
     if (!result.dryRun) c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
@@ -1455,10 +1456,12 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   let routeStatements = 0
   let admissionEnabled = false
   const requestMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as (RequestMetrics & { attemptedStatements?: number }) | undefined
-  const initialStatements = requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
+  // call_counting ON: the unit is D1 calls (the invocation's own counter) and the atomic batch is one call.
+  const callCounting = (await requestMetrics?.callCounting?.()) === true
+  const initialStatements = callCounting ? requestMetrics!.invocation.attemptedCalls : requestMetrics?.attemptedStatements ?? requestMetrics?.statements ?? 0
   const statementsUsed = () => {
     if (!requestMetrics) return routeStatements + 10
-    const attempted = requestMetrics.attemptedStatements
+    const attempted = callCounting ? requestMetrics.invocation.attemptedCalls : requestMetrics.attemptedStatements
     if (attempted == null && requestMetrics.failed) return Infinity
     return Math.max(initialStatements + routeStatements, attempted ?? requestMetrics.statements) + 3
   }
@@ -1588,7 +1591,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   if (canonicalIntent.money_precision_version === 1 && Array.isArray(canonicalIntent.replacement_items) && canonicalIntent.replacement_items.length) {
     return createExchangeReturnV1({
       c, db, user, actorId: authenticatedActorId, body: body as Record<string, any>, intent: canonicalIntent, requestJson, requestDigest,
-      saleId: requestedSaleId!, clientRequestId, movementIdFloor: Number(movementIdFloor ?? 0), queryLimit, statementsUsed,
+      saleId: requestedSaleId!, clientRequestId, movementIdFloor: Number(movementIdFloor ?? 0), queryLimit, statementsUsed, callCounting,
       addStatements: (count) => { routeStatements += count }, readReceipt,
     })
   }
@@ -2585,7 +2588,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
 
   const hasStockWrite = touchedProducts.size > 0 || returnItems.some(item => normalizeStockAction(item) === 'damaged')
-  const transactionStatementCount = hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length + 1
+  const transactionStatementCount = callCounting ? 1 : hasStockWrite ? stockTransactionStatementCount(statements.length) : statements.length + 1
   try {
     assertReturnCreatePlanBounds(statements, canonicalIntent, eventBytes)
     // Cold cache fallback including quota and retries (six), notification reads including

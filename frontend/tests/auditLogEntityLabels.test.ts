@@ -25,7 +25,7 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { AUDIT_ENTITY_LABELS, auditEntityLabel, titleCaseIdentifier } from '../src/utils/auditVocabulary.ts'
+import { AUDIT_ENTITY_LABELS, auditActionLabel, auditEntityLabel, titleCaseIdentifier } from '../src/utils/auditVocabulary.ts'
 import { ENTITY_RECORDS_ADAPTER, auditRowsToRecords, entityFieldLabel } from '../src/utils/entityRecords.ts'
 import { buildAuditFieldDiff } from '../src/utils/auditLogFieldDiff.ts'
 
@@ -117,6 +117,8 @@ const BEFORE_AFTER: Array<{
   { entity: 'fee', writtenBy: 'fees.ts', before: { amount_usd: 5 }, after: { amount_usd: 6 }, expects: en.amount_usd },
   // A reviewer approving a queued expense delete writes the removed expense (FEE_DELETE_AUDIT_COLUMNS).
   { entity: 'fee', writtenBy: 'reviewApply.ts', dir: 'lib', before: { amount_usd: 5 }, after: null, expects: en.amount_usd },
+  // A kill-switch flip (PUT /read-switches) audits the new state and the switch version in the same batch as the swap.
+  { entity: 'read_switch', writtenBy: 'runtime.ts', before: { state: 'off', epoch: 3 }, after: { state: 'on', epoch: 4 }, expects: en.status },
   { entity: 'return', writtenBy: 'returns.ts', before: { reason: 'Damaged box' }, after: { reason: 'Wrong item' }, expects: en.reason },
 ]
 
@@ -153,6 +155,16 @@ test('every record type here is named in BOTH packs', () => {
     assert.equal(auditEntityLabel(entity, labelKm), km[key])
     assert.ok(fallback, `${entity} has no English fallback`)
   }
+})
+
+test('a read-switch flip names its action and its record type in both packs, never Title-Cased English', () => {
+  assert.equal(auditActionLabel('read_switch_set', label), en.read_switch_changed)
+  assert.equal(auditActionLabel('read_switch_set', labelKm), km.read_switch_changed)
+  assert.notEqual(auditActionLabel('read_switch_set', labelKm), 'Read Switch Set')
+  assert.equal(auditEntityLabel('read_switch', labelKm), km.read_switches_title)
+  assert.notEqual(auditEntityLabel('read_switch', labelKm), 'Read Switch')
+  // The control: an action nobody named still falls back to Title Case, so the equalities above are not a constant answer.
+  assert.equal(auditActionLabel('read_switch_unlisted', labelKm), 'Read Switch Unlisted')
 })
 
 test('POSITIVE CONTROL: an unnamed entity reads as Title Case, never blank or raw', () => {

@@ -76,6 +76,10 @@ export default defineConfig({
   // all, so `npm run test:e2e` on a clean checkout never fails for a missing
   // Worker.
   testIgnore: isSystemTier ? [] : ['system/**'],
+  // Refuses to run against a fixture server that serves another checkout's
+  // build (several sessions share one machine and one default port). The
+  // system tier brings its own Worker and has no fixture server to check.
+  globalSetup: isSystemTier ? undefined : './e2e/support/globalSetup.ts',
   // Every spec drives one page through its own fixtures; nothing is shared, so
   // full parallelism is safe. The fixture server is stateless except for the
   // service-worker generation counter, and pwa-update.spec.ts serialises itself.

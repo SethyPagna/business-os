@@ -118,6 +118,20 @@ export type PlanLimits = {
   // chunk that still overshoots on either plan.
   bulkDeleteChunkSize: number
 
+  // ---- Payment-method rename ---------------------------------------------
+
+  // routes/settings.ts loadPaymentMethodCandidates -- sales read per D1 call
+  // by GET /payment-methods/impact and by the linked POST /payment-methods/
+  // replace (id, payment_method, payment_details only; keyset on sales.id, so
+  // a page edge can never split a sale). The scan is one call per page, so on
+  // Free the page is what keeps ~16k sales under the 50 calls per invocation:
+  // 200 a page took 80 calls, 5000 takes 4 and (with ~20 calls around the
+  // scan) stays under 50 until ~150k sales. Paid 200 is today's page, kept so the Paid path reads exactly what
+  // it read before (Paid has 1000 calls). Unlike the ceilings above, Free's
+  // number is the LARGER one: a bigger page is fewer calls, and calls are
+  // what Free rations; test-plan-tier-pure.cjs lists such fields by name.
+  paymentMethodScanPageSize: number
+
   // ---- Backup ------------------------------------------------------------
 
   // backup.ts MAX_ASSET_BYTES_PER_BACKUP (misnamed at its definition site:
@@ -191,6 +205,18 @@ export type PlanLimits = {
 
   stockInLinesPerRequest: number
 
+  // The same cap when call_counting is ON (lib/callCounting.ts): the largest N whose lines all complete inside the 50-call invocation WITH the
+  // tail reserve (receipt, result, audit, cache and Telegram, each allowing one retry: 16 calls). Measured on the Free config, call_counting ON
+  // (scripts/read-budget, an N-line fast stock-in on a cold isolate): 1 line is 17-18 calls, 2 lines 29, and a 3rd line (~6 calls of reads, ~12 to
+  // finish) would end at 41 real calls but fails the reserve (29 + 12 + 16 > 50), so it is deferred after its reads. A cap above 2 therefore only
+  // spends reads on a line that is deferred anyway. Paid never counts calls and keeps stockInLinesPerRequest.
+  stockInLinesPerRequestByCalls: number
+
+  // lib/callCounting.ts: whether the call_counting read switch is consulted at all. Free true: its 50-call invocation limit is the one a
+  // statement count can wrongly trip, so admission may charge a db.batch() as one call once the owner turns the switch ON. Paid false: its
+  // 1000-call limit never binds a batch, so no request pays the switch read and admission keeps counting statements.
+  callCountingSwitchApplies: boolean
+
   // ---- Read-cost lifetimes (G39 efficiency) -------------------------------
   //
   // These are LIFETIMES, so unlike every ceiling above, Free's number is the
@@ -214,6 +240,61 @@ export type PlanLimits = {
   // window's clock. Paid 30 s (the order of the 20 s product-search cache),
   // Free 300 s.
   dashboardStockOverviewCacheSeconds: number
+
+  // lib/readSwitches.ts: how long one isolate remembers the one system_flags read that carries the in-app read switches AND the
+  // data epoch (X-BOS-Switches, X-BOS-Epoch, every cache key). A kill switch or a restore's new epoch reaches every isolate within
+  // one window, so this is also the longest a flip or an epoch rotation takes to be seen, and what a restore waits before it
+  // releases maintenance (dataEpoch.ts). Paid 5 s (freshness is cheap there), Free 15 s (one statement per isolate per window is
+  // the whole cost, and Free's read wall is hard). The client's own windows (frontend api/dataEpoch.ts ECHO_WINDOW_MS, api/
+  // serverSignals.ts SIGNAL_TTL_MS) are sized from the Free value; scripts/test-plan-tier-pure.cjs pins that they still cover it.
+  readSwitchMemoSeconds: number
+
+  // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
+  // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
+  // "building since <time>" marker (a plain value); the others poll for its FINISHED result with their own timer and never await
+  // anything the first request created: workerd ties a promise to its request, so awaiting another request's can hang for good (the
+  // 6.0.1048 review, B1). The wait and the staleness window save D1 reads (a longer wait means fewer duplicate builds), so Free's number is
+  // the LARGER one; the poll step is larger on Free too, because a Free invocation has 10 ms of CPU and fewer wake-ups spend less of it.
+  //   buildSharePollMs   the step between looks at the result memo. Paid 50, Free 100.
+  //   buildShareWaitMs   the longest one request waits; also how long a finished result stays in the buildShare memo (the longest any
+  //                      waiter waits). Paid 1,000, Free 2,000.
+  //   buildShareStaleMs  the age at which a marker is taken for a dead builder (cancelled, killed) and ignored. Paid 3,000, Free 5,000.
+  //                      A cold-search slot (routes/portal.ts, the per-isolate cap on searches that run their own build) counts as lost
+  //                      at the same age: its release sits in a `finally` that a request whose context ended never reaches, and a build
+  //                      older than this is the one a waiter has already stopped trusting.
+  //   buildShareMemoMaxEntries  how many finished bodies the buildShare memo holds at once (the oldest go first). The memo is only read
+  //                      by a request waiting on a builder, for at most buildShareWaitMs, but it holds whole storefront bodies, so its
+  //                      size is bounded by count, not by time alone. An evicted body costs its waiter one rebuild. Unlike the three
+  //                      durations this is a ceiling, so Free is the SMALLER one: Paid 32, Free 16.
+  buildSharePollMs: number
+  buildShareWaitMs: number
+  buildShareStaleMs: number
+  buildShareMemoMaxEntries: number
+
+  // ---- Expenses page reads (E1-F; behind the read switch `expense_reads`) ----
+  //
+  // routes/feesCatalog.ts: the most rows ONE page of the Expenses export may carry when the export pages by cursor. A page reads up to this many rows from
+  // the expense list and as many from the sale courier-cost list, then merges them. The offset path keeps its own cap of 500 and the export client asks for
+  // 500, so a smaller Free page would turn an export of 500 rows or fewer (a month's, today's one request) into two pages that each pay the cursor's fixed
+  // cost: Free is therefore the same 500 as Paid (E1-F review N2).
+  expenseExportPageRows: number
+
+  // routes/fees.ts GET /report: the most expense rows the single grouped pass may read (a window has at most this many groups, one per day, type and label
+  // spelling). The pass reads the expense table once instead of four times and hands the groups to the Worker to fold; a window with more rows than this is
+  // answered by the four statements instead, which return a few hundred rows however large the window is. The cap is on ROWS, not groups, so a window over it
+  // costs only the first `cap + 1` rows of the scan before it is turned away, not the whole table. Free is bounded by CPU: folding is linear in the groups
+  // and the Free invocation has 10 ms in total (D1 decode of the groups and the JSON response come on top). foldFeeGroups timed in node v24: at 1,500
+  // groups 1.73-2.55 ms warm (90th percentile up to 4.5 ms) but 6.2-11.8 ms for the FIRST call in a fresh module; at 10,000 groups 4.7-5.3 ms warm and
+  // 14-25 ms cold. A cold Free isolate may therefore exceed 10 ms even at 1,500, so turning `expense_reads` ON for a Free deployment WAITS for a CPU
+  // measurement on real Workers (the switch stays OFF until then; Paid has no such limit). Paid keeps the generous bound (more than the whole expense table
+  // today: the seed has 8,695 rows, production about 8,700).
+  expenseReportFoldMaxRows: number
+
+  // routes/fees.ts GET /report: whether the grouped pass is tried at all for a window that is not bounded on both ends (no dates, or a start without an end
+  // or the reverse). Such a window is most or all of the table, and on Free that is over the row cap on any shop old enough to have a report worth reading,
+  // so the attempt (cap + 1 rows read, 2 reads each) is a pure cost before the four statements run anyway: Free skips it and the all-time report reads
+  // exactly what 6.0.1053 reads. A window with both ends can still be over the cap and pays the attempt once. Paid tries every window (it folds the table).
+  expenseReportFoldUnboundedWindows: boolean
 
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
@@ -239,19 +320,26 @@ export type PlanLimits = {
   // would have been within ~14% of the wall on the staging DB alone.
   d1MaxDatabaseBytes: number
 
-  // D1 queries per Worker invocation.
+  // D1 CALLS one invocation may make (a db.batch() is ONE call, whatever its
+  // statement count). Guards compare a call counter against this number.
   //
-  // ASSUMPTION, stated because it is the most load-bearing unknown in this
-  // whole split: Cloudflare's own docs disagree with themselves here (the
-  // D1 limits page and the Workers platform page give 50 and 1000 for the
-  // Free plan). This module assumes the CONSERVATIVE 50 for Free, because
-  // sizing against 1000 and being wrong means production requests failing,
-  // while sizing against 50 and being wrong means only that a Free
-  // deployment is more chunked than it strictly had to be. Every Free
-  // figure above is chosen to keep a single invocation's query count well
-  // under 50. Settling this needs a throwaway Worker on an actual FREE
-  // account plus `wrangler tail` -- a deploy, and therefore an owner
-  // decision. Until then: 50.
+  // Free 50, Paid 1000. Settled 27 Oct 2026 from the D1-specific page,
+  // developers.cloudflare.com/d1/platform/limits (updated 24 Oct 2026):
+  // "Queries per Worker invocation ... 1000 (Workers Paid) / 50 (Free)", and
+  // "a db.batch() call counts as a single query against it, not one query per
+  // statement ... a batch containing 2,000 statements executes in a single
+  // Worker invocation, while issuing 2,000 individual queries in one
+  // invocation fails with 'Too many API requests by single Worker
+  // invocation'". The Workers limits page lists 1,000 subrequests to internal
+  // services on Free, but it does not override this D1 row, so Free stays 50.
+  //
+  // Two consequences for callers: (1) count calls, not the statements inside a
+  // batch (requestMetrics.ts invocation.attemptedCalls, lib/callCounting.ts); a
+  // 60-statement batch is legal on Free, 51 separate queries are not. Admission
+  // still counts statements until the call_counting switch is ON.
+  // (2) Free's real ceiling is 10 ms of CPU, which a Worker cannot measure from
+  // inside (Date.now() and performance.now() only advance after I/O), so
+  // CPU-heavy routes have to be bounded by rows, bytes or page size.
   d1QueriesPerInvocation: number
 
   // ---- Storefront AI assistant (G38 P0) ----------------------------------
@@ -276,6 +364,7 @@ const PAID_LIMITS: PlanLimits = {
   stockActionAddConcurrency: 12,
   historicalSalesImportConcurrency: 12,
   bulkDeleteChunkSize: 500,
+  paymentMethodScanPageSize: 200,
   maxAssetsPerBackup: 100,
   scheduledBackupEnabled: true,
   maxImageDeletesPerReset: 500,
@@ -283,8 +372,18 @@ const PAID_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 24,
+  stockInLinesPerRequestByCalls: 24,
+  callCountingSwitchApplies: false,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
+  readSwitchMemoSeconds: 5,
+  buildSharePollMs: 50,
+  buildShareWaitMs: 1000,
+  buildShareStaleMs: 3000,
+  buildShareMemoMaxEntries: 32,
+  expenseExportPageRows: 500,
+  expenseReportFoldMaxRows: 50_000,
+  expenseReportFoldUnboundedWindows: true,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -302,6 +401,7 @@ const FREE_LIMITS: PlanLimits = {
   stockActionAddConcurrency: 6,
   historicalSalesImportConcurrency: 6,
   bulkDeleteChunkSize: 125,
+  paymentMethodScanPageSize: 5000,
   maxAssetsPerBackup: 20,
   scheduledBackupEnabled: false,
   maxImageDeletesPerReset: 40,
@@ -309,8 +409,18 @@ const FREE_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  stockInLinesPerRequestByCalls: 2,
+  callCountingSwitchApplies: true,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
+  readSwitchMemoSeconds: 15,
+  buildSharePollMs: 100,
+  buildShareWaitMs: 2000,
+  buildShareStaleMs: 5000,
+  buildShareMemoMaxEntries: 16,
+  expenseExportPageRows: 500,
+  expenseReportFoldMaxRows: 1_500,
+  expenseReportFoldUnboundedWindows: false,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

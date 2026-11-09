@@ -211,7 +211,9 @@ try {
     await assert.rejects(bounded(getSalesStats({ search: 'recovery-witness' }), 'offline health witness'), (e: any) => e.code !== 'fixture_deadline')
     const since = browserEvents.length
     globalThis.fetch = (async () => Response.json(valid())) as typeof fetch
-    await assert.rejects(bounded(getSalesStats({ search: 'recovery-witness' }), 'recovered old revision'), (e: any) => e.code === 'stale_read_scope', 'first recovered HTTP belongs to the invalidated old revision')
+    // P0.4: once the server answers again the read is re-issued under the settled scope (routeWithRetry), so the call resolves with what the
+    // server said now instead of rejecting stale_read_scope; the pending OLD stats read below is still fenced and never publishes.
+    assert.deepEqual(await bounded(getSalesStats({ search: 'recovery-witness' }), 'recovered read'), valid(), 'the recovered read returns the server answer, not a zero')
     const event = browserEvents.slice(since).find(e => e.type === 'sync:update' && (e as CustomEvent).detail?.channel === 'sales') as CustomEvent
     assert.ok(event, 'actual http recovery dispatches sales refresh'); assert.ok(browserEvents.slice(since).some(e => e.type === 'sync:reconnected'))
     h.props.syncChannel = event.detail; h.render(); h.commit()

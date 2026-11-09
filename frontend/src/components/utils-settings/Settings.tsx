@@ -2432,9 +2432,13 @@ export default function Settings() {
         ) : null}
         </SettingsRenderBoundary>
 
-        <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
-          {savingSettings ? (t('saving') || 'Saving...') : t('save')}
-        </button>
+        {/* Same gate as the header Save above: a View-tier grant gets the read-only badge there and no second Save here
+            (handleSaveSettings only raised the view-only notice, and the Worker refuses the POST). */}
+        {canEditSettings ? (
+          <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
+            {savingSettings ? (t('saving') || 'Saving...') : t('save')}
+          </button>
+        ) : null}
 
         <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
           <a

@@ -41,6 +41,8 @@ const fixedFiles = [
   'src/components/branches/Branches.tsx',
   'src/components/catalog/CatalogEditorSurface.tsx',
   'src/components/catalog/CatalogProductsSection.tsx',
+  // ED-1a: the Website Editor's sticky bar is opaque from its first commit.
+  'src/components/catalog/editor/EditorBar.tsx',
   'src/components/catalog/legal/LegalPages.tsx',
   'src/components/fees/FeesPage.tsx',
   'src/components/files/FilesPage.tsx',

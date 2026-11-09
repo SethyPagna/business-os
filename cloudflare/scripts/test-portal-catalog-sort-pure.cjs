@@ -92,7 +92,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   // Caching is transparent to what this test asserts (sort order), so the
   // producer is invoked directly -- exercising the real Cache API here would
   // test Workers, not this route's SQL.
-  '../lib/cache': {
+  '../lib/cache': { isUnsafeVersion: () => false, deploymentId: () => 'dev',
     cachedJsonResponse: async (_req, _ctx, _version, _ttl, producer) => producer(),
     getVersionWithFallback: async () => '0',
   },
@@ -101,6 +101,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/audit': { audit: async () => {} },
   // K3 Part 417: portal.ts enqueues on-upload image normalization; this
   // test asserts catalog sort, so a no-op stub is honest.
+  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32) },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --
   // this test asserts pre-existing behavior (sort/wiring), not promotion

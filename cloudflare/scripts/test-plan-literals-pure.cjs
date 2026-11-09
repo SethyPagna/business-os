@@ -3,7 +3,7 @@
 // The owner's rule (3 Nov 2026): every number sized for the Cloudflare Free plan is a field of
 // getPlanLimits(env) in lib/planTier.ts -- a Free value and a Paid value, chosen by PLAN_TIER --
 // never a bare literal at the call site. Moving to Paid, or growing the shop, must be a config edit
-// and a deploy, not a code hunt. Records/Incidents/2026-11-03/PLAN-LIMITS-AUDIT.md lists the 19
+// and a deploy, not a code hunt. The plan-limits audit (kept privately) lists the 19
 // places that already break the rule. This test does not move any of them. It stops the count from
 // growing, and it makes each cleanup remove its own entry.
 //
@@ -258,7 +258,7 @@ function compareToAllowlist(found, allowlist) {
   return problems
 }
 
-// ---- The allowlist (audit rows from PLAN-LIMITS-AUDIT.md section 2) -------
+// ---- The allowlist (audit rows from section 2 of the plan-limits audit) -------
 
 const ALLOWED_HITS = [
   { file: 'lib/branchCutoverOperator.ts', rule: 'plan-tier-read', text: 'env?.PLAN_TIER', row: 10, why: 'reads PLAN_TIER itself instead of resolvePlanTier(); gates paid-only cutover actions' },

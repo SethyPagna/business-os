@@ -766,7 +766,11 @@ function assertLoyaltyResetStatic(text, repairText, context) {
 
 const fixedNow = '2026-10-03 10:00:00'
 const clockSql = openDb([]).db
+// The clock and the random source are the two inputs a migration can read that differ between two runs of the same SQL: both are pinned, so the
+// two orders are compared on what the ORDER changes (0288 inserts a random data epoch; a fresh database and a populated one each get one).
+const fixedRandom = size => Buffer.alloc(Math.max(0, Number(size) || 0), 0xab)
 function freezeClock(raw) {
+  raw.function('randomblob', fixedRandom)
   raw.function('current_timestamp', () => fixedNow)
   raw.function('strftime', { varargs: true }, (...args) => clockSql.prepare(`SELECT strftime(${args.map(() => '?').join(',')}) AS value`)
     .get(...args.map(arg => arg === 'now' ? fixedNow : arg)).value)

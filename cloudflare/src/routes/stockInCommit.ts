@@ -172,7 +172,10 @@ export function stockInCommitSessionRefusal(lines: StockInCommitLine[], raw: unk
 // runReceiveBatchAction are tested -- no real Hono app.request() round trip
 // needed to exercise the ordering/permission/kernel-parity behaviour.
 export async function runStockInCommit(c: InventoryContext, lines: StockInCommitLine[]): Promise<StockInCommitLineResult[]> {
-  const cap = getPlanLimits(c.env).stockInLinesPerRequest
+  // call_counting ON raises the cap to the call-counted N (planTier.ts stockInLinesPerRequestByCalls); a context without the resolver keeps the old cap.
+  const limits = getPlanLimits(c.env)
+  const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as { callCounting?: () => Promise<boolean> } | undefined
+  const cap = (await metrics?.callCounting?.()) === true ? limits.stockInLinesPerRequestByCalls : limits.stockInLinesPerRequest
   const results: StockInCommitLineResult[] = []
   let deferred = false
   for (const [index, line] of lines.entries()) {

@@ -150,6 +150,52 @@ await runTest('T-X6: the language switch toggle says it shows or hides the Engli
   }
 })
 
+// ED-1a (EDITOR-REDESIGN-REFRESH section C, "Keys"): the bar, the section names, the review and the Top of page group. The
+// pairs below are the design's table word for word; the KM values the design marks as new wording (†) are flagged for the
+// Khmer reader in the lane report.
+const ED1A_PAIRS: Record<string, [string, string]> = {
+  web_editor_save: ['Save', 'រក្សាទុក'],
+  web_editor_saving: ['Saving', 'កំពុងរក្សាទុក'],
+  web_editor_saved: ['Saved', 'បានរក្សាទុក'],
+  web_editor_unsaved: ['Unsaved changes', 'មិនទាន់រក្សាទុក'],
+  web_editor_blocked_uploads: ['Wait for uploads to finish', 'រង់ចាំការផ្ទុកឡើងបញ្ចប់'],
+  web_editor_blocked_loading: ['Loading settings', 'កំពុងផ្ទុកការកំណត់'],
+  web_editor_page_title: ['Website Editor', 'កម្មវិធីកែសម្រួលគេហទំព័រ'],
+  web_editor_sections: ['Sections', 'ផ្នែក'],
+  web_editor_section_shop: ['Shop', 'ហាង'],
+  web_editor_section_contact: ['Contact', 'ទំនាក់ទំនង'],
+  web_editor_section_products: ['Products', 'ផលិតផល'],
+  web_editor_section_posts: ['Posts', 'ប្រកាស'],
+  web_editor_section_faq: ['FAQ', 'សំណួរញឹកញាប់'],
+  web_editor_section_features: ['Features', 'មុខងារ'],
+  web_editor_review_title: ['Save these changes?', 'រក្សាទុកការផ្លាស់ប្ដូរទាំងនេះ?'],
+  web_editor_changes_count: ['Changes: {n}', 'ការផ្លាស់ប្ដូរ {n}'],
+  web_editor_seller_missing: ['Seller details missing', 'ខ្វះព័ត៌មានអ្នកលក់'],
+  web_editor_group_top_of_page: ['Top of page', 'ខាងលើទំព័រ'],
+}
+
+await runTest('T-X3 (ED-1a): every ED-1a key is in both packs with the design\'s wording and the same key set, and the editor reads each one', () => {
+  const sources = editorModules().map(([, source]) => stripComments(source)).join('\n')
+  for (const [key, [english, khmer]] of Object.entries(ED1A_PAIRS)) {
+    assert.equal(en[key], english, `en.json ${key}`)
+    assert.equal(km[key], khmer, `km.json ${key}`)
+    assert.ok(sources.includes(`'${key}'`), `${key}: nothing in the editor reads it (a pack key nobody uses)`)
+  }
+  assert.equal(en.web_editor_section_about, 'About', 'the About section keeps its ED-0 key')
+  assert.equal(km.web_editor_page_title, km.studioTitle, 'the Khmer page title is the app\'s studioTitle word for word')
+  assert.deepEqual(editorKeysIn(km), editorKeysIn(en), 'en and km carry the same web_editor_ keys')
+  assert.ok(en.web_editor_changes_count.includes('{n}') && km.web_editor_changes_count.includes('{n}'), 'the count slot survives in both')
+  assert.ok(km.web_editor_review_title.includes('ប្ដូរ'), 'ប្ដូរ is spelled with coeng DA (T-X5)')
+})
+
+await runTest('T-X6 (ED-1a): no module under editor/ calls copy()', () => {
+  const modules = fs.readdirSync(editorDir).filter((file) => /\.tsx?$/.test(file))
+  assert.ok(modules.includes('editorSections.ts') && modules.includes('EditorBar.tsx'), 'the ED-1a modules exist')
+  for (const file of modules) {
+    assert.doesNotMatch(stripComments(read(`../src/components/catalog/editor/${file}`)), /\bcopy\(/, `editor/${file}: labels come from ed(), never the storefront-first copy()`)
+  }
+})
+
 if (failed) {
   console.error(`\n${failed} failing`)
   process.exit(1)

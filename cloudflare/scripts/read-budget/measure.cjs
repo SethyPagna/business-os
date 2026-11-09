@@ -34,9 +34,9 @@ const ROUTE_NOTES = {
   },
   // The GET shapes are measured with these read switches stored (the state the Free plan is meant to run in; the old paths are covered by the slices' own
   // OFF-versus-ON tests); the write shapes are measured with none.
-  switches: { report_atomic: 'on', report_atomic_long: 'on' },
+  switches: { report_atomic: 'on', report_atomic_long: 'on', expense_reads: 'on' },
   // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
-  switchSensitive: ['/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
+  switchSensitive: ['/api/fees', '/api/fees/report', '/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
     '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],
   reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
@@ -63,9 +63,15 @@ const ENTRY_NOTES = {
   'fees-list-with-sale-delivery-rows-month-branch-source-all':
     'The window index (idx_fees_fee_date) leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 10,565 with the branch index reading the whole branch.',
   'fees-report-with-sale-delivery-all-time-branch-include-sales':
-    'No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index (4,455 + 8,910 + 8,912 + 13,365 expense rows, branch 1 holding about half of this seed) plus the sale half 1,506. Four passes over the branch; one grouped pass is the follow-up.',
+    "No window: the report only aggregates, so the branch equality stays plain and the planner reads just the branch through its index (4,455 + 8,910 + 8,912 + 13,365 expense rows, branch 1 holding about half of this seed) plus the sale half 1,506. E1-F (read switch expense_reads ON, Free): a window without both dates is not folded on Free (the plan table says so: expenseReportFoldUnboundedWindows is false), so the four passes answer exactly as with the switch off, 37,151 rows; the extra call on a cold isolate is the switch row. Paid folds the same window in one pass: 8,913 + 1,506.",
   'fees-report-with-sale-delivery-month-branch-include-sales':
-    'The window index leads for all four statements and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch.',
+    "The window index leads and the branch is checked on the window rows. 6.0.1053: +f.branch_id; it was 19,411 with the branch index reading the whole branch. E1-F (read switch expense_reads ON): one grouped pass over the window's 370 expenses instead of four (849 against 2,702); a window of more than the Free fold cap (1,500 rows) is turned away after that many rows.",
+  'fees-export-first-page-by-cursor-source-all':
+    "E1-F (read switch expense_reads ON, Free page of 500): the first page also totals the expense summary (8,695) and the courier-sale totals (1,506); it takes no snapshot when it is the only page, and reads the highest ids once after the page when another follows. 6.0.1053 read 15,175 for the first page and again 16,000 to 28,000 for every later one.",
+  'fees-export-middle-page-by-cursor-source-all':
+    "E1-F: resumes after the 2,000th expense and the middle courier sale and reads its own 500 rows (an expense index entry, row and joins per returned row, plus the sale probe and page), not the 2,000 before it; the 6.0.1053 page at offset 2,000 read 19,236.",
+  'fees-export-middle-page-by-cursor-with-a-branch-source-all':
+    "E1-F: the middle page with a branch filter: +f.branch_id and +sales.branch_id keep the branch index out, so the page still reads its own rows.",
 }
 
 // 6.0.1053: the sale half of the Expenses list (routes/feesCatalog.ts) must start from idx_sales_courier_cost, the partial index of the few sales that

@@ -67,6 +67,18 @@ type ManageBatchesModalProps = {
   notify: (message: string, type?: string) => void
   onClose: () => void
   onChanged: () => void
+  /**
+   * Whether the signed-in role may change a lot: Edit (dates, notes, supplier, the quantity correction) and Deactivate. The Worker
+   * answers every write on /api/batches with 403 unless the role holds Inventory at Full and Adjust / receive (routes/batches.ts), so
+   * the opener passes can('inventory', 'adjust'). Absent means false: a caller that forgets gets a read-only list, never a button
+   * that only ever answers 403 (PERM-UI review E3).
+   */
+  canEditBatches?: boolean
+  /**
+   * Whether the role may re-attribute a lot to another supplier (Change supplier): the Worker refuses a different supplier with 403
+   * without it, so the picker is not drawn. Absent means false.
+   */
+  canChangeSupplier?: boolean
   t: Translator
   tr: TranslationWithFallback
 }
@@ -90,6 +102,8 @@ export default function ManageBatchesModal({
   notify,
   onClose,
   onChanged,
+  canEditBatches = false,
+  canChangeSupplier = false,
   t,
   tr,
 }: ManageBatchesModalProps) {
@@ -445,12 +459,15 @@ export default function ManageBatchesModal({
                         {tr('batch_quantity_scoped_hint', 'A stock-take correction for this received date only -- other received dates of this product are not affected.')}
                       </span>
                     </label>
-                    <SupplierPickerField
-                      idPrefix={`manage-batch-${batch.id}`}
-                      value={{ supplierId: draft.supplierId, supplierName: draft.supplierName }}
-                      onChange={(next) => setDraft((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))}
-                      tr={(key, fallbackEn) => tr(key, fallbackEn || '')}
-                    />
+                    {/* The stored supplier is posted back unchanged on save; only a role holding Change supplier may pick another. */}
+                    {canChangeSupplier ? (
+                      <SupplierPickerField
+                        idPrefix={`manage-batch-${batch.id}`}
+                        value={{ supplierId: draft.supplierId, supplierName: draft.supplierName }}
+                        onChange={(next) => setDraft((prev) => ({ ...prev, supplierId: next.supplierId, supplierName: next.supplierName }))}
+                        tr={(key, fallbackEn) => tr(key, fallbackEn || '')}
+                      />
+                    ) : null}
                     <label className="block">
                       <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
                       <textarea
@@ -502,23 +519,26 @@ export default function ManageBatchesModal({
                     </div>
                     <div className="flex flex-shrink-0 flex-col items-end gap-1">
                       <div className="whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {product.unit}</div>
-                      <div className="flex items-center gap-0.5">
-                        <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30" onClick={() => startEdit(batch)} disabled={isSaving}>
-                          {t('edit') || 'Edit'}
-                        </button>
-                        {batch.is_active ? (
-                          <button
-                            type="button"
-                            className="flex items-center rounded-lg px-1.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
-                            onClick={() => deactivate(batch)}
-                            disabled={isSaving}
-                            title={tr('deactivate', 'Deactivate')}
-                            aria-label={tr('deactivate', 'Deactivate')}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
+                      {/* Edit and Deactivate are Inventory writes (Adjust / receive at Full); a role without them sees the lots, not buttons the Worker refuses. */}
+                      {canEditBatches ? (
+                        <div className="flex items-center gap-0.5">
+                          <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30" onClick={() => startEdit(batch)} disabled={isSaving}>
+                            {t('edit') || 'Edit'}
                           </button>
-                        ) : null}
-                      </div>
+                          {batch.is_active ? (
+                            <button
+                              type="button"
+                              className="flex items-center rounded-lg px-1.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                              onClick={() => deactivate(batch)}
+                              disabled={isSaving}
+                              title={tr('deactivate', 'Deactivate')}
+                              aria-label={tr('deactivate', 'Deactivate')}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}

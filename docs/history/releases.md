@@ -5,7 +5,7 @@ Moved from progress.md on 27 Oct 2026 (6.0.998); the board keeps a short "Releas
 ## Standing release process
 
 - **Release gate** for every new candidate: exact-SHA full GitHub gate, independent Astra review, adversarial/threat review and secrets scan, authorized Paid workflow and independent production postflight. Earlier Opus reviews remain evidence for their historical releases, not new Astra certificates.
-- **Versions**: `Records/Recovery/COMMIT-VERSIONS.json` is the authority. Reserve before committing; titles use `n.n.n — concise description` and brief clear bodies; new commits only, never rewrite pushed history.
+- **Versions**: `private:Recovery/COMMIT-VERSIONS.json` is the authority. Reserve before committing; titles use `n.n.n — concise description` and brief clear bodies; new commits only, never rewrite pushed history.
 - **Privacy**: the GitHub repository is PUBLIC (verified 12 Oct). Customer names and phones lived in the old `progress.md` and in four lines of `docs/history/session-log.md`, and remain in git history. Owner ruling 13 Oct: scrub and purge history later (force-push, after the current lanes merge), keep customer data organised in local Records, keep a regularly pushed private mirror. Not urgent. A Haiku scan of seven pushed branches (13 Oct) found no real secret, token, phone, email or chat id in added lines; the commit author identity is the owner's configured git user, already in main history (owner info, no rewrite). See Privacy in the queue.
 - **Deploy slots:** at most two per Cambodia date (07:00, and one after 20:00 with fresh `open_today=0`); since 22 Oct the owner allows a daytime deploy once the work is finished, gated and reviewed.
 

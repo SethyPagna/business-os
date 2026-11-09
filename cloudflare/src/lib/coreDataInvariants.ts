@@ -439,19 +439,39 @@ export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariant
 // SELECT-then-conditional-write) so a cold start elsewhere re-running it is
 // harmless, but this keeps the common case (isolate already warm) down to
 // zero extra DB round-trips per request.
-let coreInvariantsPromise: Promise<CoreDataInvariants> | null = null
+//
+// Only the FINISHED result is memoized. This used to memoize the pending promise,
+// and a promise belongs to the request that created it (workerd): if the first
+// request of a cold isolate was cancelled mid-check, every later request of the
+// isolate awaited a promise that never settled (HANG-2; the 6.0.1048 review, B1).
+// Now the first request sets a marker (lib/buildShare.ts) and the others wait for
+// the finished result with a timer of their own, for a bounded time; if it does
+// not appear they run the check themselves. A failure is never memoized, so the
+// next request retries.
+let coreInvariantsDone: CoreDataInvariants | null = null
+
+// lib/buildShare.ts installs this hook (index.ts imports it); a test that loads this module alone has none and shares nothing. The
+// import list of this file stays as it was (the pure tests load it with hand-written module maps), so the hook is read, not imported.
+type BuildShareHook = { run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T> }
+function shareBuild<T>(env: Env, key: string, build: () => Promise<T>, peek: () => T | undefined): Promise<T> {
+  const found = peek()
+  if (found !== undefined) return Promise.resolve(found)
+  const hook = (globalThis as unknown as Record<symbol, BuildShareHook | undefined>)[Symbol.for('business-os.build-share.v1')]
+  return hook ? hook.run(env, key, build, peek) : build()
+}
 
 export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvariants> {
-  if (!coreInvariantsPromise) {
-    coreInvariantsPromise = ensureCoreDataInvariants(env).catch((error) => {
-      // Don't let a transient failure "poison" the isolate forever -- allow
-      // the next request to retry instead of every subsequent request
-      // silently skipping the ensure step because of one bad attempt.
-      coreInvariantsPromise = null
-      throw error
-    })
-  }
-  return coreInvariantsPromise
+  return shareBuild(env, 'core-invariants', async () => {
+    const result = await ensureCoreDataInvariants(env)
+    coreInvariantsDone = result
+    return result
+  }, () => coreInvariantsDone ?? undefined)
+}
+
+/** Forgets what both once-per-isolate checks learned: a cold isolate, for a test (scripts/test-shared-promises-cross-request-native.cjs). */
+export function resetCoreDataInvariantsMemo(): void {
+  coreInvariantsDone = null
+  buildGateEntry = null
 }
 
 // ---------------------------------------------------------------------------
@@ -645,27 +665,27 @@ export async function ensureCoreDataInvariantsForBuild(env: Env, options: CoreIn
 
 // Per-isolate memo, as ensureCoreDataInvariantsOnce: a settled outcome is
 // kept for the isolate's lifetime; 'deferred' is retried once the other
-// isolate's lease could have expired; a rejection is never cached.
-let buildGateEntry: { buildKey: string; retryAt: number; promise: Promise<CoreInvariantsGateOutcome> } | null = null
+// isolate's lease could have expired; a rejection is never cached. It holds the
+// finished OUTCOME, never a pending promise (see ensureCoreDataInvariantsOnce):
+// this gate is awaited by every /api request, so a first request cancelled
+// mid-check used to stop the whole isolate.
+let buildGateEntry: { buildKey: string; retryAt: number; outcome: CoreInvariantsGateOutcome } | null = null
 
 export function ensureCoreDataInvariantsForBuildOnce(env: Env, options: CoreInvariantsGateOptions): Promise<CoreInvariantsGateOutcome> {
   const clock = options.now ?? Date.now
-  const current = buildGateEntry
-  if (current && current.buildKey === options.buildKey && clock() < current.retryAt) return current.promise
-  const entry: { buildKey: string; retryAt: number; promise: Promise<CoreInvariantsGateOutcome> } = {
-    buildKey: options.buildKey,
-    retryAt: Number.POSITIVE_INFINITY,
-    promise: Promise.resolve('deferred' as CoreInvariantsGateOutcome),
+  const settled = () => {
+    const entry = buildGateEntry
+    return entry && entry.buildKey === options.buildKey && clock() < entry.retryAt ? entry.outcome : undefined
   }
-  entry.promise = ensureCoreDataInvariantsForBuild(env, options).then((outcome) => {
-    if (outcome === 'deferred') entry.retryAt = clock() + (options.leaseMs ?? CORE_INVARIANTS_LEASE_MS)
+  return shareBuild(env, `core-invariants-build:${options.buildKey}`, async () => {
+    const outcome = await ensureCoreDataInvariantsForBuild(env, options)
+    buildGateEntry = {
+      buildKey: options.buildKey,
+      retryAt: outcome === 'deferred' ? clock() + (options.leaseMs ?? CORE_INVARIANTS_LEASE_MS) : Number.POSITIVE_INFINITY,
+      outcome,
+    }
     return outcome
-  }, (error) => {
-    if (buildGateEntry === entry) buildGateEntry = null
-    throw error
-  })
-  buildGateEntry = entry
-  return entry.promise
+  }, settled)
 }
 
 // Every table with real rows in migrations/0001_init.sql + 0002_promotions.sql,

@@ -11,8 +11,8 @@
 // the region that served the calls (meta.served_by_region; 'mixed' when they
 // differ) and how many were served by the primary, whether the response came
 // from the Cache API (hit | miss | bypass), and which feature flags the
-// request consulted (none yet: nothing writes acc.flags until the C3v2 KV
-// flag reader lands with its first consumer). No SQL text or bound value is
+// request consulted (lib/readSwitches.ts records each switch it reads into
+// acc.flags through the hook; none until a route consults one). No SQL text or bound value is
 // ever read or kept.
 //
 // WHERE THE NUMBERS COME FROM
@@ -92,7 +92,13 @@ export type RequestMetrics = {
   startedAt: number
   statements: number
   attemptedStatements: number
-  invocation: { attemptedStatements: number }
+  // Shared by everything that belongs to one Worker invocation (the request, its waitUntil work, runBackground children).
+  // attemptedStatements counts the statements those calls submit; attemptedCalls counts the calls themselves: a
+  // db.batch() is ONE, a retry is another. The per-invocation D1 limit is on calls (lib/callCounting.ts).
+  invocation: { attemptedStatements: number; attemptedCalls: number }
+  // Set by lib/callCounting.ts's middleware on the Free tier only: resolves, once per request, whether the call_counting switch is ON.
+  // Absent (Paid, a test fixture, a queue consumer) means the old statement count.
+  callCounting?: () => Promise<boolean>
   rowsRead: number
   rowsWritten: number
   d1Ms: number
@@ -116,7 +122,7 @@ const CONTEXT_KEY = 'requestMetrics'
 export function createRequestMetrics(kind: 'api' | 'bg', label: string, now: number = Date.now()): RequestMetrics {
   return {
     kind, label, startedAt: now,
-    statements: 0, attemptedStatements: 0, invocation: { attemptedStatements: 0 }, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
+    statements: 0, attemptedStatements: 0, invocation: { attemptedStatements: 0, attemptedCalls: 0 }, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
     cacheHits: 0, cacheMisses: 0, flags: {}, sealed: false, late: 0,
   }
 }
@@ -267,16 +273,22 @@ const store = new AsyncLocalStorage<RequestMetrics>()
 // Every entry swallows its own errors: it runs inside a database call.
 export type RequestMetricsHook = {
   d1Start(statements: number): void
-  rawD1Start?(statements: number): void
+  // A batch that bypasses D1Compat: `statements` it submits, `calls` it costs against the invocation (default 1).
+  rawD1Start?(statements: number, calls?: number): void
   d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
+  flag(name: string, state: FlagState): void
+  /** The object that stands for the request (or background run) the caller is inside; undefined outside one. Lib code with no Hono context keys per-request sharing on it (lib/lowStockSettings.ts). */
+  scope?(): object | undefined
 }
 
 const hook: RequestMetricsHook = {
-  rawD1Start(statements) { try { const acc = store.getStore(); if (acc) acc.invocation.attemptedStatements += finiteOrZero(statements) } catch { /* no-op */ } },
-  d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements) } } catch { /* no-op */ } },
+  scope() { try { return store.getStore() } catch { return undefined } },
+  rawD1Start(statements, calls = 1) { try { const acc = store.getStore(); if (acc) { acc.invocation.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedCalls += finiteOrZero(calls) } } catch { /* no-op */ } },
+  d1Start(statements) { try { const acc = store.getStore(); if (acc) { acc.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedStatements += finiteOrZero(statements); acc.invocation.attemptedCalls += 1 } } catch { /* no-op */ } },
   d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
+  flag(name, state) { try { const acc = store.getStore(); if (acc && !acc.sealed) acc.flags[name] = state } catch { /* no-op */ } },
 }
 ;(globalThis as unknown as Record<symbol, RequestMetricsHook>)[Symbol.for(REQUEST_METRICS_HOOK_KEY)] = hook
 

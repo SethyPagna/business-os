@@ -419,27 +419,36 @@ function normalizeNewRequestMoney(request: StockSessionRequest): StockSessionReq
   return { ...request, items }
 }
 
-export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number }
+// statementsUsed is the invocation's spend in the unit being counted. callCounting (lib/callCounting.ts) says that unit
+// is D1 calls, so the commit batch costs one; absent or false is the statement count it always was.
+export type StockSessionQueryBudget = { statementsUsed(): number; reserveStatements: number; callCounting?: boolean }
 
 // Positive answer only: a missing table is re-checked, a present one stays for the isolate.
 let lotEditTableAvailable = false
 
-const sessionColumnCache = new WeakMap<object, Promise<Map<string, Set<string>>>>()
+// The columns of the replayed tables, probed once per database. Only the FINISHED map is kept: this used to keep the pending probe, and
+// a promise belongs to the request that created it (workerd), so a request cancelled mid-probe left every later stock session of the
+// isolate waiting for good (HANG-2; the 6.0.1048 review, B1). Concurrent first readers go through lib/buildShare.ts: the first sets a
+// marker, the others wait for the finished map with a timer of their own for a bounded time, then probe for themselves. A failed probe
+// is not kept. The hook is read, not imported, like the other modules that must keep their import list; with no hook nothing is shared.
+const sessionColumnCache = new WeakMap<object, Map<string, Set<string>>>()
+type BuildShareHook = { run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T> }
 
-async function sessionColumns(env: Env, db: D1Compat): Promise<Map<string, Set<string>>> {
-  let pending = sessionColumnCache.get(env.DB)
-  if (!pending) {
+/** Exported for scripts/test-shared-promises-cross-request-native.cjs; the stock-session code is its only caller. */
+export async function sessionColumns(env: Env, db: D1Compat): Promise<Map<string, Set<string>>> {
+  const known = sessionColumnCache.get(env.DB)
+  if (known) return known
+  const build = async () => {
     const tables = [...new Set([...Object.values(REPLAY_TABLES).map(([table]) => table), 'branches', 'suppliers'])]
-    pending = db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
-      .all<Row>({ tables: JSON.stringify(tables) }).then(rows => {
-        const result = new Map(tables.map(table => [table, new Set<string>()]))
-        for (const row of rows) result.get(String(row.table_name))?.add(String(row.name))
-        return result
-      })
-    sessionColumnCache.set(env.DB, pending)
-    pending.catch(() => sessionColumnCache.delete(env.DB))
+    const rows = await db.prepare(`SELECT t.value table_name,p.name FROM json_each(@tables) t JOIN pragma_table_info(t.value) p ORDER BY t.value,p.cid`)
+      .all<Row>({ tables: JSON.stringify(tables) })
+    const result = new Map(tables.map(table => [table, new Set<string>()]))
+    for (const row of rows) result.get(String(row.table_name))?.add(String(row.name))
+    sessionColumnCache.set(env.DB, result)
+    return result
   }
-  return pending
+  const hook = (globalThis as unknown as Record<symbol, BuildShareHook | undefined>)[Symbol.for('business-os.build-share.v1')]
+  return hook ? hook.run(env, 'stock-session-columns', build, () => sessionColumnCache.get(env.DB)) : build()
 }
 
 function sessionRowSql(columns: Set<string>): string {
@@ -484,11 +493,13 @@ function sessionBudgetDb(env: Env, budget?: StockSessionQueryBudget) {
   }
   return { db: counted, begin() { admission = true }, check,
     async commit(statements: StockWriteStatement[]) {
-      check(stockTransactionStatementCount(statements.length))
-      local += stockTransactionStatementCount(statements.length)
+      const charge = budget?.callCounting ? 1 : stockTransactionStatementCount(statements.length)
+      check(charge)
+      local += charge
       return executeStockTransaction(db, statements, 'once')
     },
-    finishReads() { admission = false; tailReads = true },
+    // After a commit the stock has moved, so the receipt read must not refuse; after a failed commit the tail reads stay guarded.
+    finishReads(committed = false) { admission = false; tailReads = !committed },
   }
 }
 
@@ -1248,7 +1259,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   checkBounds(statements, snapshot)
   try {
     await execution.commit(packSessionAssertions(statements))
-    execution.finishReads()
+    execution.finishReads(true)
   } catch (error) {
     execution.finishReads()
     if (error instanceof StockSessionError && error.code === 'stock_session_query_budget_exceeded') throw error

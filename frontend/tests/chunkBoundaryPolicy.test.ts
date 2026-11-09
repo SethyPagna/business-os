@@ -23,12 +23,19 @@ const boundaries: Array<[string, string]> = [
   ['api/unresolvedSignout.ts', 'actor-read-scope'],
   ['api/offlineQueueOwnership.ts', 'actor-read-scope'],
   ['utils/businessTimeBounds.ts', 'shared-formatters'],
+  // The Expenses transport has its own chunk (E1-F: in app-api-methods it cost the storefront ~11 KB); the 4xx predicate it shares with the Returns and
+  // sale-modal mutation paths stays in app-api-methods, or every one of those pages fetches fees-api for ten lines.
+  ['api/feesTransport.ts', 'fees-api'],
+  ['utils/directMutationRefusal.ts', 'app-api-methods'],
   ['utils/permissions.ts', 'permissions-core'],
   ['utils/acquisitionCostAccess.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
   ['utils/dirtyWork.ts', 'work-drafts'],
   ['components/shared/hubNavigation.ts', 'hub-navigation'],
   ['utils/publicAssetUrls.ts', 'api-http-core'],
+  ['api/serverSignals.ts', 'api-http-core'],
+  ['api/dataEpoch.ts', 'api-http-core'],
+  ['api/readBudgetShed.ts', 'api-http-core'],
   ['utils/uploadUrlKernel.ts', 'api-http-state'],
   ['components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],
@@ -151,8 +158,8 @@ for (const relative of [
   assert.equal(closure.has(path.join(frontend, 'src/AppContext.tsx')), false, `${relative} must not import admin startup`)
   assert.equal([...closure].some(file => /(?:PublicCatalogPage|CatalogPage|BackgroundImportTracker)\.tsx$/.test(file)), false)
 }
-// API transports ride the boot path (feesTransport is bundled into
-// app-api-methods). Importing the Reports model from one of them hoists the
+// API transports ride the boot path (returnsReadTransport and the other transports without a chunk of their own are bundled into app-api-methods;
+// feesTransport has its own 'fees-api' chunk and reaches the storefront through neither). Importing the Reports model from one of them hoists the
 // whole model into a manual API chunk that the storefront then fetches before
 // first paint -- the regression that took the landing count from 50 to 52.
 for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', 'utils/returnsExportWindow.ts']) {
@@ -162,6 +169,9 @@ for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', '
   // The pending-request store (~10 KB) stays off the boot path; the refusal predicate lives in its own leaf.
   assert.equal(closure.has(path.join(frontend, 'src/utils/directMutationRequest.ts')), false, `${relative} must not import the direct-mutation request store`)
 }
+// Sales reaches the Expenses transport through a dynamic import only: SaleDetailModal and CancelSaleModal import shared code from the Sales chunk, so a static
+// import there makes every page that opens either modal fetch 'fees-api' (checked on the emitted graph in the --bundle section below).
+assert.doesNotMatch(fs.readFileSync(path.join(frontend, 'src/components/sales/Sales.tsx'), 'utf8'), /^import\s[^;]*from\s+'[^']*api\/feesTransport\.ts'/m, 'Sales must not import feesTransport statically')
 console.log('PASS neutral chunk policy, real config ordering, and source dependency boundaries')
 
 // Run explicitly after a build; ordinary unit runs must not silently inspect
@@ -221,6 +231,30 @@ if (process.argv.includes('--bundle')) {
     for (const name of forbidden) assert.equal([...closure].some(file => match(name).test(file)), false, `${entryName} statically pulls ${name}`)
   }
   console.log('PASS till, sales and report pages load no SheetJS/export code statically')
+  // A lazy chunk stays lazy only while nothing imports it statically. The Website Editor (catalog-editor) is reached through one dynamic
+  // import from the catalog route. A lucide icon the build had no named set for (Palette) was folded into that chunk, so ReceiptSettings
+  // imported it from there and /receipt-settings loaded the editor and the whole catalog page up front (+15 chunks, +494 KB raw).
+  const lazyEditor = files.find(file => /^catalog-editor-[\w-]{8}\.js$/.test(file))
+  assert.ok(lazyEditor, 'missing exact catalog-editor chunk')
+  const editorImporters = files.filter(file => graph.get(file)?.includes(lazyEditor))
+  assert.deepEqual(editorImporters.filter(file => !/^catalog-[\w-]{8}\.js$/.test(file)), [], 'only the catalog route may statically import catalog-editor')
+  {
+    const receiptEntry = files.find(file => /^ReceiptSettings-[\w-]{8}\.js$/.test(file))
+    assert.ok(receiptEntry, 'missing exact ReceiptSettings chunk')
+    const receiptClosure = closureOf([receiptEntry])
+    // The pattern is built with a template literal and doubled backslashes, like every other chunk matcher in this file. A plain
+    // '...[\w-]...' string loses its backslashes (\w becomes w, \. becomes any character), the pattern stops matching real chunk
+    // names, and this half of the check could never fail.
+    const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
+    // Positive control: the matcher must accept a real emitted name and refuse look-alikes, or the loop below proves nothing.
+    assert.equal(match('catalog-editor').test('catalog-editor-DUazrTS2.js'), true, 'the chunk matcher must match a real chunk name')
+    assert.equal(match('catalog').test('catalog-editor-DUazrTS2.js'), false, 'catalog must not match catalog-editor')
+    assert.equal(match('catalog').test('catalog-DUazrTS2xjs'), false, 'the dot before js must be literal')
+    for (const name of ['catalog-editor', 'catalog']) {
+      assert.equal([...receiptClosure].some(file => match(name).test(file)), false, `ReceiptSettings statically pulls ${name}`)
+    }
+    console.log('PASS the Website Editor is lazy: only the catalog route imports it, and /receipt-settings pulls neither it nor the catalog page (' + receiptClosure.size + ' chunks)')
+  }
   // 6.0.935: ZXing is inside the barcode decode worker's own script (it was the vendor-zxing chunk). A worker
   // cannot import another chunk, so the scanner cannot pull the receipt libraries either: it imports nothing.
   const decodeWorker = files.find(file => /^barcodeDecode\.worker-[\w-]{8}\.js$/.test(file))
@@ -237,6 +271,23 @@ if (process.argv.includes('--bundle')) {
     assert.equal([...publicPreloadClosure].some(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file)), false, `public preload graph pulls ${name}`)
   }
   console.log(`PASS actual public preload closure: ${publicPreloadClosure.size} chunks, no admin/file/import code`)
+  // E1-F: 'fees-api' is the Expenses transport and nothing else. A chunk may import it statically only if it is a page or modal that uses fees code
+  // (Expenses, its label manager and form, and the Reports hub's Expenses report). Two things put it on pages that run no fees code: Rollup moved the 4xx
+  // predicate that Returns and the sale modals share into it, and Sales imported getFeesReport statically while SaleDetailModal and CancelSaleModal import
+  // shared code from the Sales chunk; Returns, SaleDetailModal, CancelSaleModal, EditReturnModal and ReturnsBulkActionModal then each fetched the whole 11 KB
+  // transport (one more request on first paint). Sales now loads it with a dynamic import when its period strip needs the expense figures.
+  const feesApi = files.filter(file => /^fees-api-[\w-]{8}\.js$/.test(file))
+  assert.equal(feesApi.length, 1, 'exactly one fees-api chunk')
+  const FEES_CODE_CHUNKS = /^(FeesPage|FeeForm|ExpenseLabelManagerModal|ExpenseTypesSection|ReportsHub)-[\w-]{8}\.js$/
+  const feesImporters = files.filter(file => graph.get(file)?.includes(feesApi[0]))
+  assert.ok(feesImporters.length > 0, 'the Expenses page imports fees-api')
+  assert.deepEqual(feesImporters.filter(file => !FEES_CODE_CHUNKS.test(file)), [], 'only chunks that use fees code may statically import fees-api')
+  for (const name of ['index', 'app-api-methods', 'catalog-products', 'POS', 'Dashboard', 'Sales', 'Returns', 'EditReturnModal', 'ReturnsBulkActionModal', 'SaleDetailModal', 'CancelSaleModal']) {
+    const entry = files.find(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file))
+    assert.ok(entry, `missing exact ${name} chunk`)
+    assert.equal([...closureOf([entry])].some(file => feesApi.includes(file)), false, `${name} must not statically load fees-api`)
+  }
+  console.log(`PASS fees-api is imported only by fees code (${feesImporters.length} chunks), and by no Returns, till, dashboard, Sales or sale-modal closure`)
   const css = fs.readdirSync(assets).filter(file => file.endsWith('.css'))
     .map(file => fs.readFileSync(path.join(assets, file), 'utf8')).join('\n')
   const khmerFaces = (css.match(/@font-face\s*\{[^}]*\}/g) || [])

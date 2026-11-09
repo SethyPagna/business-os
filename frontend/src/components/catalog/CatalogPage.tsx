@@ -54,7 +54,7 @@ import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import { normalizePortalLanguage, readStoredPortalLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
-import { resolvePortalAnnouncement } from './portalAnnouncement.ts'
+import { portalAnnouncementIssues, resolvePortalAnnouncement } from './portalAnnouncement.ts'
 import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
@@ -87,6 +87,8 @@ import {
 } from './portalEditorDraft.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
+// Type only: erased from the build. A run-time import would pull the lazy catalog-editor chunk (which imports this one) into this chunk's static closure.
+import type { EditorSectionId } from './editor/editorSections.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
@@ -219,7 +221,8 @@ type PortalImageViewState = { open: boolean; title: string; images: string[]; in
 type FilePickerState = { open: boolean; target?: unknown; mediaType: string; title: string }
 type SubmissionDraft = { platform: string; note: string; screenshots: string[] }
 type PortalTab = { key: string; label: string; icon: LucideIcon }
-type EditorSection = [string, string, string]
+// The sections this person can see, in the bar's order (editor/editorSections.ts holds what each one edits).
+type EditorSection = EditorSectionId
 type PortalInitialOption = ReturnType<typeof aggregateInitialOptions>[number]
 type CatalogOption = { id: string | number; name: string }
 type CatalogApi = LegacyCatalogRecord
@@ -421,10 +424,10 @@ function withAssetVersion(url: unknown, versionSeed: unknown): string {
   return `${raw}${separator}v=${encodeURIComponent(seed)}`
 }
 
-function sectionForLinkField(field: string): string {
+function sectionForLinkField(field: string): EditorSectionId {
   if (field.startsWith('about_blocks[')) return 'about'
-  if (field.startsWith('promo_items[')) return 'display'
-  return 'media'
+  if (field.startsWith('promo_items[')) return 'posts'
+  return 'shop'
 }
 
 function sanitizePortalMediaValue(value: unknown, fallback = ''): string {
@@ -1224,8 +1227,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const editorDirty = editedKeys.size > 0
   const staffSettingsRef = useRef<StaffSettings | null>(null)
   const editorBaselineLoadedRef = useRef(false)
+  // A state copy of the ref, so the bar re-renders (and says why Save waits) when the settings read lands.
+  const [editorBaselineLoaded, setEditorBaselineLoaded] = useState(false)
   const [refusedAboutImage, setRefusedAboutImage] = useState<string | null>(null)
   const [refusedLink, setRefusedLink] = useState<RefusedLink | null>(null)
+  // The last refused Save that named a field: the editor opens its section, focuses it and says why (CatalogEditorSurface).
+  const [saveFailure, setSaveFailure] = useState<{ field: string; message: string; id: number } | null>(null)
+  const saveFailureCount = useRef(0)
   const [editorSaving, setEditorSaving] = useState(false)
   const [privateAi, setPrivateAi] = useState(createPrivateAiState)
   const editorFormRef = useRef<EditorDraft>({})
@@ -1309,7 +1317,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [productDetailView, setProductDetailView] = useState<ProductDetailViewState>({ open: false, product: null, gallery: [], status: 'in_stock', pricePresentation: null, showPrices: true })
   const [portalImageView, setPortalImageView] = useState<PortalImageViewState>({ open: false, title: '', images: [], index: 0 })
   const [filePicker, setFilePicker] = useState<FilePickerState>({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
-  const [activeEditorSection, setActiveEditorSection] = useState('branding')
+  // '' until someone picks a section: the surface lands on the stored one, else the first this role can see.
+  const [activeEditorSection, setActiveEditorSection] = useState<EditorSectionId | ''>('')
   const [dragAboutBlockId, setDragAboutBlockId] = useState<string | null>(null)
   const [dragPromoItemId, setDragPromoItemId] = useState<string | null>(null)
   const [mediaUploadStates, setMediaUploadStates] = useState<Record<string, ReturnType<typeof createInitialUploadState>>>({})
@@ -1497,6 +1506,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     () => Object.values(mediaUploadStates).some((state) => state?.status === 'uploading'),
     [mediaUploadStates],
   )
+  // Why the bar's Save cannot run right now: an upload in flight, or the settings read the draft is built on has not landed.
+  const saveBlockedReason: 'uploads' | 'loading' | null = hasActiveMediaUpload
+    ? 'uploads'
+    : (!editorBaselineLoaded || (canEditConfig && privateAiBlocksSave(privateAi)) ? 'loading' : null)
   const forgetMediaUploadState = (key: string) => {
     setMediaUploadStates((current) => {
       if (!Object.prototype.hasOwnProperty.call(current, key)) return current
@@ -1615,6 +1628,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       staffSettingsRef.current = staffSettings
       setEditorDraft((current) => overlayStaffSettings(current, staffSettings, editedKeysRef.current))
       editorBaselineLoadedRef.current = true
+      setEditorBaselineLoaded(true)
     }
     setPrivateAi((current) => applyPrivateAiRead(current, settings))
   }
@@ -1767,6 +1781,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (editedKeysRef.current.size === 0) setEditorDraft(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current))
     else if (!editorBaselineLoadedRef.current) setEditorDraft((current) => keepEditedValues(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current), current, editedKeysRef.current))
     editorBaselineLoadedRef.current = true
+    setEditorBaselineLoaded(true)
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
@@ -2167,6 +2182,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   function setDraft(key: string, value: unknown) {
     markDraftEdited(key)
+    if (saveFailure?.field === key) setSaveFailure(null)
     if (isPrivateAiKey(key)) {
       setPrivateAi((current) => editPrivateAi(current, key, value))
       return
@@ -2502,14 +2518,22 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
   }
 
+  // The sentence is shown under the field by the editor; a picture shows its own (ImageField), so it is named for the focus alone.
+  function nameFailedField(field: string, message = '') {
+    saveFailureCount.current += 1
+    setSaveFailure({ field, message, id: saveFailureCount.current })
+  }
+
   function showAboutImageRefusal(refusedValue: string) {
     setRefusedAboutImage(refusedValue)
     setActiveEditorSection('about')
+    nameFailedField('customer_portal_about_image')
     notify(copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.'), 'error')
   }
 
   function refuseSave(messageKey: string, fallback: string, field?: string): PortalSaveResult {
     notify(copy(messageKey, fallback), 'error')
+    if (field) nameFailedField(field, copy(messageKey, fallback))
     return { ok: false, messageKey, field }
   }
 
@@ -2525,10 +2549,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setPrivateAi(discarded.privateAi)
     setRefusedAboutImage(null)
     setRefusedLink(null)
+    setSaveFailure(null)
   }
 
   async function savePortalDraft(): Promise<PortalSaveResult> {
     try {
+      setSaveFailure(null)
       if (!editorBaselineLoadedRef.current) {
         return refuseSave('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.')
       }
@@ -2568,6 +2594,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {
         return refuseSave('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.', 'customer_portal_google_maps_embed')
+      }
+      // The bar's link and days: the Worker refuses the same values, but only after the Save was sent. Only when this draft edited an
+      // announcement key: a bad value that was already stored must not block an unrelated edit (a FAQ title) by someone who cannot see it.
+      const announcementEdited = [...editedKeysRef.current].some((key) => key.startsWith('customer_portal_announcement_'))
+      const announcementIssues = canEditConfig && announcementEdited ? portalAnnouncementIssues({
+        link: editorDraft.customer_portal_announcement_link,
+        start: editorDraft.customer_portal_announcement_start,
+        end: editorDraft.customer_portal_announcement_end,
+      }) : { link: false, range: false }
+      if (announcementIssues.link) {
+        return refuseSave('announcementBarLinkInvalid', 'The link must start with http:// or https:// and have no spaces.', 'customer_portal_announcement_link')
+      }
+      if (announcementIssues.range) {
+        return refuseSave('announcementBarRangeInvalid', 'The end day is before the start day.', 'customer_portal_announcement_end')
       }
       let sanitizedTranslations = '{}'
       try {
@@ -3301,32 +3341,25 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }
 
   const editorPanel = canEdit ? (() => {
-    // Per-area tab gating (Part 557 slice 8): a section tab shows only if the
-    // user can manage that area. The display tab carries the config toggles
-    // (customer_portal) AND the posts editor (portal_posts), so it shows for
-    // either; CatalogEditorSurface then hides the half the user can't edit.
-    const editorSections: EditorSection[] = [
-      ...(canEditConfig ? [['portal-section-branding', 'branding', copy('businessInfo', 'Business details')] as EditorSection] : []),
-      ...(canEditConfig ? [['portal-section-media', 'media', copy('mediaSection', 'Media')] as EditorSection] : []),
-      ...((canEditConfig || canEditPosts) ? [['portal-section-display', 'display', copy('display', 'Display settings')] as EditorSection] : []),
-      ...(canEditAbout ? [['portal-section-about', 'about', copy('about', 'About')] as EditorSection] : []),
-      ...(canEditFaq ? [['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')] as EditorSection] : []),
-      ...(canEditConfig ? [['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')] as EditorSection] : []),
-      ...(canEditConfig ? [['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')] as EditorSection] : []),
-      ...(canEditConfig ? [['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')] as EditorSection] : []),
-    ]
-    // A limited role's default tab must be one it can actually see -- otherwise
-    // it would land on (say) the branding section content with no tab and no
-    // way to save it. Fall back to the first available section.
-    const availableSectionIds = editorSections.map((section) => section[1])
-    const effectiveEditorSection = availableSectionIds.includes(activeEditorSection)
-      ? activeEditorSection
-      : (availableSectionIds[0] || 'branding')
+    // Per-area section gating (Part 557 slice 8): a section shows only if the user can manage that area. Posts carries the
+    // announcement bar (customer_portal) AND the promotion cards (portal_posts), so it opens for either grant and
+    // CatalogEditorSurface hides the half the user can't edit. This is the same table as editor/editorSections.ts (a test pins
+    // them equal), repeated because this file cannot import that module at run time.
+    const sectionGates: Record<EditorSectionId, boolean> = {
+      shop: canEditConfig,
+      contact: canEditConfig,
+      products: canEditConfig,
+      posts: canEditConfig || canEditPosts,
+      about: canEditAbout,
+      faq: canEditFaq,
+      features: canEditConfig,
+    }
+    const editorSections: EditorSection[] = (Object.keys(sectionGates) as EditorSectionId[]).filter((id) => sectionGates[id])
     const aboutImageRefused = refusedAboutImage !== null && String(editorDraft.customer_portal_about_image || '') === refusedAboutImage
     const editorContextValue = {
       editorLimits: PORTAL_GRID_LIMITS,
       aboutBlocks,
-      activeEditorSection: effectiveEditorSection,
+      activeEditorSection,
       canEditConfig,
       canEditPosts,
       addAboutBlock,
@@ -3360,7 +3393,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       openFilePicker,
       openPortalImage,
       previewConfig,
-      previewSectionRef,
       privateAiStatus: privateAi.status,
       products,
       promoItems,
@@ -3372,6 +3404,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       removeAboutBlock,
       removeFaqItem,
       removePromoItem,
+      saveBlockedReason,
+      saveFailure,
       savePortalDraft,
       selectedRecommendedProductOptions,
       setActiveEditorSection,

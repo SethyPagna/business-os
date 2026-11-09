@@ -30,11 +30,14 @@ test('Dashboard sends continuous overnight endpoints through the real range UI',
   await page.goto(ADMIN_ORIGIN)
   await expect(page.locator(APP_ROOT)).toBeVisible()
   await overnight(page)
-  for (const path of ['/api/dashboard', '/api/analytics']) {
-    await expect.poll(() => reads.some(url => url.pathname === path
-      && url.searchParams.get('createdFrom') === '2026-09-19 15:00:00'
-      && url.searchParams.get('createdTo') === '2026-09-19 19:01:00')).toBe(true)
-  }
+  // One read carries both halves: since 6.0.879 (20 Oct 2026, "one dashboard read") the Dashboard loads its summary
+  // and analytics from GET /api/dashboard/startup, where it used to send /api/dashboard and /api/analytics. The
+  // continuous overnight pair (22:00 to 02:00 Phnom Penh as UTC bounds, end minute inclusive) must ride on it.
+  await expect.poll(() => reads.some(url => url.pathname === '/api/dashboard/startup'
+    && url.searchParams.get('startDate') === '2026-09-19'
+    && url.searchParams.get('endDate') === '2026-09-20'
+    && url.searchParams.get('createdFrom') === '2026-09-19 15:00:00'
+    && url.searchParams.get('createdTo') === '2026-09-19 19:01:00')).toBe(true)
   expect(health.pageErrors).toEqual([])
   expect(health.consoleErrors).toEqual([])
 })
@@ -88,16 +91,32 @@ for (const staff of [false, true]) {
     await selectView(page, 'Shift Report')
     await page.getByRole('button', { name: 'Date & time range', exact: true }).click()
     const panel = page.getByRole('dialog', { name: 'Date & time range', exact: true })
-    await expect(panel.getByLabel('Start time', { exact: true })).toHaveCount(0)
+    // Inverted 3 Nov 2026. This used to assert NO "Start time" field, because the Shift Report was a date-only view.
+    // Since 6e81cfa2e (1 Oct 2026, "select complete shifts by latest opening time") it selects shifts by their opening
+    // time, reportModel's 'shift' view has supportsTime: true, and the picker shows both clocks.
+    await expect(panel.getByLabel('Start time', { exact: true })).toHaveCount(1)
+    await expect(panel.getByLabel('End time', { exact: true })).toHaveCount(1)
     for (const label of ['End Date', 'Start Date']) {
       await panel.getByLabel(label, { exact: true }).fill('19/09/2026')
       await panel.getByLabel(label, { exact: true }).press('Enter')
     }
     await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    // Dates alone select complete shift records by business date: no opening-time bounds are sent. The list now names
+    // those bounds openedFrom/openedTo (it never sent createdFrom), so the absence is asserted on the real names.
     await expect.poll(() => reads.some(url => url.pathname === '/api/shifts'
       && url.searchParams.get('from') === '2026-09-19' && url.searchParams.get('to') === '2026-09-19'
-      && !url.searchParams.has('createdFrom'))).toBe(true)
+      && !url.searchParams.has('openedFrom') && !url.searchParams.has('openedTo') && !url.searchParams.has('createdFrom'))).toBe(true)
     await expect(page.locator('.report-shift-plain')).toContainText('SYNTHETIC-901')
+    // The new rule, positively: a typed Start time becomes an opening-time window (22:00 to the end of the day in
+    // Phnom Penh is 15:00 to 17:00 UTC) on the shift list.
+    await page.getByRole('button', { name: 'Date & time range', exact: true }).click()
+    await panel.getByLabel('Start time', { exact: true }).fill('22:00')
+    await panel.getByLabel('Start time', { exact: true }).press('Enter')
+    await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect.poll(() => reads.some(url => url.pathname === '/api/shifts'
+      && url.searchParams.get('from') === '2026-09-19' && url.searchParams.get('to') === '2026-09-19'
+      && url.searchParams.get('openedFrom') === '2026-09-19 15:00:00'
+      && url.searchParams.get('openedTo') === '2026-09-19 17:00:00')).toBe(true)
     expect(health.pageErrors).toEqual([])
     expect(health.consoleErrors).toEqual([])
   })

@@ -22,6 +22,9 @@ const cacheOverride = {
   getVersionWithFallback: async (_env, ns) => String(versions[ns] || 0),
   bumpVersion: bump,
   bumpVersions: async (env, list) => { for (const ns of list) await bump(env, ns) },
+  cacheIdentity: () => undefined,
+  isUnsafeVersion: () => false,
+  deploymentId: () => 'dev',
 }
 const h = createProductsRouteHarness({ overrides: { '../lib/cache': cacheOverride } })
 const batches = h.load('routes/batches.ts').default

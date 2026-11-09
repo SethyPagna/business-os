@@ -28,12 +28,25 @@ for (const language of ['en', 'km']) test(`Products retains sole active branch d
   await signIn(page, E2E_ACCOUNTS.admin)
   if (language === 'km') await page.getByRole('button', { name: 'Switch to Khmer' }).click()
   await page.goto(`${ADMIN_ORIGIN}/products`)
-  const visibleBranch = (page.viewportSize()?.width || 0) < 768
-    ? page.locator('[data-product-branch-summary]')
-    : page.getByText(branchSummary, { exact: true }).first()
-  await expect(visibleBranch).toBeVisible()
-  await expect(visibleBranch).toContainText(branchSummary)
+  if ((page.viewportSize()?.width || 0) < 768) {
+    // Phone card: one "Name: qty" pill.
+    const visibleBranch = page.locator('[data-product-branch-summary]')
+    await expect(visibleBranch).toBeVisible()
+    await expect(visibleBranch).toContainText(branchSummary)
+  } else {
+    // Desktop table. The "Name: qty" text exists only in the phone card, which stays in the DOM but is hidden at md+,
+    // so getByText(branchSummary).first() resolved to that hidden node and this case failed on desktop only.
+    // Since 6.0.873 (20 Oct 2026, Products Excel-style table) the Stock cell prints the total, then ONE chip naming
+    // the sole active branch (ProductStockCell, [data-stock-branch-chip]); several branches become [data-stock-branch-line] rows.
+    const chip = page.locator('[data-stock-branch-chip]').first()
+    await expect(chip).toBeVisible()
+    await expect(chip).toContainText(branchName)
+    // The chip sits in the same cell as the branch quantity: the sole branch's 12, not Old Shop's 0.
+    await expect(chip.locator('xpath=..')).toContainText('12')
+    await expect(page.locator('[data-stock-branch-line]'), 'a sole active branch is a chip, never a per-branch list').toHaveCount(0)
+  }
   await expect(page.getByText('Old Shop: 0', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Old Shop', { exact: false }).filter({ visible: true }), 'the retired branch is not shown beside stock it does not hold').toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath(`single-branch-${language}.png`), fullPage: true })
   expect(pageErrors).toEqual([])

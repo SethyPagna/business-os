@@ -85,11 +85,21 @@ const ORGANIZATION_FIELD = '#organization-search'
  * inputValue() threw on every poll, and the helper burned its whole budget
  * waiting for an organization that had already been resolved -- which is how a
  * "wait for readiness" turns into the slowest possible sleep.
+ *
+ * The same trap was still open one level down (gate run 41712707233, desktop,
+ * two first attempts): the form flips from the expanded box to the collapsed
+ * row in the instant between the button check and the value read, so the box
+ * is gone and a bare `inputValue()` waits the whole action timeout (30 s here)
+ * for a node that will not come back, with the collapsed row sitting there
+ * ready. One poll swallowed the entire wait. Every read in this probe is
+ * therefore short: a missing box means "not typed yet", and the next poll
+ * sees the button. (submitLogin shares this probe, so it could stall its 20 s
+ * bounded wait the same way and then carry on; that was not measured.)
  */
-function organizationReady(page: Page): () => Promise<boolean> {
+export function organizationReady(page: Page): () => Promise<boolean> {
   return async () => {
     if (await page.getByRole('button', { name: /Switch organization|Change/i }).count()) return true
-    const typed = await page.locator(ORGANIZATION_FIELD).inputValue().catch(() => '')
+    const typed = await page.locator(ORGANIZATION_FIELD).inputValue({ timeout: 1_000 }).catch(() => '')
     return typed.trim() !== ''
   }
 }
@@ -240,6 +250,54 @@ export async function signIn(page: Page, account: E2EAccount, password = 'e2e-pa
     }),
     { message: `the app must have ${account.username} as its signed-in user`, timeout: 30_000 },
   ).toBe(account.username)
+}
+
+/**
+ * Sign in for a TIMED measurement (perf-budget.spec.ts): the same prerequisites
+ * as signIn, with the clock around the click only.
+ *
+ * WHY THIS EXISTS (gate run 41677711258 and 41687438601, android-chromium): the
+ * till budget sampled three cold contexts and an attempt in each run failed
+ * with `#app-root ... element(s) not found` after 30 s, then passed on the
+ * retry, so the leg was reported "flaky". The captured page was still the login
+ * form, the username box holding "cashier_a" + "e2e-password" and the password
+ * box empty. The trace of that attempt shows why: the org bootstrap had
+ * answered, but the form acts on it a render later and only then asks
+ * GET /api/organizations/search?q=Leang%20Beauty -- which in the trace comes
+ * AFTER the Login click. The old sampler typed and clicked the moment
+ * #login-username was visible, so on a loaded runner (two workers, three cold
+ * contexts per test) the fills and the click landed inside that re-render.
+ * Login.tsx:765 refuses to submit without an organization while the Login
+ * button stays live, which is the same prerequisite submitLogin waits for.
+ *
+ * So: wait for the organization the way submitLogin does, type and VERIFY both
+ * fields (fillCredential retypes a value that did not stick), and only then
+ * start the clock. What is timed is still the app's own login -> shell cost;
+ * nothing the app does is skipped or faked, and the budgets are untouched.
+ * If the shell still does not come up, say what the form was showing instead
+ * of a bare timeout on #app-root.
+ */
+export async function signInForTiming(page: Page, account: E2EAccount = E2E_ACCOUNTS.cashierA, password = 'e2e-password'): Promise<number> {
+  await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
+  await expect(page.locator(USERNAME_FIELD)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(organizationReady(page), {
+    message: 'the organization bootstrap must land before the timed Login',
+    timeout: 30_000,
+  }).toBe(true)
+  await fillCredential(page, USERNAME_FIELD, account.username)
+  await fillCredential(page, PASSWORD_FIELD, password)
+  const started = Date.now()
+  // A generous action timeout: a contended click that times out would read as a
+  // broken test rather than as the slow sample it is.
+  await page.getByRole('button', { name: /^Login$/ }).click({ timeout: 60_000 })
+  try {
+    await expect(page.locator(APP_ROOT)).toBeVisible({ timeout: 30_000 })
+  } catch (error) {
+    const typed = await page.locator(USERNAME_FIELD).inputValue({ timeout: 1_000 }).catch(() => '(no username box)')
+    const shown = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 240)
+    throw new Error(`timed sign-in of ${account.username} never reached the shell; the username box holds "${typed}" and the page says: ${shown}\n${String(error)}`)
+  }
+  return Date.now() - started
 }
 
 /**

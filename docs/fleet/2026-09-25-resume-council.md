@@ -102,7 +102,7 @@ The frontend baseline at fd0a8a8 ran 549 files: 547 passed immediately and two
 service-worker upgrade fixtures could not resolve historical Git commits in the
 shallow checkout. After fetching the complete branch history from GitHub, both
 fixtures passed unchanged (swLateUpgrade and swStaleChunkRecovery). No assertion
-was weakened. Logs are under BusinessOS/Records/frontend-full-baseline-20260925.log
+was weakened. Logs are under private:frontend-full-baseline-20260925.log
 and frontend-sw-history-recheck-20260925.log. This baseline precedes WIP integration.
 
 ## Complete Sales export follow-up

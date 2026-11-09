@@ -162,7 +162,8 @@ app.post('/sessions', async (c) => {
   try {
     const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
     // Index maintenance uses one raw D1 read; cache handoff can use six attempts.
-    const queryBudget = metrics ? { statementsUsed: () => metrics.attemptedStatements + 1, reserveStatements: 6 } : undefined
+    const callCounting = (await metrics?.callCounting?.()) === true
+    const queryBudget = metrics ? { statementsUsed: () => (callCounting ? metrics.invocation.attemptedCalls : metrics.attemptedStatements) + 1, reserveStatements: 6, callCounting } : undefined
     const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body, () => branchRedirectTarget(c), queryBudget)
     if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
     return c.json(receipt)
@@ -1540,6 +1541,8 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   const denied = adjustPermissionRefusal(c, body)
   if (denied) return denied
   if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
+  const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
+  const callCounting = (await metrics?.callCounting?.()) === true
   return withStockMutationReceipt(
     () => getDb(c.env),
     c.get('user')?.id ?? null,
@@ -1561,11 +1564,10 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       }
     },
     { requireReceipt: true, budget: (() => {
-      const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
       // One retry each: receipt2 + result2 + audit2 + cache6 + Telegram4.
       // A changed selling price can add a second audit (two attempts).
-      return metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
-        reserve: body.sellingPriceUsd != null || body.sellingPriceKhr != null ? 18 : 16 } : undefined
+      return metrics?.invocation ? { used: () => callCounting ? metrics.invocation.attemptedCalls : metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation,
+        reserve: body.sellingPriceUsd != null || body.sellingPriceKhr != null ? 18 : 16, callCounting } : undefined
     })() },
   )
 }

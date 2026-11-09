@@ -353,6 +353,10 @@ export async function getNotificationSummary() {
 }
 export const getSystemDebugLog = () =>
   callSystemRuntimeMethod('getSystemDebugLog')
+export const getReadSwitches = () =>
+  callSystemRuntimeMethod('getReadSwitches')
+export const setReadSwitch = (payload) =>
+  callSystemRuntimeMethod('setReadSwitch', payload)
 export const startGoogleOauth = async (payload) => {
   const { startGoogleOauth: startGoogleOauthRequest } = await loadAuthTransport()
   return startGoogleOauthRequest(payload)

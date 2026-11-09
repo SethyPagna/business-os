@@ -806,6 +806,24 @@ function handleApi(pathname, query, req, res, body) {
       sections: [],
     })
   }
+  // ===== BEGIN E2E-P1 (role-matrix.spec.ts) -- additive, self-contained; other lanes add their own blocks beside this one =====
+  // Notes is where the shell sends every role that cannot open the page it asked for (App.tsx falls back to the first NAV_ITEMS
+  // page the role may open, and Notes carries no permission), so the role matrix lands on it for most roles. Its mount read is
+  // notes.ts GET / -> { notes }, which api/notesTransport.ts getNotes() declares and whose empty state is this.
+  if (pathname === '/api/notes') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    return sendJson(res, 200, { notes: [] })
+  }
+  // The Returns section hydrates from routes/returns.ts GET / -> a bare array of return rows (Returns.tsx loadReturns: `Array.isArray(result) ? result : []`);
+  // an unmocked 404 replaces the whole section, toolbar included, with its load-error screen. The empty list is the true empty state.
+  if (pathname === '/api/returns') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    return sendJson(res, 200, [])
+  }
+  // ===== END E2E-P1 =====
+
   if (pathname === '/api/import-jobs') {
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
     // compat.ts GET /import-jobs paging envelope.

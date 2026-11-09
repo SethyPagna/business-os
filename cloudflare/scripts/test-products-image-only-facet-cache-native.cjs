@@ -167,6 +167,11 @@ async function main() {
     const versionSchema = versionMigration.match(/CREATE TABLE IF NOT EXISTS cache_versions \([\s\S]*?\n\);/)?.[0];
     assert.ok(versionSchema, 'actual cache_versions DDL');
     await db.prepare(versionSchema).run();
+    // 6.0.1048: a cache key carries the database's data epoch (system_flags, migration 0288); without one there is no safe key and nothing is cached.
+    const flagsSchema = fs.readFileSync(path.join(root, 'migrations/0089_system_flags.sql'), 'utf8').match(/CREATE TABLE IF NOT EXISTS system_flags \([\s\S]*?\n\);/)?.[0];
+    assert.ok(flagsSchema, 'actual system_flags DDL');
+    await db.prepare(flagsSchema).run();
+    await db.prepare("INSERT INTO system_flags(key, value) VALUES('data_epoch', ?)").bind('0123456789abcdef0123456789abcdef').run();
     let requests = 0;
     const summaries = [];
     const facetPath = '/api/products/image-only-facets-cache';

@@ -215,8 +215,31 @@ await runTest('DEFAULT_PUBLIC_CONFIG carries no shop name, fails closed, and has
 await runTest('the storefront uses the cover, logo and About picture URLs as-is (no self-seeded ?v=)', () => {
   const page = publicPage()
   assert.doesNotMatch(page, /withAssetVersion/, 'a ?v= seed makes the page request a different URL than the Worker preloads')
-  assert.match(page, /versionedBusinessCover=\{businessCoverUrl\}/)
+  assert.match(page, /versionedBusinessCover=\{coverState === 'failed' \? '' : businessCoverUrl\}/, 'the config\'s own URL, blanked only when the file failed to load')
   assert.match(page, /versionedBusinessLogo=\{businessLogoUrl\}/)
+})
+
+await runTest('the skeleton holds the header\'s social row: a pending config renders its 56 px box, so nothing under the header moves when the links arrive (P2-3 layout shift)', () => {
+  const row = code(read('../src/components/catalog/PortalSocialRow.tsx'))
+  assert.match(row, /copy, pending = false \}/)
+  assert.match(row, /if \(!groups\.length && !mapLink\) \{[\s\S]*?return pending \? <div aria-hidden="true" data-portal-social-skeleton="true" className="mt-2 h-12" \/> : null/, 'mt-2 + h-12 = 8 + 44 + 4 = 56 px, the live row\'s box')
+  assert.match(row, /className="mt-2 flex min-h-11 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain px-1 pb-1"/, 'the live row the placeholder mirrors: mt-2, 44 px items, pb-1')
+  assert.match(previewSurface(), /<PortalSocialRow [^>]*pending=\{configPending\}/)
+})
+
+await runTest('the About card mounts after its cover has arrived (or a bounded wait), so the whole card lands at its final size (P2-3 layout shift)', () => {
+  const page = publicPage()
+  assert.match(page, /const COVER_WAIT_MS = \d+/)
+  const hook = between(page, 'function useCoverState(', '\n}\n')
+  assert.match(hook, /new Image\(\)/)
+  assert.match(hook, /image\.onload = \(\) => finish\('ready'\)/)
+  assert.match(hook, /image\.onerror = \(\) => finish\('failed'\)/)
+  assert.match(hook, /window\.setTimeout\(\(\) => finish\('ready'\), COVER_WAIT_MS\)/, 'a slow file does not hold the card for ever')
+  assert.match(hook, /if \(!live\) return\s*live = false\s*window\.clearTimeout\(timer\)\s*setSettled\(/, 'the first outcome stands: a failed file is not turned back into ready by the timer running out')
+  assert.match(page, /coverState = useCoverState\(activeTab === 'about' && realConfigInHand && displayConfig\.showCover && businessCoverUrl \? businessCoverUrl : ''\)/, 'only the About tab waits, and only when it has a cover to show')
+  assert.match(page, /secondaryTabSection = activeTab !== 'products' \? \(realConfigInHand && coverState !== 'waiting' \?/, 'the skeleton stays until the cover is settled; the footer waits for the content, so it waits too')
+  const css = read('../src/components/catalog/CatalogSecondaryTabs.tsx')
+  assert.doesNotMatch(between(css, 'function AboutCover(', '\n}\n'), /min-h-/, 'no fixed minimum height on the cover frame')
 })
 
 await runTest('with prices hidden, the promo strip names the promotion instead of printing a price (P2-7)', () => {
@@ -379,7 +402,7 @@ await runTest('the skeleton is hero-shaped, busy, labelled, nameless, and not mi
 
 await runTest('the About tab and header show the skeleton while pending; the Website Editor preview is untouched', () => {
   const page = publicPage()
-  assert.match(page, /const secondaryTabSection = activeTab !== 'products' \? \(realConfigInHand \? \(\n\s*<Suspense fallback=\{storefrontSkeleton\}>/, 'the About tab holds the skeleton until a real config is in hand, and while its chunk loads')
+  assert.match(page, /const secondaryTabSection = activeTab !== 'products' \? \(realConfigInHand && coverState !== 'waiting' \? \(\n\s*<Suspense fallback=\{storefrontSkeleton\}>/, 'the About tab holds the skeleton until a real config is in hand and its cover has settled, and while its chunk loads')
   assert.match(page, /\) : storefrontSkeleton\) : null/)
   assert.match(page, /if \(!paintConfigRef\.current\) loadCatalogSecondaryTabs\(\)/, 'the About chunk downloads while the config is on its way')
   assert.doesNotMatch(secondaryTabs(), /PublicStorefrontSkeleton|configPending/, 'the editor preview renders CatalogSecondaryTabs exactly as before, and the skeleton stays out of the catalog-products closure')

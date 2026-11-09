@@ -53,9 +53,12 @@ function load(rel, overrides = {}, sourcePath) {
 
 const metrics = load('lib/requestMetrics.ts', {}, process.env.REQUEST_METRICS_SOURCE)
 const dbModule = load('lib/db.ts', { './importMaintenanceFence': {} }, process.env.DB_SOURCE)
+// 6.0.1048: the entry key is built by lib/cacheKey.ts from the data epoch; a fixed epoch stands in for lib/readSwitches.ts.
+const cacheKey = load('lib/cacheKey.ts', { './readSwitches': { readDataEpoch: async () => 'e'.repeat(32) } })
 const cacheModule = load('lib/cache.ts', {
   './db': { getDb: () => { throw new Error('no D1 expected') } },
   './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) },
+  './cacheKey': cacheKey,
 }, process.env.CACHE_SOURCE)
 
 const tests = []
@@ -502,7 +505,7 @@ check('cachedJsonResponse marks miss, then hit, on the request', async () => {
   let produced = 0
   const app = appWith((a) => a.get('/api/c', async (c) => {
     c.set('user', { id: 1 })
-    const value = await cacheModule.cachedJsonResponse(c.req.raw, c.executionCtx, 'k2:1', 20, async () => { produced++; return { n: 1 } })
+    const value = await cacheModule.cachedJsonResponse(c.req.raw, c.executionCtx, 'k2:1', 20, async () => { produced++; return { n: 1 } }, cacheKey.cacheIdentity({ env: {}, get: () => ({ organization_id: 1 }) }))
     return c.json(value)
   }))
   const ctx1 = executionCtx()

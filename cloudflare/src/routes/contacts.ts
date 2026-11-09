@@ -47,6 +47,7 @@ import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } fro
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import { invoiceReadWindow } from '../lib/invoiceReadWindow'
 import type { Env } from '../index'
@@ -1042,7 +1043,7 @@ function registerContactRoutes(config: ContactConfig) {
       const version = await getContactReadCacheVersion(c.env, config.table)
       const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
         db.prepare(`SELECT id, name FROM ${config.table} ${config.table === 'customers' ? `WHERE ${customerIsProfileSql()}` : ''} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
-      )
+      cacheIdentity(c))
       return c.json(rows)
     }
     // fields=picker: the bounded offline-mirror / picker shape. Only the
@@ -1067,7 +1068,7 @@ function registerContactRoutes(config: ContactConfig) {
         const items = rawItems.slice(0, limit)
         const total = Number(totalRow?.count || 0)
         return { items: items || [], total, limit, truncated: total > (items || []).length }
-      })
+      }, cacheIdentity(c))
       return c.json(payload)
     }
     // Narrow Sales/POS customer search. It is deliberately customers-only
@@ -1202,7 +1203,7 @@ function registerContactRoutes(config: ContactConfig) {
       const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
         const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
         return withPoints(rows || [])
-      })
+      }, cacheIdentity(c))
       return c.json(payload)
     }
 
@@ -1222,7 +1223,7 @@ function registerContactRoutes(config: ContactConfig) {
         .filter((value) => /^\d{4}$/.test(value)))]
         .sort((left, right) => Number(right) - Number(left))
       return { items: (await withPoints(items || [])), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
-    })
+    }, cacheIdentity(c))
     return c.json(payload)
   })
 
@@ -1528,7 +1529,7 @@ function registerContactRoutes(config: ContactConfig) {
     }
     // Free plan: a merge too large for this request's D1 query budget merges
     // the first records now and returns the request that merges the rest.
-    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation))
+    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation, (await ((c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined)?.callCounting?.()) === true))
     plan = step.plan
 
     let committedKeeper: Record<string, unknown> = plan.finalKeeper
@@ -2208,6 +2209,13 @@ function registerContactRoutes(config: ContactConfig) {
     if (getActionTier(user, 'contacts', 'bulk') === 'none') {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
+    // The job deletes exactly what DELETE /:id deletes, so 'contacts:delete' switched off stops it too. This route
+    // used to read bulk_delete and bulk alone, so a role with Delete off and Bulk delete on got a 202 and the job
+    // deleted what the single route refuses (PERM-UI review E1 sweep, 4 Nov 2026). The role editor's bulk_delete
+    // row `requires` contacts:delete.
+    if (getActionTier(user, 'contacts', 'delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
 
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const reason = body.reason != null ? String(body.reason).trim() || null : null
@@ -2260,7 +2268,12 @@ function registerContactRoutes(config: ContactConfig) {
   // cancellation and products.ts's identical route.
   app.post(`${config.path}/bulk-delete-jobs/:id/cancel`, async (c) => {
     const user = c.get('user')
-    if (getActionTier(user, 'contacts', 'bulk') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    // Cancelling is part of running the job, so it asks for what starting one asks for: the umbrella, Bulk delete and Delete.
+    if (getActionTier(user, 'contacts', 'bulk') !== 'full'
+      || getActionTier(user, 'contacts', 'bulk_delete') !== 'full'
+      || getActionTier(user, 'contacts', 'delete') !== 'full') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const entityType = contactBulkDeleteEntityType(config)
     const job = await getBulkDeleteJob(c.env, c.req.param('id'))
     if (!job || job.entity_type !== entityType) return c.json({ error: 'Bulk delete job not found' }, 404)

@@ -15,9 +15,11 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
+import { cacheIdentity, deploymentId, isUnsafeVersion } from '../lib/cache'
+import { readDataEpoch } from '../lib/readSwitches'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
+import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { persistClientImageVariants } from '../lib/imageVariantStore'
@@ -731,7 +733,10 @@ async function loadImageOnlyFacets(
   if (facetCache && env) {
     try {
       const versions = await getVersionsWithFallback(env, PRODUCT_FILTERS_VERSIONS, { requireReadableD1: true })
-      const identity = JSON.stringify(['image-only-facets-v1', versions, fields.map(([key]) => key), statements])
+      // No data epoch or an unsafe version is no safe key; the surrounding catch then runs the statements uncached.
+      const epoch = await readDataEpoch(env)
+      if (!epoch || versions.some(isUnsafeVersion)) throw new Error('image-only facets: no safe cache key')
+      const identity = JSON.stringify(['image-only-facets-v2', deploymentId(env), epoch, versions, fields.map(([key]) => key), statements])
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))
       const key = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
       const cacheUrl = new URL('/api/products/image-only-facets-cache', facetCache.requestUrl)
@@ -1450,7 +1455,7 @@ app.get('/search', async (c) => {
   const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     produced = true
     return searchProductsWithIndexFallback(c.env, query)
-  })
+  }, cacheIdentity(c))
   // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
@@ -1531,7 +1536,7 @@ app.get('/search-index', async (c) => {
   const cacheUrl = new URL(c.req.url)
   cacheUrl.search = `?page=${page}&format=${SEARCH_INDEX_FORMAT}`
   const payload = await cachedJsonResponse(new Request(cacheUrl.toString(), { method: 'GET' }), c.executionCtx, version, 3600,
-    () => buildProductSearchIndexPage(c.env, page, version))
+    () => buildProductSearchIndexPage(c.env, page, version), cacheIdentity(c))
   c.header('Cache-Control', 'private, no-store')
   if (have && have === payload.hash) {
     return c.json({ format: payload.format, version: payload.version, page: payload.page, buckets: payload.buckets, pageIds: payload.pageIds, hash: payload.hash, unchanged: true })
@@ -1553,7 +1558,7 @@ app.get('/', async (c) => {
   const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     produced = true
     return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
-  })
+  }, cacheIdentity(c))
   const payload = produced ? cachedPayload
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
   const items = isImageOnlyRead(user, surface)
@@ -1653,7 +1658,7 @@ app.get('/filters', async (c) => {
   const filtersUrl = new URL(c.req.url)
   if (imageOnly) filtersUrl.search = ''
   const vocabulary = await cachedJsonResponse(new Request(filtersUrl.toString(), { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery))
+    await catalogReadVersion(c.env, PRODUCT_FILTERS_VERSIONS), PRODUCT_FILTERS_TTL_SECONDS, () => loadProductFilters(c.env, filtersQuery), cacheIdentity(c))
   return c.json(imageOnly ? projectVocabularyForImageOnly(vocabulary, user) : vocabulary)
 })
 
@@ -2399,9 +2404,10 @@ app.post('/', async (c) => {
     // same D1 batch as the fold; refused, never silently dropped (lib/createFold.ts).
     if (destination.quantity > 0 && destination.branchId != null) {
       const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined
+      const callCounting = (await metrics?.callCounting?.()) === true
       const folded = await foldCreateWithStockInResponse(c.env, user, duplicate, name, body, { ...destination, branchId: destination.branchId }, {
         waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-        invocation: metrics?.invocation ? { used: () => metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation } : undefined,
+        invocation: metrics?.invocation ? { used: () => callCounting ? metrics.invocation.attemptedCalls : metrics.invocation.attemptedStatements, limit: getPlanLimits(c.env).d1QueriesPerInvocation, callCounting } : undefined,
       })
       return c.json(normalProductWriteResponse(folded.body), folded.status as 200 | 400 | 403 | 409 | 503)
     }
@@ -3160,6 +3166,16 @@ app.delete('/:id', async (c) => {
     action_history_id: committed?.action_history_id ?? null, generation: Number(committed?.generation || 0) })
 })
 
+// A bulk-delete job removes exactly what DELETE /:id removes, so the role needs that action's grant as well as
+// Bulk delete. The route used to read bulk_delete alone: a role with Delete switched off and Bulk delete left on
+// (the editor offered that combination) got a 202 and the job deleted the products the single route refuses
+// (PERM-UI review E1, 4 Nov 2026). The role editor's bulk_delete row `requires` products:delete, so the two agree.
+// Create and cancel share this one answer; a Review caller still gets 'review' (bulk_delete is Refused, never queued).
+function productBulkDeleteTier(user: SessionUser): PermissionTier {
+  const tier = getActionTier(user, 'products', 'bulk_delete')
+  return getActionTier(user, 'products', 'delete') === 'none' ? 'none' : tier
+}
+
 // POST /api/products/bulk-delete-jobs -- the 10k+-safe path. Products.tsx's
 // bulk-delete flow (runBulkDeleteConfirmed) uses this instead of calling
 // DELETE /:id once per selected row once the selection is large enough
@@ -3179,7 +3195,7 @@ app.delete('/:id', async (c) => {
 // error telling them why, not a silently-wrong partial behavior.
 app.post('/bulk-delete-jobs', async (c) => {
   const user = c.get('user')
-  const tier = getActionTier(user, 'products', 'bulk_delete')
+  const tier = productBulkDeleteTier(user)
   if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   if (tier === 'review') {
     return c.json({ error: 'Bulk delete requires Full access for Products. Ask an admin, or delete a smaller selection through the normal review flow.' }, 403)
@@ -3241,7 +3257,7 @@ app.get('/bulk-delete-jobs/:id', async (c) => {
 // cancellation.
 app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'bulk_delete') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (productBulkDeleteTier(user) !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   try {
     await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
   } catch (error) {
@@ -5791,25 +5807,30 @@ export const MERGE_DUPLICATES_REQUEST_STATEMENT_BUDGET = 700
 
 type MergeDuplicateInterruptionCode = 'merge_budget_reached' | 'merge_infrastructure_interrupted'
 
-function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
+// statementCount feeds the pacing estimate (statements per product). callCount is what the per-invocation D1 limit counts:
+// a db.batch() is ONE call whatever it holds (D1 limits page). The route compares callCount only when call_counting is ON.
+export function createCountedProductMergeDb(db: ReturnType<typeof getDb>): {
   db: ReturnType<typeof getDb>
   statementCount: () => number
+  callCount: () => number
 } {
   let statements = 0
+  let calls = 0
   const counted = Object.create(db) as ReturnType<typeof getDb>
   counted.prepare = ((sql: string) => {
     const prepared = db.prepare(sql)
     return {
-      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; return prepared.get(params) },
-      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; return prepared.all(params) },
-      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; return prepared.run(params) },
+      get: (params?: Parameters<typeof prepared.get>[0]) => { statements += 1; calls += 1; return prepared.get(params) },
+      all: (params?: Parameters<typeof prepared.all>[0]) => { statements += 1; calls += 1; return prepared.all(params) },
+      run: (params?: Parameters<typeof prepared.run>[0]) => { statements += 1; calls += 1; return prepared.run(params) },
     }
   }) as typeof counted.prepare
   counted.batch = (items) => {
     statements += items.length
+    calls += 1
     return db.batch(items)
   }
-  return { db: counted, statementCount: () => statements }
+  return { db: counted, statementCount: () => statements, callCount: () => calls }
 }
 
 export function shouldPauseProductMergeBeforeGroup(input: {
@@ -5846,6 +5867,8 @@ app.post('/merge-duplicates', async (c) => {
   }
   const countedDb = createCountedProductMergeDb(getDb(c.env))
   const db = countedDb.db
+  const mergeMetrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as import('../lib/requestMetrics').RequestMetrics | undefined
+  const callCounting = (await mergeMetrics?.callCounting?.()) === true
   const requestBody: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   const modernCostReview = Object.hasOwn(requestBody, 'cost_review')
   const approvedCostReview = modernCostReview ? await parseBulkCostReview(requestBody.cost_review) : null
@@ -5946,7 +5969,7 @@ app.post('/merge-duplicates', async (c) => {
       group.duplicates.sort((a,b)=>a.id-b.id)
     }
     const members = new Set(groups.flatMap(group=>[group.canonical.id,...group.duplicates.map(row=>row.id)]))
-    if (countedDb.statementCount()+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
+    if ((callCounting ? countedDb.callCount() : countedDb.statementCount())+Math.ceil(members.size/80)*8 > getPlanLimits(c.env).d1QueriesPerInvocation) return c.json({ code:'resolve_plan_budget' },409)
     try {
       const reviews = await readBulkCostReviews(db,groups)
       for (const review of reviews) {
@@ -6309,7 +6332,7 @@ app.get('/possible-duplicates', async (c) => {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)))
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)), cacheIdentity(c))
   return c.json({ success: true, clusters })
 })
 
@@ -6331,7 +6354,7 @@ app.get('/data-gaps/counts', async (c) => {
   const denied = denyDataGaps(c)
   if (denied) return denied
   const counts = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true))
+    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => countProductDataGaps(getDb(c.env), true), cacheIdentity(c))
   if (canViewAcquisitionCosts(c.get('user'))) return c.json({ success: true, counts })
   const { unknown_cost: _hidden, ...visible } = counts
   return c.json({ success: true, counts: visible })

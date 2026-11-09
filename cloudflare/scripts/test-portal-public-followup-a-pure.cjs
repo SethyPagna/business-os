@@ -60,7 +60,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
-  '../lib/cache': {
+  '../lib/cache': { isUnsafeVersion: () => false, deploymentId: () => 'dev',
     getVersionsWithFallback: async (_env, namespaces) => { versionReads += 1; return namespaces.map((namespace) => tokens[namespace]) },
     getVersionWithFallback: async () => '0',
     bumpVersion: async () => {},
@@ -68,6 +68,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/permissions': { hasPermission: () => true },
   '../lib/audit': { audit: async () => {} },
+  '../lib/readSwitches': { readDataEpoch: async () => 'a'.repeat(32) },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1', getClientNetworkKey: () => '127.0.0.1', peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {} },
@@ -189,7 +190,7 @@ async function run() {
     const keys = [...edge.keys()].filter((url) => url.includes('/__portal-edge/body/search') && url.includes('query=serum'))
     assert.ok(keys.some((url) => url.includes('s3')) && keys.some((url) => url.includes('s4')), 'the settings token is in the key')
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
-    assert.match(source, /body: \['portal-body-v2', deploy, version\('products'\), version\('settings'\)/, 'the body key is built from the settings version')
+    assert.match(source, /const shared = \[deploymentId\(c\.env\), epoch, version\('products'\), version\('settings'\)\][\s\S]*body: \['portal-body-v2', \.\.\.shared/, 'the body key is built from the settings version')
   })
 
   await check('/promotions does not publish a deactivated linked product', async () => {

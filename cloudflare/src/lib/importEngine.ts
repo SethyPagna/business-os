@@ -6097,13 +6097,23 @@ const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resol
  */
 const STOCK_QUERY_BUDGET = Symbol('stockQueryBudget')
 class StockQueryBudgetDeferred extends Error {}
+// call_counting (lib/callCounting.ts) registers its resolver on this Symbol.for global at Worker start, so this file gains no import for the
+// dozens of tests that load it alone; no hook, or any failure, is OFF: the statement count it always was.
+async function callCountingForImports(env: Env): Promise<boolean> {
+  try {
+    const hook = (globalThis as unknown as Record<symbol, { on?(env: Env): Promise<boolean> } | undefined>)[Symbol.for('business-os.call-counting.v1')]
+    return (await hook?.on?.(env)) === true
+  } catch { return false }
+}
 // 'statement' charges every statement of a batch (the stock-actions path's conservative count). 'call' charges one per
 // db round trip, which is what the D1 binding sends (one fetch per batch) and what the per-invocation limit counts.
-type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; unit: 'statement' | 'call' }
+// baseUnit is the unit outside the historical-sales loop: 'call' when call_counting is ON (lib/callCounting.ts), else 'statement'.
+type StockQueryBudget = { used: number; limit: number; reserve: number; enabled: boolean; physicalBatches: number; unit: 'statement' | 'call'; baseUnit: 'statement' | 'call' }
 type BudgetDb = D1Compat & { [STOCK_QUERY_BUDGET]?: StockQueryBudget; readonly importWriteFenceStatements?: 0 | 1 }
-function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0): BudgetDb {
+export function stockQueryBudgetDb(db: D1Compat, limit: number, factoryQueries = 0, callCounting = false): BudgetDb {
   if ((db as BudgetDb)[STOCK_QUERY_BUDGET]) return db
-  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0, unit: 'statement' }
+  const unit = callCounting ? 'call' : 'statement'
+  const budget: StockQueryBudget = { used: factoryQueries, limit, reserve: 0, enabled: false, physicalBatches: 0, unit, baseUnit: unit }
   const wrap = (source: D1Compat): BudgetDb => {
     const result = Object.create(source) as BudgetDb
     Object.defineProperty(result, STOCK_QUERY_BUDGET, { value: budget })
@@ -6256,7 +6266,8 @@ export async function applyStockActionsJob(
   stockWritesDenied: boolean,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
-  db = stockQueryBudgetDb(db, getPlanLimits(env).d1QueriesPerInvocation)
+  const callCounting = await callCountingForImports(env)
+  db = stockQueryBudgetDb(db, getPlanLimits(env).d1QueriesPerInvocation, callCounting ? 1 : 0, callCounting) // ON: the switch read was one call
   // Same materialize-first contract as the generic apply path: this
   // self-enqueues and returns 'still working' until every raw row is in
   // import_job_source_rows, so this invocation just acks with 0/0.
@@ -6745,7 +6756,9 @@ export function productImportStockStatements(productId: number, active: unknown,
 }
 
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
-  const db = stockQueryBudgetDb(await getImportFencedDb(env), getPlanLimits(env).d1QueriesPerInvocation, 1)
+  const fencedDb = await getImportFencedDb(env)
+  const callCounting = await callCountingForImports(env)
+  const db = stockQueryBudgetDb(fencedDb, getPlanLimits(env).d1QueriesPerInvocation, callCounting ? 2 : 1, callCounting) // ON: the switch read was one more call
   // Same per-request shadow as runImportAnalyze -- see its comment -- and
   // the same redelivery back-off.
   const limits = getPlanLimits(env)
@@ -7801,7 +7814,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           jobId, nowIso, actor: authority.actor, accrueLoyalty, concurrency: limits.historicalSalesImportConcurrency, receiptNumbers,
         })
       } finally {
-        if (callBudget) Object.assign(callBudget, { unit: 'statement', enabled: false, reserve: 0 })
+        if (callBudget) Object.assign(callBudget, { unit: callBudget.baseUnit, enabled: false, reserve: 0 })
       }
     }
     sw.lap('salesItemsMs')

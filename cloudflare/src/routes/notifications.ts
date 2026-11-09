@@ -10,6 +10,7 @@ import { getPlanLimits } from '../lib/planTier'
 import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
@@ -210,7 +211,7 @@ function sectionCacheFor(c: NotificationContext): SectionCache {
     const versions = await Promise.all(namespaces.map(versionOf))
     const version = namespaces.map((namespace, index) => `${namespace}:${versions[index]}`).join('|')
     const request = new Request(`${new URL(c.req.url).origin}/api/notifications/_section/${name}?k=${encodeURIComponent(inputs)}`)
-    return cachedJsonResponse(request, c.executionCtx, version, NOTIFICATION_SECTION_CACHE_TTL_SECONDS, producer)
+    return cachedJsonResponse(request, c.executionCtx, version, NOTIFICATION_SECTION_CACHE_TTL_SECONDS, producer, cacheIdentity(c))
   }
 }
 

@@ -17,6 +17,9 @@
 //     proving the version is what invalidates; low-stock config, the UTC day
 //     and the plan-tiered TTL change the answer; a version-read fault is
 //     computed fresh and never cached; a failed compute is not memoised.
+//     HANG-2: a computation still running is shared inside one request only (workerd ties a promise to the
+//     request that created it, so a request that answers first must not hold the next one); only a FINISHED
+//     value reaches other requests, and an older start never replaces a newer memo.
 //  5. Server-applied undo/redo bumps 'stock' (the one writer that did not).
 //
 // Real migration chain through harness/d1compat.cjs (D1's expression depth
@@ -68,10 +71,15 @@ function modules(cdb, { planTier = load('lib/planTier.ts'), failCompute = null }
   const familyPagination = load('lib/familyPagination.ts', { './db': dbStub })
   const lowStockSettings = load('lib/lowStockSettings.ts', { './db': dbStub })
   const familyStockStats = load('lib/familyStockStats.ts', { './familyPagination': familyPagination, './lowStockSettings': lowStockSettings })
-  const cache = load('lib/cache.ts', { './db': dbStub, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) } })
+  // 6.0.1048: the key carries the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
+  const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
+  const cacheKey = load('lib/cacheKey.ts', { './readSwitches': readSwitches })
+  const cache = load('lib/cache.ts', { './db': dbStub, './quotaGuard': { consumeQuota: async () => ({ zone: 'ok' }) }, './cacheKey': cacheKey })
   const overview = load('lib/dashboardStockOverview.ts', {
     './db': dbStub,
     './cache': cache,
+    './cacheKey': cacheKey,
+    './readSwitches': readSwitches,
     './familyStockStats': failCompute ? { ...familyStockStats, getFamilyStockOverview: failCompute } : familyStockStats,
     './lowStockSettings': lowStockSettings,
     './planTier': planTier,
@@ -361,6 +369,95 @@ async function main() {
     fail = false
     const ok = await mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
     assert.ok(ok.inventory.total_products > 0)
+  })
+
+  await check('HANG-2: a pending computation is shared inside one request only; other requests get a finished value, never a promise', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    // The first computation never finishes: the request that started it answered or was cancelled.
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? new Promise(() => {}) : real(options) } })
+    const requestA = { ...w.ctx, cache: null }
+    void mod.overview.loadDashboardStockOverview(w.env, requestA)
+    void mod.overview.loadDashboardStockOverview(w.env, requestA)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(computes, 1, 'the callers of one request share one computation')
+    const answered = await Promise.race([
+      mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null }),
+      new Promise((resolve) => setTimeout(() => resolve('HELD'), 1500)),
+    ])
+    assert.notEqual(answered, 'HELD', 'request B must not wait on the computation of request A')
+    assert.ok(answered.inventory.total_products > 0)
+    assert.equal(computes, 2, 'B computed for itself')
+    w.cdb.log.length = 0
+    assert.deepEqual(await mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null }), answered)
+    assert.equal(heavy(w.cdb), 0, 'the finished value is what the next request shares')
+  })
+
+  await check('HANG-2: an older computation that finishes late does not replace a newer memo', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? gate.then(() => real(options)) : real(options) } })
+    const slow = mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await mod.cache.bumpVersion(w.env, 'stock') // a newer key
+    w.tick(1000)
+    await mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+    release()
+    await slow
+    w.cdb.log.length = 0
+    await mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+    assert.equal(heavy(w.cdb), 0, 'the newer memo survived the older computation finishing after it')
+  })
+
+  // With the buildShare hook the Worker installs (index.ts imports lib/buildShare.ts): the first request to start a key sets a "building
+  // since" marker, and a request that finds it fresh waits with a timer of its own, for a bounded time, for the FINISHED value.
+  const SHARE_KEY = Symbol.for('business-os.build-share.v1')
+  const withBuildShare = async (run) => {
+    load('lib/buildShare.ts', { './planTier': load('lib/planTier.ts') })
+    try { await run() } finally { delete globalThis[SHARE_KEY] }
+  }
+  await check('HANG-2b: a request behind a slow computation takes its finished value and computes nothing', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? gate.then(() => real(options)) : real(options) } })
+    await withBuildShare(async () => {
+      const a = mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const b = mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      release()
+      const [first, second] = await Promise.all([a, b])
+      assert.equal(computes, 1, 'two requests, one computation')
+      assert.deepEqual(second, first)
+      assert.equal(heavy(w.cdb), 3, 'one family pass and two expiry statements for both')
+    })
+  })
+  await check('HANG-2b: behind a computation that never finishes, a request answers after the wait plus its own computation, never hangs', async () => {
+    const w = cacheWorld()
+    const real = modules(w.cdb).familyStockStats.getFamilyStockOverview
+    let computes = 0
+    const mod = w.isolate({ failCompute: (options) => { computes += 1; return computes === 1 ? new Promise(() => {}) : real(options) } })
+    await withBuildShare(async () => {
+      void mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null })
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const started = Date.now()
+      const answered = await Promise.race([
+        mod.overview.loadDashboardStockOverview(w.env, { ...w.ctx, cache: null }),
+        new Promise((resolve) => setTimeout(() => resolve('HELD'), 3500)),
+      ])
+      assert.notEqual(answered, 'HELD', 'request B must not wait on the computation of request A')
+      assert.ok(answered.inventory.total_products > 0)
+      assert.equal(computes, 2, 'B computed for itself')
+      const waited = Date.now() - started
+      assert.ok(waited >= 900, `B gave A the wait first (${waited} ms)`)
+    })
   })
 
   await check('WIRING: compat.ts serves the stock block from the shared overview; undo/redo bumps stock', async () => {

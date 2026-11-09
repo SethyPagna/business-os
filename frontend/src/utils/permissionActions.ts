@@ -79,6 +79,10 @@ const IMPORT_COSTS = [COST_EDIT, COST_VIEW]
 const CONTACTS_BULK: ActionRequirement = { key: 'contacts:bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts' }
 // Add variant creates a product row, so the Worker demands Add as well (routes/products.ts POST /variant).
 const PRODUCTS_ADD: ActionRequirement = { key: 'products:add', tKey: 'perm_act_products_add', label: 'Add product' }
+// A bulk-delete job deletes exactly what DELETE /:id deletes, so the Worker demands Delete as well (routes/products.ts
+// productBulkDeleteTier, create and cancel). Contacts: the same for POST /bulk-delete-jobs and its cancel (routes/contacts.ts).
+const PRODUCTS_DELETE: ActionRequirement = { key: 'products:delete', tKey: 'perm_act_products_delete', label: 'Delete product' }
+const CONTACTS_DELETE: ActionRequirement = { key: 'contacts:delete', tKey: 'perm_act_contacts_delete', label: 'Delete contact' }
 // Opening stock and stock-changing product, inventory and stock-action imports are stock-ins: the Worker demands Adjust / receive at Full.
 const INVENTORY_ADJUST: ActionRequirement = { key: 'inventory:adjust', tKey: 'perm_act_inventory_adjust', label: 'Adjust / receive stock' }
 
@@ -106,7 +110,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'edit', tKey: 'perm_act_products_edit', label: 'Edit product', shortTKey: 'edit', short: 'Edit', review: 'queue' },
     { key: 'delete', tKey: 'perm_act_products_delete', label: 'Delete product', shortTKey: 'delete', short: 'Delete', review: 'queue' },
     // Refused, never queued: the review queue cannot replay a delete of thousands of rows.
-    { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_products_bulk_delete', short: 'Bulk delete', review: 'block' },
+    { key: 'bulk_delete', tKey: 'perm_act_products_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_products_bulk_delete', short: 'Bulk delete', review: 'block', requires: [PRODUCTS_DELETE] },
     { key: 'variant', tKey: 'perm_act_products_variant', label: 'Add variant', shortTKey: 'perm_short_variant', short: 'Variant', review: 'block', requires: [PRODUCTS_ADD] },
     { key: 'image', tKey: 'perm_act_products_image', label: 'Upload product images and edits that change them', shortTKey: 'images', short: 'Images', review: 'queue', controlReview: 'block' },
     { key: 'import', tKey: 'perm_act_products_import', label: 'Import', shortTKey: 'import', short: 'Import', review: 'block', requires: IMPORT_COSTS },
@@ -235,7 +239,7 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // any narrower action switch below.
     { key: 'bulk', tKey: 'perm_act_contacts_bulk', label: 'Select and change multiple contacts', shortTKey: 'perm_short_bulk', short: 'Bulk changes', review: 'block' },
     // POST /bulk-delete-jobs answers 403 for Review.
-    { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_contacts_bulk_delete', short: 'Bulk delete', review: 'block', requires: [CONTACTS_BULK] },
+    { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', shortTKey: 'perm_act_contacts_bulk_delete', short: 'Bulk delete', review: 'block', requires: [CONTACTS_BULK, CONTACTS_DELETE] },
     // POST /merge answers 403 for Review.
     { key: 'merge', tKey: 'perm_act_contacts_merge', label: 'Merge duplicates', shortTKey: 'merge', short: 'Merge', review: 'block', requires: [CONTACTS_BULK] },
     // The Conflicts tab can also persist keep/reopen decisions and rewrite

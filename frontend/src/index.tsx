@@ -71,8 +71,12 @@ function scheduleAfterLoadIdle(task: () => void, idleTimeoutMs: number, fallback
 // decides whether anything actually changed, and nothing here ever reloads the
 // page. Restarting stays exclusively the user's choice through
 // restartIntoLatestApp(), which guards unfinished work.
-function watchForNewAppShell(registration: ServiceWorkerRegistration) {
-  if (typeof window === 'undefined') return
+//
+// Returns a function that points the watcher at a newer registration: a reset that unregisters the worker (an organisation
+// change) is followed by a fresh register() in the same tab, and the listeners below must ask THAT registration, not the dead one.
+function watchForNewAppShell(registration: ServiceWorkerRegistration): (next: ServiceWorkerRegistration) => void {
+  let current = registration
+  if (typeof window === 'undefined') return (next) => { current = next }
 
   let lastCheckedAt = Date.now()
   // The check still waiting on the browser, compared by identity so a check
@@ -92,7 +96,7 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
     const self = Symbol('update-check')
     inFlight = self
     // Called inside the executor so an update() that throws is a rejection.
-    new Promise((resolve) => { resolve(registration.update?.()) })
+    new Promise((resolve) => { resolve(current.update?.()) })
       .catch(() => {})
       .finally(() => { if (inFlight === self) inFlight = null })
   }
@@ -132,6 +136,14 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
   // saw the old sw.js. The socket's reconnect backoff bounds how often this
   // fires, and `inFlight` folds the two emitters of one reconnect into one.
   window.addEventListener('sync:reconnected', () => { check() })
+
+  // The Worker names the frontend build it serves in X-BOS-Build on every /api response (api/serverSignals.ts). A build that is not
+  // the one this tab runs is the signal a deploy happened, and it reaches a till that never reconnects its socket (Durable Objects
+  // keep hibernating sockets across a deploy) within one API round trip. It only asks for the check: the worker's own byte
+  // comparison still decides whether the bar appears, and nothing here reloads. serverSignals fires it once per new build value.
+  window.addEventListener('sync:server-build', () => { check() })
+
+  return (next) => { current = next }
 }
 
 // Asks a specific worker which build it is. Resolves to an empty string if it
@@ -185,14 +197,20 @@ async function announceWaitingAppShell(registration: ServiceWorkerRegistration) 
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
+  let pointWatcherAt: ((next: ServiceWorkerRegistration) => void) | null = null
   const register = async () => {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       registration.update?.().catch(() => {})
       void announceWaitingAppShell(registration).catch(() => {})
-      watchForNewAppShell(registration)
+      if (pointWatcherAt) pointWatcherAt(registration)
+      else pointWatcherAt = watchForNewAppShell(registration)
     } catch (_) {}
   }
+
+  // A reset that unregistered the worker (platform/runtime/clientRuntime.ts) leaves this tab with a dead registration and, until
+  // it is reloaded, no way to hear about the next build. Register again right away; the watcher is re-pointed, not duplicated.
+  window.addEventListener('sync:service-worker-reset', () => { register().catch(() => {}) })
 
   scheduleAfterLoadIdle(
     () => { register().catch(() => {}) },

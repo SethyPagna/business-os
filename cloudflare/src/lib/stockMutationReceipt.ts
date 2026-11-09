@@ -441,7 +441,7 @@ export async function withStockMutationReceipt(
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
   run: (markWritten: () => Promise<void>, atomicMark: StockMutationAtomicMark) => Promise<Response>,
-  options: { requireReceipt?: boolean; budget?: { used: () => number; limit: number; reserve: number } } = {},
+  options: { requireReceipt?: boolean; budget?: { used: () => number; limit: number; reserve: number; callCounting?: boolean } } = {},
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -470,8 +470,10 @@ export async function withStockMutationReceipt(
 
   let wrote = false
   let dispatched = false
+  // callCounting: the budget counts D1 calls, and the batch about to be sent is one call whatever its statement count.
   const admit = (statements: number) => {
-    if (options.budget && options.budget.used() + statements + options.budget.reserve > options.budget.limit) {
+    const charge = options.budget?.callCounting ? 1 : statements
+    if (options.budget && options.budget.used() + charge + options.budget.reserve > options.budget.limit) {
       throw new StockMutationBudgetError()
     }
     dispatched = true

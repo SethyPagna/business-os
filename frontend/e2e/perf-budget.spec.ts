@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { PROJECT_CONTEXT_USE } from '../playwright.config'
 import { ADMIN_ORIGIN, STOREFRONT_KM_LABELS, STOREFRONT_ORIGIN, storefrontCards, storefrontSectionTab } from './support/harness'
-import { E2E_ACCOUNTS, APP_ROOT, USERNAME_FIELD, PASSWORD_FIELD } from './support/session'
+import { E2E_ACCOUNTS, signInForTiming } from './support/session'
 
 /**
  * perf-budget.spec.ts -- how long the first useful screen takes, and how many
@@ -68,10 +68,31 @@ import { E2E_ACCOUNTS, APP_ROOT, USERNAME_FIELD, PASSWORD_FIELD } from './suppor
  * [1606, 674, 723]. The worst sample is unusable as a gate; the best is stable
  * to within a few hundred milliseconds.
  *
- * Counts are reduced the other way (worst attempt), because a count is
- * deterministic and the only way it varies is a request that had not been
- * issued yet when the screen painted -- and undercounting is exactly what a
- * request budget must not do.
+ * Counts are reduced the other way (worst attempt), because the only way a
+ * count varies is a request that had not been issued yet when the screen
+ * painted -- and undercounting is exactly what a request budget must not do.
+ *
+ * THE STOREFRONT COUNT IS NOT FULLY DETERMINISTIC, AND THE SPLIT BELOW IS WHY.
+ * Measured 3 Nov 2026 at b6ebf551d, five cold attempts per project, alone
+ * (laptop otherwise idle for this file): before the Products tab is visible
+ * the totals were desktop 49 51 49 49 53, android 49 49 49 49 51 and
+ * ios-webkit 55 51 54 51 51 (a limit of 50 failed on all three). Comparing
+ * the request lists attempt by attempt, the whole spread comes from two kinds
+ * of request that the page's own code never waits for:
+ *   - LATE ASSETS, resource type font or image: the browser fetches a Noto
+ *     Sans Khmer woff2 subset only when a glyph in that weight/range is first
+ *     laid out (3 in every attempt, up to 6 seen), and the manifest/favicon
+ *     png when its own scheduler gets to it (0 or 1). Whether they were issued
+ *     by the instant the Products tab paints depends on render timing.
+ *   - two one-request races: the same stylesheet fetched twice (desktop, 1 of
+ *     5 attempts) and the /sw.js registration fetch (ios-webkit, 1 of 5).
+ * Everything else was identical in every attempt of a project: 1 document, 39
+ * scripts, 3 stylesheets and 3 API calls on Chromium; 1 document, 40 scripts
+ * (the portal manifest is one of them), 3 stylesheets on WebKit, whose 3 API
+ * calls were issued before the tab painted in 2 of 5 attempts.
+ * So landingRequests counts everything except font and image requests (what
+ * the app's own boot decides, where a new dependency shows up), and the late
+ * assets are bounded on their own by what the build can ever make them load.
  *
  * Re-measure with: npx playwright test perf-budget --workers=3
  * (every number prints as a [perf] line whether the test passes or fails).
@@ -81,6 +102,7 @@ type Budget = {
   landingMs: number
   gridMs: number
   landingRequests: number
+  landingLateAssets: number
   landingApi: number
   loginMs: number
   posMs: number
@@ -89,20 +111,32 @@ type Budget = {
 
 /**
  * Time budgets: the worst BEST-OF-THREE observed under full parallel load,
- * +50%. Request budgets: the worst count observed, +50% (they do not move with
- * load at all, so they are the tight half of this file).
+ * +50%. Request budgets are NOT padded by a percentage; each is the stable
+ * count plus the named races that can add to it (see the header):
+ *
+ *   landingRequests (everything but font/image, API calls included)
+ *     chromium: 46 stable (1 document + 39 scripts + 3 stylesheets + 3 API) + 1 duplicate
+ *       stylesheet + 1 /sw.js = 48. Seen: 46, 47. The /sw.js race was only seen on WebKit.
+ *     ios-webkit: 44 stable (1 document + 40 scripts incl. the manifest + 3 stylesheets)
+ *       + 3 API calls that may already be out + 1 /sw.js + 1 duplicate stylesheet = 49. Seen: 44 to 48.
+ *   landingLateAssets (font + image): the build ships Noto Sans Khmer as 3 weights x 3 unicode-range
+ *     subsets (khmer, latin, latin-ext) = 9 woff2 files, and the page links one 512 px icon: 10 is
+ *     the most a landing can ever ask for. Seen: 3 to 7. A new font family, a new weight or a hero
+ *     image added to the boot path pushes this past 10.
+ *   landingApi: 3 on every project (bootstrap, config, auth/me).
+ *   posRequests: unchanged by the 3 Nov measurement.
  */
 const BUDGETS: Record<string, Budget> = {
   // Landing: the worst best-of-three seen across five full parallel runs was
   // 1668 ms (android), against typical bests of 567-856 ms. 2500 is that worst
   // +50%, and it still fails a landing that has genuinely doubled.
-  'desktop-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 50, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
-  'android-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 50, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
+  'desktop-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 48, landingLateAssets: 10, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
+  'android-chromium': { landingMs: 2_500, gridMs: 2_000, landingRequests: 48, landingLateAssets: 10, landingApi: 3, loginMs: 1_800, posMs: 4_500, posRequests: 116 },
   // ios-webkit's grid budget is the one outlier: the Products tap re-lays out
   // the whole card grid, and WebKit under contention took 4101 ms even as its
   // best of three on one run (1751 ms on the next). Sequentially the same tap
   // costs ~1070 ms. The ceiling is the worst best-of-three, +50%.
-  'ios-webkit': { landingMs: 2_600, gridMs: 6_200, landingRequests: 51, landingApi: 3, loginMs: 3_000, posMs: 6_500, posRequests: 124 },
+  'ios-webkit': { landingMs: 2_600, gridMs: 6_200, landingRequests: 49, landingLateAssets: 10, landingApi: 3, loginMs: 3_000, posMs: 6_500, posRequests: 124 },
 }
 
 /** Three cold attempts per screen; override for a quick local loop. */
@@ -157,25 +191,24 @@ function record(testInfo: TestInfo, label: string, value: number, budget: number
   console.log(`    [perf] ${testInfo.project.name} ${line}`)
 }
 
-function countRequests(page: Page): { all: string[] } {
+/** Resource types the browser itself schedules once the page renders; see "THE STOREFRONT COUNT IS NOT FULLY DETERMINISTIC". */
+const LATE_ASSET_TYPES = new Set(['font', 'image'])
+
+function countRequests(page: Page): { all: string[]; late: string[] } {
   const all: string[] = []
-  page.on('request', (request) => { all.push(request.url()) })
-  return { all }
+  const late: string[] = []
+  page.on('request', (request) => {
+    all.push(request.url())
+    if (LATE_ASSET_TYPES.has(request.resourceType())) late.push(request.url())
+  })
+  return { all, late }
 }
 
+// The sign-in waits for the organization and verifies what it typed before the
+// clock starts (support/session.ts signInForTiming): the typed-too-early
+// version lost a cold attempt on a loaded CI runner and the leg went "flaky".
 async function signInQuickly(page: Page): Promise<number> {
-  await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
-  await expect(page.locator(USERNAME_FIELD)).toBeVisible({ timeout: 30_000 })
-  await page.fill(USERNAME_FIELD, E2E_ACCOUNTS.cashierA.username)
-  await page.fill(PASSWORD_FIELD, 'e2e-password')
-  const started = Date.now()
-  // Explicit, generous action timeout: the default 15 s is a fine ceiling for a
-  // functional spec, but here three browsers are hammering one fixture server on
-  // purpose, and a contended click that times out reports itself as a broken
-  // test rather than as the slow sample it actually is.
-  await page.getByRole('button', { name: /^Login$/ }).click({ timeout: 60_000 })
-  await expect(page.locator(APP_ROOT)).toBeVisible({ timeout: 30_000 })
-  return Date.now() - started
+  return signInForTiming(page, E2E_ACCOUNTS.cashierA)
 }
 
 test.describe('first-screen budgets', () => {
@@ -194,7 +227,8 @@ test.describe('first-screen budgets', () => {
       const productsTab = storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products')
       await expect(productsTab).toBeVisible({ timeout: 30_000 })
       const landingMs = Date.now() - started
-      const landingRequests = traffic.all.length
+      const landingLateAssets = traffic.late.length
+      const landingRequests = traffic.all.length - landingLateAssets
       const landingApi = traffic.all.filter((url) => url.includes('/api/')).length
 
       const gridStarted = Date.now()
@@ -202,20 +236,23 @@ test.describe('first-screen budgets', () => {
       await expect(page.locator(storefrontCards).first()).toBeVisible({ timeout: 30_000 })
       const gridMs = Date.now() - gridStarted
 
-      return { landingMs, gridMs, landingRequests, landingApi }
+      return { landingMs, gridMs, landingRequests, landingLateAssets, landingApi }
     })
 
     const landingMs = runs.best('landingMs')
     const gridMs = runs.best('gridMs')
     const landingRequests = runs.worst('landingRequests')
+    const landingLateAssets = runs.worst('landingLateAssets')
     const landingApi = runs.worst('landingApi')
 
     record(testInfo, 'storefront landing', landingMs, budget.landingMs, 'ms', runs.all.map((s) => s.landingMs))
     record(testInfo, 'storefront grid', gridMs, budget.gridMs, 'ms', runs.all.map((s) => s.gridMs))
-    record(testInfo, 'requests before landing', landingRequests, budget.landingRequests, '', runs.all.map((s) => s.landingRequests))
+    record(testInfo, 'requests before landing (no font/image)', landingRequests, budget.landingRequests, '', runs.all.map((s) => s.landingRequests))
+    record(testInfo, 'late font/image requests before landing', landingLateAssets, budget.landingLateAssets, '', runs.all.map((s) => s.landingLateAssets))
     record(testInfo, 'API calls before landing', landingApi, budget.landingApi, '', runs.all.map((s) => s.landingApi))
 
-    expect(landingRequests, 'requests before the storefront paints').toBeLessThanOrEqual(budget.landingRequests)
+    expect(landingRequests, 'requests before the storefront paints (fonts and images counted apart)').toBeLessThanOrEqual(budget.landingRequests)
+    expect(landingLateAssets, 'font and image requests before the storefront paints').toBeLessThanOrEqual(budget.landingLateAssets)
     expect(landingApi, 'API calls before the storefront paints').toBeLessThanOrEqual(budget.landingApi)
     expect(landingMs, 'storefront landing (best of the cold attempts)').toBeLessThanOrEqual(budget.landingMs)
     expect(gridMs, 'storefront grid after the Products tap (best of the cold attempts)').toBeLessThanOrEqual(budget.gridMs)

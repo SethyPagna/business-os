@@ -21,6 +21,12 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
+import { recordServerSignals } from './serverSignals.ts'
+import { epochEchoCount } from './dataEpoch.ts'
+import {
+  READ_BUDGET_PAUSED_KEY, READ_BUDGET_PAUSED_MESSAGE, isReadBudgetCode, noteReadBudgetShed, observeReadBudgetZone, readBudgetHold,
+  readBudgetSentence, retryAfterSeconds, type ReadBudgetPause,
+} from './readBudgetShed.ts'
 // The disabled-branch redirect and the Khmer refusal restatement load on the refusal path only, so the storefront's
 // catalog closure (which shares this module) does not carry them.
 const BRANCH_REDIRECT_HEADER = 'X-Branch-Redirect'
@@ -40,8 +46,10 @@ type LooseRecord = Record<string, any>
 type ApiRuntimeError = Error & LooseRecord
 type CacheEntry = { data: any; ts: number; scope: ActorReadScope }
 type CacheState = { data: any; stale: boolean }
-type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope }
+type ReadCacheToken = { channel: string; valid: boolean; pending: number; scope: ActorReadScope; echoes: number }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
+// `epoch` is _readEpoch when the read started; see apiFetchOnce's read dedupe.
+type InflightRead = InflightWrite & { epoch: number }
 // RouteFn optionally receives the AbortSignal for the search group it was
 // dispatched under (see `searchGroup` on RouteOptions below and
 // `beginSearchGroup`/`endSearchGroup`). Existing zero-arg closures
@@ -184,8 +192,14 @@ const _successfulServerReads = new WeakSet<Promise<any>>()
 // Only pending work owns tokens; completed query keys leave no generation map.
 const _readCacheTokens = new Set<ReadCacheToken>()
 const _writeInflight = new Map<string, InflightWrite>()
+// Identical concurrent GETs share one network call (apiFetchOnce). A GET that started before a data-change
+// invalidation may predate the change, so it is joined only while _readEpoch (bumped by every such
+// invalidation) is the value it started under.
+const _readInflight = new Map<string, InflightRead>()
+let _readEpoch = 0
 const _apiMismatchCooldown = new Map<string, { error: ApiRuntimeError; until: number }>()
 const CACHE_TTL   = 20_000   // 20 seconds
+const OWNER_PROBE_PATH = '/api/sync/owner'
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const API_MISMATCH_COOLDOWN_MS = 30_000
@@ -353,15 +367,37 @@ async function trackCacheRead<T>(token: ReadCacheToken, work: () => T | Promise<
 }
 
 function cacheReadResult(token: ReadCacheToken, data: any): boolean {
-  if (!token.valid || !isActorReadScopeCurrent(token.scope)) return false
+  // A response that carried a retired data epoch tag came from an isolate still on the old epoch: its body is not stored (api/dataEpoch.ts).
+  if (!token.valid || token.echoes !== epochEchoCount() || !isActorReadScopeCurrent(token.scope)) return false
   cacheSet(token.channel, data)
   return true
 }
 
-export function cacheInvalidate(prefix: string): void {
+/** The value apiFetch's read dedupe and getAppBootstrap's single flight compare: unchanged means no data-change invalidation since a read began. */
+export function currentReadEpoch(): number {
+  return _readEpoch
+}
+
+/**
+ * Drops the cached entries under `prefix` and fences every read in flight from refilling the cache.
+ * By default the invalidation says data changed, so a request already in flight may predate the change
+ * and is no longer shared: the next caller starts a fresh one (and callers after that share it).
+ * `precaution: true` is for an invalidation that does not claim a change (a socket opening, which may
+ * have missed a push while closed): the cache is dropped, but the read in flight stays shareable.
+ */
+export function cacheInvalidate(prefix: string, options: { precaution?: boolean } = {}): void {
   invalidateActorReadChannel(prefix)
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
-  Object.keys(_inflight).forEach(k => { if (k.startsWith(prefix)) clearInflight(k) })
+  for (const k of Object.keys(_inflight)) {
+    if (!k.startsWith(prefix)) continue
+    // invalidateActorReadChannel above moved the scope the read began under; a precaution re-stamps it so the read stays
+    // shareable, but only for the same account: a read begun under another one is retired like any other.
+    const began = _inflightScopes.get(_inflight[k])
+    const now = captureActorReadScope(k)
+    if (options.precaution && began && began.authority === now.authority) _inflightScopes.set(_inflight[k], now)
+    else clearInflight(k)
+  }
+  if (!options.precaution) _readEpoch++
   for (const token of _readCacheTokens) {
     if (token.channel.startsWith(prefix)) {
       token.valid = false
@@ -434,10 +470,120 @@ function getClientMetaHeaders(): Record<string, string> {
   return sharedGetClientMetaHeaders()
 }
 
+// What a body that is not the app's JSON says, by status. The English text is the pack key word for word (km.json has the
+// Khmer; restateForeignBodyError swaps it in by error.messageKey). Only a 5xx says the server is unavailable.
+export const SERVER_ERROR_PAGE_MESSAGE = 'Server unavailable. Please try again.'
+export const FOREIGN_BODY_ERRORS = {
+  tooLarge: { key: 'request_too_large', message: 'The request is too large.' },
+  rateLimited: { key: 'request_rate_limited', message: 'Too many requests. Please wait a moment and try again.' },
+  notFound: { key: 'request_not_found', message: 'Not found.' },
+  unavailable: { key: 'server_error_page', message: SERVER_ERROR_PAGE_MESSAGE },
+  failed: { key: 'request_failed_page', message: 'The request failed. Please try again.' },
+} as const
+
+function foreignBodyError(status: number): { key: string; message: string } {
+  if (status === 413) return FOREIGN_BODY_ERRORS.tooLarge
+  if (status === 429) return FOREIGN_BODY_ERRORS.rateLimited
+  if (status === 404) return FOREIGN_BODY_ERRORS.notFound
+  return status >= 500 ? FOREIGN_BODY_ERRORS.unavailable : FOREIGN_BODY_ERRORS.failed
+}
+
+// The Free plan caps D1 at a daily number of rows read and written. Past it every query fails until 00:00 UTC (07:00 in
+// Cambodia), and the Worker answers 503 with this code. It is not an outage (the server answers and /health is fine), so
+// it never feeds the offline probe or the refresh events; it raises one banner (components/server/D1LimitBanner.tsx),
+// blocks saving with the same sentence, and lifts at the first API request that succeeds. While it holds, one cheap read
+// a minute (visible tab only) checks whether the day has turned over.
+export const D1_DAILY_LIMIT_CODE = 'd1_daily_limit'
+export const D1_DAILY_LIMIT_EVENT = 'server:d1-limit'
+export const D1_DAILY_LIMIT_KEY = 'd1_daily_limit_banner'
+export const D1_DAILY_LIMIT_MESSAGE = "Daily database limit reached — the app is read-only until 07:00. Sales can't be saved."
+const D1_LIMIT_RECHECK_MS = 60_000
+let _d1LimitActive = false
+let _d1LimitRecheck: ReturnType<typeof setTimeout> | null = null
+
+export function isD1DailyLimitActive(): boolean {
+  return _d1LimitActive
+}
+
+// The Worker's refusal becomes the banner sentence, and is not a gateway failure (the server answered).
+function noteD1DailyLimit(error: ApiRuntimeError): void {
+  error.transientGateway = false
+  error.message = D1_DAILY_LIMIT_MESSAGE
+  error.messageKey = D1_DAILY_LIMIT_KEY
+  setD1DailyLimit(true)
+}
+
+function setD1DailyLimit(active: boolean): void {
+  if (active === _d1LimitActive) return
+  _d1LimitActive = active
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(D1_DAILY_LIMIT_EVENT, { detail: { active } }))
+  if (active) scheduleD1LimitRecheck()
+  else if (_d1LimitRecheck) { clearTimeout(_d1LimitRecheck); _d1LimitRecheck = null }
+}
+
+function scheduleD1LimitRecheck(): void {
+  if (_d1LimitRecheck) return
+  _d1LimitRecheck = setTimeout(() => {
+    _d1LimitRecheck = null
+    if (!_d1LimitActive) return
+    const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
+    const probe = visible ? apiFetch('GET', '/api/branches', undefined, 8000).catch(() => {}) : Promise.resolve()
+    void probe.then(() => { if (_d1LimitActive) scheduleD1LimitRecheck() })
+  }, D1_LIMIT_RECHECK_MS)
+}
+
+// Nothing is sent: the database refuses every query until the day turns over.
+async function refuseWriteUnderD1Limit(channel: string): Promise<void> {
+  if (!_d1LimitActive) return
+  logCall(channel, 'd1-limit-write-blocked', 0, false)
+  const error = new Error(D1_DAILY_LIMIT_MESSAGE) as ApiRuntimeError
+  error.status = 503
+  error.code = D1_DAILY_LIMIT_CODE
+  error.messageKey = D1_DAILY_LIMIT_KEY
+  error.outcome = 'not_dispatched'
+  await restateInKhmer(error)
+  throw error
+}
+
+// A governor refusal (api/readBudgetShed.ts) is a 429 the server chose to send before it read anything. The call fails with
+// a typed error that says when the pause ends; it is not an outage, so no probe, no cache clear and no refresh follows.
+function applyReadBudgetPause(error: ApiRuntimeError, pause: ReadBudgetPause, retryAfter: number): void {
+  error.transientGateway = false
+  error.code = pause.code
+  error.retryAfterSeconds = retryAfter
+  error.pausedUntilText = pause.timeText
+  error.messageKey = READ_BUDGET_PAUSED_KEY
+  error.message = readBudgetSentence(READ_BUDGET_PAUSED_MESSAGE, pause.timeText)
+  error.outcome = 'not_dispatched'
+}
+
+function noteReadBudget(error: ApiRuntimeError, retryHeader: string | null, resetsAt: unknown, method: string, path: string): void {
+  const retryAfter = retryAfterSeconds(retryHeader, error.retryAfterSeconds)
+  applyReadBudgetPause(error, noteReadBudgetShed({ code: error.code, method, path, resetsAt, retryAfter }), retryAfter)
+}
+
+function readBudgetHeldError(held: { pause: ReadBudgetPause; retryAfter: number }): ApiRuntimeError {
+  const error = new Error('') as ApiRuntimeError
+  error.status = 429
+  applyReadBudgetPause(error, held.pause, held.retryAfter)
+  return error
+}
+
+async function restateInKhmer(error: ApiRuntimeError): Promise<void> {
+  if (typeof document === 'undefined' || !String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) return
+  const language = await import('./branchRefusalLanguage.ts')
+  await language.restateBranchRefusal(error)
+  await language.restateForeignBodyError(error)
+}
+
 function createApiError(status: number, parsed: LooseRecord | null, text: string): ApiRuntimeError {
-  const error = new Error(parsed?.error || text || `HTTP ${status}`) as ApiRuntimeError
+  // Every route of this app answers a failure as a JSON object, so a body that is not one came from a layer in front
+  // of it (an HTML 503 or 1102 page). Never show that markup to the operator.
+  const foreignBody = !(parsed && typeof parsed === 'object') && !!String(text || '').trim() ? foreignBodyError(status) : null
+  const error = new Error(foreignBody ? foreignBody.message : (parsed?.error || text || `HTTP ${status}`)) as ApiRuntimeError
   error.status = status
-  error.code = parsed?.code || null
+  error.code = foreignBody ? foreignBody.key : (parsed?.code || null)
+  if (foreignBody) error.messageKey = foreignBody.key
   if (parsed?.outcome === 'unknown' || parsed?.outcome === 'not_dispatched') error.outcome = parsed.outcome
   if (['refresh_before_create', 'refresh_before_edit', 'retry_same_request'].includes(parsed?.action)) error.action = parsed?.action
   // A refusal that states a wait (a sign-in lockout) keeps it, so the sign-in
@@ -555,6 +701,11 @@ function createEdgeInterferenceError(path: unknown, status: number): ApiRuntimeE
     + 'This usually clears up after a refresh; if it keeps happening, check any edge/proxy access policy in front of this domain.',
   ) as ApiRuntimeError
   error.status = status
+  // A 404 from the edge says what the operator can act on; the 401/403 sentence above stays.
+  if (status === 404) {
+    error.message = FOREIGN_BODY_ERRORS.notFound.message
+    error.messageKey = FOREIGN_BODY_ERRORS.notFound.key
+  }
   error.code = 'edge_interference'
   error.path = normalizeApiPath(path)
   error.reason = 'edge_interference'
@@ -752,7 +903,7 @@ function getConflictRefreshChannels(error: any, fallbackChannel: string): string
   return [getChannelRefreshKey(fallbackChannel)]
 }
 
-function dispatchGlobalDataRefresh(channels: string[] = RECONNECT_REFRESH_CHANNELS): void {
+export function dispatchGlobalDataRefresh(channels: string[] = RECONNECT_REFRESH_CHANNELS): void {
   if (typeof window === 'undefined') return
   ;(Array.isArray(channels) ? channels : RECONNECT_REFRESH_CHANNELS).forEach((channel) => {
     window.dispatchEvent(new CustomEvent('sync:update', {
@@ -805,18 +956,24 @@ async function tryServerReadWithRetry<T>(
   }
 }
 
+// One failed read is not an outage: Cloudflare answers a single over-limit request (1102) or a busy edge with a 503
+// while the app is up, and marking the server offline made recovery clear every cache and refresh every page, which
+// loaded the server further. A failure now asks the health probe, and only a failed probe marks the server offline.
+// A probe answered in the last HEALTH_PROBE_REUSE_MS is reused, so a burst of failures costs one /health call, and
+// reads that keep failing reach a fresh probe within that window.
+function suspectServerDown(): void {
+  if (_serverOnline) pingServerHealth().catch(() => {})
+}
+
 function noteReadFailure(channel: string, error: any, source: string, startedAt: number): boolean {
-  if (isTransientGatewayError(error?.status)) {
-    setServerHealth(false)
-    dispatchTransientGatewayOutage(channel, error, true)
-    logCall(channel, source || 'transient-gateway', Date.now() - startedAt, false)
-    return true
+  if (error?.code === D1_DAILY_LIMIT_CODE || isReadBudgetCode(error?.code)) {
+    logCall(channel, source || (error.code === D1_DAILY_LIMIT_CODE ? 'd1-daily-limit' : 'read-budget-paused'), Date.now() - startedAt, false)
+    return false
   }
-  if (isConnectivityError(error)) {
-    setServerHealth(false)
-  }
-  logCall(channel, source || 'local-fallback', Date.now() - startedAt, false)
-  return false
+  const gateway = isTransientGatewayError(error?.status)
+  if (gateway || isConnectivityError(error)) suspectServerDown()
+  logCall(channel, source || (gateway ? 'transient-gateway' : 'local-fallback'), Date.now() - startedAt, false)
+  return gateway
 }
 
 function throwIfRequestAborted(signal?: AbortSignal): void {
@@ -872,6 +1029,7 @@ function methodAllowsRequestBody(method: unknown): boolean {
 
 export function __resetApiWriteDedupeForTests(): void {
   _writeInflight.clear()
+  _readInflight.clear()
 }
 
 export function __resetApiHealthForTests(): void {
@@ -880,6 +1038,9 @@ export function __resetApiHealthForTests(): void {
   _healthTimer = null
   _healthInitialTimer = null
   _healthProbeInFlight = null
+  _d1LimitActive = false
+  if (_d1LimitRecheck) clearTimeout(_d1LimitRecheck)
+  _d1LimitRecheck = null
   _lastHealthProbeResult = null
   _lastHealthProbeAt = 0
   _serverOnline = true
@@ -951,6 +1112,16 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       throw mismatchError
     }
   }
+  // The identical GET the Worker just refused for the read budget is not sent again before its Retry-After.
+  if (normalizedMethod === 'GET') {
+    const held = readBudgetHold(normalizedMethod, path)
+    if (held) {
+      logCall(path, 'read-budget-held', 0, false)
+      const heldError = readBudgetHeldError(held)
+      await restateInKhmer(heldError)
+      throw heldError
+    }
+  }
   const dedupeKey = options.skipWriteDedupe ? '' : buildApiRequestDedupeKey(normalizedMethod, path, body)
   if (dedupeKey) {
     const existing = _writeInflight.get(dedupeKey)
@@ -959,6 +1130,22 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
     }
     if (existing) {
       _writeInflight.delete(dedupeKey)
+    }
+  }
+
+  // An identical GET already on the wire is joined, not repeated (sign-in fired /api/auth/bootstrap three times).
+  // Not for recovery probes (each is its own proof), nor a caller with an abort signal (its abort would cancel the others),
+  // nor for the account-proof probe /api/sync/owner: a sale checks it again after dispatch and must not be answered by a
+  // probe that began before the sale was sent.
+  const readDedupeKey = normalizedMethod === 'GET' && readScope && !recoveryRead && !options.signal && path.split('?')[0] !== OWNER_PROBE_PATH
+    ? `${path} ${readScope.authority} ${readScope.revision} ${timeoutMs}` : ''
+  if (readDedupeKey) {
+    const existing = _readInflight.get(readDedupeKey)
+    if (existing && existing.epoch === _readEpoch && Date.now() - existing.startedAt <= Math.max(timeoutMs, INFLIGHT_REUSE_WINDOW_MS)) {
+      const shared = await existing.promise
+      assertActorReadScope(readScope!, false, recoveryRead)
+      // Each caller owns its copy, so one screen sorting or trimming its answer cannot change another's.
+      return markActorReadResult(typeof structuredClone === 'function' ? structuredClone(shared) : shared, readScope!)
     }
   }
 
@@ -1023,6 +1210,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     const requestSequence = ++apiRequestSequence
     const res = await fetch(`${base}${path}`, requestInit)
+    if (path.startsWith('/api/')) observeReadBudgetZone(recordServerSignals(res.headers))
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
     if (readScope) assertActorReadScope(readScope, false, recoveryRead)
@@ -1045,6 +1233,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       }
       if (looksLikeEdgeInterferenceResponse(res.status, parsed, text)) {
         const edgeError = createEdgeInterferenceError(path, res.status)
+        await restateInKhmer(edgeError)
         // Deliberately does NOT call dispatchUnauthorized: an edge/proxy
         // layer answering on the app's behalf is not evidence the user's
         // actual session is invalid, so we shouldn't force a logout for it.
@@ -1064,11 +1253,13 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
         dispatchPasswordChangeRequired(path, requestSequence)
       }
       // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
-      if (apiError && typeof document !== 'undefined' && String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase().startsWith('km')) {
-        await (await import('./branchRefusalLanguage.ts')).restateBranchRefusal(apiError)
-      }
+      if (apiError.code === D1_DAILY_LIMIT_CODE) noteD1DailyLimit(apiError)
+      else if (res.status === 429 && isReadBudgetCode(apiError.code)) noteReadBudget(apiError, res.headers.get('Retry-After'), parsed?.resetsAt, normalizedMethod, path)
+      if (apiError) await restateInKhmer(apiError)
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
+    // Any API answer proves D1 is serving again.
+    if (_d1LimitActive && path.startsWith('/api/')) setD1DailyLimit(false)
     const result = await res.json()
     if (establishesActor) {
       cookieUser = result?.user && typeof result.user === 'object' ? result.user : undefined
@@ -1117,6 +1308,13 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       if (current?.promise === requestPromise) {
         _writeInflight.delete(dedupeKey)
       }
+    }).catch(() => {})
+  }
+
+  if (readDedupeKey) {
+    _readInflight.set(readDedupeKey, { promise: requestPromise, startedAt: Date.now(), epoch: _readEpoch })
+    requestPromise.finally(() => {
+      if (_readInflight.get(readDedupeKey)?.promise === requestPromise) _readInflight.delete(readDedupeKey)
     }).catch(() => {})
   }
 
@@ -1198,8 +1396,9 @@ function setServerHealth(online: boolean): void {
   }
   if (online && typeof window !== 'undefined') {
     dispatchTransientGatewayOutage('server:health', null, false)
-    // Server just came back ??clear all caches so fresh data is fetched
-    cacheClearAll()
+    // Server just came back. The channel events invalidate their caches (the rest expire in 20 s) and reach the
+    // pages as one bulk sync:flush that calls only the pages listening, staggered (api/syncRuntime.ts). Clearing every
+    // cache here made all mounted pages refetch at once.
     dispatchGlobalDataRefresh()
     window.dispatchEvent(new CustomEvent('sync:reconnected'))
   }
@@ -1269,6 +1468,9 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
     }
 
     setServerHealth(result.online)
+    if (!result.online && isTransientGatewayError(result.status)) {
+      dispatchTransientGatewayOutage('server:health', Object.assign(new Error('Server/tunnel is reconnecting. Read-only data will refresh automatically.'), { status: result.status }) as ApiRuntimeError, true)
+    }
     _lastHealthProbeResult = result
     _lastHealthProbeAt = Date.now()
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('server:probe', { detail: { online: result.online, cloudflareAccessRequired: result.cloudflareAccessRequired, runtimeMismatch: result.runtimeMismatch === true } }))
@@ -1356,7 +1558,8 @@ export function ensureHealthLifecycleListeners(): void {
     const changed = connected !== _syncSocketOpen
     _syncSocketOpen = connected
     if (changed && connected) {
-      for (const key of Object.keys(SOCKET_BACKED_LOOKUP_TTL_MS)) cacheInvalidate(key)
+      // A precaution (the socket may have missed a push while closed), not a data change: reads already in flight stay shared.
+      for (const key of Object.keys(SOCKET_BACKED_LOOKUP_TTL_MS)) cacheInvalidate(key, { precaution: true })
     }
     // The socket is the fastest signal we have. It dropping (server outage,
     // redeploy, dead network that 'offline' never reported) or coming back
@@ -1557,25 +1760,35 @@ async function raceServerReadWithLocalFallback<T>(
 }
 
 // ?€?€?€ Smart dispatcher ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-/**
- * route() ??unified read/write dispatcher with:
- *   - Stale-while-revalidate: serve cached data immediately, refresh in background
- *   - Writes fail closed when the live server is unavailable
- *   - Cache tag invalidation: invalidate whole entity groups instantly
- *   - Active health awareness: skips server call if known offline
- */
-export async function route<T = any>(
+async function routeWithRetry<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
+  const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  const owner = isWrite ? null : captureActorWriteIdentity()
+  try {
+    return await routeOnce(channel, serverFn, localFn, options)
+  } catch (error: any) {
+    // Sign-in resets the read scope and the bootstrap may then rewrite the stored grants, so a read begun in that
+    // window dies with stale_read_scope although the account is the same. Re-issue it once under the settled scope.
+    // Never for a write, another account, a locked session or a caller that has gone away.
+    const callerSignal = typeof options === 'boolean' ? undefined : options?.signal
+    if (error?.code !== 'stale_read_scope' || !owner || !isActorWriteIdentityCurrent(owner) || callerSignal?.aborted) throw error
+    return routeOnce(channel, serverFn, localFn, options)
+  }
+}
+
+async function routeOnce<T = any>(
   channel: string,
   serverFn: RouteFn<T>,
   localFn?: RouteFn<T> | null,
   options: boolean | RouteOptions = false,
 ): Promise<T | null> {
   const t0 = Date.now()
-  const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
-  const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
-  const writeIdentity = typeof options === 'boolean' ? undefined : options.writeIdentity
   // An authenticated read must observe the server's permission decision before
   // considering offline data; a fast mirror must not beat a later 401/403.
   // Cookie-authenticated cold starts may not have recreated their JS session
@@ -1607,7 +1820,7 @@ export async function route<T = any>(
     // Invalidation detaches cache ownership, without canceling the original
     // caller or adding automatic retries. Detached background/local work keeps
     // the token alive until its final cache write boundary has passed.
-    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope }
+    const token: ReadCacheToken = { channel, valid: true, pending: 0, scope, echoes: epochEchoCount() }
     return trackCacheRead(token, async () => {
       if (readServerBaseUrl) {
         const bypassCache = typeof options === 'object' && options.bypassCache === true
@@ -1720,10 +1933,35 @@ export async function route<T = any>(
       return null
     })
   }
+  throw new Error('routeOnce is the read path; writes go through route()')
+}
+
+/**
+ * route() ??unified read/write dispatcher with:
+ *   - Stale-while-revalidate: serve cached data immediately, refresh in background
+ *   - Writes fail closed when the live server is unavailable
+ *   - Cache tag invalidation: invalidate whole entity groups instantly
+ *   - Active health awareness: skips server call if known offline
+ */
+export async function route<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
+  const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  // Reads (with the sign-in re-issue) are routeWithRetry; the rest of this function is the write path.
+  if (!isWrite) return routeWithRetry(channel, serverFn, localFn, options)
+  const t0 = Date.now()
+  const syncServerUrl = getSyncServerUrl()
+  const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
+  const writeIdentity = typeof options === 'boolean' ? undefined : options.writeIdentity
+  throwIfRequestAborted(typeof options === 'boolean' ? undefined : options?.signal)
 
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (writeScope) assertActorSessionDispatchAllowed(writeScope)
   if (writeIdentity) assertActorWriteIdentity(writeIdentity)
+  await refuseWriteUnderD1Limit(channel)
   if (!syncServerUrl) {
     const message = 'Server is not connected. Changes are invalid until a live server is configured.'
     logCall(channel, 'local-write-skipped', 0, false)

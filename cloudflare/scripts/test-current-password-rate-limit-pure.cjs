@@ -114,6 +114,7 @@ const usersRoute = load('routes/users.ts', {
 }).default
 
 const authRoute = load('routes/auth.ts', {
+  '../lib/readSwitches': { readDataEpoch: async () => null, epochTag: async () => null }, // 6.0.1048: /bootstrap announces the data epoch
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,

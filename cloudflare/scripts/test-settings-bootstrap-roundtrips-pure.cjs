@@ -109,6 +109,7 @@ const authLib = {
 }
 
 const authRoute = load('routes/auth.ts', {
+  '../lib/readSwitches': { readDataEpoch: async () => { trace.events.push('epoch:start'); return null }, epochTag: async () => null }, // 6.0.1048: /bootstrap announces the data epoch
   '../lib/db': { getDb: () => fakeDb },
   '../lib/auth': authLib,
   '../lib/settingsVisibility': settingsVisibility,
@@ -150,6 +151,8 @@ async function main() {
     const sessionEnd = trace.events.indexOf('session:end')
     assert.ok(settingsStart !== -1 && settingsStart < sessionEnd,
       `settings must be in flight while the session is looked up: ${trace.events.join(' > ')}`)
+    // 6.0.1048 review B1: the data epoch is asked for once there is a session, never before it.
+    assert.ok(trace.events.includes('epoch:start') && trace.events.indexOf('epoch:start') > sessionEnd, `the epoch read starts after the session lookup: ${trace.events.join(' > ')}`)
   })
 
   await check('unauthenticated bootstrap: bare 401 envelope, settings discarded', async () => {
@@ -157,6 +160,7 @@ async function main() {
     const res = await authRoute.fetch(bootstrapRequest(), env, ctx)
     assert.equal(res.status, 401)
     assert.deepEqual(await res.json(), { error: 'Not authenticated', code: 'invalid_session' })
+    assert.equal(trace.events.includes('epoch:start'), false, 'a 401 never starts an epoch read it would not wait for (6.0.1048 review B1)')
   })
 
   await check('bootstrap with no session cookie (login screen) reads no settings at all', async () => {

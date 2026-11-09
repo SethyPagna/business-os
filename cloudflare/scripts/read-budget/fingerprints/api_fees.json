@@ -128,5 +128,71 @@
    "73e791cfec7b",
    "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
   ]
+ ],
+ "fees-export-first-page-by-cursor-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5abe5005b43",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "08aa6bed0685",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "0ba1e3d1fec7",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "aeae3e95c0ff",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
+ ],
+ "fees-export-middle-page-by-cursor-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5abe5005b43",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "08aa6bed0685",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "0ba1e3d1fec7",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "aeae3e95c0ff",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
+ ],
+ "fees-export-middle-page-by-cursor-with-a-branch-source-all": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "8bfb51b6cda0",
+   "SELECT f.*, s.receipt_number AS sale_receipt_number, CASE WHEN trim(COALESCE(f.branch_name,''),char(9,10,11,12"
+  ],
+  [
+   "4a1eefd1618b",
+   "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN EXISTS ( SELECT 1 FROM fees WHERE fees.sale_id = sales.id AND"
+  ],
+  [
+   "713a7d3f0c8f",
+   "SELECT sales.id, sales.receipt_number, sales.created_at, date(sales.created_at, '+7 hours') AS d, sales.branch"
+  ],
+  [
+   "855b37b2ca92",
+   "SELECT fee_type, COUNT(*) as count, COALESCE(SUM(amount_usd), 0) as total_usd, COALESCE(SUM(amount_khr), 0) as"
+  ]
  ]
 }

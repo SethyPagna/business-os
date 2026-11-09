@@ -277,7 +277,7 @@ function transportFixture(mode: 'normal' | 'late-success' | 'late-404' | 'fresh-
   const route = extract(http, 'route', {
     ...actor, getSyncServerUrl: () => 'https://fixture.invalid',
     getReadServerBaseUrl: () => 'https://fixture.invalid', hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '',
-    throwIfRequestAborted() {}, _serverOnline: true, cacheInvalidateWithDerived: (key: string) => invalidations.push(key),
+    throwIfRequestAborted() {}, _serverOnline: true, refuseWriteUnderD1Limit: async () => {}, cacheInvalidateWithDerived: (key: string) => invalidations.push(key),
     setServerHealth() {}, logCall() {}, isConnectivityError: () => false, isWriteConflictError: () => false,
     isInvalidSessionError: () => false, createSyncErrorId: () => 'event', window: { dispatchEvent: (event: unknown) => events.push(event) },
   })
@@ -595,7 +595,7 @@ function createFixture(mode: 'mid-request' | 'before-dispatch', change: () => vo
   const route = extract(http, 'route', {
     ...actor, getSyncServerUrl: () => 'https://fixture.invalid',
     getReadServerBaseUrl: () => 'https://fixture.invalid', hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '',
-    throwIfRequestAborted() {}, _serverOnline: true, cacheInvalidateWithDerived() {}, setServerHealth() {}, logCall() {},
+    throwIfRequestAborted() {}, _serverOnline: true, refuseWriteUnderD1Limit: async () => {}, cacheInvalidateWithDerived() {}, setServerHealth() {}, logCall() {},
     isConnectivityError: () => false, isWriteConflictError: () => false, isInvalidSessionError: () => false,
     createSyncErrorId: () => 'event', window: { dispatchEvent: () => true },
   })

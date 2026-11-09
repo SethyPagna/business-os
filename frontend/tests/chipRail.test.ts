@@ -368,7 +368,6 @@ const MIGRATED: Array<{ file: string; rails: number; stale: RegExp[] }> = [
   { file: 'components/receipt-settings/ReceiptSettings.tsx', rails: 1, stale: [/whitespace-nowrap rounded-lg px-2\.5 py-1\.5 text-xs font-medium transition-colors sm:px-3/] },
   { file: 'components/products/forms/ProductForm.tsx', rails: 1, stale: [/-mb-px min-h-11 shrink-0 border-b-2/] },
   { file: 'components/users/UserProfileModal.tsx', rails: 1, stale: [/ProfileSectionButton/, /\[scrollbar-width:thin\]">\s*<ProfileSection/] },
-  { file: 'components/catalog/CatalogEditorSurface.tsx', rails: 1, stale: [/rounded-full px-3 py-2 text-xs font-semibold transition/] },
   { file: 'components/sales/SaleStatusWorkflow.tsx', rails: 1, stale: [/min-h-11 shrink-0 whitespace-nowrap rounded-lg border border-gray-300/] },
   { file: 'components/dashboard/Dashboard.tsx', rails: 3, stale: [/role="tablist" aria-label=\{t\('dashboard'\) \|\| 'Dashboard'\}>\s*\{MOBILE_SECTIONS/, /inline-flex w-full max-w-full rounded-lg bg-slate-100 p-0\.5/, /inline-flex min-w-max rounded-lg bg-slate-100 p-0\.5/] },
 ]

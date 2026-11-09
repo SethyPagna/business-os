@@ -15,6 +15,13 @@ import { STOREFRONT_ORIGIN, collectPageHealth, expectNoRuntimeErrors, seedStoref
  * leangbeauty.com/login and /pos; a sign-up that posts before the reminder is
  * answered; a native confirm() (Playwright would see a 'dialog' event).
  *
+ * SIGN-UP IS OFF BY DEFAULT (owner, 6 Oct 2026: phone+password sign-ups off, existing accounts still sign in). The Worker
+ * answers GET /api/portal/config with signupEnabled from the owner switch customer_portal_signup_enabled, and the
+ * drawer (CatalogAccountSection) shows the Sign up tab only when that is exactly true; otherwise it shows the
+ * [data-portal-signup-paused] notice. The fixture config carries no signupEnabled, so the default drawer is the
+ * paused one. The test that walks the reminder dialog turns the switch ON for its own page (openSignups below):
+ * the flow still ships behind the switch, so it stays covered while the switch is off in production.
+ *
  * G38_SHOTS_DIR=<dir> also saves 360 px and 1280 px screenshots in EN and KM.
  *
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test storefront-public-host
@@ -30,6 +37,22 @@ async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return
   mkdirSync(SHOTS, { recursive: true })
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: false })
+}
+
+/**
+ * The owner switch customer_portal_signup_enabled, on: the config the page reads says signupEnabled: true. The
+ * storefront takes its config from GET /api/portal/bootstrap (the "config" member); /api/portal/config is the
+ * same object on its own, patched too so a cold read of either route sees the switch on.
+ */
+async function openSignups(page: Page): Promise<void> {
+  await page.route((url) => url.pathname === '/api/portal/bootstrap' || url.pathname === '/api/portal/config', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    const patched = new URL(route.request().url()).pathname === '/api/portal/bootstrap'
+      ? { ...body, config: { ...body.config, signupEnabled: true } }
+      : { ...body, signupEnabled: true }
+    await route.fulfill({ response, json: patched })
+  })
 }
 
 async function expectStorefrontRoot(page: Page): Promise<void> {
@@ -49,7 +72,9 @@ for (const language of ['en', 'km'] as const) {
       await expectStorefrontRoot(page)
       const drawer = page.getByRole('dialog').first()
       await expect(drawer).toBeVisible()
-      await expect(drawer.getByRole('button', { name: COPY[language].signUp })).toBeVisible()
+      // Sign-up is paused (the default): the drawer says so and offers no Sign up tab; sign-in is what is left.
+      await expect(drawer.locator('[data-portal-signup-paused]')).toBeVisible()
+      await expect(drawer.getByRole('button', { name: COPY[language].signUp })).toHaveCount(0)
       await expect(drawer.locator('input[autocomplete="current-password"]')).toBeVisible()
       expect(health.requests.filter((url) => /\/api\/auth\//.test(url)), 'no staff auth call on the shop host').toEqual([])
       expectNoRuntimeErrors(health)
@@ -67,6 +92,7 @@ for (const language of ['en', 'km'] as const) {
       page.on('dialog', (dialog) => { nativeDialogs.push(dialog.message()); void dialog.dismiss() })
       const signups: string[] = []
       page.on('request', (request) => { if (request.url().includes('/api/portal/auth/signup')) signups.push(request.method()) })
+      await openSignups(page)
       await page.goto(`${STOREFRONT_ORIGIN}/login`, { waitUntil: 'load' })
       const drawer = page.getByRole('dialog').first()
       await drawer.getByRole('button', { name: COPY[language].signUp }).click()
@@ -94,6 +120,7 @@ test.describe('G38 P0 screenshots', () => {
       test(`${language} ${width}px`, async ({ page, context }, testInfo) => {
         test.skip(testInfo.project.name !== 'desktop-chromium', 'screenshots once, on desktop Chromium at explicit widths')
         await seedStorefrontLanguage(context, STOREFRONT_ORIGIN, language)
+        await openSignups(page)
         await page.setViewportSize({ width, height: 800 })
         const tag = `${language}-${width}`
         await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })

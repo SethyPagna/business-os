@@ -14,7 +14,7 @@ function getEntries(ctx) {
     ['auth/me', '/api/auth/me'], ['auth/bootstrap', '/api/auth/bootstrap'], ['auth/verification-capabilities', '/api/auth/verification-capabilities'],
     ['auth/otp/status/:id', '/api/auth/otp/status/x'], ['auth/devices/sessions', '/api/auth/devices/sessions'], ['auth/devices/pending', '/api/auth/devices/pending'], ['auth/devices', '/api/auth/devices'],
     ['organizations/bootstrap', '/api/organizations/bootstrap'], ['organizations/search', '/api/organizations/search?q=budget'], ['organizations/current', '/api/organizations/current'],
-    ['system/bootstrap', '/api/system/bootstrap'], ['system/config', '/api/system/config'], ['runtime/version', '/api/runtime/version'], ['runtime/cron-health', '/api/runtime/cron-health'],
+    ['system/bootstrap', '/api/system/bootstrap'], ['system/config', '/api/system/config'], ['runtime/version', '/api/runtime/version'], ['runtime/cron-health', '/api/runtime/cron-health'], ['runtime/read-switches', '/api/runtime/read-switches'],
     ['runtime/catalog-integrity (catalog stock diagnostics)', '/api/runtime/catalog-integrity'], ['sync/owner', '/api/sync/owner'],
     // settings
     ['settings', '/api/settings'], ['settings/meta', '/api/settings/meta'], ['settings/payment-methods/unregistered', '/api/settings/payment-methods/unregistered'],
@@ -112,6 +112,11 @@ function getEntries(ctx) {
     ['fees list with sale delivery rows, month + branch (source=all)', `/api/fees?page=1&pageSize=20&source=all&${R(M, T)}&branch_id=1`],
     ['fees/report with sale delivery, all time + branch (include=sales)', '/api/fees/report?branchId=1&include=sales'],
     ['fees/report with sale delivery, month + branch (include=sales)', `/api/fees/report?${R(M, T)}&branchId=1&include=sales`],
+    // E1-F: the Expenses export by cursor (read switch expense_reads, measured ON). The first page also reads the totals; a middle page resumes after the
+    // 2,000th expense and the middle courier sale of the list ({{feeCursor}}), so it must read about its own rows, not the 2,000 before them.
+    ['fees export first page by cursor (source=all)', '/api/fees?source=all&limit=500&cursor=start'],
+    ['fees export middle page by cursor (source=all)', '/api/fees?source=all&limit=500&cursor={{feeCursor}}'],
+    ['fees export middle page by cursor with a branch (source=all)', '/api/fees?source=all&limit=500&branch_id=1&cursor={{feeCursor}}'],
     ['shifts/policy', '/api/shifts/policy'], ['shifts/current', '/api/shifts/current'], ['shifts list', '/api/shifts?page=1&pageSize=20'], ['shifts/:id/history', '/api/shifts/1/history'],
     // branches / promotions / users
     ['branches', '/api/branches'], ['branches/summary', '/api/branches/summary'], ['branches/stock-integrity', '/api/branches/stock-integrity'], ['branches/:id/stock', '/api/branches/1/stock?page=1&pageSize=50'],

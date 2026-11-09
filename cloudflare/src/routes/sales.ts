@@ -29,6 +29,7 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { cacheIdentity } from '../lib/cache'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
@@ -2551,9 +2552,21 @@ app.patch('/:id/status', async (c) => {
   // Pre-flight availability for anything the plan TAKES (plain read; the
   // CHECK(quantity >= 0) constraints below remain the real race guard,
   // same validate-then-batch shape as POST / -- see lib/db.ts's batch()).
+  //
+  // ONE read covers every (product, branch) pair the plan takes, not one per
+  // line: un-cancelling a 36+ line sale used to pass the Free plan's 50 D1
+  // calls. The loop below is unchanged: plan order, per-deduction comparison
+  // against the same current quantity, first short line named, same text.
+  const deductionPairs = new Map(plan.deductions.map((entry) => [`${entry.product_id}:${entry.branch_id}`, [entry.product_id, entry.branch_id]]))
+  const deductionStock = deductionPairs.size
+    ? await db.prepare(`SELECT bs.product_id AS product_id, bs.branch_id AS branch_id, bs.quantity AS quantity
+        FROM json_each(@pairs) j
+        JOIN branch_stock bs ON bs.product_id = json_extract(j.value, '$[0]') AND bs.branch_id = json_extract(j.value, '$[1]')`)
+      .all<{ product_id: number; branch_id: number; quantity: number }>({ pairs: JSON.stringify([...deductionPairs.values()]) })
+    : []
+  const stockByPair = new Map(deductionStock.map((row) => [`${row.product_id}:${row.branch_id}`, row.quantity]))
   for (const deduction of plan.deductions) {
-    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([deduction.product_id, deduction.branch_id])
-    const available = stockRow?.quantity || 0
+    const available = stockByPair.get(`${deduction.product_id}:${deduction.branch_id}`) || 0
     if (deduction.quantity > available) {
       const name = items.find((item) => item.product_id === deduction.product_id)?.product_name || `product #${deduction.product_id}`
       return c.json({ error: `Insufficient stock for ${name}: requested ${deduction.quantity}, available ${available}` }, 409)
@@ -6261,7 +6274,7 @@ app.get('/', async (c) => {
         net_total_khr: stripMoney(sale,'total_khr').subtract(refundKhr).toNumber(4),
       }
     }))
-  })
+  }, cacheIdentity(c))
 
   return c.json(payload.map(row=>projectOperationalSaleCosts(row as Record<string,unknown>,c.get('user'))))
 })
@@ -6361,7 +6374,7 @@ app.get('/stats', async (c) => {
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }
-  })
+  }, cacheIdentity(c))
   return c.json(payload)
 })
 
@@ -6526,7 +6539,7 @@ app.get('/stats-strip', async (c) => {
       by_status: byStatus || [],
       returns: { count: before.returns.length, refund_usd: refund.toNumber() },
     }
-  })
+  }, cacheIdentity(c))
   return c.json({...payload,totals:gateSalesReportMoney(payload.totals as unknown as Record<string,unknown>,...reportMoneyAccess(c.get('user')))})
 })
 

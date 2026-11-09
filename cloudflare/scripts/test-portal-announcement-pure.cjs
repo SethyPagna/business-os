@@ -224,7 +224,8 @@ check('settings route: the validation runs before anything is stored and a refus
 
 check('cache: the public body is keyed by the settings version, so a save shows on the next fetch and nothing is keyed by time', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
-  assert.match(source, /body: \['portal-body-v2', deploy, version\('products'\), version\('settings'\), version\('promotions'\)\]/, 'the body key carries the settings version')
+  assert.match(source, /const shared = \[deploymentId\(c\.env\), epoch, version\('products'\), version\('settings'\)\]/, 'the shared key parts carry the settings version')
+  assert.match(source, /body: \['portal-body-v2', \.\.\.shared, version\('promotions'\)\]/, 'the body key is built on the shared parts')
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
   const save = settingsSource.slice(settingsSource.indexOf('validatePortalAnnouncementWrite('))
   assert.match(save, /waitUntil\(bumpVersion\(c\.env, 'settings'\)\)/, 'a save bumps the settings version that keys the body')

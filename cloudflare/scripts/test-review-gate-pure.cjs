@@ -274,6 +274,9 @@ const feesRoute = loadReal('routes/fees.ts', {
   // Real and pure: the expense DELETE now admits a stated version (expected_updated_at) through the same
   // helpers as the edit, so a partial stub here would only test the stub.
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
+  // E1-F: the report and the list consult the read switch `expense_reads` (off here: the old statements), and read their caps from the plan table.
+  '../lib/expenseReads': loadReal('lib/expenseReads.ts', { './readSwitches': { readSwitch: async () => false } }),
+  '../lib/planTier': loadReal('lib/planTier.ts'),
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {

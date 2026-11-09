@@ -1,4 +1,5 @@
 import { STORAGE_KEYS } from '../constants.ts'
+import { WORK_DRAFT_SCHEMA, announceNewerRecord, inspectWorkDraftRecord } from './persistedRecordSchema.ts'
 
 // F3 (Part 424, slice 1): the ONE draft store behind every in-progress
 // flow -- extracted from ProductForm's Part-388 "Canva-level" persistence
@@ -14,7 +15,11 @@ import { STORAGE_KEYS } from '../constants.ts'
 //   - restore drops a draft older than the server's own updated_at when
 //     one is given -- never resurrect stale edits over newer server data;
 //   - storage being full/blocked/unavailable is ALWAYS non-fatal: the
-//     flow still works, it just doesn't survive a reload.
+//     flow still works, it just doesn't survive a reload;
+//   - the envelope carries the schema of the build that wrote it. A draft
+//     from a NEWER build (a rollback, a second tab on the new build) is not
+//     read under this build's rules and is neither overwritten nor deleted
+//     by it (utils/persistedRecordSchema.ts); the person is told once.
 
 export type WorkDraft<T> = { at: number; data: T }
 
@@ -26,8 +31,19 @@ type PendingWorkDraft = {
 const pendingWorkDrafts = new Map<string, PendingWorkDraft>()
 let lifecycleFlushInstalled = false
 
+function storedDraftIsNewer(key: string): boolean {
+  try {
+    if (inspectWorkDraftRecord(localStorage.getItem(key)) !== 'newer') return false
+    announceNewerRecord('draft')
+    return true
+  } catch { return false }
+}
+
 function persistWorkDraft<T>(key: string, data: T): void {
-  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data })) } catch { /* full/blocked -- non-fatal */ }
+  try {
+    if (storedDraftIsNewer(key)) return
+    localStorage.setItem(key, JSON.stringify({ schema: WORK_DRAFT_SCHEMA, at: Date.now(), data }))
+  } catch { /* full/blocked -- non-fatal */ }
 }
 
 function installLifecycleFlush(): void {
@@ -101,6 +117,10 @@ export function readWorkDraft<T>(key: string, options?: { notOlderThanMs?: numbe
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return null
+    if (inspectWorkDraftRecord(raw) === 'newer') {
+      announceNewerRecord('draft')
+      return null
+    }
     const parsed = JSON.parse(raw) as { at?: number; data?: T; form?: T }
     // `form` is Part 388's original field name for the product draft --
     // accepted on read so existing saved drafts survive this extraction.
@@ -140,7 +160,10 @@ export function clearWorkDraft(key: string): void {
   const pending = pendingWorkDrafts.get(key)
   if (pending) window.clearTimeout(pending.timer)
   pendingWorkDrafts.delete(key)
-  try { localStorage.removeItem(key) } catch { /* fine */ }
+  try {
+    if (storedDraftIsNewer(key)) return
+    localStorage.removeItem(key)
+  } catch { /* fine */ }
 }
 
 /**

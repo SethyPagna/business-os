@@ -3,6 +3,8 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { bumpVersion, getVersionsWithFallback } from '../lib/cache'
+import { deploymentId, isUnsafeVersion } from '../lib/cache'
+import { readDataEpoch } from '../lib/readSwitches'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -1317,6 +1319,13 @@ function writePortalEdge(ctx: { waitUntil(promise: Promise<unknown>): void }, ke
   ctx.waitUntil(cache.put(key, response).catch((error) => console.error('[portal-cache] edge write failed', key.url, error)))
 }
 
+// A finished storefront result goes to the edge cache and to the short memo the requests waiting on its builder look at (lib/buildShare.ts).
+// Both are written exactly where nothing is stored while maintenance is held, and the memo never outlives the edge entry.
+function storePortalResult(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, key: Request, value: unknown, ttlSeconds: number): void {
+  writePortalEdge(c.executionCtx, key, value, ttlSeconds)
+  buildShareHook()?.remember(c.env, key.url, value, ttlSeconds * 1000)
+}
+
 async function sha256Hex(text: string, bytes = 32): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
   return Array.from(digest.slice(0, bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -1357,10 +1366,12 @@ async function portalCacheVersion(c: { env: Env }, scope: { stock: boolean; prom
   const namespaces = ['products', 'settings', ...(scope.stock ? ['stock'] : []), ...(scope.promotions ? ['promotions'] : [])]
   const tokens = await getVersionsWithFallback(c.env, namespaces, { memoMs: PORTAL_VERSION_MEMO_MS })
   const version = (namespace: string) => tokens[namespaces.indexOf(namespace)] ?? '-'
-  const deploy = c.env.CF_VERSION_METADATA?.id || 'dev'
+  const epoch = await readDataEpoch(c.env)
+  if (!epoch || tokens.some(isUnsafeVersion)) throw new Error('portal cache key unavailable') // readPortalCacheVersion then serves uncached
+  const shared = [deploymentId(c.env), epoch, version('products'), version('settings')]
   return {
-    body: ['portal-body-v2', deploy, version('products'), version('settings'), version('promotions')].join(':'),
-    stock: ['portal-stock-v1', deploy, version('products'), version('settings'), version('stock')].join(':'),
+    body: ['portal-body-v2', ...shared, version('promotions')].join(':'),
+    stock: ['portal-stock-v1', ...shared, version('stock')].join(':'),
   }
 }
 
@@ -1412,9 +1423,9 @@ async function withLivePortalStock(c: PortalContext, rawItems: unknown, versions
     ? cached
     : !key
       ? await loadPortalStockStates(c.env, ids, idList)
-      : await coalescePortalBuild(key.url, async () => {
+      : await coalescePortalBuild(c, key.url, async () => {
         const loaded = await loadPortalStockStates(c.env, ids, idList)
-        writePortalEdge(c.executionCtx, key, loaded, PORTAL_STOCK_TTL_SECONDS)
+        storePortalResult(c, key, loaded, PORTAL_STOCK_TTL_SECONDS)
         return loaded
       })
   // Stock status switched off: the badge data is not published at all.
@@ -1426,20 +1437,35 @@ function portalQueryRejection(c: PortalContext, reason: string): Response {
   return c.json({ error: 'This storefront request is not supported.', code: 'portal_bad_query', reason }, 400, { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL })
 }
 
-// One rebuild per key per isolate: concurrent misses for the same entry share the first one's work.
-const portalBuildsInFlight = new Map<string, Promise<unknown>>()
+// One rebuild per key. Inside a REQUEST the callers share the first one's work (a promise of that request, so awaiting it is safe). Across
+// requests no promise is shared: a promise belongs to the request that created it (workerd), and awaiting another request's can hang for
+// good once that request has answered or was cancelled; this used to be an isolate-wide map of pending promises, so one such request
+// stranded its key for every later visitor (the 6.0.1048 review, B1). Instead the first request sets a "building since" marker
+// (lib/buildShare.ts) and a request that finds it fresh waits with a timer of its own, for a bounded time, for the FINISHED body that
+// storePortalResult leaves in a short memo; if it does not appear it builds for itself. `request` is the Hono Context, which lives for
+// exactly one request.
+const portalBuildsInRequest = new WeakMap<object, Map<string, Promise<unknown>>>()
 
-function coalescePortalBuild<T>(key: string, build: () => Promise<T>): Promise<T> {
-  const running = portalBuildsInFlight.get(key)
+// lib/buildShare.ts installs this hook (index.ts imports it); a test that loads this module alone has none and shares nothing across
+// requests. This file's imports are stubbed by hand in many tests, so the hook is read, not imported.
+type BuildShareHook = {
+  run<T>(env: Env, key: string, build: () => Promise<T>, peek?: () => T | undefined): Promise<T>
+  remember(env: Env, key: string, value: unknown, lifetimeMs?: number): void
+}
+const buildShareHook = (): BuildShareHook | undefined => (globalThis as unknown as Record<symbol, BuildShareHook | undefined>)[Symbol.for('business-os.build-share.v1')]
+
+export function coalescePortalBuild<T>(request: { env: Env }, key: string, build: () => Promise<T>): Promise<T> {
+  let builds = portalBuildsInRequest.get(request)
+  if (!builds) portalBuildsInRequest.set(request, builds = new Map())
+  const running = builds.get(key)
   if (running) return running as Promise<T>
-  const started = build()
-  portalBuildsInFlight.set(key, started)
-  const forget = () => { if (portalBuildsInFlight.get(key) === started) portalBuildsInFlight.delete(key) }
+  const hook = buildShareHook()
+  const started = hook ? hook.run(request.env, key, build) : build()
+  builds.set(key, started)
+  const forget = () => { if (builds.get(key) === started) builds.delete(key) }
   started.then(forget, forget)
   return started
 }
-
-let portalColdSearches = 0
 
 // A cold search is the one storefront request whose cost an anonymous visitor
 // picks (every query string is its own entry), so it is limited per network
@@ -1456,6 +1482,29 @@ async function portalSearchRateLimited(c: PortalContext): Promise<boolean> {
     return false
   }
 }
+
+// The per-isolate cap on cold searches (PORTAL_COLD_SEARCH_MAX_CONCURRENT). A slot belongs to a request that runs the expensive build ITSELF:
+// the first builder of an entry, a request with no entry key, or a waiter whose builder died or timed out and which now builds for itself. A
+// request that waits for another request's finished body does the cheap thing and takes none (it used to, and five identical searches behind
+// one slow builder answered 503 for the last two).
+// A slot is released in a `finally`, which a request whose context ends mid-build never reaches (the 6.0.1169 review, B1: four such searches
+// left every later search of the isolate answering portal_search_busy for good). So a slot carries its start time and one older than
+// buildShareStaleMs counts as free: the same age at which a waiter stops trusting that builder's marker (lib/buildShare.ts). A lost
+// `finally` costs at most that long; a build that really runs longer than it simply stops being counted.
+type PortalColdSlot = { at: number }
+const portalColdSlots = new Set<PortalColdSlot>()
+
+function takePortalColdSlot(env: Env): PortalColdSlot | null {
+  const now = Date.now()
+  const lostAfterMs = getPlanLimits(env).buildShareStaleMs
+  for (const slot of portalColdSlots) if (now - slot.at >= lostAfterMs) portalColdSlots.delete(slot)
+  if (portalColdSlots.size >= PORTAL_COLD_SEARCH_MAX_CONCURRENT) return null
+  const slot: PortalColdSlot = { at: now }
+  portalColdSlots.add(slot)
+  return slot
+}
+
+class PortalSearchBusy extends Error {}
 
 // A restore deletes and reinserts every table over minutes; nothing read
 // while it holds maintenance may be stored. Absent table = no maintenance (the
@@ -1477,7 +1526,7 @@ async function buildPortalBody(
   const [produced, maintenanceHeld] = await Promise.all([produce(params), key ? portalMaintenanceHeld(c.env) : true])
   const leaked = findForbiddenPublicKey(produced.value)
   if (leaked) throw new Error(`Refusing to publish a private storefront field: ${leaked}`)
-  if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, produced.value, produced.ttl)
+  if (key && !maintenanceHeld) storePortalResult(c, key, produced.value, produced.ttl)
   return produced.value
 }
 
@@ -1505,23 +1554,27 @@ async function servePortalPublic(
   const key = versions && portalEdgeKey(c.env.BUSINESS_OS_PUBLIC_URL, 'body', route, canonical.search, versions.body)
   let body = key ? await readPortalEdge<Record<string, unknown>>(key) : null
   if (!body) {
-    const cold = route === 'search' && !(key && portalBuildsInFlight.has(key.url))
-    if (cold) {
-      if (await portalSearchRateLimited(c)) {
-        return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
-          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '60' })
+    const cold = route === 'search'
+    if (cold && await portalSearchRateLimited(c)) {
+      return c.json({ error: 'Too many searches. Try again in a minute.', code: 'portal_search_rate_limited' }, 429,
+        { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '60' })
+    }
+    // The slot is taken where the work starts, so only the request that does it holds one (see takePortalColdSlot).
+    const build = async () => {
+      const slot = cold ? takePortalColdSlot(c.env) : null
+      if (cold && !slot) throw new PortalSearchBusy()
+      try {
+        return await buildPortalBody(c, key, canonical.params, produce)
+      } finally {
+        if (slot) portalColdSlots.delete(slot)
       }
-      if (portalColdSearches >= PORTAL_COLD_SEARCH_MAX_CONCURRENT) {
-        return c.json({ error: 'The store is busy. Try again in a moment.', code: 'portal_search_busy' }, 503,
-          { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '2' })
-      }
-      portalColdSearches += 1
     }
     try {
-      const build = () => buildPortalBody(c, key, canonical.params, produce)
-      body = key ? await coalescePortalBuild(key.url, build) : await build()
-    } finally {
-      if (cold) portalColdSearches -= 1
+      body = key ? await coalescePortalBuild(c, key.url, build) : await build()
+    } catch (error) {
+      if (!(error instanceof PortalSearchBusy)) throw error
+      return c.json({ error: 'The store is busy. Try again in a moment.', code: 'portal_search_busy' }, 503,
+        { 'Cache-Control': PORTAL_PRIVATE_CACHE_CONTROL, 'Retry-After': '2' })
     }
   }
   const value = overlay ? await overlay(body, versions) : body
@@ -1703,10 +1756,10 @@ app.get('/ai/status', async (c) => {
   if (cached) return c.json(cached)
   const build = async () => {
     const [status, maintenanceHeld] = await Promise.all([buildPortalAiStatus(c.env), key ? portalMaintenanceHeld(c.env) : true])
-    if (key && !maintenanceHeld) writePortalEdge(c.executionCtx, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
+    if (key && !maintenanceHeld) storePortalResult(c, key, status, PORTAL_AI_STATUS_TTL_SECONDS)
     return status
   }
-  return c.json(key ? await coalescePortalBuild(key.url, build) : await build())
+  return c.json(key ? await coalescePortalBuild(c, key.url, build) : await build())
 })
 
 // Sanitizes the free-form shopper profile object from the request body.
