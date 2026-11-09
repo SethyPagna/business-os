@@ -32,6 +32,8 @@ export type InventoryListPlan = {
   access: InventoryCheckAccess
   branchId: number | null
   checkState: ListCheckState | null
+  /** sortBy=checked (a check state is chosen): the page is cut from the check-state ids in the order of the check's date, newest first unless ascending is asked. */
+  checkedOrder: { direction: 'asc' | 'desc' } | null
   /** The query Products would send for this scope. */
   productsQuery: Record<string, string>
   /** A barcode-blind viewer's search text that looks like a whole code: the route looks it up exactly, and only an exact hit is searched by id. */
@@ -56,7 +58,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   const { sortBy: rawSortBy, checkState: rawCheckState, ids: rawIds, ...rest } = raw
   const validated = validateInventoryCheckQuery(rest, access, true)
   const sortBy = rawSortBy?.trim() || 'created'
-  if (sortBy !== 'created' && sortBy !== 'name') invalid('sortBy')
+  if (sortBy !== 'created' && sortBy !== 'name' && sortBy !== 'checked') invalid('sortBy')
   const direction = validated.sortDirection ?? (sortBy === 'name' ? 'asc' : 'desc')
   const branchId = validated.branchId && validated.branchId.toLowerCase() !== 'all' ? integer(validated.branchId, 0, Number.MAX_SAFE_INTEGER, 'branchId') : null
   const checkWord = rawCheckState?.trim() || ''
@@ -65,7 +67,9 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (checkState && branchId === null) invalid('branchId')
   // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
-  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: `${sortBy}_${direction}`, include: LIST_INCLUDE }
+  // The date of the check orders only a list of checked products: with no check state chosen there is no such list, so the choice is refused rather than half applied.
+  if (sortBy === 'checked' && !(checkState === 'ok' || checkState === 'issue' || checkState === 'pending')) invalid('sortBy')
+  const productsQuery: Record<string, string> = { searchMode: 'smart', sort: sortBy === 'checked' ? 'name_asc' : `${sortBy}_${direction}`, include: LIST_INCLUDE }
   const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, 100, 'pageSize')
   productsQuery.page = String(page); productsQuery.pageSize = String(pageSize)
   if (branchId !== null) productsQuery.branchId = String(branchId)
@@ -87,7 +91,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)
   }
   const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState)
-  return { access, branchId, checkState, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
+  return { access, branchId, checkState, checkedOrder: sortBy === 'checked' ? { direction: direction === 'asc' ? 'asc' : 'desc' } : null, productsQuery, codeLookup, filtered, wantSummary: validated.summary !== '0' }
 }
 
 /** The request the shared cache key is built from: the canonical Products URL. Host and scheme never count; only the path and the sorted parameters do. */
@@ -104,14 +108,14 @@ export type CheckStateSets = { ok: number[]; issue: number[]; pending: number[];
 // The latest done/issue item of each product in the branch scope, inside the viewer's organization (items of other organizations and items whose branch differs
 // from their session's are never read): the same scope the ic_simple list used.
 const LATEST_ITEMS_SQL = `WITH latest AS (
-    SELECT i.product_id AS product_id, i.state AS state,
+    SELECT i.product_id AS product_id, i.state AS state, i.updated_at AS updated_at,
            ROW_NUMBER() OVER (PARTITION BY i.product_id ORDER BY i.updated_at DESC, i.session_id DESC) AS rn
     FROM inventory_check_sessions s JOIN inventory_check_items i ON i.session_id = s.id AND i.branch_id = s.branch_id
     WHERE s.organization_id IS @organization AND s.branch_id = @branchId AND i.state IN ('done', 'issue'))
-  SELECT product_id, state FROM latest WHERE rn = 1 LIMIT @limit`
+  SELECT product_id, state FROM latest WHERE rn = 1 ORDER BY updated_at DESC, product_id LIMIT @limit`
 // Products with a count line still waiting for approval at the branch (the same line rule the row tag uses).
-const PENDING_ITEMS_SQL = `SELECT DISTINCT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
-  WHERE a.organization_id IS @organization AND a.branch_id = @branchId AND ${waitingLineSql('a', 'i')} LIMIT @limit`
+const PENDING_ITEMS_SQL = `SELECT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
+  WHERE a.organization_id IS @organization AND a.branch_id = @branchId AND ${waitingLineSql('a', 'i')} GROUP BY i.product_id ORDER BY MAX(a.submitted_at) DESC, i.product_id LIMIT @limit`
 
 /** The inventory_checks cache version: every Inventory Check writer moves it (awaited), so the sets below and every restricted list key on it. */
 export const inventoryChecksVersion = (env: Env): Promise<string> => getVersionWithFallback(env, 'inventory_checks')

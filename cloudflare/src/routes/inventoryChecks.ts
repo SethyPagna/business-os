@@ -95,11 +95,28 @@ app.get('/list', async c => {
   let sets: CheckStateSets | null = null
   let setsVersion = ''
   if (plan.branchId !== null && (plan.checkState || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
-  const restriction = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  let restriction = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  // sortBy=checked: the check-state ids already come newest check first; this page is the slice of them, read by id, and put back in that order.
+  let checkedPage: { ids: number[]; total: number; page: number; pageSize: number } | null = null
+  if (plan.checkedOrder && plan.checkState && sets && !sets.tooLarge) {
+    const all = plan.checkState === 'ok' ? sets.ok : plan.checkState === 'issue' ? sets.issue : sets.pending
+    const ordered = plan.checkedOrder.direction === 'asc' ? [...all].reverse() : all
+    const page = Number(productsQuery.page), pageSize = Number(productsQuery.pageSize)
+    const ids = ordered.slice((page - 1) * pageSize, page * pageSize)
+    checkedPage = { ids, total: ordered.length, page, pageSize }
+    productsQuery.ids = ids.length ? ids.join(',') : '0'; productsQuery.page = '1'; productsQuery.pageSize = String(Math.max(1, ids.length))
+    restriction = {}
+  }
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   const payload = await readProductSearchList(c, productsQuery, { include, keyRequest: canonicalProductsRequest(productsQuery), ...restriction,
     // Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set.
-    ...(plan.checkState ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
+    ...(plan.checkState && !checkedPage ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
+  if (checkedPage) {
+    const place = new Map(checkedPage.ids.map((id, index) => [id, index]))
+    const body = payload as unknown as { items: Array<{ id: number }>; total?: number; page?: number; pageSize?: number; totalPages?: number }
+    body.items = [...body.items].sort((a, b) => (place.get(Number(a.id)) ?? 0) - (place.get(Number(b.id)) ?? 0))
+    body.total = checkedPage.total; body.page = checkedPage.page; body.pageSize = checkedPage.pageSize; body.totalPages = Math.max(1, Math.ceil(checkedPage.total / checkedPage.pageSize))
+  }
   const lotCounts = await lotCountsOn(c)
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
@@ -125,9 +142,10 @@ app.get('/overlay', async c => {
   // A page whose rows come from Products' store has no /list answer, so the overlay carries the strip's counts and the Fix stock capability, computed as /list computes them (summary=0 leaves the counts out, as on /list).
   const fixStock = access.fields.stock && await fixStockOn(c)
   const wantSummary = c.req.query('summary') !== '0'
+  const lotCounts = await lotCountsOn(c)
   const wantLots = c.req.query('lots') === '1' && access.fields.received
   const [items, withLots] = await Promise.all([
-    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock }),
+    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock, lotLines: lotCounts }),
     // Received dates for the same ids, for a screen whose shared store does not hold them: the same reader as the list (a first read, not a second).
     wantLots ? attachLotRows(c.env, user, new Set(['lots']), { items: ids.map((id) => ({ id })) }, true) : Promise.resolve(null),
   ])
@@ -135,7 +153,7 @@ app.get('/overlay', async c => {
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
   const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
-  const capabilities = capabilitiesOf(user, fixStock, await lotCountsOn(c), access.fields.stock)
+  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(capabilities ? { capabilities } : {}) })
 })

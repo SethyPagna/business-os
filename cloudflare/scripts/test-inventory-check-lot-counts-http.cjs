@@ -274,6 +274,24 @@ async function lotMain() {
     assert.equal(bad.status, 400)
   })
 
+  globalThis.caches = { default: { match: async () => undefined, put: async () => {}, delete: async () => false } }
+  const kv = (() => { const m = new Map(); return { get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) }, delete: async k => { m.delete(k) }, list: async () => ({ keys: [] }) } })()
+  await check('G4 + G4b: the overlay returns the latest session lines per received date (by key, one more statement, no ledger read); OFF sends none', async () => {
+    reset(); twoLots(); setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', ic_wired: 'on' })
+    const made = await lotSubmit([lotLine(910001, [lot(910001, 5, 5), lot(920001, 2, 4)])])
+    assert.equal(made.status, 201)
+    const read = await send(sessionsRoute, 'GET', '/overlay?branchId=1&ids=910001', undefined, COUNTER, { CACHE: kv })
+    assert.equal(read.status, 200, JSON.stringify(read.body))
+    const entry = read.body.items.find(item => item.product_id === 910001)
+    assert.deepEqual(entry.check.lots, [{ batch_id: 910001, scope: 'lot', counted: 5, seen: 5 }, { batch_id: 920001, scope: 'lot', counted: 2, seen: 4 }], 'both dates come back after a reload')
+    assert.ok(read.queries.some(sql => /inventory_check_lot_lines/.test(sql.sql || sql)), 'read by the lot-lines table')
+    assert.ok(!read.queries.some(sql => /recorded_ordinary|inventory_movements m WHERE m.product_id = wanted.value AND m.created_at >= newest/.test(sql.sql || sql) && /recorded_ordinary/.test(sql.sql || sql)), 'and no stock ledger')
+    setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_wired: 'on' })
+    const off = await send(sessionsRoute, 'GET', '/overlay?branchId=1&ids=910001', undefined, COUNTER, { CACHE: kv })
+    assert.equal(off.body.items.find(item => item.product_id === 910001).check.lots, undefined, 'OFF: the entry is exactly what it was')
+    assert.ok(!off.queries.some(sql => /inventory_check_lot_lines/.test(sql.sql || sql)), 'OFF: the lot-lines table is not read')
+  })
+
   await check('alerts: a differing lot count tells the approvers once, a matching one tells nobody, a replaced approval is told as rejected, a replay announces nothing', async () => {
     reset(); twoLots(); on()
     const { getDb } = load(path.join(__dirname, '../src/lib/db.ts'))
