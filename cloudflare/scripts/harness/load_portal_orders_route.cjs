@@ -32,16 +32,18 @@ function createOrdersHarness(options = {}) {
   for (const [key, value] of Object.entries(options.settings || {})) raw.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, String(value))
   const statements = []
   const record = (sql) => statements.push(sql.replace(/\s+/g, ' ').trim())
+  // A D1 call is what the Free plan counts (50 per request): each prepared get/all/run is one, and a whole batch is ONE however many statements it holds.
+  const d1 = { calls: 0 }
   const db = {
     prepare(sql) {
       const stmt = raw.prepare(sql)
       return {
-        get: async (params) => { record(sql); return stmt.get(params) },
-        all: async (params) => { record(sql); return stmt.all(params) || [] },
-        run: async (params) => { record(sql); const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
+        get: async (params) => { d1.calls += 1; record(sql); return stmt.get(params) },
+        all: async (params) => { d1.calls += 1; record(sql); return stmt.all(params) || [] },
+        run: async (params) => { d1.calls += 1; record(sql); const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
       }
     },
-    batch: (items) => { for (const item of items) record(item.sql); return raw.batch(items) },
+    batch: (items) => { d1.calls += 1; for (const item of items) record(item.sql); return raw.batch(items) },
   }
   const state = { switchOn: options.switchOn !== false, nowMs: options.nowMs ?? Date.UTC(2026, 10, 9, 3, 0, 0), account: null }
   const calls = []
@@ -118,10 +120,10 @@ function createOrdersHarness(options = {}) {
   const run = (sql, ...params) => raw.db.prepare(sql).run(...params)
 
   return {
-    env, raw, request, calls, statements, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
+    env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
     setNow: (ms) => { state.nowMs = ms },
     advance: (ms) => { state.nowMs += ms },
-    clearStatements: () => { statements.length = 0 },
+    clearStatements: () => { statements.length = 0; d1.calls = 0 },
   }
 }
 

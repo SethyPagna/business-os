@@ -4,7 +4,7 @@
   "rule": "MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs \"raised\": { field, from, reason } (an array when several fields rose).",
   "programme": {"rows_ceiling":100000,"by":"2026-11-30"},
   "switches": {"report_atomic":"on","report_atomic_long":"on","expense_reads":"on","dash_overview_5m":"on"},
-  "reasons": {"static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check"},
+  "reasons": {"static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check","payway-write":"a storefront order write that calls PayWay: the read-budget world has no PayWay transport and must never reach the real one, so its statement shape is pinned in scripts/test-online-order-routes-native.cjs instead"},
   "exemptions": [
     {"method":"GET","route":"/admin/*","class":"N","reason":"static-or-document"},
     {"method":"GET","route":"/admin","class":"N","reason":"static-or-document"},
@@ -337,7 +337,14 @@
     {"method":"GET","route":"/uploads/*","class":"N","reason":"static-or-document"},
     {"method":"GET","route":"/users/*","class":"N","reason":"static-or-document"},
     {"method":"GET","route":"/users","class":"N","reason":"static-or-document"},
-    {"method":"GET","route":"/ws","class":"N","reason":"static-or-document"}
+    {"method":"GET","route":"/ws","class":"N","reason":"static-or-document"},
+    {"method":"POST","route":"/api/portal/orders/:token/edit","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders/:token/cancel","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders/:token/retry","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders/:token/topup","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders/:token/requests","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders/:token/requests/:id/withdraw","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/portal/orders","class":"N","reason":"payway-write"}
   ],
   "shapes": [
     {"id":"auth-me","method":"GET","route":"/api/auth/me","params":"","status":200,"cold_calls_max":5,"rows_max":11,"rows_max_analyze":13,"rows_written_max":8,"class":"P","expect":"ok"},
@@ -634,6 +641,8 @@
     {"id":"w-read-switch-flip","method":"PUT","route":"/api/runtime/read-switches","params":"","status":200,"cold_calls_max":6,"rows_max":43,"rows_max_analyze":43,"rows_written_max":16,"class":"P","expect":"ok"},
     {"id":"w-customer-create","method":"POST","route":"/api/customers","params":"","status":200,"cold_calls_max":15,"rows_max":17143,"rows_max_analyze":17143,"rows_written_max":22,"class":"N","expect":"ok"},
     {"id":"w-product-price-edit","method":"PUT","route":"/api/products/:id","params":"","status":200,"cold_calls_max":19,"rows_max":69,"rows_max_analyze":69,"rows_written_max":38,"class":"N","expect":"ok"},
-    {"id":"w-logout","method":"POST","route":"/api/auth/logout","params":"","status":200,"cold_calls_max":4,"rows_max":26,"rows_max_analyze":26,"rows_written_max":9,"class":"P","expect":"ok"}
+    {"id":"w-logout","method":"POST","route":"/api/auth/logout","params":"","status":200,"cold_calls_max":4,"rows_max":26,"rows_max_analyze":26,"rows_written_max":9,"class":"P","expect":"ok"},
+    {"id":"portal-orders-token-status-online-orders-on","method":"GET","route":"/api/portal/orders/:token/status","params":"","status":200,"cold_calls_max":6,"rows_max":9,"rows_max_analyze":14,"rows_written_max":8,"class":"N","expect":"ok","note":"KHQR S3, read switch online_orders ON: the poll reads ONE row (the order by its token hash; measured 1 row, 1 D1 call warm). The PayWay nudge never runs here (no keys) and, when it does, reads the payment row only once a minute per order."},
+    {"id":"portal-orders-token-online-orders-on","method":"GET","route":"/api/portal/orders/:token","params":"","status":200,"cold_calls_max":7,"rows_max":25,"rows_max_analyze":24,"rows_written_max":8,"class":"N","expect":"ok","note":"KHQR S3, online_orders ON: the order page. One batch reads the order, its payments, its Records and its requests (1 + 2 + 5 + 2 rows here), plus one keyed read of the six order settings."}
   ]
 }

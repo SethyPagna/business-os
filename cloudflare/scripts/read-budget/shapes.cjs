@@ -143,6 +143,10 @@ function getEntries(ctx) {
     ['portal/catalog/products/search', '/api/portal/catalog/products/search?q=serum&page=1&pageSize=24', { anon: true }], ['portal/promotions', '/api/portal/promotions', { anon: true }],
     ['portal/ai/status', '/api/portal/ai/status', { anon: true }], ['portal/auth/me', '/api/portal/auth/me', { anon: true }], ['portal/account/cart', '/api/portal/account/cart', { anon: true }],
     ['portal/account/wishlist', '/api/portal/account/wishlist', { anon: true }], ['portal/membership/:n', '/api/portal/membership/1', { anon: true }],
+    // KHQR S3 (read switch online_orders ON, an order seeded by ensureOrderToken): the two reads of a customer's own order. The poll reads one order row;
+    // the full view reads the order, its payments, its Records and its requests in one batch. The nudge never reaches PayWay here: the world has no PayWay keys.
+    ['portal/orders/:token/status (online_orders ON)', '/api/portal/orders/{{orderToken}}/status', { anon: true, switches: ['online_orders'] }],
+    ['portal/orders/:token (online_orders ON)', '/api/portal/orders/{{orderToken}}', { anon: true, switches: ['online_orders'] }],
     ['portal/submissions/review', '/api/portal/submissions/review'], ['portal/submissions/:id/screenshot/:i', '/api/portal/submissions/1/screenshot/0'],
     ['inventory-checks/products all-time name page, page 2', `/api/inventory-checks/products?branchId=1&sortBy=name&sortDirection=asc&page=2&pageSize=20`],
     ['inventory-checks/products Issues all sessions', `/api/inventory-checks/products?branchId=1&state=issue&page=1&pageSize=20`],

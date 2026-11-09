@@ -38,13 +38,14 @@ const ROUTE_NOTES = {
   // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
   switchSensitive: ['/api/fees', '/api/fees/report', '/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
     '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],
-  reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
+  reason: (r) => (r.route.startsWith('/api/portal/orders') && r.method === 'POST' ? 'payway-write' : r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
 
 const EXEMPTION_REASONS = {
   'static-or-document': 'served assets or documents; no D1 read',
   'write-not-measured': 'a write route with no measured shape yet; the slice that changes it adds one',
   'get-not-in-shapes': 'a GET with no shape yet: OAuth callback, job poll, download, duplicate check',
+  'payway-write': 'a storefront order write that calls PayWay: the read-budget world has no PayWay transport and must never reach the real one, so its statement shape is pinned in scripts/test-online-order-routes-native.cjs instead',
 }
 
 const switchSensitive = (routes, shape) => ROUTE_NOTES.switchSensitive.includes((matchRoute(routes, shape.method, (shape.url || '').split('?')[0]) || {}).route)

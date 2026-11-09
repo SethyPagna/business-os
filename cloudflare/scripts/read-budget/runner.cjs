@@ -51,10 +51,32 @@ async function ensureFeeCursor(world) {
   return token
 }
 
+// KHQR S3: one paid online order with its payment, three Records rows and a pending request, under a fixed link token, so the order reads have a real order to read.
+const ORDER_TOKEN = 'BudgetOrderToken012345'
+async function ensureOrderToken(world) {
+  if (world.state?.orderToken) return world.state.orderToken
+  const hash = require('node:crypto').createHash('sha256').update(ORDER_TOKEN).digest('hex')
+  const db = world.db
+  const exists = (await world.all('SELECT id FROM online_orders WHERE token_hash = ?', hash))[0]
+  if (!exists) {
+    const items = JSON.stringify([{ product_id: 1000, name: 'Budget product', quantity: 2, unit_price_usd: 12.5, line_total_usd: 25 }])
+    await db.prepare(`INSERT INTO online_orders (order_no, token_hash, state, fulfilment, branch_id, customer_name, customer_phone, currency, goods_total_usd, goods_total_khr, exchange_rate,
+      items_json, pricing_version, network_key, revision, paid_at, created_at) VALUES ('W261109BUDG', ?, 'paid', 'pickup', 1, 'Budget Customer', '0120000000', 'USD', 25, 100000, 4000, ?, 1, 'budget', 1,
+      datetime('now','-1 hours'), datetime('now','-2 hours'))`).bind(hash, items).run()
+    const id = (await world.all('SELECT id FROM online_orders WHERE token_hash = ?', hash))[0].id
+    await db.prepare("INSERT INTO online_order_payments (order_id, tran_id, purpose, amount, currency, state, qr_string, paid_at, paid_amount, revision) VALUES (?, 'WBUDGETPAY00000001', 'order', 25, 'USD', 'paid', 'qr', datetime('now','-1 hours'), 25, 1)").bind(id).run()
+    await db.prepare("INSERT INTO online_order_requests (order_id, kind, stage, before_json, after_json, customer_comment) VALUES (?, 'note', 'paid', '{}', '{}', 'budget')").bind(id).run()
+    for (const event of ['created', 'qr_issued', 'verified_paid', 'request_submitted']) await db.prepare('INSERT INTO online_order_events (order_id, event, source) VALUES (?, ?, ?)').bind(id, event, event === 'verified_paid' ? 'payway' : 'customer').run()
+  }
+  world.state = { ...world.state, orderToken: ORDER_TOKEN }
+  return ORDER_TOKEN
+}
+
 // The ids the GET shapes name exist before anything is measured, so the order of shapes never changes the data.
 async function prepareWorld(world) {
   await ensureCheckId(world)
   await ensureStockKey(world)
+  await ensureOrderToken(world)
 }
 
 // Placeholders are resolved before the isolate restarts, so the measured request is the first on a fresh isolate.
@@ -62,6 +84,7 @@ async function resolveUrl(world, url) {
   let out = url
   if (out.includes('{{checkId}}')) out = out.replaceAll('{{checkId}}', await ensureCheckId(world))
   if (out.includes('{{stockKey}}')) out = out.replaceAll('{{stockKey}}', encodeURIComponent(await ensureStockKey(world)))
+  if (out.includes('{{orderToken}}')) out = out.replaceAll('{{orderToken}}', await ensureOrderToken(world))
   if (out.includes('{{feeCursor}}')) out = out.replaceAll('{{feeCursor}}', await ensureFeeCursor(world))
   return out
 }

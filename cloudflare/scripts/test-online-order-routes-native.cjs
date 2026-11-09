@@ -657,6 +657,36 @@ async function main() {
     for (const leak of ['merchant-test', 'kkkkkkkk', 'qrImage', 'hash']) assert.ok(!text.includes(leak), leak)
   })
 
+  // ---------------------------------------------------------------------------------------------------------------------------- budgets
+  await check('D1 shape of every route stays inside its budget (calls count as the Free plan counts them: a batch is one; ceilings are the measured figure plus a little)', async () => {
+    const h = world({ env: { PLAN_TIER: 'free' } })
+    const shape = async (label, call, ceilings) => {
+      h.clearStatements(); const before = h.calls.length
+      const r = await call()
+      const used = { calls: h.d1.calls, statements: h.statements.length, payway: h.calls.length - before }
+      assert.ok(r.status < 400, `${label}: ${r.status} ${JSON.stringify(r.body).slice(0, 120)}`)
+      for (const key of Object.keys(ceilings)) assert.ok(used[key] <= ceilings[key], `${label}: ${key} ${used[key]} > ${ceilings[key]}`)
+      assert.ok(used.calls <= 50, `${label}: inside the Free 50-call limit`)
+      return r
+    }
+    const created = await shape('create', () => create(h), { calls: 14, statements: 20, payway: 1 })
+    const token = tokenOf(created)
+    await shape('view', () => view(h, token), { calls: 3, statements: 6, payway: 0 })
+    await shape('poll in the first minute', () => poll(h, token), { calls: 1, statements: 1, payway: 0 })
+    h.advance(61_000)
+    await shape('poll with a nudge', () => poll(h, token), { calls: 3, statements: 3, payway: 1 })
+    await shape('edit details', () => h.request(`/${token}/edit`, 'POST', { name: 'Dara S' }), { calls: 5, statements: 12, payway: 0 })
+    await shape('edit with a new list', () => h.request(`/${token}/edit`, 'POST', { lines: lines([1, 3]) }), { calls: 12, statements: 22, payway: 3 })
+    h.advance(16 * 60_000)
+    await shape('retry', () => h.request(`/${token}/retry`, 'POST', {}), { calls: 8, statements: 17, payway: 3 })
+    await shape('cancel', () => h.request(`/${token}/cancel`, 'POST', {}), { calls: 5, statements: 14, payway: 2 })
+    const paid = await create(h, { phone: '099 111 222' })
+    payOnPayway(h, 25); h.advance(61_000)
+    await shape('poll that settles a payment', () => poll(h, tokenOf(paid)), { calls: 6, statements: 9, payway: 1 })
+    await shape('request', () => h.request(`/${tokenOf(paid)}/requests`, 'POST', { kind: 'note', phone: '099 111 222', after: { note: 'n' } }), { calls: 6, statements: 13, payway: 0 })
+    await shape('withdraw', () => h.request(`/${tokenOf(paid)}/requests/${h.one('SELECT MAX(id) id FROM online_order_requests').id}/withdraw`, 'POST', { phone: '099 111 222' }), { calls: 5, statements: 11, payway: 0 })
+  })
+
   console.log(`\n${passed} checks passed`)
 }
 
