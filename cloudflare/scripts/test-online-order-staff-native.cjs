@@ -286,7 +286,13 @@ async function main() {
     assert.equal(order(h).goods_total_usd, 37.5)
     const top = h.one("SELECT * FROM online_order_payments WHERE purpose = 'top_up'")
     assert.equal(top.amount, 12.5); assert.equal(top.state, 'awaiting'); assert.equal(top.request_id, up); assert.equal(top.qr_string, null)
+    // G3: the customer's page lists the unpaid top-up on its own, with no QR yet, so it can offer "Pay $12.50 more" without anyone calling /topup by hand.
+    const before = await h.request(`/${res.body.token}`, 'GET')
+    assert.equal(before.status, 200, JSON.stringify(before.body))
+    assert.deepEqual(before.body.order.top_ups.map((t) => [t.request_id, t.amount, t.state, t.qr_string, t.deeplink]), [[up, 12.5, 'awaiting', null, null]])
     const issued = await h.request(`/${res.body.token}/topup`, 'POST', { request_id: up })
+    const after = await h.request(`/${res.body.token}`, 'GET')
+    assert.equal(after.body.order.top_ups.length, 1, 'one entry per request, the QR now filled'); assert.ok(after.body.order.top_ups[0].qr_string)
     assert.equal(issued.status, 200, JSON.stringify(issued.body))
     assert.equal(events(h).find((e) => e.event === 'request_applied').amount_usd, 12.5)
     // lower total: no top-up, the difference is refundable

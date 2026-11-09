@@ -109,6 +109,8 @@ export type OrderRecord = OrderRow & {
   note: string | null; portal_account_id: number | null; currency: 'USD' | 'KHR'
   goods_total_usd: number; goods_total_khr: number | null; exchange_rate: number | null; items_json: string
   pricing_version: number; sale_id: number | null; paid_at: string | null; revision: number; created_at: string; updated_at: string | null
+  /** Set by the 90 day privacy scrub (lib/onlineOrderScrub.ts): the contact details are gone and the order is closed for good. */
+  scrubbed_at?: string | null
 }
 export type PaymentRecord = PaymentRow & {
   id: number; order_id: number; tran_id: string; purpose: 'order' | 'top_up'; request_id: number | null; amount: number; currency: 'USD' | 'KHR'
@@ -352,14 +354,22 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
   const { order, payments, events, requests, sale, returns } = bundle
   const view = onlineOrderView(order, payments, events, sale, returns, { now, requestWindowDays: settings.requestWindowDays, requests })
   const live = [...payments].reverse().find((p) => p.purpose === 'order' && p.state === 'awaiting' && p.qr_string) ?? null
-  const topUps = payments.filter((p) => p.purpose === 'top_up' && p.state === 'awaiting' && p.qr_string)
+  // Every top-up the customer still owes: the newest unpaid row of each request, whether or not it has a QR yet (staff applying a price increase writes the row
+  // without one, and the page offers "Pay more" from it) and whether its QR is live or ran out. A request that already has a paid top-up lists nothing.
+  const paidTopUpRequests = new Set(payments.filter((p) => p.purpose === 'top_up' && p.state === 'paid').map((p) => p.request_id))
+  const newestUnpaid = new Map<number | null, PaymentRecord>()
+  for (const p of payments) {
+    if (p.purpose === 'top_up' && (p.state === 'awaiting' || p.state === 'expired') && !paidTopUpRequests.has(p.request_id)) newestUnpaid.set(p.request_id, p)
+  }
+  const topUps = [...newestUnpaid.values()]
   const states = requestStates(requests, events)
   const stateOf = new Map(states.map((s) => [s.id, s]))
   const refundedUsd = events.filter((e) => e.event === 'refund_noted').reduce((sum, e) => sum + Number(e.amount_usd ?? 0), 0)
   const editable = order.state === 'awaiting_payment' || order.state === 'qr_failed'
   return {
     order_no: order.order_no,
-    status: view.status,
+    // A scrubbed order reads 'closed': nothing about it can change and the page offers a new order, not a new QR.
+    status: order.scrubbed_at ? 'closed' : view.status,
     phase: view.phase,
     chips: view.chips,
     fulfilment: order.fulfilment,
@@ -375,7 +385,7 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
     created_at: order.created_at,
     paid_at: order.paid_at,
     payment: live ? { amount: live.amount, currency: live.currency, qr_string: live.qr_string, deeplink: live.deeplink, expires_at: live.expires_at } : null,
-    top_ups: topUps.map((p) => ({ request_id: p.request_id, amount: p.amount, currency: p.currency, qr_string: p.qr_string, deeplink: p.deeplink, expires_at: p.expires_at })),
+    top_ups: topUps.map((p) => ({ request_id: p.request_id, amount: p.amount, currency: p.currency, state: p.state, qr_string: p.qr_string ?? null, deeplink: p.deeplink ?? null, expires_at: p.expires_at ?? null })),
     requests: requests.map((r) => ({
       id: r.id, kind: r.kind, stage: r.stage, status: stateOf.get(r.id)?.status ?? 'pending', staff_reply: stateOf.get(r.id)?.publicComment ?? null,
       comment: r.customer_comment, attachments: parseJson<string[]>(r.attachments_json, []), created_at: r.created_at,
@@ -753,13 +763,16 @@ function sameLines(order: OrderRecord, lines: OrderLineInput[]): boolean {
   const byProduct = new Map(current.map((line) => [Number(line.product_id), Number(line.quantity)]))
   return lines.every((line) => byProduct.get(line.product_id) === line.quantity)
 }
-const editableState = (order: OrderRecord) => order.state === 'awaiting_payment' || order.state === 'qr_failed'
+const editableState = (order: OrderRecord) => !order.scrubbed_at && (order.state === 'awaiting_payment' || order.state === 'qr_failed')
+/** A scrubbed order has no customer left in it: an old link may read it, never change it or ask for a new QR (a payment on it would have no one to be told). */
+const refuseIfScrubbed = (order: OrderRecord): void => { if (order.scrubbed_at) refuse(409, 'order_closed', 'This order is closed. Please start a new order.') }
 const refusePaid = (): never => refuse(409, 'already_paid', 'This order has just been paid, so it can no longer be changed here. Ask the shop if you need a change.')
 
 /** Change a waiting order directly (nothing was paid, so no approval is needed). A new list means a new price, so a new QR for the new amount. */
 export async function editOrder(deps: OrderDeps, creds: PaywayCredentials | null, token: string, body: Record<string, unknown>): Promise<OrderBundle> {
   const bundle = await bundleFromToken(deps.db, token)
   const { order } = bundle
+  refuseIfScrubbed(order)
   if (!editableState(order)) return refuse(409, 'order_not_editable', 'This order can no longer be changed here. Please contact the shop.')
   const changedFields: string[] = []
   const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key)
@@ -841,6 +854,7 @@ export async function cancelOrder(deps: OrderDeps, creds: PaywayCredentials | nu
   const bundle = await bundleFromToken(deps.db, token)
   const { order } = bundle
   if (order.state === 'cancelled') return bundle
+  refuseIfScrubbed(order)
   if (!editableState(order)) return refuse(409, 'order_not_cancellable', 'This order can no longer be cancelled here. Please contact the shop.')
   if (await paidMeanwhile(deps, creds, bundle)) return refusePaid()
   const at = sqlTime(deps.now())
@@ -864,6 +878,7 @@ export async function retryOrderQr(deps: OrderDeps, creds: PaywayCredentials | n
   const credentials = creditsOrRefuse(creds)
   const bundle = await bundleFromToken(deps.db, token)
   const { order } = bundle
+  refuseIfScrubbed(order)
   if (!['awaiting_payment', 'qr_failed', 'expired'].includes(order.state)) return refuse(409, 'order_not_retryable', 'This order does not need a new QR.')
   const now = deps.now()
   const live = bundle.payments.filter((p) => p.state === 'awaiting' && p.qr_string && (!p.expires_at || Date.parse(`${p.expires_at.replace(' ', 'T')}Z`) > now.getTime()))

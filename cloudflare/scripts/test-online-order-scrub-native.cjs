@@ -117,6 +117,27 @@ async function main() {
     assert.ok(h.d1.calls <= 12, 'D1 calls ' + h.d1.calls)
   })
 
+  await check('G4: an old link to a SCRUBBED order reads closed and can neither get a new QR, nor be edited or cancelled (409 order_closed; a build that only checks the state hands a scrubbed order a live QR and no customer)', async () => {
+    const h = world(); const res = await h.request('/', 'POST', { lines: [{ product_id: 1, quantity: 2 }], name: 'Dara Private', phone: '012777888', fulfilment: 'pickup' })
+    assert.equal(res.status, 201, JSON.stringify(res.body)); const token = res.body.token
+    h.advance(20 * 60_000); h.script.check = () => h.pending(); await h.sweep()
+    assert.equal(row(h, 1).state, 'expired')
+    const open = await h.request(`/${token}`, 'GET')
+    assert.equal(open.body.order.status, 'expired', 'before the scrub the page still offers a new QR')
+    h.run('UPDATE online_orders SET updated_at = ? WHERE id = 1', at(100))
+    assert.equal((await scrub(h)).scrubbed, 1)
+    const seen = await h.request(`/${token}`, 'GET')
+    assert.equal(seen.status, 200); assert.equal(seen.body.order.status, 'closed'); assert.equal(seen.body.order.name, '[scrubbed]')
+    const calls = h.calls.length
+    for (const [pathname, payload] of [[`/${token}/retry`, {}], [`/${token}/edit`, { name: 'New Name' }], [`/${token}/cancel`, {}]]) {
+      const refused = await h.request(pathname, 'POST', payload)
+      assert.equal(refused.status, 409, pathname); assert.equal(refused.body.code, 'order_closed', pathname)
+    }
+    assert.equal(h.calls.length, calls, 'PayWay was never asked for a QR')
+    assert.equal(h.one("SELECT COUNT(*) n FROM online_order_payments WHERE order_id = 1 AND state = 'awaiting'").n, 0, 'no live payment exists')
+    assert.equal(row(h, 1).customer_name, '[scrubbed]')
+  })
+
   await check('the scrub runs as a rotation step, and the days are a plan limit', async () => {
     const root = path.join(__dirname, '..')
     const index = fs.readFileSync(path.join(root, 'src', 'index.ts'), 'utf8')
