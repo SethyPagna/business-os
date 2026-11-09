@@ -464,6 +464,35 @@ async function main() {
     assert.equal(stale.status, 409, 'a stale preview is refused')
   })
 
+  // INV-A S2 (Inventory replan 2.7): a refused stale Set says what the figures are now, so the screen can patch the row and let the person confirm or recount.
+  // The figures are the writer's own facts read (0 extra statements), and the writer's cold-isolate schema probe no longer scans sqlite_master.
+  await check('INV-A S2: the expected-quantity refusal carries current { lotQuantity, branchQuantity } from the facts read, with no extra statement', async () => {
+    const f = seeded()
+    const prepared = []
+    const real = f.env.DB.prepare
+    f.env.DB.prepare = (text) => { prepared.push(String(text)); return real.call(f.env.DB, text) }
+    const reads = (pattern) => prepared.filter((text) => pattern.test(text))
+    const stale = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-stale-lot-0001', 4, { expectedLotQuantity: 9 }))
+    assert.equal(stale.status, 409); assert.equal(stale.json.code, 'stock_conflict')
+    assert.deepEqual(stale.json.current, { lotQuantity: 3, branchQuantity: 10 }, 'lot 10 holds 3 and the branch 10, whatever the screen showed')
+    assert.match(String(stale.json.error), /Stock changed/, 'the old sentence is unchanged')
+    // The figures come from the one facts statement (the only one that reads either quantity). Pinned: the whole refused request prepares 6 statements (receipt claim, schema probe,
+    // operation lookup, branch effect, facts, receipt release) and only the facts one touches the stock tables.
+    assert.equal(reads(/branch_batch_stock|branch_stock/).length, 1, 'one read of the quantities, nothing added for the refusal')
+    assert.equal(prepared.length, 6, 'the refusal costs the statements it always did: ' + JSON.stringify(prepared.map((text) => text.replace(/s+/g, ' ').slice(0, 60))))
+    assert.equal(reads(/sqlite_master/).filter((text) => /COUNT\(\*\)/.test(text)).length, 0, 'the schema probe does not count every object of the schema')
+    const staleBranch = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-stale-branch-1', 4, { setScope: 'branch', expectedBranchQuantity: 99 }))
+    assert.equal(staleBranch.status, 409); assert.deepEqual(staleBranch.json.current, { lotQuantity: 3, branchQuantity: 10 })
+    const patched = await send(f, 'PATCH', '/api/batches/10/branches/1', { quantity: 1, expectedLotQuantity: 9 })
+    assert.equal(patched.status, 409); assert.equal(patched.json.code, 'stock_conflict'); assert.deepEqual(patched.json.current, { lotQuantity: 3, branchQuantity: 10 }, 'the Products received-date edit gets the same figures')
+    assert.deepEqual(stock(f), { lot10: 3, lot11: 7, branch: 10, product: 10, held: 0 }, 'a refusal writes nothing')
+    // The other 409s and a matching expectation keep their old bodies.
+    const mismatch = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-mismatch-0001', 4, { productId: 1, batchId: 999 }))
+    assert.ok(!('current' in (mismatch.json || {})), 'only the stale-quantity refusal gains the figures: ' + JSON.stringify(mismatch.json))
+    const ok = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-fresh-000001', 4, { expectedLotQuantity: 3, expectedBranchQuantity: 10 }))
+    assert.equal(ok.status, 200, JSON.stringify(ok.json)); assert.ok(!('current' in ok.json))
+  })
+
   await check('PATCH /batches/:id/branches/:branchId is the same writer (lot scope, loss rule, undo)', async () => {
     const f = seeded()
     const res = await send(f, 'PATCH', '/api/batches/10/branches/1', { quantity: 0 })

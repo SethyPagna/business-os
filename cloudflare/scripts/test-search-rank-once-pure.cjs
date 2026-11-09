@@ -211,6 +211,13 @@ async function page(rawQuery, { pageNo = 1, pageSize = 15, mode, old = false } =
         }
         return chunk
       })
+      // A route may build its options in a typed object and pass that (products.ts since S7: `const familyOptions: FamilyPaginationOptions = { ... }`): the object is the call's arguments, so read it too.
+      for (const chunk of src.split(': FamilyPaginationOptions = {').slice(1)) {
+        let depth = 1
+        let end = 0
+        for (; end < chunk.length && depth > 0; end += 1) { if (chunk[end] === '{') depth += 1; if (chunk[end] === '}') depth -= 1 }
+        calls.push(chunk.slice(0, end))
+      }
       const ranked = calls.filter((c) => /matchRankSql/.test(c))
       assert.ok(ranked.length > 0, `${file}: expected a ranked paginateProductFamilies call`)
       for (const c of ranked) assert.ok(/rankCteSql/.test(c), `${file}: a paginateProductFamilies call passes matchRankSql without rankCteSql`)

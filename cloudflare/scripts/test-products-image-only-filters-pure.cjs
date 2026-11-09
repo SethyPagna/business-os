@@ -149,8 +149,14 @@ check('source locks: the window is not in the shared filter builder, and image-o
   const builder = routes.match(/function buildSearchFilters\([\s\S]*?\r?\n\}\r?\n/)[0]
   assert.doesNotMatch(builder, /pushReceivedWindow|receivedFrom|product_batches/, 'buildSearchFilters stays all-time for every reader')
   const search = routes.match(/app\.get\('\/search', async \(c\) => \{([\s\S]*?)\r?\n\}\)/)[1]
-  assert.ok(search.indexOf('isImageOnlyRead(user, surface)') > -1 && search.indexOf('isImageOnlyRead(user, surface)') < search.indexOf('cachedJsonResponse'),
+  // Since INV-A S4a the shared cache is read inside readProductSearchList (the reader the Inventory Check list also calls); /search reaches it only after the image-only branch has returned.
+  assert.ok(search.indexOf('isImageOnlyRead(user, surface)') > -1 && search.indexOf('readProductSearchList(') > -1 && search.indexOf('isImageOnlyRead(user, surface)') < search.indexOf('readProductSearchList('),
     'the image-only branch precedes the shared cache')
+  assert.ok(!search.includes('cachedJsonResponse'), 'the handler itself never reads the shared cache')
+  const readerFrom = routes.indexOf('export async function readProductSearchList')
+  const reader = routes.slice(readerFrom, routes.indexOf("app.get('/search'", readerFrom))
+  assert.ok(reader.length > 200 && reader.includes('cachedJsonResponse'), 'positive control: the reader is the one that holds the cache')
+  assert.ok(!/isImageOnlyRead|loadImageOnlyList/.test(reader), 'and an image-only read never reaches it (the reader serves no image-only list)')
   assert.match(search, /Cache-Control', 'private, no-store'/)
 })
 

@@ -150,7 +150,17 @@ check('the surface parameter defaults to products, so pre-existing callers are u
 
 // ---- the products route must not consult other pages' permissions ----
 check('the products read path no longer reaches into pos/sales/inventory permissions', () => {
-  const readSection = routeSrc.slice(routeSrc.indexOf('function isImageOnlyRead'), routeSrc.indexOf('function restrictListPayloadForImageOnly'))
+  // The predicate itself (isImageOnlyRead, by brace counting). The old end marker, function restrictListPayloadForImageOnly, no longer exists, so the slice ran to the end of the file and began to
+  // judge unrelated code (attachLotRows admits include=lots for pos/sales/inventory viewers on purpose: that is a different decision).
+  const from = routeSrc.indexOf('function isImageOnlyRead')
+  assert.ok(from >= 0, 'isImageOnlyRead not found')
+  let depth = 0
+  let at = routeSrc.indexOf('{', from)
+  const open = at
+  for (; at < routeSrc.length; at += 1) { if (routeSrc[at] === '{') depth += 1; else if (routeSrc[at] === '}' && --depth === 0) break }
+  const readSection = routeSrc.slice(from, at + 1)
+  assert.ok(readSection.length > 60 && readSection.length < 600, 'the section is the predicate and nothing else (' + readSection.length + ' chars)')
+  assert.ok(readSection.includes("getActionTier(user, 'products', 'view')") && open > from, 'positive control: it is the predicate that reads the products tier')
   assert.ok(
     !/hasPermission\(user, 'pos'\)|hasPermission\(user, 'sales'\)|getPermissionTier\(user, 'inventory'\)/.test(readSection),
     'the image-only predicate should be scoped by surface, not by enumerating every other page\'s permission',

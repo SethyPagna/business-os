@@ -21,6 +21,8 @@ function getEntries(ctx) {
     ['settings/payment-methods/impact', '/api/settings/payment-methods/impact?from=Cash&to=ABA'], ['pos/address-presets', '/api/pos/address-presets'], ['telegram/status', '/api/telegram/status'],
     // products
     ['products/search Products default (created_desc, 50, branch_stock,images,batches,tagged_lots)', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    // INV-A S3: the same default page with the received dates folded in (include=lots); Inventory asks for it. The default shape above stays without the token.
+    ['products/search default lots', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots,lots`],
     ['products/search Products text "serum"', `/api/products/search?${P}&query=serum&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products text "product 12"', `/api/products/search?${P}&query=product%2012&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products barcode', `/api/products/search?${P}&query=8850000001234&searchMode=smart&include=branch_stock,images,batches,tagged_lots`],
@@ -157,6 +159,21 @@ function getEntries(ctx) {
     ['inventory-checks/products ic_simple stock sort', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=desc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple low stock', `/api/inventory-checks/products?branchId=1&stockState=low_stock&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple issues', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    // INV-A S4a: the wired Inventory Check list and overlay (switch ic_wired, set around the request only). The rows are the Products list for the scope from the shared reader.
+    ['inventory-checks/list wired default', `/api/inventory-checks/list?branchId=1&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired page step', `/api/inventory-checks/list?branchId=1&page=2&pageSize=50&summary=0`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired issues', `/api/inventory-checks/list?branchId=1&checkState=issue&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired not checked', `/api/inventory-checks/list?branchId=1&checkState=not_checked&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired low stock', `/api/inventory-checks/list?branchId=1&stockState=low_stock&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/overlay wired window of 150', `/api/inventory-checks/overlay?branchId=1&lots=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
+    ['inventory-checks/overlay wired window of 150 without lots', `/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
+    // INV-A S7: the shared ranked scope (switch catalog_ranked_scope, with ic_wired for the Inventory list). The harness runs every GET with the Cache API answering nothing, so these are the FIRST-read
+    // cost of a scope (the ranking plus the page's rows); a stored ranking is measured by scripts/test-ranked-scope-reads-native.cjs, which reads a deep page from a stored ranking.
+    ['products/search ranked Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['catalog_ranked_scope'] }],
+    ['inventory-checks/list wired ranked default', `/api/inventory-checks/list?branchId=1&page=1&pageSize=50`, { switches: ['ic_wired', 'catalog_ranked_scope'] }],
+    ['inventory-checks/list wired ranked not checked', `/api/inventory-checks/list?branchId=1&checkState=not_checked&page=1&pageSize=50`, { switches: ['ic_wired', 'catalog_ranked_scope'] }],
+    // INV-A S8: the seek-page statement with its child-row lookups as index seeks (switch products_parent_seek). Same rows as the Products default shape; the ANALYZE pass is where the old spelling scans.
+    ['products/search parent seek Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['products_parent_seek'] }],
     ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
   ]

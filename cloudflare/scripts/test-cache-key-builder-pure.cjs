@@ -69,6 +69,7 @@ const CACHE_API_USERS = {
   'routes/notifications.ts': 'notification sections: through cachedJsonResponse',
   'lib/r2.ts': '/uploads read-through: immutable stored names, 1 year, no staff data',
   'lib/imageVariantStore.ts': '/uploads variants: immutable stored names',
+  'lib/rankedScope.ts': 'ranked Products scope + promotion edge (INV-A S7): cacheKeyRequest with build + epoch + scope + canonical params (no page) + products/promotions/IC versions; results only',
 }
 
 async function main() {
@@ -107,7 +108,7 @@ async function main() {
     }
     const unknown = users.filter((relative) => !(relative in CACHE_API_USERS))
     assert.deepEqual(unknown, [], 'a new Cache API user must key through lib/cacheKey.ts (build, org, epoch, scope, params, versions, salt, time) and be listed here')
-    for (const listed of ['lib/cache.ts', 'lib/dashboardRankingsCache.ts', 'lib/dashboardStockOverview.ts', 'routes/portal.ts', 'routes/products.ts']) assert.ok(users.includes(listed), `${listed} no longer uses the Cache API; update the list`)
+    for (const listed of ['lib/cache.ts', 'lib/dashboardRankingsCache.ts', 'lib/dashboardStockOverview.ts', 'routes/portal.ts', 'routes/products.ts', 'lib/rankedScope.ts']) assert.ok(users.includes(listed), `${listed} no longer uses the Cache API; update the list`)
   })
 
   await check('B. positive control: a planted file that calls caches.default is not in the list', () => {

@@ -11,12 +11,14 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { paginateProductFamilies } from '../lib/familyPagination'
+import { pageFamiliesByKeys, paginateProductFamilies, rankProductFamilies, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
 import { cacheIdentity, deploymentId, isUnsafeVersion } from '../lib/cache'
-import { readDataEpoch } from '../lib/readSwitches'
+import { unsafeVersionToken } from '../lib/cacheKey'
+import { readDataEpoch, readSwitch } from '../lib/readSwitches'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from '../lib/permissions'
@@ -701,6 +703,12 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
 
 type ProductSearchOptions = {
   useSearchIndex?: boolean
+  // SERVER-ONLY (Inventory Check, INV-A S4a): the id set a check-state filter restricts the cohort to, or the checked set it leaves out. One json_each parameter
+  // each; never read from the query string, so a client cannot send either. Both are absent for every other reader, so no statement of theirs changes.
+  restrictIdsJson?: string
+  excludeIdsJson?: string
+  // catalog_ranked_scope (INV-A S7): the ranking comes from the shared ranked-scope cache (lib/rankedScope.ts) and the page's rows are read by key. Absent: the seek-page statement.
+  ranked?: RankedScope
   // Image-only reads only (see loadImageOnlyList). Adds the received-window
   // predicate and the brand/category option lists; absent for every other reader.
   imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean }; facetCache?: ImageOnlyFacetCacheContext }
@@ -973,6 +981,16 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
 
 const SEEK_PAGE_MIN_RANKED_IDS = 300
 
+async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
+  const { page, pageSize } = opts
+  const ranked = await readRankedScope(scope, async () => {
+    const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), readPromotionEdge(scope, () => nextPromotionEdge(opts.db, new Date()))])
+    return { keys: ranking.keys, total: ranking.total, edgeAt }
+  })
+  const items = await pageFamiliesByKeys<Record<string, unknown>>(opts, ranked.keys.slice((page - 1) * pageSize, page * pageSize))
+  return { items, total: ranked.total, totalPages: Math.max(1, Math.ceil(ranked.total / pageSize)) }
+}
+
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -1092,7 +1110,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
-  const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
+  const familyOptions: FamilyPaginationOptions = {
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
@@ -1115,7 +1133,14 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
     // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
     seekPage: seekPageRead,
-  })
+    // products_parent_seek: the seek page looks a family's child rows up by an explicit index seek (same rows; see familyPagination.pageCandidatesSql).
+    parentSeek: seekPageRead && await readSwitch(env, 'products_parent_seek'),
+  }
+  // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
+  // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.
+  const { items, total, totalPages } = options.ranked && seekPageRead
+    ? await paginateRankedFamilies(familyOptions, options.ranked)
+    : await paginateProductFamilies<Record<string, unknown>>(familyOptions)
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
@@ -1385,6 +1410,8 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   }
 
   if (searchWhereClause) where.push(searchWhereClause)
+  if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
+  if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
 
   return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql }
 }
@@ -1400,6 +1427,17 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
   } catch (error) {
     if (!isProductSearchIndexUnavailable(error)) throw error
     return searchProductsPayload(env, query, { useSearchIndex: false })
+  }
+}
+
+// The Inventory Check twin: the same index-unavailable fallback with the server-only id restriction. Separate so the shared reader's source (pinned by
+// test-worker-perf-2-round-trips-pure.cjs) stays untouched.
+async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'ranked'>) {
+  try {
+    return await searchProductsPayload(env, query, restriction)
+  } catch (error) {
+    if (!isProductSearchIndexUnavailable(error)) throw error
+    return searchProductsPayload(env, query, { ...restriction, useSearchIndex: false })
   }
 }
 
@@ -1426,10 +1464,135 @@ function productSearchIncludes(query: Record<string, string>): Set<string> {
 // /api/inventory/tagged-lots; they sit beside `items`, never inside a row, so
 // they still cannot reach a group total or a picker. A caller without
 // Inventory view gets no key and keeps the separate request's refusal.
-async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, query: Record<string, string>, payload: T): Promise<T & { tagged_lots?: unknown[] }> {
-  if (!productSearchIncludes(query).has('tagged_lots') || getActionTier(user, 'inventory', 'view') === 'none') return payload
+async function attachFoldedTaggedLots<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T, admitted = false): Promise<T & { tagged_lots?: unknown[] }> {
+  if (!include.has('tagged_lots') || !admitted && getActionTier(user, 'inventory', 'view') === 'none') return payload
   const pageIds = (payload.items as Array<Record<string, unknown>>).map((row) => Number(row.id))
   return { ...payload, tagged_lots: await readTaggedLotGroups(getDb(env), pageIds) }
+}
+
+// include=lots (INV-A S3) folds each row's received dates into the answer: `lots: [{id, received_at, expiry_date, lot_code, batch_number, supplier_name,
+// branches: [{branch_id, quantity}]}]`, so a screen that counts or edits by received date reads them from the rows it already holds instead of one
+// GET /api/batches per product. Read live after the page cache like tagged_lots, so the cache entry and its key are unchanged; without the token nothing
+// is added to any shape. It lists a row's ACTIVE lots that have a branch row, in listBatchesForProduct's first-in-first-out order (soonest expiry, no
+// expiry last, then received date, then id), at most productListLotsPerRow per row with `lots_more: true` on a row that has more (the rest load through
+// GET /api/batches as before). Money-free by construction: the statement selects no cost, payment or credit column. ONE statement for the whole page: the
+// ids are one json_each parameter and the join to the branch rows is the unique (batch_id, branch_id) index. The order and the cap are applied here, not by
+// the statement: an ORDER BY (and a window rank, which the first version used) is a sort the database counts as rows read again -- 2,151 against 849 rows
+// for the same 50 products on the budget seed -- and a lot of a page costs its own row plus one per branch it sits in either way. So the cap bounds the
+// payload and the work per row, not the rows read; a row's lots are few (4.3 on average in production).
+// Gated like the batches read it mirrors (Inventory view, POS or Sales view): a caller outside it gets rows without the key.
+type PageLotRow = { product_id: number; id: number; received_at: string | null; expiry_date: string | null; lot_code: string | null; batch_number: number | null
+  supplier_name: string | null; branch_id: number; quantity: number }
+// The order of listBatchesForProduct: (expiry_date IS NULL), expiry_date, received_at, id -- SQLite sorts NULL below every value, text by byte.
+const compareText = (a: string | null, b: string | null): number => (a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1)
+function compareLotsFifo(a: { expiry_date: string | null; received_at: string | null; id: number }, b: { expiry_date: string | null; received_at: string | null; id: number }): number {
+  if ((a.expiry_date === null) !== (b.expiry_date === null)) return a.expiry_date === null ? 1 : -1
+  return compareText(a.expiry_date, b.expiry_date) || compareText(a.received_at, b.received_at) || a.id - b.id
+}
+// `admitted`: the caller has already decided this viewer may read lots (the Inventory Check routes admit by the Inventory Check received-date grant, which does not
+// require the Inventory page); the quantities are then cut by that route's own projection.
+export async function attachLotRows<T extends { items: unknown }>(env: Env, user: SessionUser, include: ReadonlySet<string>, payload: T, admitted = false): Promise<T> {
+  if (!include.has('lots')
+    || !(admitted || getActionTier(user, 'inventory', 'view') === 'full' || hasPermission(user, 'pos') || getActionTier(user, 'sales', 'view') === 'full')) return payload
+  const items = payload.items as Array<Record<string, unknown>>
+  const ids = [...new Set(items.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!ids.length) return payload
+  const cap = getPlanLimits(env).productListLotsPerRow
+  const rows = await getDb(env).prepare(`
+    SELECT pb.variant_product_id AS product_id, pb.id AS id, pb.received_at AS received_at, pb.expiry_date AS expiry_date, pb.lot_code AS lot_code,
+           pb.batch_number AS batch_number, pb.supplier_name AS supplier_name, bbs.branch_id AS branch_id, bbs.quantity AS quantity
+    FROM json_each(@ids) wanted
+    JOIN product_batches pb ON pb.variant_product_id = wanted.value AND pb.is_active = 1
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+  `).all<PageLotRow>({ ids: JSON.stringify(ids) })
+  type Lot = { id: number; received_at: string | null; expiry_date: string | null; lot_code: string | null; batch_number: number | null; supplier_name: string | null; branches: Array<{ branch_id: number; quantity: number }> }
+  const lotById = new Map<number, Lot>()
+  const lotsByProduct = new Map<number, Lot[]>()
+  for (const row of rows) {
+    let lot = lotById.get(Number(row.id))
+    if (!lot) {
+      lot = { id: Number(row.id), received_at: row.received_at, expiry_date: row.expiry_date, lot_code: row.lot_code, batch_number: row.batch_number, supplier_name: row.supplier_name, branches: [] }
+      lotById.set(lot.id, lot)
+      const productId = Number(row.product_id)
+      const list = lotsByProduct.get(productId)
+      if (list) list.push(lot); else lotsByProduct.set(productId, [lot])
+    }
+    lot.branches.push({ branch_id: Number(row.branch_id), quantity: Number(row.quantity) || 0 })
+  }
+  return { ...payload, items: items.map((row) => {
+    const all = lotsByProduct.get(Number(row.id)) ?? []
+    const kept = all.length > 1 ? [...all].sort(compareLotsFifo) : all
+    for (const lot of kept) if (lot.branches.length > 1) lot.branches.sort((a, b) => a.branch_id - b.branch_id)
+    return { ...row, lots: kept.slice(0, cap), ...(kept.length > cap ? { lots_more: true } : {}) }
+  }) }
+}
+
+// The shared Products list reader (INV-A S4a): version -> cachedJsonResponse -> refresh on a hit -> the live attachments (tagged_lots, lots). GET /search and
+// GET /api/inventory-checks/list both call it, so one cache entry serves both pages. The caller has already decided who may read (surface denial, image-only).
+//   include        the live attachments to add (default: the tokens of query.include). They are read after the cache, so they are never part of the key.
+//   keyRequest     the request the cache key is built from (default: the incoming one). Inventory builds the canonical Products URL here, so its key is Products'.
+//   restrictIdsJson / excludeIdsJson / setKey / setVersion
+//                  the server-only Inventory Check restriction: the ids (JSON array) the cohort is limited to or leaves out, a label for the key, and the
+//                  inventory_checks version the id set was read at. Without them the key and the statements are exactly what they were.
+// A `lots` token in the URL's include parameter is dropped from the key: it adds rows after the cache and changes nothing the entry holds.
+// The page payload cache's lifetime with catalog_ranked_scope OFF: exactly what it has always been. ON, the ranked-scope entry lives productListCacheSeconds (planTier).
+const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20
+export type ProductSearchListOptions = {
+  include?: ReadonlySet<string>
+  keyRequest?: Request
+  restrictIdsJson?: string
+  excludeIdsJson?: string
+  setKey?: string
+  setVersion?: string
+  /** The caller has already admitted this viewer to the lots / held-stock attachments (see attachLotRows). */
+  lotsAdmitted?: boolean
+  taggedLotsAdmitted?: boolean
+}
+export async function readProductSearchList(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, query: Record<string, string>, options: ProductSearchListOptions = {}) {
+  const user = c.get('user')
+  const include = options.include ?? productSearchIncludes(query)
+  const restricted = options.restrictIdsJson !== undefined || options.excludeIdsJson !== undefined
+  let keyRequest = options.keyRequest ?? c.req.raw
+  const keyUrl = new URL(keyRequest.url)
+  const tokens = (keyUrl.searchParams.get('include') ?? '').split(',').map((part) => part.trim()).filter(Boolean)
+  if (tokens.includes('lots') || restricted) {
+    if (tokens.includes('lots')) {
+      const kept = tokens.filter((token) => token !== 'lots')
+      if (kept.length) keyUrl.searchParams.set('include', kept.join(',')); else keyUrl.searchParams.delete('include')
+    }
+    if (restricted) keyUrl.searchParams.set('ic_set', options.setKey ?? 'set')
+    keyRequest = new Request(keyUrl.toString(), { method: 'GET' })
+  }
+  // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
+  // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
+  if (await readSwitch(c.env, 'catalog_ranked_scope')) {
+    let versions: string, edgeVersions: string
+    try {
+      const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
+      edgeVersions = `${baseVersion}:promo:${promotions}`
+      versions = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}:promo:${promotions}` : edgeVersions
+    } catch { versions = edgeVersions = unsafeVersionToken() }
+    const limits = getPlanLimits(c.env)
+    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson,
+      ranked: { ctx: c.executionCtx, request: keyRequest, versions, edgeVersions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
+    const [taggedRanked, lotsRanked] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, rankedPayload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, rankedPayload, options.lotsAdmitted === true)])
+    return lotsRanked === rankedPayload ? taggedRanked : { ...taggedRanked, items: lotsRanked.items }
+  }
+  const baseVersion = await productSearchCacheVersion(c.env, query)
+  const version = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}` : baseVersion
+  let produced = false
+  const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS, async () => {
+    produced = true
+    return restricted
+      ? searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson })
+      : searchProductsWithIndexFallback(c.env, query)
+  }, cacheIdentity(c))
+  // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).
+  const payload = produced ? cachedPayload
+    : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
+
+  const [withTagged, withLots] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, payload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, payload, options.lotsAdmitted === true)])
+  return withLots === payload ? withTagged : { ...withTagged, items: withLots.items }
 }
 
 app.get('/search', async (c) => {
@@ -1450,17 +1613,7 @@ app.get('/search', async (c) => {
   if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
     return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
 
-  const version = await productSearchCacheVersion(c.env, query)
-  let produced = false
-  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
-    produced = true
-    return searchProductsWithIndexFallback(c.env, query)
-  }, cacheIdentity(c))
-  // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).
-  const payload = produced ? cachedPayload
-    : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
-
-  return c.json(await attachFoldedTaggedLots(c.env, user, query, payload))
+  return c.json(await readProductSearchList(c, query))
 })
 
 // ---- G37: the client search index ------------------------------------
