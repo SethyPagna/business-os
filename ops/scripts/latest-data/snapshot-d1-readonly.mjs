@@ -256,6 +256,13 @@ export const PII_COLUMNS = Object.freeze({
     'cashier_name', 'cancelled_by_name', 'stock_skipped_by_name', 'device_name', 'notes',
   ],
   returns: ['customer_name', 'cashier_name', 'device_name', 'notes'],
+  // Online orders (KHQR, migration 0293): the customer's own contact data, free text that names a person or an address, and the staff who acted.
+  online_orders: [
+    'customer_name', 'customer_phone', 'customer_address', 'contact_telegram', 'contact_instagram', 'contact_facebook', 'contact_tiktok', 'contact_whatsapp', 'contact_other',
+    'note', 'network_key',
+  ],
+  online_order_requests: ['customer_comment', 'before_json', 'after_json', 'network_key'], // the JSON holds the proposed address, contacts and note
+  online_order_events: ['actor_name', 'public_comment', 'internal_note', 'reference'],
   customer_receivables: ['customer_name'],
   customer_share_submissions: ['customer_name', 'note', 'reviewed_by_name'],
   contact_duplicate_dismissals: ['cluster_value', 'dismissed_by_name'], // cluster_value is a phone or a name
@@ -296,6 +303,7 @@ export const SECRET_COLUMNS = Object.freeze({
   portal_accounts: ['password_hash'],
   verification_codes: ['code_hash'],
   user_sessions: ['token_hash'],
+  online_orders: ['token_hash'], // the order link's credential
   portal_sessions: ['token_hash'],
   portal_password_resets: ['token_hash'],
   ai_provider_configs: ['api_key_encrypted'],

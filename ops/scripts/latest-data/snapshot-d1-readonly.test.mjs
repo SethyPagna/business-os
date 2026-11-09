@@ -265,6 +265,11 @@ const MAPPED_BEYOND_CLASSIFIER = [
   'legacy_deleted_sale_items.deleted_by', 'portal_accounts.name', 'portal_auth_lockouts.key',
   'rate_limit_events.client_key', 'returns.notes', 'sales.notes', 'suppliers.notes', 'users.name',
   'verification_codes.target',
+  // Online orders (KHQR): contact handles, free text and the proposed-change JSON carry a customer's own data.
+  'online_order_events.internal_note', 'online_order_events.public_comment', 'online_order_events.reference',
+  'online_order_requests.after_json', 'online_order_requests.before_json', 'online_order_requests.customer_comment', 'online_order_requests.network_key',
+  'online_orders.contact_facebook', 'online_orders.contact_instagram', 'online_orders.contact_other', 'online_orders.contact_telegram', 'online_orders.contact_tiktok',
+  'online_orders.contact_whatsapp', 'online_orders.network_key', 'online_orders.note',
 ]
 check('mapped columns beyond the classifier are exactly the reviewed set', () => {
   const actual = []
@@ -285,6 +290,14 @@ check('column map is complete for the migrated schema (classifier sweep) and has
   for (const map of [PII_COLUMNS, SECRET_COLUMNS]) {
     for (const [t, cols] of Object.entries(map)) for (const c of cols) assert.ok(SCHEMA[t]?.includes(c), `mapped ${t}.${c} is not in the migrated schema`)
   }
+})
+
+check('online order tables: every customer-facing column is mapped and the order link credential is a secret (verifier R5)', () => {
+  for (const c of ['customer_name', 'customer_phone', 'customer_address', 'contact_telegram', 'contact_instagram', 'contact_facebook', 'contact_tiktok', 'contact_whatsapp', 'contact_other', 'note', 'network_key']) assert.ok(PII_COLUMNS.online_orders.includes(c), 'online_orders.' + c)
+  for (const c of ['customer_comment', 'before_json', 'after_json']) assert.ok(PII_COLUMNS.online_order_requests.includes(c), 'online_order_requests.' + c)
+  for (const c of ['actor_name', 'public_comment', 'internal_note']) assert.ok(PII_COLUMNS.online_order_events.includes(c), 'online_order_events.' + c)
+  assert.ok(SECRET_COLUMNS.online_orders.includes('token_hash'))
+  for (const t of ['online_orders', 'online_order_requests', 'online_order_events']) assert.ok(SCHEMA[t], t + ' exists in the migrated schema')
 })
 
 function sampleRow(table, cols) {
