@@ -36,6 +36,66 @@ const os = require('node:os')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 
+// ---- the real sale edit route, for the SALE-DELIVERY-EDIT checks below ------
+// The driver is changed through POST /api/sales/bulk-update on a fully migrated SQLite database, and the report is then
+// read from THAT database. A hand-written UPDATE would pass on any writer, including one that forgot the linked expense.
+const ts = require('typescript')
+const { withProductStockGuard } = require('./harness/product_stock_guard.cjs')
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+const srcRoot = path.join(__dirname, '..')
+const recordContract = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
+const ADMIN = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
+const routeCache = new Map()
+const routeActual = new Set(['businessMaintenanceGuard', 'acquisitionCostAccess', 'courierCostAccess', 'saleCustomerAssignmentGuard', 'customerPointsReturn', 'actorSnapshot', 'anonymousCustomer', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites', 'conflictControl', 'saleAmendments', 'productStockGuard', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'failureText'])
+function loadRoute(rel) {
+  if (routeCache.has(rel)) return routeCache.get(rel).exports
+  const mod = { exports: {} }
+  routeCache.set(rel, mod)
+  const output = ts.transpileModule(fs.readFileSync(path.join(srcRoot, 'src', rel), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const req = (name) => {
+    if (name === 'hono') return require(name)
+    if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', ADMIN); return next() } }
+    if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0 }
+    if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
+    if (name.endsWith('/audit')) return { audit: async () => {} }
+    if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
+    if (name.startsWith('.')) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'
+      return routeActual.has(path.posix.basename(name)) ? loadRoute(target) : {}
+    }
+    return require(name)
+  }
+  new Function('require', 'module', 'exports', output)(withProductStockGuard(req), mod, mod.exports)
+  return mod.exports
+}
+function routeFixture(sql) {
+  const env = { __db: sql, DB: {
+    prepare(text) {
+      return { bind(...params) { return {
+        text, params,
+        async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+        async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+        async run() { const r = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
+      } } }
+    },
+    async batch(statements) {
+      return sql.transaction(() => statements.map((s) => { const r = sqliteD1Call(sql.prepare(s.text), 'run', s.params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } }))()
+    },
+  } }
+  const ctx = { waitUntil() {}, passThroughOnException() {} }
+  const salesApp = loadRoute('routes/sales.ts').default
+  const historyApp = loadRoute('routes/actionHistory.ts').default
+  const post = async (app, url, body) => {
+    const response = await app.request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, env, ctx)
+    return { status: response.status, body: await response.json() }
+  }
+  return {
+    env,
+    changeDriver: (key, saleId, sourceId, targetId) => post(salesApp, '/bulk-update', { client_request_id: key, items: [{ id: saleId, expected_updated_at: sql.prepare('SELECT updated_at FROM sales WHERE id=?').get(saleId).updated_at }], action: { kind: 'delivery_contact', source_id: sourceId, target_id: targetId } }),
+    undo: (historyId, generation = 0) => post(historyApp, '/' + historyId + '/undo', { require_applied: true, expected_generation: generation }),
+  }
+}
+
 const srcPath = path.join(__dirname, '..', 'src', 'lib', 'salesAnalytics.ts')
 const stripped = ('// @ts-nocheck\n' + fs.readFileSync(srcPath, 'utf8'))
   .replace(/^import \{ getDb \} from '\.\/db'\r?\n/m, 'const getDb = (env) => env.__db\n')
@@ -229,19 +289,44 @@ check(`paid_by_method reports only what was actually taken (${JSON.stringify(rit
 check('POSITIVE CONTROL: the unpaid delivery was on a DIFFERENT method, so an unfiltered breakdown would list two',
   db.prepare("SELECT COUNT(DISTINCT payment_method) AS n FROM sales WHERE delivery_contact_id = 9").get().n === 2)
 
-// A sale's driver edited afterwards (SALE-DELIVERY-EDIT) moves the delivery with it: the report groups on the sale row's
-// live delivery_contact_id, so no stored aggregate needs repair.
-db.prepare('INSERT INTO delivery_contacts (id, name) VALUES (?,?)').run(10, 'Sophea')
-db.prepare("UPDATE sales SET delivery_contact_id = 10, delivery_contact_name = 'Sophea' WHERE id = 7").run()
-const movedCouriers = await lib.getDeliveryContactTotals(env, AUG)
-const rithAfter = movedCouriers.find((r) => r.delivery_contact_id === 9)
-const sopheaAfter = movedCouriers.find((r) => r.delivery_contact_id === 10)
-check(`the re-assigned delivery leaves the old driver (${rithAfter.deliveries}) and joins the new one (${sopheaAfter && sopheaAfter.deliveries})`,
-  rithAfter.deliveries === 1 && sopheaAfter && sopheaAfter.deliveries === 1 && sopheaAfter.delivery_contact_name === 'Sophea')
-check('the fees follow it and the all-driver total does not move',
-  Math.round((rithAfter.charged_fee_usd + sopheaAfter.charged_fee_usd) * 100) / 100 === rith.charged_fee_usd)
-db.prepare('UPDATE sales SET delivery_contact_id = 9, delivery_contact_name = ? WHERE id = 7').run(db.prepare('SELECT name FROM delivery_contacts WHERE id = 9').get().name)
-db.prepare('DELETE FROM delivery_contacts WHERE id = 10').run()
+// A sale's driver edited afterwards (SALE-DELIVERY-EDIT) moves the delivery with it. The edit goes through the REAL route
+// on a migrated database; the report then groups on the sale row's live delivery_contact_id, so no stored aggregate needs
+// repair. G3: the delivery expense linked to that sale and the old driver moves too, so "Linked expenses" follows.
+{
+  const real = new Database(':memory:')
+  real.pragma('foreign_keys = OFF')
+  for (const file of fs.readdirSync(path.join(__dirname, '..', 'migrations')).filter((f) => f.endsWith('.sql')).sort()) real.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', file), 'utf8'))
+  real.exec("INSERT INTO branches(id,name) VALUES(1,'Shop'); INSERT INTO delivery_contacts(id,name,phone,area,address) VALUES(9,'Rith','111','','Rith road'),(10,'Sophea','222','','Sophea road')")
+  for (const [id, fee] of [[7, 2], [8, 3]]) {
+    real.prepare("INSERT INTO sales(id,receipt_number,created_at,sale_status,branch_id,branch_name,cashier_name,payment_method,total_usd,subtotal_usd,delivery_fee_usd,delivery_fee_paid_by,is_delivery,delivery_contact_id,delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_actual_cost_usd,updated_at) VALUES(?,?,?,'completed',1,'Shop','aza','cash',?,?,?,'customer',1,9,'Rith','111','Rith road',1.25,'v1')")
+      .run(id, 'D' + id, AT(8, 12), 40 + fee, 40, fee)
+  }
+  real.exec("INSERT INTO fees(id,fee_type,label,amount_usd,fee_date,sale_id,delivery_contact_id) VALUES (9201,'delivery','Courier',1.25,'2026-08-12',7,9),(9202,'other','Box',0.5,'2026-08-12',7,9),(9203,'delivery','Courier',1.25,'2026-08-12',8,9)")
+  const realEnv = routeFixture(real)
+  const reportOf = async () => (await lib.getDeliveryContactTotals({ __db: real }, AUG))
+  const before = await reportOf()
+  const rithBefore = before.find((r) => r.delivery_contact_id === 9)
+  check('baseline on the migrated database: Rith has both deliveries and two linked delivery expenses plus one other',
+    rithBefore && rithBefore.deliveries === 2 && rithBefore.linked_expense_count === 3)
+  const moved = await realEnv.changeDriver('report-driver-move', 7, 9, 10)
+  check('the real edit route accepted the driver change (' + moved.status + ')', moved.status === 200)
+  const after = await reportOf()
+  const rithAfter = after.find((r) => r.delivery_contact_id === 9)
+  const sopheaAfter = after.find((r) => r.delivery_contact_id === 10)
+  check('the re-assigned delivery leaves the old driver (' + rithAfter.deliveries + ') and joins the new one (' + (sopheaAfter && sopheaAfter.deliveries) + ')',
+    rithAfter.deliveries === 1 && sopheaAfter && sopheaAfter.deliveries === 1 && sopheaAfter.delivery_contact_name === 'Sophea')
+  check('the delivery fee follows the sale, and the all-driver total does not move',
+    rithAfter.charged_fee_usd + sopheaAfter.charged_fee_usd === rithBefore.charged_fee_usd && sopheaAfter.charged_fee_usd === 2)
+  check('G3: the linked delivery expense moved with it: the old driver keeps the other sale\'s expense and the non-delivery one, the new driver gains exactly the one',
+    rithAfter.linked_expense_count === 2 && sopheaAfter.linked_expense_count === 1)
+  check('G3: the other-type expense stayed on the old driver, the delivery one did not',
+    real.prepare('SELECT delivery_contact_id d FROM fees WHERE id=9202').get().d === 9 && real.prepare('SELECT delivery_contact_id d FROM fees WHERE id=9201').get().d === 10)
+  const undone = await realEnv.undo(moved.body.actionHistoryId)
+  check('Undo is accepted (' + undone.status + ')', undone.status === 200)
+  const restored = (await reportOf()).find((r) => r.delivery_contact_id === 9)
+  check('Undo gives the old driver both deliveries and all three linked expenses back', restored.deliveries === 2 && restored.linked_expense_count === 3)
+  real.close()
+}
 
 // ---- 6. overview / periods totals ------------------------------------------
 const days = await lib.getBusinessSummaryDayRows(env, AUG)

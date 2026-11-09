@@ -3,7 +3,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
-import { getActionTier } from './permissions'
+import { getActionTier, isAdminControlUser } from './permissions'
+import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindowMinutes } from './saleAmendments'
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
@@ -76,11 +77,19 @@ type BulkUpdateMember = {
   returnsAfter: ReturnCustomerSnapshot[]
 }
 
+// A delivery expense linked to the sale and the old driver follows the delivery
+// to the new driver (owner, 9 Nov 2026). Saved so undo and redo reverse it;
+// older snapshots lack the field and replay as "no expenses moved".
+type DeliveryFeeMoves = { ids: number[]; before: number | null; after: number | null }
+// What a review dialog lists before the write: the expense label only, never its amount (the courier payout is a cost field).
+type MovedExpense = { id: number; sale_id: number; label: string | null }
+
 type BulkUpdateSnapshot = {
   version: 1
   operationId: string
   action: SaleBulkUpdateAction
   members: BulkUpdateMember[]
+  feeMoves?: DeliveryFeeMoves
   referenceBefore?: Row | null
   referenceAfter?: Row | null
 }
@@ -317,11 +326,56 @@ function saleUpdateStatement(member: BulkUpdateMember, action: SaleBulkUpdateAct
   return statements
 }
 
-function auditStatement(user: SessionUser, operationId: string, direction: string, action: SaleBulkUpdateAction, count: number): StockStatement {
+// Who the sale's driver was or is: id, name and phone, never any money field.
+function driverBrief(row: Row): Row {
   return {
-    sql: "INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@event,'sale',@id,@details,'sales',@id,@details)",
-    params: { uid: user.id, name: actorSnapshot(user), event: direction, id: operationId, details: JSON.stringify({ kind: BULK_UPDATE_KIND, action: action.kind, count }) },
+    id: row.delivery_contact_id == null ? null : Number(row.delivery_contact_id),
+    name: String(row.delivery_contact_name || '').trim() || null,
+    phone: String(row.delivery_contact_phone || '').trim() || null,
   }
+}
+
+// One sale's driver edit names the sale and the driver before and after
+// (entity_id = the sale id, kind 'sale.delivery.single'); a group keeps one row
+// for the operation but lists every sale it covers. Nothing here ever reads a
+// courier cost.
+function auditStatement(user: SessionUser, snapshot: BulkUpdateSnapshot, direction: string, count: number, via: 'apply' | 'undo' | 'redo' = 'apply'): StockStatement {
+  const action = snapshot.action
+  const driverEdit = action.kind === 'delivery_contact'
+  const flip = via === 'undo'
+  const sales = driverEdit
+    ? snapshot.members.filter((member) => member.changed).map((member) => ({
+      id: member.id, receipt_number: member.receipt,
+      before: driverBrief(flip ? member.after : member.before), after: driverBrief(flip ? member.before : member.after),
+    }))
+    : []
+  const insert = "INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@event,'sale',@id,@details,'sales',@id,@details)"
+  if (driverEdit && snapshot.members.length === 1) {
+    const sale = snapshot.members[0]
+    const details = JSON.stringify({
+      kind: SINGLE_DELIVERY_UPDATE_KIND, action: action.kind, count, sale_id: sale.id, receipt_number: sale.receipt,
+      before: sales[0]?.before ?? driverBrief(sale.before), after: sales[0]?.after ?? driverBrief(sale.before),
+      expenses_moved: snapshot.feeMoves?.ids.length ?? 0,
+    })
+    return { sql: insert, params: { uid: user.id, name: actorSnapshot(user), event: direction, id: String(sale.id), details } }
+  }
+  const details = JSON.stringify({ kind: BULK_UPDATE_KIND, action: action.kind, count, ...(driverEdit ? { sales, expenses_moved: snapshot.feeMoves?.ids.length ?? 0 } : {}) })
+  return { sql: insert, params: { uid: user.id, name: actorSnapshot(user), event: direction, id: snapshot.operationId, details } }
+}
+
+// Delivery expenses (type 'delivery', the courier payout) linked to a sale and
+// its old driver. The same type match the payout de-duplication in
+// shiftReconciliation uses.
+const DELIVERY_FEE_MATCH = "COALESCE(fee_type,'')='delivery'"
+function feeMoveStatements(moves: DeliveryFeeMoves | undefined, direction: 1 | -1, stamp: string): StockStatement[] {
+  if (!moves || !moves.ids.length) return []
+  const from = direction > 0 ? moves.before : moves.after
+  const to = direction > 0 ? moves.after : moves.before
+  return [{
+    // Only expenses still on the side being left move, so an expense edited by hand since stays as the user left it.
+    sql: 'UPDATE fees SET delivery_contact_id=@to,updated_at=@stamp WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids)) AND delivery_contact_id IS @from',
+    params: { to, from, stamp, ids: JSON.stringify(moves.ids) },
+  }]
 }
 
 function referenceGuard(action: SaleBulkUpdateAction, state: Row): StockStatement | null {
@@ -373,18 +427,22 @@ export async function notifySaleBulkUpdate(env: Env, actionKind?: string): Promi
   if (actionKind === 'customer') {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'returns'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'returns', { action: 'update' }), broadcast(env, 'customers', { action: 'update' })])
   } else if (actionKind === 'delivery_contact') {
-    await Promise.allSettled([bumpVersion(env, 'sales'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'deliveryContacts', { action: 'update' })])
+    await Promise.allSettled([bumpVersion(env, 'sales'), broadcast(env, 'sales', { action: 'update' }), broadcast(env, 'deliveryContacts', { action: 'update' }), broadcast(env, 'fees', { action: 'update' })])
   } else {
     await Promise.allSettled([bumpVersion(env, 'sales'), broadcast(env, 'sales', { action: 'update' })])
   }
 }
 
-export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row) {
+export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput: Row) {
+  // preview: true runs every read and refusal of the real write (permission, cancelled, edit window, the exact
+  // expenses that would move) and answers without writing anything, so a review dialog can list what moves.
+  const preview = !!rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) && rawInput.preview === true
+  const raw = preview ? Object.fromEntries(Object.entries(rawInput).filter(([key]) => key !== 'preview')) : rawInput
   const request = parseRequest(raw)
   permission(user, request.action, request.items.length)
   const db = getDb(env)
   const canonical = JSON.stringify(request)
-  const previous = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
+  const previous = preview ? null : await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous) {
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return JSON.parse(String(previous.receipt_json))
@@ -450,6 +508,20 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     if (sale.movement_fingerprint === null) fail(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400)
   }
   const sourceMatchedIds = request.items.filter((item) => sourceMatches.get(item.id)).map((item) => item.id)
+  // Parity with the delivery-cost edit (owner ruling, 9 Nov 2026): outside the
+  // sale edit window only an admin may change a driver. Only the window applies:
+  // returned sales stay editable (23 Sep rule) and cancelled ones were refused above.
+  if (request.action.kind === 'delivery_contact' && sourceMatchedIds.length && !isAdminControlUser(user)) {
+    const windowRow = await db.prepare('SELECT value FROM settings WHERE key = ?').get<{ value: string }>([AMENDMENT_WINDOW_SETTING_KEY])
+    const windowMinutes = resolveAmendmentWindowMinutes(windowRow?.value)
+    const windowGuard = (sale: Row) => guardSaleAmendment({ saleStatus: 'completed', hasRecordedReturns: false, saleCreatedAt: sale.created_at, windowMinutes, isAdmin: false })
+    const closed = sales.filter((sale) => sourceMatches.get(Number(sale.id)) && !windowGuard(sale).ok)
+    if (closed.length) {
+      const refusal = windowGuard(closed[0])
+      const message = refusal.ok ? 'The edit window for this sale has closed.' : refusal.error
+      throw new SaleBulkError(closed.length > 1 ? `${message} Sales: ${closed.map((sale) => String(sale.receipt_number || sale.id)).join(', ')}. Nothing in the group was changed.` : message, 400, { code: 'window', sale_ids: closed.map((sale) => Number(sale.id)) })
+    }
+  }
   const returnRows = request.action.kind === 'customer'
     ? await rowsIn<ReturnCustomerSnapshot & Row & { sale_id: number }>(db, sourceMatchedIds, (marks) => `SELECT id,sale_id,customer_id,customer_name,search_normalized,return_number,receipt_number,cashier_name,branch_name,reason,return_type,notes FROM returns WHERE sale_id IN (${marks}) ORDER BY id LIMIT 301`)
     : []
@@ -471,7 +543,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     const table = request.action.kind === 'customer' ? 'customers' : 'delivery_contacts'
     const columns = request.action.kind === 'customer' ? 'id,name,membership_number,phone,address,is_anonymous' : 'id,name,phone,area,address'
     sourceReference = await db.prepare(`SELECT ${columns} FROM ${table} WHERE id=?`).get<Row>([request.action.source_id]) || null
-    if (!sourceReference) fail('Source linked record was not found.', 400)
+    // A driver contact deleted after the sale was saved must not trap the sale on a
+    // driver nobody can pick: the sale row's own id already matched the request,
+    // so the edit proceeds with no source-contact guard (undo restores the snapshot).
+    if (!sourceReference && request.action.kind !== 'delivery_contact') fail('Source linked record was not found.', 400)
   }
 
   const operationId = crypto.randomUUID()
@@ -593,6 +668,27 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     ? await prepareCustomerAssignments(db, members.filter(member => member.changed).map(member => ({ id: member.id, sourceId: member.before.customer_id == null ? null : Number(member.before.customer_id), targetId: member.after.customer_id == null ? null : Number(member.after.customer_id) })))
     : null
   if (assignmentPlan) guards.push(assignmentPlan.pre)
+  let feeMoves: DeliveryFeeMoves | undefined
+  let movedExpenses: MovedExpense[] = []
+  const changedMemberIds = members.filter((member) => member.changed).map((member) => member.id)
+  if (request.action.kind === 'delivery_contact' && changedMemberIds.length && request.action.source_id !== null) {
+    const feeRows = await db.prepare(`SELECT id,sale_id,label FROM fees WHERE sale_id IN (${changedMemberIds.map(() => '?').join(',')}) AND delivery_contact_id=? AND ${DELIVERY_FEE_MATCH} ORDER BY id`)
+      .all<MovedExpense>([...changedMemberIds, request.action.source_id])
+    feeMoves = { ids: feeRows.map((row) => Number(row.id)), before: request.action.source_id, after: request.action.target_id }
+    movedExpenses = feeRows.map((row) => ({ id: Number(row.id), sale_id: Number(row.sale_id), label: row.label == null ? null : String(row.label) }))
+    // The set that moves is the set that was reviewed: a delivery expense added or re-pointed since the read refuses the write.
+    guards.push(bulkAssertion(`(SELECT COUNT(*) FROM fees WHERE sale_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@sale_ids)) AND delivery_contact_id=@old AND ${DELIVERY_FEE_MATCH})=@n`, { sale_ids: JSON.stringify(changedMemberIds), old: request.action.source_id, n: feeMoves.ids.length }))
+  }
+  if (preview) {
+    return {
+      preview: true as const,
+      action: request.action,
+      changedCount: changedMemberIds.length,
+      unchangedCount: members.length - changedMemberIds.length,
+      movedExpenseCount: movedExpenses.length,
+      movedExpenses,
+    }
+  }
   const changedReference = members.find((member) => member.changed)
   if (changedReference) {
     for (const state of [referenceState(request.action, sourceReference), referenceState(request.action, request.action.kind === 'customer' ? targetCustomer : targetContact)]) {
@@ -607,6 +703,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     operationId,
     action: request.action,
     members,
+    ...(feeMoves ? { feeMoves } : {}),
     referenceBefore: referenceState(request.action, sourceReference),
     referenceAfter: referenceState(request.action, request.action.kind === 'customer' ? targetCustomer : targetContact),
   }
@@ -620,6 +717,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     unchangedIds,
     changedCount: changedIds.length,
     unchangedCount: unchangedIds.length,
+    ...(feeMoves ? { movedExpenseCount: feeMoves.ids.length } : {}),
     currentReplayGeneration: 0,
     items: members.map((member) => ({ id: member.id, receipt_number: member.receipt, before: member.before, after: member.after, changed: member.changed, reason: member.reason })),
   }
@@ -629,25 +727,37 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
   for (const member of members) statements.push(...saleUpdateStatement(member, request.action, 1, stamp))
+  statements.push(...feeMoveStatements(feeMoves, 1, stamp))
   if (assignmentPlan) statements.push(assignmentPlan.post)
   const recordEvents = bulkUpdateRecordEvents(snapshot, 0, 'apply', user, stamp)
   if (recordEvents) statements.push(recordEvents.statement)
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: BULK_UPDATE_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE sale_bulk_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
+  // A one-sale driver edit reads "Driver of #R: A -> B" (translated by the History bar from these fields); the
+  // names only, never a courier cost.
+  const singleDriver = request.action.kind === 'delivery_contact' && members.length === 1 && members[0].changed ? members[0] : null
+  const historyLabel = singleDriver
+    ? `Driver of #${singleDriver.receipt}: ${String(singleDriver.before.delivery_contact_name || '-')} -> ${String(singleDriver.after.delivery_contact_name || '-')}`
+    : `${changedIds.length} sales: ${request.action.kind}; ${unchangedIds.length} unchanged`
+  const historyExtra = JSON.stringify(singleDriver ? {
+    receipt_number: singleDriver.receipt,
+    before_name: singleDriver.before.delivery_contact_name ?? null,
+    after_name: singleDriver.after.delivery_contact_name ?? null,
+  } : {})
   const historyIndex = statements.length
   statements.push({
     sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
           SELECT 'global','sale',id,@label,@reversible,@status,
-            json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),
-            json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),@actor,@name
+            json_patch(json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),@extra),
+            json_patch(json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'action',@action),@extra),@actor,@name
           FROM sale_bulk_operations WHERE id=@id`,
-    params: { id: operationId, label: `${changedIds.length} sales: ${request.action.kind}; ${unchangedIds.length} unchanged`, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: applier, action: request.action.kind, actor: user.id, name: actorSnapshot(user) },
+    params: { id: operationId, label: historyLabel, extra: historyExtra, reversible: changedIds.length ? 1 : 0, status: changedIds.length ? 'undoable' : 'recorded', kind: applier, action: request.action.kind, actor: user.id, name: actorSnapshot(user) },
   })
   statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {
     statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: member.id } })
   }
-  statements.push(auditStatement(user, operationId, 'sale_fields_bulk', request.action, changedIds.length))
+  statements.push(auditStatement(user, snapshot, 'sale_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   bounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
@@ -709,6 +819,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
     if (guard) statements.push(guard)
   }
   for (const member of snapshot.members) statements.push(...saleUpdateStatement(member, snapshot.action, sign, stamp))
+  statements.push(...feeMoveStatements(snapshot.feeMoves, sign, stamp))
   if (assignmentPlan) statements.push(assignmentPlan.post)
   const nextGeneration = Number(generation) + 1
   const recordEvents = bulkUpdateRecordEvents(snapshot, nextGeneration, direction, user, stamp)
@@ -719,7 +830,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   statements.push({ sql: 'UPDATE sale_bulk_operations SET generation=generation+1 WHERE id=@op', params: { op: op.id } })
   statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: op.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } })
   statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } })
-  statements.push(auditStatement(user, String(op.id), `action_${direction}`, snapshot.action, snapshot.members.filter((member) => member.changed).length))
+  statements.push(auditStatement(user, snapshot, `action_${direction}`, snapshot.members.filter((member) => member.changed).length, direction))
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   bounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
