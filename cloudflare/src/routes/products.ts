@@ -981,7 +981,7 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
 
 const SEEK_PAGE_MIN_RANKED_IDS = 300
 
-async function paginateRankedFamilies(env: Env, opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
+async function paginateRankedFamilies(opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
   const { page, pageSize } = opts
   const ranked = await readRankedScope(scope, async () => {
     const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), readPromotionEdge(scope, () => nextPromotionEdge(opts.db, new Date()))])
@@ -1139,7 +1139,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
   // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.
   const { items, total, totalPages } = options.ranked && seekPageRead
-    ? await paginateRankedFamilies(env, familyOptions, options.ranked)
+    ? await paginateRankedFamilies(familyOptions, options.ranked)
     : await paginateProductFamilies<Record<string, unknown>>(familyOptions)
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
