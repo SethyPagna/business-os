@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { ADMIN_ORIGIN, collectPageHealth } from './support/harness'
+import { appSelect } from './support/selects'
 import { APP_ROOT, E2E_ACCOUNTS, signIn } from './support/session'
 
 // Built UI and request ownership only. Synthetic authenticated GET responses
@@ -61,7 +62,7 @@ for (const boundary of ['filter', 'permission'] as const) {
     current = true
     if (boundary === 'filter') {
       await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
-      await page.getByRole('button', { name: 'Branch', exact: true }).click()
+      await appSelect(page, 'Branch').click()
       await page.getByRole('option', { name: 'Synthetic Two', exact: true }).click()
     } else {
       // Exercise the existing same-actor profile/permission event while the
