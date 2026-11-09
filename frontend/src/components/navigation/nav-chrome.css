@@ -215,3 +215,39 @@ body.lang-km .bos-nav-chrome {
 .hub-section-rule {
   border-bottom: 2px solid var(--nav-line);
 }
+
+/* The title is the control: plain text in the bar, no fill or border. Expanded, the subpage titles
+   continue the bar's own surface directly beneath it. */
+.bos-nav-title-button {
+  color: var(--nav-ink);
+}
+
+/* While the list is open the bar and the list are one surface: the bar's divider is hidden (kept
+   transparent, so the bar does not change height) and the same line closes the list's bottom edge. */
+.bos-nav-topbar:has([data-bos-title-menu][aria-expanded='true']) {
+  border-bottom-color: transparent;
+}
+
+/* main.css pins every dark `header.md:hidden` border with !important, so dark needs its own. */
+.dark .bos-nav-topbar:has([data-bos-title-menu][aria-expanded='true']) {
+  border-bottom-color: transparent !important;
+}
+
+.bos-nav-subpages {
+  background-color: var(--nav-surface);
+  border-bottom: 1px solid var(--nav-line);
+  color: var(--nav-ink);
+}
+
+.bos-nav-subpage {
+  color: var(--nav-ink-2);
+}
+
+.bos-nav-subpage.is-active {
+  color: var(--nav-accent-strong);
+}
+
+/* On the label, not the button: Khmer buttons are pinned to weight 500 (main.css). */
+.bos-nav-subpage.is-active > span {
+  font-weight: 600;
+}

@@ -306,6 +306,7 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   // Confirmations and choosers: what they hold is the question itself, not
   // authored content. Reopening costs one tap.
   'components/shared/RenameCascadeModal.tsx': 'a three-way choice dialog with nothing typed into it',
+  'components/navigation/SectionTitleMenu.tsx': 'the expanded subpage titles are a navigation list with no fields; picking one goes through navigateTo, which runs the dirty guard',
   'components/pos/POS.tsx': 'both overlays are a status chooser and a receipt viewer; the cart lives on the page, not in them',
   // Credential entry. Nothing authored is at risk and a retyped six-digit
   // code costs seconds; prompting mid-authentication is noise, not safety.
