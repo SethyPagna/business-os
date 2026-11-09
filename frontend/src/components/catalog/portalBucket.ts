@@ -51,6 +51,11 @@ export function findItemQty(items: PortalBucketItem[], id: string | number): num
   return items.find((item) => String(item.id) === String(id))?.qty ?? 0
 }
 
+/** Empties the stored list at once: the checkout calls this just before the page navigates to the new order, when the hook's own save may not get to run. */
+export function clearStoredBucket() {
+  writeStoredBucket([])
+}
+
 export function usePortalBucket() {
   const [items, setItems] = useState<PortalBucketItem[]>(() => readStoredBucket())
 

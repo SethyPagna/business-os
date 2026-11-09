@@ -7,6 +7,8 @@ import { installPortalTranslateDomGuard } from './components/catalog/portalTrans
 import PublicStorefrontSkeleton from './components/catalog/PublicStorefrontSkeleton.tsx'
 import { resolveStorefrontCopy } from './components/catalog/portalLanguagePacks.ts'
 import { readPublicStorefrontLanguage } from './components/catalog/portalLanguageOptions.ts'
+import { orderRouteFromPath } from './components/catalog/orders/orderPath.ts'
+import { lazyRetry } from './utils/lazyImport.ts'
 
 // Every storefront page load, before the first render: Chrome's built-in
 // translator and translation extensions move text nodes React owns, and React's next commit then throws on
@@ -25,7 +27,12 @@ function PublicCatalogFallback(): ReactElement {
   )
 }
 
+// An order link (/order/<token>) or "My orders" (/order) is its own small page: it opens straight to the payment screen without loading the
+// catalogue. The chunk loads only for those addresses; the catalogue's first paint never carries any of the order code.
+const OrderRoute = lazyRetry(() => import('./components/catalog/orders/OrderRoute.tsx'), 'public-order-route')
+
 export default function PublicCatalogRoot(): ReactElement {
+  const orderRoute = typeof window === 'undefined' ? null : orderRouteFromPath(window.location.pathname)
   return (
     // Suspense alone only covers a pending lazy import; it does not catch a
     // THROW. The incident: window.sessionStorage threw inside a ref
@@ -34,7 +41,7 @@ export default function PublicCatalogRoot(): ReactElement {
     <RootErrorBoundary surface="public-catalog-root">
       <PublicCatalogAppProvider>
         <Suspense fallback={<PublicCatalogFallback />}>
-          <PublicCatalogPage />
+          {orderRoute ? <OrderRoute route={orderRoute} /> : <PublicCatalogPage />}
         </Suspense>
       </PublicCatalogAppProvider>
     </RootErrorBoundary>

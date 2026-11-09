@@ -39,6 +39,7 @@ export default function CatalogAccountSection({
   wishlistCount,
   signupEnabled = false,
   errorCode = '',
+  onlineOrders = false,
 }: {
   copy: CopyFn
   account: PortalAccountProfile | null
@@ -58,6 +59,8 @@ export default function CatalogAccountSection({
    * paint, a failed bootstrap) shows the paused state, never a dead Sign up tab.
    */
   signupEnabled?: boolean
+  /** Online ordering is on: the standing notice says the shop takes KHQR payments instead of none. */
+  onlineOrders?: boolean
   /** The Worker's refusal code for `error` (usePortalAccount errorCode). */
   errorCode?: string
 }) {
@@ -330,7 +333,7 @@ export default function CatalogAccountSection({
           </div>
         )}
 
-        <PortalNoPaymentNotice copy={copy} variant="short" />
+        <PortalNoPaymentNotice copy={copy} variant="short" online={onlineOrders} />
       </div>
       {reminderOpen ? (
         <ConfirmDialog

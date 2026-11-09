@@ -15,6 +15,8 @@ import Store from 'lucide-react/dist/esm/icons/store.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import QrCode from 'lucide-react/dist/esm/icons/qr-code.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Minus from 'lucide-react/dist/esm/icons/minus.js'
@@ -45,7 +47,8 @@ import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, p
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { portalScrollBehavior } from './portalMotion.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
-import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
+import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile, clearStoredBucket } from './portalBucket.ts'
+import { hasSavedOrders } from './orders/orderPath.ts'
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import PortalFooter from './legal/LegalPages.tsx'
@@ -66,6 +69,8 @@ const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'public-catalog
 const ConsentRenewalPrompt = lazyRetry(() => import('./legal/ConsentRenewalPrompt'), 'public-catalog-consent-renewal')
 const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
+// Online ordering (KHQR): the checkout sheet loads only when a shopper taps Checkout, so the first paint never carries it.
+const CheckoutSheet = lazyRetry(() => import('./orders/CheckoutSheet'), 'public-order-checkout')
 
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
@@ -108,6 +113,8 @@ type PortalConfig = LooseRecord & {
   aiIntro?: string
   aiProviderId?: string | number | null
   aiTitle?: string
+  /** The Worker's `online_orders` switch, published with the config. Anything but exactly true (a missing answer included) means no cart checkout. */
+  onlineOrdersEnabled?: boolean
   businessAddress?: string
   businessLegalName?: string
   businessRegistrationNumber?: string
@@ -536,6 +543,7 @@ export default function PublicCatalogPage() {
   // their list in this browser; signing in mirrors it to the account.
   const portalAccount = usePortalAccount(bucket, wishlist)
   const [bucketOpen, setBucketOpen] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
   // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
   // from their own top-bar icon (user request), same overlay pattern as the
   // cart bucket drawer below.
@@ -1237,6 +1245,10 @@ export default function PublicCatalogPage() {
   }
 
   const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || STOREFRONT_NAME).trim()
+  // Online ordering is shown only when the Worker says it is on, and only where prices are shown (an order is priced on the server from the live catalogue).
+  const onlineOrders = displayConfig.onlineOrdersEnabled === true && displayConfig.showPrices !== false
+  // "My orders" stays reachable for a shopper who already placed one, even if ordering is paused later (reading an order stays open).
+  const showMyOrders = bucketOpen && (onlineOrders || hasSavedOrders())
 
   const handleBucketCopy = () => {
     const text = formatPortalBucketText(bucket.items, bucketBusinessName)
@@ -1272,9 +1284,21 @@ export default function PublicCatalogPage() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div>
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('bucketTitle', 'My List')}</div>
-            <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
+            <div className="text-xs text-slate-500 dark:text-neutral-400">{onlineOrders
+              ? copy('order_bucket_hint', 'Add items, then tap Checkout to pay with ABA KHQR.', 'បន្ថែមទំនិញ រួចចុច «ទូទាត់» ដើម្បីបង់ប្រាក់ដោយ ABA KHQR។')
+              : copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {showMyOrders ? (
+              <a
+                href="/order"
+                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                aria-label={copy('order_my_orders', 'My orders', 'ការបញ្ជាទិញរបស់ខ្ញុំ')}
+                title={copy('order_my_orders', 'My orders', 'ការបញ្ជាទិញរបស់ខ្ញុំ')}
+              >
+                <Receipt className="h-5 w-5" />
+              </a>
+            ) : null}
             {contactChannels.length > 0 ? (
               <button
                 type="button"
@@ -1338,7 +1362,7 @@ export default function PublicCatalogPage() {
         ) : null}
 
         <div className="px-5 pt-3">
-          <PortalNoPaymentNotice copy={copy} />
+          <PortalNoPaymentNotice copy={copy} online={onlineOrders} />
         </div>
 
         <div className="max-h-[calc(50*var(--app-vh))] overflow-y-auto px-5 py-3">
@@ -1400,6 +1424,16 @@ export default function PublicCatalogPage() {
 
         {bucket.items.length > 0 ? (
           <div className="space-y-2 border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
+            {onlineOrders ? (
+              <button
+                type="button"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800"
+                onClick={() => setCheckoutOpen(true)}
+              >
+                <QrCode className="h-4 w-4" />
+                {copy('order_checkout', 'Checkout', 'ទូទាត់')}
+              </button>
+            ) : null}
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -1484,6 +1518,7 @@ export default function PublicCatalogPage() {
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
               signupEnabled={displayConfig.signupEnabled === true}
+              onlineOrders={onlineOrders}
             />
           </Suspense>
         </div>
@@ -1697,6 +1732,16 @@ export default function PublicCatalogPage() {
     {contactFab}
     {contactPopover}
     {bucketDrawer}
+    {checkoutOpen && onlineOrders ? (
+      <Suspense fallback={null}>
+        <CheckoutSheet
+          copy={copy}
+          items={bucket.items.map((item) => ({ id: item.id, qty: item.qty, name: item.name, priceText: item.priceText }))}
+          onClose={() => setCheckoutOpen(false)}
+          onPlaced={() => { bucket.clear(); clearStoredBucket() }}
+        />
+      </Suspense>
+    ) : null}
     {accountDrawer}
     {portalAccount.consentRenewal ? (
       <Suspense fallback={null}>
