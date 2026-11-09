@@ -70,8 +70,13 @@ export function gatePath(pathname: string): string | null {
   return path.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
 }
 
-/** true when this request must be answered 404 on a storefront host. */
-export function isBlockedOnStorefrontHost(url: string): boolean {
+// ABA PayWay posts its payment callback to the shop's own host (the callback URL is built from BUSINESS_OS_PUBLIC_URL). That ONE request is let through:
+// the exact path and the POST method, nothing else under /api/payway/. The callback is only a nudge (routes/paywayCallback.ts verifies its token and then
+// asks PayWay itself whether the order was paid), so what it can do is bounded whatever its body says.
+const STOREFRONT_CALLBACK_PATH = '/api/payway/callback'
+
+/** true when this request must be answered 404 on a storefront host. `method` is only needed for the callback: without it that path is refused. */
+export function isBlockedOnStorefrontHost(url: string, method?: string): boolean {
   let parsed: URL
   try { parsed = new URL(url) } catch { return true }
   if (isStaffHostname(parsed.hostname)) return false
@@ -79,6 +84,7 @@ export function isBlockedOnStorefrontHost(url: string): boolean {
   if (path === null) return true
   const lower = path.toLowerCase()
   if (lower === '/ws' || lower.startsWith('/ws/')) return true
+  if (lower === STOREFRONT_CALLBACK_PATH) return String(method || '').toUpperCase() !== 'POST'
   if (lower === '/api' || lower.startsWith('/api/')) return !isStorefrontApiPath(path)
   return false
 }

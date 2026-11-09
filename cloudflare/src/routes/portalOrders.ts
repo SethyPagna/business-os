@@ -12,8 +12,9 @@
 //
 // The link token is the customer's key to its own order: 128 random bits, only its SHA-256 is stored. A leaked link can read the order but cannot
 // change a paid one: requests and withdrawals also need the order phone. Every write is a same-origin JSON POST (a cross-site form cannot send one).
-// With the read switch `online_orders` off every route answers 404 feature_off and nothing is read or written; the PayWay callback and the staff
-// side (other slices) ignore the switch, so money already taken is always handled.
+// With the read switch `online_orders` off every WRITE answers 404 feature_off and nothing is read or written. Reading an existing order (the two GETs)
+// stays open so a customer who paid can still see it; the PayWay callback, the sweep and the staff side (other slices) ignore the switch, so money
+// already taken is always handled.
 
 import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
@@ -73,7 +74,8 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
     return next()
   })
   app.use('*', async (c, next) => {
-    if (!(await readSwitch(c.env, ORDER_FEATURE_SWITCH))) return c.json({ error: 'Online ordering is not available.', code: 'feature_off' }, 404)
+    // Reading an order that exists stays open with the switch off (owner decision, 9 Nov): a customer who paid still sees it. Every write is closed.
+    if (c.req.method !== 'GET' && !(await readSwitch(c.env, ORDER_FEATURE_SWITCH))) return c.json({ error: 'Online ordering is not available.', code: 'feature_off' }, 404)
     return next()
   })
 

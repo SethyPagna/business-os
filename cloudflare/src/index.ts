@@ -344,7 +344,7 @@ app.use('*', async (c, next) => {
 // storefront's own API answers; staff endpoints and the live-update socket are
 // 404 there (lib/publicHostGate.ts). Before any body, seeding or DB work.
 app.use('*', async (c, next) => {
-  if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: 'Not found' }, 404)
+  if (isBlockedOnStorefrontHost(c.req.url, c.req.method)) return c.json({ error: 'Not found' }, 404)
   return next()
 })
 app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, seeding or DB work

@@ -65,16 +65,27 @@ async function paidOrder(h, over = {}) {
 
 async function main() {
   // ---------------------------------------------------------------------------------------------------------------------------- guards
-  await check('switch OFF: every route answers 404 feature_off and touches nothing (a wrong build would create the order)', async () => {
+  await check('switch OFF: every write answers 404 feature_off and touches nothing (a wrong build creates the order); reading an existing order stays open', async () => {
     const h = world({ switchOn: false })
-    const res = await create(h)
-    assert.equal(res.status, 404); assert.equal(res.body.code, 'feature_off')
-    for (const [path, method, payload] of [['/abcdefghijklmnopqrstuv', 'GET'], ['/abcdefghijklmnopqrstuv/status', 'GET'], ['/abcdefghijklmnopqrstuv/cancel', 'POST', {}], ['/abcdefghijklmnopqrstuv/requests', 'POST', {}]]) {
+    const token = 'abcdefghijklmnopqrstuv'
+    for (const [path, method, payload] of [['/', 'POST', body()], [`/${token}/edit`, 'POST', {}], [`/${token}/cancel`, 'POST', {}], [`/${token}/retry`, 'POST', {}], [`/${token}/topup`, 'POST', {}],
+      [`/${token}/requests`, 'POST', {}], [`/${token}/requests/1/withdraw`, 'POST', {}]]) {
       const r = await h.request(path, method, payload)
       assert.equal(r.status, 404, path); assert.equal(r.body.code, 'feature_off', path)
     }
     assert.deepEqual(counts(h), ZERO); assert.equal(h.calls.length, 0)
     assert.equal(h.statements.filter((s) => /online_order|products|branch_stock/.test(s)).length, 0, 'no statement read or wrote anything of the feature')
+    // An order placed while the switch was on is still readable after it is turned off (the customer who paid must see it), and an unknown link is a plain not-found.
+    h.state.switchOn = true
+    const placed = await create(h)
+    h.state.switchOn = false
+    const read = await view(h, tokenOf(placed)); assert.equal(read.status, 200); assert.equal(read.body.order.status, 'awaiting_payment')
+    const light = await poll(h, tokenOf(placed)); assert.equal(light.status, 200); assert.equal(light.body.state, 'awaiting_payment')
+    assert.equal((await view(h, token)).status, 404); assert.equal((await view(h, token)).body.code, 'order_not_found')
+    h.advance(90_000); payOnPayway(h, 25)
+    assert.equal((await poll(h, tokenOf(placed))).body.state, 'paid', 'the nudge still settles money already taken')
+    const cancel = await h.request(`/${tokenOf(placed)}/cancel`, 'POST', {})
+    assert.equal(cancel.status, 404); assert.equal(cancel.body.code, 'feature_off')
   })
 
   await check('missing PayWay secrets: payway_not_configured on every route that needs PayWay, nothing written, no call made', async () => {

@@ -82,7 +82,7 @@ function gateSuite(gate) {
 check('the gate exists and is wired before every other API middleware and route', () => {
   assert.ok(gateSource, `${GATE} exists`)
   assert.ok(indexSource.includes("import { isBlockedOnStorefrontHost } from './lib/publicHostGate'"), 'index.ts imports the gate')
-  const gateAt = indexSource.indexOf('if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: \'Not found\' }, 404)')
+  const gateAt = indexSource.indexOf('if (isBlockedOnStorefrontHost(c.req.url, c.req.method)) return c.json({ error: \'Not found\' }, 404)')
   assert.ok(gateAt > 0, 'index.ts answers 404 from the gate')
   // E3 (G39 item 3) renamed the invariants middleware call to ensureCoreDataInvariantsForRequest.
   for (const later of ["app.use('/api/*', originGuard)", 'ensureCoreDataInvariantsForRequest(c.env)', "app.get('/ws'", "app.route('/api/auth', authRoute)", "app.route('/api/portal', portalRoute)"]) {
@@ -96,6 +96,20 @@ const gate = gateSource ? loadGate(gateSource) : null
 check('shop host: staff API and /ws are 404; storefront API, uploads and documents stay; staff host unchanged', () => {
   assert.ok(gate, 'gate loaded')
   gateSuite(gate)
+})
+
+check('KHQR S4: the PayWay callback is the ONE /api/payway path the shop host lets through: exact path, POST only; every other path, method and spelling stays 404', () => {
+  const blocked = (url, method) => gate.isBlockedOnStorefrontHost(url, method)
+  for (const host of ['leangbeauty.com', 'www.leangbeauty.com', 'business-os.example.workers.dev']) {
+    assert.equal(blocked(`https://${host}/api/payway/callback?t=ABC&s=def`, 'POST'), false, 'the callback itself is reachable')
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', '', undefined]) assert.equal(blocked(`https://${host}/api/payway/callback`, method), true, `${method} is refused`)
+    for (const path of ['/api/payway', '/api/payway/', '/api/payway/callback/', '/api/payway/callback/x', '/api/payway/callbacks', '/api/payway/other', '/api/payway/check', '/api/payway/webhook',
+      '/api/paywaycallback', '/api/payway/callback/../auth/login', '/api/payway/./other', '/api/payway/callback%2Fx']) {
+      for (const method of ['POST', 'GET']) assert.equal(blocked(`https://${host}${path}`, method), true, `${method} ${path} stays 404 on the shop host`)
+    }
+    assert.equal(blocked(`https://${host}/api/payway/%63allback`, 'POST'), false, 'an encoded spelling of the same path is the same path (the router decodes it too)')
+  }
+  for (const method of ['GET', 'POST']) assert.equal(blocked('https://admin.leangbeauty.com/api/payway/other', method), false, 'the staff host is unchanged')
 })
 
 check('parity: every /api path the storefront bundle calls is reachable on the shop host', () => {
