@@ -215,3 +215,27 @@ body.lang-km .bos-nav-chrome {
 .hub-section-rule {
   border-bottom: 2px solid var(--nav-line);
 }
+
+/* The title is the control: plain text in the bar, no fill or border. Expanded, the subpage titles
+   continue the bar's own surface directly beneath it. */
+.bos-nav-title-button {
+  color: var(--nav-ink);
+}
+
+.bos-nav-subpages {
+  background-color: var(--nav-surface);
+  color: var(--nav-ink);
+}
+
+.bos-nav-subpage {
+  color: var(--nav-ink-2);
+}
+
+.bos-nav-subpage.is-active {
+  color: var(--nav-accent-strong);
+}
+
+/* On the label, not the button: Khmer buttons are pinned to weight 500 (main.css). */
+.bos-nav-subpage.is-active > span {
+  font-weight: 600;
+}

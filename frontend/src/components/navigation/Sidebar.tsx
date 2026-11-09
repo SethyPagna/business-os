@@ -42,6 +42,7 @@ import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
 import { translateFromPack } from '../shared/InstallPromptBand.tsx'
 import IosInstallSteps from '../install/IosInstallSteps.tsx'
 import { getMobileSectionIcon } from './mobileSectionIcons.ts'
+import SectionTitleMenu from './SectionTitleMenu.tsx'
 
 const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
 
@@ -634,9 +635,17 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             >
               <ChevronLeft className={`h-5 w-5 transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
             </button>
-            <div className="bos-nav-title min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm font-semibold [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" title={mobileTitle} tabIndex={0}>
-              {mobileTitle}
-            </div>
+            {/* With the pages layer open it already lists every page and the sections, so the title is
+                plain text then; otherwise a page with sections makes the title a tap-to-expand list of them. */}
+            <SectionTitleMenu
+              page={page}
+              title={mobileTitle}
+              sections={moreOpen ? [] : currentSections.map((section) => ({ id: section.id, label: sectionLabel(section) }))}
+              currentId={currentSectionId}
+              menuLabel={t('sections') || 'Sections'}
+              top={navLayerTop}
+              onSelect={(id) => navigateTo(page, hubAnchor(page, id))}
+            />
             {!moreOpen && currentSectionId === 'duplicates' && (page === 'products' || page === 'contacts') ? <span data-section-title-action-host={`${page}:duplicates`} data-section-title-action-location="mobile" className="flex shrink-0 items-center" /> : null}
           </div>
         ) : (
