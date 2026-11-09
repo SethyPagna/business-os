@@ -37,7 +37,7 @@ const app = createInvApp({
         raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run([id, stock])
       })
       // Child rows and a blank-named root: the candidate sets a page reads by key are the rows of the name_key, the children of those rows, a blank-named 'id:N' root and its children.
-      for (const [id, name, parent] of [[150, '', null], [151, 'Blank Child', 150], [152, 'Aloe Child', 104], [153, 'Powder Child', 100]]) {
+      for (const [id, name, parent] of [[150, '', null], [151, 'Blank Child', 150], [152, 'Aloe Child', 104], [153, 'Powder Child', 100], [99, '', null], [155, '', null]]) {
         raw.prepare(`INSERT INTO products(id,name,sku,barcode,brand,category,stock_quantity,low_stock_threshold,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,parent_id,created_at,updated_at)
           VALUES(?,?,?,?,'Alpha','Face',4,3,5,20000,2,8000,1,?,'2026-09-05 08:00:00','2026-09-05 08:00:00')`).run([id, name, `SKU${id}`, `88500000${id}`, parent])
       }
@@ -80,7 +80,7 @@ async function answer(on, shape) {
     check(`parity ${shape}: the hit is the same bytes`, on.second.text === off.first.text)
   }
   const sample = (await answer(false, url('page=1&pageSize=10&sort=name_asc'))).first.json
-  check('control: the fixture has promoted rows (promoted-first is exercised) and more than one page', sample.total === NAMES.length + 1 && sample.items.length > 10)
+  check('control: the fixture has promoted rows (promoted-first is exercised) and more than one page', sample.total === NAMES.length + 3 && sample.items.length > 10)
   const firstNames = sample.items.map((r) => r.name)
   check('control: promoted rows lead the unfiltered name sort', ['Aloe Toner', 'Powder Brush', 'Hair Oil'].every((n) => firstNames.includes(n)) || firstNames.slice(0, 3).length === 3)
 
@@ -108,6 +108,11 @@ async function answer(on, shape) {
   const rankingsOf = (mk) => app.since(mk).filter((sql) => /SELECT family_root_id FROM families ORDER BY/.test(sql)).length
   const edgeScans = (mk) => app.since(mk).filter((sql) => /datetime\(discount_starts_at\) > datetime/.test(sql)).length
   check('the first read of a scope ranks once', rankingsOf(m) === 1)
+  const rankingSql = app.since(m).find((sql) => /SELECT family_root_id FROM families ORDER BY/.test(sql))
+  // Tied families (the two blank-named roots) come out of the GROUP BY in key order on this plan, so the order alone cannot tell a missing tie-break; the statement must carry it, as the seek-page statement does.
+  check('the ranking statement ends its ORDER BY with the family key (a total order: tied families never swap between reads)', /ORDER BY[^;]*, family_root_id ASC$/.test(rankingSql.trim()))
+  const tied = (await app.get(url('page=1&pageSize=60&sort=name_asc'))).json.items.filter((row) => row.name === '').map((row) => row.id)
+  check('the blank-named roots tie on name and keep the key string order id:150 < id:155 < id:99, the same as OFF', tied.slice(0, 3).join() === '150,155,99')
   m = app.mark()
   await app.get(url('page=3&pageSize=10&sort=name_asc'))
   await app.get(url('page=2&pageSize=7&sort=name_asc'))
