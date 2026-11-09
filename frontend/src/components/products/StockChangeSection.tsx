@@ -77,6 +77,7 @@ import {
   emitFailedAttemptsChanged,
   readFailedStockAttempts,
   FAILED_ATTEMPTS_EVENT,
+  stockFailureText,
   type FailedStockAttempt,
 } from '../../utils/stockAdjustOutcome.ts'
 
@@ -1246,7 +1247,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     {row.reason ? ` · ${row.reason}` : ''}
                   </span>
                   <div className="mt-0.5 break-words text-rose-700 dark:text-rose-300">
-                    {row.failure?.message}
+                    {row.failure ? stockFailureText({ code: row.failure.code, message: row.failure.message }, (key, fallback) => tr(t, key, fallback), row.failure.message) : null}
                     {row.failure?.available != null ? ` (${tr(t, 'available', 'Available')}: ${row.failure.available})` : ''}
                   </div>
                 </div>

@@ -105,6 +105,7 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
   inventory_check_claim_lost: { key: 'inventory_check_error_claim_lost', fallback: 'Another approver took over or closed this count, so nothing was written for this line. The page was reloaded.' },
   inventory_check_no_lot: { key: 'inventory_check_error_no_lot', fallback: 'A product has no received date to add stock to. Receive it first.' },
   inventory_check_stock_write_refused: { key: 'inventory_check_error_write_refused', fallback: 'Stock could not be updated for some products. Try again.' },
+  inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'This count is waiting for approval. Approve or reject it first.' },
   inventory_check_approve_required: { key: 'inventory_check_error_approve_required', fallback: 'You do not have permission to approve counts.' },
   inventory_check_adjust_required: { key: 'inventory_check_error_adjust_required', fallback: 'Approving also needs permission to adjust stock.' },
   inventory_check_self_approval: { key: 'inventory_check_error_self_approval', fallback: 'You submitted this count, so another approver must approve it.' },

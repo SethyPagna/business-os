@@ -255,7 +255,8 @@ export default function ManageBatchesModal({
       await load()
       onChanged()
     } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : tr('update_failed', 'Update failed'), 'error')
+      // A Set is held while a count of this product waits for approval: said in the person's language, not the Worker's English.
+      notify((e as { code?: unknown } | null)?.code === 'inventory_check_count_pending' ? tr('inventoryCheckCountPending', 'This count is waiting for approval. Approve or reject it first.') : e instanceof Error ? e.message : tr('update_failed', 'Update failed'), 'error')
     } finally {
       finishSingleAction(saveBatchInFlightRef)
       setSavingId(null)
