@@ -13,6 +13,7 @@ import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
+import Inbox from 'lucide-react/dist/esm/icons/inbox.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -36,6 +37,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'sales:sales': ReceiptText,
   'sales:returns': Undo2,
   'sales:fees': WalletCards,
+  'sales:orders': Inbox,
   'sales:reports': BarChart3,
   'contacts:customers': UserRound,
   'contacts:suppliers': Factory,

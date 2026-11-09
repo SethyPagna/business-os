@@ -123,7 +123,8 @@ const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
 // Checkout and My orders controls, the saved-orders check (orders/orderPath.ts) and two icons (qr-code, receipt) in shared-ui. The base was already 409 bytes under the
 // ceiling, so the allowance is exactly what is left over (1,005 bytes) plus 45. Everything else is lazy and outside this closure: the checkout, the order page, the QR
 // drawing, edit and requests are four chunks, and the ordering-only policy text and structure are a fifth (legalOrderContent.ts, loaded when the policy reader opens).
-const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_050
+// G6 (staff Orders screen) adds the Orders destination to hubNavigation and one access line to AppContext, both in this closure: 3 bytes over the ceiling above, so +50.
+const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_100
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10

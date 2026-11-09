@@ -122,7 +122,7 @@ runTest('every permission-visible subpage has its own semantic icon', () => {
   const access = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
   const pairs = ['branches', 'inventory', 'sales', 'contacts', 'promotions', 'settings', 'products', 'review']
     .flatMap((ownerId) => getHubDestinations(ownerId, access).map((section) => [ownerId, section.id] as const))
-  assert.equal(pairs.length, 27, 'the eight section groups expose 27 fully permitted subpages')
+  assert.equal(pairs.length, 28, 'the eight section groups expose 28 fully permitted subpages')
   const icons = pairs.map(([ownerId, sectionId]) => {
     const icon = getMobileSectionIcon(ownerId, sectionId)
     assert.ok(icon, `${ownerId}:${sectionId} has an icon`)
