@@ -3,7 +3,7 @@
 // A line is one received date of one product: what the person typed (counted) against the figure the screen showed (seen). A product's count is the sum of its lines and its
 // baseline the sum of what they saw, so the Set-to figure keeps sales made after the screen was read: max(0, now + counted - seen) (inventoryWired.setToAmount).
 import type { InventoryCheckLotRow } from '../../types/inventoryChecks.ts'
-import type { StockConflictAnswer } from '../../api/stockAnswerPatch.ts'
+import type { StockConflictAnswer } from './stockAnswerPatch.ts'
 
 /** What is typed on one received date of a row, with the figure the row showed when it was typed. Keyed by batch id. */
 export type LotDraft = Readonly<Record<string, { count: string; seen: number }>>

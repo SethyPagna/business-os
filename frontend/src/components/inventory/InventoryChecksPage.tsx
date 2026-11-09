@@ -36,7 +36,7 @@ import { fixStockOpening, fixStockRequestId, type FixStockOpening } from './inve
 import { countTextFromLots, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type SubmissionLotLine } from './inventoryCheckLots.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
-import { stockConflictFigures, type StockWriteAnswer } from '../../api/stockAnswerPatch.ts'
+import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'

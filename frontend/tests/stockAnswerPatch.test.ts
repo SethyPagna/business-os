@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { patchProductFromStockAnswer, patchProductFromStockConflict, stockConflictFigures, type StockWriteAnswer } from '../src/api/stockAnswerPatch.ts'
+import { patchProductFromStockAnswer, patchProductFromStockConflict, stockConflictFigures, type StockWriteAnswer } from '../src/components/inventory/stockAnswerPatch.ts'
 
 // INV-A S2 (Inventory replan 2.7): a Set's answer, or its stale-quantity refusal, patches the Products row. Nothing re-reads stock.
 

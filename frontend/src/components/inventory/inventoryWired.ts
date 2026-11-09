@@ -7,7 +7,7 @@
 // Both answer 404 while the switch is off; the page then keeps today's list (`not_wired`). Pure functions only, so the open sequence can be tested without a browser.
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
-import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from '../../api/stockAnswerPatch.ts'
+import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
 type Row = Record<string, unknown> & { lots_more?: boolean; id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
