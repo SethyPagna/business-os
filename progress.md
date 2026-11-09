@@ -6,7 +6,7 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `private:Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 9 Nov 2026, 16:30 (Cambodia, UTC+7)
+## Status snapshot — 9 Nov 2026, 17:20 (Cambodia, UTC+7)
 
 - **Live:** `b1a9d9706` (`rc/20261104b`) since 4 Nov 16:21Z (deploy 41837530271) = 57178edc0 + P0.3/P0.4/P0.7 read switches and cache lifecycle (migration 0288 data_epoch), P1.1 call counting, P1.2 Free-budget operations, HANG-2 (no shared promises across requests: fixes the Products first-load error), E1-F Expenses reads, PERM-UI, ED-1a editor, storefront CLS, e2e suites. Census 42584319552: 221 migrations, every read switch OFF. Health pack 9 Nov 13/13 ok. main = this commit.
 - **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
@@ -26,36 +26,65 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
 
 ### Free-plan programme board
 
-Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on the owner. The slice ids are the private plan's (MASTER-PLAN, 1 Nov).
+Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` waiting on the owner. The slice ids come from the private plan (MASTER-PLAN, 1 Nov). Updated 9 Nov.
 
 - [x] 6.0.1035 Inventory Check name-page reads (live)
-- [x] 6.0.1036–1038, 1055 read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
-- [x] P0.1 6.0.1039 CI read-budget gate (per-route rows and calls, with and without statistics, Free config): live
-- [x] P0.2 6.0.1040 leak stop: live 2 Nov 15:46Z, health pack clean
-- [~] P0.3 6.0.1041 read switches + clean daily-cap answer · P0.4 6.0.1042 transport dedupe + shed handling · P0.7 6.0.1048 cache lifecycle: the isolate freeze is fixed (a pending read is shared only within one request); review fixes pushed (`62634ae13`); exact gate and Opus delta check running
+- [x] 6.0.1036–1038 and 1055: read-only ops queries (production facts: no planner statistics, one active branch, sale sizes up to 86 lines)
+- [x] P0.1 6.0.1039 CI read-budget gate · P0.2 6.0.1040 leak stop · P0.6 6.0.1043 health tiers (all live)
+- [x] P0.3/P0.4/P0.7 read switches, transport dedupe, cache lifecycle (migration 0288) · P1.1 call counting · P1.2 Free-budget operations · HANG-2 no shared promises across requests (the Products first-load error): all live in `b1a9d9706` since 4 Nov. Every switch is OFF.
 - [!] P0.5 governor (70/85/95% staged pause, owner-approved): the outside alarm waits on the owner's analytics token
-- [x] P0.6 6.0.1043 health tiers (recent checks ≤20k rows), release-kit counts default full, storage alarm at 400 MB: live 3 Nov
-- [~] P1.1 6.0.1049 call counting: gate green (`66a208601`); composes on P0.3. It found that a stock session reads about 8.5k rows per line
-- [x] P1.4 6.0.1050 report chain in one call: Opus GO, gate green, live 4 Nov (`57178edc0`). Deadline 11 Nov, when the read-budget coverage test starts failing every deploy without P1.2 and P1.4
-- [~] P1.6a 6.0.1044 Inventory Check (owner's 2 Nov design) · P1.7 6.0.1045 submitted counts wait for admin approval: stock fixes in progress after a second Opus NO-GO (two approvers at once could apply a count twice); off in production
-- [~] P1.2 1008 operations (payment-method impact, un-cancel, bulk transfer under 50 calls): building, focused tests running
-- [ ] P1.3 sole-branch read · P1.5 long reports · P1.8 bell + 5-minute overview with its time beside the date
+- [x] P1.4 6.0.1050 report chain in one call (live 4 Nov)
+- [~] P1.6/P1.7 Inventory Check lane (migrations 0285, 0286; switches `ic_simple` and `ic_fix_stock` OFF): in the next RC `f84f98e16` with the IC-R0 OFF-path fix. Owner, 4 Nov: turn `ic_simple` ON after deploy and keep `ic_fix_stock` OFF until the safe row Set lands (S6)
+- [~] **Inventory replan** (owner 4 Nov and 9 Nov: Inventory = the Products list + users' counts and check marks + the existing adjust/Set; never re-read or verify stock). Plan revision 2, slices:
+  - R0: in the next RC.
+  - S1: baselines `a53459312`/`f25fbd84d`.
+  - S2: refusal carries the current figures; a lot Set reads 980 → 231 rows.
+  - S3: `include=lots` in the shared Products payload (`lane/inv-a`).
+  - S8: Stock Changes keyset paging, `ledger_keyset` OFF. A deep page reads 242K → 1.4K rows (`lane/inv-b`).
+  - In progress: S4a (shared reader plus IC list/overlay, `ic_wired`) and S4b (client wiring, one request on open).
+  - Next: S5 (count lines per received date, migration, direct row Set), S7 (shared ranked scope, required before `ic_wired` ON), S6 (approval per line).
+  - Owner answers 4 Nov: `ic_simple` ON tomorrow; Full adjusters Set directly while others queue; counts are sellable units only; keep the last-change time.
+- [~] P1.8b Dashboard stock overview `asOf` + `dash_overview_5m` (OFF) and the date+time range buttons (TIME-1): in the next RC. Switching `dash_overview_5m` ON halves dashboard reads after sales.
+- [ ] P1.3 sole-branch read · P1.5 long reports · P1.9 lot orphan check once per transaction
 - [ ] P2.1 sale-money CPU (86 lines) · P2.2 merges · P2.3 paged integrity scan · P2.5 fast stock-in · P2.6 imports on Free
 - [!] P2.4 off-site backups: waits on the owner's backup token
-- [~] P2.8 6.0.1046 "See full phone numbers" permission, off by default (owner, 2 Nov): held out of the next RC; a security review found that masked notes and names can still be searched by digit fragments; fix in progress
+- [~] P2.8 "See full phone numbers" permission (off by default) + P2.8-F digit-fragment fix: in the next RC
+- [~] MONEY-1 riel cash in whole 100s, nearest-cent display, prices round up: in the next RC
 - [ ] P2.7 tills keep only the search index · P2.9 documents off public `/uploads` · P2.10 push hub closes on revoke · P2.11 isolation tests
 - [ ] P3 per-sale report facts + day rollups + sales search + 10 ms CPU rehearsal · P4 catalog SQL, customers, tracked ids, hidden-tab hold, client fixes
 - [ ] Switch gate: Free-config rehearsal from about 22 Nov + 7 measured days; switch on or before 30 Nov
-- [ ] After the switch: D1 version vector, ETag/304, live push, KV retirement, storage (the DB is 253.7 MB; the 500 MB Free cap lands between Mar and Dec 2027), design
+- [ ] After the switch: D1 version vector, ETag/304, live push, KV retirement, storage (the DB is 253.7 MB)
+
+### Owner requests 4–9 Nov (none dropped)
+
+- [~] **Online payment on leangbeauty.com with ABA PayWay dynamic KHQR + Telegram notices** (owner 9 Nov). The storefront has no cart today. The plan (private: ABA-KHQR-PLAN) covers:
+  - **Order flow:** cart → online order → PayWay KHQR for the exact amount → callback as a nudge, confirmed by check-transaction → staff "Fulfil" in POS makes the sale (KHQR).
+  - **Owner answers:** staff Fulfil; pickup or delivery with an address only, and staff contact the customer about the delivery price and time (the QR covers goods only); name, phone and address required; social contacts all shown and optional; no account; no stock hold.
+  - **Added scope:** the full lifecycle (cancel/revert/return/status changes keep the order and sale consistent); customer change requests pending, which staff accept or reject with comments, applied only through existing writers; a Telegram alert and correct data on every change.
+  - **Built:** S1 PayWay client `d54b976c2` (`lane/khqr`).
+  - **Next:** a lifecycle addendum, then S2 (migration 0293 + order core) through S7.
+  - [!] The owner must open an ABA PayWay merchant account (sandbox self-register; production via ABA's PayWay sales team) and set the keys as Worker secrets. The static merchant QR cannot do this.
+- [x] **Edit a sale's delivery person** (owner 9 Nov). Built in `lane/sale-delivery-edit` `1e41ebf4f`/`3b3f8930d`: one-sale driver change needs only `sales:amend` (it was hidden behind `sales:bulk`), plus a before/after confirm, Records, and reports that follow the new driver. Waits for the next compose and review.
+- [~] **Inventory is slow** (owner 4 and 9 Nov): see the Inventory replan above. Interim relief: `ic_simple` ON after the next deploy.
+- [~] **Time beside dates, and the Dashboard "as of" time** (owner 4 Nov): in the next RC.
+- [x] Shift "additional change used": the owner confirmed it works (9 Nov). Closed.
+- [x] Fewer agents: at most 4 at once, one gate + one Opus review per composed candidate (owner 4 Nov).
+
+### Follow-ups found (not yet scheduled)
+
+- Inventory Check: turning `ic_simple` from ON to OFF while a tab has a status filter keeps returning a 400 until the filter is cleared (R0 review finding).
+- Desktop browser suite: 72 known `dirty-form-guards` locator failures (`button.hub-section-pill`), plus an intermittent `cutover-branch-collapse.spec.ts:93`. Fix both before e2e becomes blocking.
+- Stock Changes page 1 still scans history once for its summary (about 102K rows); needs a maintained summary.
+- Telegram day summary does not show "additional change used" (noted; not asked for).
+- Live verification that Products loads cleanly on first open now that HANG-2 is live (browser check still to do).
+- BM Shop deployment needs migrations 0288, 0285 and 0286 before this code reaches it, plus the U2 storefront default changes. Message the BM session.
+- Still queued, one at a time: DIRTY-1 (6 dirty-form bugs), PAY-S4-PORT, P0.6 ops follow-ups, PLAN-LIMITS step 2, ED-1b, COVER-DIMS, the e2e writers, and flipping `e2e_blocking` after 2–3 clean runs.
 
 ### Owner UX asks (2 Nov afternoon)
 
-- [x] U1 6.0.1051 click-to-install: one Install button on Android and desktop, drawn steps on iPhone: Opus GO, gate green, live 4 Nov (`57178edc0`)
-- [x] U2 6.0.1052 leangbeauty.com: About page with the full cover photo, 2–6 product columns, one-tap chat buttons and the announcement strip: Opus GO, gate green, live 4 Nov (`57178edc0`)
-- [x] E1 6.0.1053 Expenses: labels and types in their own section, sale-linked expenses with no cost of goods, totals equal to the reports: Opus GO, gate green, live 4 Nov (`57178edc0`) (migration 0292). Follow-up E1-F cuts the export's reads about 8x behind a switch: in review
-- [x] R1 6.0.1054 one shared option button and one shared preset/option rail on every page: Opus GO, gate green, live 4 Nov (`57178edc0`)
-- [~] Website Editor new look (owner GO 3 Nov): ED-1a (bar, save states with a review before going live, seven sections) built, browser tests finishing; ED-1b, ED-2, ED-3, ED-4 follow
-- [!] Round 2 owner questions (database space, release rules on Free, which expiry date counts, sign-in after a rewind): asked 2 Nov
+- [x] U1 click-to-install · U2 leangbeauty.com About/columns/chat/announcement · E1 Expenses labels and types · R1 shared option buttons: all live 4 Nov
+- [x] Website Editor ED-1a: live 4 Nov (owner waived its +5 KB admin-only chunk). ED-1b, ED-2, ED-3 and ED-4 follow.
+- [!] Owner questions still open: deploy speed-up (reuse gate results); Review-tier multi-select delete; returns:bulk without returns:edit; renaming a payment method into or out of cash; restoring a phone change without the full-phone grant; the About-blocks media box; Paid memo 5 s vs 15 s; IC Review entry; the editor Q1–Q3 and Khmer wording; round 2 (database space, release rules on Free, which expiry date counts, sign-in after a rewind).
 
 ## Status snapshot — 27 Oct 2026 (superseded; kept for the lanes below)
 
