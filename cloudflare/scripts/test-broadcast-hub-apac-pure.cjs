@@ -92,6 +92,7 @@ const QUEUE_ONLY = {
 }
 const NOTIFIERS = {
   'customerGenderRestoration.ts': ['notifyCustomerGenderRestoration'],
+  'onlineOrderAlerts.ts': ['announceOrderChange'],
   'returnBulkAction.ts': ['notifyReturnBulkAction'],
   'returnLegacyConvert.ts': ['notifyLegacyReturnConversion'],
   'saleBulkStatus.ts': ['notifyBulkStatus'],

@@ -129,3 +129,17 @@ export function fulfilStatements(plan: FulfilPlan, input: { saleWriteKey: string
     },
   ]
 }
+
+/** Which of these sales fulfilled an online order (their KHQR money is locked: it changes only through the order's own flows). Fails open where the tables do not exist. */
+export async function linkedOnlineSaleIds(db: D1Compat, saleIds: readonly number[]): Promise<Set<number>> {
+  const ids = [...new Set(saleIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!ids.length || ids.length > 100) return new Set()
+  try {
+    // sql-bound-params: bounded by the guard above (at most 100 ids).
+    const rows = await db.prepare(`SELECT sale_id FROM online_orders WHERE sale_id IN (${ids.map(() => '?').join(',')})`).all<{ sale_id: number }>(ids)
+    return new Set((rows || []).map((row) => Number(row.sale_id)))
+  } catch { return new Set() }
+}
+
+export const ONLINE_METHOD_REQUIRES_ORDER_CODE = 'online_method_requires_order'
+export const LINKED_SALE_MONEY_LOCKED_CODE = 'linked_sale_money_locked'

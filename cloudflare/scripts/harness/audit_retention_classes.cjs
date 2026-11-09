@@ -30,6 +30,14 @@ const ROWS = [
   ['sale', 'sync_amended_allocation_quantity', KEPT],
   ['sale', 'repair_replacement_line_allocation', KEPT],
   ['payment_method', 'replace', KEPT],
+  // ---- online (KHQR) orders: audit_logs rows follow the retention setting; the order's own Records (online_order_events, never pruned) are the permanent money trail. Making these kept-forever needs the owner's ruling and a change to lib/audit.ts
+  ['online_order', 'online_order_cancel', PURGED],
+  ['online_order', 'online_order_note', PURGED],
+  ['online_order', 'online_order_recheck', PURGED],
+  ['online_order', 'online_order_refund_note', PURGED],
+  ['online_order', 'online_order_request_apply', PURGED],
+  ['online_order', 'online_order_request_decide', PURGED],
+  ['online_order', 'online_order_resolve', PURGED],
   ['customer_receivables', 'repair_receivable_paid_multiple', KEPT],
   ['supplier_invoices', 'owner_settle_legacy_supplier_0183', KEPT],
   // ---- returns
@@ -360,6 +368,8 @@ const DYNAMIC_WRITERS = [
   { file: 'routes/actionHistory.ts', entity: "existing.entity || 'action_history'", action: '{action_redo|action_undo}', cls: 'undo/redo of the history row\'s own entity', kept: 'by-entity',
     pairs: ['action_history', 'product', 'sale', 'return', 'stock_transfer', 'fee', 'branch', 'customer', 'supplier', 'delivery_contact', 'category', 'unit']
       .flatMap((entity) => [[entity, 'action_undo'], [entity, 'action_redo']]) },
+  { file: 'routes/onlineOrders.ts', entity: "'online_order'", action: 'action', cls: 'online order staff actions (the record() helper; its callers pass literals)', kept: false,
+    pairs: [['online_order', 'online_order_cancel'], ['online_order', 'online_order_note'], ['online_order', 'online_order_recheck'], ['online_order', 'online_order_refund_note'], ['online_order', 'online_order_request_apply'], ['online_order', 'online_order_request_decide'], ['online_order', 'online_order_resolve']] },
   { file: 'routes/contacts.ts', entity: 'config.entity', action: "'create'", cls: 'contact edits', kept: false, pairs: [['customer', 'create'], ['supplier', 'create'], ['delivery_contact', 'create']] },
   { file: 'routes/contacts.ts', entity: 'config.entity', action: "'update'", cls: 'contact edits', kept: false, pairs: [['customer', 'update'], ['supplier', 'update'], ['delivery_contact', 'update']] },
   { file: 'routes/contacts.ts', entity: 'config.entity', action: "'delete'", cls: 'contact edits', kept: false, pairs: [['customer', 'delete'], ['supplier', 'delete'], ['delivery_contact', 'delete']] },

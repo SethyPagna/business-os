@@ -8,6 +8,7 @@ import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindo
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
+import { configuredOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY } from './onlineOrderFulfil'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
   BULK_STATUS_LIMIT,
@@ -451,8 +452,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
   let expectedPaymentMethodsRaw: string | null = null
   // A relabel that makes non-cash riel cash must find whole 100-riel notes (owner, 27 Oct 2026); cash -> cash keeps what is stored.
   let relabelMakesCash: ((sourceMethod: unknown) => boolean) | null = null
+  let onlineMethodKey: string | null = null
   if (request.action.kind === 'payment_method') {
-    const settingRows = await db.prepare(`SELECT key,value FROM settings WHERE key IN ('pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')`).all<{ key: string; value: string }>()
+    const settingRows = await db.prepare(`SELECT key,value FROM settings WHERE key IN ('pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}','${ONLINE_PAYMENT_METHOD_KEY}')`).all<{ key: string; value: string }>()
+    onlineMethodKey = paymentMethodKey(configuredOnlineMethod(settingRows.find((row) => row.key === ONLINE_PAYMENT_METHOD_KEY)?.value))
     const setting = settingRows.find((row) => row.key === 'pos_payment_methods')
     const kinds = parsePaymentMethodKinds(settingRows.find((row) => row.key === PAYMENT_METHOD_KINDS_SETTING)?.value)
     if (isCashPaymentMethod(request.action.target, kinds)) relabelMakesCash = (sourceMethod) => !isCashPaymentMethod(sourceMethod, kinds)
@@ -461,6 +464,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     const targetKey = paymentMethodKey(request.action.target)
     const target = configured.methods.find((method) => paymentMethodKey(method) === targetKey)
     if (!target || RETIRED_PAYMENT_METHODS.has(targetKey)) fail('Choose an active configured payment method.', 400)
+    // The online (KHQR) method exists on a sale only through Fulfilling its order: a relabel cannot create online money.
+    if (targetKey === onlineMethodKey) throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 400, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
     expectedPaymentMethodsRaw = setting.value
     request.action = { ...request.action, target }
   }
@@ -508,6 +513,11 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     if (sale.movement_fingerprint === null) fail(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400)
   }
   const sourceMatchedIds = request.items.filter((item) => sourceMatches.get(item.id)).map((item) => item.id)
+  // ... and the online money of a Fulfilled order cannot be relabelled away: the order's money view reads it by method.
+  if (request.action.kind === 'payment_method' && onlineMethodKey && sourceMatchedIds.length && paymentMethodKey(request.action.source) === onlineMethodKey) {
+    const locked = await linkedOnlineSaleIds(db, sourceMatchedIds)
+    if (locked.size) throw new SaleBulkError('The online payment of a fulfilled online order cannot be relabelled. Nothing in the group was changed.', 409, { code: LINKED_SALE_MONEY_LOCKED_CODE, sale_ids: [...locked] })
+  }
   // Parity with the delivery-cost edit (owner ruling, 9 Nov 2026): outside the
   // sale edit window only an admin may change a driver. Only the window applies:
   // returned sales stay editable (23 Sep rule) and cancelled ones were refused above.

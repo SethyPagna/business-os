@@ -1,5 +1,4 @@
 import type { D1Compat } from './db'
-import { OnlineRefundNotedError } from './onlineRefundGuard'
 
 export const PRODUCT_HAS_STOCK_CODE = 'product_has_stock'
 export const PRODUCT_HAS_STOCK_MESSAGE = 'Products with stock cannot be removed. Stock can only be added to products that have not been removed.'
@@ -16,6 +15,20 @@ export class ProductStatusUnsupportedError extends Error {
 export function assertProductStatusInput(body: Record<string, unknown>): void {
   if (body.is_active != null && ![1, true, '1'].includes(body.is_active as number | boolean | string)) {
     throw new ProductStatusUnsupportedError()
+  }
+}
+
+/**
+ * Migration 0298 aborts any UPDATE that reopens a cancelled sale whose online order has a refund_noted Record ("online_refund_noted: ..."). The sale status is written by the
+ * Sales page, the bulk status action and the history replay of both; every one of them already classifies a D1 failure through productStockGuardError (below), which returns
+ * this error so the caller answers 409 with a stable code instead of an opaque 500.
+ */
+export class OnlineRefundNotedError extends Error {
+  readonly code = 'online_refund_noted'
+  readonly status = 409
+  constructor() {
+    super('This sale was cancelled and its online payment was refunded through ABA, so it cannot be reopened. Ring a new sale instead.')
+    this.name = 'OnlineRefundNotedError'
   }
 }
 

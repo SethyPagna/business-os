@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange } from '../lib/onlineOrderAlerts'
 import {
-  ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, sameMethod, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -2711,9 +2711,26 @@ app.patch('/:id/status', async (c) => {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
     }
     const settingRows = await db.prepare(`
-      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')
+      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}','${ONLINE_PAYMENT_METHOD_KEY}')
     `).all<{ key: string; value: string }>()
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
+    // Fulfilled online orders: their KHQR money is not the till's to replace, and no settlement may add online money (that arrives only through Fulfil).
+    {
+      const onlineMethod = configuredOnlineMethod(settingMap[ONLINE_PAYMENT_METHOD_KEY])
+      // A settlement restates every recorded payment row unchanged beside the new one (partial_payment_reduced), so the KHQR row of a Fulfilled sale is legitimately
+      // present: what is refused is MORE KHQR money than the sale already carries.
+      const asDetails = (raw: unknown) => (Array.isArray(raw) ? raw : []).map((detail) => ({ method: String(detail?.method ?? ''), amount_usd: Number(detail?.amount_usd) || 0, amount_khr: Number(detail?.amount_khr) || 0 }))
+      let recordedDetails: unknown = []
+      try { recordedDetails = paymentCorrection || !sale.payment_details ? [] : JSON.parse(String(sale.payment_details)) } catch { recordedDetails = [] }
+      const sentOnline = onlineTender(asDetails(body.payment_details), onlineMethod)
+      const recordedOnline = onlineTender(asDetails(recordedDetails), onlineMethod)
+      if (sentOnline.usd > recordedOnline.usd + 0.00005 || sentOnline.khr > recordedOnline.khr) {
+        return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
+      }
+      if (paymentCorrection && (await linkedOnlineSaleIds(db, [Number(id)])).size) {
+        return c.json({ error: 'This sale fulfilled an online order, so its recorded payment cannot be replaced. Settle only what is still owed.', code: LINKED_SALE_MONEY_LOCKED_CODE }, 409)
+      }
+    }
     const recordedMoney=hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0])
     // Owner rule (24 Sep 2026): a sale keeps the exchange rate it was booked
     // with, legacy (precision v0) or not. Settling records a payment against

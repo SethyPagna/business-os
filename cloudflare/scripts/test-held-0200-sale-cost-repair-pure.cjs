@@ -910,7 +910,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
     }
     return true
   }
-  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql', '0261_trigger_index_plans.sql']
+  const costReviewDdl = ['0243_stock_schema_epoch.sql', '0255_product_cost_review.sql', '0256_validated_catalog_cost.sql', '0257_product_cost_review_confirmation.sql', '0258_catalog_cost_admission.sql', '0261_trigger_index_plans.sql', '0298_sales_uncancel_after_online_refund.sql']
   for (const file of costReviewDdl) {
     assert.equal(costReviewDdlOnly(chainText(file)), true, `${file} changes only unread metadata and triggers on tables the repair never writes`)
     assert.equal(costReviewDdlOnly(chainText(file) + '\nUPDATE sale_items SET cost_price_usd=123;'), false)
