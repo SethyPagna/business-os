@@ -63,6 +63,8 @@ const NAMED_COMPANIONS = {
   285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0286 is the approval row a submitted Inventory Check count waits for (ic_fix_stock); a new table, no existing row changes.
   286: 'test-migration-0286-inventory-check-approvals-native.cjs',
+  // 0294 adds the received-date lines of an Inventory Check count (ic_lot_counts); its companion applies the real chain and pins the table, its constraints and the index.
+  294: 'test-migration-0294-inventory-check-lot-lines-native.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',
