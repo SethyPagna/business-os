@@ -5617,6 +5617,8 @@
   "read_switch_name_ic_simple": "ការត្រួតពិនិត្យស្តុក៖ បញ្ជីសាមញ្ញ និងការរាប់",
   "read_switch_name_ic_fix_stock": "ការត្រួតពិនិត្យស្តុក៖ ការអនុម័តការរាប់",
   "read_switch_name_dash_overview_5m": "ស្តុកផ្ទាំងគ្រប់គ្រង ៥ នាទី",
+  "read_switch_name_catalog_ranked_scope": "បញ្ជីផលិតផល៖ ការតម្រៀបរួមគ្នា",
+  "read_switch_name_ic_wired": "ការត្រួតពិនិត្យស្តុក៖ បញ្ជី និងការត្រួតពិនិត្យតភ្ជាប់",
   "read_switch_name_ledger_keyset": "ការផ្លាស់ប្តូរស្តុក៖ បង្ហាញតាមទំព័រ",
   "read_switch_stale": "កុងតាក់ត្រូវបានប្ដូរពីកន្លែងផ្សេង។ បង្ហាញថ្មីបំផុត។",
   "read_switch_state_off": "បិទ",

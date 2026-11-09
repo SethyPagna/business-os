@@ -173,6 +173,14 @@ function writeShapes() {
     { id: 'w-adjust', label: 'POST /api/inventory/adjust (remove 1)', method: 'POST', url: '/api/inventory/adjust',
       prepare: async (world) => (await lots(world, 1, 900))[0],
       run: async (world, send, r) => send('POST', '/api/inventory/adjust', { productId: r.pid, branchId: 1, quantity: 1, type: 'remove', reason: 'damaged', client_request_id: key('adjust') }) },
+    // ---- INV-A S2: the surgical Set (Inventory count / Products received-date edit). Self-contained block: the lead unions it with builder B's shapes. ----
+    { id: 'w-adjust-set-lot', label: 'POST /api/inventory/adjust Set one received date (expectedLotQuantity)', method: 'POST', url: '/api/inventory/adjust',
+      prepare: async (world) => { const r = (await lots(world, 1, 1100))[0]; const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch); return { ...r, was: Number(q[0].quantity) } },
+      run: async (world, send, r) => send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: r.pid, branchId: 1, batchId: r.batch, quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Physical count', client_request_id: key('set-lot') }) },
+    { id: 'w-batch-branch-set', label: 'PATCH /api/batches/:id/branches/:branchId Set one received date at a branch', method: 'PATCH', url: '/api/batches/:id/branches/1',
+      prepare: async (world) => { const r = (await lots(world, 1, 1110))[0]; const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch); return { ...r, was: Number(q[0].quantity) } },
+      run: async (world, send, r) => send('PATCH', `/api/batches/${r.batch}/branches/1`, { quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Physical count', client_request_id: key('batch-set') }) },
+    // ---- end INV-A S2 ----
     { id: 'w-fast-stock-in-1-line', label: 'POST /api/inventory/fast-stock-in/commit 1 line', method: 'POST', url: '/api/inventory/fast-stock-in/commit',
       prepare: async (world) => lots(world, 1, 910), run: async (world, send, rows) => send('POST', '/api/inventory/fast-stock-in/commit', fastStockIn(rows)) },
     { id: 'w-fast-stock-in-3-lines', label: 'POST /api/inventory/fast-stock-in/commit 3 lines', method: 'POST', url: '/api/inventory/fast-stock-in/commit',

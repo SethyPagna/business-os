@@ -315,6 +315,39 @@ export type PlanLimits = {
   // exactly what 6.0.1053 reads. A window with both ends can still be over the cap and pays the attempt once. Paid tries every window (it folds the table).
   expenseReportFoldUnboundedWindows: boolean
 
+  // ---- Received dates in the Products list (INV-A S3; token-gated, additive) ----
+  //
+  // routes/products.ts GET /search with include=lots: the most received dates (lots) ONE row carries. The answer lists a row's active lots that have a branch
+  // row, first-in-first-out, and sets `lots_more: true` on a row that has more; the rest load through GET /api/batches as before. The cap bounds the payload
+  // bytes and the per-row work on the tier that rations both (Free 20, Paid 50); the statement still reads every active lot of the page's rows (a lot costs its own
+  // row plus one per branch it sits in), because ordering in SQL would be counted as rows read again.
+  productListLotsPerRow: number
+
+  // ---- The wired Inventory Check read path (INV-A S4a; behind the read switch `ic_wired`) ----
+  //
+  // routes/inventoryChecks.ts GET /overlay: the most product ids ONE overlay request reads count entries, pending marks and last movements for (a window is
+  // a page plus the prefetch pages after it). Above it the request is refused 400, so the statements stay bounded by a number the client was told.
+  inventoryOverlayMaxRows: number
+
+  // lib/inventoryCheckOverlay.ts: the most movement rows read per product to find its last recorded stock change. The newest day's rows are read in index order
+  // (created_at mixes 'YYYY-MM-DD HH:MM:SS' and ISO 'T...Z', so the text order alone puts ISO 09:00 above 14:00) and the latest by julianday among these wins.
+  inventoryLastChangeMaxRows: number
+
+  // lib/inventoryCheckList.ts: the most ids a check-state filter (Issues, Counted, Pending, Not checked) may carry into the Products kernel as ONE json_each
+  // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
+  inventoryCheckFilterMaxIds: number
+
+  // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
+  //
+  // lib/rankedScope.ts: how long a cached ranking (the ordered family keys of a window of pages, and the family total) may be served. The entry is also keyed on the products,
+  // stock, promotions and Inventory Check versions and ends at the next promotion boundary, so this only bounds what no version moves: Free keeps a ranking for an hour (reads are
+  // what Free rations), Paid for a minute. Replaces the 20 s literal the page payload cache used.
+  productListCacheSeconds: number
+
+  // The prefetch window of a paged list that reads the shared ranking (the Inventory Check list tells its client): the current page and the pages ahead it may fetch, so a window of
+  // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
+  catalogListWindowPages: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -406,6 +439,12 @@ const PAID_LIMITS: PlanLimits = {
   stockLedgerExportPageRows: 1000,
   expenseReportFoldMaxRows: 50_000,
   expenseReportFoldUnboundedWindows: true,
+  productListLotsPerRow: 50,
+  inventoryOverlayMaxRows: 300,
+  inventoryLastChangeMaxRows: 8,
+  inventoryCheckFilterMaxIds: 10_000,
+  productListCacheSeconds: 60,
+  catalogListWindowPages: 4,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -446,6 +485,12 @@ const FREE_LIMITS: PlanLimits = {
   stockLedgerExportPageRows: 500,
   expenseReportFoldMaxRows: 1_500,
   expenseReportFoldUnboundedWindows: false,
+  productListLotsPerRow: 20,
+  inventoryOverlayMaxRows: 150,
+  inventoryLastChangeMaxRows: 4,
+  inventoryCheckFilterMaxIds: 2_000,
+  productListCacheSeconds: 3_600,
+  catalogListWindowPages: 3,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

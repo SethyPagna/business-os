@@ -98,3 +98,15 @@ test('every key the panel and the flow use exists in both language packs, in a f
   assert.equal(km.read_switch_confirm_note.includes('{n}'), true, 'the placeholder survives in km')
   assert.equal(km.read_switch_confirm_on.includes('{name}'), true)
 })
+
+test('every read switch the Worker knows has a name in both language packs (INV-A: ic_wired)', () => {
+  const registry = read('../../cloudflare/src/lib/readSwitches.ts')
+  const list = /KNOWN_READ_SWITCHES = \[([^\]]*)\] as const/.exec(registry)?.[1] ?? ''
+  const names = [...list.matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1])
+  assert.ok(names.includes('ic_wired') && names.includes('ic_simple') && names.length >= 9, `the registry lists the switches: ${names.join(',')}`)
+  for (const name of names) {
+    const key = `read_switch_name_${name}`
+    assert.ok(en[key] && km[key], `${key} is in both packs`)
+    assert.notEqual(km[key], en[key], `km ${key} is translated`)
+  }
+})

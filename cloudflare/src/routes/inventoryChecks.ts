@@ -11,6 +11,12 @@ import { getPlanLimits } from '../lib/planTier'
 import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
+import { bumpVersion } from '../lib/cache'
+import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
+import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
+import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
+import { getActionTier } from '../lib/permissions'
+import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckSession, createInventoryCheckSubmission, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, REPLACED_NOTE } from '../lib/inventoryCheckSessions'
 
@@ -41,6 +47,77 @@ async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionU
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
   return { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
 }
+// Every Inventory Check writer moves the inventory_checks version, AWAITED before the answer leaves (the check-state sets and every restricted list key on it). Only a
+// request that wrote or may have written: a refusal before the write (4xx) moves nothing. With ic_wired OFF nothing is cached from these tables, so nothing is bumped and the
+// write's statements are exactly what they were; a cached copy lives at most the cache lifetime, so a flip back ON cannot serve one for long.
+app.use('*', async (c, next) => {
+  await next()
+  if (c.req.method === 'GET' || c.req.method === 'HEAD') return
+  const status = c.res.status
+  if (status >= 400 && status < 500) return
+  if (await readSwitch(c.env, 'ic_wired')) await bumpVersion(c.env, 'inventory_checks')
+})
+
+// ---- ic_wired: the Inventory Check list and overlay over the shared Products reader (INV-A S4a) ----------------------------------------------------------
+// Both answer 404 while the switch is OFF (the page keeps its old path). /list is GET /api/products/search for the scope plus the viewer's grants; /overlay is the
+// only other read Inventory makes, scoped to a window of ids. See lib/inventoryCheckList.ts and lib/inventoryCheckOverlay.ts.
+type IcContext = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
+const notWired = (c: IcContext) => c.json({ error: 'not_found', code: 'not_found' }, 404)
+const singleValued = (c: IcContext): void => {
+  for (const [key, values] of Object.entries(c.req.queries())) if (values.length !== 1) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', key)
+}
+app.get('/list', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  singleValued(c)
+  const user = c.get('user'), db = getDb(c.env)
+  const access = getInventoryCheckAccess(user)
+  // Counts waiting for approval are known only to a viewer who may see stock, and only while ic_fix_stock is on (migration 0286 applied): the same rule as the old list.
+  const fixStock = access.fields.stock && await fixStockOn(c)
+  const plan = planInventoryList(user, c.req.query(), { pendingAvailable: fixStock })
+  const productsQuery = { ...plan.productsQuery }
+  if (plan.codeLookup) {
+    // A viewer without the barcode field finds a product by its WHOLE code only: an exact hit is read by id, anything else is searched by name.
+    const hit = await db.prepare('SELECT id FROM products WHERE barcode = @code OR sku = @code LIMIT 2').all<{ id: number }>({ code: plan.codeLookup })
+    if (hit.length === 1) { delete productsQuery.query; delete productsQuery.searchFields; productsQuery.ids = String(hit[0].id); productsQuery.page = '1'; productsQuery.pageSize = '1' }
+  }
+  let sets: CheckStateSets | null = null
+  let setsVersion = ''
+  if (plan.branchId !== null && (plan.checkState || plan.wantSummary)) ({ sets, version: setsVersion } = await readCheckStateSets(c, plan.branchId, fixStock))
+  const restriction = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
+  const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
+  const payload = await readProductSearchList(c, productsQuery, { include, keyRequest: canonicalProductsRequest(productsQuery), ...restriction,
+    ...(plan.checkState ? { setKey: plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
+  const productsPage = getActionTier(user, 'products', 'view') !== 'none'
+  const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
+  const total = Number((payload as { total?: unknown }).total) || 0
+  const summary = sets && plan.wantSummary && !sets.tooLarge ? { ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
+    // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
+    ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
+  // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
+  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, ...(summary ? { summary } : {}),
+    ...(fixStock ? { capabilities: { fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) } } : {}) })
+})
+app.get('/overlay', async c => {
+  if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
+  singleValued(c)
+  const user = c.get('user')
+  const access = getInventoryCheckAccess(user)
+  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
+  const branchWord = c.req.query('branchId')?.trim() ?? ''
+  if (!/^\d+$/.test(branchWord) || !Number.isSafeInteger(Number(branchWord)) || Number(branchWord) <= 0) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'branchId')
+  const branchId = Number(branchWord)
+  const ids = parseOverlayIds(c.req.query('ids'), c.env)
+  const wantLots = c.req.query('lots') === '1' && access.fields.received
+  const [items, withLots] = await Promise.all([
+    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: access.fields.stock && await fixStockOn(c) }),
+    // Received dates for the same ids, for a screen whose shared store does not hold them: the same reader as the list (a first read, not a second).
+    wantLots ? attachLotRows(c.env, user, new Set(['lots']), { items: ids.map((id) => ({ id })) }, true) : Promise.resolve(null),
+  ])
+  const lots = withLots ? (withLots.items as Array<{ id: number; lots?: Array<Record<string, unknown>>; lots_more?: true }>).map((row) => ({ product_id: row.id,
+    lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
+    ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
+  return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}) })
+})
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
 app.post('/sessions', async c => {
   const result = await createInventoryCheckSession(getDb(c.env), await principal(c), await c.req.json().catch(()=>null), await loadLowStockConfig(c.env), { simple: await readSwitch(c.env, 'ic_simple') })

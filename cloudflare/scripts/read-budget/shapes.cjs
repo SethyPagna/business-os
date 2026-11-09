@@ -21,6 +21,8 @@ function getEntries(ctx) {
     ['settings/payment-methods/impact', '/api/settings/payment-methods/impact?from=Cash&to=ABA'], ['pos/address-presets', '/api/pos/address-presets'], ['telegram/status', '/api/telegram/status'],
     // products
     ['products/search Products default (created_desc, 50, branch_stock,images,batches,tagged_lots)', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    // INV-A S3: the same default page with the received dates folded in (include=lots); Inventory asks for it. The default shape above stays without the token.
+    ['products/search default lots', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots,lots`],
     ['products/search Products text "serum"', `/api/products/search?${P}&query=serum&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products text "product 12"', `/api/products/search?${P}&query=product%2012&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
     ['products/search Products barcode', `/api/products/search?${P}&query=8850000001234&searchMode=smart&include=branch_stock,images,batches,tagged_lots`],
@@ -157,6 +159,14 @@ function getEntries(ctx) {
     ['inventory-checks/products ic_simple stock sort', `/api/inventory-checks/products?branchId=1&sortBy=stock&sortDirection=desc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple low stock', `/api/inventory-checks/products?branchId=1&stockState=low_stock&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple issues', `/api/inventory-checks/products?branchId=1&checkState=issue&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    // INV-A S4a: the wired Inventory Check list and overlay (switch ic_wired, set around the request only). The rows are the Products list for the scope from the shared reader.
+    ['inventory-checks/list wired default', `/api/inventory-checks/list?branchId=1&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired page step', `/api/inventory-checks/list?branchId=1&page=2&pageSize=50&summary=0`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired issues', `/api/inventory-checks/list?branchId=1&checkState=issue&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired not checked', `/api/inventory-checks/list?branchId=1&checkState=not_checked&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/list wired low stock', `/api/inventory-checks/list?branchId=1&stockState=low_stock&page=1&pageSize=50`, { switches: ['ic_wired'] }],
+    ['inventory-checks/overlay wired window of 150', `/api/inventory-checks/overlay?branchId=1&lots=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
+    ['inventory-checks/overlay wired window of 150 without lots', `/api/inventory-checks/overlay?branchId=1&ids=${Array.from({ length: 150 }, (_, n) => 1000 + n).join(',')}`, { switches: ['ic_wired'] }],
     ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     // INV-B S1 (Inventory replan rev. 2): the BEFORE-numbers the later slices are judged against. Opening the Inventory Check sends this request with no branchId;
