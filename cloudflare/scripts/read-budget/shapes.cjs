@@ -172,6 +172,8 @@ function getEntries(ctx) {
     ['products/search ranked Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['catalog_ranked_scope'] }],
     ['inventory-checks/list wired ranked default', `/api/inventory-checks/list?branchId=1&page=1&pageSize=50`, { switches: ['ic_wired', 'catalog_ranked_scope'] }],
     ['inventory-checks/list wired ranked not checked', `/api/inventory-checks/list?branchId=1&checkState=not_checked&page=1&pageSize=50`, { switches: ['ic_wired', 'catalog_ranked_scope'] }],
+    // INV-A S8: the seek-page statement with its child-row lookups as index seeks (switch products_parent_seek). Same rows as the Products default shape; the ANALYZE pass is where the old spelling scans.
+    ['products/search parent seek Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['products_parent_seek'] }],
     ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
   ]
