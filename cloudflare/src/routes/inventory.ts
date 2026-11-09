@@ -1545,15 +1545,19 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
   const callCounting = (await metrics?.callCounting?.()) === true
-  // Fix stock (ic_fix_stock) names the count it fixes in its request id: while that count waits for approval it is decided first, not settled beside it.
-  // Loaded only for such an id, like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
-  if (typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')) {
-    const { fixStockHeldByApproval, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
-    // Loaded with the hold, like the module above: only a Fix stock request reads the switch, and every other /adjust stays byte-identical.
+  // A direct Set is held while any count of that product at that branch waits for approval (owner rule), whatever the request says: every scoped Set asks, and a request that names its
+  // count (icfix_..., Fix stock) is held for that count on any /adjust. The approval's own writes carry their approvalClaim and step over that approval only. Loaded only for such a request,
+  // like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
+  const scopedSet = body.type === 'set' && body.setScope !== undefined
+  const namesCount = typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')
+  if (scopedSet || namesCount) {
+    const { fixStockHeldByApproval, approvalClaimSession, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
     const { readSwitch } = await import('../lib/readSwitches')
-    // ic_lot_counts: held while ANY count of this product at this branch waits, not only the count the request names.
-    const productId = Number.parseInt(String(body.productId ?? ''), 10), branchId = Number.parseInt(String(body.branchId ?? ''), 10)
-    const widened = Number.isSafeInteger(productId) && productId > 0 && Number.isSafeInteger(branchId) && branchId > 0 && await readSwitch(c.env, 'ic_lot_counts') ? { productId, branchId } : undefined
+    const productId = Number.parseInt(String(body.productId ?? ''), 10), requestedBranch = Number.parseInt(String(body.branchId ?? ''), 10)
+    // A scoped Set is held product-wide while the counts queue is live (ic_fix_stock); a named count on any other /adjust keeps its ic_lot_counts widening.
+    const productWide = Number.isSafeInteger(productId) && productId > 0 && await readSwitch(c.env, scopedSet ? 'ic_fix_stock' : 'ic_lot_counts')
+    const branchId = Number.isSafeInteger(requestedBranch) && requestedBranch > 0 ? requestedBranch : productWide && scopedSet ? await defaultBranchId(c.env) : null
+    const widened = productWide && branchId ? { productId, branchId, exceptSession: approvalClaimSession(body) } : undefined
     if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id, widened)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   }
   return withStockMutationReceipt(

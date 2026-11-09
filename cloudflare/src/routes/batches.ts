@@ -617,6 +617,10 @@ app.patch('/:id/branches/:branchId', async (c) => {
   // lot's cost), a per-request idempotency id and exact undo/redo.
   const reasonText = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Quantity correction (received date #${batchId})`
   const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+  // A direct Set is held while any count of this product at this branch waits for approval (owner rule), whatever the request id is; the hold is the same one POST /api/inventory/adjust
+  // applies to a scoped Set (lib/inventoryCheckFixStock.ts), so Products can never settle stock around a queued count either.
+  const { scopedSetHeld, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
+  if (await scopedSetHeld(c.env, db, { productId: batch.productId, branchId })) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
   const result = await applyStockLotSet(db, user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
     productId: batch.productId, branchId, batchId, quantity, setScope: 'lot', reason: reasonText, conditionTag: null,

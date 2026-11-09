@@ -251,7 +251,15 @@ async function lotMain() {
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910001, branchId: 1 }), true, 'widened: the product still has a waiting count at this branch')
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910002, branchId: 1 }), false, 'another product is not held')
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910001, branchId: 2 }), false, 'another branch is not held')
-    assert.equal(await fixStockHeldByApproval(handle, 'not-a-fix-request', { productId: 910001, branchId: 1 }), false, 'a request that names no count is never held')
+    // G3: the hold is decided by what the server knows, not by the client's request id. A request that names no count is held all the same while a count of the product waits.
+    assert.equal(await fixStockHeldByApproval(handle, 'not-a-fix-request', { productId: 910001, branchId: 1 }), true, 'a request that names no count is held while the product has a waiting count')
+    assert.equal(await fixStockHeldByApproval(handle, 'inventory_set_abcdef12', { productId: 910001, branchId: 1 }), true, 'whatever the id is')
+    assert.equal(await fixStockHeldByApproval(handle, 'inventory_set_abcdef12', { productId: 910002, branchId: 1 }), false, 'a product with no waiting count is not held')
+    assert.equal(await fixStockHeldByApproval(handle, 'inventory_set_abcdef12'), false, 'without the product-wide ask only the count a request names is held')
+    // the approval's own write steps over its own approval only
+    const waiting = db.prepare("SELECT session_id FROM inventory_check_approvals WHERE status='pending'").get().session_id
+    assert.equal(await fixStockHeldByApproval(handle, 'x-approval-write-1', { productId: 910001, branchId: 1, exceptSession: waiting }), false, 'the approval being applied is not held by itself')
+    assert.equal(await fixStockHeldByApproval(handle, 'x-approval-write-1', { productId: 910001, branchId: 1, exceptSession: first.body.item.id }), true, 'a claim for another approval buys nothing')
   })
 
   await check('alerts: a differing lot count tells the approvers once, a matching one tells nobody, a replaced approval is told as rejected, a replay announces nothing', async () => {

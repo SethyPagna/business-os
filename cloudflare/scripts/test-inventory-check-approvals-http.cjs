@@ -639,7 +639,7 @@ async function main() {
     assert.deepEqual([await held(910002), await held(910003), await held(910004)], [true, true, true], 'every difference of a waiting count is held')
     assert.equal(await held(910001), false, 'a line that matched has nothing to fix'); assert.equal(await held(910009), false, 'nor a product that is not in the count')
     assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${id.split('').reverse().join('')}_910002_a1b2c3d4e5f60718`), false, 'nor a count that does not exist')
-    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), 'stockline_a1b2c3d4e5f60718'), false, 'a request that names no count is never held')
+    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), 'stockline_a1b2c3d4e5f60718'), false, 'a request that names no count is never held by itself: only the product-wide ask (a scoped Set) holds it')
     await decide(id, {})
     assert.deepEqual([await held(910002), await held(910003), await held(910004)], [false, true, true], 'a line already applied is released; the rest stay held')
     writer.cap = 24; await decide(id, {})
@@ -648,9 +648,9 @@ async function main() {
     const rejected = await standard()
     await decide(rejected.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })
     assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${rejected.body.item.id}_910002_a1b2c3d4e5f60718`), false, 'a rejected count leaves the Issue to be fixed by hand')
-    // The adjust kernel asks before it claims a receipt, and only for such an id.
+    // The adjust kernel asks before it claims a receipt: for an id that names a count, and (G3) for every scoped Set whatever its id is.
     const kernel = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
-    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,700}startsWith\('icfix_'\)[\s\S]{0,1400}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
+    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,1800}startsWith\('icfix_'\)[\s\S]{0,300}if \(scopedSet \|\| namesCount\)[\s\S]{0,1600}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
   })
 
   await check('the approval cannot be forged around the API: its rows are immutable once decided and never deleted', async () => {
