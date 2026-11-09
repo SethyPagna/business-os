@@ -168,7 +168,8 @@ app.post('/submissions', async c => {
   const input = await c.req.json().catch(()=>null)
   // A submission whose lines carry received dates (`lots`) is the ic_lot_counts writer's; with the switch off the older writer refuses the key exactly as it always did.
   const withLots = Array.isArray((input as { lines?: unknown } | null)?.lines) && ((input as { lines: unknown[] }).lines).some(line => !!line && typeof line === 'object' && Object.hasOwn(line, 'lots'))
-  const lotCounts = withLots && await lotCountsOn(c)
+  // While the page is wired (ic_wired) its rows show and send branch_stock, i.e. sellable units: every submission is then judged by the writer that measures exactly that, plain lines included. The older writer's baseline adds held units and would turn a held product into a false shortage or a 409 loop.
+  const lotCounts = withLots ? await lotCountsOn(c) : await readSwitch(c.env, 'ic_wired') && await lotLinesAvailable(getDb(c.env))
   // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
   if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>

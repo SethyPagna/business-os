@@ -276,6 +276,29 @@ async function lotMain() {
 
   globalThis.caches = { default: { match: async () => undefined, put: async () => {}, delete: async () => false } }
   const kv = (() => { const m = new Map(); return { get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) }, delete: async k => { m.delete(k) }, list: async () => ({ keys: [] }) } })()
+  await check('N1: while the page is wired, a plain-only submission is judged against sellable stock (product 910003: 5 sellable + 2 held); the older writer still runs with ic_wired OFF', async () => {
+    reset(); twoLots()
+    setSwitch({ ic_simple: 'on', ic_wired: 'on' })
+    const wired = await lotSubmit([{ productId: 910003, countedQuantity: 5, seenQuantity: 5, checked: true }], { requestId: 'n1-wired-0001' })
+    assert.equal(wired.status, 201, JSON.stringify(wired.body))
+    assert.deepEqual(itemOf(910003), { state: 'done', counted_quantity: 5, baseline_quantity: 5, reason: null }, 'held units are not part of the baseline')
+    reset(); twoLots()
+    setSwitch({ ic_simple: 'on' })
+    const older = await lotSubmit([{ productId: 910003, countedQuantity: 5, seenQuantity: 5 }], { requestId: 'n1-older-0001' })
+    assert.ok(older.status === 409 || (older.status === 201 && itemOf(910003).baseline_quantity === 7), 'the control: the older writer measures 5 + 2 held = 7 (a 409 or a baseline of 7), so the wired answer above is the routing, not the fixture ' + older.status)
+  })
+
+  await check('N3: offsetting date errors (A counted 6 of 5, B counted 3 of 4: the sums agree) are an Issue and reach the approval queue, not "done"', async () => {
+    reset(); twoLots(); on()
+    const made = await lotSubmit([lotLine(910001, [lot(910001, 6, 5), lot(920001, 3, 4)])], { requestId: 'n3-offset-0001' })
+    assert.equal(made.status, 201, JSON.stringify(made.body))
+    assert.equal(itemOf(910001).state, 'issue', 'two wrong figures are an Issue even though their sums agree')
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_approvals').get().n, 1, 'and the approver is asked')
+    reset(); twoLots(); on()
+    const same = await lotSubmit([lotLine(910001, [lot(910001, 5, 5), lot(920001, 4, 4)])], { requestId: 'n3-same-00001' })
+    assert.equal(same.status, 201); assert.equal(itemOf(910001).state, 'done', 'the control: every date equal is done')
+  })
+
   await check('G4 + G4b: the overlay returns the latest session lines per received date (by key, one more statement, no ledger read); OFF sends none', async () => {
     reset(); twoLots(); setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', ic_wired: 'on' })
     const made = await lotSubmit([lotLine(910001, [lot(910001, 5, 5), lot(920001, 2, 4)])])

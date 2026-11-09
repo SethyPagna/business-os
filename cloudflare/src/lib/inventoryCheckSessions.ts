@@ -722,7 +722,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const resolved = lines.map(line => {
     const counted = line.plain ? line.plain.counted : line.lots.reduce((sum, lot) => sum + lot.counted, 0)
     const seen = !sighted ? null : line.plain ? line.plain.seen : line.lots.reduce((sum, lot) => sum + (lot.seen ?? 0), 0)
-    const matched = seen !== null && Math.abs(seen - counted) <= COUNT_EPSILON
+    // Every typed date must equal what it showed: a shortage on one date and a surplus on another (sums equal) is still two wrong figures.
+    const matched = seen !== null && Math.abs(seen - counted) <= COUNT_EPSILON && line.lots.every(lot => lot.seen !== null && Math.abs(lot.seen - lot.counted) <= COUNT_EPSILON)
     const state: 'done' | 'issue' = !sighted || matched ? 'done' : 'issue'
     return { line, counted, seen, matched, state, reason: state === 'issue' ? line.note ?? DEFAULT_COUNT_NOTE : null }
   })
@@ -776,7 +777,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const approvalAt = statements.length
   if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
     SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL)
-    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL AND abs(i.baseline_quantity-i.counted_quantity)>@eps) d WHERE d.n>0 RETURNING session_id`, params })
+    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL AND (abs(i.baseline_quantity-i.counted_quantity)>@eps
+      OR EXISTS(SELECT 1 FROM inventory_check_lot_lines l WHERE l.session_id=i.session_id AND l.product_id=i.product_id AND abs(l.seen_quantity-l.counted_quantity)>@eps))) d WHERE d.n>0 RETURNING session_id`, params })
   let saved: Awaited<ReturnType<typeof commit>>
   try { saved = await commit(db, principal, actor, statements, key, hash) }
   catch (error) {
