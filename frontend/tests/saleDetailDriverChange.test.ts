@@ -12,7 +12,9 @@
 //      the right source/target, and success is reported back to the detail.
 //   2. THE GATE. The detail offers the control for a delivery sale in every
 //      status except cancelled (the expression is lifted and evaluated), only
-//      with the group path's grants, through the shared searchable picker.
+//      with sales:amend alone (the delivery cost's grant; sales:bulk stays the
+//      multi-sale switch), through the shared searchable picker. Apply opens
+//      the shared review dialog showing the driver before and after.
 //   3. BOTH PACKS carry the new labels and the inline fallbacks match them.
 //
 // DISCRIMINATING: on 0293aeb0 changeSaleDriver, onDriverChange and the
@@ -44,11 +46,11 @@ const slice = (from: string, to: string): string => {
   return transformSync(salesPage.slice(start, end), { loader: 'ts' }).code
 }
 
-function harness(options: { pending?: unknown; changedCount?: number } = {}) {
+function harness(options: { pending?: unknown; changedCount?: number; canBulkSales?: boolean; canAmendSales?: boolean } = {}) {
   const sent: any[] = []
   const notes: unknown[] = []
   const scope: any = {
-    canBulkSales: true, canAmendSales: true, canReassignSaleCustomer: true,
+    canBulkSales: options.canBulkSales ?? true, canAmendSales: options.canAmendSales ?? true, canReassignSaleCustomer: true,
     pendingBulkFieldRequest: options.pending ?? null, bulkFieldSaving: false, bulkStatusInFlightRef: { current: false },
     beginSingleAction: (ref: { current: boolean }) => { if (ref.current) return false; ref.current = true; return true },
     finishSingleAction: (ref: { current: boolean }) => { ref.current = false },
@@ -63,7 +65,7 @@ function harness(options: { pending?: unknown; changedCount?: number } = {}) {
     crypto: { randomUUID: () => 'request-0001' },
   }
   const code = `${slice('  const valueChoice =', '  const choicesForSale =')}\n${slice('  const submitBulkFieldChange =', '  const customerRows =')}`
-  const api = new Function('scope', `with (scope) { ${code}\nreturn { changeSaleDriver } }`)(scope) as { changeSaleDriver: (sale: unknown, target: unknown) => Promise<boolean> }
+  const api = new Function('scope', `with (scope) { ${code}\nreturn { changeSaleDriver, submitBulkFieldChange } }`)(scope) as { changeSaleDriver: (sale: unknown, target: unknown) => Promise<boolean>; submitBulkFieldChange: (...args: unknown[]) => Promise<boolean> }
   return { ...api, sent, notes }
 }
 
@@ -84,6 +86,19 @@ await runTest('the detail changes, clears and re-sets a driver through a one-sal
   assert.deepEqual(first.sent[0].action, { kind: 'delivery_contact', source_id: null, target_id: 2 })
 })
 
+await runTest('sales:amend alone sends the one-sale change; sales:bulk stays required for a group', async () => {
+  const amendOnly = harness({ canBulkSales: false })
+  assert.equal(await amendOnly.changeSaleDriver(withDriver, { id: 2, name: 'Driver B' }), true)
+  assert.equal(amendOnly.sent.length, 1)
+  const noAmend = harness({ canBulkSales: false, canAmendSales: false })
+  assert.equal(await noAmend.changeSaleDriver(withDriver, { id: 2, name: 'Driver B' }), false)
+  assert.deepEqual(noAmend.sent, [])
+  const group = harness({ canBulkSales: false })
+  const choice = { key: '1', label: 'Driver A', id: 1 }
+  assert.equal(await group.submitBulkFieldChange('delivery_contact', choice, { key: '2', label: 'Driver B', id: 2 }, [{ id: 7 }, { id: 8 }], [withDriver, { ...withDriver, id: 8 }]), false)
+  assert.deepEqual(group.sent, [], 'a two-sale driver change still needs sales:bulk')
+})
+
 await runTest('an unchanged answer keeps the picker open, and a pending retry blocks a new request', async () => {
   const unchanged = harness({ changedCount: 0 })
   assert.equal(await unchanged.changeSaleDriver(withDriver, { id: 2, name: 'Driver B' }), false)
@@ -93,7 +108,7 @@ await runTest('an unchanged answer keeps the picker open, and a pending retry bl
   assert.match(String(pending.notes[0]), /previous request has an unknown outcome/)
 })
 
-await runTest('the detail offers the change in every status except cancelled, with the group grants', () => {
+await runTest('the detail offers the change in every status except cancelled, with sales:amend alone', () => {
   const gate = detail.match(/const canChangeDriver = (!!onDriverChange && !!toNumber\(sale\.is_delivery\) && currentStatus !== 'cancelled')\n/)
   assert.ok(gate, 'SaleDetailModal should gate the control with canChangeDriver')
   const evaluate = new Function('onDriverChange', 'toNumber', 'sale', 'currentStatus', `return ${gate[1]}`) as (...args: unknown[]) => boolean
@@ -104,18 +119,22 @@ await runTest('the detail offers the change in every status except cancelled, wi
   assert.equal(evaluate(() => {}, toNumber, { is_delivery: 1 }, 'cancelled'), false, 'cancelled is read-only')
   assert.equal(evaluate(() => {}, toNumber, { is_delivery: 0 }, 'completed'), false, 'a counter sale uses Add delivery instead')
   assert.equal(evaluate(undefined, toNumber, { is_delivery: 1 }, 'completed'), false, 'hidden without the grants')
-  assert.match(salesPage, /onDriverChange=\{canBulkSales && canAmendSales \? \(sale, target\) => changeSaleDriver\(sale as SaleRecord, target\) : undefined\}/)
+  assert.match(salesPage, /onDriverChange=\{canAmendSales \? \(sale, target\) => changeSaleDriver\(sale as SaleRecord, target\) : undefined\}/)
   // The change uses the same searchable picker as Add delivery, and can clear.
   assert.match(detail, /const renderDriverPicker = \(inputId: string\) => \(/)
   assert.match(detail, /type="search"\n\s+value=\{deliverySearch\}/)
   assert.match(detail, /\{renderDriverPicker\('sale-add-delivery-driver-search'\)\}/)
   assert.match(detail, /\{renderDriverPicker\('sale-change-driver-search'\)\}/)
-  assert.match(detail, /onClick=\{\(\) => \{ void applyDriverChange\(null\) \}\}/)
+  assert.match(detail, /onClick=\{\(\) => setDriverConfirm\(\{ target: null \}\)\}/)
+  assert.match(detail, /onClick=\{\(\) => setDriverConfirm\(\{ target: deliveryContact \}\)\}/, 'Apply reviews first')
+  assert.match(detail, /onConfirm=\{\(\) => applyDriverChange\(driverConfirm\.target\)\}/)
+  assert.match(detail, /driverLabel\(sale\.delivery_contact_name, sale\.delivery_contact_phone\)[\s\S]*?driverConfirm\.target \? driverLabel\(driverConfirm\.target\.name/, 'the dialog shows before and after')
+  assert.match(detail, /setDriverConfirm\(\{ target: null \}\)\} title=\{translateOr\('remove_driver'[^\n]*aria-label=/, 'the remove button is icon-only with a tooltip')
   assert.match(detail, /if \(!deliveryAdding && !driverChanging\) return/, 'the picker loads drivers for the change too')
 })
 
 await runTest('both packs carry the new labels and the inline fallbacks match them', () => {
-  for (const key of ['change_driver', 'remove_driver']) {
+  for (const key of ['change_driver', 'remove_driver', 'driver_change_title', 'driver_remove_title', 'driver_before', 'driver_after', 'driver_change_note']) {
     assert.equal(typeof en[key], 'string', `${key} in en.json`)
     assert.equal(typeof km[key], 'string', `${key} in km.json`)
     const call = detail.match(new RegExp(`translateOr\\('${key}', '([^']+)', '([^']+)'\\)`))

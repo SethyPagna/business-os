@@ -2422,7 +2422,9 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
   }
 
   const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload): Promise<boolean> => {
-    if (!canBulkSales) return false
+    // One sale's driver needs sales:amend alone, like its delivery cost; every other field change here is a group action.
+    const oneSaleDriver = field === 'delivery_contact' && (retryRequest ? retryRequest.items.length : frozenSales.length) === 1
+    if (!canBulkSales && !oneSaleDriver) return false
     if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return false
     if (!retryRequest && !matched.length) return false
     if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return false
@@ -3005,7 +3007,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
             // gates it on read access), so it is passed unconditionally.
             onAmend={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? handleAmendSale : undefined}
             // Same grants as the group Driver change it reuses (sales:bulk + sales:amend).
-            onDriverChange={canBulkSales && canAmendSales ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
+            onDriverChange={canAmendSales ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
             onLoadAmendments={loadSaleAmendments}
             onOpenRecords={(sale) => {
               setRecordsSale(sale as SaleRecord)
@@ -3192,7 +3194,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
           />
         </Suspense>
       ) : null}
-      {canBulkSales && pendingBulkFieldRequest ? (
+      {(canBulkSales || (canAmendSales && pendingBulkFieldRequest?.action.kind === 'delivery_contact' && pendingBulkFieldRequest.items.length === 1)) && pendingBulkFieldRequest ? (
         <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border p-3 text-sm">
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => {
