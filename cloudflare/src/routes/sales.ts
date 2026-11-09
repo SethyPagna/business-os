@@ -17,6 +17,11 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
 import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/permissions'
+import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
+import { announceOrderChange } from '../lib/onlineOrderAlerts'
+import {
+  ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilGuardStatement, fulfilStatements, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+} from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
@@ -631,6 +636,8 @@ app.post('/', async (c) => {
     // P6: staff-entered actual courier cost -- never printed on receipts.
     delivery_actual_cost_usd?: number | string | null
     delivery_actual_cost_khr?: number | string | null
+    // Fulfil (KHQR online orders): the id of the PAID online order this sale hands over. The sale is rung from the POS, prefilled from the order.
+    online_order_id?: unknown
   }>()
 
   if (body.client_request_id != null && typeof body.client_request_id !== 'string') {
@@ -644,6 +651,9 @@ app.post('/', async (c) => {
   const offlineOwner = canonicalOfflineSaleOwner(user, c.req.url)
   const ownerError = offlineSaleOwnerError(body.offline_owner, offlineOwner)
   if (ownerError) return c.json(ownerError, 409)
+
+  // Set by the Fulfil preflight below, read by the batch and by the error attribution in the catch.
+  let fulfilPlan: FulfilPlan | null = null
 
   try {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
@@ -785,7 +795,7 @@ app.post('/', async (c) => {
       .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk)))
     : null
   const rateSettingRowsRead = readStarted(db.prepare(
-    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','${PAYMENT_METHOD_KINDS_SETTING}')`,
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','${PAYMENT_METHOD_KINDS_SETTING}','${ONLINE_PAYMENT_METHOD_KEY}')`,
   ).all<{ key: string; value: string }>())
   const customerRead = body.customer_id
     ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous, phone, address FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number; phone: string | null; address: string | null }>([body.customer_id]))
@@ -1308,6 +1318,22 @@ app.post('/', async (c) => {
   const rielCashRow = rielCashRowRefused(effectivePaymentDetails, (method) => isCashPaymentMethod(method, methodKinds))
   if (rielCashRow >= 0) return c.json({ error: RIEL_CASH_REFUSAL, code: RIEL_CASH_NOT_HUNDREDS, row: rielCashRow }, 400)
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
+  // Fulfil of an online order (lib/onlineOrderFulfil.ts). The configured KHQR method may appear on a sale ONLY through this path, so the method cannot be used to
+  // fake online money; a Fulfil needs the online_orders view action as well as pos/sales, and its KHQR tender must be exactly the part of the online payment this
+  // sale covers. One preflight read; everything it decides is re-asserted inside the batch by the guard statement.
+  const onlineMethod = configuredOnlineMethod(rateSettings[ONLINE_PAYMENT_METHOD_KEY])
+  const wantsOrder = body.online_order_id !== undefined && body.online_order_id !== null && body.online_order_id !== ''
+  if (!wantsOrder && onlineTender(effectivePaymentDetails, onlineMethod).present) {
+    return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: 'online_method_requires_order' }, 400)
+  }
+  if (wantsOrder) {
+    if (!getOnlineOrderAccess(user as never).canView) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    const onlineOrderId = Number(body.online_order_id)
+    if (!Number.isSafeInteger(onlineOrderId) || onlineOrderId <= 0) return c.json({ error: 'Choose a valid online order.', code: 'online_order_invalid' }, 400)
+    const planned = planFulfil(await loadFulfilOrder(db, onlineOrderId), { method: onlineMethod, details: effectivePaymentDetails, payableUsd: totalUsd, branchId: body.branch_id ?? null })
+    if (!planned.ok) return c.json({ error: planned.refusal.error, code: planned.refusal.code }, planned.refusal.status)
+    fulfilPlan = planned.plan
+  }
   // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
   // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
   // Aug 31 2026: "Receipt no need RCP"; returns keep RET-/SRET-).
@@ -1591,6 +1617,8 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
+      // Fulfil: the order must still be the paid, unlinked, same-revision order the cashier saw, or the whole batch (sale, lines, stock) rolls back.
+      ...(fulfilPlan ? [fulfilGuardStatement(fulfilPlan)] : []),
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1899,6 +1927,10 @@ app.post('/', async (c) => {
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
     }, saleCreationAuditStatement)
+    // Fulfil: link the order to this sale and write its Records, in the same batch as the sale itself.
+    if (fulfilPlan) {
+      statements.push(...fulfilStatements(fulfilPlan, { saleWriteKey, userId: actorId(user) ?? null, userName: actorSnapshot(user), at: new Date().toISOString().replace('T', ' ').slice(0, 19) }))
+    }
     // Receipt-race retry. A failed batch rolled back completely, so re-running
     // it with a fresh number re-evaluates every guard (stock, pricing,
     // customer) from scratch. Retry ONLY when the failure is attributable to
@@ -1963,6 +1995,13 @@ app.post('/', async (c) => {
           code: 'receipt_number_conflict',
         }, 409)
       }
+      if (fulfilPlan && /malformed JSON/i.test(message)) {
+        // The order guard shares the abort text of the other guards: attribute by re-reading the order, never by message.
+        const now = await loadFulfilOrder(db, fulfilPlan.orderId)
+        if (!now || now.state !== 'paid' || now.sale_id != null || Number(now.revision) !== fulfilPlan.revision) {
+          return c.json({ error: 'This online order changed while the sale was being saved. Nothing was recorded. Open the order again.', code: 'online_order_changed' }, 409)
+        }
+      }
       if (/malformed JSON/i.test(message)) {
         // The guard compares every column of the product rows, so stock that moved in the window trips it too: say which.
         const sourceConflict = await classifyPricingSourceConflict(db, products, pricingRuleRows)
@@ -2023,6 +2062,8 @@ app.post('/', async (c) => {
   if (recoveredCommittedCreate) {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
   }
+  // The staff screens (Orders list, bell) refresh; the chat hears nothing extra, the sale's own alert says it all.
+  if (fulfilPlan) c.executionCtx.waitUntil(announceOrderChange(c.env, { kind: 'staff', orderId: fulfilPlan.orderId }))
   // A method typed at the till joins the configured list (user, Sep 4 2026).
   // Off the response path: the sale is already recorded and must not be held
   // up, or failed, by a settings write. `settings` is bumped only when the
