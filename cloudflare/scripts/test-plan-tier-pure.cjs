@@ -157,6 +157,7 @@ const PAID = {
   productListLotsPerRow: 50,
   inventoryOverlayMaxRows: 300,
   inventoryCheckLotLinesPerSubmission: 240,
+  inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
   productListCacheSeconds: 60,
@@ -203,6 +204,7 @@ const FREE = {
   productListLotsPerRow: 20,
   inventoryOverlayMaxRows: 150,
   inventoryCheckLotLinesPerSubmission: 60,
+  inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
   productListCacheSeconds: 3600,
@@ -398,6 +400,17 @@ check('no test or harness keeps its own literal copy of a plan query budget', as
   const helper = require(path.join(scripts, 'harness', 'plan_query_limits.cjs'))
   assert.equal(helper.FREE_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation)
   assert.equal(helper.PAID_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.paid.d1QueriesPerInvocation)
+})
+
+check('Inventory Check bounds come from the plan: no numeric literal caps the lines per product or the ids of a list read', async () => {
+  const sessions = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'), 'utf8')
+  const list = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckList.ts'), 'utf8')
+  assert.ok(!/LOT_LINES_PER_PRODUCTs*=s*d/.test(sessions), 'the per-product line cap is the plan field')
+  assert.ok(sessions.includes('line.lots.length > perProduct'), 'and it is what the writer compares against')
+  assert.ok(!/ids.lengths*>s*d/.test(list), 'the ids of a /list read are bounded by the plan, not by a literal')
+  assert.ok(list.includes('ids.length > options.maxIds'))
+  const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
+  assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

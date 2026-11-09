@@ -50,14 +50,15 @@ async function principal(c: Context<{ Bindings: Env; Variables: { user: SessionU
   return { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
 }
 // Every Inventory Check writer moves the inventory_checks version, AWAITED before the answer leaves (the check-state sets and every restricted list key on it). Only a
-// request that wrote or may have written: a refusal before the write (4xx) moves nothing. With ic_wired OFF nothing is cached from these tables, so nothing is bumped and the
-// write's statements are exactly what they were; a cached copy lives at most the cache lifetime, so a flip back ON cannot serve one for long.
+// request that wrote or may have written: a refusal before the write (4xx) moves nothing. Whatever the ic_wired switch says: a copy cached while it was ON can live for the
+// whole product-list cache lifetime (an hour on Free), so a write made while it was OFF must still move the version, or a flip back ON serves a stale Issues filter.
 app.use('*', async (c, next) => {
   await next()
   if (c.req.method === 'GET' || c.req.method === 'HEAD') return
   const status = c.res.status
   if (status >= 400 && status < 500) return
-  if (await readSwitch(c.env, 'ic_wired')) await bumpVersion(c.env, 'inventory_checks')
+  // The write is already committed: a cache version that cannot move is logged, never turned into a 5xx that would make the person repeat a count that was recorded.
+  try { await bumpVersion(c.env, 'inventory_checks') } catch (error) { console.error('[inventory-checks] inventory_checks version not moved', error) }
 })
 
 // ---- ic_wired: the Inventory Check list and overlay over the shared Products reader (INV-A S4a) ----------------------------------------------------------
@@ -84,7 +85,7 @@ app.get('/list', async c => {
   const access = getInventoryCheckAccess(user)
   // Counts waiting for approval are known only to a viewer who may see stock, and only while ic_fix_stock is on (migration 0286 applied): the same rule as the old list.
   const fixStock = access.fields.stock && await fixStockOn(c)
-  const plan = planInventoryList(user, c.req.query(), { pendingAvailable: fixStock })
+  const plan = planInventoryList(user, c.req.query(), { pendingAvailable: fixStock, maxIds: getPlanLimits(c.env).inventoryOverlayMaxRows })
   const productsQuery = { ...plan.productsQuery }
   if (plan.codeLookup) {
     // A viewer without the barcode field finds a product by its WHOLE code only: an exact hit is read by id, anything else is searched by name.
@@ -97,7 +98,8 @@ app.get('/list', async c => {
   const restriction = plan.checkState && sets ? checkStateRestriction(plan.checkState, sets) : {}
   const include = new Set<string>([...access.fields.stock ? ['tagged_lots'] : [], ...access.fields.received ? ['lots'] : []])
   const payload = await readProductSearchList(c, productsQuery, { include, keyRequest: canonicalProductsRequest(productsQuery), ...restriction,
-    ...(plan.checkState ? { setKey: plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
+    // Pending without the right to see it is an empty set of its own: it must not share a cached page with the admin's real Pending set.
+    ...(plan.checkState ? { setKey: plan.checkState === 'pending' && !fixStock ? 'pending_unavailable' : plan.checkState, setVersion: setsVersion } : {}), lotsAdmitted: access.fields.received, taggedLotsAdmitted: access.fields.stock })
   const lotCounts = await lotCountsOn(c)
   const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock)
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
@@ -152,7 +154,7 @@ app.post('/submissions', async c => {
   // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
   if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
-    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission }) : createInventoryCheckSubmission
+    createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission, maxLinesPerProduct: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }) : createInventoryCheckSubmission
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
     { approvals: await fixStockOn(c), onApprovalCreated: ({ sessionId }) => announceCount(c.env, c.get('user'), { kind: 'created', sessionId }),
       // Each approval the submission replaced was rejected by the system: a review decided, so it is told like one (a rejection with its reason, and no person to name).

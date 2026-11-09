@@ -333,6 +333,8 @@ export type PlanLimits = {
   // carries across all its products (a branch-total line counts as one). Above it the submission is refused 400, so its insert statements stay bounded by a number the client was
   // told. A ceiling like the ones above: Paid carries 4 times what Free does.
   inventoryCheckLotLinesPerSubmission: number
+  // The most received dates ONE product carries in a count (a product with more is not counted date by date). Paid carries twice what Free does.
+  inventoryCheckLotLinesPerProduct: number
 
   // lib/inventoryCheckOverlay.ts: the most movement rows read per product to find its last recorded stock change. The newest day's rows are read in index order
   // (created_at mixes 'YYYY-MM-DD HH:MM:SS' and ISO 'T...Z', so the text order alone puts ISO 09:00 above 14:00) and the latest by julianday among these wins.
@@ -447,6 +449,7 @@ const PAID_LIMITS: PlanLimits = {
   productListLotsPerRow: 50,
   inventoryOverlayMaxRows: 300,
   inventoryCheckLotLinesPerSubmission: 240,
+  inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
   productListCacheSeconds: 60,
@@ -494,6 +497,7 @@ const FREE_LIMITS: PlanLimits = {
   productListLotsPerRow: 20,
   inventoryOverlayMaxRows: 150,
   inventoryCheckLotLinesPerSubmission: 60,
+  inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
   productListCacheSeconds: 3_600,

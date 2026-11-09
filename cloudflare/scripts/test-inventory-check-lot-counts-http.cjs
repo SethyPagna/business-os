@@ -283,7 +283,7 @@ async function lotMain() {
     planTier.__resetPlanTierCacheForTests()
     const who = { id: COUNTER, tokenHash: await inventoryCheckDigest(`token-${COUNTER}`) }
     const told = []
-    const options = { approvals: true, maxLines: 60, onApprovalCreated: async created => { told.push(['created', created.sessionId]) }, onApprovalsReplaced: async replaced => { told.push(['replaced', ...replaced.sessionIds]) } }
+    const options = { approvals: true, maxLines: 60, maxLinesPerProduct: 50, onApprovalCreated: async created => { told.push(['created', created.sessionId]) }, onApprovalsReplaced: async replaced => { told.push(['replaced', ...replaced.sessionIds]) } }
     const matching = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-01', lines: [lotLine(910001, [lot(910001, 5, 5), lot(920001, 4, 4)])] }, options)
     assert.equal(matching.created, true); assert.deepEqual(told, [], 'counts that match stock queue nothing and tell nobody')
     const first = await createInventoryCheckLotSubmission(handle, who, { branchId: 1, requestId: 'alert-request-02', lines: [lotLine(910001, [lot(910001, 4, 5), lot(920001, 4, 4)])] }, options)

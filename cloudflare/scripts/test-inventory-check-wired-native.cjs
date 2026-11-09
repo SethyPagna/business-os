@@ -247,7 +247,8 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   app.setUser(U.admin)
   check('capabilities differ by grant: the control that proves the comparison can fail (approveCounts for admin, not for the checker)', capsAdmin.json.capabilities.approveCounts === true && capsChecker.json.capabilities.approveCounts === false)
   app.setUser(U.receivedOnly)
-  check('Pending is not offered to a viewer without the stock field', (await app.get('/api/inventory-checks/list?branchId=1&checkState=pending')).status === 400)
+  const blindPending = await app.get('/api/inventory-checks/list?branchId=1&checkState=pending')
+  check('G12: Pending for a viewer without the stock field is an empty page (200), not a 400 a tab would repeat; and the same page with the choice off still lists products', blindPending.status === 200 && blindPending.json.items.length === 0 && blindPending.json.total === 0 && (await app.get('/api/inventory-checks/list?branchId=1')).json.items.length > 0, JSON.stringify(blindPending.json).slice(0, 200))
   app.setUser(U.checker)
   // the restricted read is its own cache entry and does not disturb the plain one
   const pageBefore = app.counters.pageQueries
@@ -340,6 +341,6 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   app.setSwitch('ic_wired', 'off')
   const offBefore = await version()
   const offWrite = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: 1, requestId: 'req-resume-0001' })
-  check('with ic_wired OFF the writer does not touch the version (its statements are what they were)', offWrite.status === 200 && (await version()) === offBefore)
+  check('G6: with ic_wired OFF the writer STILL moves the version, so a copy cached while ON cannot serve a stale Issues filter after a flip back', offWrite.status === 200 && (await version()) !== offBefore)
   console.log(`\n${checks} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })

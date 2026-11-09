@@ -657,9 +657,8 @@ type LotSubmissionLine = { productId: number; checked: boolean; note: string | n
 const LOT_SUBMISSION_LINE_KEYS = new Set(['productId', 'lots', 'checked', 'note'])
 const PLAIN_SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
 const LOT_LINE_KEYS = new Set(['batchId', 'scope', 'counted', 'seen'])
-/** The lines one product may carry: more received dates than this on one product is not a count of it. */
-const LOT_LINES_PER_PRODUCT = 50
-function lotSubmissionLine(value: unknown, sighted: boolean): LotSubmissionLine {
+/** The lines one product may carry (getPlanLimits.inventoryCheckLotLinesPerProduct): more received dates than that on one product is not a count of it. */
+function lotSubmissionLine(value: unknown, sighted: boolean, perProduct: number): LotSubmissionLine {
   const line = object(value)
   if (line.lots === undefined && line.countedQuantity !== undefined) {
     if (Object.keys(line).some(key => !PLAIN_SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
@@ -674,7 +673,7 @@ function lotSubmissionLine(value: unknown, sighted: boolean): LotSubmissionLine 
   if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
   const note = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
   if (note !== null && note.length > 500) fail(400, 'inventory_check_invalid_note')
-  if (!Array.isArray(line.lots) || line.lots.length < 1 || line.lots.length > LOT_LINES_PER_PRODUCT) return fail(400, 'inventory_check_invalid_request')
+  if (!Array.isArray(line.lots) || line.lots.length < 1 || line.lots.length > perProduct) return fail(400, 'inventory_check_invalid_request')
   const lots = line.lots.map((raw): LotLine => {
     const lot = object(raw)
     if (Object.keys(lot).some(key => !LOT_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
@@ -696,13 +695,13 @@ const LIVE_LINE_SQL = (line: string) => `CASE json_extract(${line},'$.scope')
 const ACTIVE_LOT_SQL = (productId: string, batchId?: string) => `EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
   WHERE pb.variant_product_id=${productId} AND pb.is_active=1${batchId ? ` AND pb.id=${batchId}` : ''})`
 export async function createInventoryCheckLotSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown,
-  options: { approvals?: boolean; maxLines: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
+  options: { approvals?: boolean; maxLines: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
   const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
   if (options.approvals) await approvalsReady(db)
   const access = getInventoryCheckAccess(actor), sighted = access.fields.stock
   const branchId = positive(body.branchId), key = requestId(body.requestId)
   if (!Array.isArray(body.lines) || body.lines.length < 1 || body.lines.length > 500) return fail(400, 'inventory_check_product_ids_required')
-  const lines = body.lines.map(value => lotSubmissionLine(value, sighted)).sort((a, b) => a.productId - b.productId)
+  const lines = body.lines.map(value => lotSubmissionLine(value, sighted, options.maxLinesPerProduct)).sort((a, b) => a.productId - b.productId)
   const productIds = lines.map(line => line.productId)
   if (new Set(productIds).size !== productIds.length) fail(400, 'inventory_check_invalid_id')
   if (lines.reduce((sum, line) => sum + Math.max(1, line.lots.length), 0) > options.maxLines) fail(400, 'inventory_check_too_many_lines')

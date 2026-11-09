@@ -50,7 +50,7 @@ function integer(value: string | undefined, fallback: number, maximum: number, k
 /** A whole code, not a word: no spaces, a digit in it, 4 to 64 characters of the kind barcodes and SKUs use. */
 const looksLikeCode = (text: string): boolean => /^[A-Za-z0-9._-]{4,64}$/.test(text) && /\d/.test(text)
 
-export function planInventoryList(user: PermissionUser, raw: Record<string, string>, options: { pendingAvailable: boolean }): InventoryListPlan {
+export function planInventoryList(user: PermissionUser, raw: Record<string, string>, options: { pendingAvailable: boolean; maxIds: number }): InventoryListPlan {
   const access = getInventoryCheckAccess(user)
   for (const alias of ['sort_by', 'sort_direction', 'check_state']) if (Object.hasOwn(raw, alias)) invalid(alias)
   const { sortBy: rawSortBy, checkState: rawCheckState, ids: rawIds, ...rest } = raw
@@ -63,7 +63,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (checkWord && !(LIST_CHECK_STATES as readonly string[]).includes(checkWord)) invalid('checkState')
   const checkState = (checkWord || null) as ListCheckState | null
   if (checkState && branchId === null) invalid('branchId')
-  if (checkState === 'pending' && !options.pendingAvailable) invalid('checkState')
+  // 'pending' while ic_fix_stock is OFF (or the viewer may not see stock) is a valid choice with nothing in it: an empty page, never a 400 that a tab would repeat.
 
   const productsQuery: Record<string, string> = { searchMode: 'smart', sort: `${sortBy}_${direction}`, include: LIST_INCLUDE }
   const page = integer(validated.page, 1, 100000, 'page'), pageSize = integer(validated.pageSize, DEFAULT_PAGE_SIZE, 100, 'pageSize')
@@ -83,7 +83,7 @@ export function planInventoryList(user: PermissionUser, raw: Record<string, stri
   if (rawIds !== undefined && rawIds.trim() !== '') {
     if (checkState) invalid('ids')
     const ids = [...new Set(rawIds.split(',').map((part) => part.trim()))]
-    if (!ids.length || ids.length > 100 || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
+    if (!ids.length || ids.length > options.maxIds || ids.some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) invalid('ids')
     productsQuery.ids = ids.join(','); productsQuery.page = '1'; productsQuery.pageSize = String(ids.length)
   }
   const filtered = Boolean(productsQuery.query || productsQuery.brand || productsQuery.category || productsQuery.stockState || productsQuery.ids || checkState)
