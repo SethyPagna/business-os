@@ -387,7 +387,9 @@ export async function applyStockLotSet(
   const replay = (row: OperationRow): StockLotSetResult => row.request_json !== requestJson
     ? conflict('client_request_id was already used for different stock adjustment data.', 'idempotency_conflict')
     : { status: 200, body: { ...JSON.parse(row.response_json), replayed: true } }
-  if (recordOperation && requestId) {
+  // Under the receipt wrapper (atomicMark) a repeat was already answered from its receipt, which commits in the same batch as the operation row, so no operation row can exist for a request the
+  // wrapper let through: the look-up is skipped there (one D1 call per Set). Called without the wrapper (Products' PATCH), the operation row is what answers a repeat.
+  if (recordOperation && requestId && !atomicMark?.execute) {
     const existing = await previous()
     if (existing) return replay(existing)
   }

@@ -105,10 +105,11 @@ function returnOf(n, offset, saleLines = 10) {
 
 // A counter submits two counts of 0 (an approved device, as every non-administrator needs: nobody approves their own count) and the administrator approves the
 // session once. `counting` false = the pass's call_counting switch is taken away for this request (the Free plan before it is turned on); true = as the pass has it.
-function approvalStep({ id, label, offset, counting }) {
+// `lots`: the count is typed per received date (ic_lot_counts, INV S6): each line is one received date, which the approval Sets from what the count found (the writer computes the target).
+function approvalStep({ id, label, offset, counting, lots: dated = false }) {
   return { id, label, method: 'POST', url: '/api/inventory-checks/sessions/:id/approval',
     prepare: async (world) => {
-      await world.addSwitches(['ic_simple', 'ic_fix_stock'], counting ? {} : { without: ['call_counting'] })
+      await world.addSwitches(dated ? ['ic_simple', 'ic_fix_stock', 'ic_lot_counts'] : ['ic_simple', 'ic_fix_stock'], counting ? {} : { without: ['call_counting'] })
       // The switches are memoized per isolate for 15 s: the counter's submission below must meet the row just written.
       await world.restart()
       const rows = await lots(world, 2, offset)
@@ -118,7 +119,10 @@ function approvalStep({ id, label, offset, counting }) {
       await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
       const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
       if (!login.setCookie) throw new Error('approval fixture: the counter could not sign in: ' + login.text.slice(0, 200))
-      const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines: rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false })) }, { cookie: login.setCookie.split(';')[0] })
+      const seen = dated ? new Map((await world.all('SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = 1 AND batch_id IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.batch))).map((q) => [q.batch_id, Number(q.quantity)])) : null
+      const lines = dated ? rows.map((r) => ({ productId: r.pid, lots: [{ batchId: r.batch, scope: 'lot', counted: seen.get(r.batch) - 2, seen: seen.get(r.batch) }] }))
+        : rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false }))
+      const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines }, { cookie: login.setCookie.split(';')[0] })
       if (made.status !== 201) throw new Error('approval fixture: submission answered ' + made.status)
       return { id: made.json.item.id, request: key('approval') }
     },
@@ -230,6 +234,8 @@ function writeShapes() {
     // ON (P1.1): the commit's cap becomes stockInLinesPerRequestByCalls (2 on Free), so one request applies both lines and finishes the approval.
     approvalStep({ id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', offset: 1100, counting: false }),
     approvalStep({ id: 'w-inventory-check-approval-step-counted', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, call_counting ON, both lines)', offset: 1150, counting: true }),
+    // INV S6: the same two-line step with the count typed per received date (ic_lot_counts): each line is one received date Set from what the count found, no stock ledger read.
+    approvalStep({ id: 'w-inventory-check-approval-lot-line', label: 'POST /api/inventory-checks/sessions/:id/approval 2 received-date lines (ic_fix_stock, ic_lot_counts, call_counting ON, both lines)', offset: 1200, counting: true, lots: true }),
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',

@@ -5,7 +5,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { APPROVAL_CLAIM_LOST } from './stockMutationReceipt'
 import {
   APPROVAL_DETAIL_COLUMNS, InventoryCheckSessionError, appliedLines, approvalBaselines, approvalsReady, authorityGuard, currentInventoryCheckActor, eventStatement, guard, inventoryCheckDigest,
-  lotLinesAvailable, object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
+  object, projectApproval, requestId as requestIdOf, REPLACED_NOTE, schemaReady, sessionRow, supersededLines,
   type Actor, type ApprovalAppliedLine, type ApprovalRow, type InventoryCheckPrincipal, type Statement,
 } from './inventoryCheckSessions'
 import type { StockInCommitLine, StockInCommitLineResult } from '../routes/stockInCommit'
@@ -441,12 +441,21 @@ const REFUSAL_ORDER = ['inventory_check_product_retired', 'inventory_check_basel
  */
 async function readFacts(db: D1Compat, branchId: number, count: { sessionId: string; submittedAt: string }, products: ItemFacts[], baselines: Record<string, number>, plan: boolean): Promise<Facts> {
   const ids = products.map(item => item.product_id)
-  const dated = ids.length > 0 && await lotLinesAvailable(db)
-  const statements: Statement[] = []
-  if (dated) statements.push({ sql: `SELECT product_id,batch_id,scope,seen_quantity,counted_quantity FROM inventory_check_lot_lines
-    WHERE session_id=@sessionId AND product_id IN (SELECT value FROM json_each(@ids)) ORDER BY product_id,batch_id`, params: { sessionId: count.sessionId, ids: JSON.stringify(ids) } })
-  if (plan && ids.length) statements.push(sinceCountStatement(branchId, ids, count), newestLotStatement(branchId, ids, count.sessionId, dated))
-  const results = statements.length ? await db.batch(statements) : []
+  // The lines table is asked for in the same call as everything else, with no probe of its own (a probe reads the whole schema on a cold isolate); a database without migration 0294 answers
+  // "no such table" and the same read is made without it (every count there is an older, product-level one).
+  const attempt = async (withDates: boolean): Promise<{ dated: boolean; results: D1Result[] }> => {
+    const statements: Statement[] = []
+    if (withDates && ids.length) statements.push({ sql: `SELECT product_id,batch_id,scope,seen_quantity,counted_quantity FROM inventory_check_lot_lines
+      WHERE session_id=@sessionId AND product_id IN (SELECT value FROM json_each(@ids)) ORDER BY product_id,batch_id`, params: { sessionId: count.sessionId, ids: JSON.stringify(ids) } })
+    if (plan && ids.length) statements.push(sinceCountStatement(branchId, ids, count), newestLotStatement(branchId, ids, count.sessionId, withDates))
+    return { dated: withDates && ids.length > 0, results: statements.length ? await db.batch(statements) : [] }
+  }
+  let read: Awaited<ReturnType<typeof attempt>>
+  try { read = await attempt(true) } catch (error) {
+    if (!/no such table:?\s*inventory_check_lot_lines/i.test(error instanceof Error ? error.message : String(error))) throw error
+    read = await attempt(false)
+  }
+  const { dated, results } = read
   const take = (): D1Result | undefined => results.shift()
   const lotRows = (dated ? take()?.results ?? [] : []) as Array<{ product_id: number; batch_id: number; scope: 'lot' | 'branch'; seen_quantity: number | null; counted_quantity: number }>
   const since = plan && ids.length ? (take()?.results ?? []) as Array<{ kind: string; product_id: number }> : plan ? [] : undefined
