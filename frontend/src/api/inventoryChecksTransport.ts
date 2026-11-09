@@ -158,6 +158,16 @@ export function readInventoryCheckProducts<T>(params: QueryParams, signal?: Abor
   return apiFetch('GET', appendQuery(`${base}/products`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
+/** ic_wired: the Products rows for the scope, cut to this viewer's Inventory grants. A server with the switch off answers 404 (the page then keeps readInventoryCheckProducts). */
+export function readInventoryCheckList<T>(params: QueryParams, signal?: AbortSignal): Promise<T> {
+  return apiFetch('GET', appendQuery(`${base}/list`, buildQueryString(params)), undefined, undefined, { signal })
+}
+
+/** ic_wired: the users' count entries and last stock change for the visible ids of one branch (lots=1 also brings the received dates the shared rows lack). */
+export function readInventoryCheckOverlay<T>(params: { branchId: number | string; ids: Array<number | string>; lots?: boolean }, signal?: AbortSignal): Promise<T> {
+  return apiFetch('GET', appendQuery(`${base}/overlay`, buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}) })), undefined, undefined, { signal })
+}
+
 export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number; approvals?: boolean }> {
   return apiFetch('GET', appendQuery(`${base}/sessions`, buildQueryString(params)), undefined, undefined, { signal })
 }
