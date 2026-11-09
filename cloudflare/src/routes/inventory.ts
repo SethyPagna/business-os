@@ -1550,7 +1550,10 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
   const scopedSet = body.type === 'set'
   const namesCount = typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')
-  if (scopedSet || namesCount) {
+  // An approval's own variance line (a valid claim) is not asked: queue-first supersedes every older count of the product and refuses a newer one while an approval applies, so no other count of it
+  // can wait, and the claim itself is checked inside the stock batch. That is one hold query fewer for every line of every approval.
+  const underClaim = body.variance !== undefined && body.approvalClaim != null
+  if ((scopedSet || namesCount) && !underClaim) {
     const { fixStockHeldByApproval, approvalClaimSession, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
     const { readSwitch } = await import('../lib/readSwitches')
     const productId = Number.parseInt(String(body.productId ?? ''), 10), requestedBranch = Number.parseInt(String(body.branchId ?? ''), 10)

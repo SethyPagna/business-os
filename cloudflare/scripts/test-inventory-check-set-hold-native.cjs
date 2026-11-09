@@ -94,6 +94,24 @@ async function main() {
     assert.equal(heldPatch.status, 409, JSON.stringify(heldPatch.body)); assert.equal(heldPatch.body.code, 'inventory_check_count_pending'); assert.equal(w.snapshot(f), before)
   })
 
+  await check('the hold asks the counts tables directly: no schema scan; a database without them is not held (200); an approval line under its claim asks nothing', async () => {
+    const watch = f => { const seen = []; const real = f.env.DB.prepare; f.env.DB.prepare = (sql, values) => { seen.push(sql); return real(sql, values) }; return seen }
+    // No schema scan ahead of the hold, and the waiting query is the only count read.
+    const f = w.world({ switches: ON }); const seen = watch(f)
+    assert.equal((await adjust(f)).status, 200)
+    assert.ok(!seen.some(sql => /sqlite_master/i.test(sql) && /inventory_check/i.test(sql)), 'no sqlite_master probe for the counts tables')
+    assert.equal(seen.filter(sql => /FROM inventory_check_items i JOIN inventory_check_approvals a/.test(sql)).length, 1, 'one hold query')
+    // A database that never had the tables (before 0259/0286): nothing waits, so nothing is held.
+    const bare = w.world({ switches: ON }); bare.raw.exec('PRAGMA foreign_keys=OFF; DROP TABLE inventory_check_approvals; DROP TABLE inventory_check_items;')
+    assert.equal((await adjust(bare)).status, 200); assert.equal(lotQuantity(bare), 6)
+    const named = w.world({ switches: ON }); named.raw.exec('PRAGMA foreign_keys=OFF; DROP TABLE inventory_check_approvals; DROP TABLE inventory_check_items;')
+    assert.equal((await adjust(named, { client_request_id: 'icfix_some-session_1_abcdef12' })).status, 200, 'a named Fix stock request is not held for a table that is not there')
+    // An approval's variance line (a claim) is not asked at all: one hold query fewer for every line of every approval.
+    const g = w.world({ switches: ON }); w.waitingCount(g); const gseen = watch(g)
+    await adjust(g, { quantity: undefined, expectedLotQuantity: undefined, variance: { counted: 5, seen: 7 }, client_request_id: 'approval-line-0001', approvalClaim: { sessionId: 'waiting-session-1', key: 'approval-key-0001' } })
+    assert.equal(gseen.filter(sql => /FROM inventory_check_items i JOIN inventory_check_approvals a/.test(sql)).length, 0, 'the hold query was not run for a claimed variance line')
+  })
+
   if (failures.length) { console.error(`FAILED ${failures.length}: ${failures.join(' | ')}`); process.exit(1) }
   console.log('PASS test-inventory-check-set-hold-native')
 }

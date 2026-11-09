@@ -1,6 +1,9 @@
 import type { D1Compat } from './db'
 import type { Env } from '../index'
-import { approvalsAvailable, lineWaitsForApproval, waitingLineSql } from './inventoryCheckSessions'
+import { lineWaitsForApproval, waitingLineSql } from './inventoryCheckSessions'
+
+/** A database that predates the counts tables (0259, 0286) holds nothing: asked directly, the missing table is the answer, with no schema scan first (a probe of sqlite_master reads the whole schema on a cold isolate). */
+const missingCountTable = (error: unknown): boolean => /no such table:?\s*inventory_check_(items|approvals)/i.test(error instanceof Error ? error.message : String(error))
 import { readSwitch } from './readSwitches'
 
 /*
@@ -40,11 +43,15 @@ type Scope = { productId: number; branchId: number; alsoBranchId?: number | null
 
 /** Does ANY count of this product at this branch still wait for approval (other than the approval that is writing)? The product's lines at the branch come from index 0285, each approval is a primary-key step. */
 export async function waitingCountHolds(db: D1Compat, scope: Scope): Promise<boolean> {
-  if (!await approvalsAvailable(db)) return false
-  const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id
-    WHERE i.product_id=@productId AND i.branch_id IN (@branchId,@alsoBranchId) AND a.session_id IS NOT @except AND ${waitingLineSql('a', 'i')} LIMIT 1`)
-    .get<{ waiting: number }>({ productId: scope.productId, branchId: scope.branchId, alsoBranchId: scope.alsoBranchId ?? scope.branchId, except: scope.exceptSession ?? null })
-  return row?.waiting === 1
+  try {
+    const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id
+      WHERE i.product_id=@productId AND i.branch_id IN (@branchId,@alsoBranchId) AND a.session_id IS NOT @except AND ${waitingLineSql('a', 'i')} LIMIT 1`)
+      .get<{ waiting: number }>({ productId: scope.productId, branchId: scope.branchId, alsoBranchId: scope.alsoBranchId ?? scope.branchId, except: scope.exceptSession ?? null })
+    return row?.waiting === 1
+  } catch (error) {
+    if (missingCountTable(error)) return false
+    throw error
+  }
 }
 
 /** The hold of a scoped Set. Only while the counts queue is live (ic_fix_stock): with it OFF no count can be approved, so nothing may be held for one. */
@@ -61,6 +68,8 @@ export async function fixStockHeldByApproval(db: D1Compat, requestId: unknown, w
   if (widened && await waitingCountHolds(db, widened)) return true
   const count = fixStockCountOf(requestId)
   if (!count) return false
-  if (!await approvalsAvailable(db)) return false
-  return lineWaitsForApproval(db, count.sessionId, count.productId)
+  try { return await lineWaitsForApproval(db, count.sessionId, count.productId) } catch (error) {
+    if (missingCountTable(error)) return false
+    throw error
+  }
 }
