@@ -11,6 +11,11 @@ export function productsServerOf(answer: { simple?: boolean }): ProductsServer {
 /** Inside a session the older list names the three item states unstarted | done | issue; the page's in-session choices are in_check | ok | issue. */
 const OLD_SESSION_STATE: Record<string, string> = { in_check: 'unstarted', ok: 'done', issue: 'issue' }
 
+/** True when the older list has no word for the status choice this request holds (anything but Issues, or a session's three), so asking it drops the choice rather than honouring it. */
+export function oldListDropsStatus(params: QueryParams): boolean {
+  return typeof params.checkState === 'string' && params.checkState !== '' && !('state' in productsWireParams(params, 'old', false))
+}
+
 /**
  * The query one products read puts on the wire. The page thinks in the check-status words (checkState, and summary=0 on a page step), which only the ic_simple
  * list knows; the older list refuses a key it does not know with a 400. So once an answer has shown which list this is, the older one is asked in its own words:

@@ -30,7 +30,7 @@ import InventoryCheckListRows, { InventoryCheckListHeader, InventoryCheckSelecti
 import { finiteQuantity, parseCount } from './InventoryCheckCountEditor.tsx'
 import InventoryCheckDetailFloat from './InventoryCheckDetailFloat.tsx'
 import { fixStockOpening, type FixStockOpening } from './inventoryCheckFixStock.ts'
-import { productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
 import InventoryCheckApprovalPanel from './InventoryCheckApprovalPanel.tsx'
 import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
@@ -330,7 +330,22 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           if (publish()) { setSessions(result); setLoadedKey(scopeKey) }
         } else {
           const stepScope = JSON.stringify([{ ...params, page: undefined }, section, refresh])
-          const products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, productsServer.current, summaryScope.current === stepScope), abort.signal)
+          // The switch can move under an open tab (ic_simple turned on or off), and then the key this tab holds (a status filter, Issues, a skipped summary) belongs to the other list.
+          // Two outcomes, both answered in the same load by asking once in the other list's words (never a third time; a second refusal is a real error):
+          //  - the other list REFUSES the key (400 inventory_check_invalid_query): ask in the other list's words;
+          //  - the check-status list ANSWERS a request written in the older words, which dropped a status choice the tab holds: its rows are not the filtered ones, so ask again with the status.
+          let wording: ProductsServer = productsServer.current
+          let products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, wording, summaryScope.current === stepScope), abort.signal)
+            .catch(cause => {
+              if ((cause as { code?: unknown } | null)?.code !== 'inventory_check_invalid_query' || abort.signal.aborted) throw cause
+              summaryScope.current = ''
+              wording = wording === 'old' ? 'simple' : 'old'
+              return readInventoryCheckProducts<ProductsResult>(productsWireParams(params, wording, false), abort.signal)
+            })
+          if (products.simple === true && wording === 'old' && oldListDropsStatus(params) && !abort.signal.aborted) {
+            summaryScope.current = ''
+            products = await readInventoryCheckProducts<ProductsResult>(productsWireParams(params, 'simple', false), abort.signal)
+          }
           if (publish()) {
             if (!branchId && !sessionId && products.branches?.length === 1) {
               onSelect({ branchId: String(products.branches[0].id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } })
@@ -344,7 +359,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
           }
         }
       } catch (cause) {
-        // A refused query key means the switch moved since the last answer (ic_simple turned on or off under an open tab): forget which list this is, so Retry asks in the words both understand.
+        // Refused in both lists' words: forget which list this is, so Retry starts from the words both understand.
         if (publish() && (cause as { code?: unknown } | null)?.code === 'inventory_check_invalid_query') { productsServer.current = 'unknown'; summaryScope.current = '' }
         if (publish()) setError(tr('inventory_check_load_failed', 'Inventory checks are unavailable. Reload to try again.'))
       } finally { if (publish()) setLoading(false) }
