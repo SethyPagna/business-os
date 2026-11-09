@@ -125,6 +125,18 @@ async function main() {
   }
   for (const method of ['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE']) assert.equal(smallBodyAccess(method, '/api/auth/login'), null)
 
+  // KHQR S3: the storefront order writes are small public POSTs, by shape (the link token is in the path), and nothing else under that prefix is.
+  const tok = 'abcdefghijklmnopqrstuv'
+  for (const route of ['/api/portal/orders', ...['edit', 'cancel', 'retry', 'topup', 'requests'].map((a) => `/api/portal/orders/${tok}/${a}`), `/api/portal/orders/${tok}/requests/12/withdraw`]) {
+    assert.equal(smallBodyAccess('POST', route), 'public', route)
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) assert.equal(smallBodyAccess(method, route), null, `${method} ${route}`)
+  }
+  for (const route of ['/api/portal/orders/', '/api/portal/orders/short/edit', `/api/portal/orders/${tok}`, `/api/portal/orders/${tok}/status`, `/api/portal/orders/${tok}/edit/`, `/api/portal/orders/${tok}/other`,
+    `/api/portal/orders/${tok}/requests/x/withdraw`, `/api/portal/orders/${tok}/requests/1/withdraw/more`, `/api/portal/orders${tok}`, '/api/portal/orders/%61bcdefghijklmnopqrstuv/edit']) {
+    assert.equal(smallBodyAccess('POST', route), null, route)
+  }
+  assert.match(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8'), /PORTAL_PRIVATE_PATH = \/\^\\\/api\\\/portal\\\/\([^)]*\|orders\)/, 'order responses are never edge-cached')
+
   // Execute the actual index middleware order and actual portal/backup handlers.
   const calls = { bootstrap: 0, maintenance: 0, rate: 0, settings: 0, effect: 0 }
   let authenticated = false, backup = false, restore = false, admin = false, enabled = true, allowed = true

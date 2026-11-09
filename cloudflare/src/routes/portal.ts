@@ -1585,7 +1585,7 @@ async function servePortalPublic(
 // a shared cache, and the shared public routes never carry a cookie (HEAD is
 // a GET without the body, so the same rule applies). Registered before every
 // route so it wraps all of them.
-const PORTAL_PRIVATE_PATH = /^\/api\/portal\/(auth|account|membership|submissions|ai)(\/|$)/
+const PORTAL_PRIVATE_PATH = /^\/api\/portal\/(auth|account|membership|submissions|ai|orders)(\/|$)/
 app.use('*', async (c, next) => {
   await next()
   const publicRead = (c.req.method === 'GET' || c.req.method === 'HEAD') && Boolean(PORTAL_PUBLIC_ROUTES[c.req.path])

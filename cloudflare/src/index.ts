@@ -3,6 +3,7 @@ import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
+import portalOrdersRoute from './routes/portalOrders'
 import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
 import filesRoute from './routes/files'
@@ -140,6 +141,9 @@ export type Env = {
   // wrangler.toml [[ratelimits]]: per-network limit on cold storefront searches
   // (routes/portal.ts). Optional: absent means only the per-isolate cap applies.
   PORTAL_SEARCH_LIMITER?: RateLimit
+  // wrangler.toml [[ratelimits]]: per-network limit on the storefront's order writes (routes/portalOrders.ts): creating, editing, cancelling, retrying
+  // and sending requests. No D1 write. Optional: absent means no limit beyond the caps the routes read from D1.
+  ORDER_LIMITER?: RateLimit
   // wrangler.toml [version_metadata]: the deployed version's id keys the
   // storefront's edge cache entries. Optional: absent (local, tests) reads 'dev'.
   CF_VERSION_METADATA?: WorkerVersionMetadata
@@ -624,6 +628,8 @@ app.route('/api/internal/branch-cutover', branchCutoverOperatorRoute)
 app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/products', productCostRoute)
+// Before /api/portal so the order paths are answered by their own app (its guards, its switch), never by the storefront's.
+app.route('/api/portal/orders', portalOrdersRoute)
 app.route('/api/portal', portalRoute)
 app.route('/api/sales', salesRoute)
 app.route('/api/auth', authRoute)

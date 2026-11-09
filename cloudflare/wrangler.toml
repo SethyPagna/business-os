@@ -203,6 +203,14 @@ name = "PORTAL_SEARCH_LIMITER"
 namespace_id = "1001"
 simple = { limit = 30, period = 60 }
 
+# Per-network limit on the storefront order writes (routes/portalOrders.ts): create, edit, cancel, retry, request. Counted before any D1 work, so a
+# flood costs no write. The Workers RateLimit binding only offers 10 or 60 second periods, so this is 5 per minute per network and key (the plan's
+# "5 creates per 10 minutes" is the closest this binding allows); the open-unpaid caps in D1 (per phone, shop-wide) are the longer-range guard.
+[[ratelimits]]
+name = "ORDER_LIMITER"
+namespace_id = "1002"
+simple = { limit = 5, period = 60 }
+
 # The deployed version's id, folded into the storefront's edge cache keys so a
 # new build never reads entries an older build stored.
 [version_metadata]

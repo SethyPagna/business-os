@@ -22,9 +22,17 @@ const STAFF_SMALL_POSTS = new Set([
   '/api/system/finalize-migration',
 ])
 
+// The storefront's order writes (routes/portalOrders.ts) carry the order's link token in the path, so they match by shape: the create, and the six
+// token actions. Anything else under /api/portal/orders is not a small public POST.
+const PUBLIC_SMALL_POST_PATTERNS = [
+  /^\/api\/portal\/orders$/,
+  /^\/api\/portal\/orders\/[A-Za-z0-9_-]{22}\/(?:edit|cancel|retry|topup|requests)$/,
+  /^\/api\/portal\/orders\/[A-Za-z0-9_-]{22}\/requests\/\d{1,12}\/withdraw$/,
+]
+
 export function smallBodyAccess(method: string, path: string): 'public' | 'staff' | null {
   if (method !== 'POST') return null
-  if (PUBLIC_SMALL_POSTS.has(path)) return 'public'
+  if (PUBLIC_SMALL_POSTS.has(path) || PUBLIC_SMALL_POST_PATTERNS.some((pattern) => pattern.test(path))) return 'public'
   if (STAFF_SMALL_POSTS.has(path)) return 'staff'
   return null
 }
