@@ -55,3 +55,14 @@ for (const file of specs) {
 assert.ok(checked > 10, `positive control: class selectors were read (${checked})`)
 assert.deepEqual(stale, [], 'every class a browser spec locates is still rendered by the app')
 console.log(`e2eLocatorsExist passed (${checked} class selectors in ${specs.length} spec files)`)
+
+// ---- a select is never located by its accessible name alone ----
+// The sidebar's navigation items share names with the selects ("Branch", Khmer "សាខា"); the sidebar paints later than the page, so a role+name locator found one element on a fast boot and two on a slow one
+// (cutover-branch-collapse.spec.ts:93, intermittent). Specs reach a select through appSelect() (support/selects.ts), which keys on data-app-select-button.
+export const ambiguousSelectLocators = (specText: string): string[] =>
+  [...specText.matchAll(/getByRole\('button',\s*\{\s*name:\s*'(Branch|សាខា)',\s*exact:\s*true\s*\}\)/g)].map(match => match[0])
+assert.equal(ambiguousSelectLocators("await page.getByRole('button', { name: 'Branch', exact: true }).click()").length, 1, 'the rule sees the ambiguous form')
+assert.equal(ambiguousSelectLocators("await appSelect(page, 'Branch').click()").length, 0, 'and not the safe one')
+const ambiguous = specs.flatMap(file => ambiguousSelectLocators(fs.readFileSync(file, 'utf8')).map(found => `${path.relative(frontend, file)}: ${found}`))
+assert.deepEqual(ambiguous, [], 'no spec locates the Branch select by role and name (it matches the sidebar item too)')
+console.log('e2eLocatorsExist: no ambiguous select locators')

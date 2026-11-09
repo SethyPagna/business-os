@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import path from 'node:path'
 import { ADMIN_ORIGIN } from './support/harness'
 import { APP_ROOT, E2E_ACCOUNTS, signIn } from './support/session'
+import { appSelect } from './support/selects'
 
 // Branch cutover, readiness gap G-M: the branch UI collapses to one branch from
 // DATA. The fixture server answers /api/branches; each scenario below replaces
@@ -97,7 +98,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(`${ADMIN_ORIGIN}/sales#hub:sales:reports`)
       await expect(page.locator(APP_ROOT)).toBeVisible()
       await openReportFilters(page)
-      const branchSelect = page.getByRole('button', { name: 'Branch', exact: true })
+      const branchSelect = appSelect(page, 'Branch')
       await expect(branchSelect).toBeVisible()
       await branchSelect.click()
       await expect(page.getByRole('option', { name: 'Shop', exact: true })).toBeVisible()
@@ -114,7 +115,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(`${ADMIN_ORIGIN}/sales#hub:sales:reports`)
       await page.reload()
       await openReportFilters(page)
-      await page.getByRole('button', { name: 'Branch', exact: true }).click()
+      await appSelect(page, 'Branch').click()
       await expect(page.getByRole('option', { name: 'LC Store', exact: true })).toBeVisible()
       await expect(page.getByRole('option', { name: 'Old Shop (Inactive)', exact: true })).toBeVisible()
       await shot(page, 'reports-filter-after', viewport.width)
@@ -128,7 +129,7 @@ for (const viewport of VIEWPORTS) {
       await arrange(context, SINGLE, [])
       await page.reload()
       await openReportFilters(page)
-      await expect(page.getByRole('button', { name: 'Branch', exact: true })).toHaveCount(0)
+      await expect(appSelect(page, 'Branch')).toHaveCount(0)
       await shot(page, 'reports-filter-single', viewport.width)
       await page.keyboard.press('Escape')
       await openViewPicker(page)
@@ -147,7 +148,7 @@ for (const viewport of VIEWPORTS) {
       // lang/km.json `inactive` and `branch`
       await page.getByRole('button', { name: /^តម្រង/ }).first().click()
       // the select, not the sidebar item that carries the same Khmer word
-      await page.locator('button[data-app-select-button][aria-label="សាខា"]').click()
+      await appSelect(page, 'សាខា').click()
       await expect(page.getByRole('option', { name: 'Old Shop (អសកម្ម)', exact: true })).toBeVisible()
       await shot(page, 'reports-filter-after-km', viewport.width)
     })
