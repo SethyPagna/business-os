@@ -16,7 +16,7 @@
 //
 // The whole family sits behind the `online_orders` category and its own sub-switches (all unset = on), and goes to the Orders topic, or the Sales
 // topic until one is set. A notice is built from the committed rows AFTER the write (OrderDeps.notify, called once per guarded transition by
-// lib/onlineOrderStore.ts), so a replayed check, a lost race or a refusal never sends one. The phone is always masked, the customer's own words are
+// lib/onlineOrderStore.ts), so a replayed check, a lost race or a refusal never sends one. The customer's FULL phone number is shown (owner ruling 10 Nov 2026, replacing the earlier masked decision; one constant below), the customer's own words are
 // cut short, and no token, tran id or PayWay field ever appears: this chat is read by staff, not by the customer.
 //
 // Never throws: a missing chat id, a Telegram outage or a vanished row costs the notice and nothing else.
@@ -34,6 +34,9 @@ import type { OrderAlertEvent, OrderRecord, PaymentRecord, RequestRecord } from 
 import type { Env } from '../index'
 
 type Composed = Omit<TelegramEvent, 'type'>
+
+/** Owner ruling 10 Nov 2026 ("Show full phone"): staff alerts carry the whole phone number so staff can call the customer. Nothing else about the customer (address, social handles, note) is ever in an alert. */
+export const ALERT_SHOWS_FULL_PHONE = true
 
 const MAX_DIGEST_ROWS = 8
 const COMMENT_CHARACTERS = 120
@@ -53,10 +56,10 @@ function itemCount(order: Pick<OrderRecord, 'items_json'>): number {
   } catch { return 0 }
 }
 
-/** The rows every single-order notice opens with: which order, who, how it is collected. The phone is masked here, not by the caller. */
+/** The rows every single-order notice opens with: which order, who, how it is collected. The phone follows ALERT_SHOWS_FULL_PHONE, decided here and not by the caller. */
 function orderRows(order: OrderRecord): string[] {
   const rows = [`Order: ${order.order_no}`, `Customer: ${firstCharacters(order.customer_name, 60)}`]
-  const phone = maskPhone(order.customer_phone)
+  const phone = ALERT_SHOWS_FULL_PHONE ? order.customer_phone : maskPhone(order.customer_phone)
   if (phone) rows.push(`Tel: ${phone}`)
   rows.push(`Fulfilment: ${order.fulfilment === 'delivery' ? 'Home delivery' : 'Pickup'}`)
   return rows

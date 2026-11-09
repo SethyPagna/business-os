@@ -50,7 +50,7 @@ const tranOf = (h, orderId = 1) => h.one('SELECT tran_id FROM online_order_payme
 const textOf = (message) => message.text
 
 async function main() {
-  await check('a new order is announced once, in both languages, to the Sales topic, with the phone masked and no secret in the text', async () => {
+  await check('a new order is announced once, in both languages, to the Sales topic, with the FULL customer phone (owner ruling 10 Nov) and no secret in the text', async () => {
     const h = world()
     const res = await place(h, { phone: PHONE })
     assert.equal(sent.length, 1)
@@ -58,11 +58,23 @@ async function main() {
     assert.match(text, /Online order/); assert.match(text, KHMER, 'the Khmer half is there')
     assert.match(text, /LB-|\d{6,}/, 'it names the order number'); assert.ok(text.includes(h.one('SELECT order_no FROM online_orders').order_no))
     assert.match(text, /Dara/); assert.match(text, /\$25\.00/); assert.equal(sent[0].thread, 77, 'the Sales topic, never General')
-    assert.ok(!text.includes('345 678') && !text.includes('012345678'), 'the phone is masked')
-    assert.match(text, /\*\*\*/)
+    assert.ok(text.replace(/\s/g, '').includes('012345678'), 'the full phone is in the alert: ' + text)
+    assert.ok(!/\*\*\*/.test(text), 'not masked')
     for (const secret of [res.body.token, tranOf(h), 'APV', 'qr', 'abamobilebank']) assert.ok(!text.includes(secret), `no ${secret}`)
     assert.ok(text.split('\n').every((line) => line.length <= 80), 'short rows')
     assert.ok(!text.includes('—'), 'no em dash')
+  })
+
+  await check('the full phone is the ONLY customer detail an alert adds: address, social handles and the order note never appear, in any message of a delivery order from creation to payment (plan section 8)', async () => {
+    const h = world()
+    await place(h, { phone: PHONE, fulfilment: 'delivery', address: 'House 77 Hidden Street Phnom Penh', note: 'leave-with-the-guard', contacts: { telegram: '@hidden_handle', instagram: 'hidden.insta', facebook: 'hidden.fb', tiktok: 'hidden_tik', whatsapp: '85512999888', other: 'hidden-other' } })
+    h.script.check = () => h.approved(25); await h.callback(tranOf(h))
+    assert.ok(sent.length >= 2, 'created and paid were announced')
+    for (const message of sent) {
+      const text = textOf(message)
+      assert.ok(text.replace(/s/g, '').includes('012345678'), 'full phone in every order notice: ' + text)
+      for (const leak of ['Hidden Street', 'House 77', 'hidden_handle', 'hidden.insta', 'hidden.fb', 'hidden_tik', '12999888', 'hidden-other', 'leave-with-the-guard']) assert.ok(!text.includes(leak), 'leaked ' + leak)
+    }
   })
 
   await check('paid: exactly one message per guarded transition, however many callbacks, polls or sweeps arrive after it (a wrong build announces every check)', async () => {
