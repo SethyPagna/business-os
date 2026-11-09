@@ -248,9 +248,12 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
         const plan = onLotSet ? rowSetPlan(lot, text) : null
         const received = tr('inventory_check_lot_received', 'Received {date}').replace('{date}', lot.receivedAt ? fmtDateOnly(lot.receivedAt) : '—')
         const setLabel = plan ? tr('inventory_check_lot_set', 'Set to {count}').replace('{count}', String(plan.after)) : ''
+        // What the latest count typed on this date, kept in the session: it is still there after a reload.
+        const recorded = canViewCounts ? product.check_lines?.find(line => line.scope === 'lot' && line.batch_id === lot.batchId) : undefined
         return <li key={lot.batchId} data-check-lot={lot.batchId} className="flex min-w-0 items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
           <span className="min-w-0 flex-1 truncate leading-relaxed">{received}</span>
           <span className="shrink-0 tabular-nums"><span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_now', 'Now')}</span> <strong>{lot.quantity}</strong></span>
+          {recorded ? <span data-check-lot-recorded className="shrink-0 tabular-nums"><span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_counted', 'Counted')}</span> <strong>{recorded.counted}</strong></span> : null}
           <input data-check-lot-count type="text" inputMode="decimal" autoComplete="off" value={text} readOnly={locked} placeholder={String(lot.quantity)} aria-label={`${received}: ${product.name}`} aria-invalid={typed.kind === 'invalid' ? true : undefined}
             className={`h-11 w-20 min-w-0 shrink-0 rounded-lg border px-2 text-right text-xs tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 read-only:opacity-60 dark:bg-gray-900 lg:h-9 ${typed.kind === 'invalid' ? 'border-red-400' : 'border-gray-300 dark:border-gray-600'}`}
             onChange={event => onLotCount?.(product, lot, event.target.value)} onFocus={event => event.currentTarget.select()} />

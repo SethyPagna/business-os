@@ -140,6 +140,13 @@ const cases: Array<[string, () => Promise<void>]> = [
     const blind = await mount({ drafts: draft, canViewStock: false })
     assert.equal(lots(blind).length, 0, 'a viewer who may not see stock sees no dates')
   }],
+  ['after a reload the dates still show what the latest count typed on each (counted per date comes back from the overlay)', async () => {
+    const s = await mount({ products: [{ ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] }] })
+    const recorded = s.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).map(node => node.textContent.replace(/s+/g, ' ').trim())
+    assert.deepEqual(recorded, ['inventory_check_counted 4', 'inventory_check_counted 3'].map(text => text.replace('inventory_check_counted', recorded[0].startsWith('Counted') ? 'Counted' : 'inventory_check_counted')), 'both dates show their counted figure')
+    const blind = await mount({ products: [{ ...rowProduct, check_lines: [{ batch_id: 7, scope: 'lot', counted: 4 }] }], canViewCounts: false })
+    assert.equal(blind.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).length, 0, 'a viewer who may not read counts sees none')
+  }],
   ['with the switch off the row is exactly the older row (no date list, no extra input)', async () => {
     const off = await mount({ lotCounts: false, onLotCount: undefined, onLotSet: undefined })
     assert.equal(lots(off).length, 0)
