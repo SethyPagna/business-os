@@ -515,6 +515,30 @@ export async function shiftCashSales(
   }
 }
 
+// ---- online (KHQR) money on a linked sale --------------------------------------------------------------------------------------------------
+//
+// A sale made by Fulfilling an online order carries the customer's KHQR payment as part of its tender (an ordinary payments_version 0 sale). No cashier took that
+// money: the customer paid ABA directly, on the day PayWay approved it, long before this shift's Fulfil. It therefore belongs to no shift's drawer AND to no shift's
+// "digital taken" figure; the shift reader removes it by the order link (online_orders.sale_id, with the amounts the order recorded onto the sale in its
+// payment_recorded_on_sale events). Any other tender of the same sale (cash taken at the till for added lines, a digital method used at the till) stays counted.
+// Fail-open: a database without the online order tables (a deploy ahead of migration 0293) has no linked sales, so nothing is removed and nothing breaks.
+type LinkedOnline = Map<number, { usd: number; khr: number }>
+
+async function linkedOnlineMoney(env: Env, clauses: string[], params: Record<string, unknown>): Promise<LinkedOnline> {
+  try {
+    const rows = await getDb(env).prepare(`SELECT o.sale_id AS sale_id, COALESCE(SUM(e.amount_usd), 0) AS usd, COALESCE(SUM(e.amount_khr), 0) AS khr
+      FROM online_orders o INDEXED BY idx_online_orders_sale CROSS JOIN sales ON sales.id = o.sale_id
+      JOIN online_order_events e ON e.order_id = o.id AND e.event = 'payment_recorded_on_sale'
+      WHERE o.sale_id IS NOT NULL AND ${clauses.join(' AND ')} GROUP BY o.sale_id LIMIT 5001`).all<{ sale_id: number; usd: unknown; khr: unknown }>(params)
+    return new Map((rows || []).map((row) => [Number(row.sale_id), { usd: Number(row.usd) || 0, khr: Number(row.khr) || 0 }]))
+  } catch { return new Map() }
+}
+
+/** Takes the linked online money off a digital figure; never below zero (the money is a part of that tender, so it can only shrink it). */
+function withoutOnlineMoney(digital: ShiftMoney, online: { usd: number; khr: number }): ShiftMoney {
+  return { usd: round2(Math.max(0, digital.usd - online.usd)), khr: roundKhr(Math.max(0, digital.khr - online.khr)) }
+}
+
 /** Recorded tender on the sales `clauses` select (alias `sales`), cancelled sales always excluded. */
 export async function tenderWhere(
   env: Env,
@@ -526,7 +550,11 @@ export async function tenderWhere(
   const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr,
       change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
     FROM sales WHERE ${where.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
-  const cash = summarizeShiftCashDetail(rows.slice(0, 5000), options ?? await readCashConfig(env))
+  const cashRaw = summarizeShiftCashDetail(rows.slice(0, 5000), options ?? await readCashConfig(env))
+  // Online money on linked sales was taken by no cashier: out of the digital figure too (see linkedOnlineMoney).
+  const linked = await linkedOnlineMoney(env, where, params)
+  const online = [...linked.values()].reduce((sum, value) => ({ usd: sum.usd + value.usd, khr: sum.khr + value.khr }), { usd: 0, khr: 0 })
+  const cash = linked.size ? { ...cashRaw, digital: withoutOnlineMoney(cashRaw.digital, online) } : cashRaw
   // Bound memory and refuse a partial drawer total rather than reporting one.
   if (rows.length > 5000) {
     return { ...cash, needsReview: true, reviewCodes: [...new Set([...cash.reviewCodes, SHIFT_REVIEW.limit])].sort() }
@@ -1010,9 +1038,15 @@ export async function shiftSaleTenders(
     .all<ShiftTenderRow & { id: number; payments_version?: unknown }>(params)
   if (rows.length > SHIFT_CLOSE_SALE_CAP) return null
   const config = options ?? await readCashConfig(env)
+  const linked = await linkedOnlineMoney(env, [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"], params)
   const entries = new Map<number, ShiftSaleTender>()
   for (const row of rows) {
-    entries.set(Number(row.id), Number(row.payments_version) === 1 ? [Number(row.id), 0, 0, 0, 0] : shiftSaleTenderEntry(row, config))
+    const entry = Number(row.payments_version) === 1 ? [Number(row.id), 0, 0, 0, 0] as ShiftSaleTender : shiftSaleTenderEntry(row, config)
+    const online = linked.get(Number(row.id))
+    if (online) {
+      const digital = withoutOnlineMoney({ usd: entry[3], khr: entry[4] }, online)
+      entries.set(Number(row.id), [entry[0], entry[1], entry[2], digital.usd, digital.khr])
+    } else entries.set(Number(row.id), entry)
   }
   const eventRows = await shiftPaymentEventRows(env, shift, nowMs, SHIFT_CLOSE_SALE_CAP + 1, true)
   if (eventRows.length > SHIFT_CLOSE_SALE_CAP) return null
