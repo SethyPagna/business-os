@@ -97,6 +97,32 @@ export const LEGAL_PAGE_SECTIONS: Record<LegalPageKey, readonly LegalSection[]> 
   ],
 }
 
+// With online ordering on (the shop's `online_orders` switch, published as onlineOrdersEnabled), the same pages say what is then true: orders carry
+// personal details, payment goes through ABA PayWay, and the catalogue is no longer "no payment". Each section keeps its place; only the added or replaced
+// ones differ. With the switch off, LEGAL_PAGE_SECTIONS above is what renders, so a shop that never takes orders never publishes a promise it cannot keep.
+const sectionWith = (section: LegalSection, ...more: string[]): LegalSection => ({ heading: section.heading, bodies: [...section.bodies, ...more] })
+export const LEGAL_PAGE_SECTIONS_ONLINE: Record<LegalPageKey, readonly LegalSection[]> = {
+  privacy: LEGAL_PAGE_SECTIONS.privacy.flatMap((section): LegalSection[] => {
+    if (section.heading === 'portal_legal_privacy_collect_h') return [section, { heading: 'portal_legal_privacy_orders_h', bodies: ['portal_legal_privacy_orders_b'] }]
+    if (section.heading === 'portal_legal_privacy_retention_h') return [sectionWith(section, 'portal_legal_privacy_retention_orders')]
+    if (section.heading === 'portal_legal_privacy_sharing_h') return [sectionWith(section, 'portal_legal_privacy_sharing_orders')]
+    return [section]
+  }),
+  terms: LEGAL_PAGE_SECTIONS.terms.flatMap((section): LegalSection[] => {
+    if (section.heading === 'portal_legal_terms_catalogue_h') return [{ heading: section.heading, bodies: ['portal_legal_terms_catalogue_online_b'] }]
+    if (section.heading === 'portal_legal_terms_nopayment_h') {
+      return [
+        { heading: 'portal_legal_terms_online_h', bodies: ['portal_legal_terms_online_b'] },
+        { heading: 'portal_legal_terms_orders_h', bodies: ['portal_legal_terms_orders_b'] },
+      ]
+    }
+    return [section]
+  }),
+  cookies: LEGAL_PAGE_SECTIONS.cookies,
+}
+
+export const legalSections = (page: LegalPageKey, onlineOrders: boolean): readonly LegalSection[] => (onlineOrders ? LEGAL_PAGE_SECTIONS_ONLINE : LEGAL_PAGE_SECTIONS)[page]
+
 // The EXACT client-side storage this storefront uses. Every row was traced to
 // a real write in the source, listed beside it -- nothing here is aspirational.
 export type LegalStorageRow = {
@@ -128,6 +154,10 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   // portalAnnouncement.ts -- written only when the visitor closes the announcement bar, so it stays closed until the shop changes the message.
   { id: 'announcement', name: 'business-os-portal-announcement-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_announcement_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
 ]
+
+// orders/orderHistory.ts -- written when an order is placed on this device (the link, number, time and total only); listed only while ordering is on.
+export const LEGAL_STORAGE_ROW_ORDERS: LegalStorageRow = { id: 'orders', name: 'business-os-portal-orders-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_orders_p', lifetimeKey: 'portal_legal_store_until_cleared_l' }
+export const legalStorageRows = (onlineOrders: boolean): readonly LegalStorageRow[] => (onlineOrders ? [...LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS] : LEGAL_STORAGE_ROWS)
 
 const EN: Record<string, string> = {
   // --- shared chrome -------------------------------------------------------
@@ -187,6 +217,12 @@ const EN: Record<string, string> = {
   portal_legal_privacy_changes_h: 'Changes',
   portal_legal_privacy_changes_b: 'If we change this policy, we update the date at the top. We record which version you agreed to and when; just browsing the site never counts as agreeing.',
 
+  // --- online ordering (KHQR): shown only when the shop has the ordering switch on -----------------
+  portal_legal_privacy_orders_h: 'Orders and online payment',
+  portal_legal_privacy_orders_b: 'You can order without an account. For an order we keep your name and phone number, how you want to receive it (pickup or delivery) and, for delivery, your address. Any social contacts or note you add are optional and are kept with the order, together with what you ordered, its total and whether it was paid. You pay in your own banking app by scanning the KHQR code, so we never see or keep your bank details, card numbers or passwords. Staff use your phone number only to reach you about your order.',
+  portal_legal_privacy_sharing_orders: 'To take your payment, ABA PayWay receives the amount, a payment reference and the order number. We never send it your name, phone number or address. Our staff are told about your order in a private staff chat on Telegram, which shows your name, a masked phone number and the comments you send with a request.',
+  portal_legal_privacy_retention_orders: 'An order stays in our records with its payment status, because we need it to look after your purchase, refunds and returns. To ask us to correct or delete the details on an order, contact us using the business details above.',
+
   // --- Terms & Conditions --------------------------------------------------
   portal_legal_terms_catalogue_h: 'This is a catalogue',
   portal_legal_terms_catalogue_b: 'This site shows what {name} has in stock so you can browse and plan your visit. It is an invitation to get in touch, not a binding offer or a sales contract.',
@@ -196,6 +232,11 @@ const EN: Record<string, string> = {
   portal_legal_terms_returns_b: 'Returns are accepted within 7 days for unopened items with the receipt.',
   portal_legal_terms_nopayment_h: 'No payment on this site',
   portal_legal_terms_nopayment_b: 'You cannot pay on this site. Your list is a shortlist to show our team; you pay in person or in a way you agree with our staff. We keep no billing information, and payment details are never collected through this site. We will never ask for your bank details, card numbers or passwords, so anyone who does, even if they say they are us, is trying to scam you.',
+  portal_legal_terms_catalogue_online_b: 'This site shows what {name} has in stock so you can browse, plan your visit or order online. The catalogue itself is an invitation to get in touch, not a binding offer.',
+  portal_legal_terms_online_h: 'Ordering and paying online',
+  portal_legal_terms_online_b: 'You can order here without an account. Pick your items, give your name and phone number, choose pickup or delivery and pay by scanning the KHQR code in your banking app. Nothing is held for you before you pay. Each QR code works for the short time shown on the screen; if it runs out, nothing is charged and you can ask for a new one. The QR covers the goods only. For delivery, our staff contact you about the delivery price and time. We will never ask for your bank details, card numbers or passwords, so anyone who does, even if they say they are us, is trying to scam you.',
+  portal_legal_terms_orders_h: 'Changing, cancelling and returning an order',
+  portal_legal_terms_orders_b: 'Until you pay, you can change or cancel your order on its order page, and nothing is charged for a cancelled order. After you pay, ask us on the same page to change or cancel it or to return items. Our staff review each request and answer there. Returns follow the Returns section above. Anyone who has your order link can see your order, so keep the link private.',
   portal_legal_terms_account_h: 'Your account',
   portal_legal_terms_account_b: 'Create an account only if you are 16 or older and can agree to these terms yourself. Give accurate details, keep your password private, and tell us if you think someone else is using your account. We pause any account that is misused.',
   portal_legal_terms_ai_h: 'The assistant',
@@ -241,6 +282,7 @@ const EN: Record<string, string> = {
   portal_legal_store_assets_p: 'Where product images are loaded from.',
   portal_legal_store_map_consent_p: 'Whether you chose to load the store map on this device.',
   portal_legal_store_announcement_p: 'Which shop announcement you closed on this device, so it does not come back until the shop changes it.',
+  portal_legal_store_orders_p: 'The orders you placed on this device (the link, order number, time and total), so My orders can list them. It never holds your name, phone number or address.',
   portal_legal_store_until_cleared_l: 'Until you clear site data',
 
   // --- consent + embeds ----------------------------------------------------
@@ -322,6 +364,12 @@ const KM: Record<string, string> = {
   portal_legal_privacy_changes_h: 'ការផ្លាស់ប្តូរ',
   portal_legal_privacy_changes_b: 'បើយើងផ្លាស់ប្តូរគោលការណ៍នេះ យើងនឹងធ្វើបច្ចុប្បន្នភាពកាលបរិច្ឆេទខាងលើ។ យើងកត់ត្រាកំណែដែលអ្នកបានយល់ព្រម និងពេលវេលា។ ការគ្រាន់តែមើលគេហទំព័រ មិនត្រូវបានចាត់ទុកជាការយល់ព្រមទេ។',
 
+  // --- online ordering (KHQR): shown only when the shop has the ordering switch on -----------------
+  portal_legal_privacy_orders_h: 'ការបញ្ជាទិញ និងការទូទាត់តាមអនឡាញ',
+  portal_legal_privacy_orders_b: 'អ្នកអាចបញ្ជាទិញបានដោយមិនចាំបាច់មានគណនី។ សម្រាប់ការបញ្ជាទិញ យើងរក្សាទុកឈ្មោះ និងលេខទូរស័ព្ទរបស់អ្នក វិធីដែលអ្នកចង់ទទួល (មកយកនៅហាង ឬដឹកជញ្ជូន) ហើយសម្រាប់ការដឹកជញ្ជូន យើងរក្សាទុកអាសយដ្ឋានរបស់អ្នក។ ទំនាក់ទំនងបណ្តាញសង្គម ឬកំណត់ចំណាំដែលអ្នកបន្ថែមគឺជាជម្រើស ហើយត្រូវបានរក្សាទុកជាមួយការបញ្ជាទិញ រួមជាមួយទំនិញដែលអ្នកបានបញ្ជាទិញ តម្លៃសរុប និងស្ថានភាពទូទាត់។ អ្នកបង់ប្រាក់ក្នុងកម្មវិធីធនាគាររបស់អ្នកផ្ទាល់ ដោយស្កេនកូដ KHQR ដូច្នេះយើងមិនឃើញ ឬរក្សាទុកព័ត៌មានគណនីធនាគារ លេខកាត ឬពាក្យសម្ងាត់របស់អ្នកឡើយ។ បុគ្គលិកប្រើលេខទូរស័ព្ទរបស់អ្នកដើម្បីទាក់ទងអ្នកអំពីការបញ្ជាទិញប៉ុណ្ណោះ។',
+  portal_legal_privacy_sharing_orders: 'ដើម្បីទទួលការទូទាត់របស់អ្នក ABA PayWay ទទួលបានចំនួនទឹកប្រាក់ លេខយោងការទូទាត់ និងលេខបញ្ជាទិញ។ យើងមិនផ្ញើឈ្មោះ លេខទូរស័ព្ទ ឬអាសយដ្ឋានរបស់អ្នកទៅវាឡើយ។ បុគ្គលិករបស់យើងត្រូវបានជូនដំណឹងអំពីការបញ្ជាទិញរបស់អ្នកក្នុងក្រុមសន្ទនាឯកជនរបស់បុគ្គលិកលើ Telegram ដែលបង្ហាញឈ្មោះរបស់អ្នក លេខទូរស័ព្ទដែលបានបិទបាំងមួយផ្នែក និងមតិដែលអ្នកផ្ញើជាមួយសំណើ។',
+  portal_legal_privacy_retention_orders: 'ការបញ្ជាទិញនៅក្នុងកំណត់ត្រារបស់យើងជាមួយស្ថានភាពទូទាត់របស់វា ព្រោះយើងត្រូវការវាដើម្បីមើលការទិញ ការសងប្រាក់ និងការប្រគល់មកវិញរបស់អ្នក។ ដើម្បីស្នើកែ ឬលុបព័ត៌មានលើការបញ្ជាទិញ សូមទាក់ទងយើងតាមព័ត៌មានអាជីវកម្មខាងលើ។',
+
   portal_legal_terms_catalogue_h: 'នេះជាកាតាឡុក',
   portal_legal_terms_catalogue_b: 'គេហទំព័រនេះបង្ហាញអ្វីដែល {name} មានស្តុក ដើម្បីឱ្យអ្នករុករក និងរៀបចំការមកហាង។ វាជាការអញ្ជើញឱ្យទាក់ទងមកយើង មិនមែនជាការផ្តល់ជូនដែលចងកាតព្វកិច្ច ឬកិច្ចសន្យាលក់ទេ។',
   portal_legal_terms_prices_h: 'តម្លៃនិងស្តុក',
@@ -330,6 +378,11 @@ const KM: Record<string, string> = {
   portal_legal_terms_returns_b: 'ទទួលការប្រគល់មកវិញក្នុងរយៈពេល ៧ ថ្ងៃ សម្រាប់ទំនិញដែលមិនទាន់បើក ជាមួយវិក្កយបត្រ។',
   portal_legal_terms_nopayment_h: 'គ្មានការទូទាត់លើគេហទំព័រនេះ',
   portal_legal_terms_nopayment_b: 'អ្នកមិនអាចបង់ប្រាក់នៅលើគេហទំព័រនេះទេ។ បញ្ជីរបស់អ្នកគឺសម្រាប់បង្ហាញក្រុមការងារយើង ហើយអ្នកបង់ប្រាក់នៅហាង ឬតាមវិធីដែលអ្នកព្រមព្រៀងជាមួយបុគ្គលិក។ យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយមិនដែលប្រមូលវាតាមគេហទំព័រនេះទេ។ យើងនឹងមិនសុំព័ត៌មានគណនីធនាគារ លេខកាត ឬពាក្យសម្ងាត់របស់អ្នកឡើយ ដូច្នេះអ្នកណាដែលសុំ ទោះបីអះអាងថាជាយើងក៏ដោយ គឺកំពុងព្យាយាមបោកប្រាស់អ្នក។',
+  portal_legal_terms_catalogue_online_b: 'គេហទំព័រនេះបង្ហាញអ្វីដែល {name} មានស្តុក ដើម្បីឱ្យអ្នករុករក រៀបចំការមកហាង ឬបញ្ជាទិញតាមអនឡាញ។ កាតាឡុកខ្លួនឯងជាការអញ្ជើញឱ្យទាក់ទងមកយើង មិនមែនជាការផ្តល់ជូនដែលចងកាតព្វកិច្ចទេ។',
+  portal_legal_terms_online_h: 'ការបញ្ជាទិញ និងការទូទាត់តាមអនឡាញ',
+  portal_legal_terms_online_b: 'អ្នកអាចបញ្ជាទិញនៅទីនេះដោយមិនចាំបាច់មានគណនី។ ជ្រើសទំនិញ ផ្តល់ឈ្មោះ និងលេខទូរស័ព្ទរបស់អ្នក ជ្រើសមកយកនៅហាង ឬដឹកជញ្ជូន ហើយបង់ប្រាក់ដោយស្កេនកូដ KHQR ក្នុងកម្មវិធីធនាគាររបស់អ្នក។ គ្មានអ្វីត្រូវបានទុកឱ្យអ្នកមុនអ្នកបង់ប្រាក់ទេ។ កូដ QR នីមួយៗមានសុពលភាពក្នុងរយៈពេលខ្លីដែលបង្ហាញលើអេក្រង់ បើវាផុតកំណត់ គ្មានអ្វីត្រូវបានកាត់ប្រាក់ទេ ហើយអ្នកអាចសុំកូដថ្មី។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។ សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។ យើងនឹងមិនសុំព័ត៌មានគណនីធនាគារ លេខកាត ឬពាក្យសម្ងាត់របស់អ្នកឡើយ ដូច្នេះអ្នកណាដែលសុំ ទោះបីអះអាងថាជាយើងក៏ដោយ គឺកំពុងព្យាយាមបោកប្រាស់អ្នក។',
+  portal_legal_terms_orders_h: 'ការកែប្រែ ការបោះបង់ និងការប្រគល់ការបញ្ជាទិញមកវិញ',
+  portal_legal_terms_orders_b: 'មុនអ្នកបង់ប្រាក់ អ្នកអាចកែប្រែ ឬបោះបង់ការបញ្ជាទិញនៅលើទំព័រការបញ្ជាទិញរបស់វា ហើយគ្មានអ្វីត្រូវបានកាត់ប្រាក់សម្រាប់ការបញ្ជាទិញដែលបានបោះបង់ទេ។ ក្រោយអ្នកបង់ប្រាក់ សូមស្នើមកយើងនៅលើទំព័រដដែលដើម្បីកែប្រែ បោះបង់ ឬប្រគល់ទំនិញមកវិញ។ បុគ្គលិករបស់យើងពិនិត្យសំណើនីមួយៗ ហើយឆ្លើយតបនៅទីនោះ។ ការប្រគល់មកវិញធ្វើតាមផ្នែក «ការប្រគល់មកវិញ» ខាងលើ។ អ្នកណាដែលមានតំណការបញ្ជាទិញរបស់អ្នក អាចមើលឃើញការបញ្ជាទិញនោះ ដូច្នេះសូមរក្សាតំណឱ្យនៅឯកជន។',
   portal_legal_terms_account_h: 'គណនីរបស់អ្នក',
   portal_legal_terms_account_b: 'សូមបង្កើតគណនីតែបើអ្នកមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយអាចយល់ព្រមនឹងលក្ខខណ្ឌទាំងនេះដោយខ្លួនឯង។ សូមផ្តល់ព័ត៌មានត្រឹមត្រូវ រក្សាពាក្យសម្ងាត់ជាការសម្ងាត់ ហើយប្រាប់យើង បើអ្នកគិតថាមាននរណាម្នាក់ផ្សេងកំពុងប្រើគណនីរបស់អ្នក។ យើងផ្អាកគណនីណាដែលត្រូវបានប្រើខុសគោលបំណង។',
   portal_legal_terms_ai_h: 'ជំនួយការ',
@@ -373,6 +426,7 @@ const KM: Record<string, string> = {
   portal_legal_store_assets_p: 'កន្លែងដែលរូបភាពផលិតផលត្រូវផ្ទុកមក។',
   portal_legal_store_map_consent_p: 'ថាតើអ្នកបានជ្រើសរើសផ្ទុកផែនទីហាងលើឧបករណ៍នេះឬអត់។',
   portal_legal_store_announcement_p: 'សេចក្តីជូនដំណឹងរបស់ហាងដែលអ្នកបានបិទលើឧបករណ៍នេះ ដើម្បីកុំឲ្យវាត្រឡប់មកវិញ រហូតដល់ហាងផ្លាស់ប្តូរ។',
+  portal_legal_store_orders_p: 'ការបញ្ជាទិញដែលអ្នកបានធ្វើលើឧបករណ៍នេះ (តំណ លេខបញ្ជាទិញ ពេលវេលា និងតម្លៃសរុប) ដើម្បីឱ្យ «ការបញ្ជាទិញរបស់ខ្ញុំ» បង្ហាញវា។ វាមិនដែលមានឈ្មោះ លេខទូរស័ព្ទ ឬអាសយដ្ឋានរបស់អ្នកឡើយ។',
   portal_legal_store_until_cleared_l: 'រហូតដល់អ្នកសម្អាតទិន្នន័យគេហទំព័រ',
 
   portal_legal_consent_label: 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយខ្ញុំយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព។',

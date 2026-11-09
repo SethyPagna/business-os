@@ -10,7 +10,7 @@
 //
 // Run: node tests/publicLegalNoHedges.test.ts
 import assert from 'node:assert/strict'
-import { LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
+import { LEGAL_PAGE_SECTIONS, LEGAL_PAGE_SECTIONS_ONLINE, LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
 import fs from 'node:fs'
 
 const embedSource = fs.readFileSync(new URL('../src/components/catalog/legal/PortalEmbedConsent.tsx', import.meta.url), 'utf8')
@@ -21,8 +21,8 @@ const EN_HEDGE = /\b(?:may|might|perhaps|possibly|approximately|roughly|generall
 const KM_HEDGE = /ប្រហែល/
 
 const rendered = new Set<string>(['portal_legal_footer_content_concerns', 'portal_legal_map_consent_b'])
-for (const sections of Object.values(LEGAL_PAGE_SECTIONS)) for (const section of sections) { rendered.add(section.heading); for (const body of section.bodies) rendered.add(body) }
-for (const row of LEGAL_STORAGE_ROWS) { rendered.add(row.kindKey); rendered.add(row.purposeKey); rendered.add(row.lifetimeKey) }
+for (const sections of [...Object.values(LEGAL_PAGE_SECTIONS), ...Object.values(LEGAL_PAGE_SECTIONS_ONLINE)]) for (const section of sections) { rendered.add(section.heading); for (const body of section.bodies) rendered.add(body) }
+for (const row of [...LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS]) { rendered.add(row.kindKey); rendered.add(row.purposeKey); rendered.add(row.lifetimeKey) }
 
 function scan(en: Record<string, string>, km: Record<string, string>): string[] {
   const found: string[] = []
@@ -53,6 +53,10 @@ check('privacy keeps its substance: no billing data, never share bank details (E
   assert.match(PORTAL_LEGAL_KM.portal_legal_privacy_collect_list, /យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយក៏មិនដែលសុំវាដែរ។/)
   assert.match(PORTAL_LEGAL_KM.portal_legal_privacy_scam_b, /សូមកុំផ្តល់ព័ត៌មានគណនីធនាគារ/)
   assert.match(PORTAL_LEGAL_EN.portal_legal_terms_nopayment_b, /We will never ask for your bank details/)
+  // ...and the ordering wording keeps the same promise (KHQR is scanned in the shopper's own banking app).
+  assert.match(PORTAL_LEGAL_EN.portal_legal_terms_online_b, /We will never ask for your bank details/)
+  assert.match(PORTAL_LEGAL_EN.portal_legal_privacy_orders_b, /we never see or keep your bank details/)
+  assert.match(PORTAL_LEGAL_KM.portal_legal_privacy_orders_b, /យើងមិនឃើញ ឬរក្សាទុកព័ត៌មានគណនីធនាគារ/)
 })
 
 check('control: the retired 30 Sep wording fails the same scan', () => {

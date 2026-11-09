@@ -1785,7 +1785,7 @@ export default function PublicCatalogPage() {
       mapLink={addressFact?.href || ''}
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
-      footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
+      footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} onlineOrders={onlineOrders} /> : null}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       onAddToBucket={addToBucket}

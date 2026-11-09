@@ -19,12 +19,12 @@ import { PORTAL_SOCIAL_ICONS, PortalSocialText } from '../PortalSocialRow.tsx'
 import type { SocialPlatform } from '../../../utils/socialHandles.ts'
 import {
   LEGAL_PAGE_ORDER,
-  LEGAL_PAGE_SECTIONS,
   LEGAL_PAGE_TITLE_KEY,
-  LEGAL_STORAGE_ROWS,
   formatLegalLastUpdated,
   interpolateLegal,
   isLegalPageKey,
+  legalSections,
+  legalStorageRows,
   legalText,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
@@ -94,6 +94,8 @@ export type PortalFooterProps = {
   // the social links it has already filtered and normalised.
   quickLinks?: PortalFooterQuickLink[]
   socialLinks?: PortalFooterSocialLink[]
+  /** Online ordering is on (the shop's `online_orders` switch): the policies then describe orders and online payment instead of "no payment". */
+  onlineOrders?: boolean
 }
 
 const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400'
@@ -160,6 +162,7 @@ export default function PortalFooter({
   email,
   quickLinks = [],
   socialLinks = [],
+  onlineOrders = false,
 }: PortalFooterProps) {
   const [activePage, setActivePage] = useState<LegalPageKey | null>(() =>
     typeof window === 'undefined' ? null : readLegalPageFromSearch(window.location.search))
@@ -440,7 +443,7 @@ export default function PortalFooter({
       </footer>
 
       {activePage ? (
-        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} />
+        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} onlineOrders={onlineOrders} />
       ) : null}
     </>
   )
@@ -455,6 +458,7 @@ function LegalReader({
   onNavigate,
   aiState,
   pick,
+  onlineOrders,
 }: {
   page: LegalPageKey
   text: (key: string) => string
@@ -464,6 +468,7 @@ function LegalReader({
   onNavigate: (page: LegalPageKey) => void
   aiState: AiProviderState
   pick: (en: string, km: string) => string
+  onlineOrders: boolean
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -564,7 +569,7 @@ function LegalReader({
 
         <BusinessIdentityCard text={text} details={details} />
 
-        {LEGAL_PAGE_SECTIONS[page].map((section) => (
+        {legalSections(page, onlineOrders).map((section) => (
           <section key={section.heading} className="mt-6">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{fill(section.heading)}</h2>
             {section.bodies.map((body) => (
@@ -573,7 +578,7 @@ function LegalReader({
                 : <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
             ))}
             {page === 'cookies' && section.heading === 'portal_legal_cookies_table_h' ? (
-              <StorageTable text={text} />
+              <StorageTable text={text} onlineOrders={onlineOrders} />
             ) : null}
           </section>
         ))}
@@ -652,7 +657,7 @@ function BusinessIdentityCard({ text, details }: { text: (key: string) => string
   )
 }
 
-function StorageTable({ text }: { text: (key: string) => string }): ReactNode {
+function StorageTable({ text, onlineOrders }: { text: (key: string) => string; onlineOrders: boolean }): ReactNode {
   return (
     <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 dark:border-neutral-800">
       <table className="w-full min-w-[520px] border-collapse text-left text-xs">
@@ -665,7 +670,7 @@ function StorageTable({ text }: { text: (key: string) => string }): ReactNode {
           </tr>
         </thead>
         <tbody>
-          {LEGAL_STORAGE_ROWS.map((row) => (
+          {legalStorageRows(onlineOrders).map((row) => (
             <tr key={row.id} className="border-t border-slate-100 align-top dark:border-neutral-800">
               <td className="px-3 py-2 font-mono text-[11px] break-all text-slate-800 dark:text-neutral-200">{row.name}</td>
               <td className="px-3 py-2 whitespace-nowrap">{text(row.kindKey)}</td>

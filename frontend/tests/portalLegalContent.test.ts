@@ -22,8 +22,10 @@ import { fileURLToPath } from 'node:url'
 import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
+  LEGAL_PAGE_SECTIONS_ONLINE,
   LEGAL_PAGE_TITLE_KEY,
   LEGAL_STORAGE_ROWS,
+  LEGAL_STORAGE_ROW_ORDERS,
   PORTAL_LEGAL_CONSENT_VERSION,
   PORTAL_LEGAL_EN,
   PORTAL_LEGAL_KM,
@@ -68,14 +70,16 @@ for (const pack of [en, km]) {
 const rendered = new Set<string>()
 for (const page of LEGAL_PAGE_ORDER) {
   rendered.add(LEGAL_PAGE_TITLE_KEY[page])
-  const sections = LEGAL_PAGE_SECTIONS[page]
-  assert.ok(sections.length >= 5, `${page} has too few sections`)
-  for (const section of sections) {
-    rendered.add(section.heading)
-    for (const body of section.bodies) rendered.add(body)
+  // Both variants render: the shortlist wording (ordering off) and the ordering wording (the shop's online_orders switch on).
+  for (const sections of [LEGAL_PAGE_SECTIONS[page], LEGAL_PAGE_SECTIONS_ONLINE[page]]) {
+    assert.ok(sections.length >= 5, `${page} has too few sections`)
+    for (const section of sections) {
+      rendered.add(section.heading)
+      for (const body of section.bodies) rendered.add(body)
+    }
   }
 }
-for (const row of LEGAL_STORAGE_ROWS) {
+for (const row of [...LEGAL_STORAGE_ROWS, LEGAL_STORAGE_ROW_ORDERS]) {
   rendered.add(row.kindKey)
   rendered.add(row.purposeKey)
   rendered.add(row.lifetimeKey)
