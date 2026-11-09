@@ -8,7 +8,8 @@
 //   withdrawn / edited / cancelled   the customer took a request back, changed a waiting order, or cancelled it  (`requests`)
 //   qr_failed the payment could not be started and the customer is stuck                (`new`)
 //   unknown_payment  ABA reported a payment for a transaction this shop has no record of (after a restore: money with no order)  (`new`)
-// A declined check ('failed') and a QR re-issue ('changed') are announced to the screens only: no message.
+// A declined check ('failed'), a QR re-issue ('changed') and a staff action with nothing to tell ('staff': a note, a resolved review) are announced to the screens only: no message.
+// Staff decisions, applied changes and refund notes (S5) are messages in the `requests` family.
 //
 // Every committed event also bumps the `online_orders` data version and broadcasts, whatever the Telegram switches say: staff screens must refresh
 // even when nobody wants the messages.
@@ -104,6 +105,15 @@ export function composeCancelledAlert(order: OrderRecord): Composed {
 export function composeWithdrawnAlert(order: OrderRecord, kind: string): Composed {
   return { heading: '🔙 Online order request withdrawn', lines: [...orderRows(order), `Change requested: ${REQUEST_KIND_WORDS[kind] ?? kind}`] }
 }
+export function composeRefundAlert(order: OrderRecord, amountUsd: number): Composed {
+  return { heading: '↩️ Refund sent through ABA', lines: [...orderRows(order), `Refund: ${money(amountUsd)}`] }
+}
+export function composeDecidedAlert(order: OrderRecord, kind: string, accepted: boolean): Composed {
+  return { heading: accepted ? '👍 Online order request accepted' : '👎 Online order request rejected', lines: [...orderRows(order), `Change requested: ${REQUEST_KIND_WORDS[kind] ?? kind}`] }
+}
+export function composeAppliedAlert(order: OrderRecord, kind: string, topUpUsd: number): Composed {
+  return { heading: '✔️ Online order change applied', lines: [...orderRows(order), `Change requested: ${REQUEST_KIND_WORDS[kind] ?? kind}`, ...(topUpUsd > 0 ? [`Amount: ${money(topUpUsd)}`] : []), `Total: ${money(order.goods_total_usd)}`] }
+}
 /** Only the tail of the transaction id: enough to find it at ABA, nothing that would let anyone else use it. */
 export function composeUnknownPaymentAlert(tranId: string): Composed {
   return { heading: '❓ Online payment not recognised', lines: [`Reference: ...${String(tranId).slice(-6)}`, `Status: Needs review`] }
@@ -147,6 +157,9 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
       case 'edited': return await withOrder('requests', event.orderId, composeEditedAlert)
       case 'cancelled': return await withOrder('requests', event.orderId, composeCancelledAlert)
       case 'withdrawn': return await withOrder('requests', event.orderId, (order) => composeWithdrawnAlert(order, event.requestKind))
+      case 'refund': return await withOrder('requests', event.orderId, (order) => composeRefundAlert(order, event.amountUsd))
+      case 'decided': return await withOrder('requests', event.orderId, (order) => composeDecidedAlert(order, event.requestKind, event.accepted))
+      case 'applied': return await withOrder('requests', event.orderId, (order) => composeAppliedAlert(order, event.requestKind, event.topUpUsd))
       case 'unknown_payment': return await send('new', async () => composeUnknownPaymentAlert(event.tranId))
       case 'paid':
       case 'review':

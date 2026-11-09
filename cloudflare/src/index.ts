@@ -6,6 +6,7 @@ import portalRoute from './routes/portal'
 import portalOrdersRoute from './routes/portalOrders'
 import paywayCallbackRoute from './routes/paywayCallback'
 import { orderNotifier } from './lib/onlineOrderAlerts'
+import onlineOrdersRoute from './routes/onlineOrders'
 import { sweepOrders } from './lib/onlineOrderSweep'
 import { getDb } from './lib/db'
 import { paywayCredentialsFor } from './lib/paywayConfig'
@@ -638,6 +639,7 @@ app.route('/api/products', productCostRoute)
 app.route('/api/portal/orders', portalOrdersRoute)
 // ABA's payment callback (a nudge; the route verifies its token and asks PayWay itself). The shop host lets exactly this POST through (lib/publicHostGate.ts).
 app.route('/api/payway', paywayCallbackRoute)
+app.route('/api/online-orders', onlineOrdersRoute)
 app.route('/api/portal', portalRoute)
 app.route('/api/sales', salesRoute)
 app.route('/api/auth', authRoute)

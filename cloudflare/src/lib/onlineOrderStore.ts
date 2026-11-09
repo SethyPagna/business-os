@@ -43,7 +43,7 @@ export class OrderError extends Error {
     this.extra = extra
   }
 }
-const refuse = (status: number, code: string, message: string, extra?: Record<string, unknown>): never => { throw new OrderError(status, code, message, extra) }
+export const refuse = (status: number, code: string, message: string, extra?: Record<string, unknown>): never => { throw new OrderError(status, code, message, extra) }
 
 /** What a customer reads for each PayWay reason. A configuration fault is the shop's to fix, so it says "contact the shop", not "try again". */
 export function paymentFailureMessage(reason: PaywayFailureReason): { code: string; message: string; retryable: boolean } {
@@ -87,12 +87,17 @@ export type OrderAlertEvent =
   | { kind: 'withdrawn'; orderId: number; requestId: number; requestKind: string }
   | { kind: 'expired'; expired: Array<{ orderId: number; paymentId: number; purpose: string }> }
   | { kind: 'unknown_payment'; tranId: string }
+  // Staff actions (lib/onlineOrderStaff.ts): the screens refresh for every one; the chat hears of a refund, a decision and an applied change.
+  | { kind: 'staff'; orderId: number }
+  | { kind: 'refund'; orderId: number; amountUsd: number }
+  | { kind: 'decided'; orderId: number; requestKind: string; accepted: boolean }
+  | { kind: 'applied'; orderId: number; requestKind: string; topUpUsd: number }
 const announce = async (deps: OrderDeps, event: OrderAlertEvent): Promise<void> => {
   if (!deps.notify) return
   try { await deps.notify(event) } catch { /* an alert must never fail the order */ }
 }
 export { announce as announceOrderEvent }
-const sqlTime = (date: Date): string => date.toISOString().replace('T', ' ').replace('Z', '')
+export const sqlTime = (date: Date): string => date.toISOString().replace('T', ' ').replace('Z', '')
 
 // ---- shapes of the rows ---------------------------------------------------------------------------------------------------------
 
@@ -239,7 +244,7 @@ export async function findSellingBranch(db: D1Compat): Promise<{ id: number; nam
   return row ?? null
 }
 
-type PricingFacts = { priced: PricedOrder; products: Map<number, Record<string, unknown> & { id: number; name?: string }>; branchId: number }
+export type PricingFacts = { priced: PricedOrder; products: Map<number, Record<string, unknown> & { id: number; name?: string }>; branchId: number }
 
 /** Prices a cart from live rows with the till's kernel and checks the selling branch holds every unit. Throws OrderError with the item names. */
 export async function priceAndCheckStock(deps: OrderDeps, lines: OrderLineInput[], settings: OrderSettings): Promise<PricingFacts> {
@@ -280,7 +285,7 @@ export async function priceAndCheckStock(deps: OrderDeps, lines: OrderLineInput[
   return { priced, products, branchId: branch.id }
 }
 
-function itemsJson(facts: PricingFacts): string {
+export function itemsJson(facts: PricingFacts): string {
   return JSON.stringify(facts.priced.lines.map((line) => ({
     product_id: line.product_id, name: String(facts.products.get(line.product_id)?.name ?? '').slice(0, 120), quantity: line.quantity,
     unit_price_usd: line.unit_price_usd, line_total_usd: line.line_total_usd,
@@ -340,7 +345,7 @@ export async function bundleFromToken(db: D1Compat, token: unknown): Promise<Ord
 
 // ---- the customer-safe view -----------------------------------------------------------------------------------------------------------
 
-const parseJson = <T>(text: string | null | undefined, fallback: T): T => { try { return text ? JSON.parse(text) as T : fallback } catch { return fallback } }
+export const parseJson = <T>(text: string | null | undefined, fallback: T): T => { try { return text ? JSON.parse(text) as T : fallback } catch { return fallback } }
 
 /** `*** 678`: enough for the customer to recognise their number, never enough to pass the phone check from a leaked link. */
 export const phoneHint = (phone: string): string => `*** ${phone.slice(-3)}`
@@ -527,7 +532,7 @@ async function applyCheckResultRows(
   return 'paid'
 }
 
-async function closeQuietly(deps: OrderDeps, creds: PaywayCredentials | null, tranIds: string[]): Promise<void> {
+export async function closeQuietly(deps: OrderDeps, creds: PaywayCredentials | null, tranIds: string[]): Promise<void> {
   if (!creds) return
   for (const tranId of tranIds) {
     try { await closeTransaction(deps.transport, creds, deps.now(), tranId) } catch { /* best effort: the QR expires on its own */ }

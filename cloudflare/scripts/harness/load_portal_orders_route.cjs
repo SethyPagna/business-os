@@ -45,7 +45,7 @@ function createOrdersHarness(options = {}) {
     },
     batch: (items) => { d1.calls += 1; for (const item of items) record(item.sql); return raw.batch(items) },
   }
-  const state = { switchOn: options.switchOn !== false, nowMs: options.nowMs ?? Date.UTC(2026, 10, 9, 3, 0, 0), account: null }
+  const state = { switchOn: options.switchOn !== false, nowMs: options.nowMs ?? Date.UTC(2026, 10, 9, 3, 0, 0), account: null, user: null }
   const calls = []
   const script = {
     // Each receives the request body and returns the JSON PayWay would answer (or { status, json } to answer an HTTP status), or throws for a network failure.
@@ -64,7 +64,11 @@ function createOrdersHarness(options = {}) {
   // The live-refresh side effects, recorded instead of sent: every committed order change bumps the data version and broadcasts (lib/onlineOrderAlerts.ts).
   const bumps = []
   const broadcasts = []
+  // Staff side (routes/onlineOrders.ts): the signed-in user is whatever the test says, and the audit trail is recorded instead of written.
+  const audits = []
   const overrides = {
+    '../lib/auth': { requireAuth: async (c, next) => { if (!state.user) return c.json({ error: 'Authentication required' }, 401); c.set('user', state.user); return next() } },
+    '../lib/audit': { audit: async (_env, userId, userName, action, entity, entityId, details) => { audits.push({ userId, userName, action, entity, entityId, details }) } },
     './cache': { bumpVersions: async (_env, namespaces) => { bumps.push(...namespaces) } },
     '../durable-objects/broadcastHub': { broadcast: async (_env, channel, payload) => { broadcasts.push({ channel, payload }) } },
     '../lib/db': { getDb: () => db },
@@ -102,6 +106,7 @@ function createOrdersHarness(options = {}) {
   const app = routeModule.createPortalOrdersRoute({ transport, now: () => new Date(state.nowMs), random })
   const sweepModule = load('lib/onlineOrderSweep.ts')
   const paywayModule = load('lib/payway.ts')
+  let staffApp = null
   const callbackApp = load('routes/paywayCallback.ts').createPaywayCallbackRoute({ transport, now: () => new Date(state.nowMs) })
 
   // The raw D1 binding code outside getDb reaches for (the maintenance read): prepare().bind().first()/all(), over the same in-memory database.
@@ -142,13 +147,23 @@ function createOrdersHarness(options = {}) {
   const deps = (over = {}) => { const merged = { ...env, ...(over.env || {}) }; return { db, env: merged, now: () => new Date(state.nowMs), random, transport, origin: null, notify: over.notify ?? alertsModule.orderNotifier(merged) } }
   const configModule = load('lib/paywayConfig.ts')
   const credentials = (over = {}) => configModule.paywayCredentialsFor({ ...env, ...(over.env || {}) })
+  // A staff request: `as` is the signed-in user ({ id, name, permissions } or null for signed out).
+  async function staff(pathname, method = 'GET', body, { as, envOverride } = {}) {
+    planTier.__resetPlanTierCacheForTests?.()
+    state.user = as === undefined ? state.user : as
+    staffApp = staffApp || load('routes/onlineOrders.ts').createOnlineOrdersRoute({ transport, now: () => new Date(state.nowMs), random })
+    const response = await staffApp.request(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, { ...env, ...(envOverride || {}) }, { waitUntil() {}, passThroughOnException() {} })
+    let json = null
+    try { json = await response.json() } catch (_) { json = null }
+    return { status: response.status, body: json, headers: response.headers }
+  }
   async function sweep(over = {}) { planTier.__resetPlanTierCacheForTests?.(); return sweepModule.sweepOrders(deps(over), over.noCredentials ? null : credentials(over)) }
   const one = (sql, ...params) => raw.db.prepare(sql).get(...params)
   const all = (sql, ...params) => raw.db.prepare(sql).all(...params)
   const run = (sql, ...params) => raw.db.prepare(sql).run(...params)
 
   return {
-    bumps, broadcasts, deps, credentials, callback, sweep, sweepModule, paywayModule, load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
+    staff, audits, bumps, broadcasts, deps, credentials, callback, sweep, sweepModule, paywayModule, load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
     setNow: (ms) => { state.nowMs = ms },
     advance: (ms) => { state.nowMs += ms },
     clearStatements: () => { statements.length = 0; d1.calls = 0 },
