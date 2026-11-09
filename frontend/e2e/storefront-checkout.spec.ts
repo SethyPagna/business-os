@@ -168,33 +168,35 @@ test.describe('Checkout', () => {
       await expect(form.getByLabel(label, { exact: true }), label).toBeVisible()
     }
     await expect(form.getByRole('radio', { name: 'Pickup at the shop' })).toHaveAttribute('aria-checked', 'true')
-    await expect(form).toContainText('our staff will contact you about the delivery price and time')
+    await expect(form).toContainText('our staff will contact you about the delivery price, the time and how to pay for it')
     await expect(form).toContainText('The QR covers the goods only')
-    await expect(form).toContainText('You will see the exact total before you pay')
-    await expect(form.getByRole('button', { name: 'Get QR' })).toBeVisible()
+    await expect(form).toContainText('the QR shows the exact total')
+    await expect(form.getByText('Total', { exact: true })).toBeVisible()
+    await expect(form.getByText('$37.26', { exact: true }), 'the buyer sees the price before paying').toBeVisible()
+    await expect(form.getByRole('button', { name: 'Pay with KHQR' })).toBeVisible()
     await expect(form.getByRole('link', { name: 'Terms & Conditions' })).toBeVisible()
     await expect(form.getByRole('link', { name: 'Privacy Policy' })).toBeVisible()
     expectNoRuntimeErrors(health)
   })
 
   test('name and phone are required, an address only for delivery; nothing is sent until they are right', async ({ page }) => {
-    // CATCHES: an order sent with no name or phone, an address demanded for pickup, and a Get QR that fires before the form is valid.
+    // CATCHES: an order sent with no name or phone, an address demanded for pickup, and a Pay with KHQR that fires before the form is valid.
     const seen = await mockOrders(page, () => ({ status: 201, json: { order: orderView(), token: TOKEN } }))
     await openCatalogue(page)
     await openDrawer(page)
     await page.getByRole('dialog', { name: 'My List' }).getByRole('button', { name: 'Checkout' }).click()
     const form = sheet(page, 'Your order')
-    await form.getByRole('button', { name: 'Get QR' }).click()
+    await form.getByRole('button', { name: 'Pay with KHQR' }).click()
     await expect(form.getByRole('alert')).toHaveText('Please enter your name.')
     await form.getByLabel('Your name').fill('Sample Buyer')
-    await form.getByRole('button', { name: 'Get QR' }).click()
+    await form.getByRole('button', { name: 'Pay with KHQR' }).click()
     await expect(form.getByRole('alert')).toContainText('Please enter a phone number we can call')
     await form.getByLabel('Phone number').fill('1234567')
-    await form.getByRole('button', { name: 'Get QR' }).click()
+    await form.getByRole('button', { name: 'Pay with KHQR' }).click()
     await expect(form.getByRole('alert')).toContainText('Please enter a phone number we can call')
     await form.getByLabel('Phone number').fill('012 345 678')
     await form.getByRole('radio', { name: 'Delivery' }).click()
-    await form.getByRole('button', { name: 'Get QR' }).click()
+    await form.getByRole('button', { name: 'Pay with KHQR' }).click()
     await expect(form.getByRole('alert')).toContainText('Please enter your delivery address')
     expect(seen, 'nothing reached the API').toEqual([])
   })
@@ -214,7 +216,7 @@ test.describe('Checkout', () => {
     await openDrawer(page)
     await page.getByRole('dialog', { name: 'My List' }).getByRole('button', { name: 'Checkout' }).click()
     await fillCheckout(page, { delivery: true, address: '12 Street 271, Phnom Penh', telegram: '@sample' })
-    await sheet(page, 'Your order').getByRole('button', { name: 'Get QR' }).click()
+    await sheet(page, 'Your order').getByRole('button', { name: 'Pay with KHQR' }).click()
     await page.waitForURL(`**/order/${TOKEN}`)
 
     const create = seen.find((entry) => entry.method === 'POST')!
@@ -230,7 +232,7 @@ test.describe('Checkout', () => {
     await expect(page.getByRole('timer')).toHaveText(/^Pay within 1[45]:\d\d$/)
     await expect(page.getByText('Waiting for your payment…')).toBeVisible()
     await expect(page.getByText('Total for the goods')).toBeVisible()
-    await expect(page.getByText('our staff will contact you about the delivery price and time').first()).toBeVisible()
+    await expect(page.getByText('our staff will contact you about the delivery price, the time and how to pay for it').first()).toBeVisible()
     // The clock runs on after install; stop it at a known second so the countdown can be read exactly.
     await page.clock.pauseAt(new Date('2026-11-09T10:01:00Z'))
     await page.clock.runFor(1_000)
@@ -254,12 +256,12 @@ test.describe('Checkout', () => {
     await page.getByRole('dialog', { name: 'My List' }).getByRole('button', { name: 'Checkout' }).click()
     await fillCheckout(page)
     const form = sheet(page, 'Your order')
-    await form.getByRole('button', { name: 'Get QR' }).click()
+    await form.getByRole('button', { name: 'Pay with KHQR' }).click()
     await expect(form.getByRole('alert')).toContainText('Some items are not in stock in the quantity you asked for')
     await expect(form.getByRole('alert')).toContainText('E2E Product 001 Aurelia: 1 left')
     await expect(form.getByLabel('Your name')).toHaveValue('Sample Buyer')
     expect(new URL(page.url()).pathname, 'still on the catalogue').toBe('/')
-    await expect(form.getByRole('button', { name: 'Get QR' })).toBeEnabled()
+    await expect(form.getByRole('button', { name: 'Pay with KHQR' })).toBeEnabled()
   })
 
   test('closing a half-filled sheet asks first, with Discard and Back', async ({ page }) => {
@@ -291,6 +293,40 @@ test.describe('Order page', () => {
     await seedStorefrontLanguage(page.context(), STOREFRONT_ORIGIN, language)
     await page.goto(`${STOREFRONT_ORIGIN}/order/${TOKEN}`, { waitUntil: 'load' })
   }
+
+  test('an extra payment with no QR yet shows "Pay {amount} more" and a button that gets the QR', async ({ page }) => {
+    // CATCHES: a higher total after the shop applied a change with no way to pay the difference (the top-up has no QR until the buyer asks for it).
+    let asked: Json | null = null
+    const topUp = { request_id: 5, amount: 5, currency: 'USD', qr_string: null, deeplink: null, expires_at: null }
+    await mockOrders(page, ({ method, path, body }) => {
+      if (path === `/${TOKEN}/topup` && method === 'POST') {
+        asked = body
+        return { json: { order: paidView({ top_ups: [{ ...topUp, qr_string: QR_STRING, expires_at: '2026-11-09 10:30:00.000' }] }) } }
+      }
+      if (method === 'GET' && path === `/${TOKEN}`) return { json: { order: paidView({ top_ups: [topUp] }) } }
+      return undefined
+    })
+    await openOrder(page)
+    await expect(page.getByText('Pay $5.00 more')).toBeVisible()
+    await expect(page.getByAltText('KHQR code to pay $5.00')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Pay with KHQR' }).click()
+    await expect(page.getByAltText('KHQR code to pay $5.00')).toBeVisible()
+    expect(asked).toEqual({ request_id: 5 })
+  })
+
+  test('a closed order says so: no new QR, no removed details shown, and its refusal reads in the shopper language', async ({ page }) => {
+    // CATCHES: "[scrubbed]" printed as a name, a "Get a new QR" on an order the shop closed, and the raw code order_closed.
+    await mockOrders(page, ({ method, path }) => {
+      if (path === `/${TOKEN}/retry`) return { status: 409, json: { error: 'This order was closed. Please place a new order.', code: 'order_closed' } }
+      if (method === 'GET' && path === `/${TOKEN}`) return { json: { order: orderView({ status: 'expired', payment: null, closed: true, name: '[scrubbed]', can_edit: false, can_cancel: false }) } }
+      return undefined
+    })
+    await openOrder(page)
+    await expect(page.getByText('This order was closed because it was never paid. Please place a new order.')).toBeVisible()
+    await expect(page.getByText('Closed', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Get a new QR' })).toHaveCount(0)
+    await expect(page.locator('body')).not.toContainText('[scrubbed]')
+  })
 
   test('the status poll finds the payment and the page turns to "Payment received" without a reload', async ({ page }) => {
     // CATCHES: a QR page that never learns it was paid, a poll that reads faster than every 3 seconds, and one that does not stop once paid.
@@ -341,6 +377,9 @@ test.describe('Order page', () => {
     await expect(page.getByRole('timer')).toHaveText('Pay within 0:09')
     await page.clock.runFor(11_000)
     await expect(page.getByText('Time ran out. Nothing was charged.')).toBeVisible()
+    // The status pill agrees with the card (it said "Waiting for payment" next to "Time ran out").
+    await expect(page.getByText('Waiting for payment', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Time ran out', { exact: true })).toBeVisible()
     await expect(page.getByAltText('KHQR code to pay $37.26')).toHaveCount(0)
     await page.getByRole('button', { name: 'Get a new QR' }).click()
     await expect(page.getByAltText('KHQR code to pay $37.26')).toBeVisible()
@@ -360,7 +399,7 @@ test.describe('Order page', () => {
     await openDrawer(page)
     await page.getByRole('dialog', { name: 'My List' }).getByRole('button', { name: 'Checkout' }).click()
     await fillCheckout(page)
-    await sheet(page, 'Your order').getByRole('button', { name: 'Get QR' }).click()
+    await sheet(page, 'Your order').getByRole('button', { name: 'Pay with KHQR' }).click()
     await page.waitForURL(`**/order/${TOKEN}`)
     await expect(page.getByText('We could not get a QR for this order yet. Nothing was charged.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Get a new QR' })).toBeEnabled()
@@ -417,7 +456,8 @@ test.describe('Order page', () => {
       return undefined
     })
     await openOrder(page)
-    await page.getByRole('button', { name: 'Cancel order' }).click()
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true }), 'cancel is a word, not a bare trash icon').toBeVisible()
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page.getByText('Cancel this order?')).toBeVisible()
     await expect(page.getByText('Waiting for payment → Cancelled')).toBeVisible()
     expect(cancelled).toBe(false)
@@ -535,12 +575,12 @@ test.describe('Khmer', () => {
     const form = page.getByRole('dialog', { name: 'ការបញ្ជាទិញរបស់អ្នក' })
     await expect(form).toBeVisible()
     await expect(form).toContainText('ឈ្មោះរបស់អ្នក')
-    await expect(form).toContainText('បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន')
-    const english = await form.evaluate((node) => (node.textContent || '').match(/\b(?:Your name|Phone number|Delivery address|Get QR|Checkout|optional)\b/g))
+    await expect(form).toContainText('បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក')
+    const english = await form.evaluate((node) => (node.textContent || '').match(/\b(?:Your name|Phone number|Delivery address|Pay with KHQR|Checkout|optional)\b/g))
     expect(english, 'no English UI words on a Khmer checkout').toBeNull()
     await form.getByLabel('ឈ្មោះរបស់អ្នក').fill('សាក​ល្បង')
     await form.getByLabel('លេខទូរស័ព្ទ').fill('012 345 678')
-    await form.getByRole('button', { name: 'ទទួលយក QR' }).click()
+    await form.getByRole('button', { name: 'បង់ជាមួយ KHQR' }).click()
     await page.waitForURL(`**/order/${TOKEN}`)
     await expect(page.getByAltText('កូដ KHQR សម្រាប់បង់ $37.26')).toBeVisible()
     await expect(page.getByRole('timer')).toContainText('សូមបង់ក្នុងរយៈពេល')
@@ -573,7 +613,7 @@ test.describe('Phone width', () => {
     const box = await sheet(page, 'Your order').boundingBox()
     expect(box && box.width).toBeLessThanOrEqual(360)
     await fillCheckout(page)
-    await sheet(page, 'Your order').getByRole('button', { name: 'Get QR' }).click()
+    await sheet(page, 'Your order').getByRole('button', { name: 'Pay with KHQR' }).click()
     await page.waitForURL(`**/order/${TOKEN}`)
     await expect(page.getByAltText('KHQR code to pay $37.26')).toBeVisible()
     expect(await wide(), 'the QR page').toBeLessThanOrEqual(0)

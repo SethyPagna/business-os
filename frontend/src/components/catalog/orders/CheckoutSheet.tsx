@@ -12,7 +12,7 @@ import { createOrderApi } from './orderClient.ts'
 import { orderErrorMessage } from './orderErrors.ts'
 import { rememberOrder } from './orderHistory.ts'
 import {
-  MAX_ORDER_LINE_QTY, buildCheckoutBody, checkoutProblems, emptyCheckoutForm, newClientRequestId, orderableLines, type CheckoutForm, type CheckoutLine,
+  MAX_ORDER_LINE_QTY, buildCheckoutBody, checkoutProblems, emptyCheckoutForm, estimateCartTotal, formatUsd, newClientRequestId, orderableLines, type CheckoutForm, type CheckoutLine,
 } from './orderLogic.ts'
 import { orderPathFor } from './orderPath.ts'
 import { ORDER_CONTACT_FIELDS, type OrderContactField } from './orderTypes.ts'
@@ -22,7 +22,7 @@ import { Field, Notice, ProductName, iconButtonClass, inputClass, primaryButtonC
 // when the goods are to be delivered; every way to reach them is shown and optional; there is no account and no stock is held. The sheet is
 // the whole form from its first paint (the address field and the delivery notice are always there, not unfolded by a choice).
 //
-// Tapping "Get QR" places the order on the Worker, remembers its link in this browser and opens the order page, which is where the QR, the
+// Tapping "Pay with KHQR" places the order on the Worker, remembers its link in this browser and opens the order page, which is where the QR, the
 // countdown and the waiting for payment live. One screen for the QR, whether the buyer arrives from here, from a saved link or after a reload.
 
 export type CheckoutItem = CheckoutLine & { name: string; priceText?: string }
@@ -71,6 +71,7 @@ export default function CheckoutSheet({ copy, items, onClose, onPlaced }: Props)
   })
 
   const lines = orderableLines(items)
+  const estimate = estimateCartTotal(lines as CheckoutItem[])
   const tooMany = lines.some((line) => Number(line.qty) > MAX_ORDER_LINE_QTY)
 
   const submit = async (event: FormEvent) => {
@@ -117,7 +118,7 @@ export default function CheckoutSheet({ copy, items, onClose, onPlaced }: Props)
   const privacyKey = LEGAL_PAGE_TITLE_KEY.privacy
   const termsKey = LEGAL_PAGE_TITLE_KEY.terms
   // One sentence, so Khmer word order is its own: the two links are dropped into the {terms} and {privacy} slots.
-  const consentText = copy('order_consent', 'By tapping Get QR you agree to our {terms} and {privacy}. We never see or keep your bank details.', 'ដោយចុច «ទទួលយក QR» អ្នកយល់ព្រមតាម {terms} និង {privacy}។ យើងមិនឃើញ ឬរក្សាទុកព័ត៌មានធនាគាររបស់អ្នកទេ។')
+  const consentText = copy('order_consent', 'By tapping Pay with KHQR you agree to our {terms} and {privacy}. We never see or keep your bank details.', 'ដោយចុច «បង់ជាមួយ KHQR» អ្នកយល់ព្រមតាម {terms} និង {privacy}។ យើងមិនឃើញ ឬរក្សាទុកព័ត៌មានធនាគាររបស់អ្នកទេ។')
   const consentLine = consentText.split(/({terms}|{privacy})/).map((part, index) => {
     if (part === '{terms}') return <LegalInlineLink key={index} page="terms" label={copy(termsKey, legalText('en', termsKey), legalText('km', termsKey))} />
     if (part === '{privacy}') return <LegalInlineLink key={index} page="privacy" label={copy(privacyKey, legalText('en', privacyKey), legalText('km', privacyKey))} />
@@ -159,7 +160,13 @@ export default function CheckoutSheet({ copy, items, onClose, onPlaced }: Props)
                 </li>
               ))}
             </ul>
-            <p className="text-xs leading-6 text-slate-500 dark:text-neutral-400">{copy('order_total_note', 'You will see the exact total before you pay.', 'អ្នកនឹងឃើញតម្លៃសរុបពិតប្រាកដ មុនពេលបង់ប្រាក់។')}</p>
+            {estimate !== null ? (
+              <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-sm font-semibold text-slate-900 dark:border-white/10 dark:text-neutral-100">
+                <span>{copy('order_total_label', 'Total', 'សរុប')}</span>
+                <span translate="no">{formatUsd(estimate)}</span>
+              </div>
+            ) : null}
+            <p className="text-xs leading-6 text-slate-500 dark:text-neutral-400">{copy('order_total_note', 'Prices are checked again when you pay, and the QR shows the exact total.', 'តម្លៃត្រូវបានពិនិត្យម្ដងទៀតពេលអ្នកបង់ ហើយ QR បង្ហាញតម្លៃសរុបពិតប្រាកដ។')}</p>
 
             {failure ? (
               <Notice tone="error">
@@ -215,7 +222,7 @@ export default function CheckoutSheet({ copy, items, onClose, onPlaced }: Props)
               )}
             </Field>
             <Notice tone="info">
-              {copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price and time. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}
+              {copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price, the time and how to pay for it. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}
             </Notice>
 
             <fieldset className="space-y-2">
@@ -246,7 +253,7 @@ export default function CheckoutSheet({ copy, items, onClose, onPlaced }: Props)
           <div className="shrink-0 space-y-2 border-t border-slate-100 px-5 py-3 dark:border-neutral-800">
             <button type="submit" disabled={busy} className={primaryButtonClass}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <QrCode className="h-4 w-4" aria-hidden="true" />}
-              {busy ? copy('order_working', 'Please wait…', 'សូមរង់ចាំ…') : copy('order_get_qr', 'Get QR', 'ទទួលយក QR')}
+              {busy ? copy('order_working', 'Please wait…', 'សូមរង់ចាំ…') : copy('order_pay_khqr', 'Pay with KHQR', 'បង់ជាមួយ KHQR')}
             </button>
             <p className="text-center text-xs leading-6 text-slate-500 dark:text-neutral-400">{consentLine}</p>
           </div>

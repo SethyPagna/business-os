@@ -8,7 +8,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  PAID_STATUSES, buildRequestBody, draftForRequest, draftFromOrder, editBodyFor, formatAmount, hasPendingRequest, requestKindsOffered, requestProblem, safeDeeplink,
+  PAID_STATUSES, buildRequestBody, draftForRequest, draftFromOrder, editBodyFor, estimateCartTotal, formatAmount, hasPendingRequest, orderScreen, requestKindsOffered, requestProblem, safeDeeplink,
 } from '../src/components/catalog/orders/orderLogic.ts'
 import type { OrderView } from '../src/components/catalog/orders/orderTypes.ts'
 
@@ -126,4 +126,23 @@ test('the bank-app link is only ever an ABA scheme or https, and the amount read
   assert.equal(formatAmount(37.26, 'USD'), '$37.26')
   assert.equal(formatAmount(152766, 'KHR'), '152,766 ៛')
   assert.equal(formatAmount('x', 'usd'), '$0.00')
+})
+
+test('the checkout total is the cart as the shopper sees it, and nothing at all when a price is not a plain dollar amount', () => {
+  // CATCHES: a total built with floating point (18.63 x 2 as 37.260000000000005), a comma price read as 1, and a wrong figure shown when one line is not in dollars.
+  assert.equal(estimateCartTotal([{ qty: 2, priceText: '$18.63' }, { qty: 1, priceText: '$5.00' }]), 42.26)
+  assert.equal(estimateCartTotal([{ qty: 3, priceText: '$1,250.50' }]), 3751.5)
+  assert.equal(estimateCartTotal([{ qty: 1, priceText: '$0.1' }, { qty: 2, priceText: '$0.2' }]), 0.5)
+  assert.equal(estimateCartTotal([{ qty: 1, priceText: '$5.00' }, { qty: 1, priceText: '12,000 ៛' }]), null)
+  assert.equal(estimateCartTotal([{ qty: 1, priceText: '' }]), null)
+  assert.equal(estimateCartTotal([{ qty: 0, priceText: '$5.00' }]), null)
+  assert.equal(estimateCartTotal([]), 0)
+})
+
+test('a closed order shows the closed screen whatever its status says, so it offers no new QR', () => {
+  // CATCHES: an old unpaid link that still offers "Get a new QR" after the shop closed the order.
+  assert.equal(orderScreen({ status: 'expired', payment: null, closed: true }, null), 'closed')
+  assert.equal(orderScreen({ status: 'awaiting_payment', payment: null, closed: true }, null), 'closed')
+  assert.equal(orderScreen({ status: 'expired', payment: null, closed: false }, null), 'new_qr')
+  assert.equal(orderScreen({ status: 'expired', payment: null }, null), 'new_qr')
 })

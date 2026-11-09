@@ -64,7 +64,10 @@ test('every code the Worker or the client can produce has an entry, and no entry
   const unhandled = [...codes].filter((code) => !handled.has(code)).sort()
   assert.deepEqual(unhandled, [], `codes with no storefront text: ${unhandled.join(', ')}`)
   // bad_response and unknown are the client's catch-alls (orderClient.ts builds them from a status, not from a literal refusal).
-  const stale = [...handled].filter((code) => !codes.has(code) && !['unknown', 'bad_response'].includes(code)).sort()
+  // order_closed: the Worker refuses customer writes on a closed (scrubbed) order from the KHQR S5 audit fix G4 on lane/khqr, which this branch's base does not have yet; the text
+  // ships first so the compose never shows a raw code. Delete it from this list once the Worker source in the tree names it.
+  const ARRIVING_FROM_THE_WORKER = ['order_closed']
+  const stale = [...handled].filter((code) => !codes.has(code) && !['unknown', 'bad_response', ...ARRIVING_FROM_THE_WORKER].includes(code)).sort()
   assert.deepEqual(stale, [], `entries for codes nothing sends: ${stale.join(', ')}`)
 })
 

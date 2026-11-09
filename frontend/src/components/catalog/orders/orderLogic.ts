@@ -73,9 +73,11 @@ export type OrderScreen =
   | 'paid'
   | 'review'
   | 'cancelled'
+  | 'closed'       // the shop closed it (its details were removed): nothing can be paid or changed
   | 'after_sale'
 
-export function orderScreen(order: Pick<OrderView, 'status' | 'payment'>, secondsLeft: number | null): OrderScreen {
+export function orderScreen(order: Pick<OrderView, 'status' | 'payment' | 'closed'>, secondsLeft: number | null): OrderScreen {
+  if (order.closed === true) return 'closed'
   switch (order.status) {
     case 'awaiting_payment':
       if (!order.payment) return 'new_qr'
@@ -326,3 +328,18 @@ export const hasPendingRequest = (order: Pick<OrderView, 'requests'>): boolean =
 
 /** Statuses after which a request page is worth showing at all: the order was paid, so changes and returns can exist. */
 export const PAID_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['paid', 'review', 'completed', 'balance_due', 'delivery_pending', 'sale_cancelled'])
+
+/**
+ * The cart's total as the shopper already sees it (quantity times the price text on each line), shown on the checkout so nobody has to tap "Pay with KHQR" to learn
+ * the price. null when any price is not a plain dollar amount: then nothing is shown rather than a wrong figure. The Worker prices the order itself.
+ */
+export function estimateCartTotal(items: ReadonlyArray<{ qty: number; priceText?: string | null }>): number | null {
+  let cents = 0
+  for (const item of items) {
+    const match = /^\s*\$\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\.([0-9]{1,4}))?\s*$/.exec(String(item.priceText ?? ''))
+    const qty = Number(item.qty)
+    if (!match || !Number.isFinite(qty) || qty < 1) return null
+    cents += Math.round(Number(match[1].replace(/,/g, '') + '.' + (match[2] ?? '0')) * 100) * Math.round(qty)
+  }
+  return cents / 100
+}

@@ -249,7 +249,7 @@ export default function OrderRequests({ copy, api, token, order, onChanged }: Pr
               <Field label={copy('order_address', 'Delivery address', 'អាសយដ្ឋានដឹកជញ្ជូន')} hint={copy('order_address_hint', 'Needed for delivery. Leave empty for pickup.', 'ត្រូវការសម្រាប់ការដឹកជញ្ជូន។ ទុកទទេសម្រាប់ការមកយកផ្ទាល់។')}>
                 {(id, describedBy) => <textarea id={id} aria-describedby={describedBy} rows={2} maxLength={300} value={draft.address} onChange={(e) => set('address', e.target.value)} className={inputClass} />}
               </Field>
-              <Notice tone="info">{copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price and time. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}</Notice>
+              <Notice tone="info">{copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price, the time and how to pay for it. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}</Notice>
             </div>
           ) : null}
 

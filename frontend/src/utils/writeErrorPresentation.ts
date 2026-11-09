@@ -21,6 +21,9 @@ const GENERIC_REJECTION_DETAIL: RejectionDetail = ['write_rejected_details', 'Th
 const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, RejectionDetail>([
   ['invalid_portal_language', ['write_rejected_portal_language', 'The website language must be English or Khmer.']],
   ['portal_translation_private_key', ['write_rejected_portal_translation_key', 'A translation entry name cannot be published. Rename it, then save again.']],
+  // KHQR: online order timing is refused with its reason, never clamped (cloudflare/src/lib/onlineOrders.ts validateOnlineOrderSettingsWrite).
+  ['invalid_online_order_payment_minutes', ['write_rejected_online_order_payment_minutes', 'The payment time for online orders must be a whole number of minutes from 3 to 60.']],
+  ['invalid_online_order_request_days', ['write_rejected_online_order_request_days', 'The change window for online orders must be a whole number of days from 1 to 30.']],
 ])
 
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {

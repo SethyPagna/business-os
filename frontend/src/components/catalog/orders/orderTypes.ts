@@ -15,7 +15,8 @@ export type OrderContacts = Record<OrderContactField, string | null>
 export type OrderItem = { product_id: number; name: string; quantity: number; unit_price_usd: number; line_total_usd: number }
 
 export type OrderQr = { amount: number; currency: string; qr_string: string; deeplink: string | null; expires_at: string | null }
-export type OrderTopUp = OrderQr & { request_id: number | null }
+/** An extra payment the shop asked for. Its QR fields are null until the QR is made (the shop applies a change first; the buyer taps to get the QR) and after it is over. */
+export type OrderTopUp = { request_id: number | null; amount: number; currency: string; qr_string: string | null; deeplink: string | null; expires_at: string | null }
 
 export type RequestKind = 'items' | 'fulfilment' | 'address' | 'contact' | 'note' | 'cancel' | 'return'
 export type RequestStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'applied' | 'reversed'
@@ -60,6 +61,8 @@ export type OrderView = {
   request_kinds: RequestKind[]
   /** The owner's setting (default 7): the page quotes it, it is never a literal here. */
   request_window_days: number
+  /** True for an order the shop closed (a never-paid order whose details were removed after the ordering period): nothing on it can be changed or paid. */
+  closed?: boolean
 }
 
 /** What GET /:token/status answers: one order row, nothing else. */

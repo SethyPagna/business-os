@@ -76,6 +76,7 @@ export const ORDER_ERROR_KEYS = {
   order_not_editable: 'order_err_not_editable',
   order_changed: 'order_err_changed',
   order_not_cancellable: 'order_err_not_cancellable',
+  order_closed: 'order_err_closed',
   order_not_retryable: 'order_err_not_retryable',
   qr_still_valid: 'order_err_qr_valid',
   no_topup_due: 'order_err_no_topup',
@@ -122,7 +123,7 @@ export function orderErrorMessage(copy: CopyFn, code: string): string {
     case 'order_err_text_long': return copy('order_err_text_long', 'That text is too long. Please make it shorter.', 'អក្សរនោះវែងពេក។ សូមធ្វើឱ្យខ្លីជាងនេះ។')
     case 'order_err_phone': return copy('order_err_phone', 'Please enter a phone number we can call, for example 012 345 678.', 'សូមបញ្ចូលលេខទូរស័ព្ទដែលយើងអាចហៅបាន ឧទាហរណ៍ 012 345 678។')
     case 'order_err_fulfilment': return copy('order_err_fulfilment', 'Choose pickup or delivery.', 'សូមជ្រើសរើសមកយកផ្ទាល់ ឬដឹកជញ្ជូន។')
-    case 'order_err_address_required': return copy('order_err_address_required', 'Please enter your delivery address. Our staff will contact you about the delivery price and time.', 'សូមបញ្ចូលអាសយដ្ឋានដឹកជញ្ជូនរបស់អ្នក។ បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។')
+    case 'order_err_address_required': return copy('order_err_address_required', 'Please enter your delivery address. Our staff will contact you about the delivery price, the time and how to pay for it.', 'សូមបញ្ចូលអាសយដ្ឋានដឹកជញ្ជូនរបស់អ្នក។ បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក។')
     case 'order_err_attachments': return copy('order_err_attachments', 'We could not attach your picture. Our staff will contact you for photos.', 'យើងមិនអាចភ្ជាប់រូបភាពរបស់អ្នកបានទេ។ បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកសុំរូបថត។')
     case 'order_err_lines_required': return copy('order_err_lines_required', 'Your list is empty. Add at least one item.', 'បញ្ជីរបស់អ្នកទទេ។ សូមបន្ថែមទំនិញយ៉ាងហោចណាស់មួយ។')
     case 'order_err_too_many_lines': return copy('order_err_too_many_lines', 'There are too many different items in one order. Please split it into two orders.', 'មានទំនិញខុសៗគ្នាច្រើនពេកក្នុងការបញ្ជាទិញមួយ។ សូមបំបែកជាពីរការបញ្ជាទិញ។')
@@ -138,6 +139,7 @@ export function orderErrorMessage(copy: CopyFn, code: string): string {
     case 'order_err_already_paid': return copy('order_err_already_paid', 'This order was just paid, so it can no longer be changed here. Ask the shop if you need a change.', 'ការបញ្ជាទិញនេះទើបតែបានបង់ប្រាក់ ដូច្នេះមិនអាចកែនៅទីនេះទៀតទេ។ សូមសួរហាង បើអ្នកត្រូវការកែប្រែ។')
     case 'order_err_not_editable': return copy('order_err_not_editable', 'This order can no longer be changed here. Please contact the shop.', 'ការបញ្ជាទិញនេះមិនអាចកែនៅទីនេះទៀតទេ។ សូមទាក់ទងហាង។')
     case 'order_err_changed': return copy('order_err_changed', 'This order changed while you were editing it. Please reload and try again.', 'ការបញ្ជាទិញនេះបានផ្លាស់ប្តូរ ខណៈអ្នកកំពុងកែ។ សូមផ្ទុកឡើងវិញ រួចព្យាយាមម្តងទៀត។')
+    case 'order_err_closed': return copy('order_err_closed', 'This order was closed. Please place a new order.', 'ការបញ្ជាទិញនេះត្រូវបានបិទ។ សូមធ្វើការបញ្ជាទិញថ្មី។')
     case 'order_err_not_cancellable': return copy('order_err_not_cancellable', 'This order can no longer be cancelled here. Please contact the shop.', 'ការបញ្ជាទិញនេះមិនអាចបោះបង់នៅទីនេះទៀតទេ។ សូមទាក់ទងហាង។')
     case 'order_err_not_retryable': return copy('order_err_not_retryable', 'This order does not need a new QR.', 'ការបញ្ជាទិញនេះមិនត្រូវការ QR ថ្មីទេ។')
     case 'order_err_qr_valid': return copy('order_err_qr_valid', 'Your QR is still valid. Please scan it to pay.', 'QR របស់អ្នកនៅតែប្រើបាន។ សូមស្កេនវាដើម្បីបង់ប្រាក់។')

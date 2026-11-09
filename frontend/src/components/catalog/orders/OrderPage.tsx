@@ -5,7 +5,7 @@ import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import ConfirmDialog from '../../shared/ConfirmDialog.tsx'
 import { fmtDateTime24 } from '../../../utils/formatters.ts'
@@ -35,13 +35,14 @@ const CONTACT_LABELS = { telegram: 'Telegram', instagram: 'Instagram', facebook:
 /** A top-up QR is not covered by the order's own status read, so a page showing one re-reads the order now and then (only while visible). */
 const TOP_UP_REFRESH_MS = 30_000
 
-function statusLabel(copy: CopyFn, status: OrderStatus): string {
+function statusLabel(copy: CopyFn, status: OrderStatus | 'closed'): string {
   switch (status) {
     case 'awaiting_payment': return copy('order_status_waiting', 'Waiting for payment', 'កំពុងរង់ចាំអ្នកបង់ប្រាក់')
     case 'qr_failed': return copy('order_status_qr_failed', 'QR not ready', 'QR មិនទាន់រួចរាល់')
     case 'expired': return copy('order_status_expired', 'Time ran out', 'អស់ពេល')
     case 'paid': return copy('order_status_paid', 'Paid', 'បានបង់ប្រាក់')
     case 'review': return copy('order_status_review', 'Payment being checked', 'កំពុងពិនិត្យការទូទាត់')
+    case 'closed': return copy('order_status_closed', 'Closed', 'បានបិទ')
     case 'cancelled':
     case 'sale_cancelled': return copy('order_status_cancelled', 'Cancelled', 'បានបោះបង់')
     case 'completed': return copy('order_status_completed', 'Completed', 'បានបញ្ចប់')
@@ -155,6 +156,7 @@ export default function OrderPage({ copy, token }: Props) {
   const view = loaded.order
   const secondsLeft = secondsUntilExpiry(view.payment?.expires_at, now, skewMs)
   const screen = orderScreen(view, secondsLeft)
+  const closed = screen === 'closed'
   const notes = orderMoneyNotes(view)
   const delivery = view.fulfilment === 'delivery'
   const savedContacts = ORDER_CONTACT_FIELDS.filter((field) => view.contacts[field])
@@ -196,7 +198,7 @@ export default function OrderPage({ copy, token }: Props) {
           </h1>
           <div className="text-xs leading-6 text-slate-500 dark:text-neutral-400" translate="no">{fmtDateTime24(view.created_at)}</div>
         </div>
-        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold leading-6 text-slate-800 dark:bg-white/10 dark:text-neutral-100">{statusLabel(copy, view.status)}</span>
+        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold leading-6 text-slate-800 dark:bg-white/10 dark:text-neutral-100">{statusLabel(copy, closed ? 'closed' : screen === 'pay_expired' ? 'expired' : view.status)}</span>
       </div>
 
       {actionError ? <Notice tone="error">{orderErrorMessage(copy, actionError)}</Notice> : null}
@@ -240,12 +242,15 @@ export default function OrderPage({ copy, token }: Props) {
         <Notice tone="success" icon={<CheckCircle2 className="h-5 w-5" />}>
           <div className="font-semibold">{copy('order_paid_title', 'Payment received. Thank you!', 'បានទទួលការទូទាត់។ សូមអរគុណ!')}</div>
           <div className="mt-1">{delivery
-            ? copy('order_paid_delivery', 'Our staff will contact you about the delivery price and time.', 'បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។')
+            ? copy('order_paid_delivery', 'Our staff will contact you about the delivery price, the time and how to pay for it.', 'បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក។')
             : copy('order_paid_pickup', 'Come to the shop to collect your order and show your order number.', 'សូមមកយកទំនិញនៅហាង ហើយបង្ហាញលេខការបញ្ជាទិញរបស់អ្នក។')}</div>
         </Notice>
       ) : null}
       {screen === 'review' ? (
         <Notice tone="warn" icon={<AlertCircle className="h-5 w-5" />}>{copy('order_review_text', 'We received your payment, but our staff need to check it. We will contact you. You do not need to pay again.', 'យើងបានទទួលការទូទាត់របស់អ្នកហើយ ប៉ុន្តែបុគ្គលិករបស់យើងត្រូវពិនិត្យវា។ យើងនឹងទាក់ទងអ្នក។ អ្នកមិនចាំបាច់បង់ម្តងទៀតទេ។')}</Notice>
+      ) : null}
+      {closed ? (
+        <Notice tone="info" icon={<Info className="h-5 w-5" />}>{copy('order_closed_text', 'This order was closed because it was never paid. Please place a new order.', 'ការបញ្ជាទិញនេះត្រូវបានបិទ ព្រោះមិនបានបង់ប្រាក់។ សូមធ្វើការបញ្ជាទិញថ្មី។')}</Notice>
       ) : null}
       {screen === 'cancelled' ? (
         <Notice tone="info" icon={<Info className="h-5 w-5" />}>{copy('order_cancelled_text', 'This order is cancelled.', 'ការបញ្ជាទិញនេះត្រូវបានបោះបង់។')}</Notice>
@@ -267,28 +272,35 @@ export default function OrderPage({ copy, token }: Props) {
         </Notice>
       ))}
 
-      {view.top_ups.map((topUp) => (
-        <div key={`${topUp.request_id}-${topUp.expires_at}`} className={`${cardClass} space-y-3`}>
-          <h2 className="text-base font-semibold leading-7 text-slate-900 dark:text-neutral-100">{copy('order_topup_title', 'Pay {amount} more', 'បង់បន្ថែម {amount}').replace('{amount}', formatAmount(topUp.amount, topUp.currency))}</h2>
-          <p className="text-sm leading-relaxed text-slate-600 dark:text-neutral-300">{copy('order_topup_text', 'The shop asked for an extra payment for the change you requested.', 'ហាងបានសុំការបង់ប្រាក់បន្ថែមសម្រាប់ការកែប្រែដែលអ្នកបានស្នើ។')}</p>
-          <KhqrCard
-            copy={copy}
-            qrString={topUp.qr_string}
-            deeplink={topUp.deeplink}
-            amount={topUp.amount}
-            currency={topUp.currency}
-            expiresAt={topUp.expires_at}
-            skewMs={skewMs}
-            orderNo={view.order_no}
-          />
-          {secondsUntilExpiry(topUp.expires_at, now, skewMs) === 0 && topUp.request_id !== null ? (
-            <button type="button" className={primaryButtonClass} disabled={busy !== null} onClick={() => { void run('topup', () => api.topUp(token, Number(topUp.request_id))) }}>
-              {busy === 'topup' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-4 w-4" aria-hidden="true" />}
-              {copy('order_new_qr', 'Get a new QR', 'ទទួលយក QR ថ្មី')}
-            </button>
-          ) : null}
-        </div>
-      ))}
+      {view.top_ups.map((topUp) => {
+        // The shop applies a change first; the QR for the extra amount is made when the buyer asks (qr_string is null until then, and again once it is over).
+        const noQr = !topUp.qr_string
+        const over = !noQr && secondsUntilExpiry(topUp.expires_at, now, skewMs) === 0
+        return (
+          <div key={`${topUp.request_id}-${topUp.expires_at}`} className={`${cardClass} space-y-3`}>
+            <h2 className="text-base font-semibold leading-7 text-slate-900 dark:text-neutral-100">{copy('order_topup_title', 'Pay {amount} more', 'បង់បន្ថែម {amount}').replace('{amount}', formatAmount(topUp.amount, topUp.currency))}</h2>
+            <p className="text-sm leading-relaxed text-slate-600 dark:text-neutral-300">{copy('order_topup_text', 'The shop asked for an extra payment for the change you requested.', 'ហាងបានសុំការបង់ប្រាក់បន្ថែមសម្រាប់ការកែប្រែដែលអ្នកបានស្នើ។')}</p>
+            {topUp.qr_string ? (
+              <KhqrCard
+                copy={copy}
+                qrString={topUp.qr_string}
+                deeplink={topUp.deeplink}
+                amount={topUp.amount}
+                currency={topUp.currency}
+                expiresAt={topUp.expires_at}
+                skewMs={skewMs}
+                orderNo={view.order_no}
+              />
+            ) : null}
+            {(noQr || over) && topUp.request_id !== null ? (
+              <button type="button" className={primaryButtonClass} disabled={busy !== null} onClick={() => { void run('topup', () => api.topUp(token, Number(topUp.request_id))) }}>
+                {busy === 'topup' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-4 w-4" aria-hidden="true" />}
+                {noQr ? copy('order_pay_khqr', 'Pay with KHQR', 'បង់ជាមួយ KHQR') : copy('order_new_qr', 'Get a new QR', 'ទទួលយក QR ថ្មី')}
+              </button>
+            ) : null}
+          </div>
+        )
+      })}
       {topUpReceived && !hasTopUp ? <Notice tone="success" icon={<CheckCircle2 className="h-5 w-5" />}>{copy('order_topup_done', 'We received your extra payment. Thank you.', 'យើងបានទទួលការបង់ប្រាក់បន្ថែមរបស់អ្នក។ សូមអរគុណ។')}</Notice> : null}
 
       <section className={`${cardClass} space-y-3`} aria-labelledby="order-items-title">
@@ -305,10 +317,10 @@ export default function OrderPage({ copy, token }: Props) {
           <span>{copy('order_total_goods', 'Total for the goods', 'តម្លៃសរុបនៃទំនិញ')}</span>
           <span translate="no">{formatUsd(view.total_usd)}</span>
         </div>
-        {delivery ? <p className="text-xs leading-6 text-slate-500 dark:text-neutral-400">{copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price and time. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ និងពេលវេលាដឹកជញ្ជូន។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}</p> : null}
+        {delivery ? <p className="text-xs leading-6 text-slate-500 dark:text-neutral-400">{copy('order_delivery_notice', 'For delivery, our staff will contact you about the delivery price, the time and how to pay for it. The QR covers the goods only.', 'សម្រាប់ការដឹកជញ្ជូន បុគ្គលិករបស់យើងនឹងទាក់ទងអ្នកអំពីតម្លៃ ពេលវេលា និងរបៀបបង់ថ្លៃដឹក។ QR គិតតែថ្លៃទំនិញប៉ុណ្ណោះ។')}</p> : null}
       </section>
 
-      <section className={`${cardClass} space-y-2`} aria-labelledby="order-details-title">
+      {closed ? null : <section className={`${cardClass} space-y-2`} aria-labelledby="order-details-title">
         <div className="flex items-center justify-between gap-2">
           <h2 id="order-details-title" className="text-base font-semibold leading-7 text-slate-900 dark:text-neutral-100">{copy('order_details_title', 'Your details', 'ព័ត៌មានរបស់អ្នក')}</h2>
           {view.can_edit ? (
@@ -317,8 +329,9 @@ export default function OrderPage({ copy, token }: Props) {
                 <Pencil className="h-5 w-5" aria-hidden="true" />
               </button>
               {view.can_cancel ? (
-                <button type="button" className={`${iconButtonClass} !text-rose-600 dark:!text-rose-300`} onClick={() => setCancelAsk(true)} disabled={busy !== null} aria-label={copy('order_cancel', 'Cancel order', 'បោះបង់ការបញ្ជាទិញ')} title={copy('order_cancel', 'Cancel order', 'បោះបង់ការបញ្ជាទិញ')}>
-                  <Trash2 className="h-5 w-5" aria-hidden="true" />
+                <button type="button" className="inline-flex min-h-10 items-center gap-1.5 rounded-xl px-2.5 text-sm font-semibold leading-6 text-rose-700 hover:bg-rose-50 disabled:opacity-60 dark:text-rose-300 dark:hover:bg-rose-500/10" onClick={() => setCancelAsk(true)} disabled={busy !== null} title={copy('order_cancel', 'Cancel order', 'បោះបង់ការបញ្ជាទិញ')}>
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  {copy('order_cancel_word', 'Cancel', 'បោះបង់')}
                 </button>
               ) : null}
             </div>
@@ -334,7 +347,7 @@ export default function OrderPage({ copy, token }: Props) {
           ))}
           {view.note ? <Detail label={copy('order_note_short', 'Note', 'កំណត់ចំណាំ')}><span {...getKhmerTextProps(view.note, '[overflow-wrap:anywhere]')}>{view.note}</span></Detail> : null}
         </dl>
-      </section>
+      </section>}
 
       {PAID_STATUSES.has(view.status) ? (
         <Suspense fallback={null}>
