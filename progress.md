@@ -6,9 +6,9 @@
 
 Ending a session: update Status snapshot and the queue here, reserve versions in `private:Recovery/COMMIT-VERSIONS.json`, and write narrative to `docs/history/session-log.md`. Never put customer names, phone numbers or other personal data in this file or any tracked file: those belong in the private local Records only.
 
-## Status snapshot — 4 Nov 2026, 10:30 (Cambodia, UTC+7)
+## Status snapshot — 9 Nov 2026, 16:30 (Cambodia, UTC+7)
 
-- **Live:** `57178edc0` (`rc/20261104a`) = the 3 Nov release + P1.4 report chain, E1 Expenses labels and types (migration 0292 applied), U2 leangbeauty.com (About cover, 2–6 product columns, chat buttons, announcement strip), U1 install prompt, R1 option rail, the plan-literals ratchet test and a test-only fix for an audit-log fixture whose fixed date aged out of the 30-day window on 3 Nov 17:00Z. Deployed 4 Nov 02:27Z (run 41743498282, Worker `099d0e7f-fd93-43a3-9839-fb806eb2c1b3`), tier paid, no shift open. Postflight headers confirmed; health pack 13/13 with no drift. Previous: `64c9e9166`, Worker `c471ed6b-3bbe-4957-82f5-208bad5d2cc2`.
+- **Live:** `b1a9d9706` (`rc/20261104b`) since 4 Nov 16:21Z (deploy 41837530271) = 57178edc0 + P0.3/P0.4/P0.7 read switches and cache lifecycle (migration 0288 data_epoch), P1.1 call counting, P1.2 Free-budget operations, HANG-2 (no shared promises across requests: fixes the Products first-load error), E1-F Expenses reads, PERM-UI, ED-1a editor, storefront CLS, e2e suites. Census 42584319552: 221 migrations, every read switch OFF. Health pack 9 Nov 13/13 ok. main = this commit.
 - **Driver:** Claude, since 1 Nov; the owner stops the Codex app. Codex's 28–31 Oct work is on pushed `codex/*` branches.
 - **Plan:** the account is back on Workers Paid until 30 Nov after the 30 Oct Free outage. The owner's goal is the FREE plan permanently.
 - **Goal:** by 30 Nov, production runs on Free with every function intact. Measured as:
@@ -19,7 +19,7 @@ Ending a session: update Status snapshot and the queue here, reserve versions in
   - the governor enforcing, and every optimization behind a read switch.
 
   Production read about 34–39M rows per day before 1035.
-- **Next RC (`rc/20261104b`, after 20:00 4 Nov):** `3e1c4852c` = the live release + P0.3/P0.4/P0.7 read switches and cache lifecycle (migration 0288), P1.1 call counting, P1.2 Free-budget operations, the no-shared-promise fix, Expenses reads (switch off), the permission fixes (bulk delete now needs Delete), the Website Editor bar and sections, the storefront About-cover layout fix and four test-only lanes. Gate and one Opus release review running. Ready for the release after it: riel cash rules, the See full phone numbers permission and the new Inventory Check.
+- **Next RC (`rc/20261105a`, next window):** `f84f98e16` = live + Inventory Check lane (ic_simple / ic_fix_stock OFF; migrations 0285, 0286), P2.8 phone masking + P2.8-F, MONEY-1 riel/cent rules, IC-R0 OFF-path compatibility, the one-session-lookup fix, TIME-1 (date+time range buttons, Dashboard "Stock as of", dash_overview_5m OFF). Gate 42588202261 + Opus delta review running. After deploy: ic_simple ON (owner 4 Nov).
 - **Owner rules added 3 Nov:** Free-plan numbers stay adjustable (every plan-sensitive number is a `getPlanLimits(env)` field, now guarded by `test-plan-literals-pure`); rigorous browser testing (the Playwright suite was repaired to near-green and joins gate.yml as a report-only job first).
 - **Found by the new browser tests:** riel cash not in whole 100s and nearest-cent display (fixed, next-but-one release); eight UI permission gates and a bulk-delete hole that ignored Delete (fixed, next RC); live cross-request shared promises that could hang a request (fixed, next RC); six unsaved-changes guard bugs (queued); the storefront About cover jumping on load (fixed, next RC).
 - **Large sales:** the live fix should make the one production sale over the limit (62 lines, 27 Oct) open again; a read-only check is still to do. Storing the basket once per sale, which also shrinks the database, still needs the owner's ruling on rewriting saved rows.
