@@ -3163,6 +3163,7 @@
   "notification_expiry_days": "ចន្លោះថ្ងៃជូនដំណឹងផុតកំណត់",
   "notification_expiry_days_desc": "ជូនដំណឹងពេលកាលបរិច្ឆេទផុតកំណត់របស់ផលិតផលស្ថិតក្នុងចំនួនថ្ងៃនេះ។",
   "notification_expiry_title": "ផុតកំណត់ផលិតផល",
+  "notification_online_orders": "ការបញ្ជាទិញអនឡាញ",
   "notification_inventory": "ស្តុកទំនិញ",
   "notification_inventory_alerts": "ការជូនដំណឹងស្តុក",
   "notification_inventory_alerts_desc": "ការព្រមានស្តុកទាប និងអស់ស្តុក",

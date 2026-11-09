@@ -217,6 +217,7 @@ const SECTION_LABEL_KEYS: Record<string, LabelTuple> = {
 }
 
 SECTION_LABEL_KEYS.expiry = ['notification_expiry_title', 'Product expiry', 'ផុតកំណត់ផលិតផល']
+SECTION_LABEL_KEYS.online_orders = ['notification_online_orders', 'Online orders', 'ការបញ្ជាទិញអនឡាញ']
 
 const TONE_LABEL_KEYS: Record<Tone, LabelTuple> = {
   danger: ['status_danger', 'Danger', 'បន្ទាន់'],
@@ -245,6 +246,10 @@ const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
     en: salesSummaryCopy,
     km: salesSummaryCopy,
   },
+  notification_online_orders_summary: {
+    en: ({ reviewCount, toFulfilCount }) => [reviewCount ? `${reviewCount} payment${reviewCount === 1 ? '' : 's'} to review` : null, toFulfilCount ? `${toFulfilCount} paid, to fulfil` : null].filter(Boolean).join(' • '),
+    km: ({ reviewCount, toFulfilCount }) => [reviewCount ? `${reviewCount} ការទូទាត់ត្រូវពិនិត្យ` : null, toFulfilCount ? `${toFulfilCount} បានបង់ ត្រូវរៀបចំ` : null].filter(Boolean).join(' • '),
+  },
   notification_loyalty_summary: {
     en: ({ count, threshold }) => `${count} customer${count === 1 ? '' : 's'} reached ${threshold}+ points`,
     km: ({ count, threshold }) => `${count} អតិថិជនឈានដល់ ${threshold}+ ពិន្ទុ`,
@@ -265,6 +270,15 @@ SECTION_SUMMARY_COPY.notification_expiry_summary = {
 }
 
 const ITEM_META_COPY: Record<string, LocalizedCopy> = {
+  // Online orders (KHQR): money in review, and paid orders waiting to be handed over.
+  notification_online_orders_review: {
+    en: ({ totalUsd }) => `Payment needs review • $${totalUsd}`,
+    km: ({ totalUsd }) => `ការទូទាត់ត្រូវពិនិត្យ • $${totalUsd}`,
+  },
+  notification_online_orders_to_fulfil: {
+    en: ({ totalUsd }) => `Paid, to fulfil • $${totalUsd}`,
+    km: ({ totalUsd }) => `បានបង់ ត្រូវរៀបចំ • $${totalUsd}`,
+  },
   notification_inventory_out_of_stock: {
     en: () => 'Out of stock',
     km: () => 'អស់ស្តុក',

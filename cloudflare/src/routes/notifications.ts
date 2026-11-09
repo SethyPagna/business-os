@@ -14,6 +14,7 @@ import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
 import type { PhoneActor } from '../lib/phoneAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
@@ -190,6 +191,8 @@ export const NOTIFICATION_SECTION_CACHE_TTL_SECONDS = 45
 export const INVENTORY_PREVIEW_ITEMS = 50
 // What the full list was capped at before the preview existed.
 export const INVENTORY_FULL_ITEMS = 5000
+// Rows the online orders section carries; its count is always the true size of the queue.
+export const ONLINE_ORDERS_PREVIEW_ITEMS = 50
 
 type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
 
@@ -650,6 +653,53 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
   }
 }
 
+/**
+ * Online orders (KHQR) that need someone: paid and waiting to be fulfilled, or holding money in review. ONE bounded statement over the partial index
+ * idx_online_orders_attention (state, created_at) WHERE state IN ('paid','review'): its cost is the size of the queue, never of the table, and the totals ride on the same
+ * pass as window aggregates (as the inventory section does). Rows carry the order number and total only, no customer name or phone, so the cached body is the same for everyone
+ * allowed to ask. Review first (money nobody has looked at), then oldest first. Cached per the `online_orders` data version, which every order write bumps.
+ */
+async function buildOnlineOrdersSection(env: Env): Promise<NotificationSection | null> {
+  const rows = await getDb(env).prepare(`
+    SELECT o.id, o.order_no, o.state, o.goods_total_usd, o.fulfilment,
+      COUNT(*) OVER () AS total, SUM(CASE WHEN o.state = 'review' THEN 1 ELSE 0 END) OVER () AS review_total
+    FROM online_orders o INDEXED BY idx_online_orders_attention
+    WHERE o.state IN ('paid','review')
+    ORDER BY CASE o.state WHEN 'review' THEN 0 ELSE 1 END, o.created_at ASC, o.id ASC
+    LIMIT ${ONLINE_ORDERS_PREVIEW_ITEMS}
+  `).all<{ id: number; order_no: string; state: string; goods_total_usd: number; fulfilment: string; total: number; review_total: number }>()
+  if (!rows.length) return null
+  const total = Number(rows[0].total || rows.length)
+  const reviewCount = Number(rows[0].review_total || 0)
+  const toFulfilCount = total - reviewCount
+  return {
+    id: 'online_orders',
+    label: 'Online orders',
+    pageId: 'sales',
+    count: total,
+    summary: joinSummary([
+      reviewCount ? `${reviewCount} payment${reviewCount === 1 ? '' : 's'} to review` : null,
+      toFulfilCount ? `${toFulfilCount} paid, to fulfil` : null,
+    ]),
+    summaryKey: 'notification_online_orders_summary',
+    summaryParams: { reviewCount, toFulfilCount },
+    items: rows.map((order) => {
+      const review = order.state === 'review'
+      const totalUsd = Number(order.goods_total_usd || 0).toFixed(2)
+      return {
+        id: `online-order-${order.id}`,
+        tone: review ? 'danger' as const : 'warning' as const,
+        label: order.order_no,
+        meta: `${review ? 'Payment needs review' : 'Paid, to fulfil'}${SUMMARY_SEPARATOR}$${totalUsd}`,
+        metaKey: review ? 'notification_online_orders_review' : 'notification_online_orders_to_fulfil',
+        metaParams: { totalUsd },
+        kind: review ? 'online_order_review' : 'online_order_to_fulfil',
+        pageId: 'sales',
+      }
+    }),
+  }
+}
+
 function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean): NotificationSection | null {
   // The Drive OAuth flow IS fully implemented (lib/googleDrive.ts +
   // compat.ts's /system/drive-sync/* routes) -- the comment that used to
@@ -799,6 +849,9 @@ app.get('/summary', async (c) => {
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
+  // Online orders: a queue someone must act on (money in review, paid goods to hand over), so like the portal approvals it has no mute switch. Staff with the
+  // online_orders:view action only (Admin passes): the same rule as the /api/online-orders staff API.
+  if (getOnlineOrderAccess(user as never).canView) tasks.push(cachedSection('online_orders', ['online_orders'], 'queue', () => buildOnlineOrdersSection(c.env)))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
   // Supplier credit reminders (0065): money owed to suppliers is cost

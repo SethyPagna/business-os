@@ -3163,6 +3163,7 @@
   "notification_expiry_days": "Expiry alert window",
   "notification_expiry_days_desc": "Notify when a product expiry date is inside this many days.",
   "notification_expiry_title": "Product expiry",
+  "notification_online_orders": "Online orders",
   "notification_inventory": "Inventory",
   "notification_inventory_alerts": "Inventory alerts",
   "notification_inventory_alerts_desc": "Low stock and out of stock warnings",
