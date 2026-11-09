@@ -1133,6 +1133,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
     // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
     seekPage: seekPageRead,
+    // products_parent_seek: the seek page looks a family's child rows up by an explicit index seek (same rows; see familyPagination.pageCandidatesSql).
+    parentSeek: seekPageRead && await readSwitch(env, 'products_parent_seek'),
   }
   // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
   // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.

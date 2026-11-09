@@ -171,6 +171,8 @@ export interface FamilyPaginationOptions {
   // Result, order, total and totalPages are identical to the default path; callers that do not pass it are
   // untouched. A page past the end returns no rows, so only then does a COUNT statement still run.
   seekPage?: boolean
+  // products_parent_seek: the seek page's child lookups are written as index seeks (see pageCandidatesSql). Same rows either way; absent, the statement text is the one it always was.
+  parentSeek?: boolean
 }
 
 export interface FamilyPaginationResult<T> {
@@ -269,10 +271,7 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
       LIMIT @__familyPageSize OFFSET @__familyOffset
     ),
     page_candidates AS MATERIALIZED (
-      SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
-      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')
+      ${pageCandidatesSql(opts.parentSeek === true)}
     ),
     page_rows AS (
       SELECT ${selectColumns},
@@ -288,6 +287,20 @@ function buildSeekPageSql(opts: FamilyPaginationOptions, familyOrderSql: string,
     JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
     ORDER BY ${familyOrderSql}, page_families.family_root_id ASC, ${intraFamilyOrderSql}
   `
+}
+
+// The ids a page reads: the rows of its families' name keys, their children, and for a blank-named root 'id:N' the root and its children. Two spellings of the same four sets.
+// The IN (SELECT ...) spelling leaves the child lookup to the planner, which scans the whole parent_id index (once per lookup) as soon as ANALYZE statistics exist: every product has a NULL
+// parent_id, so the statistics say every key matches every row. The join spelling pins the order (CROSS JOIN) and the index (INDEXED BY idx_products_parent_pg), so the lookup is a seek.
+function pageCandidatesSql(parentSeek: boolean): string {
+  if (!parentSeek) return `SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')`
+  return `SELECT p.id FROM page_families pf CROSS JOIN products p ON p.name_key = pf.family_root_id
+      UNION SELECT c.id FROM page_families pf CROSS JOIN products r ON r.name_key = pf.family_root_id CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = r.id
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT c.id FROM page_families pf CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = CAST(substr(pf.family_root_id, 4) AS INTEGER) WHERE substr(pf.family_root_id, 1, 3) = 'id:'`
 }
 
 export async function paginateProductFamilies<T = Record<string, unknown>>(
@@ -401,9 +414,6 @@ export async function rankProductFamilies(opts: FamilyPaginationOptions): Promis
   return { keys: rows.map((row) => String(row.family_root_id)), total: rows.length }
 }
 
-// The candidate sets below are the seek page's four, written as nested-loop joins from the page's own keys (CROSS JOIN pins the order). The IN (SELECT ...) form made SQLite scan the whole
-// parent_id index per child lookup, twice the catalogue per page, which is most of what a deep page cost; the joins read only the rows of the page's families. INDEXED BY is needed:
-// every product has a NULL parent_id, so ANALYZE records 'every key matches every row' and the planner would otherwise scan the index for an equality it can seek.
 /** The rows of the given family keys, in the keys' order, then the caller's intra-family order. The candidate ids and the row filter are buildSeekPageSql's. */
 export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[]): Promise<T[]> {
   if (!keys.length) return []
@@ -416,10 +426,7 @@ export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: Fami
     WITH ${rankCteSql ? `${rankCteSql},` : ''}
     page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(@__familyKeys)),
     page_candidates AS MATERIALIZED (
-      SELECT p.id FROM page_families pf CROSS JOIN products p ON p.name_key = pf.family_root_id
-      UNION SELECT c.id FROM page_families pf CROSS JOIN products r ON r.name_key = pf.family_root_id CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = r.id
-      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
-      UNION SELECT c.id FROM page_families pf CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = CAST(substr(pf.family_root_id, 4) AS INTEGER) WHERE substr(pf.family_root_id, 1, 3) = 'id:'
+      ${pageCandidatesSql(true)}
     ),
     page_rows AS (
       SELECT ${selectColumns},
