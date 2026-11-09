@@ -12,7 +12,7 @@ import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { pageFamiliesByKeys, paginateProductFamilies, rankProductFamilies, type FamilyPaginationOptions } from '../lib/familyPagination'
-import { nextPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
+import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
@@ -984,7 +984,7 @@ const SEEK_PAGE_MIN_RANKED_IDS = 300
 async function paginateRankedFamilies(env: Env, opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
   const { page, pageSize } = opts
   const ranked = await readRankedScope(scope, async () => {
-    const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), nextPromotionEdge(opts.db, new Date())])
+    const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), readPromotionEdge(scope, () => nextPromotionEdge(opts.db, new Date()))])
     return { keys: ranking.keys, total: ranking.total, edgeAt }
   })
   const items = await pageFamiliesByKeys<Record<string, unknown>>(opts, ranked.keys.slice((page - 1) * pageSize, page * pageSize))
@@ -1564,14 +1564,15 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
   // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
   if (await readSwitch(c.env, 'catalog_ranked_scope')) {
-    let versions: string
+    let versions: string, edgeVersions: string
     try {
       const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
-      versions = `${restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}` : baseVersion}:promo:${promotions}`
-    } catch { versions = unsafeVersionToken() }
+      edgeVersions = `${baseVersion}:promo:${promotions}`
+      versions = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}:promo:${promotions}` : edgeVersions
+    } catch { versions = edgeVersions = unsafeVersionToken() }
     const limits = getPlanLimits(c.env)
     const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson,
-      ranked: { ctx: c.executionCtx, request: keyRequest, versions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
+      ranked: { ctx: c.executionCtx, request: keyRequest, versions, edgeVersions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
     const [taggedRanked, lotsRanked] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, rankedPayload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, rankedPayload, options.lotsAdmitted === true)])
     return lotsRanked === rankedPayload ? taggedRanked : { ...taggedRanked, items: lotsRanked.items }
   }

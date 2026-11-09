@@ -401,6 +401,9 @@ export async function rankProductFamilies(opts: FamilyPaginationOptions): Promis
   return { keys: rows.map((row) => String(row.family_root_id)), total: rows.length }
 }
 
+// The candidate sets below are the seek page's four, written as nested-loop joins from the page's own keys (CROSS JOIN pins the order). The IN (SELECT ...) form made SQLite scan the whole
+// parent_id index per child lookup, twice the catalogue per page, which is most of what a deep page cost; the joins read only the rows of the page's families. INDEXED BY is needed:
+// every product has a NULL parent_id, so ANALYZE records 'every key matches every row' and the planner would otherwise scan the index for an equality it can seek.
 /** The rows of the given family keys, in the keys' order, then the caller's intra-family order. The candidate ids and the row filter are buildSeekPageSql's. */
 export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[]): Promise<T[]> {
   if (!keys.length) return []
@@ -413,10 +416,10 @@ export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: Fami
     WITH ${rankCteSql ? `${rankCteSql},` : ''}
     page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(@__familyKeys)),
     page_candidates AS MATERIALIZED (
-      SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
+      SELECT p.id FROM page_families pf CROSS JOIN products p ON p.name_key = pf.family_root_id
+      UNION SELECT c.id FROM page_families pf CROSS JOIN products r ON r.name_key = pf.family_root_id CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = r.id
       UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
-      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')
+      UNION SELECT c.id FROM page_families pf CROSS JOIN products c INDEXED BY idx_products_parent_pg ON c.parent_id = CAST(substr(pf.family_root_id, 4) AS INTEGER) WHERE substr(pf.family_root_id, 1, 3) = 'id:'
     ),
     page_rows AS (
       SELECT ${selectColumns},

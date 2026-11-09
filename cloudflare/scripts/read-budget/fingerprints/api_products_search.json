@@ -556,5 +556,63 @@
    "1670c85597b6",
    "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
   ]
+ ],
+ "products-search-ranked-products-default": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "5ade221b0a2e",
+   "SELECT * FROM promotion_rules WHERE is_active = 1 ORDER BY id ASC"
+  ],
+  [
+   "603e70996cd2",
+   "SELECT key, value FROM settings WHERE key IN (?,?,?)"
+  ],
+  [
+   "7839d1f8dc8c",
+   "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
+  ],
+  [
+   "6e7f527bc73c",
+   "SELECT MIN(CASE WHEN datetime(discount_starts_at) > datetime(?1) THEN datetime(discount_starts_at) END) AS sta"
+  ],
+  [
+   "ad1ccee401b4",
+   "SELECT MIN(CASE WHEN datetime(starts_at) > datetime(?1) THEN datetime(starts_at) END) AS starts, MIN(CASE WHEN"
+  ],
+  [
+   "0dc6cd32dca2",
+   "WITH page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(?1)), pag"
+  ],
+  [
+   "07831119a65e",
+   "SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC"
+  ],
+  [
+   "42b59cc4a469",
+   "SELECT product_id, image_path FROM product_images WHERE product_id IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10"
+  ],
+  [
+   "da931771c9cd",
+   "SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count FROM product_batches pb JOIN "
+  ],
+  [
+   "871253f74a1f",
+   "SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity FROM branch_stock WHERE product_id IN (?1, ?2,"
+  ],
+  [
+   "40eca645009a",
+   "SELECT d.product_id AS product_id, d.product_name AS product_name, d.branch_id AS branch_id, b.name AS branch_"
+  ]
  ]
 }
