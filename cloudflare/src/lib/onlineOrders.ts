@@ -349,8 +349,10 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   const onlineInUsd = sumMoney4(paid.map(amountOf))
   // Only what PayWay actually took: a review row without a stored amount (written before it was kept) holds nothing we can name.
   const heldInReviewUsd = sumMoney4(payments.filter((p) => p.state === 'review').map((p) => num(p.paid_amount)))
-  const recordedIds = new Set(events.filter((e) => e.event === 'payment_recorded_on_sale' && e.payment_id != null).map((e) => Number(e.payment_id)))
-  const recordedOnSaleUsd = sumMoney4(paid.filter((p) => recordedIds.has(Number(p.id))).map(amountOf))
+  // What each paid payment put onto the sale: the amount its payment_recorded_on_sale event states (a Fulfil with fewer lines records less than the whole
+  // payment), or the whole payment when the event carries no amount (older rows).
+  const recorded = new Map(events.filter((e) => e.event === 'payment_recorded_on_sale' && e.payment_id != null).map((e) => [Number(e.payment_id), e.amount_usd]))
+  const recordedOnSaleUsd = sumMoney4(paid.filter((p) => recorded.has(Number(p.id))).map((p) => { const stated = recorded.get(Number(p.id)); return stated == null ? amountOf(p) : Math.min(amountOf(p), num(stated)) }))
   const refunds = events.filter((e) => e.event === 'refund_noted')
   const notedUsd = sumMoney4(refunds.map((e) => num(e.amount_usd)))
   const notedAfterSaleUsd = sumMoney4(refunds.filter((e) => e.sale_id != null).map((e) => num(e.amount_usd)))
@@ -365,14 +367,18 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
     toRecordUsd = Math.max(0, roundMoney4(onlineInUsd - recordedOnSaleUsd))
     const stored = saleStoredState(sale)
     if (stored.saleStatus === 'cancelled') {
-      refundDue = recordedOnSaleUsd - sumMoney4(returns.map(abaCashOut)) - notedUsd
+      // Everything the customer paid online comes back once the sale is cancelled, the part still waiting to be recorded (a paid top-up) included.
+      refundDue = onlineInUsd - sumMoney4(returns.map(abaCashOut)) - notedUsd
     } else {
-      refundDue = saleOverpaidUsd(sale, returns) - notedAfterSaleUsd
       if (stored.saleStatus === NOT_PAID_STATUS) {
         try {
           balanceDueUsd = recordedSaleOutstandingUsd({ ...sale, refund_usd: sumRefundsUsd(returns.filter(isActiveReturn).map(returnDebtLowered)) })
         } catch { balanceDueUsd = 0 }
       }
+      // Money paid online that the sale did not take (the cashier Fulfilled with fewer or cheaper lines) and that the sale does not still owe is the customer's:
+      // it is refundable through ABA. A top-up the sale is still waiting for is covered by its balance due, so it is not.
+      const unrecordedExcessUsd = Math.max(0, roundMoney4(toRecordUsd - balanceDueUsd))
+      refundDue = saleOverpaidUsd(sale, returns) + unrecordedExcessUsd - notedAfterSaleUsd
     }
   }
   return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }

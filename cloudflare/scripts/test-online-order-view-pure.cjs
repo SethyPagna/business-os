@@ -22,6 +22,39 @@ const sale = (over = {}) => ({
 const fulfilled = (over = {}) => order({ state: 'fulfilled', sale_id: 9, ...over })
 const money = (o, payments, events, s, returns) => O.orderMoney(o, payments, events, s, returns)
 
+// ---- Fulfil with other lines than the order (KHQR S6a, Q3) -------------------------------------------------------------------------
+check('Fulfil with fewer lines: the sale takes only what it is worth, the rest is refundable through ABA and shrinks with each note (a build that counts the whole payment as recorded shows no refund)', () => {
+  // order paid 24.5; the cashier rang 20, so the sale tender holds 20 and the event states 20
+  const cheaper = sale({ total_usd: 20, amount_paid_usd: 20 })
+  const m = money(fulfilled(), [orderPay()], [recorded(1, { amount_usd: 20 })], cheaper)
+  assert.equal(m.recordedOnSaleUsd, 20); assert.equal(m.toRecordUsd, 4.5); assert.equal(m.refundDueUsd, 4.5)
+  assert.equal(money(fulfilled(), [orderPay()], [recorded(1, { amount_usd: 20 }), noted(4.5, { sale_id: 9 })], cheaper).refundDueUsd, 0)
+  assert.equal(money(fulfilled(), [orderPay()], [recorded(1, { amount_usd: 20 }), noted(1.5, { sale_id: 9 })], cheaper).refundDueUsd, 3)
+  // an event with no stated amount (older rows) still means the whole payment was recorded
+  assert.equal(money(fulfilled(), [orderPay()], [recorded(1)], sale()).toRecordUsd, 0)
+  // an event can never record more than the payment held
+  assert.equal(money(fulfilled(), [orderPay()], [recorded(1, { amount_usd: 99 })], sale()).recordedOnSaleUsd, 24.5)
+})
+
+check('Fulfil with extra lines: the extra is the normal balance due of the sale (Not Paid), nothing is refundable, and a paid top-up the sale still waits for is not refundable either', () => {
+  const dearer = sale({ total_usd: 30, amount_paid_usd: 24.5, sale_status: 'awaiting_payment' })
+  const m = money(fulfilled(), [orderPay()], [recorded(1, { amount_usd: 24.5 })], dearer)
+  assert.equal(m.refundDueUsd, 0); assert.equal(m.balanceDueUsd, 5.5)
+  // the customer paid a 3 top-up for part of the extra; until the cashier records it, the balance due still covers it
+  const waiting = money(fulfilled(), [orderPay(), topUp()], [recorded(1, { amount_usd: 24.5 })], dearer)
+  assert.equal(waiting.toRecordUsd, 3); assert.equal(waiting.refundDueUsd, 0)
+  // a top-up larger than what the sale still owes: only the excess is refundable
+  const tooMuch = money(fulfilled(), [orderPay(), topUp({ paid_amount: 8 })], [recorded(1, { amount_usd: 24.5 })], dearer)
+  assert.equal(tooMuch.refundDueUsd, 2.5)
+})
+
+check('a CANCELLED linked sale: everything paid online is refundable, a paid top-up not yet recorded on the sale included, less ABA returns and notes', () => {
+  const cancelledSale = sale({ sale_status: 'cancelled' })
+  const m = money(fulfilled(), [orderPay(), topUp()], [recorded(1)], cancelledSale)
+  assert.equal(m.refundDueUsd, 27.5, 'the top-up (3) was never recorded on the sale and is still owed to the customer')
+  assert.equal(money(fulfilled(), [orderPay(), topUp()], [recorded(1), noted(10)], cancelledSale).refundDueUsd, 17.5)
+})
+
 // ---- before a sale ------------------------------------------------------------------------------------------------------------
 check('awaiting payment: nothing in, nothing due; a QR that is only awaiting is not money', () => {
   const m = money(order({ state: 'awaiting_payment' }), [{ id: 1, state: 'awaiting', amount: 24.5 }], [], null)
