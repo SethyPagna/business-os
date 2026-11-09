@@ -139,6 +139,33 @@ async function main() {
     assert.deepStrictEqual(calls, [`GET ${BASE}/secrets`, `GET ${BASE}/deployments`, `GET ${BASE}/versions/${V1}`])
   })
 
+  await check('the optional PayWay names: reported in the encrypted result only, never expected, never a problem, never among the other names, never in the public lines; both are names the app reads', async () => {
+    const own = ['PAYWAY_MERCHANT_ID', 'PAYWAY_API_KEY']
+    assert.deepStrictEqual([...sn.OPTIONAL_SECRETS], own)
+    for (const name of own) assert.ok(!sn.EXPECTED_SECRETS.includes(name), `${name} is optional`)
+    const src = fs.readFileSync(path.join(ROOT, 'cloudflare', 'src', 'lib', 'payway.ts'), 'utf8')
+    for (const name of own) assert.ok(new RegExp(`\\b${name}\\b`).test(src), `the app reads ${name}`)
+    // not set: normal. Still PASS, still 8 expected, nothing about them in the public lines
+    const unset = await sn.readSecretNames(fakeApi(scenario()).api, ACCOUNT)
+    assert.strictEqual(unset.ok, true); assert.deepStrictEqual(unset.problems, [])
+    assert.deepStrictEqual(unset.optional, { PAYWAY_MERCHANT_ID: { live: 'absent', listed: 'absent' }, PAYWAY_API_KEY: { live: 'absent', listed: 'absent' } })
+    assert.deepStrictEqual(unset.otherSecretNames, [CANARY_NAME])
+    // set: reads secret/present and is still not an "other" name
+    const set = await sn.readSecretNames(fakeApi(scenario({
+      secrets: [...scenario().secrets, ...own.map((name) => ({ name, type: 'secret_text' }))],
+      versions: { [V1]: versionBindings({ extra: own.map((name) => ({ type: 'secret_text', name })) }), [V2]: versionBindings() },
+    })).api, ACCOUNT)
+    assert.deepStrictEqual(set.optional, { PAYWAY_MERCHANT_ID: { live: 'secret', listed: 'present' }, PAYWAY_API_KEY: { live: 'secret', listed: 'present' } })
+    assert.deepStrictEqual(set.otherSecretNames, [CANARY_NAME], 'optional names are known names')
+    assert.strictEqual(set.disagreements, 0); assert.strictEqual(set.ok, true)
+    assert.deepStrictEqual(statuses(set), ALL_SET, 'the expected statuses are untouched')
+    const lines = format(set, 10).join(' | ')
+    assert.ok(!/PAYWAY/i.test(lines) && lines.includes('expected: 8, present: 8'), 'the public log is unchanged')
+    // a half-set pair (one name) is reported as it is, not as a failure
+    const half = await sn.readSecretNames(fakeApi(scenario({ secrets: [...scenario().secrets, { name: 'PAYWAY_API_KEY', type: 'secret_text' }], versions: { [V1]: versionBindings({ extra: [{ type: 'secret_text', name: 'PAYWAY_API_KEY' }] }), [V2]: versionBindings() } })).api, ACCOUNT)
+    assert.strictEqual(half.ok, true); assert.strictEqual(half.optional.PAYWAY_API_KEY.live, 'secret'); assert.strictEqual(half.optional.PAYWAY_MERCHANT_ID.live, 'absent')
+  })
+
   await check('only { name, type } is kept: a plain-text value never reaches the report', async () => {
     const r = await sn.readSecretNames(fakeApi(scenario()).api, ACCOUNT)
     const text = JSON.stringify(r)

@@ -42,6 +42,15 @@ export const EXPECTED_SECRETS = Object.freeze([
   'TELEGRAM_BOT_TOKEN',
 ])
 
+// Secrets the app uses only when a feature is switched on: the ABA PayWay online payment (cloudflare/src/lib/payway.ts paywayCredentials). Without them
+// the storefront answers `payway_not_configured` and everything else works, so their absence is normal until the owner sets them. They are reported
+// in the encrypted file (live and listed state, like the expected names) and nowhere else: never counted as expected, never a problem, never in the
+// public log, and never listed among the OTHER secret names. PAYWAY_ENV is a plain var, not a secret.
+export const OPTIONAL_SECRETS = Object.freeze([
+  'PAYWAY_MERCHANT_ID',
+  'PAYWAY_API_KEY',
+])
+
 // Every production version binds ASSETS to an R2 bucket. A version read that
 // does not show it observed nothing, and its "absent" answers would mean
 // nothing either.
@@ -85,7 +94,7 @@ export async function readSecretNames(api, accountId) {
       versionId: v.versionId,
       percentage: v.percentage,
       observed: all.some((b) => b.name === CONTROL_BINDING && b.type === 'r2_bucket'),
-      bindings: all.filter((b) => EXPECTED_SECRETS.includes(b.name) || isSecretType(b.type)),
+      bindings: all.filter((b) => EXPECTED_SECRETS.includes(b.name) || OPTIONAL_SECRETS.includes(b.name) || isSecretType(b.type)),
     }
   })
   if (versions.some((v) => !v.observed)) problems.push('bindings-not-observed')
@@ -101,14 +110,25 @@ export async function readSecretNames(api, accountId) {
     expected[name] = { live: liveStatus, listed: listedStatus }
   }
 
+  const optional = {}
+  for (const name of OPTIONAL_SECRETS) {
+    const kinds = versions.map((v) => bindingKind(v.bindings, name))
+    optional[name] = {
+      live: !liveKnown ? 'unknown' : kinds.every((k) => k === kinds[0]) ? kinds[0] : 'mixed',
+      listed: !listed ? 'unknown' : listed.some((s) => s.name === name) ? 'present' : 'absent',
+    }
+  }
+
+  const known = (name) => EXPECTED_SECRETS.includes(name) || OPTIONAL_SECRETS.includes(name)
   const others = new Set()
-  for (const s of listed || []) if (!EXPECTED_SECRETS.includes(s.name)) others.add(s.name)
-  for (const v of versions) for (const b of v.bindings) if (isSecretType(b.type) && !EXPECTED_SECRETS.includes(b.name)) others.add(b.name)
+  for (const s of listed || []) if (!known(s.name)) others.add(s.name)
+  for (const v of versions) for (const b of v.bindings) if (isSecretType(b.type) && !known(b.name)) others.add(b.name)
 
   return {
     ok: problems.length === 0,
     problems,
     expected,
+    optional,
     secretsInEveryLiveVersion: EXPECTED_SECRETS.filter((name) => expected[name].live === 'secret').length,
     otherSecretNames: [...others].sort(),
     disagreements,
