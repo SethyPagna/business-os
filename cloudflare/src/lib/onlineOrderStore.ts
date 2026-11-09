@@ -370,6 +370,8 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
     order_no: order.order_no,
     // A scrubbed order reads 'closed': nothing about it can change and the page offers a new order, not a new QR.
     status: order.scrubbed_at ? 'closed' : view.status,
+    // The same fact as a boolean, so a page does not have to compare a status word (S7 contract, LANE-KHQR.md).
+    closed: Boolean(order.scrubbed_at),
     phase: view.phase,
     chips: view.chips,
     fulfilment: order.fulfilment,

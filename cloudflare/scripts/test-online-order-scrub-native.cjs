@@ -127,7 +127,7 @@ async function main() {
     h.run('UPDATE online_orders SET updated_at = ? WHERE id = 1', at(100))
     assert.equal((await scrub(h)).scrubbed, 1)
     const seen = await h.request(`/${token}`, 'GET')
-    assert.equal(seen.status, 200); assert.equal(seen.body.order.status, 'closed'); assert.equal(seen.body.order.name, '[scrubbed]')
+    assert.equal(seen.status, 200); assert.equal(seen.body.order.status, 'closed'); assert.equal(seen.body.order.closed, true); assert.equal(seen.body.order.name, '[scrubbed]')
     const calls = h.calls.length
     for (const [pathname, payload] of [[`/${token}/retry`, {}], [`/${token}/edit`, { name: 'New Name' }], [`/${token}/cancel`, {}]]) {
       const refused = await h.request(pathname, 'POST', payload)

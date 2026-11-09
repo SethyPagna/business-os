@@ -63,6 +63,7 @@ async function main() {
     assert.equal(s.summaryKey, 'notification_online_orders_summary')
     assert.deepEqual(s.summaryParams, { reviewCount: 1, toFulfilCount: 1, partPaidCount: 0 })
     assert.equal(s.items[0].metaKey, 'notification_online_orders_review'); assert.equal(s.items[1].metaKey, 'notification_online_orders_to_fulfil')
+    for (const item of s.items) { assert.equal(item.pageId, 'sales'); assert.equal(item.anchor, 'hub:sales:orders', 'a bell row opens the Sales hub on its Orders tab') }
     assert.match(s.summary, /1 payment to review/); assert.match(s.summary, /1 paid, to fulfil/)
     assert.equal(s.enabledKey, undefined, 'a queue someone must act on has no mute switch')
     assert.ok(res.body.unreadCount >= 2, 'the bell badge counts it')

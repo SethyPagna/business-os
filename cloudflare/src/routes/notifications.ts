@@ -701,6 +701,8 @@ async function buildOnlineOrdersSection(env: Env): Promise<NotificationSection |
         metaParams: { totalUsd: owed ? owed.toFixed(2) : totalUsd },
         kind: review ? 'online_order_review' : owed ? 'online_order_part_paid' : 'online_order_to_fulfil',
         pageId: 'sales',
+        // The Sales hub opens on its Orders tab (the staff online order list), not on the sales list.
+        anchor: 'hub:sales:orders',
       }
     }),
   }

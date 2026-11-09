@@ -38,19 +38,89 @@ export async function loadBundleById(db: D1Compat, id: unknown): Promise<OrderBu
 
 // ---- the list ---------------------------------------------------------------------------------------------------------------------
 
-export const LIST_FILTERS = ['attention', 'all', 'paid', 'review', 'awaiting_payment', 'qr_failed', 'expired', 'cancelled', 'fulfilled'] as const
+export const LIST_FILTERS = ['attention', 'all', 'paid', 'review', 'awaiting_payment', 'qr_failed', 'expired', 'cancelled', 'fulfilled', 'requests', 'refund_due'] as const
 export type ListFilter = (typeof LIST_FILTERS)[number]
 export type ListRow = {
   id: number; order_no: string; state: string; fulfilment: string; customer_name: string; customer_phone: string; goods_total_usd: number; created_at: string
   paid_at: string | null; sale_id: number | null; pending_requests: number; held_review: number
+  /** What is still due back to the customer through ABA (0 when nothing is); orders that never took money are always 0. */
+  refund_due_usd: number; refund_due: boolean
+}
+
+/** ABA can refund a KHQR payment for 30 days; the refund_due filter looks at orders created inside that window plus a little slack, so its cost never grows with history. */
+const REFUND_WINDOW_DAYS = 32
+const MONEY_STATES = new Set(['paid', 'review', 'cancelled', 'fulfilled'])
+const DECIDED = "('request_accepted','request_rejected','request_withdrawn')"
+const END_OF_PREFIX = '￿'
+
+/** The `q` box: an order number prefix (letters, e.g. W2611) or a phone prefix (digits, the canonical form the order stores). Refused when too short to be useful. */
+function searchClause(raw: unknown): { sql: string; params: Record<string, unknown> } | null {
+  const q = typeof raw === 'string' ? raw.trim() : ''
+  if (!q) return null
+  if (q.length > 40) return refuse(400, 'search_invalid', 'That search is too long.')
+  if (/^[+\d][\d\s().-]*$/.test(q)) {
+    const digits = q.replace(/\D/g, '')
+    if (digits.length < 3) return refuse(400, 'search_too_short', 'Type at least 3 digits of the phone number.')
+    // The stored form folds 855xxxxxxxx to 0xxxxxxxx (lib/phone.ts), so a typed +855 prefix is looked up in both spellings.
+    const prefixes = digits.startsWith('855') && digits.length > 3 ? [digits, `0${digits.slice(3)}`] : [digits]
+    return {
+      sql: `(${prefixes.map((_, i) => `(o.customer_phone >= @p${i} AND o.customer_phone < @p${i}e)`).join(' OR ')})`,
+      params: Object.fromEntries(prefixes.flatMap((p, i) => [[`p${i}`, p], [`p${i}e`, p + END_OF_PREFIX]])),
+    }
+  }
+  const number = q.toUpperCase().replace(/[\s-]/g, '')
+  if (number.length < 3) return refuse(400, 'search_too_short', 'Type at least 3 characters of the order number.')
+  return { sql: '(o.order_no >= @no AND o.order_no < @noe)', params: { no: number, noe: number + END_OF_PREFIX } }
+}
+
+/**
+ * Sets refund_due_usd on the rows that could owe money, from the SAME money read the order screen uses (orderMoney), for the whole page in ONE batch (payments, the two
+ * event kinds that matter, the sales and their returns). Rows in other states (never paid, expired) cost nothing.
+ */
+async function attachRefundDue(db: D1Compat, rows: ListRow[]): Promise<void> {
+  const money = rows.filter((row) => MONEY_STATES.has(row.state))
+  for (const row of rows) { row.refund_due_usd = 0; row.refund_due = false }
+  if (!money.length) return
+  const ids = money.map((row) => row.id)
+  const saleIds = money.map((row) => row.sale_id).filter((id): id is number => id != null)
+  const marks = (list: readonly number[]) => list.map(() => '?').join(',')
+  // sql-bound-params: a page is at most the plan's page size (50 at most), well under the 100-bind limit.
+  const results = await db.batch([
+    { sql: `SELECT id, order_id, state, paid_amount, amount, purpose FROM online_order_payments WHERE order_id IN (${marks(ids)})`, params: ids },
+    { sql: `SELECT id, order_id, event, payment_id, amount_usd, sale_id FROM online_order_events WHERE order_id IN (${marks(ids)}) AND event IN ('payment_recorded_on_sale','refund_noted')`, params: ids },
+    ...(saleIds.length ? [
+      { sql: `SELECT * FROM sales WHERE id IN (${marks(saleIds)})`, params: saleIds },
+      { sql: `SELECT id, sale_id, status, total_refund_usd, owed_reduction_usd, refund_currency, refund_channel FROM returns WHERE sale_id IN (${marks(saleIds)})`, params: saleIds },
+    ] : []),
+  ])
+  const part = (index: number): Array<Record<string, unknown>> => ((results[index] as { results?: Array<Record<string, unknown>> } | undefined)?.results) ?? []
+  const group = (list: Array<Record<string, unknown>>, key: string) => {
+    const map = new Map<number, Array<Record<string, unknown>>>()
+    for (const item of list) { const k = Number(item[key]); map.set(k, [...(map.get(k) ?? []), item]) }
+    return map
+  }
+  const payments = group(part(0), 'order_id'), events = group(part(1), 'order_id')
+  const sales = new Map(part(2).map((sale) => [Number(sale.id), sale])), returns = group(part(3), 'sale_id')
+  for (const row of money) {
+    const due = orderMoney(
+      row as never, (payments.get(row.id) ?? []) as never, (events.get(row.id) ?? []) as never,
+      row.sale_id == null ? null : ((sales.get(row.sale_id) ?? null) as never), (row.sale_id == null ? [] : returns.get(row.sale_id) ?? []) as never,
+    ).refundDueUsd
+    row.refund_due_usd = due; row.refund_due = due > 0
+  }
 }
 
 /**
  * One page, newest first, by keyset (created_at, id): the cost of a page is the page, never the table. `attention` (paid or review, i.e. to
  * fulfil or to look at) walks the partial index; every other filter walks the state's rows through the created index. The total is NOT counted.
+ * `q` searches an order number prefix or a phone prefix (indexed: the order_no unique index, idx_online_orders_phone) across every state unless a filter is also given.
+ * `requests` lists orders with an undecided change request; `refund_due` lists orders inside ABA's refund window that still owe the customer money (read exactly, a few rounds
+ * of candidates at most, the cursor continues where they stopped).
  */
-export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { filter?: unknown; cursor?: unknown; limit?: unknown }): Promise<{ rows: ListRow[]; next_cursor: string | null; page_size: number }> {
-  const filter = (LIST_FILTERS as readonly string[]).includes(String(input.filter)) ? String(input.filter) as ListFilter : 'attention'
+export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { filter?: unknown; cursor?: unknown; limit?: unknown; q?: unknown; now?: Date }): Promise<{ rows: ListRow[]; next_cursor: string | null; page_size: number }> {
+  const search = searchClause(input.q)
+  const given = (LIST_FILTERS as readonly string[]).includes(String(input.filter))
+  const filter = given ? String(input.filter) as ListFilter : search ? 'all' : 'attention'
   const size = adminPageRows(env)
   const limit = Math.min(size, Math.max(1, Number.isSafeInteger(Number(input.limit)) ? Number(input.limit) : size))
   let afterAt: string | null = null
@@ -60,20 +130,48 @@ export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { f
     if (!m) return refuse(400, 'cursor_invalid', 'That page marker is not valid. Reload the list.')
     afterAt = m[1]; afterId = Number(m[2])
   }
-  const where = filter === 'attention' ? "o.state IN ('paid','review')" : filter === 'all' ? '1 = 1' : 'o.state = @state'
-  const index = filter === 'attention' ? 'idx_online_orders_attention' : 'idx_online_orders_created'
-  const rows = await db.prepare(`
+  const since = sqlTime(new Date((input.now ?? new Date()).getTime() - REFUND_WINDOW_DAYS * 86_400_000))
+  const where = [
+    filter === 'attention' ? "o.state IN ('paid','review')"
+      : filter === 'all' ? '1 = 1'
+        : filter === 'requests' ? `o.id IN (SELECT r.order_id FROM online_order_requests r WHERE NOT EXISTS (SELECT 1 FROM online_order_events e WHERE e.request_id = r.id AND e.event IN ${DECIDED}))`
+          : filter === 'refund_due' ? "o.state IN ('paid','review','cancelled','fulfilled') AND o.created_at >= @since AND EXISTS (SELECT 1 FROM online_order_payments p WHERE p.order_id = o.id AND p.state IN ('paid','review'))"
+            : 'o.state = @state',
+    ...(search ? [search.sql] : []),
+  ].join(' AND ')
+  // The planner picks the search's own index (order_no unique, phone); the plain lists keep their fixed index.
+  const index = search || filter === 'requests' ? '' : `INDEXED BY ${filter === 'attention' ? 'idx_online_orders_attention' : 'idx_online_orders_created'}`
+  const exact = filter === 'refund_due'
+  const perRound = exact ? limit * 2 : limit
+  const fetchRows = async (at: string | null, id: number, n: number): Promise<ListRow[]> => (await db.prepare(`
     SELECT o.id, o.order_no, o.state, o.fulfilment, o.customer_name, o.customer_phone, o.goods_total_usd, o.created_at, o.paid_at, o.sale_id,
-      (SELECT COUNT(*) FROM online_order_requests r WHERE r.order_id = o.id AND NOT EXISTS (SELECT 1 FROM online_order_events e WHERE e.request_id = r.id AND e.event IN ('request_accepted','request_rejected','request_withdrawn'))) AS pending_requests,
+      (SELECT COUNT(*) FROM online_order_requests r WHERE r.order_id = o.id AND NOT EXISTS (SELECT 1 FROM online_order_events e WHERE e.request_id = r.id AND e.event IN ${DECIDED})) AS pending_requests,
       (SELECT COUNT(*) FROM online_order_payments p WHERE p.order_id = o.id AND p.state = 'review') AS held_review
-    FROM online_orders o INDEXED BY ${index}
+    FROM online_orders o ${index}
     WHERE ${where} AND (@afterAt IS NULL OR o.created_at < @afterAt OR (o.created_at = @afterAt AND o.id < @afterId))
     ORDER BY o.created_at DESC, o.id DESC LIMIT @limit
-  `).all<ListRow>({ state: filter, afterAt, afterId, limit: limit + 1 })
-  const page = (rows || []).slice(0, limit)
-  const more = (rows || []).length > limit
-  const last = page[page.length - 1]
-  return { rows: page, next_cursor: more && last ? `${last.created_at}|${last.id}` : null, page_size: limit }
+  `).all<ListRow>({ state: filter, since, afterAt: at, afterId: id, limit: n, ...(search?.params ?? {}) })) || []
+  const cursorOf = (row: ListRow) => `${row.created_at}|${row.id}`
+  const page: ListRow[] = []
+  let next: string | null = null
+  let at = afterAt
+  let id = afterId
+  for (let round = 0; round < (exact ? 3 : 1); round += 1) {
+    const batch = await fetchRows(at, id, perRound + 1)
+    const scanned = batch.slice(0, perRound)
+    await attachRefundDue(db, scanned)
+    let full = false
+    for (const row of scanned) {
+      if (exact && !row.refund_due) continue
+      if (page.length >= limit) { full = true; break }
+      page.push(row)
+    }
+    if (full) { next = cursorOf(page[page.length - 1]); break }
+    if (batch.length <= perRound) { next = null; break }
+    const tail = scanned[scanned.length - 1]
+    at = tail.created_at; id = tail.id; next = cursorOf(tail)
+  }
+  return { rows: page, next_cursor: next, page_size: limit }
 }
 
 // ---- the detail -------------------------------------------------------------------------------------------------------------------
