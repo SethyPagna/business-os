@@ -1,5 +1,5 @@
-// Storefront consent versions. Owner, 20 Oct 2026: the age-16 wording moved the
-// version to portal-legal-2026-10-20 and nothing earlier is accepted, so every
+// Storefront consent versions. Owner, 10 Nov 2026: the online-ordering wording moved the
+// version to portal-legal-2026-11-10 and nothing earlier is accepted, so every
 // account agrees again; an account is current only with that exact version AND
 // a stored age confirmation (age_confirmed_at, migration 0262).
 //
@@ -17,7 +17,8 @@ const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations')
-const CURRENT = 'portal-legal-2026-10-20'
+const CURRENT = 'portal-legal-2026-11-10'
+const PREVIOUS = 'portal-legal-2026-10-20'
 const EARLIER = 'portal-legal-2026-09-30'
 const OLDEST = 'portal-legal-2026-09-07'
 
@@ -109,13 +110,13 @@ let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
 async function run() {
-  await check('the Worker records the 20 Oct 2026 policy version', () => {
+  await check('the Worker records the 10 Nov 2026 policy version', () => {
     assert.strictEqual(accounts.PORTAL_CONSENT_VERSION, CURRENT)
   })
 
   await check('only the current version is accepted; every earlier or unknown one is refused', () => {
     assert.strictEqual(accounts.portalConsentVersionAccepted(CURRENT), true)
-    for (const unknown of [EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older', ` ${CURRENT}`, CURRENT.toUpperCase(), '', null, undefined, 20261020]) {
+    for (const unknown of [PREVIOUS, EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older', ` ${CURRENT}`, CURRENT.toUpperCase(), '', null, undefined, 20261110]) {
       assert.strictEqual(accounts.portalConsentVersionAccepted(unknown), false, `${String(unknown)} must be refused`)
     }
   })
@@ -127,7 +128,7 @@ async function run() {
   })
 
   await check('an account on any earlier or unknown version must agree again, and reading never rewrites the record', async () => {
-    for (const version of [EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older']) {
+    for (const version of [PREVIOUS, EARLIER, OLDEST, 'portal-legal-2026-01-01', 'portal-legal-older']) {
       const { accountId, state } = await signedInWith(version)
       assert.strictEqual(state.status, 'reconsent_required')
       assert.strictEqual(state.account, null)

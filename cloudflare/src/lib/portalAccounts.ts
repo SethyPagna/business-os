@@ -40,7 +40,7 @@ import type { Env } from '../index'
 // frontend/src/components/catalog/legal/legalContent.ts, which is the version
 // of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
 // the two together so they cannot drift apart.
-export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-10-20'
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-11-10'
 
 // Owner, 20 Oct 2026: every account agrees again to the age-16 wording, so no
 // earlier version is accepted (the 30 Sep rewrite had accepted 2026-09-07).

@@ -132,7 +132,7 @@ function seedAccount() {
   const r = rawDb.prepare(
     `INSERT INTO portal_accounts (
       membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale, age_confirmed_at
-    ) VALUES (@m, @n, @p, @h, 'portal-legal-2026-10-20', CURRENT_TIMESTAMP, 'en', CURRENT_TIMESTAMP)`,
+    ) VALUES (@m, @n, @p, @h, 'portal-legal-2026-11-10', CURRENT_TIMESTAMP, 'en', CURRENT_TIMESTAMP)`,
   ).run({ m: `LC-9${String(seedSeq).padStart(4, '0')}`, n: 'Retention Test', p: `0709998${String(seedSeq).padStart(2, '0')}`, h: 'x' })
   return Number(r.meta?.last_row_id ?? 0)
 }
@@ -194,7 +194,7 @@ async function run() {
     assert.equal(sessionRow(tokenHash).last_seen_at, null)
     assert.equal(sessionRow(tokenHash).expires_at, beforeExpiry)
 
-    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-10-20', consent_at = CURRENT_TIMESTAMP, age_confirmed_at = CURRENT_TIMESTAMP WHERE id = ?").run([accountId])
+    rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-11-10', consent_at = CURRENT_TIMESTAMP, age_confirmed_at = CURRENT_TIMESTAMP WHERE id = ?").run([accountId])
     const current = await session.getPortalAccountState(ctx)
     assert.equal(current.status, 'authenticated')
     assert.equal(current.account.id, accountId)
