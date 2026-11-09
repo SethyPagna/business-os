@@ -30,7 +30,7 @@ export const BRANCH_SCALAR_REFERENCES = [
   ['transfer_operation_members', 'destination_branch_id'], ['transfer_operation_members', 'source_branch_id'],
 ] as const
 export const RESTRICTED_HISTORICAL_BRANCH_REFERENCES = [
-  ['inventory_check_approvals', 'branch_id'], ['inventory_check_items', 'branch_id'], ['inventory_check_sessions', 'branch_id'],
+  ['inventory_check_approvals', 'branch_id'], ['inventory_check_items', 'branch_id'], ['inventory_check_lot_lines', 'branch_id'], ['inventory_check_sessions', 'branch_id'],
   // 0271: the branch a payment was taken at, an event-time fact on an append-only ledger (UPDATE aborts), so it is never reparented.
   ['sale_payment_events', 'branch_id'],
   // 0272: the branch a low or out-of-stock crossing happened at, an event-time fact in an alert log, never reparented.
