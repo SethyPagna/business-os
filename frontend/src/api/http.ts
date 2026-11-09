@@ -418,7 +418,8 @@ const DERIVED_READ_PREFIXES: Record<string, string[]> = {
   // A customer marker change affects the customer labels shown by already
   // loaded Sales and Returns. Their readers have independent short caches.
   customers: ['sales', 'returns'],
-  sales: ['dashboard', 'analytics'],
+  // The Expenses list carries each sale's courier rows (driver name, cost), so a sale edit makes its cached pages stale.
+  sales: ['dashboard', 'analytics', 'fees'],
   returns: ['dashboard', 'analytics'],
   // GET /api/categories and /api/units also list the values products carry.
   products: ['dashboard', 'analytics', 'categories', 'units'],

@@ -3,6 +3,7 @@ import Modal from '../shared/Modal'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
+import { useSync } from '../../AppContext.tsx'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
 // the per-courier drill on a delivery contact, mirroring the supplier
@@ -87,6 +88,12 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
   }, [contactId, range, t])
 
   useEffect(() => { load() }, [load])
+
+  // A sale's driver edited while this report is open moves a delivery (and its expenses) between drivers.
+  const { syncChannel } = useSync() as { syncChannel?: { channel?: string; ts?: number } | null }
+  useEffect(() => {
+    if (syncChannel?.channel === 'sales' || syncChannel?.channel === 'deliveryContacts') void load()
+  }, [load, syncChannel?.channel, syncChannel?.ts])
 
   const stat = (label: string, value: string, hint?: string, tone = '') => (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">

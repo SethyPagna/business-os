@@ -40,7 +40,7 @@ import {
 // that outright.
 import { amendmentEntryStatement } from './saleAmendments'
 import { replaySaleBulkStatus } from './saleBulkStatus'
-import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
+import { BULK_CUSTOMER_UPDATE_KIND, BULK_UPDATE_KIND, MULTI_CUSTOMER_UPDATE_KIND, SINGLE_CUSTOMER_UPDATE_KIND, SINGLE_DELIVERY_UPDATE_KIND, replaySaleBulkUpdate } from './saleBulkUpdate'
 import { RETURN_BULK_ACTION_KIND, replayReturnBulkAction, type ReturnBulkQueryBudget } from './returnBulkAction'
 import { SALE_SETTLEMENT_ACTION_KIND, replaySaleSettlementAction, saleMutationGuard, samePrecisionCompatibleState } from './saleSettlementAction'
 import { STOCK_SESSION_KIND, replayStockSession, type StockSessionQueryBudget } from './stockSession'
@@ -3599,6 +3599,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   },
   [MULTI_CUSTOMER_UPDATE_KIND]: {
     permission: 'sales', action: 'bulk',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
+      await replaySaleBulkUpdate(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
+  [SINGLE_DELIVERY_UPDATE_KIND]: {
+    permission: 'sales', action: 'amend',
     run: async (payload, ctx) => {
       if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative history identity required.')
       await replaySaleBulkUpdate(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
