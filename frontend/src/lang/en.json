@@ -5626,6 +5626,7 @@
   "read_switch_name_ic_wired": "Inventory check: wired list and overlay",
   "read_switch_name_ic_lot_counts": "Inventory check: count per received date",
   "read_switch_name_ledger_keyset": "Stock Changes: paging by cursor",
+  "read_switch_name_stock_bump_narrow": "Stock: refresh only stock after a Set",
   "read_switch_stale": "The switches changed elsewhere. Showing the current ones.",
   "read_switch_state_off": "Off",
   "read_switch_state_on": "On",
@@ -8130,5 +8131,6 @@
   "inventory_check_discard_counts_message": "The products you picked and the counts you typed will be cleared.",
   "perm_contacts_full_phone": "See full phone numbers",
   "perm_short_full_phone": "Full phones",
-  "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works."
+  "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works.",
+  "inventoryCheckCountPending": "This count is waiting for approval. Approve or reject it first."
 }

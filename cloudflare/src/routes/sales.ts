@@ -269,7 +269,8 @@ async function getSalesReadCacheVersion(env: Env): Promise<string> {
   // current product barcode/category data, while refund totals come from
   // returns. Fold each low-cardinality KV version into one Cache API key so a
   // write to any dependency makes the old response unreachable immediately.
-  const namespaces = ['sales', 'returns', 'customers', 'products'] as const
+  // 'stock': the stats strip's removal loss and profit after losses read the stock movements a Set writes; a narrow Set (stock_bump_narrow) bumps 'stock', not 'products'.
+  const namespaces = ['sales', 'returns', 'customers', 'products', 'stock'] as const
   const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }

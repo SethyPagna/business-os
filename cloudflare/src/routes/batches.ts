@@ -617,22 +617,30 @@ app.patch('/:id/branches/:branchId', async (c) => {
   // lot's cost), a per-request idempotency id and exact undo/redo.
   const reasonText = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Quantity correction (received date #${batchId})`
   const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
-  const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
+  // A direct Set is held while any count of this product at this branch waits for approval (owner rule), whatever the request id is; the hold is the same one POST /api/inventory/adjust
+  // applies to a scoped Set (lib/inventoryCheckFixStock.ts), so Products can never settle stock around a queued count either.
+  const { scopedSetHeld, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
+  if (await scopedSetHeld(c.env, db, { productId: batch.productId, branchId, alsoBranchId: branchRedirectTarget(c) })) return c.json(FIX_STOCK_COUNT_PENDING, 409)
+  const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
+  const closeIssue = await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
   const result = await applyStockLotSet(db, user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
     productId: batch.productId, branchId, batchId, quantity, setScope: 'lot', reason: reasonText, conditionTag: null,
     // The lot figure the editor showed: a count that moved since refuses 409.
     ...(typeof body.expectedLotQuantity === 'number' && Number.isFinite(body.expectedLotQuantity) && body.expectedLotQuantity >= 0
       ? { expectedLotQuantity: body.expectedLotQuantity } : {}),
-  }, undefined, () => branchRedirectTarget(c))
+  }, undefined, () => branchRedirectTarget(c), undefined, closeIssue)
   if (result.status !== 200) return c.json(result.body as never, result.status as never)
+  if (result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
 
   if (Number(result.body.quantity) > 0 && !result.body.replayed) {
+    // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
+    const bumped = await scopedSetBump(c.env, result.body)
     c.executionCtx.waitUntil(Promise.all([
       audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, {
         branch_id: branchId, quantity, previous_quantity: (result.body.before as { lotQuantity?: number } | undefined)?.lotQuantity ?? null,
         operation_id: result.body.operation_id ?? null,
       }),
-      bumpVersion(c.env, 'products'),
+      bumpVersion(c.env, bumped),
       broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
       broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
     ]))

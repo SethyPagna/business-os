@@ -476,10 +476,10 @@ async function main() {
     assert.equal(stale.status, 409); assert.equal(stale.json.code, 'stock_conflict')
     assert.deepEqual(stale.json.current, { lotQuantity: 3, branchQuantity: 10 }, 'lot 10 holds 3 and the branch 10, whatever the screen showed')
     assert.match(String(stale.json.error), /Stock changed/, 'the old sentence is unchanged')
-    // The figures come from the one facts statement (the only one that reads either quantity). Pinned: the whole refused request prepares 6 statements (receipt claim, schema probe,
-    // operation lookup, branch effect, facts, receipt release) and only the facts one touches the stock tables.
+    // The figures come from the one facts statement (the only one that reads either quantity). Pinned: the whole refused request prepares 5 statements (receipt claim, schema probe,
+    // branch effect, facts, receipt release) and only the facts one touches the stock tables. (INV S6: under the receipt wrapper the operation look-up is gone, a repeat is answered from the receipt.)
     assert.equal(reads(/branch_batch_stock|branch_stock/).length, 1, 'one read of the quantities, nothing added for the refusal')
-    assert.equal(prepared.length, 6, 'the refusal costs the statements it always did: ' + JSON.stringify(prepared.map((text) => text.replace(/s+/g, ' ').slice(0, 60))))
+    assert.equal(prepared.length, 5, 'the refusal costs the statements it should: ' + JSON.stringify(prepared.map((text) => text.replace(/s+/g, ' ').slice(0, 60))))
     assert.equal(reads(/sqlite_master/).filter((text) => /COUNT\(\*\)/.test(text)).length, 0, 'the schema probe does not count every object of the schema')
     const staleBranch = await send(f, 'POST', '/api/inventory/adjust', setLot('s2-stale-branch-1', 4, { setScope: 'branch', expectedBranchQuantity: 99 }))
     assert.equal(staleBranch.status, 409); assert.deepEqual(staleBranch.json.current, { lotQuantity: 3, branchQuantity: 10 })
