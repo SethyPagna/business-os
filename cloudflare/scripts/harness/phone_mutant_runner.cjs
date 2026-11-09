@@ -41,7 +41,17 @@ const RUNS = [
 const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs', text: 'test-phone-masked-text-native.cjs' }
 // The mutants are split over two test files so that each fits the gate's first try (10 min) with margin: one file took 675 s on a loaded machine.
 // Every kind belongs to exactly one group (checked below), so no mutant is dropped by the split.
-const GROUPS = { crawl: ['crawl', 'write', 'text'], oracle: ['oracle'] }
+// A group is the kinds it runs and, when a kind list is too long for the runner, which part of that list it takes (part, of): the runs are dealt in order, so the parts of
+// one kind list are disjoint and together are the whole list. The GitHub runner is slower than a laptop (the one-file oracle half took 434 s here and timed out there), so
+// no group runs more than 9 mutants of the slow kinds.
+const GROUPS = {
+  'crawl-1': { kinds: ['crawl', 'write', 'text'], part: 1, of: 2 }, 'crawl-2': { kinds: ['crawl', 'write', 'text'], part: 2, of: 2 },
+  'oracle-1': { kinds: ['oracle'], part: 1, of: 3 }, 'oracle-2': { kinds: ['oracle'], part: 2, of: 3 }, 'oracle-3': { kinds: ['oracle'], part: 3, of: 3 },
+}
+const groupRuns = (group) => {
+  const { kinds, part, of } = GROUPS[group]
+  return RUNS.filter(([kind]) => kinds.includes(kind)).filter((_, index, all) => index >= Math.floor((part - 1) * all.length / of) && index < Math.floor(part * all.length / of))
+}
 const PARALLEL = Math.max(1, Number(process.env.PHONE_MUTANT_PARALLEL) || 4)
 
 function run([kind, name, env]) {
@@ -58,13 +68,14 @@ function run([kind, name, env]) {
   })
 }
 
-const grouped = new Set(Object.values(GROUPS).flat())
-for (const [kind, name] of RUNS) if (!grouped.has(kind)) throw new Error(`mutant ${kind}: ${name} is in no group`)
+// Every mutant is in exactly one group: counted by identity, so a kind that is in no group, or in two, stops the load.
+const owners = new Map(RUNS.map((run) => [run, 0]))
+for (const group of Object.keys(GROUPS)) for (const run of groupRuns(group)) owners.set(run, owners.get(run) + 1)
+for (const [[kind, name], count] of owners) if (count !== 1) throw new Error(`mutant ${kind}: ${name} is in ${count} groups (it must be in exactly one)`)
 
 async function main(group) {
-  const kinds = GROUPS[group]
-  if (!kinds) throw new Error(`unknown mutant group ${group}`)
-  const queue = RUNS.filter(([kind]) => kinds.includes(kind))
+  if (!GROUPS[group]) throw new Error(`unknown mutant group ${group}`)
+  const queue = groupRuns(group)
   const results = []
   await Promise.all(Array.from({ length: PARALLEL }, async () => {
     while (queue.length) {
