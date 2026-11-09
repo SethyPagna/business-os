@@ -103,6 +103,8 @@ export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'>
   current_product_name?: string | null
   current_quantity?: number | null
   stock_changed?: boolean
+  /** ic_lot_counts: what the count typed per received date (the approval is applied date by date). */
+  lot_lines?: InventoryCheckObservation['lot_lines']
   /** The damaged units now (a Set excludes them); sent with the stock field. */
   current_stock?: { recorded_ordinary_quantity?: number | null; recorded_damaged_quantity?: number | null; consistent?: boolean }
 }

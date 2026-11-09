@@ -43,7 +43,7 @@ const excluded = ['unknown-future-chunk', 'vendor', 'file-picker-modal', 'image-
   'background-import-tracker', 'write-conflict-modal', 'browser-dialogs', 'product-detail',
   'shared-portal-menu', 'action-history-api', 'ai-api', 'audit-log-api', 'branch-api',
   'contacts-api', 'csv-utils', 'dashboard-api', 'dashboard-charts', 'dashboard-export',
-  'drive-sync-api', 'file-api', 'inventory-api', 'inventory-export', 'inventory-write-api',
+  'drive-sync-api', 'file-api', 'inventory-api', 'inventory-export', 'inventory-stock-patch', 'inventory-write-api',
   'import-jobs-api', 'multipart-headers-api', 'notification-api', 'pending-sync-api',
   'product-export', 'product-image-upload-api', 'api-local-cache', 'lookup-api',
   'product-write-api', 'rfid-api', 'returns-write-api', 'sale-write-api', 'sales-read-api',

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHarness } from './mountedComponentHarness.ts'
 import { APP_NAVIGATION_EVENT } from '../src/app/pathRouting.ts'
 import * as dirtyWork from '../src/utils/dirtyWork.ts'
+import { __resetApiHealthForTests, __resetApiWriteDedupeForTests, apiFetch, setSyncServerUrl } from '../src/api/http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from '../src/api/query.ts'
 
 // INV-B S5: the mounted Inventory page with ic_lot_counts: the status choice in one scrolling row, counts typed per received date, and a Set straight from the row
@@ -28,6 +29,13 @@ const submissions: Array<Record<string, unknown>> = []
 const batchReads: Array<[number, number]> = []
 let moreBatches: Array<Record<string, unknown>> = []
 let submitAnswer: (input: Record<string, unknown>) => unknown = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
+/** The error the page really receives for a 400: built by the real apiFetch from a stubbed network answer, not by hand (it carries the code, never the parameter name). */
+async function realRefusal(body: Record<string, unknown>): Promise<Error> {
+  const saved = globalThis.fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify(body), { status: 400, headers: { 'content-type': 'application/json' } })) as typeof fetch
+  setSyncServerUrl('https://admin.example.test'); __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
+  try { await apiFetch('GET', '/api/inventory-checks/list?x=1'); throw new Error('the stub answered 400 but apiFetch did not throw') } catch (error) { return error as Error } finally { globalThis.fetch = saved }
+}
 const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
 let adjustAnswer: (payload: Record<string, unknown>) => unknown = () => ({})
 let listAnswer: (query: URLSearchParams) => Row | Promise<Row> = () => ({})
@@ -181,14 +189,18 @@ try {
     assert.ok(surface.findAll(node => node.getAttribute('role') === 'alert').some(node => node.textContent.includes('turned off')), 'and the person is told why')
     assert.equal(surface.findAll(node => node.getAttribute('data-check-lot') !== null).length, 0, 'the dates are gone with the switch')
     submitAnswer = () => ({ item: { id: 'session-new' }, receipt: {}, created: true })
+    const rowCount = () => inside(surface, 'data-check-count') as unknown as { value: string }
+    assert.equal(rowCount().value, '', 'the sum of the typed dates is NOT carried over as the product count (a partly dated product would read as a shortage)')
+    assert.equal(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit').getAttribute('aria-disabled'), 'true', 'Submit asks for a count first')
+    await surface.type(inside(surface, 'data-check-count'), '8')
     await surface.click(surface.find(node => node.getAttribute('data-selection-action') === 'submit', 'Submit'))
     await surface.click(exact(surface, 'Submit').at(-1)!)
-    assert.equal(submissions.length, 2); assert.ok(!('lots' in (submissions[1].lines as Array<Record<string, unknown>>)[0]), 'the second send is plain: no refusal loop')
+    assert.equal(submissions.length, 2); assert.deepEqual({ ...(submissions[1].lines as Array<Record<string, unknown>>)[0] }, { productId: 12, countedQuantity: 8, seenQuantity: 8, checked: false }, 'the second send is the typed product count, plain: no refusal loop')
     await surface.unmount()
   }
   // ---- audit G12: a status the server refuses is dropped once; G13: one status choice on the page ----
   {
-    listAnswer = query => { if (query.get('checkState') === 'pending') throw Object.assign(new Error('bad'), { status: 400, code: 'inventory_check_invalid_query', parameter: 'checkState' }); return answerOf() }
+    listAnswer = async query => { if (query.get('checkState') === 'pending') throw await realRefusal({ error: 'inventory_check_invalid_query', code: 'inventory_check_invalid_query', parameter: 'checkState' }); return answerOf() }
     const surface = await mount()
     await surface.click(surface.find(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'filters', 'Filters trigger'))
     assert.ok(surface.findAll(node => node.getAttribute('data-filter-menu-section') === 'sort').length > 0, 'the Filters menu is open (the control: its Sort section is there)')
@@ -233,10 +245,15 @@ try {
     sync({ channel: 'products', payload: { id: 13, action: 'update' } })
     await new Promise(resolve => setTimeout(resolve, 20))
     assert.equal(surface.findAll(node => node.getAttribute('data-inventory-check-changed-elsewhere') !== null).length, 1, 'G8: another row changed elsewhere still shows the hint (the control)')
-    assert.equal(submissions.length, 1, 'G14: one count of the new figure was recorded')
-    assert.deepEqual({ ...(submissions[0].lines as Array<Record<string, unknown>>)[0] }, { productId: 12, countedQuantity: 7, seenQuantity: 7, checked: true })
-    assert.equal(submissions[0].title, 'Set from Inventory', 'and it is named in History')
-    assert.equal(surface.findAll(node => node.getAttribute('data-check-list-status') === 'issue').length, 0, 'G14: the row no longer reads Issue')
+    assert.equal(submissions.length, 0, 'N2: the client never sends a second request after a Set')
+    assert.equal(surface.findAll(node => node.getAttribute('data-check-list-status') === 'issue').length, 1, 'N2: without issue_closed the row stays an Issue (the writer did not close it: a date still differs, or a count waits)')
+    await surface.type(dateInput(surface, 9), '2')
+    adjustAnswer = payload => ({ productId: 12, branchId: 1, batchId: payload.batchId, before: { lotQuantity: 3, branchQuantity: 7 }, after: { lotQuantity: 2, branchQuantity: 6 }, issue_closed: true })
+    await surface.click(surface.find(node => node.getAttribute('data-check-action') === 'set-lot', 'Set'))
+    await surface.click(exact(surface, 'Set').at(-1)!)
+    await new Promise(resolve => setTimeout(resolve, 40))
+    assert.equal(submissions.length, 0, 'still no second request')
+    assert.equal(surface.findAll(node => node.getAttribute('data-check-list-status') === 'issue').length, 0, 'N2: the row leaves Issues because the writer said issue_closed, with nothing read')
     await surface.unmount()
   }
   // ---- audit G10: dates cut at the plan limit load on request; units on no date show read-only ----
@@ -254,6 +271,14 @@ try {
     assert.equal(lists.length, lists0, 'and no list page')
     assert.deepEqual(surface.findAll(node => node.getAttribute('data-check-lot') !== null).map(node => node.getAttribute('data-check-lot')), ['7', '9', '21'], 'the third date is there to count')
     await surface.unmount()
+    // N5: a date this branch never held (the read lists every active date of the product) is not offered
+    moreBatches = [...moreBatches, { id: 33, received_at: '2026-09-01', expiry_date: null, is_active: 1, quantity: 0 }]
+    listAnswer = () => listBody([{ ...withLots(productRow(12, 'Dated product', 11)), lots_more: true }], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
+    const other = await mount()
+    await other.call(inside(other, 'data-check-select'), 'onChange', [{ target: { checked: true } }])
+    await other.click(other.find(node => node.getAttribute('data-check-action') === 'more-dates', 'More dates'))
+    assert.deepEqual(other.findAll(node => node.getAttribute('data-check-lot') !== null).map(node => node.getAttribute('data-check-lot')), ['7', '9', '21'], 'N5: the other-branch date 33 (no stock row here) is not listed')
+    await other.unmount()
     listAnswer = () => listBody([withLots(productRow(12, 'Dated product', 11))], { capabilities, summary: { ok: 0, issue: 0, not_checked: 1, total: 1 } })
     const loose = await mount()
     await loose.call(inside(loose, 'data-check-select'), 'onChange', [{ target: { checked: true } }])

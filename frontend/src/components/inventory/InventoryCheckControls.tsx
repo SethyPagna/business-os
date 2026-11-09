@@ -75,7 +75,7 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
   if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))
   // The date of the check orders a list of checked products, so it is offered once a status that has such a list is chosen.
-  if (wired && ['ok', 'issue', 'pending'].includes(filters.checkState)) sortOptions.push(sortChoice('checked', 'desc', t('inventory_check_sort_checked')))
+  if (wired && ['ok', 'issue', 'pending'].includes(filters.checkState) && !query.trim() && !filters.brand && !filters.category && !filters.stockState) sortOptions.push(sortChoice('checked', 'desc', t('inventory_check_sort_checked')))
 
   const sections: FilterSection[] = [{ id: 'sort', label: t('sort'), options: sortOptions }]
   if (!soleBranch) sections.push({

@@ -26,6 +26,7 @@ export type WiredList = { items: Row[]; total: number; page: number; pageSize: n
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
 /** The dates of one row; `more` is set when the plan's limit cut them. */
 type RowLots = Lot[] & { more?: boolean }
+const withMore = (lots: readonly Lot[] | undefined, more: unknown): RowLots => Object.assign([...(lots ?? [])], more ? { more: true } : {})
 
 /** Everything one wired screen is made of, kept raw so a by-id refresh or a write's patch can rebuild the rows without asking again. */
 export type WiredRaw = { list: WiredList; overlay: Map<number, OverlayEntry>; lots: Map<number, RowLots>; branches: Branch[]; branchId: number; extras: WiredExtras }
@@ -42,7 +43,9 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
   for (const key of LIST_KEYS) if (present(params[key])) out[key] = params[key]
   if (present(params.branchId) && !options.omitBranch) out.branchId = params.branchId
   // The date of the check orders only a list of checked products, so it is sent with a check state (a stale choice never reaches the server alone).
-  out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
+  // ...and never beside a search or filter: the Worker refuses that combination (its pages are cut before they could narrow).
+  const narrowed = ['query', 'brand', 'category', 'stockState'].some(key => present(params[key]))
+  out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && !narrowed && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
   out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
   if (options.skipSummary) out.summary = 0
   return out
@@ -88,7 +91,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   const { branchId } = raw
   const entry = branchId && Array.isArray(row.branch_stock) ? row.branch_stock.find(candidate => Number(candidate.branch_id) === branchId) : undefined
   const quantity = branchId ? (Array.isArray(row.branch_stock) ? (entry ? entry.quantity : 0) : undefined) : row.stock_quantity
-  const lots: RowLots | undefined = raw.lots.get(id) ?? (row.lots ? Object.assign([...row.lots], row.lots_more ? { more: true } : {}) : undefined)
+  const lots: RowLots | undefined = raw.lots.get(id) ?? (row.lots ? withMore(row.lots, row.lots_more) : undefined)
   const heldHere = (lot: Lot) => (lot.branches ?? []).some(candidate => (!branchId || Number(candidate.branch_id) === branchId) && Number(candidate.quantity ?? 1) > 0)
   const received = lots?.map(lot => lot.received_at).filter((value): value is string => typeof value === 'string' && value !== '').sort().pop()
   const expiry = lots?.filter(heldHere).map(lot => lot.expiry_date).filter((value): value is string => typeof value === 'string' && value !== '').sort()[0]
@@ -254,7 +257,7 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
     for (let start = 0; start < wanted.length; start += chunk) {
       const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots }, signal)
       for (const entry of answer.items ?? []) overlay.set(Number(entry.product_id), entry)
-      for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), Object.assign([...(entry.lots ?? [])], entry.lots_more ? { more: true } : {}))
+      for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), withMore(entry.lots, entry.lots_more))
       if (answer.summary || answer.capabilities) extras = { summary: answer.summary ?? extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
     }
   }
@@ -270,7 +273,7 @@ export function mergeWiredRows(raw: WiredRaw, fresh: Awaited<ReturnType<typeof r
   const overlay = new Map(raw.overlay), lots = new Map(raw.lots)
   for (const id of fresh.ids) { overlay.delete(id); lots.delete(id) }
   for (const entry of fresh.overlay) overlay.set(Number(entry.product_id), entry)
-  for (const entry of fresh.lots) lots.set(Number(entry.product_id), Object.assign([...(entry.lots ?? [])], (entry as { lots_more?: boolean }).lots_more ? { more: true } : {}))
+  for (const entry of fresh.lots) lots.set(Number(entry.product_id), withMore(entry.lots, (entry as { lots_more?: boolean }).lots_more))
   return { ...raw, overlay, lots, list: { ...raw.list, items: raw.list.items.map(row => byId.get(Number(row.id)) ?? row),
     tagged_lots: [...(raw.list.tagged_lots ?? []).filter(group => !taggedIds.has(Number(group.product_id))), ...fresh.tagged] } }
 }
@@ -283,7 +286,7 @@ export function patchWiredRaw(raw: WiredRaw, answer: StockWriteAnswer | StockCon
   const apply = <T extends Parameters<typeof patchProductFromStockAnswer>[0]>(row: T): T => 'after' in answer ? patchProductFromStockAnswer(row, answer) : patchProductFromStockConflict(row, answer)
   const lots = new Map(raw.lots)
   const held = lots.get(answer.productId)
-  if (held) lots.set(answer.productId, Object.assign([...(apply({ id: answer.productId, lots: held }).lots ?? held)], held.more ? { more: true } : {}) as RowLots)
+  if (held) lots.set(answer.productId, withMore(apply({ id: answer.productId, lots: held }).lots as Lot[] | undefined ?? held, held.more))
   return { ...raw, lots, list: { ...raw.list, items: raw.list.items.map(row => Number(row.id) === answer.productId ? apply(row) : row) } }
 }
 

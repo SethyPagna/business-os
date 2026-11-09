@@ -76,11 +76,6 @@ export function staleLotFigures(cause: unknown, products: ReadonlyArray<{ id: nu
     const productId = Number(entry.productId), batchId = Number(entry.batchId), quantity = Number(entry.quantity)
     const product = products.find(candidate => Number(candidate.id) === productId)
     if (!product || !finite(quantity) || !finite(product.quantity)) continue
-    if (entry.scope === 'branch') {
-      conflicts.push({ productId, branchId, batchId: 0, current: { lotQuantity: 0, branchQuantity: quantity } })
-      changed.push({ productId, name: product.name, batchId: 0, receivedAt: null, was: product.quantity, now: quantity })
-      continue
-    }
     const row = product.lot_rows?.find(candidate => candidate.batchId === batchId)
     if (!row) continue
     const branchQuantity = Math.max(0, product.quantity + (moved.get(productId) ?? 0) + quantity - row.quantity)

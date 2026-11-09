@@ -50,7 +50,6 @@ assert.equal(staleLotFigures({ status: 409, code: 'inventory_check_stock_changed
 assert.equal(staleLotFigures({ body: { current: [{ productId: 77, batchId: 7, scope: 'lot', quantity: 1 }] } }, [product], 1), null, 'a product not on this page is not patched')
 const twoDates = staleLotFigures({ current: [{ productId: 5, batchId: 7, scope: 'lot', quantity: 4 }, { productId: 5, batchId: 9, scope: 'lot', quantity: 6 }] }, [product], 1)
 assert.deepEqual(twoDates?.conflicts.map(entry => entry.current.branchQuantity), [7, 10], 'two dates of one product move the total one after the other')
-assert.deepEqual(staleLotFigures({ current: [{ productId: 5, batchId: 0, scope: 'branch', quantity: 2 }] }, [product], 1)?.conflicts, [{ productId: 5, branchId: 1, batchId: 0, current: { lotQuantity: 0, branchQuantity: 2 } }])
 
 // ---- the wired page: a Set patches the row from the answer (the mounted page test counts the requests: none) ------------------------------------------------------------------------------
 const list: WiredList = {
@@ -88,6 +87,8 @@ assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after:
   const cut = wiredResult({ ...raw, list: { ...list, items: [{ ...list.items[0], lots_more: true }] } }).items[0]
   assert.equal(cut.lots_more, true, 'G10: a row whose dates were cut at the plan limit says so'); assert.equal(cut.unlotted_quantity, undefined, 'and claims no unlotted remainder it cannot know')
   assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'issue' }).sortBy, 'checked')
+  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', query: 'serum' }).sortBy, 'created', 'N6: never beside a search (the Worker refuses it)')
+  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'ok', brand: 'A' }).sortBy, 'created', 'nor a brand')
   assert.equal(wiredListParams({ sortBy: 'checked', checkState: '' }).sortBy, 'created', 'a stale date order never reaches the server without a status')
   assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'not_checked' }).sortBy, 'created', 'nor with a status that has no checked list')
 }
@@ -142,7 +143,7 @@ const cases: Array<[string, () => Promise<void>]> = [
   }],
   ['after a reload the dates still show what the latest count typed on each (counted per date comes back from the overlay)', async () => {
     const s = await mount({ products: [{ ...rowProduct, check_status: 'issue', check_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5 }, { batch_id: 9, scope: 'lot', counted: 3, seen: 3 }] }] })
-    const recorded = s.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).map(node => node.textContent.replace(/s+/g, ' ').trim())
+    const recorded = s.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).map(node => node.textContent.replace(/\s+/g, ' ').trim())
     assert.deepEqual(recorded, ['inventory_check_counted 4', 'inventory_check_counted 3'].map(text => text.replace('inventory_check_counted', recorded[0].startsWith('Counted') ? 'Counted' : 'inventory_check_counted')), 'both dates show their counted figure')
     const blind = await mount({ products: [{ ...rowProduct, check_lines: [{ batch_id: 7, scope: 'lot', counted: 4 }] }], canViewCounts: false })
     assert.equal(blind.findAll(node => node.getAttribute('data-check-lot-recorded') !== null).length, 0, 'a viewer who may not read counts sees none')

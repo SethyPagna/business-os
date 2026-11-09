@@ -52,6 +52,16 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.match(text(lineOf(panel, 2)), /Set to 1/, 'and the result is measured from it: 4 + 3 - 6')
     assert.match(text(lineOf(panel, 1)), /System 7/, 'a line without a recorded baseline shows the item figure')
   }],
+  ['G4/S6: a product counted per received date is one line listing its dates (saw -> counted); two wrong dates whose sums agree still need a decision; no product-level result is invented', async () => {
+    const dated = item(4, 'Dated D', 9, 9, { lot_lines: [{ batch_id: 7, scope: 'lot', counted: 6, seen: 5, received_at: '2026-10-01' }, { batch_id: 9, scope: 'lot', counted: 3, seen: 4, received_at: '2026-10-09' }] })
+    const panel = await mount({ items: [...items, dated] })
+    assert.deepEqual(panel.findAll(node => node.getAttribute('data-approval-line') !== null).map(node => node.getAttribute('data-approval-line')), ['1', '2', '4'], 'counted 9 of 9 by the sums, yet the dates differ: it is a line')
+    const lines = panel.findAll(node => node.getAttribute('data-approval-lot-lines') === '4')
+    assert.equal(lines.length, 1)
+    assert.match(text(lines[0]), /Received.*: 5 → 6/); assert.match(text(lines[0]), /Received.*: 4 → 3/)
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-target') === '4').length, 0, 'the date-by-date result is the writer facts, not a guess on this page')
+    assert.equal(panel.findAll(node => node.getAttribute('data-approval-target') === '2').length, 1, 'the control: an undated line still shows its result')
+  }],
   ['Approve and Reject appear only for someone who may decide, only while pending, and fire their own handlers', async () => {
     const panel = await mount()
     assert.ok(action(panel, 'approve') && action(panel, 'reject'))

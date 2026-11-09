@@ -54,6 +54,8 @@ export type InventoryCheckTranslator = (key: string) => string | null | undefine
 
 export type InventoryCheckObservation = {
   product_id: InventoryCheckId
+  /** ic_lot_counts: what the count typed per received date (batch_id 0 = the branch total). */
+  lot_lines?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number; received_at?: string }>
   state: 'unstarted' | 'done' | 'issue'
   counted_quantity: number | null
   reason: string | null

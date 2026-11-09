@@ -169,7 +169,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   if (wants('now')) {
     const unit = finiteQuantity(product.quantity) ? String(product.unit ?? '').trim() : ''
     const hint = tr('inventory_check_stock_inconsistent_hint', 'Stock records for this product disagree. Check its stock before counting.')
-    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_damaged', 'Damaged')}: ${product.damaged_quantity}`}>{tr('inventory_check_damaged', 'Damaged')} {product.damaged_quantity}</span></> : null}{product.stock_consistent === false ? <InfoHint text={hint} label={hint} className="ml-0.5" triggerClassName="inline-flex h-4 w-4 items-center justify-center rounded-full text-amber-700 dark:text-amber-300" /> : null}</span>])
+    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_held', 'Held')}: ${product.damaged_quantity}`}>{tr('inventory_check_held', 'Held')} {product.damaged_quantity}</span></> : null}{product.stock_consistent === false ? <InfoHint text={hint} label={hint} className="ml-0.5" triggerClassName="inline-flex h-4 w-4 items-center justify-center rounded-full text-amber-700 dark:text-amber-300" /> : null}</span>])
   }
   if (wants('status')) {
     const Icon = status ? LIST_STATUS[status].Icon : null
@@ -241,7 +241,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
         </div>
       </div>
     </div>
-    {lotRows.length ? <ul data-check-lots aria-label={tr('inventory_check_lots', 'Received dates')} className="mt-1 min-w-0 space-y-1 lg:pl-12">
+    {lotRows.length ? <ul data-check-lots className="mt-1 min-w-0 space-y-1 lg:pl-12">
       {lotRows.map(lot => {
         const text = draft?.lots?.[String(lot.batchId)]?.count ?? ''
         const typed = lotCountOf(text)
@@ -250,8 +250,8 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
         const setLabel = plan ? tr('inventory_check_lot_set', 'Set to {count}').replace('{count}', String(plan.after)) : ''
         // What the latest count typed on this date, kept in the session: it is still there after a reload.
         const recorded = canViewCounts ? product.check_lines?.find(line => line.scope === 'lot' && line.batch_id === lot.batchId) : undefined
-        return <li key={lot.batchId} data-check-lot={lot.batchId} className="flex min-w-0 items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
-          <span className="min-w-0 flex-1 truncate leading-relaxed">{received}</span>
+        return <li key={lot.batchId} data-check-lot={lot.batchId} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-700 dark:text-gray-200">
+          <span className="min-w-[9rem] flex-1 leading-relaxed">{received}</span>
           <span className="shrink-0 tabular-nums"><span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_now', 'Now')}</span> <strong>{lot.quantity}</strong></span>
           {recorded ? <span data-check-lot-recorded className="shrink-0 tabular-nums"><span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_counted', 'Counted')}</span> <strong>{recorded.counted}</strong></span> : null}
           <input data-check-lot-count type="text" inputMode="decimal" autoComplete="off" value={text} readOnly={locked} placeholder={String(lot.quantity)} aria-label={`${received}: ${product.name}`} aria-invalid={typed.kind === 'invalid' ? true : undefined}
@@ -262,7 +262,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
       })}
     </ul> : null}
     {lotCounts && counting && selected && canViewStock && (product.lots_more || product.unlotted_quantity) ? <div data-check-lots-extra className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 lg:pl-12 dark:text-gray-300">
-      {product.unlotted_quantity ? <span data-check-unlotted className="tabular-nums" title={tr('inventory_check_unlotted_hint', 'Stock that no received date holds. Stock it in on a date to count it.')}>{tr('inventory_check_unlotted', 'No received date')}: <strong>{product.unlotted_quantity}</strong></span> : null}
+      {product.unlotted_quantity ? <span data-check-unlotted className="tabular-nums">{tr('inventory_check_unlotted', 'No received date')}: <strong>{product.unlotted_quantity}</strong></span> : null}
       {product.lots_more ? <button type="button" data-check-action="more-dates" disabled={locked} className="min-h-11 rounded-lg px-2 font-semibold text-blue-700 hover:bg-gray-100 dark:text-blue-300" onClick={() => onMoreDates?.(product)}>{tr('inventory_check_more_dates', 'More dates')}</button> : null}
     </div> : null}
     {note ? <p className="mt-1 break-words text-xs leading-relaxed text-amber-800 lg:pl-12 dark:text-amber-200" data-check-note>{note}</p> : null}
