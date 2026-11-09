@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['loyaltyEligibility','businessMaintenanceGuard','acquisitionCostAccess','courierCostAccess','saleCustomerAssignmentGuard','customerPointsReturn','actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','undoAppliers','branchWrites','conflictControl','searchMatch','paymentMethodRegistry','contactOptions','failureText','phone','phoneMask','phoneAccess','phoneSearchGuard','phoneWriteGuard','phoneCache'])
+const actual = new Set(['loyaltyEligibility','businessMaintenanceGuard','acquisitionCostAccess','courierCostAccess','saleCustomerAssignmentGuard','customerPointsReturn','actorSnapshot','anonymousCustomer','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','undoAppliers','branchWrites','conflictControl','saleAmendments','productStockGuard','searchMatch','paymentMethodRegistry','contactOptions','failureText','phone','phoneMask','phoneAccess','phoneSearchGuard','phoneWriteGuard','phoneCache'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
@@ -231,6 +231,83 @@ async function run(){
   assert.equal((await replay(f,driver.body.actionHistoryId)).status,200)
   assert.deepEqual(f.sql.prepare('SELECT delivery_contact_id,delivery_contact_phone,delivery_actual_cost_usd FROM sales WHERE id=1').get(),{delivery_contact_id:1,delivery_contact_phone:null,delivery_actual_cost_usd:2})
   console.log('PASS delivery reassignment preserves historical sale snapshots and actual cost while replay guards canonical contacts')
+
+  // SALE-DELIVERY-EDIT: one sale's driver is edited with the authority of its
+  // delivery cost (sales:amend), not the multi-sale sales:bulk switch.
+  f=fixture()
+  const moneyColumns='SELECT total_usd,total_khr,amount_paid_usd,amount_paid_khr,delivery_fee_usd,delivery_fee_khr,delivery_actual_cost_usd,delivery_actual_cost_khr,sale_status FROM sales WHERE id=1'
+  const moneyBefore=f.sql.prepare(moneyColumns).get()
+  const movementsBefore=f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n
+  user={id:3,name:'Amend only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':false})}
+  const singleDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'single-driver-1',[1]))
+  assert.equal(singleDriver.status,200,JSON.stringify(singleDriver))
+  assert.deepEqual(f.sql.prepare('SELECT delivery_contact_id,delivery_contact_name,delivery_contact_phone,delivery_contact_address FROM sales WHERE id=1').get(),{delivery_contact_id:2,delivery_contact_name:'Driver B',delivery_contact_phone:'222',delivery_contact_address:'B road'})
+  assert.deepEqual(f.sql.prepare(moneyColumns).get(),moneyBefore,'changing the driver moves no money')
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,movementsBefore,'changing the driver moves no stock')
+  assert.equal(f.sql.prepare('SELECT json_extract(undo_payload,\'$.applier\') applier FROM action_history WHERE id=?').get(singleDriver.body.actionHistoryId).applier,'sale.delivery.single')
+  assert.deepEqual(f.sql.prepare("SELECT kind,via,subject FROM sale_record_events WHERE sale_id=1").all(),[{kind:'driver_changed',via:'apply',subject:'R1'}])
+  // G6: the audit row is about THIS sale and names who it moved from and to; it never carries the courier cost.
+  const singleAudit=f.sql.prepare("SELECT entity_id,record_id,details FROM audit_logs WHERE action='sale_fields_bulk' AND user_id=3").all()
+  assert.equal(singleAudit.length,1)
+  assert.equal(singleAudit[0].entity_id,'1')
+  assert.equal(singleAudit[0].record_id,'1')
+  const singleAuditDetails=JSON.parse(singleAudit[0].details)
+  assert.equal(singleAuditDetails.kind,'sale.delivery.single')
+  assert.equal(singleAuditDetails.receipt_number,'R1')
+  assert.deepEqual([singleAuditDetails.before.name,singleAuditDetails.after.name],['Driver A','Driver B'])
+  assert.ok(!/cost/i.test(singleAudit[0].details)&&!singleAudit[0].details.includes('"2"'),'the audit row holds no courier cost')
+  assert.deepEqual([1,2].map(id=>f.sql.prepare('SELECT COUNT(*) n FROM sales WHERE delivery_contact_id=?').get(id).n),[2,1],'per-driver reads key on delivery_contact_id, which moved')
+  assert.equal((await replay(f,singleDriver.body.actionHistoryId)).status,200,'the same amend-only user can undo it')
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver A')
+  assert.equal((await replay(f,singleDriver.body.actionHistoryId,'redo',1)).status,200)
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver B')
+  const deniedBefore=snapshot(f)
+  user={id:4,name:'Bulk only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':false,'sales:bulk':true})}
+  const noAmend=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'single-driver-denied',[1]))
+  assert.equal(noAmend.status,403,JSON.stringify(noAmend))
+  user={id:3,name:'Amend only',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':false})}
+  const manyNoBulk=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'multi-driver-denied',[1,2]))
+  assert.equal(manyNoBulk.status,403,JSON.stringify(manyNoBulk))
+  assert.equal(snapshot(f),deniedBefore,'refusals leave sale, audit, receipt and history untouched')
+  // Single-sale driver changes saved before this split carry the bulk applier name and stay replayable.
+  user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
+  const legacyDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:2,target_id:1},'legacy-driver-1',[1]))
+  assert.equal(legacyDriver.status,200)
+  f.sql.prepare("UPDATE action_history SET undo_payload=json_set(undo_payload,'$.applier','sale.fields.bulk'),redo_payload=json_set(redo_payload,'$.applier','sale.fields.bulk') WHERE id=?").run(legacyDriver.body.actionHistoryId)
+  assert.equal((await replay(f,legacyDriver.body.actionHistoryId)).status,200)
+  assert.equal(f.sql.prepare('SELECT delivery_contact_name FROM sales WHERE id=1').get().delivery_contact_name,'Driver B')
+  // The group Driver edit (sales:bulk) matches the one-sale edit on the window (G1), the linked delivery expense (G3),
+  // the audit content (G6) and the history details (G5).
+  f=fixture()
+  f.sql.exec("INSERT INTO settings(key,value,updated_at) VALUES('sale_amendment_window_minutes','60','w1') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+  f.sql.prepare("UPDATE sales SET is_delivery=1,created_at=datetime('now','-5 minutes')").run()
+  f.sql.prepare("UPDATE sales SET created_at=datetime('now','-2 hours') WHERE id=2").run()
+  f.sql.exec("INSERT INTO fees(id,fee_type,label,amount_usd,fee_date,sale_id,delivery_contact_id) VALUES (9101,'delivery','Courier',1,'2026-11-09',1,1),(9102,'delivery','Courier',1,'2026-11-09',2,1),(9103,'delivery','Courier',1,'2026-11-09',3,1),(9104,'other','Box',1,'2026-11-09',3,1)")
+  const feeOwner=id=>f.sql.prepare('SELECT delivery_contact_id d FROM fees WHERE id=?').get(id).d
+  user={id:5,name:'Bulk and amend',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':true})}
+  const groupBefore=snapshot(f)
+  const groupWindow=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'group-driver-window',[1,2,3]))
+  assert.equal(groupWindow.status,400,JSON.stringify(groupWindow))
+  assert.equal(groupWindow.body.code,'window')
+  assert.deepEqual(groupWindow.body.sale_ids,[2])
+  assert.equal(snapshot(f),groupBefore,'a refused group changes nothing')
+  const groupOk=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'group-driver-ok',[1,3]))
+  assert.equal(groupOk.status,200,JSON.stringify(groupOk))
+  assert.equal(groupOk.body.movedExpenseCount,2)
+  assert.deepEqual([9101,9102,9103,9104].map(feeOwner),[2,1,2,1],'delivery expenses of the changed sales follow; the unselected sale and the other type stay')
+  const groupAudit=JSON.parse(f.sql.prepare("SELECT details FROM audit_logs WHERE action='sale_fields_bulk' AND user_id=5").get().details)
+  assert.equal(groupAudit.kind,'sale.fields.bulk')
+  assert.deepEqual(groupAudit.sales.map(s=>[s.id,s.receipt_number,s.before.name,s.after.name]),[[1,'R1','Driver A','Driver B'],[3,'R3','Driver A','Driver B']])
+  assert.equal(groupAudit.expenses_moved,2)
+  assert.ok(!/cost/i.test(JSON.stringify(groupAudit)),'no courier cost in the group audit row')
+  assert.equal((await replay(f,groupOk.body.actionHistoryId)).status,200)
+  assert.deepEqual([9101,9102,9103,9104].map(feeOwner),[1,1,1,1],'Undo moves the expenses back')
+  user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
+  const groupAdmin=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'group-driver-admin',[1,2,3]))
+  assert.equal(groupAdmin.status,200,'an admin is not bound by the window')
+  console.log('PASS group driver edit matches the one-sale edit: window, linked delivery expenses with undo, audit content')
+
+  console.log('PASS one-sale driver change needs sales:amend only, writes snapshot/record/audit with no money or stock change, undo follows amend, legacy bulk-applier rows replay')
 
   f=fixture()
   user={id:2,name:'Customer editor',role_code:'user',permissions:JSON.stringify({sales:true,'sales:status':true,'sales:customer':true,'sales:bulk':false})}

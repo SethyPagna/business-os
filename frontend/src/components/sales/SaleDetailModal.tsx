@@ -6,6 +6,8 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import UserX from 'lucide-react/dist/esm/icons/user-x.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
 import { searchProducts } from '../../api/methods.ts'
 import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
@@ -377,6 +379,9 @@ interface SaleDetailModalProps {
   // Change or clear the driver of a delivery sale (null clears). Omitted when
   // the user lacks the grants; the Worker refuses a cancelled sale.
   onDriverChange?: (sale: SaleDetail, target: { id: number; name: string } | null) => Promise<boolean>
+  // Asked before the review dialog opens: how many delivery expenses (linked to this sale and its current driver)
+  // would move with the change. Null = the change was refused (the page already said why), so no dialog opens.
+  onDriverPreview?: (sale: SaleDetail, target: { id: number; name: string } | null) => Promise<{ expenseCount: number } | null>
   // The sale's audit trail. NOT gated on the write permission: anyone who can
   // open the sale can see how it got that way -- hiding the trail from the
   // people who reconcile the books would defeat the feature. Resolves to null
@@ -439,6 +444,7 @@ export default function SaleDetailModal({
   onAddItems,
   onAmend,
   onDriverChange,
+  onDriverPreview,
   onLoadAmendments,
   onOpenRecords,
   t,
@@ -708,6 +714,8 @@ export default function SaleDetailModal({
   // searchable picker the Add delivery form uses.
   const [driverChanging, setDriverChanging] = useState(false)
   const [driverSaving, setDriverSaving] = useState(false)
+  // The reviewed change: null target = remove the driver. The dialog shows the sale's driver before and after.
+  const [driverConfirm, setDriverConfirm] = useState<{ target: DeliveryContactOption | null; expenseCount: number } | null>(null)
   const [deliverySearch, setDeliverySearch] = useState('')
   const [deliveryOptions, setDeliveryOptions] = useState<DeliveryContactOption[]>([])
   const [deliveryContact, setDeliveryContact] = useState<DeliveryContactOption | null>(null)
@@ -1536,6 +1544,29 @@ export default function SaleDetailModal({
   // Owner rule (23 Sep 2026): the driver is editable in every status except
   // cancelled -- the same rule the Worker's driver change enforces.
   const canChangeDriver = !!onDriverChange && !!toNumber(sale.is_delivery) && currentStatus !== 'cancelled'
+  // One review for the change: the driver before and after, and the delivery expenses that move with it.
+  const openDriverReview = async (target: DeliveryContactOption | null): Promise<void> => {
+    if (driverSaving) return
+    setDriverSaving(true)
+    try {
+      const preview = onDriverPreview
+        ? await onDriverPreview(sale, target ? { id: target.id, name: String(target.name || '') } : null)
+        : { expenseCount: 0 }
+      if (preview) setDriverConfirm({ target, expenseCount: preview.expenseCount })
+    } finally { setDriverSaving(false) }
+  }
+  const driverExpenseLine = (target: DeliveryContactOption | null, count: number): string => {
+    if (count <= 0) return ''
+    if (!target) {
+      return count === 1
+        ? translateOr('driver_expense_unlinks_one', '1 delivery expense is unlinked from the driver', 'ចំណាយដឹកជញ្ជូន ១ ត្រូវដកចេញពីអ្នកដឹកជញ្ជូន')
+        : translateOr('driver_expense_unlinks_many', '{count} delivery expenses are unlinked from the driver', 'ចំណាយដឹកជញ្ជូន {count} ត្រូវដកចេញពីអ្នកដឹកជញ្ជូន').replace('{count}', String(count))
+    }
+    const driver = String(target.name || '')
+    return count === 1
+      ? translateOr('driver_expense_moves_one', '1 delivery expense moves to {driver}', 'ចំណាយដឹកជញ្ជូន ១ ផ្លាស់ទៅ {driver}').replace('{driver}', driver)
+      : translateOr('driver_expense_moves_many', '{count} delivery expenses move to {driver}', 'ចំណាយដឹកជញ្ជូន {count} ផ្លាស់ទៅ {driver}').replace('{count}', String(count)).replace('{driver}', driver)
+  }
   const applyDriverChange = async (target: DeliveryContactOption | null): Promise<void> => {
     if (!onDriverChange || driverSaving) return
     setDriverSaving(true)
@@ -1544,7 +1575,11 @@ export default function SaleDetailModal({
         setDriverChanging(false)
         setDeliveryContact(null)
       }
-    } finally { setDriverSaving(false) }
+    } finally { setDriverSaving(false); setDriverConfirm(null) }
+  }
+  const driverLabel = (name: unknown, phone: unknown): string => {
+    const text = [sanitizeSaleDetailText(name), sanitizeSaleDetailText(phone)].filter(Boolean).join(' · ')
+    return text || translateOr('no_driver', 'No driver', 'គ្មានអ្នកដឹកជញ្ជូន')
   }
   // One searchable driver picker for both Add delivery and Change driver.
   const renderDriverPicker = (inputId: string) => (
@@ -2010,12 +2045,13 @@ export default function SaleDetailModal({
                       <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 dark:border-blue-900 dark:bg-blue-950/20">
                         {renderDriverPicker('sale-change-driver-search')}
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" disabled={driverSaving || !deliveryContact || String(deliveryContact.id) === String(sale.delivery_contact_id ?? '')} onClick={() => { void applyDriverChange(deliveryContact) }} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                          <button type="button" disabled={driverSaving || !deliveryContact || String(deliveryContact.id) === String(sale.delivery_contact_id ?? '')} onClick={() => { void openDriverReview(deliveryContact) }} className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
                             {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
                           </button>
                           {deliveryDriverName || sale.delivery_contact_id ? (
-                            <button type="button" disabled={driverSaving} onClick={() => { void applyDriverChange(null) }} className="rounded border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-50 dark:border-red-900 dark:text-red-300">
-                              {translateOr('remove_driver', 'Remove driver', 'ដកអ្នកដឹកជញ្ជូនចេញ')}
+                            <button type="button" disabled={driverSaving} onClick={() => { void openDriverReview(null) }} title={translateOr('remove_driver', 'Remove driver', 'ដកអ្នកដឹកជញ្ជូនចេញ')} aria-label={translateOr('remove_driver', 'Remove driver', 'ដកអ្នកដឹកជញ្ជូនចេញ')} className="rounded border border-red-200 px-2 py-1.5 text-red-700 disabled:opacity-50 dark:border-red-900 dark:text-red-300">
+                              <UserX className="h-3.5 w-3.5" aria-hidden="true" />
                             </button>
                           ) : null}
                         </div>
@@ -3228,6 +3264,25 @@ export default function SaleDetailModal({
               { label: t('total') || 'Total', value: fmtUSD(lineReviewConfirm.quote.total_usd) },
             ]} working={lineRecoveryBusy} onClose={() => { if (!lineRecoveryBusy) setLineReviewConfirm(null) }}
             onConfirm={() => { void retryLineMutationAndClose(lineReviewConfirm.kind, lineReviewConfirm.body, lineReviewConfirm) }} /> : null}
+          {driverConfirm ? (
+            <ConfirmDialog
+              t={t}
+              title={driverConfirm.target
+                ? translateOr('driver_change_title', 'Change the driver?', 'ប្ដូរអ្នកដឹកជញ្ជូន?')
+                : translateOr('driver_remove_title', 'Remove the driver?', 'ដកអ្នកដឹកជញ្ជូនចេញ?')}
+              message={sale.receipt_number ? `#${sale.receipt_number}` : undefined}
+              items={[
+                { label: translateOr('driver_before', 'Before', 'មុន'), value: driverLabel(sale.delivery_contact_name, sale.delivery_contact_phone) },
+                { label: translateOr('driver_after', 'After', 'ក្រោយ'), value: driverConfirm.target ? driverLabel(driverConfirm.target.name, driverConfirm.target.phone) : translateOr('no_driver', 'No driver', 'គ្មានអ្នកដឹកជញ្ជូន') },
+                ...(driverConfirm.expenseCount > 0 ? [{ label: translateOr('expense', 'Expense', 'ចំណាយ'), value: driverExpenseLine(driverConfirm.target, driverConfirm.expenseCount) }] : []),
+              ]}
+              note={translateOr('driver_change_note', 'Money and stock do not change. The delivery fee and courier cost now count for the new driver. The change is recorded and can be undone.', 'លុយ និងស្តុកមិនប្ដូរ។ ថ្លៃដឹក និងថ្លៃដឹកដើម នឹងរាប់ជូនអ្នកដឹកជញ្ជូនថ្មី។ ការកែត្រូវបានកត់ត្រា ហើយអាចត្រឡប់វិញបាន។')}
+              confirmLabel={translateOr('amend_confirm', 'Apply change', 'អនុវត្តការកែប្រែ')}
+              working={driverSaving}
+              onConfirm={() => applyDriverChange(driverConfirm.target)}
+              onClose={() => { if (!driverSaving) setDriverConfirm(null) }}
+            />
+          ) : null}
           {amendConfirm ? (
             <ConfirmDialog
               t={t}

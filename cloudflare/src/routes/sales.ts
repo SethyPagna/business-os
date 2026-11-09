@@ -2149,7 +2149,8 @@ app.post('/bulk-status', async (c) => {
 app.post('/bulk-update', async (c) => {
   try {
     const result = await applySaleBulkUpdate(c.env, c.get('user'), await c.req.json())
-    c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
+    // A preview wrote nothing: no cache bump, no broadcast.
+    if (!('preview' in result)) c.executionCtx.waitUntil(notifySaleBulkUpdate(c.env, result.action?.kind))
     return c.json(result)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
