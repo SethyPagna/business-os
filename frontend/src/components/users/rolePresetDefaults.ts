@@ -94,6 +94,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       'contacts:financial_history': false,
       contacts_suppliers: false,
       contacts_full_phone: false,
+      online_orders: true,
     },
   },
   {
@@ -142,6 +143,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       business_identity: true,
       sales_policy: true,
       receipt_settings: true,
+      online_orders: true,
     },
   },
   {

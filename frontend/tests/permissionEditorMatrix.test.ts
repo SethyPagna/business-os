@@ -310,12 +310,13 @@ await test('A8: no image-only route while Products is on; it appears with its fi
 })
 
 for (const [name, language] of [['English', en], ['Khmer', km]] as const) {
-  await test(`A9: the Employee ${name} grid at first paint stays within 70 buttons and 1,200 characters`, async () => {
+  await test(`A9: the Employee ${name} grid at first paint stays within 71 buttons and 1,200 characters`, async () => {
     const { surface } = await mountEditor(employee, { language, baseline: employee })
     const buttons = buttonCount(surface)
     const characters = surface.text().length
     console.log(`     ${name}: ${buttons} buttons, ${characters} visible characters`)
-    assert.ok(buttons <= 70, `${buttons} buttons`)
+    // 70 until the Online orders module row (KHQR, 9 Nov 2026) joined the closed list: one more row, nothing else.
+    assert.ok(buttons <= 71, `${buttons} buttons`)
     assert.ok(characters <= 1200, `${characters} characters`)
     assert.equal(surface.findAll((node) => node.getAttribute('data-perm-action') !== null).length, 0, 'no chip is drawn while the rows are closed')
     await surface.unmount()

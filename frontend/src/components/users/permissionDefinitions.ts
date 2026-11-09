@@ -403,6 +403,16 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    key: 'online_orders',
+    tKey: 'perm_section_online_orders',
+    label: 'Online orders',
+    description: 'Orders customers place and pay for on the website: see them, answer change and return requests, record refunds.',
+    permissions: [
+      // A plain Full / None grant read strictly (cloudflare/src/lib/onlineOrdersAccess.ts); no other key implies it. The chips narrow it.
+      { key: 'online_orders', tKey: 'perm_online_orders', label: 'Online orders', sensitivity: 'high' },
+    ],
+  },
+  {
     key: 'fees',
     tKey: 'perm_section_fees',
     label: 'Expenses',

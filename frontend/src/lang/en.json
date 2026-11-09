@@ -8093,5 +8093,13 @@
   "inventory_check_discard_counts_message": "The products you picked and the counts you typed will be cleared.",
   "perm_contacts_full_phone": "See full phone numbers",
   "perm_short_full_phone": "Full phones",
-  "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works."
+  "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works.",
+  "perm_section_online_orders": "Online orders",
+  "perm_section_online_orders_desc": "Orders customers place and pay for on the website: see them, answer change and return requests, record refunds.",
+  "perm_online_orders": "Online orders",
+  "perm_act_online_orders_view": "See online orders",
+  "perm_act_online_orders_decide": "Accept or reject customer requests",
+  "perm_act_online_orders_refund": "Record refunds",
+  "perm_short_decide": "Decide requests",
+  "perm_short_record_refund": "Record refunds"
 }

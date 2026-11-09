@@ -55,6 +55,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     business_identity: true,
     sales_policy: true,
     receipt_settings: true,
+    // Online orders (KHQR, migration 0293): staff see paid online orders, accept or reject a customer request and record a refund. Full = all three; an admin narrows with online_orders:decide / :refund.
+    online_orders: true,
   },
   employee: {
     pos: true,
@@ -122,5 +124,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     'contacts:financial_history': false,
     contacts_suppliers: false,
     contacts_full_phone: false,
+    // Owner, 9 Nov 2026: the front line handles online orders (view, decide a customer request, record a refund); an admin can narrow any of the three.
+    online_orders: true,
   },
 }

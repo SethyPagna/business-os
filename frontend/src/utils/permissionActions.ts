@@ -177,6 +177,13 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'check', tKey: 'perm_act_inventory_checks_check', label: 'Count and submit', shortTKey: 'perm_short_count', short: 'Count', review: 'block' },
   ],
 
+  // cloudflare/src/lib/onlineOrdersAccess.ts (the routes arrive with the storefront slices; the Worker reads these three through getOnlineOrderAccess)
+  online_orders: [
+    { key: 'view', tKey: 'perm_act_online_orders_view', label: 'See online orders', shortTKey: 'view', short: 'View', review: 'block' },
+    { key: 'decide', tKey: 'perm_act_online_orders_decide', label: 'Accept or reject customer requests', shortTKey: 'perm_short_decide', short: 'Decide requests', review: 'block' },
+    { key: 'refund', tKey: 'perm_act_online_orders_refund', label: 'Record refunds', shortTKey: 'perm_short_record_refund', short: 'Record refunds', review: 'block' },
+  ],
+
   // cloudflare/src/routes/branches.ts
   branches: [
     { key: 'view', tKey: 'perm_act_branches_view', label: 'View and search', shortTKey: 'view', short: 'View', review: 'allow' },

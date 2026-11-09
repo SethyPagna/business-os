@@ -302,7 +302,7 @@ test('chips: Inventory has no Count chip (counting is its own grant) and the sub
 
 test('switched-off and waiting-for-approval counts match the Employee preset and Review', () => {
   const counts = roleTierCounts(employee)
-  assert.deepEqual(counts, { none: 11, view: 0, review: 0, full: 5, off: 20 })
+  assert.deepEqual(counts, { none: 11, view: 0, review: 0, full: 6, off: 20 })
   assert.equal(moduleState(row('products'), employee).off, 13)
   assert.equal(moduleState(row('products'), state({ products: 'review' })).queued, 7, 'add, edit, delete, image, merge duplicates, price and supplier all wait for approval')
   assert.deepEqual(roleTierCounts(state({ all: true })), { none: 0, view: 0, review: 0, full: MODULE_ROWS.filter((entry) => !entry.sub).length, off: 0 })

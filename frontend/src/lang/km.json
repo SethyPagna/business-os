@@ -8093,5 +8093,13 @@
   "inventory_check_discard_counts_message": "ផលិតផលដែលអ្នកបានជ្រើស និងការរាប់ដែលអ្នកបានវាយនឹងត្រូវសម្អាត។",
   "perm_contacts_full_phone": "មើលលេខទូរស័ព្ទពេញ",
   "perm_short_full_phone": "លេខពេញ",
-  "perm_hint_full_phone": "បើគ្មានសិទ្ធិនេះ លេខទូរស័ព្ទបង្ហាញជា 012 *** 678 គ្រប់កន្លែង។ ស្វែងរកដោយលេខពេញនៅតែបាន។"
+  "perm_hint_full_phone": "បើគ្មានសិទ្ធិនេះ លេខទូរស័ព្ទបង្ហាញជា 012 *** 678 គ្រប់កន្លែង។ ស្វែងរកដោយលេខពេញនៅតែបាន។",
+  "perm_section_online_orders": "ការបញ្ជាទិញអនឡាញ",
+  "perm_section_online_orders_desc": "ការបញ្ជាទិញដែលអតិថិជនដាក់ និងបង់ប្រាក់លើគេហទំព័រ៖ មើល ឆ្លើយតបសំណើកែប្រែ និងសំណើប្រគល់មកវិញ ហើយកត់ត្រាការសងប្រាក់។",
+  "perm_online_orders": "ការបញ្ជាទិញអនឡាញ",
+  "perm_act_online_orders_view": "មើលការបញ្ជាទិញអនឡាញ",
+  "perm_act_online_orders_decide": "ទទួលយក ឬបដិសេធសំណើរបស់អតិថិជន",
+  "perm_act_online_orders_refund": "កត់ត្រាការសងប្រាក់",
+  "perm_short_decide": "សម្រេចសំណើ",
+  "perm_short_record_refund": "កត់ត្រាការសង"
 }
