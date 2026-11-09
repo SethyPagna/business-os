@@ -44,11 +44,13 @@ const fixtureSource = String.raw`
     9: { order: base({ id: 9, order_no: 'W261108H4D1', state: 'cancelled', revision: 9, fulfilment: 'delivery', customer_address: '12 Street 271, Phnom Penh' }), payments: [pay({ id: 3, state: 'paid' })], status: 'cancelled', chips: [],
       money: { paid_usd: 25, refunded_usd: 0, refund_due_usd: 25, balance_due_usd: 0 }, requests: [], events: [ev(1, 'created'), ev(2, 'verified_paid', { source: 'payway' }), ev(3, 'cancelled', { source: 'staff', actor_name: 'Sokha', internal_note: 'Duplicate order' })] },
   }
-  const row = (id, extra = {}) => { const o = store[id]?.order; return { id, order_no: o.order_no, state: o.state, fulfilment: o.fulfilment, customer_name: o.customer_name, customer_phone: o.customer_phone, goods_total_usd: o.goods_total_usd, created_at: o.created_at, paid_at: o.paid_at, sale_id: null, pending_requests: 0, held_review: 0, ...extra } }
+  const row = (id, extra = {}) => { const o = store[id]?.order; return { id, order_no: o.order_no, state: o.state, fulfilment: o.fulfilment, customer_name: o.customer_name, customer_phone: o.customer_phone, goods_total_usd: o.goods_total_usd, created_at: o.created_at, paid_at: o.paid_at, sale_id: null, pending_requests: 0, held_review: 0, refund_due: id === 9, refund_due_usd: id === 9 ? 25 : 0, ...extra } }
   const lists = {
     first: () => ({ rows: [row(7, { pending_requests: 1 }), row(8, { held_review: 1 }), row(9)], next_cursor: '2026-11-08 03:00:00.000|9', page_size: 3 }),
     second: () => ({ rows: [{ ...row(9), id: 4, order_no: 'W261107A1B2', state: 'fulfilled', customer_name: 'Older Buyer' }], next_cursor: null, page_size: 3 }),
     review: () => ({ rows: [row(8, { held_review: 1 })], next_cursor: null, page_size: 3 }),
+    requests: () => ({ rows: [row(7, { pending_requests: 1 })], next_cursor: null, page_size: 3 }),
+    refund_due: () => ({ rows: [row(9)], next_cursor: null, page_size: 3 }),
   }
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   setSyncServerUrl('https://sync.example.test')
@@ -63,7 +65,15 @@ const fixtureSource = String.raw`
     if (method === 'GET' && parts.length === 2) {
       const filter = url.searchParams.get('filter'); const cursor = url.searchParams.get('cursor')
       if (params.get('empty') === '1') return json({ rows: [], next_cursor: null, page_size: 3 })
-      return json(cursor ? lists.second() : filter === 'review' ? lists.review() : lists.first())
+      const q = url.searchParams.get('q')
+      if (q) {
+        const phone = /^[\d+\s\-.()]+$/.test(q); const size = phone ? q.replace(/\D/g, '').length : q.replace(/[\s-]/g, '').length
+        if (size < 3) return json({ error: 'short', code: 'search_too_short' }, 400)
+        const all = [row(7), row(8), row(9)]
+        const wanted = q.replace(/[\s-]/g, '').toLowerCase()
+        return json({ rows: all.filter((x) => (phone ? x.customer_phone.replace(/\D/g, '').startsWith(q.replace(/\D/g, '')) : x.order_no.toLowerCase().startsWith(wanted))), next_cursor: null, page_size: 3 })
+      }
+      return json(cursor ? lists.second() : lists[filter] ? lists[filter]() : lists.first())
     }
     const id = Number(parts[2]); const rec = store[id]
     if (method === 'GET' && rec) return json(rec)
@@ -125,6 +135,7 @@ async function listScenario() {
   assert.match(rowsText[0], /W261109K7Q2.*To fulfil.*Request/, 'a paid order with an unanswered request wears both chips')
   assert.match(rowsText[1], /Needs review/, 'a held payment is flagged on the list')
   assert.match(rowsText[0], /Sample Buyer.*\*\*\* 678.*Pickup/s)
+  assert.match(rowsText[2], /Cancelled.*Refund due/, 'a cancelled order that still owes the customer money says so on the list')
   assert.deepEqual((await calls())[0].search, '?filter=attention', 'the screen opens on what needs a person')
   // filter
   await clickButton('Needs review', `document.querySelector('.chip-rail')`)
@@ -134,13 +145,38 @@ async function listScenario() {
   await clickButton('To do', `document.querySelector('.chip-rail')`)
   await pause(150)
   assert.equal(await evaluate<number>(`document.querySelectorAll('[data-online-order-row]').length`), 3)
-  // search is over the page shown, and says so
-  assert.match(await evaluate<string>('document.body.innerText'), /Looks through the orders on this page\. Use Next to look further back\./)
-  await typeInto('#oo-search', 'm2p5')
+  // the two newer chips ask the Worker for their own filter
+  await clickButton('Requests', `document.querySelector('.chip-rail')`)
+  await pause(150)
+  assert.equal((await calls()).pop()!.search, '?filter=requests')
+  await clickButton('Refund due', `document.querySelector('.chip-rail')`)
+  await pause(150)
+  assert.equal((await calls()).pop()!.search, '?filter=refund_due')
+  assert.match(await evaluate<string>(`document.querySelector('[data-online-order-row]').innerText`), /W261108H4D1/)
+  await clickButton('To do', `document.querySelector('.chip-rail')`)
+  await pause(150)
+  // search asks the Worker, once typing pauses and the text is long enough; it spans every state, so no chip is selected while it shows
+  assert.doesNotMatch(await evaluate<string>('document.body.innerText'), /this page|Use Next to look further back/, 'no notice that search covers only one page')
+  const before = (await calls()).length
+  await typeInto('#oo-search', 'm2')
+  await pause(600)
+  assert.equal((await calls()).length, before, 'two characters ask nothing')
+  assert.match(await evaluate<string>('document.body.innerText'), /Type at least 3 letters or digits to search\./)
+  await typeInto('#oo-search', 'w261109m')
+  await pause(700)
+  assert.equal((await calls()).pop()!.search, '?q=w261109m', 'the search carries no filter')
   assert.equal(await evaluate<number>(`document.querySelectorAll('[data-online-order-row]').length`), 1)
+  assert.equal(await evaluate<number>(`document.querySelectorAll('.chip-rail [aria-pressed="true"], .chip-rail [aria-selected="true"], .chip-rail [aria-current="true"]').length`), 0, 'no chip claims to be the view during a search')
+  await typeInto('#oo-search', '678')
+  await pause(700)
+  assert.equal((await calls()).pop()!.search, '?q=678')
   await typeInto('#oo-search', 'nothing like this')
-  assert.match(await evaluate<string>('document.body.innerText'), /No order on this page matches\./)
+  await pause(700)
+  assert.match(await evaluate<string>('document.body.innerText'), /No order matches\./)
   await typeInto('#oo-search', '')
+  await pause(700)
+  assert.equal((await calls()).pop()!.search, '?filter=attention', 'clearing the search returns to the chip that was open')
+  assert.equal(await evaluate<number>(`document.querySelectorAll('[data-online-order-row]').length`), 3)
   // paging
   assert.match(await evaluate<string>('document.body.innerText'), /Page 1/)
   await clickButton('Next')

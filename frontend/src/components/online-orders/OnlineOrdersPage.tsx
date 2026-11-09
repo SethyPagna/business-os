@@ -19,7 +19,7 @@ import {
   applyOnlineOrderRequest, cancelOnlineOrder, decideOnlineOrderRequest, getOnlineOrder, listOnlineOrders, noteOnlineOrder, noteOnlineOrderRefund, recheckOnlineOrder, resolveOnlineOrder,
 } from './onlineOrdersApi.ts'
 import {
-  DEFAULT_ORDER_FILTER, FIRST_PAGE, FULFIL_HANDOFF_KEY, FULFIL_OPENS_POS, ORDER_FILTERS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, itemLine, matchesOrderQuery,
+  DEFAULT_ORDER_FILTER, FIRST_PAGE, FULFIL_HANDOFF_KEY, FULFIL_OPENS_POS, ORDER_FILTERS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, itemLine, SEARCH_MAX, searchState,
   nextTrail, noteBody, orderAccess, pageNumber, parseItems, previousTrail, refundBody, refundProblem, requestChanges, requestCanBeApplied, requestIsPending, resolveBody, rowChips,
   stateChip, staffMessage, type OrderAccess, type OrderChip, type OrderFilter, type PageTrail, type RequestChange, type StaffOrderDetail, type StaffOrderPage, type StaffOrderRow, type StaffRequest,
 } from './onlineOrdersLogic.ts'
@@ -69,6 +69,8 @@ function filterLabel(tt: Tx, filter: OrderFilter): string {
     case 'attention': return tt('oo_filter_attention', 'To do')
     case 'paid': return tt('oo_filter_paid', 'To fulfil')
     case 'review': return tt('oo_filter_review', 'Needs review')
+    case 'requests': return tt('oo_filter_requests', 'Requests')
+    case 'refund_due': return tt('oo_filter_refund_due', 'Refund due')
     case 'awaiting_payment': return tt('oo_filter_not_paid', 'Not paid yet')
     case 'fulfilled': return tt('oo_filter_fulfilled', 'Fulfilled')
     case 'expired': return tt('oo_filter_expired', 'Expired')
@@ -91,16 +93,20 @@ export default function OnlineOrdersPage({ embedded = false }: { embedded?: bool
   const [page, setPage] = useState<StaffOrderPage | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState<string | null>(null)
+  const [typed, setTyped] = useState('')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<number | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
+  const search = searchState(query)
+  const searching = search.kind === 'ok'
+  const searchKey = search.kind === 'ok' ? search.q : ''
 
   useEffect(() => {
     if (!access.canView) return undefined
     const controller = new AbortController()
     setLoading(true)
     setFailed(null)
-    listOnlineOrders(filter, currentCursor(trail), controller.signal)
+    listOnlineOrders(filter, searching ? search.q : null, currentCursor(trail), controller.signal)
       .then((answer) => { if (!controller.signal.aborted) { setPage(answer); setLoading(false) } })
       .catch((error: { code?: unknown; name?: string }) => {
         if (controller.signal.aborted || error?.name === 'AbortError') return
@@ -108,11 +114,16 @@ export default function OnlineOrdersPage({ embedded = false }: { embedded?: bool
         setLoading(false)
       })
     return () => controller.abort()
-  }, [access.canView, filter, trail, reloadTick])
+  }, [access.canView, filter, trail, reloadTick, searchKey])
 
-  const changeFilter = (next: OrderFilter) => { setFilter(next); setTrail(FIRST_PAGE); setQuery('') }
+  // The box asks the Worker once typing pauses; a new search starts again at page 1.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setQuery((current) => { if (current !== typed) setTrail(FIRST_PAGE); return typed }) }, 350)
+    return () => window.clearTimeout(timer)
+  }, [typed])
+  const changeFilter = (next: OrderFilter) => { setFilter(next); setTrail(FIRST_PAGE); setTyped(''); setQuery('') }
   const refresh = () => setReloadTick((n) => n + 1)
-  const rows = useMemo(() => (page?.rows ?? []).filter((row) => matchesOrderQuery(row, query)), [page, query])
+  const rows = useMemo(() => page?.rows ?? [], [page])
 
   if (!access.canView) {
     return <div className="p-6"><EmptyState icon={<Inbox />} title={staffMessage(tt, 'forbidden')} /></div>
@@ -124,7 +135,7 @@ export default function OnlineOrdersPage({ embedded = false }: { embedded?: bool
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <ChipRail label={tt('oo_filters_label', 'Show orders')}>
-              {ORDER_FILTERS.map((id) => <RailChip key={id} selected={filter === id} onClick={() => changeFilter(id)}>{filterLabel(tt, id)}</RailChip>)}
+              {ORDER_FILTERS.map((id) => <RailChip key={id} selected={!searching && filter === id} onClick={() => changeFilter(id)}>{filterLabel(tt, id)}</RailChip>)}
             </ChipRail>
           </div>
           <Button variant="ghost" size="sm" onClick={refresh} aria-label={tt('oo_refresh', 'Refresh')} title={tt('oo_refresh', 'Refresh')} icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />} />
@@ -136,11 +147,12 @@ export default function OnlineOrdersPage({ embedded = false }: { embedded?: bool
             type="search"
             inputMode="search"
             autoComplete="off"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            value={typed}
+            maxLength={SEARCH_MAX}
+            onChange={(event) => setTyped(event.target.value)}
             className="mt-1 min-h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm leading-6 text-slate-900 dark:border-white/20 dark:bg-neutral-900 dark:text-neutral-100"
           />
-          <p className="mt-1 text-xs leading-6 text-slate-500 dark:text-neutral-400">{tt('oo_search_hint', 'Looks through the orders on this page. Use Next to look further back.')}</p>
+          {searchState(typed).kind === 'short' ? <p className="mt-1 text-xs leading-6 text-slate-500 dark:text-neutral-400">{tt('oo_search_short', 'Type at least 3 letters or digits to search.')}</p> : null}
         </div>
       </div>
 
@@ -157,8 +169,8 @@ export default function OnlineOrdersPage({ embedded = false }: { embedded?: bool
             rows.length === 0 ? (
               <EmptyState
                 icon={<Inbox />}
-                title={query ? tt('oo_no_match', 'No order on this page matches.') : tt('oo_empty_title', 'No orders here')}
-                text={query ? undefined : tt('oo_empty_text', 'Orders that customers pay for on the website appear here.')}
+                title={searching ? tt('oo_no_match', 'No order matches.') : tt('oo_empty_title', 'No orders here')}
+                text={searching ? undefined : tt('oo_empty_text', 'Orders that customers pay for on the website appear here.')}
               />
             ) : (
               <ul className="space-y-2" aria-busy={loading || undefined}>

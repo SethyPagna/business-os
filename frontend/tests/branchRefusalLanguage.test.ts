@@ -89,7 +89,7 @@ const WORKER_SENTENCE_CODES: Record<string, [string, string] | [string, string, 
 // idempotency_conflict is the one restated code that is NOT one Worker sentence: about fifteen sentences across sales, returns, expenses,
 // transfers and stock carry it, so its pack text is a single operator-language sentence for the class (checked below).
 // return_export_range_invalid / return_export_ids_invalid: the Worker words each refusal differently (six range sentences, one ids sentence with the limit in it), so the pack carries one operator-language sentence per code.
-const SHARED_CODES = ['idempotency_conflict', 'money_precision_review_needed', 'return_export_range_invalid', 'return_export_ids_invalid']
+const SHARED_CODES = ['idempotency_conflict', 'money_precision_review_needed', 'return_export_range_invalid', 'return_export_ids_invalid', 'online_refund_noted', 'linked_sale_money_locked', 'online_method_requires_order']
 CODES.push(...Object.keys(WORKER_SENTENCE_CODES), ...SHARED_CODES)
 
 await runTest('return money and supplier refusals carry the Worker sentence as English and a real Khmer pair', async () => {

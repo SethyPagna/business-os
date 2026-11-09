@@ -8,7 +8,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  FIRST_PAGE, ORDER_FILTERS, STAFF_ERROR_FALLBACK, STAFF_ERROR_KEYS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, matchesOrderQuery, nextTrail, noteBody,
+  FIRST_PAGE, ORDER_FILTERS, SEARCH_MAX, searchState, STAFF_ERROR_FALLBACK, STAFF_ERROR_KEYS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, nextTrail, noteBody,
   orderAccess, pageNumber, previousTrail, refundBody, refundProblem, requestCanBeApplied, requestChanges, resolveBody, rowChips, staffErrorKey, staffMessage, stateChip,
   type StaffOrderDetail,
 } from '../src/components/online-orders/onlineOrdersLogic.ts'
@@ -33,7 +33,7 @@ test('each state wears its own chip, and a request or a held payment adds one wi
 
 test('the filters are exactly the ones the Worker answers, with what needs a person first', () => {
   // CATCHES: a chip that asks for a filter the Worker would treat as "attention" without saying so.
-  assert.deepEqual([...ORDER_FILTERS], ['attention', 'paid', 'review', 'awaiting_payment', 'fulfilled', 'expired', 'qr_failed', 'cancelled', 'all'])
+  assert.deepEqual([...ORDER_FILTERS], ['attention', 'paid', 'review', 'requests', 'refund_due', 'awaiting_payment', 'fulfilled', 'expired', 'qr_failed', 'cancelled', 'all'])
   const worker = path.join(here, '..', '..', 'cloudflare', 'src', 'lib', 'onlineOrderStaff.ts')
   if (fs.existsSync(worker)) {
     const list = /LIST_FILTERS = \[([^\]]*)\]/.exec(fs.readFileSync(worker, 'utf8'))?.[1] ?? ''
@@ -42,18 +42,25 @@ test('the filters are exactly the ones the Worker answers, with what needs a per
   }
 })
 
-test('search finds an order by any part of its number, by phone digits (masked too) or by name, and an empty search finds everything', () => {
-  // CATCHES: a case-sensitive number match, a phone search that needs the whole number when only the last digits are shown, and one that matches every row on "0".
-  const r = { order_no: 'W261109K7Q2', customer_phone: '*** 678', customer_name: 'Sample Buyer' }
-  assert.equal(matchesOrderQuery(r, ''), true)
-  assert.equal(matchesOrderQuery(r, 'k7q'), true)
-  assert.equal(matchesOrderQuery(r, '261109'), true)
-  assert.equal(matchesOrderQuery(r, '678'), true)
-  assert.equal(matchesOrderQuery({ ...r, customer_phone: '012 345 678' }, '345 6'), true)
-  assert.equal(matchesOrderQuery(r, '999'), false)
-  assert.equal(matchesOrderQuery(r, '8'), false, 'one digit is not a phone search')
-  assert.equal(matchesOrderQuery(r, 'sample'), true)
-  assert.equal(matchesOrderQuery(r, 'zzz'), false)
+test('search waits for enough text, reads phone text by its digits and order numbers by their characters, and never exceeds the Worker limit', () => {
+  // CATCHES: asking the Worker on one keystroke (it refuses with search_too_short), counting "+855 1" as long enough because of its punctuation, and an order number counted with its dashes.
+  assert.deepEqual(searchState(''), { kind: 'none' })
+  assert.deepEqual(searchState('   '), { kind: 'none' })
+  assert.deepEqual(searchState('01'), { kind: 'short' })
+  assert.deepEqual(searchState('+8 5'), { kind: 'short' }, 'three digits are needed, not three characters')
+  assert.deepEqual(searchState('(012) 345'), { kind: 'ok', q: '(012) 345' })
+  assert.deepEqual(searchState('W2'), { kind: 'short' })
+  assert.deepEqual(searchState('w - 2'), { kind: 'short' }, 'spaces and dashes do not count toward the three')
+  assert.deepEqual(searchState('  W2611 '), { kind: 'ok', q: 'W2611' })
+  assert.equal((searchState('x'.repeat(80)) as { q: string }).q.length, SEARCH_MAX)
+})
+
+test('a list row wears Refund due when the Worker says money is owed back, and not otherwise', () => {
+  // CATCHES: reading refund_due_usd instead of the flag (0 for orders that never took money), and a chip on an order whose refund is complete.
+  const base = { state: 'cancelled', pending_requests: 0, held_review: 0 }
+  assert.deepEqual(rowChips({ ...base, refund_due: true }).map((c) => c.id), ['cancelled', 'refund_due'])
+  assert.deepEqual(rowChips({ ...base, refund_due: false }).map((c) => c.id), ['cancelled'])
+  assert.deepEqual(rowChips(base).map((c) => c.id), ['cancelled'])
 })
 
 test('Previous and Next walk keyset cursors without ever losing the first page', () => {
@@ -165,4 +172,18 @@ test('every refusal code the Worker staff routes can answer has a sentence key, 
   assert.equal(staffMessage(tt, 'order_changed'), 'PACK TEXT', 'the pack wins over the fallback')
   assert.equal(staffMessage(tt, 'refund_over_due'), STAFF_ERROR_FALLBACK.oo_err_refund_over_due)
   assert.equal(staffMessage(tt, 'nonsense'), STAFF_ERROR_FALLBACK.oo_err_generic)
+})
+
+test('the bell anchor the Worker sends for an online order opens the Orders section of Sales', async () => {
+  // CATCHES: a bell row (pageId sales, anchor hub:sales:orders) that lands on the Sales list, because the hub does not recognise the section.
+  const { hubAnchor, getHubPageFromLocation, resolveHubSection } = await import('../src/components/shared/hubNavigation.ts')
+  const { getHubDestinations } = await import('../src/components/shared/hubDestinations.ts')
+  assert.equal(hubAnchor('sales', 'orders'), 'hub:sales:orders')
+  assert.equal(getHubPageFromLocation('/', '#hub:sales:orders'), 'sales')
+  const everything = { getPermissionTier: () => 'full', hasPermission: () => true, can: () => true }
+  const ids = getHubDestinations('sales', everything).map((d) => d.id)
+  assert.ok(ids.includes('orders'))
+  assert.equal(resolveHubSection('sales', '/sales', '#hub:sales:orders', ids, 'sales'), 'orders')
+  const viewOnly = { ...everything, can: (key: string) => key === 'online_orders' }
+  assert.deepEqual(getHubDestinations('sales', viewOnly).map((d) => d.id), ['orders'], 'online_orders view alone shows the Orders section and nothing else')
 })

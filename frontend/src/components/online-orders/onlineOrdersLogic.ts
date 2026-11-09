@@ -5,7 +5,7 @@
 // ---- the list -----------------------------------------------------------------------------------------------------------------
 
 /** The filters the Worker's list answers (lib/onlineOrderStaff.ts LIST_FILTERS), in the order staff meet them: what needs a person first. */
-export const ORDER_FILTERS = ['attention', 'paid', 'review', 'awaiting_payment', 'fulfilled', 'expired', 'qr_failed', 'cancelled', 'all'] as const
+export const ORDER_FILTERS = ['attention', 'paid', 'review', 'requests', 'refund_due', 'awaiting_payment', 'fulfilled', 'expired', 'qr_failed', 'cancelled', 'all'] as const
 export type OrderFilter = (typeof ORDER_FILTERS)[number]
 export const DEFAULT_ORDER_FILTER: OrderFilter = 'attention'
 export const isOrderFilter = (value: unknown): value is OrderFilter => (ORDER_FILTERS as readonly string[]).includes(String(value))
@@ -23,6 +23,9 @@ export type StaffOrderRow = {
   sale_id: number | null
   pending_requests: number
   held_review: number
+  /** The Worker's own money read: the customer was refunded less than they are owed (orders from the last 32 days only). */
+  refund_due?: boolean
+  refund_due_usd?: number
 }
 export type StaffOrderPage = { rows: StaffOrderRow[]; next_cursor: string | null; page_size: number }
 
@@ -45,28 +48,32 @@ export function stateChip(state: string): OrderChip {
 
 /**
  * Every chip one list row wears: its state, plus "Requests" while a customer's request is unanswered and "Needs review" while a payment is held, even when the state says
- * paid (a mismatched top-up). A refund due is not in the list answer (it is money read from payments), so it shows on the order itself.
+ * paid (a mismatched top-up), and "Refund due" while the customer is still owed money back.
  */
-export function rowChips(row: Pick<StaffOrderRow, 'state' | 'pending_requests' | 'held_review'>): OrderChip[] {
+export function rowChips(row: Pick<StaffOrderRow, 'state' | 'pending_requests' | 'held_review'> & { refund_due?: boolean }): OrderChip[] {
   const chips = [stateChip(row.state)]
   if (Number(row.pending_requests) > 0) chips.push({ id: 'requests', tone: 'todo', count: Number(row.pending_requests) })
   if (Number(row.held_review) > 0 && row.state !== 'review') chips.push({ id: 'needs_review', tone: 'warn' })
+  if (row.refund_due === true) chips.push({ id: 'refund_due', tone: 'warn' })
   return chips
 }
 
 const digits = (value: unknown): string => String(value ?? '').replace(/\D/g, '')
 
 /**
- * Search over the rows already loaded: the order number (any part, any case) or the phone (any run of digits; a masked number is searched by the digits that are shown).
- * The Worker has no search parameter yet, so this never claims to search older pages.
+ * What the search box asks the Worker (GET /api/online-orders?q=): an order-number prefix, or a phone prefix when the text is only digits and phone punctuation. The Worker
+ * refuses fewer than 3 digits (phone) or 3 characters (order number) with search_too_short and more than 40 with search_invalid, so the screen asks nothing until the
+ * text is long enough and tells the person why, instead of showing an error for every first keystroke. A search spans every state; it is not narrowed by a chip.
  */
-export function matchesOrderQuery(row: Pick<StaffOrderRow, 'order_no' | 'customer_phone' | 'customer_name'>, query: string): boolean {
-  const q = String(query ?? '').trim()
-  if (!q) return true
-  if (String(row.order_no ?? '').toLowerCase().includes(q.toLowerCase())) return true
-  const wanted = digits(q)
-  if (wanted.length >= 2 && digits(row.customer_phone).includes(wanted)) return true
-  return String(row.customer_name ?? '').toLowerCase().includes(q.toLowerCase())
+export const SEARCH_MIN = 3
+export const SEARCH_MAX = 40
+export type SearchState = { kind: 'none' } | { kind: 'short' } | { kind: 'ok'; q: string }
+export function searchState(raw: unknown): SearchState {
+  const q = String(raw ?? '').trim().slice(0, SEARCH_MAX)
+  if (!q) return { kind: 'none' }
+  const phoneLike = /^[\d+\s\-.()]+$/.test(q)
+  const size = phoneLike ? digits(q).length : q.replace(/[\s-]/g, '').length
+  return size >= SEARCH_MIN ? { kind: 'ok', q } : { kind: 'short' }
 }
 
 /** Keyset pages walked with Previous / Next: the cursor that opens each page (the first is null). Going on pushes the Worker's `next_cursor`, going back pops. */
@@ -268,6 +275,12 @@ export const STAFF_ERROR_KEYS: Readonly<Record<string, string>> = {
   reason_invalid: 'oo_err_text_too_long',
   reference_invalid: 'oo_err_text_too_long',
   cursor_invalid: 'oo_err_cursor',
+  search_too_short: 'oo_err_search_short',
+  search_invalid: 'oo_err_search_invalid',
+  // Sales-side refusals that concern an online order's money (cloudflare/src/lib/onlineOrderFulfil.ts, productStockGuard.ts); their pack keys are the codes themselves.
+  online_refund_noted: 'online_refund_noted',
+  linked_sale_money_locked: 'linked_sale_money_locked',
+  online_method_requires_order: 'online_method_requires_order',
   payway_not_configured: 'oo_err_payway',
 }
 export const staffErrorKey = (code: unknown): string => STAFF_ERROR_KEYS[String(code ?? '')] ?? 'oo_err_generic'
@@ -293,6 +306,11 @@ export const STAFF_ERROR_FALLBACK: Readonly<Record<string, string>> = {
   oo_err_note_required: 'Write the note first.',
   oo_err_text_too_long: 'That text is too long. Shorten it and try again.',
   oo_err_cursor: 'That page marker is not valid. Reload the list.',
+  oo_err_search_short: 'Type at least 3 digits of the phone number or 3 characters of the order number.',
+  oo_err_search_invalid: 'That search is too long.',
+  online_refund_noted: 'This sale was cancelled and its online payment was refunded through ABA, so it cannot be reopened. Ring a new sale instead.',
+  linked_sale_money_locked: 'This sale fulfilled an online order, so its online payment cannot be changed or relabelled. Only settle what is still owed.',
+  online_method_requires_order: 'The online payment method is only for fulfilling an online order. Use another payment method for a normal sale.',
   oo_err_payway: 'Online payment is not set up on this server.',
 }
 /** The sentence for a staff refusal code, in the staff language (`tt` is the pack lookup with its English fallback). */

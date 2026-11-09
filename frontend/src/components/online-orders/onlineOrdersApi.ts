@@ -8,8 +8,9 @@ import type { OrderFilter, StaffOrderDetail, StaffOrderPage } from './onlineOrde
 const base = '/api/online-orders'
 const orderPath = (id: number) => `${base}/${encodeURIComponent(String(id))}`
 
-export const listOnlineOrders = (filter: OrderFilter, cursor: string | null, signal?: AbortSignal): Promise<StaffOrderPage> =>
-  apiFetch('GET', appendQuery(base, buildQueryString({ filter, cursor })), undefined, undefined, { signal })
+/** A search (`q`) spans every state, so it is sent without a filter; a chip is sent without a search. */
+export const listOnlineOrders = (filter: OrderFilter | null, q: string | null, cursor: string | null, signal?: AbortSignal): Promise<StaffOrderPage> =>
+  apiFetch('GET', appendQuery(base, buildQueryString({ filter: q ? null : filter, q, cursor })), undefined, undefined, { signal })
 
 export const getOnlineOrder = (id: number, signal?: AbortSignal): Promise<StaffOrderDetail> =>
   apiFetch('GET', orderPath(id), undefined, undefined, { signal })

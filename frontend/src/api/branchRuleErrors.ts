@@ -113,6 +113,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   return_export_maintenance: 'return_export_maintenance',
   return_export_range_invalid: 'return_export_range_invalid',
   return_export_ids_invalid: 'return_export_ids_invalid',
+  // KHQR online orders (cloudflare/src/lib/productStockGuard.ts, onlineOrderFulfil.ts): one class sentence each; the Worker's own sentences differ by route (the method name is interpolated).
+  online_refund_noted: 'online_refund_noted',
+  linked_sale_money_locked: 'linked_sale_money_locked',
+  online_method_requires_order: 'online_method_requires_order',
   return_export_cursor_invalid: 'return_export_cursor_invalid',
   return_cancel_exchange_change: 'return_cancel_exchange_change',
   return_exchange_line_no_lot: 'return_exchange_line_no_lot',
