@@ -25,6 +25,8 @@ export const FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = [
   'promotions',
   'roles',
   'pendingActions',
+  // Online orders (KHQR): every committed order change broadcasts here (lib/onlineOrderAlerts.ts announceOrderChange).
+  'onlineOrders',
 ] as const
 
 // A push from another device reaches the page as websocket.ts's { channel, payload }. Every local

@@ -726,7 +726,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // decisions (routes/devices.ts) -- previously missing even though
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
+    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings', 'onlineOrders'].includes(syncChannel.channel)) {
       const plan = planThrottledSyncReload(
         syncChannel.channel,
         Date.now() - lastSummaryLoadAtRef.current,

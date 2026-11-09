@@ -32,6 +32,7 @@ export const DEFAULT_REFRESH_CHANNELS = [
   'promotions',
   'roles',
   'pendingActions',
+  'onlineOrders',
 ]
 
 type RefreshDetail = Record<string, unknown>
