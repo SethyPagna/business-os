@@ -35,7 +35,12 @@ export type InventoryCheckProduct = {
   check_set_to?: number | null
   check_seen_quantity?: number | null
   last_change_at?: string | null
+  /** ic_wired rows with received dates: the dates this branch holds, oldest expiry first. */
+  lot_rows?: InventoryCheckLotRow[]
 }
+
+/** One received date held at the listed branch (ic_lot_counts): the figure a count per date is typed against. */
+export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number }
 
 export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'
 

@@ -7,6 +7,7 @@
 // Both answer 404 while the switch is off; the page then keeps today's list (`not_wired`). Pure functions only, so the open sequence can be tested without a browser.
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
+import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from '../../api/stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
 type Row = Record<string, unknown> & { id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
@@ -19,7 +20,7 @@ export type OverlayEntry = {
   pending?: true
 }
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
-export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean } }
+export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean } }
 export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; wired?: boolean; projected?: boolean } & WiredExtras
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[] }> } & WiredExtras
 
@@ -110,6 +111,14 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     if (overlay?.pending) product.check_pending = true
   }
   if (overlay) product.last_change_at = overlay.last_change_at
+  // The received dates this branch holds, for a count typed per date (ic_lot_counts). Nothing is read for them: the rows already carry the lots.
+  if (branchId && lots?.length) {
+    const held = lots.flatMap(lot => {
+      const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
+      return at && Number(at.quantity ?? 0) > 0 && Number(lot.id) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
+    })
+    if (held.length) product.lot_rows = held
+  }
   return product
 }
 
@@ -123,7 +132,8 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
   }
   // The check counts come with the answers that carry them (page 1 and a filter change); a page step or a Products-held answer keeps the last ones.
   const incoming = raw.extras.summary, last = previous?.summary
-  const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0 } : undefined
+  const summary = incoming || last ? { not_checked: incoming?.not_checked ?? last?.not_checked ?? 0, in_check: 0, ok: incoming?.ok ?? last?.ok ?? 0, issue: incoming?.issue ?? last?.issue ?? 0, total: incoming?.total ?? last?.total ?? 0,
+    ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}) } : undefined
   return {
     wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages,
     branches: raw.branches, ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
@@ -246,6 +256,18 @@ export function mergeWiredRows(raw: WiredRaw, fresh: Awaited<ReturnType<typeof r
   for (const entry of fresh.lots) lots.set(Number(entry.product_id), entry.lots ?? [])
   return { ...raw, overlay, lots, list: { ...raw.list, items: raw.list.items.map(row => byId.get(Number(row.id)) ?? row),
     tagged_lots: [...(raw.list.tagged_lots ?? []).filter(group => !taggedIds.has(Number(group.product_id))), ...fresh.tagged] } }
+}
+
+/**
+ * The raw answers after a Set from the row: the row and its received dates take the writer's own figures (an answer, or the figures a stale-quantity refusal carries),
+ * so the page shows them with no read at all. The same patch the Products page applies; the row is rebuilt from the patched raw, never re-asked.
+ */
+export function patchWiredRaw(raw: WiredRaw, answer: StockWriteAnswer | StockConflictAnswer): WiredRaw {
+  const apply = <T extends Parameters<typeof patchProductFromStockAnswer>[0]>(row: T): T => 'after' in answer ? patchProductFromStockAnswer(row, answer) : patchProductFromStockConflict(row, answer)
+  const lots = new Map(raw.lots)
+  const held = lots.get(answer.productId)
+  if (held) lots.set(answer.productId, (apply({ id: answer.productId, lots: held }).lots ?? held) as Lot[])
+  return { ...raw, lots, list: { ...raw.list, items: raw.list.items.map(row => Number(row.id) === answer.productId ? apply(row) : row) } }
 }
 
 // ---- which server this is ----------------------------------------------------------------------------------------------------------------------------------

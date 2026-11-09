@@ -3,6 +3,7 @@ import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed.js'
 import Clock from 'lucide-react/dist/esm/icons/clock.js'
+import Save from 'lucide-react/dist/esm/icons/save.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
@@ -13,12 +14,13 @@ import { PendingReviewMark } from '../shared/PendingReviewTag.tsx'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
-import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import { lotCountOf, lotTotals, rowSetPlan, type LotDraft } from './inventoryCheckLots.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 
 /** What a person has entered on one row of the list but not yet submitted. `checked`: the count was filled from Now by the row's check button. */
-export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string }
+export type ListDraft = { selected: boolean; count: string; checked: boolean; note: string; /** Counts typed per received date (ic_lot_counts); the row's count is their sum. */ lots?: LotDraft }
 export type ListDrafts = Readonly<Record<string, ListDraft | undefined>>
 
 const makeTr = (t: InventoryCheckTranslator) => (key: string, fallback: string) => {
@@ -120,6 +122,11 @@ export type InventoryCheckListRowsProps = {
   onCount: (product: InventoryCheckProduct, value: string) => void
   onChecked: (product: InventoryCheckProduct) => void
   onNote: (product: InventoryCheckProduct, value: string) => void
+  /** ic_lot_counts: a picked row lists the received dates it holds, a count box on each. Absent: the list is exactly what it was. */
+  lotCounts?: boolean
+  onLotCount?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => void
+  /** Full stock adjusters: a Set button beside a typed date count that differs from stock. */
+  onLotSet?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => void
 }
 
 type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focusRequest' | 'adornments'> & {
@@ -134,14 +141,18 @@ type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focus
   onAdvance: (id: InventoryCheckId) => void
 }
 
-function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered }: RowProps) {
+function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered, lotCounts = false, onLotCount, onLotSet }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
   const selected = counting && draft?.selected === true
   const entry = parseCount(draft?.count ?? '')
   const stockKnown = canViewStock && finiteQuantity(product.quantity)
-  const differs = stockKnown && entry.kind === 'valid' && entry.value !== product.quantity
+  // A count typed on received dates is measured against what those dates showed, not against the whole branch.
+  const dated = lotCounts && lotTotals(draft?.lots).dates > 0
+  const baseline = dated ? lotTotals(draft?.lots).seen : product.quantity
+  const lotRows = lotCounts && counting && selected && canViewStock ? product.lot_rows ?? [] : []
+  const differs = stockKnown && entry.kind === 'valid' && entry.value !== baseline
   const status = listStatus(product.check_status)
   const wants = (field: ListField) => columns.includes(field)
   const nowText = stockKnown ? String(product.quantity) : ''
@@ -219,7 +230,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
           })}
           {selecting && !countable ? <span aria-hidden="true" data-cell="count-input" className={`hidden lg:block ${CELL_BOX.count} lg:shrink-0`} /> : null}
           {counting ? <span data-cell="count-input" className={`inline-flex w-full items-center gap-1 lg:w-auto lg:justify-end ${CELL_BOX.count} lg:shrink-0`}>
-            <input data-check-count type="text" inputMode="decimal" autoComplete="off" value={draft?.count ?? ''} readOnly={locked} placeholder={nowText} aria-label={countLabel} aria-invalid={entry.kind === 'invalid' ? true : undefined}
+            <input data-check-count type="text" inputMode="decimal" autoComplete="off" value={draft?.count ?? ''} readOnly={locked || dated} placeholder={nowText} aria-label={countLabel} aria-invalid={entry.kind === 'invalid' ? true : undefined}
               className={`h-11 w-24 min-w-0 rounded-lg border px-2 text-right text-xs tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 read-only:opacity-60 dark:bg-gray-900 lg:h-9 lg:w-[4.5rem] ${entry.kind === 'invalid' ? 'border-red-500' : differs ? 'border-amber-500' : 'border-gray-300 dark:border-gray-600'}`}
               onChange={event => onCount(product, event.target.value)} onFocus={event => event.currentTarget.select()} onKeyDown={onCountKeyDown} />
             {stockKnown ? <button type="button" data-check-action="checked" aria-label={`${checkLabel}: ${product.name}`} title={checkLabel} aria-pressed={draft?.checked === true} disabled={locked}
@@ -228,9 +239,26 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
         </div>
       </div>
     </div>
+    {lotRows.length ? <ul data-check-lots aria-label={tr('inventory_check_lots', 'Received dates')} className="mt-1 min-w-0 space-y-1 lg:pl-12">
+      {lotRows.map(lot => {
+        const text = draft?.lots?.[String(lot.batchId)]?.count ?? ''
+        const typed = lotCountOf(text)
+        const plan = onLotSet ? rowSetPlan(lot, text) : null
+        const received = tr('inventory_check_lot_received', 'Received {date}').replace('{date}', lot.receivedAt ? fmtDateOnly(lot.receivedAt) : '—')
+        const setLabel = plan ? tr('inventory_check_lot_set', 'Set to {count}').replace('{count}', String(plan.after)) : ''
+        return <li key={lot.batchId} data-check-lot={lot.batchId} className="flex min-w-0 items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
+          <span className="min-w-0 flex-1 truncate leading-relaxed">{received}</span>
+          <span className="shrink-0 tabular-nums"><span className="text-gray-500 dark:text-gray-400">{tr('inventory_check_now', 'Now')}</span> <strong>{lot.quantity}</strong></span>
+          <input data-check-lot-count type="text" inputMode="decimal" autoComplete="off" value={text} readOnly={locked} placeholder={String(lot.quantity)} aria-label={`${received}: ${product.name}`} aria-invalid={typed.kind === 'invalid' ? true : undefined}
+            className={`h-11 w-20 min-w-0 shrink-0 rounded-lg border px-2 text-right text-xs tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 read-only:opacity-60 dark:bg-gray-900 lg:h-9 ${typed.kind === 'invalid' ? 'border-red-400' : 'border-gray-300 dark:border-gray-600'}`}
+            onChange={event => onLotCount?.(product, lot, event.target.value)} onFocus={event => event.currentTarget.select()} />
+          {plan ? <button type="button" data-check-action="set-lot" aria-label={`${setLabel}: ${product.name}`} title={setLabel} disabled={locked} className={rowIconButton} onClick={() => onLotSet?.(product, lot, text)}><Save className="h-5 w-5" aria-hidden="true" /></button> : null}
+        </li>
+      })}
+    </ul> : null}
     {note ? <p className="mt-1 break-words text-xs leading-relaxed text-amber-800 lg:pl-12 dark:text-amber-200" data-check-note>{note}</p> : null}
     {counting && selected && differs ? <label className="mt-1 flex min-w-0 items-center gap-2 text-xs text-amber-800 lg:pl-12 dark:text-amber-200" data-check-draft-note>
-      <span data-check-difference className="shrink-0 font-semibold tabular-nums">{signedDelta((entry as { value: number }).value - (product.quantity as number))}</span>
+      <span data-check-difference className="shrink-0 font-semibold tabular-nums">{signedDelta((entry as { value: number }).value - (baseline as number))}</span>
       <input type="text" value={draft?.note ?? ''} maxLength={500} readOnly={locked} placeholder={tr('inventory_check_note_placeholder', 'Note (optional)')} aria-label={`${tr('inventory_check_note_placeholder', 'Note (optional)')}: ${product.name}`}
         className="h-11 min-w-0 flex-1 rounded-lg border border-gray-300 px-2 text-xs lg:h-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-900" onChange={event => onNote(product, event.target.value)} />
     </label> : null}

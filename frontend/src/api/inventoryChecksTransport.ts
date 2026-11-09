@@ -196,7 +196,9 @@ export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, p
 export type InventoryCheckSubmission = {
   branchId: number
   requestId: string
-  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }>
+  /** A line is a product's one count, or (ic_lot_counts) the counts typed per received date, each with the figure it showed. */
+  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }
+    | { productId: number; lots: Array<{ batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }>; checked: boolean; note?: string }>
 }
 export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
   if (scope.context.sessionId) throw new Error('Counts are submitted from the list, not from inside a session.')
