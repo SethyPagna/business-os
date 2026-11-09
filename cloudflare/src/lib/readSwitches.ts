@@ -31,8 +31,9 @@ export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH
 // count submissions (ic_simple) and the count approval flow with Fix stock (ic_fix_stock), see lib/inventoryCheckProducts.ts,
 // lib/inventoryCheckSessions.ts and lib/inventoryCheckApprovals.ts; dash_overview_5m is the Dashboard stock overview kept for up to 5 minutes
 // and stamped with the time it was computed (lib/dashboardStockOverview.ts); ic_wired is the wired Inventory Check read path: GET /api/inventory-checks/list
-// and /overlay over the shared Products reader (lib/inventoryCheckList.ts, lib/inventoryCheckOverlay.ts). OFF, both answer 404 and the page keeps its old path.
-export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired'] as const
+// and /overlay over the shared Products reader (lib/inventoryCheckList.ts, lib/inventoryCheckOverlay.ts). OFF, both answer 404 and the page keeps its old path; catalog_ranked_scope is the shared ranked scope of the Products list: the ranking of a window of pages
+// is cached once and every page reads its rows by key (lib/rankedScope.ts). OFF, GET /api/products/search runs the seek-page statement it always ran.
+export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired', 'catalog_ranked_scope'] as const
 /** How long one isolate remembers the flags read: planTier.ts readSwitchMemoSeconds (Free 15 s, Paid 5 s). */
 export const readSwitchMemoMs = (env: Env): number => getPlanLimits(env).readSwitchMemoSeconds * 1000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1

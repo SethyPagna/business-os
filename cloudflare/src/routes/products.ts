@@ -11,12 +11,14 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { paginateProductFamilies } from '../lib/familyPagination'
+import { pageFamiliesByKeys, paginateProductFamilies, rankProductFamilies, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { nextPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
 import { cachedJsonResponse, getVersionWithFallback, getVersionsWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
 import { cacheIdentity, deploymentId, isUnsafeVersion } from '../lib/cache'
-import { readDataEpoch } from '../lib/readSwitches'
+import { unsafeVersionToken } from '../lib/cacheKey'
+import { readDataEpoch, readSwitch } from '../lib/readSwitches'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from '../lib/permissions'
@@ -705,6 +707,8 @@ type ProductSearchOptions = {
   // each; never read from the query string, so a client cannot send either. Both are absent for every other reader, so no statement of theirs changes.
   restrictIdsJson?: string
   excludeIdsJson?: string
+  // catalog_ranked_scope (INV-A S7): the ranking comes from the shared ranked-scope cache (lib/rankedScope.ts) and the page's rows are read by key. Absent: the seek-page statement.
+  ranked?: RankedScope
   // Image-only reads only (see loadImageOnlyList). Adds the received-window
   // predicate and the brand/category option lists; absent for every other reader.
   imageOnly?: { received: ImageOnlyReceivedWindow; facets: { brand: boolean; category: boolean }; facetCache?: ImageOnlyFacetCacheContext }
@@ -977,6 +981,16 @@ async function refreshCachedProductRows(env: Env, items: Array<Record<string, un
 
 const SEEK_PAGE_MIN_RANKED_IDS = 300
 
+async function paginateRankedFamilies(env: Env, opts: FamilyPaginationOptions, scope: RankedScope): Promise<{ items: Array<Record<string, unknown>>; total: number; totalPages: number }> {
+  const { page, pageSize } = opts
+  const ranked = await readRankedScope(scope, async () => {
+    const [ranking, edgeAt] = await Promise.all([rankProductFamilies(opts), nextPromotionEdge(opts.db, new Date())])
+    return { keys: ranking.keys, total: ranking.total, edgeAt }
+  })
+  const items = await pageFamiliesByKeys<Record<string, unknown>>(opts, ranked.keys.slice((page - 1) * pageSize, page * pageSize))
+  return { items, total: ranked.total, totalPages: Math.max(1, Math.ceil(ranked.total / pageSize)) }
+}
+
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -1096,7 +1110,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
-  const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
+  const familyOptions: FamilyPaginationOptions = {
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
@@ -1119,7 +1133,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || `${catalogProductSql()}`) : undefined,
     // One ranking pass and a keyed fetch of the page's rows (see seekPage), not three walks of the catalogue.
     seekPage: seekPageRead,
-  })
+  }
+  // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
+  // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.
+  const { items, total, totalPages } = options.ranked && seekPageRead
+    ? await paginateRankedFamilies(env, familyOptions, options.ranked)
+    : await paginateProductFamilies<Record<string, unknown>>(familyOptions)
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
@@ -1411,7 +1430,7 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
 
 // The Inventory Check twin: the same index-unavailable fallback with the server-only id restriction. Separate so the shared reader's source (pinned by
 // test-worker-perf-2-round-trips-pure.cjs) stays untouched.
-async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson'>) {
+async function searchRestrictedProductsWithIndexFallback(env: Env, query: Record<string, string>, restriction: Pick<ProductSearchOptions, 'restrictIdsJson' | 'excludeIdsJson' | 'ranked'>) {
   try {
     return await searchProductsPayload(env, query, restriction)
   } catch (error) {
@@ -1514,6 +1533,8 @@ export async function attachLotRows<T extends { items: unknown }>(env: Env, user
 //                  the server-only Inventory Check restriction: the ids (JSON array) the cohort is limited to or leaves out, a label for the key, and the
 //                  inventory_checks version the id set was read at. Without them the key and the statements are exactly what they were.
 // A `lots` token in the URL's include parameter is dropped from the key: it adds rows after the cache and changes nothing the entry holds.
+// The page payload cache's lifetime with catalog_ranked_scope OFF: exactly what it has always been. ON, the ranked-scope entry lives productListCacheSeconds (planTier).
+const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20
 export type ProductSearchListOptions = {
   include?: ReadonlySet<string>
   keyRequest?: Request
@@ -1540,10 +1561,24 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
     if (restricted) keyUrl.searchParams.set('ic_set', options.setKey ?? 'set')
     keyRequest = new Request(keyUrl.toString(), { method: 'GET' })
   }
+  // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
+  // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
+  if (await readSwitch(c.env, 'catalog_ranked_scope')) {
+    let versions: string
+    try {
+      const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
+      versions = `${restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}` : baseVersion}:promo:${promotions}`
+    } catch { versions = unsafeVersionToken() }
+    const limits = getPlanLimits(c.env)
+    const rankedPayload = await searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson,
+      ranked: { ctx: c.executionCtx, request: keyRequest, versions, identity: cacheIdentity(c), ttlSeconds: limits.productListCacheSeconds } })
+    const [taggedRanked, lotsRanked] = await Promise.all([attachFoldedTaggedLots(c.env, user, include, rankedPayload, options.taggedLotsAdmitted === true), attachLotRows(c.env, user, include, rankedPayload, options.lotsAdmitted === true)])
+    return lotsRanked === rankedPayload ? taggedRanked : { ...taggedRanked, items: lotsRanked.items }
+  }
   const baseVersion = await productSearchCacheVersion(c.env, query)
   const version = restricted ? `${baseVersion}:ic:${options.setVersion ?? ''}` : baseVersion
   let produced = false
-  const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, 20, async () => {
+  const cachedPayload = await cachedJsonResponse(keyRequest, c.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS, async () => {
     produced = true
     return restricted
       ? searchRestrictedProductsWithIndexFallback(c.env, query, { restrictIdsJson: options.restrictIdsJson, excludeIdsJson: options.excludeIdsJson })

@@ -93,7 +93,8 @@ app.get('/list', async c => {
   const summary = sets && plan.wantSummary && !sets.tooLarge ? { ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
     // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
     ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
-  return c.json({ ...body, wired: true, projected, ...(summary ? { summary } : {}),
+  // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
+  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, ...(summary ? { summary } : {}),
     ...(fixStock ? { capabilities: { fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) } } : {}) })
 })
 app.get('/overlay', async c => {

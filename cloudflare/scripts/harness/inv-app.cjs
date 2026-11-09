@@ -29,6 +29,8 @@ const USERS = {
   stockOnly: person(74, 'employee', { inventory_checks: true, inventory_checks_check: true, inventory_check_show_stock: true, inventory_check_show_received: true }),
   // Received dates but no stock, no price, no barcode, no Products page.
   receivedOnly: person(76, 'employee', { inventory_checks: true, inventory_checks_check: true, inventory_check_show_received: true }),
+  // Products only, in another organisation.
+  foreignOrg: person(77, 'employee', { products: true }, 2),
   // No Inventory Check at all.
   none: person(75, 'employee', { products: true }),
 }
@@ -63,10 +65,11 @@ function createInvApp({ mount, seed, users = USERS }) {
   }
 
   const cacheStore = new Map()
+  const cachePuts = [] // every Cache API put, with the cache-control the entry was stored under
   globalThis.caches = {
     default: {
       match: async (request) => (cacheStore.has(request.url) ? new Response(cacheStore.get(request.url)) : undefined),
-      put: async (request, response) => { cacheStore.set(request.url, await response.text()) },
+      put: async (request, response) => { cachePuts.push({ url: request.url, cacheControl: response.headers.get('cache-control') }); cacheStore.set(request.url, await response.text()) },
     },
   }
   const kv = new Map()
@@ -120,7 +123,7 @@ function createInvApp({ mount, seed, users = USERS }) {
   }
 
   return {
-    raw, env, load, users, statements, batches, counters, cacheStore, kv, seedStockFixture,
+    raw, env, load, users, statements, batches, counters, cacheStore, cachePuts, kv, seedStockFixture,
     setUser: (user) => { current = user },
     get: (url, withEnv) => request('GET', url, undefined, withEnv),
     send: (method, url, body, withEnv) => request(method, url, body, withEnv),

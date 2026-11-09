@@ -5621,6 +5621,7 @@
   "read_switch_name_ic_simple": "Inventory check: simple list and counts",
   "read_switch_name_ic_fix_stock": "Inventory check: count approval",
   "read_switch_name_dash_overview_5m": "Dashboard stock, 5 min",
+  "read_switch_name_catalog_ranked_scope": "Products list: shared ranked scope",
   "read_switch_name_ic_wired": "Inventory check: wired list and overlay",
   "read_switch_stale": "The switches changed elsewhere. Showing the current ones.",
   "read_switch_state_off": "Off",

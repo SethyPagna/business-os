@@ -23,9 +23,7 @@ export type ListCheckState = typeof LIST_CHECK_STATES[number]
 /** The include string Products sends; the `lots` token is added after the cache and never belongs to the key. */
 export const LIST_INCLUDE = 'branch_stock,images,batches,tagged_lots'
 const DEFAULT_PAGE_SIZE = 50
-// The id sets are version-keyed (inventory_checks, bumped by every IC writer), so this only bounds how long a copy may live; it is the same figure
-// routes/products.ts passes cachedJsonResponse for the list, which S7 turns into the productListCacheSeconds plan field.
-const CHECK_STATE_CACHE_SECONDS = 20
+// The id sets are version-keyed (inventory_checks, bumped by every IC writer), so the plan's productListCacheSeconds only bounds how long a copy may live.
 const STOCK_STATES: Record<string, string> = { in_stock: 'in_stock', low_stock: 'low', out_of_stock: 'out' }
 
 const invalid = (parameter: string): never => { throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter) }
@@ -124,7 +122,7 @@ export async function readCheckStateSets(c: Context<{ Bindings: Env; Variables: 
   const version = await inventoryChecksVersion(env)
   const organization = user.organization_id ?? null
   const sets = await cachedJsonResponse(new Request(`https://ic.invalid/__bos/ic-state?branchId=${branchId}&pending=${withPending ? 1 : 0}`, { method: 'GET' }), c.executionCtx,
-    `ic:${version}`, CHECK_STATE_CACHE_SECONDS, async (): Promise<CheckStateSets> => {
+    `ic:${version}`, getPlanLimits(env).productListCacheSeconds, async (): Promise<CheckStateSets> => {
       const latest = await db.prepare(LATEST_ITEMS_SQL).all<{ product_id: number; state: string }>({ organization, branchId, limit: limit + 1 })
       const pending = withPending ? await db.prepare(PENDING_ITEMS_SQL).all<{ product_id: number }>({ organization, branchId, limit: limit + 1 }) : []
       if (latest.length > limit || pending.length > limit) return { ok: [], issue: [], pending: [], tooLarge: true }

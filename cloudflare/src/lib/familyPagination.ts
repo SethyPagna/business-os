@@ -382,3 +382,58 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
   }
 }
+
+// ---- Ranked scope (INV-A S7, behind the read switch catalog_ranked_scope) --------------------------------------------------------------------------------------------
+//
+// The seekPage statement above re-ranks every family of the filtered catalogue on EVERY page of every scope (about 37K rows read cold at 8.6K products). A ranking does not
+// depend on the page, only on the scope, so it is read once and shared: rankProductFamilies answers the ordered family keys of the WHOLE scope and its total, and
+// pageFamiliesByKeys reads the rows of one page's keys without ranking anything. Together they return exactly the rows, order and total paginateProductFamilies({ seekPage })
+// returns for the same options: same families table, same ORDER BY (the caller's familyOrderSql, then family_root_id), same candidate ids, same row filter, same intra-family order.
+
+/** The ordered family keys of the whole scope, and the family total. */
+export async function rankProductFamilies(opts: FamilyPaginationOptions): Promise<{ keys: string[]; total: number }> {
+  const { db, params, familyOrderSql } = opts
+  const ctes = buildCtes({ ...opts, familyMemberBaseWhereSql: undefined, inlineFamilies: true })
+  const rows = await db.prepare(`
+    ${ctes}
+    SELECT family_root_id FROM families ORDER BY ${familyOrderSql}, family_root_id ASC
+  `).all<{ family_root_id: string }>(params)
+  return { keys: rows.map((row) => String(row.family_root_id)), total: rows.length }
+}
+
+/** The rows of the given family keys, in the keys' order, then the caller's intra-family order. The candidate ids and the row filter are buildSeekPageSql's. */
+export async function pageFamiliesByKeys<T = Record<string, unknown>>(opts: FamilyPaginationOptions, keys: readonly string[]): Promise<T[]> {
+  if (!keys.length) return []
+  const { db, params, selectColumns, joinSql, whereSql, matchRankSql, familyMemberBaseWhereSql, rankCteSql, intraFamilyOrderSql } = opts
+  const rankJoin = matchRankSql?.includes('__fts_rank.') ? 'LEFT JOIN __fts_rank ON __fts_rank.id = p.id' : ''
+  const rowsWhere = familyMemberBaseWhereSql ? familyMemberBaseWhereSql : whereSql.replace(/^\s*WHERE\s+/i, '') || '1 = 1'
+  const rowsJoins = familyMemberBaseWhereSql ? joinSql : `${joinSql}
+      ${rankJoin}`
+  const rows = await db.prepare(`
+    WITH ${rankCteSql ? `${rankCteSql},` : ''}
+    page_families AS MATERIALIZED (SELECT value AS family_root_id, key AS family_pos FROM json_each(@__familyKeys)),
+    page_candidates AS MATERIALIZED (
+      SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families)
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT id FROM products WHERE name_key IN (SELECT family_root_id FROM page_families))
+      UNION SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:'
+      UNION SELECT id FROM products WHERE parent_id IN (SELECT CAST(substr(family_root_id, 4) AS INTEGER) FROM page_families WHERE substr(family_root_id, 1, 3) = 'id:')
+    ),
+    page_rows AS (
+      SELECT ${selectColumns},
+             ${FAMILY_ROOT_KEY_SQL} AS __family_root_id
+      FROM page_candidates pc
+      CROSS JOIN products p ON p.id = pc.id
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      ${rowsJoins}
+      WHERE (${rowsWhere})
+    )
+    SELECT page_rows.*
+    FROM page_rows
+    JOIN page_families ON page_families.family_root_id = page_rows.__family_root_id
+    ORDER BY page_families.family_pos ASC, ${intraFamilyOrderSql}
+  `).all<Record<string, unknown>>({ ...params, __familyKeys: JSON.stringify(keys) })
+  return rows.map((row) => {
+    const { __family_root_id, ...rest } = row
+    return rest as unknown as T
+  })
+}

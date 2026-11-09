@@ -330,6 +330,17 @@ export type PlanLimits = {
   // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
   inventoryCheckFilterMaxIds: number
 
+  // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
+  //
+  // lib/rankedScope.ts: how long a cached ranking (the ordered family keys of a window of pages, and the family total) may be served. The entry is also keyed on the products,
+  // stock, promotions and Inventory Check versions and ends at the next promotion boundary, so this only bounds what no version moves: Free keeps a ranking for an hour (reads are
+  // what Free rations), Paid for a minute. Replaces the 20 s literal the page payload cache used.
+  productListCacheSeconds: number
+
+  // The prefetch window of a paged list that reads the shared ranking (the Inventory Check list tells its client): the current page and the pages ahead it may fetch, so a window of
+  // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
+  catalogListWindowPages: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -424,6 +435,8 @@ const PAID_LIMITS: PlanLimits = {
   inventoryOverlayMaxRows: 300,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
+  productListCacheSeconds: 60,
+  catalogListWindowPages: 4,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -467,6 +480,8 @@ const FREE_LIMITS: PlanLimits = {
   inventoryOverlayMaxRows: 150,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
+  productListCacheSeconds: 3_600,
+  catalogListWindowPages: 3,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
