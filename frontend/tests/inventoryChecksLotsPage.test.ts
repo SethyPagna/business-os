@@ -32,7 +32,6 @@ const held = new Map<string, unknown>()
 let authorityCurrent = true
 let epoch = 'epoch-a'
 let ranked: { hits: Array<{ id: number; tier: number }>; total: number } | null = null
-const CANONICAL = 'page=1&pageSize=20&searchMode=AND&sort=name_asc&include=branch_stock%2Cimages%2Cbatches%2Ctagged_lots'
 const listBody = (items: Row[], extra: Row = {}) => ({ items, total: items.length, page: 1, pageSize: 20, totalPages: 1, wired: true, projected: false, summary: { ok: 0, issue: 0, not_checked: items.length, total: items.length }, ...extra })
 
 const app = (permissions: Record<string, boolean>) => ({
@@ -82,8 +81,6 @@ async function mount(permissions: Record<string, boolean> = FIELDS) {
   open('hub:inventory:products')
   return harness.mount({ component: 'components/inventory/InventoryChecksPage.tsx', app: app(permissions), doubles, props: {} })
 }
-const sync = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('sync:update', { detail }))
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const withLots = (row: Row): Row => ({ ...row, lots: [
   { id: 7, received_at: '2026-10-01', branches: [{ branch_id: 1, quantity: 5 }] }, { id: 9, received_at: '2026-10-09', branches: [{ branch_id: 1, quantity: 3 }] }] })
