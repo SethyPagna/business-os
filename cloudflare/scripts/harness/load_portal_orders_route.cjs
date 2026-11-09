@@ -129,7 +129,8 @@ function createOrdersHarness(options = {}) {
     try { json = await response.json() } catch (_) { json = null }
     return { status: response.status, body: json }
   }
-  const deps = (over = {}) => ({ db, env: { ...env, ...(over.env || {}) }, now: () => new Date(state.nowMs), random, transport, origin: null })
+  const alertsModule = load('lib/onlineOrderAlerts.ts')
+  const deps = (over = {}) => { const merged = { ...env, ...(over.env || {}) }; return { db, env: merged, now: () => new Date(state.nowMs), random, transport, origin: null, notify: alertsModule.orderNotifier(merged) } }
   const credentials = (over = {}) => paywayModule.paywayCredentials({ ...env, ...(over.env || {}) })
   async function sweep(over = {}) { planTier.__resetPlanTierCacheForTests?.(); return sweepModule.sweepOrders(deps(over), over.noCredentials ? null : credentials(over)) }
   const one = (sql, ...params) => raw.db.prepare(sql).get(...params)

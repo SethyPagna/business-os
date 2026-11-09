@@ -5,6 +5,7 @@ import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
 import portalOrdersRoute from './routes/portalOrders'
 import paywayCallbackRoute from './routes/paywayCallback'
+import { orderNotifier } from './lib/onlineOrderAlerts'
 import { sweepOrders } from './lib/onlineOrderSweep'
 import { getDb } from './lib/db'
 import { paywayCredentials } from './lib/payway'
@@ -816,7 +817,7 @@ export default {
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
         // Online orders: a payment that outlived its QR is checked once more and then expired. Same lane, own step, so a failure in one never skips the other.
-        sweepOnlineOrders: label('online-order-sweep', () => sweepOrders({ db: getDb(env), env, now: () => new Date(), random: (n) => crypto.getRandomValues(new Uint8Array(n)), transport: fetchPaywayTransport, origin: null }, paywayCredentials(env))),
+        sweepOnlineOrders: label('online-order-sweep', () => sweepOrders({ db: getDb(env), env, now: () => new Date(), random: (n) => crypto.getRandomValues(new Uint8Array(n)), transport: fetchPaywayTransport, origin: null, notify: orderNotifier(env) }, paywayCredentials(env))),
         heavySteps: () => cronHeavySteps(env, label),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),

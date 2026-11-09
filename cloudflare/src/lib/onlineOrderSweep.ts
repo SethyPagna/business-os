@@ -11,7 +11,7 @@ import type { D1Compat } from './db'
 import { checkTransaction, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
 import { sweepBatchSize } from './onlineOrders'
 import {
-  PAYMENT_MINUTES_DEFAULT, PAYMENT_MINUTES_KEY, applyCheckResult, type OrderDeps, type OrderRecord, type PaymentRecord,
+  PAYMENT_MINUTES_DEFAULT, PAYMENT_MINUTES_KEY, announceOrderEvent, applyCheckResult, type OrderDeps, type OrderRecord, type PaymentRecord,
 } from './onlineOrderStore'
 
 /** After its QR lifetime ends ABA may still be finishing a payment: wait this long before a payment is allowed to expire. */
@@ -108,6 +108,8 @@ export async function sweepOrders(deps: OrderDeps, creds: PaywayCredentials | nu
     else if (outcome === 'failed') summary.failed += 1
     else if (outcome === 'pending' && await expirePayment(deps, payment)) summary.expired.push({ orderId: payment.order_id, paymentId: payment.id, purpose: payment.purpose })
   }
+  // One message for the whole tick, however many payments ran out: the owner reads a digest, not a burst.
+  if (summary.expired.length) await announceOrderEvent(deps, { kind: 'expired', expired: summary.expired })
   return summary
 }
 

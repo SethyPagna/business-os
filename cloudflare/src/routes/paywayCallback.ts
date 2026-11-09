@@ -13,6 +13,7 @@ import { getDb } from '../lib/db'
 import type { Env } from '../index'
 import { paywayCredentials, validTranId, verifyCallbackToken, type PaywayTransport } from '../lib/payway'
 import { fetchPaywayTransport } from '../lib/paywayTransport'
+import { orderNotifier } from '../lib/onlineOrderAlerts'
 import { settleByTranId, type SettleResult } from '../lib/onlineOrderSweep'
 import type { OrderDeps } from '../lib/onlineOrderStore'
 
@@ -36,7 +37,7 @@ export function createPaywayCallbackRoute(options: PaywayCallbackOptions = {}) {
     // Without credentials nothing can be confirmed. ABA is told "received" so it stops retrying; the sweep and the customer's page settle it once keys exist.
     if (!creds) return c.json({ ok: true })
     const deps: OrderDeps = {
-      db: getDb(c.env), env: c.env, now, random: (n) => crypto.getRandomValues(new Uint8Array(n)), transport, origin: null,
+      db: getDb(c.env), env: c.env, now, random: (n) => crypto.getRandomValues(new Uint8Array(n)), transport, origin: null, notify: orderNotifier(c.env),
     }
     try {
       const result = await settleByTranId(deps, creds, tranId)

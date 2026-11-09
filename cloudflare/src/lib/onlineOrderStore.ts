@@ -68,7 +68,22 @@ export type OrderDeps = {
   transport: PaywayTransport
   /** https origin ABA posts its callback to (the storefront host). Null leaves the callback URL out; the sweep and polls still find the payment. */
   origin: string | null
+  /**
+   * Tells the shop (Telegram, lib/onlineOrderAlerts.ts) about a committed change. Optional: absent in every pure test and costs nothing. It is called
+   * once per GUARDED transition (a replayed check or a lost race changes nothing, so announces nothing) and must never throw into the order flow.
+   */
+  notify?: (event: OrderAlertEvent) => Promise<void>
 }
+export type OrderAlertEvent =
+  | { kind: 'created'; orderId: number }
+  | { kind: 'paid' | 'review'; orderId: number; paymentId: number }
+  | { kind: 'request'; orderId: number; requestId: number; requestKind: string }
+  | { kind: 'expired'; expired: Array<{ orderId: number; paymentId: number; purpose: string }> }
+const announce = async (deps: OrderDeps, event: OrderAlertEvent): Promise<void> => {
+  if (!deps.notify) return
+  try { await deps.notify(event) } catch { /* an alert must never fail the order */ }
+}
+export { announce as announceOrderEvent }
 const sqlTime = (date: Date): string => date.toISOString().replace('T', ' ').replace('Z', '')
 
 // ---- shapes of the rows ---------------------------------------------------------------------------------------------------------
@@ -376,6 +391,16 @@ export async function applyCheckResult(
   deps: OrderDeps, order: Pick<OrderRecord, 'id' | 'state'>, payment: Pick<PaymentRecord, 'id' | 'amount' | 'currency' | 'revision' | 'state'>,
   check: ParsedCheck, source: 'payway' | 'sweep',
 ): Promise<'paid' | 'review' | 'failed' | 'pending' | 'noop'> {
+  const outcome = await applyCheckResultRows(deps, order, payment, check, source)
+  // The one place a check becomes Paid or Review, so the one place the shop hears of it: whichever of the poll, the callback or the sweep got there first.
+  if (outcome === 'paid' || outcome === 'review') await announce(deps, { kind: outcome, orderId: order.id, paymentId: payment.id })
+  return outcome
+}
+
+async function applyCheckResultRows(
+  deps: OrderDeps, order: Pick<OrderRecord, 'id' | 'state'>, payment: Pick<PaymentRecord, 'id' | 'amount' | 'currency' | 'revision' | 'state'>,
+  check: ParsedCheck, source: 'payway' | 'sweep',
+): Promise<'paid' | 'review' | 'failed' | 'pending' | 'noop'> {
   if (!check.ok) return 'pending'
   const verdict = classifyCheck({ amount: Number(payment.amount), currency: payment.currency }, check)
   if (verdict === 'pending') return 'pending'
@@ -639,6 +664,7 @@ export async function createOrder(
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: facts.priced.goodsTotalUsd, currency: 'USD', purpose: 'order' }, settings, 'awaiting_payment')
   if (!issued.ok) return qrFailure(issued.reason, token, orderNo)
   const bundle = (await loadBundle(db, hash))!
+  await announce(deps, { kind: 'created', orderId: bundle.order.id })
   return { token, bundle }
 }
 
@@ -909,7 +935,10 @@ export async function submitRequest(deps: OrderDeps, token: string, body: Record
     const refusal = REQUEST_REFUSALS.one_pending
     return refuse(refusal.status, refusal.code, refusal.message)
   }
-  return (await loadBundle(deps.db, order.token_hash))!
+  const submitted = (await loadBundle(deps.db, order.token_hash))!
+  const latest = submitted.requests[submitted.requests.length - 1]
+  if (latest) await announce(deps, { kind: 'request', orderId: order.id, requestId: latest.id, requestKind: kind })
+  return submitted
 }
 
 /** Withdrawing is free. The customer re-enters the phone for this too: a leaked link alone changes nothing. */

@@ -33,7 +33,9 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
 // restored -- get their own switch and their own forum topic. Until then a
 // customer return was sent as a `sales` event, into the Sale invoices topic.
-export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews' | 'stock_alert'
+// `online_orders` (KHQR lane): the storefront's paid-online orders (lib/onlineOrderAlerts.ts). Its own category switch and three sub-switches. It posts to the Sales topic: a
+// dedicated Orders topic needs a Settings label in both frontend packs and a /settopic family, which is a later frontend step.
+export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out' | 'products' | 'reviews' | 'stock_alert' | 'online_orders'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
@@ -56,9 +58,17 @@ type TelegramConfig = {
   shiftOverview: boolean
   /** The overview's optional sections; each is on only when its switch says 'true'. */
   summary: TelegramSummarySections
+  /** The online-order alert families, each on unless its switch says 'false' (lib/onlineOrderAlerts.ts). The category switch above gates all three. */
+  onlineOrders: Record<TelegramOnlineOrderSub, boolean>
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
   topics: Record<TelegramTopicKey, number | undefined>
 }
+/** `new` order notices, the `expired` digest, and the change `requests` family (a request, its decision, its outcome). */
+export type TelegramOnlineOrderSub = 'new' | 'expired' | 'requests'
+export const TELEGRAM_ONLINE_ORDER_SWITCHES: Record<TelegramOnlineOrderSub, string> = {
+  new: 'telegram_online_orders_new_enabled', expired: 'telegram_online_orders_expired_enabled', requests: 'telegram_online_orders_requests_enabled',
+}
+export const TELEGRAM_ONLINE_ORDERS_SWITCH = 'telegram_online_orders_enabled'
 type TelegramMessage = {
   text?: string
   from?: { id?: number | string; username?: string; first_name?: string; last_name?: string }
@@ -107,6 +117,7 @@ const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled', 'telegram_products_enabled', 'telegram_reviews_enabled', 'telegram_stock_alert_enabled',
+  'telegram_online_orders_enabled', 'telegram_online_orders_new_enabled', 'telegram_online_orders_expired_enabled', 'telegram_online_orders_requests_enabled',
   ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -300,6 +311,12 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
       reviews: isEnabled(values.telegram_reviews_enabled, true),
       // Owner, 6 Oct 2026: low / out-of-stock alerts fire when a sale crosses the threshold (lib/stockCrossingAlert.ts). Unset means on.
       stock_alert: isEnabled(values.telegram_stock_alert_enabled, true),
+      // KHQR lane: unset means on, like every category.
+      online_orders: isEnabled(values.telegram_online_orders_enabled, true),
+    },
+    onlineOrders: {
+      new: isEnabled(values.telegram_online_orders_new_enabled, true), expired: isEnabled(values.telegram_online_orders_expired_enabled, true),
+      requests: isEnabled(values.telegram_online_orders_requests_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
   }
@@ -414,10 +431,12 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent, options:
 
 /** For events whose lines cost a read: one settings read, then `compose` runs only if the switches and chat id are set; null means nothing to send. */
 export async function sendTelegramEventWhenOn(
-  env: Env, type: TelegramEventType, compose: () => Promise<Omit<TelegramEvent, 'type'> | null>, options: TelegramSendOptions = {},
+  env: Env, type: TelegramEventType, compose: () => Promise<Omit<TelegramEvent, 'type'> | null>, options: TelegramSendOptions & { onlineOrders?: TelegramOnlineOrderSub } = {},
 ): Promise<boolean> {
   const config = await getTelegramConfig(env)
   if (!telegramEventIsOn(config, type)) return false
+  // An online-order family switched off by its own sub-switch costs nothing beyond the one settings read: compose never runs.
+  if (options.onlineOrders && !config.onlineOrders[options.onlineOrders]) return false
   const composed = await compose()
   return composed ? deliverTelegramEvent(config, { ...composed, type }, options) : false
 }
@@ -437,7 +456,7 @@ async function deliverTelegramEvent(config: TelegramConfig, event: TelegramEvent
   const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
     sales: 'telegram_topic_sales', status: 'telegram_topic_status', returns: 'telegram_topic_returns',
     fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
-    products: 'telegram_topic_alerts', reviews: 'telegram_topic_alerts', stock_alert: 'telegram_topic_alerts',
+    products: 'telegram_topic_alerts', reviews: 'telegram_topic_alerts', stock_alert: 'telegram_topic_alerts', online_orders: 'telegram_topic_sales',
   }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
   // the composed line (rather than in each builder) means the one route that

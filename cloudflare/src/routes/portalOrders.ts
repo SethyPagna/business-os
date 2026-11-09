@@ -28,6 +28,7 @@ import { getPortalAccountState } from '../lib/portalSession'
 import { hashOrderToken, isOrderToken } from '../lib/onlineOrders'
 import { paywayCredentials, type PaywayCredentials, type PaywayTransport } from '../lib/payway'
 import { fetchPaywayTransport } from '../lib/paywayTransport'
+import { orderNotifier } from '../lib/onlineOrderAlerts'
 import {
   OrderError, bundleFromToken, cancelOrder, createOrder, editOrder, loadOrderSettings, nudgeOrder, parseOrderInput, publicOrderView, resetNudgeThrottleForTests,
   retryOrderQr, retryTopUpQr, submitRequest, withdrawRequest, type OrderBundle, type OrderDeps,
@@ -57,7 +58,7 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
       const url = new URL(String(c.env.BUSINESS_OS_PUBLIC_URL ?? ''))
       origin = url.protocol === 'https:' ? url.origin : null
     } catch { origin = null }
-    return { db: getDb(c.env), env: c.env, now, random, transport, origin }
+    return { db: getDb(c.env), env: c.env, now, random, transport, origin, notify: orderNotifier(c.env) }
   }
 
   // An order's responses are about one customer: never stored by a browser or a shared cache.

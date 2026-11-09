@@ -376,6 +376,10 @@ const LABELS = {
   yesterday: { en: 'Yesterday', km: 'ម្សិលមិញ' },                     // km.json yesterday
   sameDayLastWeek: { en: 'Same day last week', km: 'ថ្ងៃដដែលសប្តាហ៍មុន' }, // km.json rpt_week (សប្តាហ៍)
   compareUntil: { en: 'Each day up to', km: 'ថ្ងៃនីមួយៗរហូតដល់' },  // km.json rpt_each_expense (នីមួយៗ) + until_browser_closes (រហូតដល់)
+  // --- online orders (KHQR lane, lib/onlineOrderAlerts.ts) ---
+  order: { en: 'Order', km: 'ការបញ្ជាទិញ' },                             // km.json order_* (ការបញ្ជាទិញ)
+  fulfilment: { en: 'Fulfilment', km: 'ការទទួលទំនិញ', localizeValue: true },
+  changeRequested: { en: 'Change requested', km: 'សំណើកែប្រែ', localizeValue: true },
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -423,6 +427,12 @@ const HEADINGS = {
   // The Khmer is the packs' own `low_stock` and `out_of_stock`.
   '⚠️ Low stock': 'ស្តុកទាប',
   '🛑 Out of stock': 'អស់ស្តុក',
+  // The storefront's online orders (KHQR lane, lib/onlineOrderAlerts.ts). ការបញ្ជាទិញ is the packs' word for an order.
+  '🛒 Online order': 'ការបញ្ជាទិញអនឡាញ',
+  '✅ Online order paid': 'ការបញ្ជាទិញអនឡាញបានបង់',
+  '⚠️ Online payment needs review': 'ការទូទាត់អនឡាញត្រូវពិនិត្យ',
+  '⌛ Online orders not paid in time': 'ការបញ្ជាទិញអនឡាញមិនបានបង់ទាន់ពេល',
+  '✏️ Online order change requested': 'សំណើកែប្រែការបញ្ជាទិញអនឡាញ',
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
@@ -493,6 +503,19 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
   none: 'គ្មាន',
   ...SALE_STATUS_PHRASES,
   // return stock actions (lib/returnsStock.ts ReturnStockAction)
+  // online orders: how the customer gets the goods, and what a change request asks for (REQUEST_KINDS in lib/onlineOrders.ts)
+  Pickup: 'ទទួលនៅហាង',
+  'Home delivery': 'ដឹកជញ្ជូនដល់ផ្ទះ',
+  'Waiting for payment': 'កំពុងរង់ចាំការបង់ប្រាក់',
+  'Needs review': 'ត្រូវពិនិត្យ',
+  'Not paid in time': 'មិនបានបង់ទាន់ពេល',
+  'Change items': 'ប្តូរទំនិញ',
+  'Change pickup or delivery': 'ប្តូរការទទួលទំនិញ',
+  'Change address': 'ប្តូរអាសយដ្ឋាន',
+  'Change contact': 'ប្តូរព័ត៌មានទំនាក់ទំនង',
+  'Change note': 'ប្តូរកំណត់ចំណាំ',
+  'Cancel order': 'បោះបង់ការបញ្ជាទិញ',
+  'Return items': 'ទំនិញត្រឡប់',
   restock: 'បញ្ចូលស្តុកវិញ',
   damaged: 'ខូចខាត',
   // return settlements
