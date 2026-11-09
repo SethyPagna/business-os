@@ -133,8 +133,8 @@ async function run() {
     assert.ok(after.every((r) => r.age_confirmed_at === null), 'existing accounts stay NULL, not back-filled')
   })
 
-  await check('the Worker records the 10 Nov 2026 version', () => {
-    assert.strictEqual(accounts.PORTAL_CONSENT_VERSION, 'portal-legal-2026-11-10')
+  await check('the Worker records the 20 Oct 2026 version', () => {
+    assert.strictEqual(accounts.PORTAL_CONSENT_VERSION, 'portal-legal-2026-10-20')
   })
 
   await check('sign-up stores age_confirmed_at in the same write as the consent record (new and existing-customer paths)', async () => {
@@ -152,7 +152,7 @@ async function run() {
 
   const stale = await accountWith({ n: 1, version: OLD, ageConfirmedAt: null })
   const noAge = await accountWith({ n: 2, version: accounts.PORTAL_CONSENT_VERSION, ageConfirmedAt: null })
-  const fresh = await accountWith({ n: 3, version: accounts.PORTAL_CONSENT_VERSION, ageConfirmedAt: '2026-11-10 01:00:00' })
+  const fresh = await accountWith({ n: 3, version: accounts.PORTAL_CONSENT_VERSION, ageConfirmedAt: '2026-10-20 01:00:00' })
 
   await check('every account endpoint refuses a session that has not renewed; sign-out and the public config do not', async () => {
     for (const who of [stale, noAge]) {
