@@ -7,7 +7,9 @@ import { transformSync } from 'esbuild'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { getInventoryCheckAccess } from '../src/utils/inventoryCheckAccess.ts'
-import * as navigation from '../src/components/shared/hubNavigation.ts'
+import * as hubNavigation from '../src/components/shared/hubNavigation.ts'
+import * as hubDestinations from '../src/components/shared/hubDestinations.ts'
+const navigation = { ...hubNavigation, ...hubDestinations }
 import { NAV_ITEMS } from '../src/components/shared/navigationConfig.ts'
 
 // Execute the production page callback, with the actual effective authority.
@@ -103,7 +105,7 @@ new Function('require', 'module', 'exports', compiled)((id: string) => {
   if (id.includes('kit/Skeleton')) return { __esModule: true, default: () => null }
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('AppContext')) return { useApp: context }
-  if (id.includes('hubNavigation')) return navigation
+  if (id.includes('hubNavigation') || id.includes('hubDestinations')) return navigation
   if (id.includes('HubSectionNav')) return { __esModule: true, default: (props: any) => React.createElement('section', null, props.sections.filter((row: any) => !row.hidden).map((row: any) => row.label).join('|'), props.children), readStoredHubSection: () => null }
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: () => null }
   throw new Error(`Unexpected dependency ${id}`)

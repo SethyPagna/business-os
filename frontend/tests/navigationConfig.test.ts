@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { getHubDestinations, hubAnchor, mobileGroupAction, resolveHubSection, navigationHash, needsNavigationGuard } from '../src/components/shared/hubNavigation.ts'
+import { hubAnchor, mobileGroupAction, resolveHubSection, navigationHash, needsNavigationGuard } from '../src/components/shared/hubNavigation.ts'
+import { getHubDestinations } from '../src/components/shared/hubDestinations.ts'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../src/components/shared/navigationConfig.ts'
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')

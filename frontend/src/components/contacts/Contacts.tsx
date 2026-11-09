@@ -1,4 +1,5 @@
-import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import type { ComponentType, SVGProps } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { Suspense, useEffect, useState } from 'react'

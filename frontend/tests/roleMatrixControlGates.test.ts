@@ -8,7 +8,7 @@
 // Run: node tests/roleMatrixControlGates.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
+import { getHubDestinations } from '../src/components/shared/hubDestinations.ts'
 import { actionsForKey } from '../src/utils/permissionActions.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { ROLES, accessFor, deriveRole, type RoleDef } from '../e2e/support/roleMatrix.ts'

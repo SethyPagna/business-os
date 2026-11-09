@@ -9,7 +9,7 @@
 // Run: node tests/employeeProductsSubpages.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
+import { getHubDestinations } from '../src/components/shared/hubDestinations.ts'
 import { effectivePermissions, type PermissionUser } from '../src/utils/permissions.ts'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
 

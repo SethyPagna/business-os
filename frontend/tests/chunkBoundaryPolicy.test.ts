@@ -34,6 +34,7 @@ const boundaries: Array<[string, string]> = [
   ['utils/workDrafts.ts', 'work-drafts'],
   ['utils/dirtyWork.ts', 'work-drafts'],
   ['components/shared/hubNavigation.ts', 'hub-navigation'],
+  ['components/shared/hubDestinations.ts', 'hub-destinations'],
   ['utils/publicAssetUrls.ts', 'api-http-core'],
   ['api/serverSignals.ts', 'api-http-core'],
   ['api/dataEpoch.ts', 'api-http-core'],

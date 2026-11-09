@@ -1,4 +1,5 @@
-import { getHubDestinations, getHubPageFromLocation, hubAnchor, useHubSection } from '../shared/hubNavigation.ts'
+import { getHubPageFromLocation, hubAnchor, useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { Suspense, lazy, useEffect, useState } from 'react'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'

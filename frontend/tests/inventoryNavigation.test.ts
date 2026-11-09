@@ -5,7 +5,9 @@ import test from 'node:test'
 import { transformSync } from 'esbuild'
 import ts from 'typescript'
 import * as routing from '../src/app/pathRouting.ts'
-import * as hubs from '../src/components/shared/hubNavigation.ts'
+import * as hubNav from '../src/components/shared/hubNavigation.ts'
+import * as hubDest from '../src/components/shared/hubDestinations.ts'
+const hubs = { ...hubNav, ...hubDest }
 import { NAV_ITEMS, DEFAULT_MOBILE_PINNED, orderNavItems } from '../src/components/shared/navigationConfig.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
 import { getInventoryCheckAccess } from '../src/utils/inventoryCheckAccess.ts'
@@ -135,7 +137,7 @@ function branchHarness(path: string, hash: string, grants: Record<string, unknow
       page = next
     },
   })(next, anchor)
-  const hubModule = { exports: {} as typeof hubs }
+  const hubModule = { exports: {} as typeof hubNav }
   new Function('require', 'module', 'exports', transformSync(read('components/shared/hubNavigation.ts'), { loader: 'ts', format: 'cjs' }).code)(
     (id: string) => id === 'react' ? hooks : routing, hubModule, hubModule.exports)
   const module = { exports: {} as { default: () => any } }
@@ -144,6 +146,7 @@ function branchHarness(path: string, hash: string, grants: Record<string, unknow
     if (id === 'react') return { ...React, ...hooks, lazy: () => lazyIndex++ ? 'legacy-inventory-body' : 'branch-body' }
     if (id === 'react/jsx-runtime') return require(id)
     if (id.includes('hubNavigation')) return hubModule.exports
+    if (id.includes('hubDestinations')) return hubDest
     if (id.includes('pathRouting')) return routing
     if (id.includes('AppContext')) return { useApp: () => ({ ...authority, t: (key: string) => key, navigateTo }) }
     if (id.includes('pageActivity')) return { useIsPageActive: () => page === 'branches' }

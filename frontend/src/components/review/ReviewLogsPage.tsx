@@ -1,5 +1,6 @@
 import HubSectionNav from '../shared/HubSectionNav.tsx'
-import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { Suspense, lazy } from 'react'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'

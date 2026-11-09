@@ -123,8 +123,7 @@ const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
 // Checkout and My orders controls, the saved-orders check (orders/orderPath.ts) and two icons (qr-code, receipt) in shared-ui. The base was already 409 bytes under the
 // ceiling, so the allowance is exactly what is left over (1,005 bytes) plus 45. Everything else is lazy and outside this closure: the checkout, the order page, the QR
 // drawing, edit and requests are four chunks, and the ordering-only policy text and structure are a fifth (legalOrderContent.ts, loaded when the policy reader opens).
-// G6 (staff Orders screen) adds the Orders destination to hubNavigation and one access line to AppContext, both in this closure: 3 bytes over the ceiling above, so +50.
-const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_100
+const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_050
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -141,6 +140,13 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
   // The Expenses transport serves the Expenses page, its report and the Sales hub; filed in the /src/api/ catch-all it rode in app-api-methods and cost the
   // storefront ~11 KB (E1-F). Its own chunk ('fees-api') is outside this closure, and no chunk inside it carries the Expenses endpoints.
   assert.ok(!closureFiles.some((file) => /^fees-api-/.test(file)), 'the catalog-products closure must not load the Expenses transport chunk')
+  // Admin-only code never rides in the storefront (owner rule). The staff Orders screen (G6) and the admin subpage registry it is listed in (shared/hubDestinations.ts,
+  // its own chunk because Rollup filed it in app-shared, which the storefront loads) stay out of this closure, by file and by content.
+  assert.deepEqual(closureFiles.filter((file) => /^(OnlineOrdersPage|SalesHubPage|hub-destinations)-/.test(file)), [], 'no staff Orders or hub-registry chunk in the catalog-products closure')
+  assert.deepEqual(
+    closureFiles.filter((file) => /\/api\/online-orders|oo_tab|promo_tab_discounts/.test(fs.readFileSync(path.join(distAssets, file), 'utf8'))), [],
+    'no chunk of the catalog-products closure carries the staff Orders endpoints or the admin hub destinations',
+  )
   assert.deepEqual(
     closureFiles.filter((file) => fs.readFileSync(path.join(distAssets, file), 'utf8').includes('/api/fees/report')), [],
     'no chunk of the catalog-products closure carries the Expenses report endpoint',

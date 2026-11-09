@@ -1,4 +1,5 @@
-import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, SVGProps } from 'react'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'

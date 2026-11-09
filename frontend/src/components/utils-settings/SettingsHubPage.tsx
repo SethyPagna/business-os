@@ -1,4 +1,5 @@
-import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { Suspense, lazy } from 'react'
 import SettingsIcon from 'lucide-react/dist/esm/icons/settings.js'
 import UsersIcon from 'lucide-react/dist/esm/icons/users.js'

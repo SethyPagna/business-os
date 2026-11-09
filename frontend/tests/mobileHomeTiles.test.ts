@@ -8,7 +8,7 @@ import {
 import { DEFAULT_MOBILE_SECTION_NAV_MODE } from '../src/utils/sectionNavPreference.ts'
 import { getMobileSectionIcon } from '../src/components/navigation/mobileSectionIcons.ts'
 import { ConflictIcon } from '../src/components/shared/ConflictIcon.ts'
-import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
+import { getHubDestinations } from '../src/components/shared/hubDestinations.ts'
 
 let failed = 0
 const runTest = (name: string, fn: () => void): void => {

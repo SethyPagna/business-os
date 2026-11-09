@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { effectivePermissions, type PermissionUser } from '../src/utils/permissions.ts'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
-import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
+import { getHubDestinations } from '../src/components/shared/hubDestinations.ts'
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8').split('\r\n').join('\n')
 const worker = read('../../cloudflare/src/lib/productDiscountGate.ts')
@@ -43,7 +43,7 @@ test('FIELDS: every price-bearing discount column the Worker gates is one the Pr
 
 test('GATE: the discount editor needs View, Edit product and the price action; its hub tile mirrors it', () => {
   assert.match(page, /const canManageDiscounts = can\('products', 'view'\) && can\('products', 'edit'\) && can\('products', 'price'\)/)
-  const hub = read('../src/components/shared/hubNavigation.ts')
+  const hub = read('../src/components/shared/hubDestinations.ts')
   assert.match(hub, /\['discounts', 'promo_tab_discounts', 'Discounts', can\('products'\) && act\('products', 'edit'\) && act\('products', 'price'\)\]/)
 })
 

@@ -1,6 +1,7 @@
 import { buildCacheBustedMediaPath } from '../../utils/mediaUpload.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import { getHubDestinations, hubAnchor, mobileGroupAction, resolveChromeSection } from '../shared/hubNavigation.ts'
+import { hubAnchor, mobileGroupAction, resolveChromeSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { buildMobileHomeLayout, mobileHomeSectionsPanelId } from '../../utils/mobileHomeTiles.ts'
 import { mobileChromeViewportOffset, navLayerToggle } from '../../utils/mobileNavChrome.ts'
 import './nav-chrome.css'

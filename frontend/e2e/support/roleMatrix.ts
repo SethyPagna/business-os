@@ -7,7 +7,7 @@ import { getInventoryCheckAccess } from '../../src/utils/inventoryCheckAccess.ts
 import { canViewAcquisitionCosts } from '../../src/utils/acquisitionCostAccess.ts'
 import { getAdminPathForPage } from '../../src/app/pathRouting.ts'
 import { ACCOUNT_NAV_IDS, NAV_ITEMS } from '../../src/components/shared/navigationConfig.ts'
-import { getHubDestinations, type HubDestination } from '../../src/components/shared/hubNavigation.ts'
+import { getHubDestinations, type HubDestination } from '../../src/components/shared/hubDestinations.ts'
 import { PERMISSION_DEFS, PERMISSION_SECTIONS } from '../../src/components/users/permissionDefinitions.ts'
 import { ROLE_PRESETS } from '../../src/components/users/rolePresetDefaults.ts'
 

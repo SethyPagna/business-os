@@ -27,6 +27,8 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/utils/workDrafts.ts', 'work-drafts'],
   ['/src/utils/dirtyWork.ts', 'work-drafts'],
   ['/src/components/shared/hubNavigation.ts', 'hub-navigation'],
+  // The admin subpage registry (every hub page's sections and permission keys). Its own chunk so Rollup cannot file it in app-shared, which the storefront loads.
+  ['/src/components/shared/hubDestinations.ts', 'hub-destinations'],
   ['/src/utils/publicAssetUrls.ts', 'api-http-core'],
   // http.ts reads the server's build, epoch and read-budget headers through these three leaves. Left to the '/src/api/' fallback they
   // land in app-api-methods, which imports http.ts back: a static chunk cycle that verify-built-startup refuses.

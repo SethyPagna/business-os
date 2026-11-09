@@ -1,4 +1,5 @@
-import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useHubSection } from '../shared/hubNavigation.ts'
+import { getHubDestinations } from '../shared/hubDestinations.ts'
 import { Suspense } from 'react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
