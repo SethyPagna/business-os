@@ -95,15 +95,7 @@ export function planFulfil(
 
 type Statement = { sql: string; params: Record<string, unknown> }
 
-/** First in the batch, before the header: aborts everything when the order moved. The shared "malformed JSON" abort idiom of the other guards. */
-export function fulfilGuardStatement(plan: FulfilPlan): Statement {
-  return {
-    sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM online_orders WHERE id = @oid AND state = 'paid' AND sale_id IS NULL AND revision = @rev)
-          THEN 1 ELSE json_extract('online_order_conflict', '$') END`,
-    params: { oid: plan.orderId, rev: plan.revision },
-  }
-}
-
+/** There is deliberately NO separate guard before the header: D1 rolls the whole batch back on the first failing statement, and the verification SELECT after the UPDATE below fails it when the order moved. */
 /**
  * After the header and the lines: link the order and write its Records. Everything keys on the sale's write key, like the batch's other follow-ups, and every row is
  * guarded by the order being linked to THIS sale, so a replayed batch adds nothing twice (the unique index on payment_recorded_on_sale backs that up).

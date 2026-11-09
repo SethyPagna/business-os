@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange } from '../lib/onlineOrderAlerts'
 import {
-  ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilGuardStatement, fulfilStatements, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+  ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -1617,8 +1617,6 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
-      // Fulfil: the order must still be the paid, unlinked, same-revision order the cashier saw, or the whole batch (sale, lines, stock) rolls back.
-      ...(fulfilPlan ? [fulfilGuardStatement(fulfilPlan)] : []),
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {

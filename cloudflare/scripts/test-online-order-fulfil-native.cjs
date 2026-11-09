@@ -117,6 +117,18 @@ async function main() {
     assert.equal((await h.one("SELECT COUNT(*) c FROM online_order_events WHERE order_id = ? AND event = 'payment_recorded_on_sale'", raced)).c, 1)
     console.log('PASS two cashiers Fulfilling the same order at once: one sale, one link, one set of Records')
 
+    // The order moves AFTER the preflight read and before the batch's UPDATE (a trigger on the sale insert stands in for another cashier): only the in-batch verification can catch it.
+    const stale = await paidOrder()
+    await h.db.prepare(`CREATE TRIGGER fulfil_test_move AFTER INSERT ON sales WHEN NEW.client_request_id = 'fulfil-stale' BEGIN UPDATE online_orders SET revision = revision + 1 WHERE id = ${stale}; END`).run()
+    const before3 = await sales()
+    const lost = await sale('fulfil-stale', stale)
+    // The trigger's own move is rolled back with the batch, so the route's re-read cannot attribute it here (a real competitor's committed change would answer online_order_changed): the proof is the 409 and the clean rollback.
+    assert.equal(lost.status, 409, JSON.stringify(lost.body))
+    assert.equal(await sales(), before3, 'the sale was rolled back with the failed link'); assert.equal((await order(stale)).state, 'paid'); assert.equal((await order(stale)).sale_id, null)
+    assert.deepEqual(await events(stale), [])
+    await h.db.prepare('DROP TRIGGER fulfil_test_move').run()
+    console.log('PASS an order that moves between the preflight read and the batch rolls the whole sale back (409)')
+
     // ------------------------------------------------------------------------------------------------------------------------------------------ plain sales are untouched
     const plain = await H.createSale(h, { key: 'plain-1', lines: [{ productId: 12, quantity: 1 }], paymentDetails: [{ method: 'Cash', amount_usd: 12.5, amount_khr: 0 }], label: 'plain' })
     assert.equal(plain.status, 200, JSON.stringify(plain.body))
