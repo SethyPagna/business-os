@@ -36,7 +36,7 @@ import { costViewProfit } from '../lib/reportProfitView'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
-import { onlineReceivedOverlay } from '../lib/onlineOrderReceived'
+import { collectedByPaymentDay, onlineReceivedOverlay } from '../lib/onlineOrderReceived'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -461,10 +461,10 @@ app.get('/overview', async (c) => {
     const onlineDelta = Math.round((onlineReceived.paidInWindowUsd - onlineReceived.recordedOnSalesUsd) * 10000) / 10000
     if (onlineDelta !== 0) {
       const mutable = totals as unknown as Record<string, unknown>
-      mutable.collected_total_usd = Math.round((num(mutable.collected_total_usd) + onlineDelta) * 100) / 100
+      mutable.collected_total_usd = collectedByPaymentDay(num(mutable.collected_total_usd), onlineReceived)
       const key = onlineReceived.method.trim().toLowerCase()
       const row = paymentMethods.find((r) => String(r.key).trim().toLowerCase() === key || String(r.label ?? '').trim().toLowerCase() === key)
-      if (row) row.collected_total_usd = Math.round((num(row.collected_total_usd) + onlineDelta) * 100) / 100
+      if (row) row.collected_total_usd = collectedByPaymentDay(num(row.collected_total_usd), onlineReceived)
       else if (onlineReceived.paidInWindowUsd > 0) {
         paymentMethods.push({ key, label: onlineReceived.method, tx_count: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: Math.round(onlineDelta * 100) / 100 } as unknown as (typeof paymentMethods)[number])
       }

@@ -164,7 +164,7 @@ const telegram = load('lib/telegram.ts', {
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
   './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,
-  './onlineOrderReceived': { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }) },
+  './onlineOrderReceived': { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received },
 })
 
 const NOW = Date.parse('2026-09-06T12:00:00Z')

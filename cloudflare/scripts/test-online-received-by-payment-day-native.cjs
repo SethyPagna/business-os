@@ -52,4 +52,4 @@ async function main() {
 main().then(() => { console.log('online received by payment day: ok'); process.exit(0) }).catch((e) => { console.error(e); process.exit(1) })
 // The Telegram overview's Received line carries the same rule (it is composed in the Worker, not reachable from this harness): pin the wiring so it cannot be dropped silently.
 const telegramSource = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
-assert.match(telegramSource, /if \(received\) \{\s*const online = await onlineReceivedOverlay\(env, filters\)\s*if \(online\.paidInWindowUsd > 0\) received = \{ \.\.\.received, digital: \{ \.\.\.received\.digital, usd: round4\(received\.digital\.usd \+ online\.paidInWindowUsd\) \} \}/, 'Telegram overview Received adds the online money paid in the day')
+assert.match(telegramSource, /received = receivedWithOnlinePaid\(received, await onlineReceivedOverlay\(env, filters\)\)/, 'Telegram overview Received calls the pure fold (tested in test-online-received-by-day-pure.cjs)')

@@ -64,3 +64,25 @@ export async function onlineReceivedOverlay(env: Env, f: SalesFilters): Promise<
     return NONE(method)
   }
 }
+
+// ---- the pure parts: what the composers do with the overlay (no database, tested in scripts/test-online-received-by-day-pure.cjs) ------------------------------
+
+const round4 = (value: number): number => Math.round(value * 10000) / 10000
+const round2 = (value: number): number => Math.round(value * 100) / 100
+
+/**
+ * A SALE-DATED collected figure (the reports kernel's collected total, or the KHQR method row) moved to the day the money arrived: the online money recorded on this window's
+ * live sales is already inside it and comes out, the money PayWay took in this window goes in.
+ */
+export function collectedByPaymentDay(collectedUsd: number, overlay: Pick<OnlineReceivedOverlay, 'paidInWindowUsd' | 'recordedOnSalesUsd'>): number {
+  return round2(collectedUsd + overlay.paidInWindowUsd - overlay.recordedOnSalesUsd)
+}
+
+/**
+ * A TENDER-BASED received figure (the Telegram overview's Received line: it reads each sale's recorded tender, and the tender reader already leaves the online money of a
+ * Fulfilled sale out of every day) gets the money PayWay took in the window, once, on its paid day.
+ */
+export function receivedWithOnlinePaid<T extends { digital: { usd: number } }>(received: T, overlay: Pick<OnlineReceivedOverlay, 'paidInWindowUsd'>): T {
+  if (!(overlay.paidInWindowUsd > 0)) return received
+  return { ...received, digital: { ...received.digital, usd: round4(received.digital.usd + overlay.paidInWindowUsd) } }
+}

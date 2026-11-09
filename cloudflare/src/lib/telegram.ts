@@ -21,7 +21,7 @@ import {
   refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
-import { onlineReceivedOverlay } from './onlineOrderReceived'
+import { onlineReceivedOverlay, receivedWithOnlinePaid } from './onlineOrderReceived'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
@@ -2272,8 +2272,7 @@ async function summarySectionFigures(
   // KHQR online orders (lead condition 2): the Received line is by the day the money arrived. The tender reader leaves linked online money out of every day, so the day it
   // was paid (PayWay's paid_at) adds it here, once, whenever the order is fulfilled.
   if (received) {
-    const online = await onlineReceivedOverlay(env, filters)
-    if (online.paidInWindowUsd > 0) received = { ...received, digital: { ...received.digital, usd: round4(received.digital.usd + online.paidInWindowUsd) } }
+    received = receivedWithOnlinePaid(received, await onlineReceivedOverlay(env, filters))
   }
   return {
     ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),

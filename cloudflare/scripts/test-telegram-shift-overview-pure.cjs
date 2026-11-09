@@ -173,7 +173,7 @@ const telegram = loadReal('lib/telegram.ts', {
   './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange,
   './shiftReconciliation': shiftReconciliation,
-  './onlineOrderReceived': { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }) },
+  './onlineOrderReceived': { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received },
 })
 
 // ---- the Telegram API, locally ---------------------------------------------
