@@ -1557,7 +1557,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     // A scoped Set is held product-wide while the counts queue is live (ic_fix_stock); a named count on any other /adjust keeps its ic_lot_counts widening.
     const productWide = Number.isSafeInteger(productId) && productId > 0 && await readSwitch(c.env, scopedSet ? 'ic_fix_stock' : 'ic_lot_counts')
     const branchId = Number.isSafeInteger(requestedBranch) && requestedBranch > 0 ? requestedBranch : productWide && scopedSet ? await defaultBranchId(c.env) : null
-    const widened = productWide && branchId ? { productId, branchId, exceptSession: approvalClaimSession(body) } : undefined
+    const widened = productWide && branchId ? { productId, branchId, alsoBranchId: branchRedirectTarget(c), exceptSession: approvalClaimSession(body) } : undefined
     if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id, widened)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   }
   return withStockMutationReceipt(

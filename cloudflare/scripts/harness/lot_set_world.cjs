@@ -104,9 +104,9 @@ function createLotSetWorld(options = {}) {
     if (switches) f.raw.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, set_at: '2026-11-09T00:00:00.000Z', set_by: 1, switches }))
     load('lib/readSwitches.ts').resetReadSwitchMemo()
   }
-  async function call(f, method, url, body, env = {}) {
+  async function call(f, method, url, body, env = {}, headers = {}) {
     const pending = []
-    const response = await app.request(url, { method, headers: { 'content-type': 'application/json', cookie: `bos_session=${TOKEN}` }, body: body === undefined ? undefined : JSON.stringify(body) }, { ...f.env, ...env }, { waitUntil: p => pending.push(p), passThroughOnException() {} })
+    const response = await app.request(url, { method, headers: { 'content-type': 'application/json', cookie: `bos_session=${TOKEN}`, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }, { ...f.env, ...env }, { waitUntil: p => pending.push(p), passThroughOnException() {} })
     await Promise.allSettled(pending)
     return { status: response.status, body: await response.json() }
   }

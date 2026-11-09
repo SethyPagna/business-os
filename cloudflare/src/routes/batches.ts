@@ -620,7 +620,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
   // A direct Set is held while any count of this product at this branch waits for approval (owner rule), whatever the request id is; the hold is the same one POST /api/inventory/adjust
   // applies to a scoped Set (lib/inventoryCheckFixStock.ts), so Products can never settle stock around a queued count either.
   const { scopedSetHeld, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
-  if (await scopedSetHeld(c.env, db, { productId: batch.productId, branchId })) return c.json(FIX_STOCK_COUNT_PENDING, 409)
+  if (await scopedSetHeld(c.env, db, { productId: batch.productId, branchId, alsoBranchId: branchRedirectTarget(c) })) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
   const closeIssue = await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
   const result = await applyStockLotSet(db, user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {

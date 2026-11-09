@@ -79,6 +79,21 @@ async function main() {
     assert.equal(lotQuantity(f), 7, 'a claim nobody holds writes nothing')
   })
 
+  await check('the hold reads the LANDING branch: a Set addressed to a disabled branch that lands on a branch where a count waits is held, on both routes', async () => {
+    const REDIRECT = { 'X-Branch-Redirect': '1' }
+    const disabled = f => w.seed(f, 'UPDATE branches SET is_active=0 WHERE id=2')
+    const viaAdjust = (f, extra = {}) => w.call(f, 'POST', '/api/inventory/adjust', set({ branchId: 2, ...extra }), {}, REDIRECT)
+    const control = w.world({ switches: ON }); disabled(control)
+    assert.equal((await viaAdjust(control)).status, 200, 'with nothing waiting, the confirmed redirect lands the Set at branch 1')
+    assert.equal(lotQuantity(control), 6)
+    const f = w.world({ switches: ON }); disabled(f); w.waitingCount(f)
+    const before = w.snapshot(f)
+    const held = await viaAdjust(f)
+    assert.equal(held.status, 409, JSON.stringify(held.body)); assert.equal(held.body.code, 'inventory_check_count_pending'); assert.equal(w.snapshot(f), before)
+    const heldPatch = await w.call(f, 'PATCH', '/api/batches/11/branches/2', { quantity: 6, reason: 'Physical count', client_request_id: 'batches_set_land001' }, {}, REDIRECT)
+    assert.equal(heldPatch.status, 409, JSON.stringify(heldPatch.body)); assert.equal(heldPatch.body.code, 'inventory_check_count_pending'); assert.equal(w.snapshot(f), before)
+  })
+
   if (failures.length) { console.error(`FAILED ${failures.length}: ${failures.join(' | ')}`); process.exit(1) }
   console.log('PASS test-inventory-check-set-hold-native')
 }

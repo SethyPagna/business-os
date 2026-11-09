@@ -35,14 +35,15 @@ export function approvalClaimSession(body: Record<string, unknown>): string | nu
   return typeof sessionId === 'string' && sessionId.length > 0 && sessionId.length <= 120 ? sessionId : null
 }
 
-type Scope = { productId: number; branchId: number; exceptSession?: string | null }
+// alsoBranchId: the branch a confirmed redirect (X-Branch-Redirect) lands the write on when the addressed branch was disabled; a count waiting THERE holds the Set as much as one at the addressed branch.
+type Scope = { productId: number; branchId: number; alsoBranchId?: number | null; exceptSession?: string | null }
 
 /** Does ANY count of this product at this branch still wait for approval (other than the approval that is writing)? The product's lines at the branch come from index 0285, each approval is a primary-key step. */
 export async function waitingCountHolds(db: D1Compat, scope: Scope): Promise<boolean> {
   if (!await approvalsAvailable(db)) return false
   const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id
-    WHERE i.product_id=@productId AND i.branch_id=@branchId AND a.session_id IS NOT @except AND ${waitingLineSql('a', 'i')} LIMIT 1`)
-    .get<{ waiting: number }>({ productId: scope.productId, branchId: scope.branchId, except: scope.exceptSession ?? null })
+    WHERE i.product_id=@productId AND i.branch_id IN (@branchId,@alsoBranchId) AND a.session_id IS NOT @except AND ${waitingLineSql('a', 'i')} LIMIT 1`)
+    .get<{ waiting: number }>({ productId: scope.productId, branchId: scope.branchId, alsoBranchId: scope.alsoBranchId ?? scope.branchId, except: scope.exceptSession ?? null })
   return row?.waiting === 1
 }
 
