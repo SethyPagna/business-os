@@ -1,4 +1,4 @@
-import { isOrderToken } from './orderPath.ts'
+import { ORDER_HISTORY_STORAGE_KEY, isOrderToken } from './orderPath.ts'
 
 // "My orders": the orders this browser placed, kept in this browser only (localStorage), like the shortlist.
 // The order link IS the key to the order, so what is stored is the link's token, the order number and the time it was placed. Never the
@@ -6,7 +6,6 @@ import { isOrderToken } from './orderPath.ts'
 
 export type SavedOrder = { token: string; orderNo: string; savedAt: string; totalUsd: number }
 
-export const ORDER_HISTORY_STORAGE_KEY = 'business-os-portal-orders-v1'
 /** The newest orders only: a phone's storage is not a ledger. */
 export const ORDER_HISTORY_MAX = 20
 

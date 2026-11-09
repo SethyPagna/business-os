@@ -76,6 +76,25 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/legalContent.ts', 'catalog-legal'],
   ['/src/components/catalog/legal/PortalEmbedConsent.tsx', 'catalog-legal'],
+  // Online ordering (KHQR). The order link helper is read by the storefront root and page before first paint, so that one tiny module rides the
+  // storefront's own utils chunk. Everything else under orders/ loads only when asked for (an /order link, or Checkout): left to the
+  // '/src/components/catalog/' fallback it would land in the admin 'catalog' chunk and the storefront would load the Website Editor.
+  ['/src/components/catalog/orders/orderPath.ts', 'catalog-public-utils'],
+  ['/src/components/catalog/orders/orderHistory.ts', 'catalog-order-core'],
+  // The code both lazy order chunks share (the API client, error text, rules, the poller, the form pieces): imported by them, importing nothing of theirs.
+  ['/src/components/catalog/orders/orderClient.ts', 'catalog-order-core'],
+  ['/src/components/catalog/orders/orderErrors.ts', 'catalog-order-core'],
+  ['/src/components/catalog/orders/orderLogic.ts', 'catalog-order-core'],
+  ['/src/components/catalog/orders/orderPoller.ts', 'catalog-order-core'],
+  ['/src/components/catalog/orders/orderTypes.ts', 'catalog-order-core'],
+  ['/src/components/catalog/orders/orderUi.tsx', 'catalog-order-core'],
+  // Checkout sheet: opens from the cart. The order page: opens from a link. Change and return forms: open from the order page once paid.
+  ['/src/components/catalog/orders/CheckoutSheet.tsx', 'catalog-order-checkout'],
+  ['/src/components/catalog/orders/OrderRoute.tsx', 'catalog-order-page'],
+  ['/src/components/catalog/orders/OrderPage.tsx', 'catalog-order-page'],
+  ['/src/components/catalog/orders/KhqrCard.tsx', 'catalog-order-page'],
+  ['/src/components/catalog/orders/OrderRequests.tsx', 'catalog-order-changes'],
+  ['/src/components/catalog/orders/OrderEditSheet.tsx', 'catalog-order-changes'],
 ]
 
 // These icons have consumers on both sides of a route boundary. Pinning them

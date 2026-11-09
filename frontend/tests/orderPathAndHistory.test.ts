@@ -3,9 +3,9 @@
 // Run: node tests/orderPathAndHistory.test.ts
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isOrderToken, orderPathFor, orderRouteFromPath } from '../src/components/catalog/orders/orderPath.ts'
+import { ORDER_HISTORY_STORAGE_KEY, hasSavedOrders, isOrderToken, orderPathFor, orderRouteFromPath } from '../src/components/catalog/orders/orderPath.ts'
 import {
-  ORDER_HISTORY_MAX, ORDER_HISTORY_STORAGE_KEY, addSavedOrder, forgetOrder, readSavedOrders, rememberOrder, removeSavedOrder, sanitizeSavedOrders, writeSavedOrders,
+  ORDER_HISTORY_MAX, addSavedOrder, forgetOrder, readSavedOrders, rememberOrder, removeSavedOrder, sanitizeSavedOrders, writeSavedOrders,
   type SavedOrder,
 } from '../src/components/catalog/orders/orderHistory.ts'
 
@@ -81,4 +81,21 @@ test('storage that is blocked or corrupt never throws: the order is safe on the 
   assert.deepEqual(readSavedOrders(memoryStorage({ [ORDER_HISTORY_STORAGE_KEY]: '{not json' })), [])
   assert.deepEqual(readSavedOrders(null), [])
   assert.equal(writeSavedOrders([saved(TOKEN_A)], null), false)
+})
+
+test('the cart drawer learns whether any order is saved without parsing the list, and an emptied list reads as none', () => {
+  // CATCHES: a "My orders" link shown to a browser that has none (the empty "[]" left after removing the last order), and a throw in blocked storage.
+  const withWindow = (localStorage: unknown, run: () => void) => {
+    const had = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage } })
+    try { run() } finally { if (had) Object.defineProperty(globalThis, 'window', had); else delete (globalThis as { window?: unknown }).window }
+  }
+  const storage = memoryStorage()
+  withWindow(storage, () => assert.equal(hasSavedOrders(), false, 'nothing saved'))
+  rememberOrder(saved(TOKEN_A), storage)
+  withWindow(storage, () => assert.equal(hasSavedOrders(), true, 'one saved'))
+  forgetOrder(TOKEN_A, storage)
+  withWindow(storage, () => assert.equal(hasSavedOrders(), false, 'the "[]" left after removing the last one is none'))
+  withWindow({ getItem: () => { throw new Error('denied') } }, () => assert.equal(hasSavedOrders(), false, 'blocked storage'))
+  assert.equal(hasSavedOrders(), false, 'no window (server render)')
 })

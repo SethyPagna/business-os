@@ -191,6 +191,9 @@ const DYNAMIC_KEY_SOURCES: Record<string, (file: string, site: string) => Storef
   'components/catalog/catalogUi.tsx copy(labelKey, fallback)': keyFallbackTuples,
   'components/catalog/legal/LegalPages.tsx copy(key, legalText(\'en\', key), legalText(\'km\', key))': (_file, site) => legalEntries(site),
   'components/catalog/PortalNoPaymentNotice.tsx copy(privacyKey, legalText(\'en\', privacyKey), legalText(\'km\', privacyKey))': (_file, site) => legalEntries(site),
+  // The checkout sheet's consent line links the two policies by the same legal keys.
+  'components/catalog/orders/CheckoutSheet.tsx copy(termsKey, legalText(\'en\', termsKey), legalText(\'km\', termsKey))': (_file, site) => legalEntries(site),
+  'components/catalog/orders/CheckoutSheet.tsx copy(privacyKey, legalText(\'en\', privacyKey), legalText(\'km\', privacyKey))': (_file, site) => legalEntries(site),
   // InstallPromptBand's translate wrapper; its calls are scanned under `translate` below.
   'components/catalog/PublicCatalogPage.tsx copy(key, fallback, fallbackKm)': () => [],
 }

@@ -630,8 +630,13 @@ const routeSharedIconNames = new Set([
   'map-pin',
   'medal',
   'moon',
+  'pencil',
   'phone',
   'plus',
+  // Online ordering (KHQR): the cart Checkout and My orders controls (storefront, eager) and the order screens (lazy) use these. Left unnamed,
+  // each lands in whichever admin chunk imported it first, and the lazy order chunks would then load that admin chunk (tests/chunkBoundaryPolicy.test.ts).
+  'qr-code',
+  'receipt',
   'rotate-ccw',
   'save',
   'search',

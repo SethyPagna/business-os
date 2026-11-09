@@ -17,6 +17,8 @@ const ALLOWED: Record<string, [number, string]> = {
   'api/websocket.ts': [1, 'socket keep-alive, not a poll; the hub auto-responds without waking'],
   'index.tsx': [1, 'service-worker update check; returns early in a hidden tab, checks on visibilitychange'],
   'components/pos/ShiftGate.tsx': [1, 'local clock, no request'],
+  'components/catalog/orders/KhqrCard.tsx': [1, 'local 1 s countdown redraw, no request (the status poll is orderPoller, which is hidden-tab aware)'],
+  'components/catalog/orders/OrderPage.tsx': [1, 'local 1 s clock for the countdown and the expiry switch, no request'],
   'components/server/ServerPage.tsx': [1, 'local 1 s clock, no request'],
   'components/utils-settings/ResetData.tsx': [1, 'local elapsed counter, no request'],
 }

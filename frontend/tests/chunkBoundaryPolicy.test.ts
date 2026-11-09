@@ -46,6 +46,19 @@ const boundaries: Array<[string, string]> = [
   ['components/catalog/portalAccount.ts', 'catalog-account-core'],
   ['components/catalog/portalBucket.ts', 'catalog-account-core'],
   ['components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
+  // Online ordering (KHQR): the link helper rides the storefront's utils chunk (the root and page read it before first paint);
+  // everything else under orders/ is lazy and has chunks of its own, never the admin 'catalog' chunk (the generic catalog/ rule).
+  ['components/catalog/orders/orderPath.ts', 'catalog-public-utils'],
+  ['components/catalog/orders/orderHistory.ts', 'catalog-order-core'],
+  ['components/catalog/orders/orderClient.ts', 'catalog-order-core'],
+  ['components/catalog/orders/orderLogic.ts', 'catalog-order-core'],
+  ['components/catalog/orders/orderUi.tsx', 'catalog-order-core'],
+  ['components/catalog/orders/CheckoutSheet.tsx', 'catalog-order-checkout'],
+  ['components/catalog/orders/OrderRoute.tsx', 'catalog-order-page'],
+  ['components/catalog/orders/OrderPage.tsx', 'catalog-order-page'],
+  ['components/catalog/orders/KhqrCard.tsx', 'catalog-order-page'],
+  ['components/catalog/orders/OrderRequests.tsx', 'catalog-order-changes'],
+  ['components/catalog/orders/OrderEditSheet.tsx', 'catalog-order-changes'],
   ['components/shared/modalCloseContext.ts', 'shared-modal'],
   ['components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
   ['components/shared/useDialogKeyboard.ts', 'shared-ui'],
@@ -221,7 +234,13 @@ if (process.argv.includes('--bundle')) {
     // whole storefront (catalog-public, catalog-products) never load it. Red when a boot-path module imports saleStatusResolution.ts again.
     ['index', ['vendor', 'app-auth', 'auth-login', 'catalog', 'backup-reset-tools', 'money-core']],
     ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker', 'money-core']],
-    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools', 'money-core']],
+    // Online ordering (KHQR) is reached only through dynamic imports (an /order link, the cart's Checkout button): no storefront entry may load any of
+    // its four chunks statically, and none of them may pull the admin app, the Website Editor, SheetJS or the file and import code.
+    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']],
+    ['PublicCatalogRoot', ['catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']],
+    ['catalog-order-page', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],
+    ['catalog-order-checkout', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],
+    ['catalog-order-changes', ['app-auth', 'auth-login', 'catalog', 'catalog-editor', 'background-import-tracker', 'backup-reset-tools', 'money-core', 'vendor-xlsx', 'file-api', 'import-jobs-api']],
     ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools', 'image-lightbox', 'money-core']],
     ['catalog-secondary-tabs', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
   ] as const) {

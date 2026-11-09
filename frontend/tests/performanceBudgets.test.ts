@@ -119,6 +119,10 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // rules (utils/posOrdersSchema.ts) stay out of it; serverSignals, dataEpoch and readBudgetShed join api-http-core, which imports them.
 const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
 const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
+// KHQR S7 (online ordering): the storefront's eager share of it, measured against the same tree without it (979,656 -> 981,082 bytes, +1,426; +466 gzip): the cart's
+// Checkout and My orders controls, the saved-orders check (orders/orderPath.ts), the order notice copy and three icons (qr-code, receipt, pencil) in shared-ui. The
+// checkout, the order page, the QR drawing, edit and requests are four lazy chunks outside this closure (chunkBoundaryPolicy forbids a static path to them).
+const CATALOG_PRODUCTS_KHQR_GROWTH_BYTES = 1_500
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -140,7 +144,7 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
     'no chunk of the catalog-products closure carries the Expenses report endpoint',
   )
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_KHQR_GROWTH_BYTES,
     `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(

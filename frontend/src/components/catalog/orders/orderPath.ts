@@ -24,3 +24,19 @@ export function orderRouteFromPath(pathname: unknown): OrderRoute | null {
 export const isOrderToken = (value: unknown): value is string => typeof value === 'string' && ORDER_TOKEN_PATTERN.test(value)
 
 export const orderPathFor = (token: string): string => `${ORDER_PATH_ROOT}/${encodeURIComponent(token)}`
+
+/** Where "My orders" keeps its rows (orderHistory.ts reads and writes them; the cookie policy lists this key). */
+export const ORDER_HISTORY_STORAGE_KEY = 'business-os-portal-orders-v1'
+
+/**
+ * Whether this browser has saved any order, without parsing them: the cart drawer (eager) only needs to know whether to offer the "My orders" link,
+ * and the row sanitiser and writers (orderHistory.ts) load with the order screens, not with the catalogue.
+ */
+export function hasSavedOrders(): boolean {
+  try {
+    const raw = typeof window === 'undefined' ? null : window.localStorage.getItem(ORDER_HISTORY_STORAGE_KEY)
+    return !!raw && raw.length > 2
+  } catch {
+    return false
+  }
+}

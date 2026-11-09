@@ -43,7 +43,9 @@ try {
   // 6.0.1171: the Website Editor is a lazy chunk reached only from the catalog route, and Receipt Settings must not pull either one
   // (a shared icon once folded into catalog-editor and dragged the editor into /receipt-settings), so the graph needs all three.
   const editorChunks = ['catalog', 'catalog-editor', 'ReceiptSettings']
-  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...editorChunks, ...staticChecked]) {
+  // KHQR S7: the storefront root and the four lazy order chunks are closure-checked too.
+  const orderChunks = ['PublicCatalogRoot', 'catalog-order-core', 'catalog-order-checkout', 'catalog-order-page', 'catalog-order-changes']
+  for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs', ...editorChunks, ...orderChunks, ...staticChecked]) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
   // The Expenses transport chunk and the pages that must NOT load it (E1-F): only the Expenses page imports it here.
@@ -64,7 +66,7 @@ try {
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 27 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 32 chunks, zero cycles/)
   // A till page that statically imports SheetJS must fail the gate.
   fs.writeFileSync(path.join(assets, 'vendor-xlsx-12345678.js'), 'export const xlsx = 1;')
   fs.writeFileSync(path.join(assets, 'POS-12345678.js'), 'import { xlsx } from "./vendor-xlsx-12345678.js"; export const value = xlsx;')

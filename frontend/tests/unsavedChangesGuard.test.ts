@@ -314,6 +314,10 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   'components/catalog/ProductDetailFlyout.tsx': 'read-only viewer',
   'components/catalog/legal/ConsentRenewalPrompt.tsx': 'holds no draft -- one tick and Agree; nothing authored is lost by dismissing it',
   'components/catalog/legal/LegalPages.tsx': 'read-only policy viewer; it has no editable fields or draft state to lose',
+  // Storefront ordering sheets (KHQR S7) DO hold typed work and DO ask before dropping it -- with the storefront's own Discard/Back dialog (ConfirmDialog),
+  // not useCloseGuard, because the shared guard lives in the admin bundle and the public site must not load it. Pinned in e2e/storefront-checkout.spec.ts.
+  'components/catalog/orders/CheckoutSheet.tsx': 'has its own Discard/Back prompt for typed details (the shared guard is admin-bundle code the storefront must not load)',
+  'components/catalog/orders/OrderEditSheet.tsx': 'has its own Discard/Back prompt for edited details (the shared guard is admin-bundle code the storefront must not load)',
   'components/catalog/PublicCatalogPage.tsx': 'storefront drawers -- the cart and wishlist persist, the drawers only show them',
   'components/inventory/ProductDetailModal.tsx': 'read-only viewer',
   'components/navigation/Sidebar.tsx': 'navigation chrome, not a modal',
