@@ -157,10 +157,11 @@ async function evaluate<T>(expression: string): Promise<T> {
 const menuOpen = async () => await evaluate<boolean>(`document.querySelector('[data-bos-title-menu-layer]') !== null`)
 
 const SCREENSHOT_DIR = process.env.TITLE_MENU_SCREENSHOT_DIR || ''
-const pages: Array<[string, string, string[]]> = [
-  ['products', 'hub:products:stock_changes', ['products', 'stock_changes', 'stock_in_sessions', 'duplicates']],
-  ['sales', 'hub:sales:returns', ['sales', 'returns', 'fees', 'reports']],
-  ['inventory', 'hub:inventory:sessions', ['products', 'sessions', 'issues']],
+const pages: Array<[string, string, string[], string]> = [
+  ['products', 'hub:products:products', ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'], 'products'],
+  ['products', 'hub:products:stock_changes', ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'], 'stock-changes'],
+  ['sales', 'hub:sales:returns', ['sales', 'returns', 'fees', 'reports'], 'sales'],
+  ['inventory', 'hub:inventory:sessions', ['products', 'sessions', 'issues'], 'inventory'],
 ]
 
 async function openPage(page: string, anchor: string): Promise<void> {
@@ -209,12 +210,16 @@ try {
     const fab = document.createElement('button'); fab.id = 'fake-float'; fab.textContent = 'FAB'; fab.style.cssText = 'position:fixed;left:8px;top:90px;width:300px;height:300px;z-index:1100;background:#cfc'; document.body.appendChild(fab)
   })()`)
 
-  for (const language of ['en', 'km']) {
+  for (const theme of ['light', 'dark']) for (const language of ['en', 'km']) {
+    await evaluate(`document.documentElement.classList.toggle('dark', ${theme === 'dark'})`)
     await evaluate(`window.__setSidebarLanguage('${language}')`)
-    for (const [page, anchor, ids] of pages) {
+    for (const [page, anchor, ids, shotName] of pages) {
       await openPage(page, anchor)
       const trigger = `[data-bos-title-menu="${page}"]`
       await waitFor(async () => await evaluate<boolean>(`document.querySelector('${trigger}') !== null`) ? true : null)
+      const barLine = await evaluate<string>(`getComputedStyle(document.querySelector('header')).borderBottomColor`)
+      assert.notEqual(barLine, 'rgba(0, 0, 0, 0)', `${theme} ${language} ${page}: the closed bar keeps its divider`)
+      const stickyBefore = await evaluate<number>(`document.getElementById('fake-sticky').getBoundingClientRect().top`)
       const closed = await evaluate<any>(`(() => { const b = document.querySelector('${trigger}'); return { tag: b.tagName, expanded: b.getAttribute('aria-expanded'), svg: b.querySelector('svg') !== null, list: document.querySelector('[data-bos-title-menu-layer]') !== null } })()`)
       assert.deepEqual(closed, { tag: 'BUTTON', expanded: 'false', svg: false, list: false }, `${language} ${page}: the title is a button with no arrow and the list starts collapsed`)
 
@@ -240,6 +245,16 @@ try {
           plain: items.every((i) => !i.querySelector('svg')) && getComputedStyle(menu).boxShadow === 'none' && getComputedStyle(menu).borderTopWidth === '0px' && getComputedStyle(menu).borderRadius === '0px' && items.every((i) => getComputedStyle(i).backgroundColor === 'rgba(0, 0, 0, 0)'),
           weights: items.map((i) => Number(getComputedStyle(i.querySelector('span')).fontWeight)),
           flush: Math.abs(rect.top - document.querySelector('header').getBoundingClientRect().bottom) < 1 && rect.left === 0 && rect.right === document.documentElement.clientWidth,
+          barLine: getComputedStyle(document.querySelector('header')).borderBottomColor,
+          barBottom: document.querySelector('header').getBoundingClientRect().bottom,
+          listLine: getComputedStyle(menu).borderBottomWidth + ' ' + getComputedStyle(menu).borderBottomColor,
+          listTopLine: getComputedStyle(menu).borderTopWidth,
+          listShadow: getComputedStyle(menu).boxShadow,
+          listBg: getComputedStyle(menu).backgroundColor,
+          barBg: getComputedStyle(document.querySelector('header')).backgroundColor,
+          titleLeft: document.querySelector('${trigger} span').getBoundingClientRect().left,
+          itemLeft: items[0].querySelector('span').getBoundingClientRect().left,
+          pushed: document.getElementById('fake-sticky').getBoundingClientRect().top,
           noOverflow: document.documentElement.scrollWidth === document.documentElement.clientWidth,
         }
       })()`)
@@ -254,11 +269,18 @@ try {
       assert.equal(open.reachable, true, `${language} ${page}: every item is the topmost element at its centre, over the sticky row and the float`)
       assert.equal(open.inside, true, `${language} ${page}: the list stays inside the viewport`)
       assert.ok(open.zMenu > open.zFloat && open.zMenu > open.zSticky && open.zMenu > open.zHeader, `${language} ${page}: menu z-index ${open.zMenu} is above sticky ${open.zSticky}, float ${open.zFloat}, header ${open.zHeader}`)
+      assert.equal(open.barLine, 'rgba(0, 0, 0, 0)', `${theme} ${language} ${shotName}: no divider between the title row and the list`)
+      assert.match(open.listLine, /^1px rgb/, `${theme} ${language} ${shotName}: the line is the list's bottom edge`)
+      assert.equal(open.listTopLine, '0px')
+      assert.equal(open.listShadow, 'none')
+      assert.equal(open.listBg, open.barBg, `${theme} ${language} ${shotName}: list and bar share one background`)
+      assert.ok(Math.abs(open.titleLeft - open.itemLeft) < 1, `${theme} ${language} ${shotName}: items align with the title text (${open.titleLeft} vs ${open.itemLeft})`)
+      assert.equal(open.pushed, stickyBefore, `${theme} ${language} ${shotName}: the list floats and moves no page content`)
       assert.equal(open.noOverflow, true, `${language} ${page}: no horizontal overflow`)
       if (SCREENSHOT_DIR) {
         const shot = await send('Page.captureScreenshot', { format: 'png' })
         fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
-        fs.writeFileSync(path.join(SCREENSHOT_DIR, `${page}-${language}-360x740.png`), Buffer.from(shot.data, 'base64'))
+        fs.writeFileSync(path.join(SCREENSHOT_DIR, `${shotName}-${language}-${theme}-360x740.png`), Buffer.from(shot.data, 'base64'))
       }
 
       await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)

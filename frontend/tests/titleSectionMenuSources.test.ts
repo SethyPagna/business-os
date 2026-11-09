@@ -40,6 +40,12 @@ assert.doesNotMatch(titleMenu, /ui_mobile_section_nav|useLayeredSectionNav/, 'th
 assert.doesNotMatch(titleMenu, /lucide-react|<svg|shadow|border|rounded-xl|bg-white/, 'the expanded titles are plain text: no arrow, icon, box, border or shadow')
 assert.match(titleMenu, /aria-expanded={open}/, 'the title announces expanded/collapsed')
 
+// One surface while open: no divider between the title row and the list; the line is on the list's bottom edge.
+const chromeCss = read('components/navigation/nav-chrome.css')
+assert.match(chromeCss, /\.bos-nav-topbar:has\(\[data-bos-title-menu\]\[aria-expanded='true'\]\) \{\s*border-bottom-color: transparent;/, 'the bar divider is hidden while the title list is open')
+assert.match(chromeCss, /\.bos-nav-subpages \{[^}]*border-bottom: 1px solid var\(--nav-line\)/, 'the divider is the list bottom edge')
+assert.doesNotMatch(chromeCss, /\.bos-nav-subpages \{[^}]*(border-top|box-shadow)/, 'no line or shadow above or around the list')
+
 // The menu layer outranks the sticky rows (z-30), bar (z-50) and every float, modal and toast tier.
 const zValues = [...(sidebar + read('components/navigation/SectionTitleMenu.tsx')).matchAll(/z-\[?(\d+)\]?/g)].map((m) => Number(m[1]))
 assert.ok(SECTION_TITLE_MENU_Z > 1200 && SECTION_TITLE_MENU_Z < 1500, 'menu z sits above the modal, toast and hint tiers, below the update bar')
