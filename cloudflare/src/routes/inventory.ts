@@ -36,7 +36,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, approvalClaimOf, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1623,6 +1623,19 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
+  // A count variance (INV S6) is an approved count line: the lot writer computes the target (max(0, live + counted - seen)) from what it reads inside its own pinned write, so the line carries no
+  // quantity of its own, no expected figure and no tag. It is accepted only as a scoped Set written under an approval claim, which the receipt wrapper checks inside the stock batch.
+  let variance: { counted: number; seen: number } | undefined
+  if (body.variance !== undefined) {
+    const sent = body.variance && typeof body.variance === 'object' && !Array.isArray(body.variance) ? body.variance as Record<string, unknown> : null
+    const figure = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    if (type !== 'set' || (body.setScope !== 'lot' && body.setScope !== 'branch') || !approvalClaimOf(body) || !sent || !figure(sent.counted) || !figure(sent.seen)
+      || Object.keys(sent).length !== 2 || body.quantity !== undefined || body.expectedLotQuantity != null || body.expectedBranchQuantity != null || (body.conditionTag ?? body.condition_tag) != null) {
+      return c.json({ error: 'A count variance is a scoped Set under an approval claim, with the counted and seen figures and no quantity.', code: 'invalid_variance' }, 400)
+    }
+    variance = { counted: sent.counted, seen: sent.seen }
+    quantity = 0
+  }
   const reason = body.reason != null ? String(body.reason).trim() || null : null
   const requestedBranchId = body.branchId != null ? Number(body.branchId) : null
   // D4 (11.28): stock recorded late may carry the REAL received date. It
@@ -1724,11 +1737,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
       ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
+      ...(variance ? { variance } : {}),
     }, markWritten, () => branchRedirectTarget(c), atomicMark)
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
-          type: 'set', setScope: body.setScope, quantity, reason, branchId, batchId: Number(body.batchId), conditionTag,
+          // A variance line names no figure of its own: the figure written is the writer's, from its answer.
+          type: 'set', setScope: body.setScope, quantity: variance ? (body.setScope === 'lot' ? (result.body.after as { lotQuantity?: number } | undefined)?.lotQuantity : (result.body.after as { branchQuantity?: number } | undefined)?.branchQuantity) ?? null : quantity,
+          reason, branchId, batchId: Number(body.batchId), conditionTag, ...(result.body.variance ? { variance: result.body.variance } : {}),
           operationId: result.body.operation_id ?? null, before: result.body.before, after: result.body.after,
         }),
         broadcast(c.env, 'products', { action: 'update', id: productId }),

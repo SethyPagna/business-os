@@ -123,7 +123,24 @@ function createLotSetWorld(options = {}) {
       VALUES(?,NULL,?,'pending',1,7,'2026-11-09T01:00:00.000Z',?)`).run(session, branchId, JSON.stringify({ [productId]: seen }))
     f.raw.exec('PRAGMA foreign_keys=ON')
   }
-  return { actor, load, lot, app, world, seed, setSwitches, call, snapshot, waitingCount, cacheBumps, resetBumps: () => { cacheBumps.length = 0 } }
+  /**
+   * A waiting count per received date, as the submission writes it: the product's item (counted = the sum of the lines, baseline = the sum of the seen figures), one lot line per date and
+   * a pending approval. lines: [[batchId, counted, seen], ...]; batchId 0 is a branch-total line.
+   */
+  function dateCount(f, { productId = 1, branchId = 1, session = 'dated-session-1', lines, submittedBy = 8 } = {}) {
+    const counted = lines.reduce((sum, line) => sum + line[1], 0), seen = lines.reduce((sum, line) => sum + line[2], 0)
+    f.raw.prepare(`INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
+      VALUES(?,NULL,?,?,'','closed',0,'{}','2026-11-09T01:00:00.000Z','2026-11-09T01:00:00.000Z','2026-11-09T01:00:00.000Z')`).run(session, branchId, submittedBy)
+    f.raw.prepare(`INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
+      VALUES(?,?,?,'{}',?,'{}','issue',?,'Count differs from stock',1,?,'2026-11-09T01:00:00.000Z')`).run(session, productId, branchId, seen, counted, submittedBy)
+    for (const [batchId, lineCounted, lineSeen] of lines) {
+      f.raw.prepare(`INSERT INTO inventory_check_lot_lines(session_id,product_id,branch_id,batch_id,scope,seen_quantity,counted_quantity,seen_source,created_at)
+        VALUES(?,?,?,?,?,?,?,'screen','2026-11-09T01:00:00.000Z')`).run(session, productId, branchId, batchId, batchId === 0 ? 'branch' : 'lot', lineSeen, lineCounted)
+    }
+    f.raw.prepare(`INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
+      VALUES(?,NULL,?,'pending',1,?,'2026-11-09T01:00:00.000Z',?)`).run(session, branchId, submittedBy, JSON.stringify({ [productId]: seen }))
+  }
+  return { actor, load, lot, app, world, seed, setSwitches, call, snapshot, waitingCount, dateCount, cacheBumps, resetBumps: () => { cacheBumps.length = 0 } }
 }
 
 module.exports = { createLotSetWorld }

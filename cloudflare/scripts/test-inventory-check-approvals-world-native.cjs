@@ -123,7 +123,7 @@ async function main() {
       const movements = await world.all("SELECT product_id,movement_type,quantity FROM inventory_movements WHERE reason LIKE '%Inventory check approved%' ORDER BY id")
       assert.ok(movements.some(row => row.product_id === LOW), 'the lowering left its stock movement')
       const operations = await world.all("SELECT request_id FROM stock_lot_adjustment_operations WHERE request_id LIKE ?", `${request}-%`)
-      assert.equal(operations.length, 1, 'the raise went through the lot-level Set writer (undoable Set operation)')
+      assert.equal(operations.length, 2, 'both lines went through the lot-level Set writer: one undoable Set operation each, with its own history row')
       const history = await as('lead', 'GET', `/api/inventory-checks/sessions/${id}/history?page=1&pageSize=50`)
       assert.equal(history.json.items.filter(item => item.after?.approval).length, 3, 'two lines and the decision are on the record')
       world.approveRequest = request
@@ -174,7 +174,7 @@ async function main() {
     }
     const breakTwo = async pid => assert.equal((await as('admin', 'POST', '/api/inventory/adjust', { productId: pid, branchId: 1, quantity: 2, type: 'remove', reason: 'broken in store', conditionTag: 'damaged', client_request_id: key('damage') })).status, 200)
 
-    await check('the count is applied as a VARIANCE on the real Worker: a sale after the count survives it (counted 26 over 24, one sold: 25), damaged units are never touched, a count below them is refused', async () => {
+    await check('the count is applied as a VARIANCE on the real Worker: a sale after the count survives it (counted 26 over 24, one sold: 25), damaged units are never touched, a count below them floors at zero and says so', async () => {
       const [VAR_RAISE, VAR_LOW, BELOW] = rows.slice(8, 11).map(row => row.pid)
       await breakTwo(VAR_LOW); await breakTwo(BELOW)
       const start = await snapshot([VAR_RAISE, VAR_LOW, BELOW]), totalOf = pid => start[pid].ordinary + start[pid].damaged
@@ -191,9 +191,10 @@ async function main() {
       assert.equal(lowered.damaged, 2, 'damaged units are never touched'); assert.equal(lowered.lots, lowered.ordinary); assert.equal(raised.lots, raised.ordinary)
       const below = await submit([{ productId: BELOW, countedQuantity: 1, seenQuantity: totalOf(BELOW), checked: false }])
       const refused = await as('lead', 'POST', `/api/inventory-checks/sessions/${below.json.item.id}/approval`, { decision: 'approve', requestId: key('below') })
-      assert.equal(refused.status, 409); assert.equal(refused.json.code, 'inventory_check_count_below_damaged'); assert.deepEqual(refused.json.productIds, [BELOW])
-      assert.deepEqual(await stock(BELOW), start[BELOW], 'nothing was written')
-      assert.equal((await as('lead', 'POST', `/api/inventory-checks/sessions/${below.json.item.id}/approval`, { decision: 'reject', requestId: key('below-reject') })).status, 200, 'and it can still be rejected')
+      assert.equal(refused.status, 200, refused.text.slice(0, 300)); assert.equal(refused.json.done, true)
+      const floored = await stock(BELOW)
+      assert.equal(floored.ordinary, 0, 'counted 1 against the seen ' + totalOf(BELOW) + ': max(0, live + 1 - seen)'); assert.equal(floored.damaged, 2, 'the damaged units are untouched'); assert.equal(floored.lots, 0)
+      assert.equal(refused.json.approval.applied_lines[BELOW].clamped, true, 'the shortage the floor held back is told')
       console.log('  D1 calls per variance step (limit ' + FREE_CALL_LIMIT + '): ' + calls.join(', '))
     })
 

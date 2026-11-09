@@ -15,6 +15,9 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 // products.stock_quantity, H = the held (tagged) row. q = the operator's
 // target, d = the lot delta.
 //
+//   variance      q is computed here, not sent: q = max(0, live + counted - seen) of the scope's
+//                 quantity (lot L, or branch B), read by this writer's own facts and pinned by
+//                 stateGuard; then exactly one of the two rows below (INV S6, count approvals)
 //   scope lot     d = q - L        L' = q      B' = max(0, B + d)   P += B' - B
 //   scope branch  d = q - B        L' = L + d  B' = q               P += d
 //                 (refused 409 when L + d < 0: the lot cannot cover it)
@@ -32,6 +35,11 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 // has always carried: the lot figure being set is authoritative and a drifted
 // aggregate must not make the repair impossible. The exact B'/B pair is kept
 // in the snapshots, so undo still restores B exactly.
+//
+// VARIANCE (INV S6). An approved count line is applied as what the count FOUND: request.variance = {counted, seen} (what was counted, and the figure the counter saw). The target is
+// max(0, live + counted - seen), computed from the quantity this writer reads in its own facts, so a sale between the count and the approval survives it, and pinned by stateGuard in the
+// same batch. It is accepted only inside an approval's claim (the receipt wrapper's atomicMark carries the claim into the batch; without one the request is refused 400), never from a
+// plain Set. The answer carries variance: {counted, seen, wanted, clamped?} so the approval records what was applied; the request id keys the receipt like any Set, so a repeat is replayed.
 //
 // IDEMPOTENCY. The whole forward write is one ordinaryBusinessBatch (the
 // maintenance guard is its last statement), so a Set either lands completely
@@ -102,6 +110,8 @@ export type StockLotSetRequest = {
   conditionTag: StockConditionTag | null
   expectedLotQuantity?: number
   expectedBranchQuantity?: number
+  /** An approved count line: the target is computed from what the count found, inside this writer. Only under an approval claim. */
+  variance?: { counted: number; seen: number }
 }
 
 export type StockLotSetResult = { status: number; body: Record<string, unknown> }
@@ -396,11 +406,12 @@ export async function applyStockLotSet(
       (SELECT variant_product_id FROM product_batches WHERE id=@batch) AS lot_product_id,
       (SELECT unit_cost_usd FROM product_batches WHERE id=@batch) AS unit_cost_usd,
       (SELECT received_at FROM product_batches WHERE id=@batch) AS received_at,
+      (SELECT is_active FROM product_batches WHERE id=@batch) AS lot_active,
       COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch) AS lot_exists,
       EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists`)
-    .get<{ product_name: string | null; branch_name: string | null; lot_product_id: number | null; unit_cost_usd: number | null; received_at: string | null
+    .get<{ product_name: string | null; branch_name: string | null; lot_product_id: number | null; unit_cost_usd: number | null; received_at: string | null; lot_active: number | null
       lot_quantity: number; branch_quantity: number; lot_exists: number; branch_exists: number }>({ product: request.productId, branch: request.branchId, batch: request.batchId })
   if (!facts?.product_name) return { status: 404, body: { error: 'Product not found' } }
   if (!facts.branch_name) return { status: 400, body: { error: 'An active branch is required before stock can be changed' } }
@@ -410,6 +421,18 @@ export async function applyStockLotSet(
     productId: request.productId, branchId: request.branchId, batchId: request.batchId,
     lotQuantity: Number(facts.lot_quantity) || 0, branchQuantity: Number(facts.branch_quantity) || 0,
     lotExists: Number(facts.lot_exists) ? 1 : 0, branchExists: Number(facts.branch_exists) ? 1 : 0,
+  }
+  // An approved count line: the target is what the count found, applied to the quantity read above, and pinned by stateGuard in the batch below.
+  let variance: { counted: number; seen: number; wanted: number; clamped?: true } | undefined
+  if (request.variance) {
+    const { counted, seen } = request.variance
+    if (!atomicMark?.execute) return { status: 400, body: { error: 'A count variance is applied only under an approval claim.', code: 'variance_requires_claim' } }
+    if (!Number.isFinite(counted) || !Number.isFinite(seen) || counted < 0 || seen < 0) return { status: 400, body: { error: 'A count variance needs the counted and the seen figures.', code: 'invalid_variance' } }
+    const wanted = (request.setScope === 'lot' ? before.lotQuantity : before.branchQuantity) + counted - seen
+    const target = Math.max(0, wanted)
+    if (Math.abs(target - Math.round(target)) > 0.000000001) return conflict('The count does not leave a whole number of units.', 'inventory_check_target_not_whole')
+    request = { ...request, quantity: Math.round(target) }
+    variance = { counted, seen, wanted, ...(wanted < 0 ? { clamped: true as const } : {}) }
   }
   if ((request.expectedLotQuantity !== undefined && request.expectedLotQuantity !== before.lotQuantity)
     || (request.expectedBranchQuantity !== undefined && request.expectedBranchQuantity !== before.branchQuantity)) {
@@ -425,6 +448,9 @@ export async function applyStockLotSet(
   const base = {
     success: true, branchId: request.branchId, productId: request.productId, productName: facts.product_name,
     batchId: request.batchId, setScope: request.setScope, createdSibling: false,
+    // A write that finds the lot retired puts it back in use (0154): the caches that list received dates must hear about it, which is not the quantity-only change a sale is.
+    ...(after.lotQuantity > 0 && Number(facts.lot_active) !== 1 && lotDelta !== 0 ? { reactivated: true } : {}),
+    ...(variance ? { variance } : {}),
   }
   if (lotDelta === 0) return { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after } }
   if (lotDelta > 0) {
