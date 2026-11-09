@@ -652,13 +652,24 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
 // The product's item row keeps its state and total (counted = the sum of its lines, baseline = the sum of the seen figures), so sessions, history, the Issues filter, queue-first supersede and
 // the approval plan work as they always did; the lines ride in inventory_check_lot_lines. A refused stale figure answers with the figures of now, read only on that refusal path.
 type LotLine = { batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }
-type LotSubmissionLine = { productId: number; checked: boolean; note: string | null; lots: LotLine[] }
+// A plain line (countedQuantity / seenQuantity, as the older writer takes it) counts the product's branch total with no received-date lines: a submission may mix both kinds.
+type LotSubmissionLine = { productId: number; checked: boolean; note: string | null; lots: LotLine[]; plain?: { counted: number; seen: number | null } }
 const LOT_SUBMISSION_LINE_KEYS = new Set(['productId', 'lots', 'checked', 'note'])
+const PLAIN_SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
 const LOT_LINE_KEYS = new Set(['batchId', 'scope', 'counted', 'seen'])
 /** The lines one product may carry: more received dates than this on one product is not a count of it. */
 const LOT_LINES_PER_PRODUCT = 50
 function lotSubmissionLine(value: unknown, sighted: boolean): LotSubmissionLine {
   const line = object(value)
+  if (line.lots === undefined && line.countedQuantity !== undefined) {
+    if (Object.keys(line).some(key => !PLAIN_SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
+    if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
+    const plainNote = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
+    if (plainNote !== null && plainNote.length > 500) fail(400, 'inventory_check_invalid_note')
+    const plainSeen = line.seenQuantity == null ? null : submissionQuantity(line.seenQuantity)
+    if (sighted && plainSeen === null) fail(400, 'inventory_check_invalid_request')
+    return { productId: positive(line.productId), checked: line.checked === true, note: plainNote, lots: [], plain: { counted: submissionQuantity(line.countedQuantity), seen: sighted ? plainSeen : null } }
+  }
   if (Object.keys(line).some(key => !LOT_SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
   if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
   const note = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
@@ -694,7 +705,7 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   const lines = body.lines.map(value => lotSubmissionLine(value, sighted)).sort((a, b) => a.productId - b.productId)
   const productIds = lines.map(line => line.productId)
   if (new Set(productIds).size !== productIds.length) fail(400, 'inventory_check_invalid_id')
-  if (lines.reduce((sum, line) => sum + line.lots.length, 0) > options.maxLines) fail(400, 'inventory_check_too_many_lines')
+  if (lines.reduce((sum, line) => sum + Math.max(1, line.lots.length), 0) > options.maxLines) fail(400, 'inventory_check_too_many_lines')
   const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
   if (title.length > 120) fail(400, 'inventory_check_invalid_title')
   if (!sighted && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
@@ -710,8 +721,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
   if (products.length !== productIds.length) fail(409, 'inventory_check_baseline_changed')
   // "Marked checked" means the count the person saw equalled stock: the figures it was typed against are the ones the batch guards, so a mismatch here is a recount, never a difference.
   const resolved = lines.map(line => {
-    const counted = line.lots.reduce((sum, lot) => sum + lot.counted, 0)
-    const seen = sighted ? line.lots.reduce((sum, lot) => sum + (lot.seen ?? 0), 0) : null
+    const counted = line.plain ? line.plain.counted : line.lots.reduce((sum, lot) => sum + lot.counted, 0)
+    const seen = !sighted ? null : line.plain ? line.plain.seen : line.lots.reduce((sum, lot) => sum + (lot.seen ?? 0), 0)
     const matched = seen !== null && Math.abs(seen - counted) <= COUNT_EPSILON
     const state: 'done' | 'issue' = !sighted || matched ? 'done' : 'issue'
     return { line, counted, seen, matched, state, reason: state === 'issue' ? line.note ?? DEFAULT_COUNT_NOTE : null }
@@ -724,7 +735,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
   const lotLines = resolved.flatMap(item => item.line.lots.map(lot => ({ product_id: item.line.productId, batch_id: lot.batchId, scope: lot.scope, seen: lot.seen, counted: lot.counted })))
   const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify({ membership: 'submission' }), now,
-    members: JSON.stringify(members), lines: JSON.stringify(lotLines), count: productIds.length, sighted: sighted ? 1 : 0, eps: COUNT_EPSILON }
+    members: JSON.stringify(members), lines: JSON.stringify(lotLines),
+    plain: JSON.stringify(resolved.filter(item => item.line.plain).map(item => ({ product_id: item.line.productId, seen: item.line.plain!.seen }))), count: productIds.length, sighted: sighted ? 1 : 0, eps: COUNT_EPSILON }
   const supersede = options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []
   const lineAlias = 'e.value'
   const statements: Statement[] = [
@@ -737,6 +749,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE json_extract(${lineAlias},'$.scope')='lot' AND NOT ${ACTIVE_LOT_SQL(`json_extract(${lineAlias},'$.product_id')`, `json_extract(${lineAlias},'$.batch_id')`)})`, 'inventory_check_baseline_changed', params),
     guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE json_extract(${lineAlias},'$.scope')='branch' AND NOT ${ACTIVE_LOT_SQL(`json_extract(${lineAlias},'$.product_id')`)})`, 'inventory_check_no_lot', params),
     // The seen figures, inside the batch: the quantity of each line is what the counter saw at the moment of the write, or nothing is written.
+    // A plain line is measured against the branch total the counter saw, inside the same batch.
+    ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@plain) e WHERE abs(COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(e.value,'$.product_id') AND bs.branch_id=@branchId),0)-json_extract(e.value,'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
     ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE abs(${LIVE_LINE_SQL(lineAlias)}-json_extract(${lineAlias},'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
     ...supersede,
     { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
@@ -745,7 +759,8 @@ export async function createInventoryCheckLotSubmission(db: D1Compat, principal:
     { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
       SELECT @id,json_extract(m.value,'$.product_id'),@branchId,json_extract(m.value,'$.product'),
         CASE WHEN @sighted=1 THEN json_extract(m.value,'$.baseline')
-          ELSE (SELECT SUM(${LIVE_LINE_SQL('e.value')}) FROM json_each(@lines) e WHERE json_extract(e.value,'$.product_id')=json_extract(m.value,'$.product_id')) END,
+          ELSE COALESCE((SELECT SUM(${LIVE_LINE_SQL('e.value')}) FROM json_each(@lines) e WHERE json_extract(e.value,'$.product_id')=json_extract(m.value,'$.product_id')),
+            (SELECT COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(m.value,'$.product_id') AND bs.branch_id=@branchId),0))) END,
         '{}',json_extract(m.value,'$.state'),json_extract(m.value,'$.counted'),json_extract(m.value,'$.reason'),1,@actorId,@now FROM json_each(@members) m`, params },
     { sql: `INSERT INTO inventory_check_lot_lines(session_id,product_id,branch_id,batch_id,scope,seen_quantity,counted_quantity,seen_source,created_at)
       SELECT @id,json_extract(e.value,'$.product_id'),@branchId,json_extract(e.value,'$.batch_id'),json_extract(e.value,'$.scope'),

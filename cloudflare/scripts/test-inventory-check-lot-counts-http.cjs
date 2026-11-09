@@ -112,13 +112,13 @@ const lot = (batchId, counted, seen) => ({ batchId, scope: 'lot', counted, ...(s
 async function lotMain() {
   const on = () => setSwitch({ ic_simple: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on' })
 
-  await check('OFF: a line that carries received dates is refused exactly as an unknown key always was, and nothing is written', async () => {
+  await check('OFF: a line that carries received dates is refused with its own 409 (the tab re-reads its capabilities), and nothing is written', async () => {
     reset(); twoLots()
     for (const form of [{ ic_simple: 'on' }, { ic_simple: 'on', ic_lot_counts: 'off' }, { ic_simple: 'on', ic_lot_counts: 'shadow:0.5' }]) {
       setSwitch(form)
       const before = metadata(), stock = physical()
       const response = await lotSubmit([lotLine(910001, [lot(910001, 5, 5)])])
-      assert.equal(response.status, 400, JSON.stringify(form)); assert.equal(response.body.code, 'inventory_check_invalid_request')
+      assert.equal(response.status, 409, JSON.stringify(form)); assert.equal(response.body.code, 'inventory_check_lot_counts_off')
       assert.deepEqual(metadata(), before); assert.deepEqual(physical(), stock); assert.deepEqual(lotLines(), [])
     }
     // the plain count of the same product still works with the switch off: the older writer is untouched
@@ -252,6 +252,26 @@ async function lotMain() {
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910002, branchId: 1 }), false, 'another product is not held')
     assert.equal(await fixStockHeldByApproval(handle, named, { productId: 910001, branchId: 2 }), false, 'another branch is not held')
     assert.equal(await fixStockHeldByApproval(handle, 'not-a-fix-request', { productId: 910001, branchId: 1 }), false, 'a request that names no count is never held')
+  })
+
+  await check('G1: one submission may mix a dated product and a plain product; the plain one is a branch-total item with no date lines, guarded against the figure it saw', async () => {
+    reset(); twoLots(); on()
+    const mixed = [lotLine(910001, [lot(910001, 5, 5), lot(920001, 3, 4)]), { productId: 910002, countedQuantity: 5, seenQuantity: 5, checked: true }]
+    const before = physical()
+    const first = await lotSubmit(mixed)
+    assert.equal(first.status, 201, JSON.stringify(first.body))
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_items').get().n, 2, 'two items')
+    assert.deepEqual(lotLines().map(row => row.product_id), [910001, 910001], 'one product has date lines, the plain one has none')
+    assert.deepEqual(itemOf(910002), { state: 'done', counted_quantity: 5, baseline_quantity: 5, reason: null })
+    assert.equal(itemOf(910001).state, 'issue')
+    assert.deepEqual(physical(), before, 'a count writes no stock')
+    // a plain figure that no longer matches what was seen is refused whole, with the product named
+    reset(); twoLots(); on()
+    const stale = await lotSubmit([lotLine(910001, [lot(910001, 5, 5)]), { productId: 910002, countedQuantity: 4, seenQuantity: 99 }], { requestId: 'lot-request-mixed-2' })
+    assert.equal(stale.status, 409); assert.equal(stale.body.code, 'inventory_check_stock_changed'); assert.deepEqual(lotLines(), [], 'nothing written')
+    // a plain line with an unknown key is still refused, and the ceiling counts a plain line as one
+    const bad = await lotSubmit([{ productId: 910002, countedQuantity: 4, seenQuantity: 4, lots: [] }], { requestId: 'lot-request-mixed-3' })
+    assert.equal(bad.status, 400)
   })
 
   await check('alerts: a differing lot count tells the approvers once, a matching one tells nobody, a replaced approval is told as rejected, a replay announces nothing', async () => {

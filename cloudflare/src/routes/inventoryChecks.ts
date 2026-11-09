@@ -149,6 +149,8 @@ app.post('/submissions', async c => {
   // A submission whose lines carry received dates (`lots`) is the ic_lot_counts writer's; with the switch off the older writer refuses the key exactly as it always did.
   const withLots = Array.isArray((input as { lines?: unknown } | null)?.lines) && ((input as { lines: unknown[] }).lines).some(line => !!line && typeof line === 'object' && Object.hasOwn(line, 'lots'))
   const lotCounts = withLots && await lotCountsOn(c)
+  // A tab that still holds the switch ON after it went OFF sends dates: a plain 409 with its own code, so the page re-reads its capabilities once instead of repeating a 400.
+  if (withLots && !lotCounts) throw new InventoryCheckSessionError(409, 'inventory_check_lot_counts_off')
   const writer = lotCounts ? (db: ReturnType<typeof getDb>, who: Awaited<ReturnType<typeof principal>>, body: unknown, _low: Awaited<ReturnType<typeof loadLowStockConfig>>, options: Parameters<typeof createInventoryCheckSubmission>[4]) =>
     createInventoryCheckLotSubmission(db, who, body, { ...options, maxLines: getPlanLimits(c.env).inventoryCheckLotLinesPerSubmission }) : createInventoryCheckSubmission
   const result = await writer(getDb(c.env), await principal(c), input, await loadLowStockConfig(c.env),
