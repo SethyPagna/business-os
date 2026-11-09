@@ -15,7 +15,7 @@ CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, br
 CREATE TABLE sale_items(id INTEGER PRIMARY KEY, sale_id INTEGER, cost_price_usd REAL, quantity REAL);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, branch_id INTEGER, return_number TEXT,
  receipt_number TEXT, customer_id INTEGER, customer_name TEXT, return_scope TEXT DEFAULT 'customer', return_type TEXT, reason TEXT,
- status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
+ status TEXT DEFAULT 'completed', total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, refund_channel TEXT);
 CREATE TABLE return_items(id INTEGER PRIMARY KEY, return_id INTEGER, cost_price_usd REAL, quantity REAL, stock_action TEXT, return_to_stock INTEGER);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
  label TEXT, notes TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0);

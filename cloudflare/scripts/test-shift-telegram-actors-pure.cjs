@@ -103,7 +103,7 @@ CREATE TABLE sale_payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id I
     );
     CREATE TABLE returns (
       id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, cashier_id INTEGER, branch_id INTEGER,
-      status TEXT, return_scope TEXT, total_refund_usd REAL, total_refund_khr REAL, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT
+      status TEXT, return_scope TEXT, total_refund_usd REAL, total_refund_khr REAL, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, refund_channel TEXT
     );
     CREATE TABLE return_items (
       id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,

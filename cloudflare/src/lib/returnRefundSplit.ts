@@ -31,7 +31,7 @@ export function returnDebtLoweredSql(alias: string): string {
       AND ${notPaidSaleSql('debt_sale')}) THEN COALESCE(${alias}.total_refund_usd, 0) ELSE 0 END
     ELSE COALESCE(${alias}.owed_reduction_usd, 0) END)`
 }
-export type ReturnMoneyColumns = { total_refund_usd?: unknown; total_refund_khr?: unknown; owed_reduction_usd?: unknown; refund_currency?: unknown }
+export type ReturnMoneyColumns = { total_refund_usd?: unknown; total_refund_khr?: unknown; owed_reduction_usd?: unknown; refund_currency?: unknown; refund_channel?: unknown }
 const finite = (value: unknown): number => Number.isFinite(Number(value)) ? Number(value) : 0
 
 /** JS reading of shiftReconciliation's refund drawer SQL, for one return row (alerts). */
@@ -39,6 +39,8 @@ export function refundCashOut(row: ReturnMoneyColumns): { owedReductionUsd: numb
   const total = finite(row.total_refund_usd)
   const owed = finite(row.owed_reduction_usd)
   const cash = roundMoney4(total - owed)
+  // Refunded through ABA (0293): nothing left a drawer.
+  if (row.refund_channel === 'aba') return { owedReductionUsd: owed, usd: 0, khr: 0 }
   if (row.refund_currency !== 'KHR') return { owedReductionUsd: owed, usd: cash, khr: 0 }
   // Riel cash leaves the drawer in whole 100-riel notes, rounded down (owner, 21 and 27 Oct 2026).
   return { owedReductionUsd: owed, usd: 0, khr: total > 0 ? rielCashFloor(finite(row.total_refund_khr) * (total - owed) / total) : 0 }

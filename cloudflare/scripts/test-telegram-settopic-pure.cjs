@@ -104,7 +104,7 @@ function makeDb(settings) {
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT);
     CREATE TABLE returns (id INTEGER PRIMARY KEY, return_number TEXT, status TEXT, return_scope TEXT, receipt_number TEXT,
       customer_name TEXT, supplier_name TEXT, branch_id INTEGER, total_refund_usd REAL, total_refund_khr REAL, branch_name TEXT,
-      owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT);
+      owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, refund_channel TEXT);
     CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, branch_id INTEGER, batch_id INTEGER,
       product_name TEXT, quantity REAL, total_usd REAL, stock_action TEXT);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, lot_code TEXT, received_at TEXT);
@@ -112,12 +112,12 @@ function makeDb(settings) {
     CREATE TABLE products (id INTEGER PRIMARY KEY, stock_quantity REAL);
     CREATE TABLE return_replacement_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_name TEXT, quantity REAL);
     INSERT INTO branches VALUES (1, 'Store');
-    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0, NULL, 0, NULL);
-    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0, NULL, 0, NULL);
-    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0, NULL, 0, NULL);
-    INSERT INTO returns VALUES (8, 'RET-0008', 'cancelled', 'customer', '20261021-090000', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'USD');
-    INSERT INTO returns VALUES (9, 'RET-0009', 'cancelled', 'customer', '20261021-091500', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'KHR');
-    INSERT INTO returns VALUES (10, 'RET-0010', 'cancelled', 'customer', '20261021-093000', 'Mony', NULL, 1, 4, 16000, NULL, 4, 'USD');
+    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0, NULL, 0, NULL, NULL);
+    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0, NULL, 0, NULL, NULL);
+    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0, NULL, 0, NULL, NULL);
+    INSERT INTO returns VALUES (8, 'RET-0008', 'cancelled', 'customer', '20261021-090000', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'USD', NULL);
+    INSERT INTO returns VALUES (9, 'RET-0009', 'cancelled', 'customer', '20261021-091500', 'Mony', NULL, 1, 4, 16000, NULL, 3, 'KHR', NULL);
+    INSERT INTO returns VALUES (10, 'RET-0010', 'cancelled', 'customer', '20261021-093000', 'Mony', NULL, 1, 4, 16000, NULL, 4, 'USD', NULL);
     INSERT INTO products VALUES (1, 9);
     INSERT INTO branch_stock VALUES (1, 1, 1, 9);
     INSERT INTO return_items VALUES (1, 6, 1, 1, NULL, 'Face cream', 1, 4, 'restock');

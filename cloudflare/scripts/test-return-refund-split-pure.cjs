@@ -108,7 +108,7 @@ check('the payment-state writer is gone: a plan carries no payment state and the
 
 check('drawer SQL and its JS twin agree: legacy dollars, split dollars, split riel', () => {
   const db = new DatabaseSync(':memory:')
-  db.exec('CREATE TABLE returns(id INTEGER PRIMARY KEY, total_refund_usd REAL, total_refund_khr REAL, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, sale_id INTEGER)')
+  db.exec('CREATE TABLE returns(id INTEGER PRIMARY KEY, total_refund_usd REAL, total_refund_khr REAL, owed_reduction_usd REAL NOT NULL DEFAULT 0, refund_currency TEXT, sale_id INTEGER, refund_channel TEXT)')
   // Sales 1 and 3 read Not Paid (column, retired label); 2 and 4 read paid -- 6.0.905: a pre-0260 return there lowered no debt.
   db.exec("CREATE TABLE sales(id INTEGER PRIMARY KEY, sale_status TEXT, status_before_return TEXT); INSERT INTO sales VALUES (1,'awaiting_payment',NULL),(2,'completed',NULL),(3,'partial_return','awaiting_payment'),(4,'returned','completed')")
   const rows = [
@@ -118,13 +118,21 @@ check('drawer SQL and its JS twin agree: legacy dollars, split dollars, split ri
     // Riel cash leaves in whole 100-riel notes, rounded DOWN (owner, 21 and 27 Oct 2026): 9,717 -> 9,700, never up to 4,000 from 3,990.
     [12, 1, 9717, 0, 'KHR', 2], [13, 1, 3990, 0, 'KHR', 2],
   ]
-  const insert = db.prepare('INSERT INTO returns VALUES (?,?,?,?,?,?)')
-  for (const row of rows) insert.run(...row)
-  const read = db.prepare(`SELECT id, total_refund_usd, total_refund_khr, owed_reduction_usd, refund_currency,
+  const insert = db.prepare('INSERT INTO returns VALUES (?,?,?,?,?,?,?)')
+  for (const row of rows) insert.run(...row, null)
+  // refund_channel (0293): a refund sent back through ABA leaves no drawer. A drawer that counted it would read short by money it
+  // never paid out. 'drawer' and NULL read exactly as before.
+  const channelRows = [
+    [20, 4, 16000, 0, 'USD', 2, 'aba'], [21, 4, 16000, 3, 'USD', 1, 'aba'], [22, 4, 16000, 0, 'KHR', 2, 'aba'], [23, 4, 16000, 0, null, 2, 'aba'],
+    [24, 4, 16000, 0, 'USD', 2, 'drawer'], [25, 4, 16000, 0, 'KHR', 2, 'drawer'], [26, 4, 16000, 0, 'USD', 2, null],
+  ]
+  for (const row of channelRows) insert.run(...row)
+  const read = db.prepare(`SELECT id, total_refund_usd, total_refund_khr, owed_reduction_usd, refund_currency, refund_channel,
       ${shift.refundDrawerUsdSql('returns')} AS usd, ${shift.refundDrawerKhrSql('returns')} AS khr,
       ${split.returnDebtLoweredSql('returns')} AS lowered FROM returns ORDER BY id`).all()
   const expected = { 1: [4, 0, 4], 2: [1, 0, 3], 3: [0, 4000, 3], 4: [0, 800, 0.99], 5: [0, 0, 4], 6: [0, 16000, 0], 7: [0, 0, 0], 8: [2.5, 0, 0],
-    9: [4, 0, 0], 10: [3, 0, 3], 11: [3, 0, 0], 12: [0, 9700, 0], 13: [0, 3900, 0] }
+    9: [4, 0, 0], 10: [3, 0, 3], 11: [3, 0, 0], 12: [0, 9700, 0], 13: [0, 3900, 0],
+    20: [0, 0, 0], 21: [0, 0, 3], 22: [0, 0, 0], 23: [0, 0, 0], 24: [4, 0, 0], 25: [0, 16000, 0], 26: [4, 0, 0] }
   for (const row of read) {
     assert.deepEqual([Number(Number(row.usd).toFixed(4)), row.khr, row.lowered], expected[row.id], `row ${row.id}`)
     const twin = split.refundCashOut(row)

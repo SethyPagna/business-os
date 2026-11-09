@@ -81,16 +81,18 @@ import type { Env } from '../index'
 // (owed_reduction_usd), from the dollar drawer, or -- refund_currency 'KHR' --
 // that cash share of its riel figure from the riel drawer. A row from before
 // 0260 (currency NULL, nothing lowered) reads as it always did: dollar cash.
+// refund_channel (0293): 'aba' means the refund went back through ABA, so it left no drawer at all (a drawer that counted it would read
+// short by money that never left it); NULL and 'drawer' read as above.
 // lib/returnRefundSplit.ts refundCashOut is the JS reading.
 function refundCashUsdSql(alias: string): string {
   return `(COALESCE(${alias}.total_refund_usd, 0) - COALESCE(${alias}.owed_reduction_usd, 0))`
 }
 export function refundDrawerUsdSql(alias: string): string {
-  return `(CASE WHEN ${alias}.refund_currency = 'KHR' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
+  return `(CASE WHEN ${alias}.refund_currency = 'KHR' OR ${alias}.refund_channel = 'aba' THEN 0 ELSE ${refundCashUsdSql(alias)} END)`
 }
 /** A riel refund's cash share, rounded DOWN to whole 100-riel notes (owner, 21 and 27 Oct 2026; rielCashFloor). */
 export function refundDrawerKhrSql(alias: string): string {
-  return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
+  return `(CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.refund_channel, '') <> 'aba' AND COALESCE(${alias}.total_refund_usd, 0) > 0
     THEN MAX(0, CAST(COALESCE(${alias}.total_refund_khr, 0) * ${refundCashUsdSql(alias)} / ${alias}.total_refund_usd / 100 + 1e-9 AS INTEGER)) * 100 ELSE 0 END)`
 }
 
