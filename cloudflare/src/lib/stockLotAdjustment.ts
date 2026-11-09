@@ -534,10 +534,13 @@ export async function scopedSetBump(env: Env, body: Record<string, unknown>): Pr
   return structural ? 'products' : 'stock'
 }
 
-export async function notifyStockLotSet(env: Env): Promise<void> {
+/** The product id rides on the broadcast (audit G9) so a client refreshes that product's rows; an unreadable id (a legacy row) still announces the change, id-less. */
+export async function notifyStockLotSet(env: Env, productId?: number | string | null): Promise<void> {
+  const id = Number(productId)
+  const named = Number.isInteger(id) && id > 0 ? { id } : {}
   await Promise.all([
-    broadcast(env, 'products', { action: 'update' }),
-    broadcast(env, 'inventory', { action: 'adjust' }),
+    broadcast(env, 'products', { action: 'update', ...named }),
+    broadcast(env, 'inventory', { action: 'adjust', ...named }),
     bumpVersion(env, 'products'),
   ])
 }

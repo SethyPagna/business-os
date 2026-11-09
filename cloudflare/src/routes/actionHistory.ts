@@ -633,7 +633,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_LOT_SET_KIND
-        ? notifyStockLotSet(c.env)
+        ? notifyStockLotSet(c.env, existing.entity_id)
         : applier.name === STOCK_IN_LINE_EDIT_KIND
         ? notifyStockInLineEdit(c.env)
         : applier.name === STOCK_SESSION_KIND
