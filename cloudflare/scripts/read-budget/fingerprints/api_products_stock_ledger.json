@@ -16,5 +16,65 @@
    "e455821b472c",
    "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
   ]
+ ],
+ "products-stock-ledger-all-time-page-1-ledger-keyset-off": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "7af5bff3a99f",
+   "SELECT COUNT(*) AS total FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id LEFT JOIN prod"
+  ],
+  [
+   "edab2c73a334",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "a952391fc310",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-all-time-page-1-ledger-keyset-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e991508e5e25",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "a952391fc310",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-all-time-deep-page-400-ledger-keyset-off": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "7af5bff3a99f",
+   "SELECT COUNT(*) AS total FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id LEFT JOIN prod"
+  ],
+  [
+   "edab2c73a334",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "a952391fc310",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-all-time-deep-page-400-ledger-keyset-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "693edbe8cc9e",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ]
  ]
 }

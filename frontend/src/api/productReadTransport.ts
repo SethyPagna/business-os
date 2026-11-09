@@ -1,4 +1,4 @@
-import { apiFetch, cacheInvalidateWithDerived, requireLiveServerWrite, route } from './http.ts'
+import { apiFetch, cacheGet, cacheInvalidateWithDerived, cacheSet, requireLiveServerWrite, route } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams } from './query.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
 import type { InventoryMovementBalance } from './inventoryTransport.ts'
@@ -142,9 +142,28 @@ export type ImageOnlyProductSearchPayload = {
   facets: { categories?: string[]; brands?: string[] }
 }
 
+// The shared Products answer, in tab memory only (it is the http.ts read cache under the same key, so an actor change, a products/inventory sync event or a write drops it like any
+// other read). Inventory Check primes it with an IC list answer that is exactly the Products answer (not projected), and peeks it to skip its own list request. The version vector
+// rides along: an answer older than the one held does not replace it.
+const primedVersions = new Map<string, Record<string, number | string | null>>()
+const searchKey = (query: string): string => `products:search:${query}`
+
+export function primeProductSearch(query: string, payload: unknown, versions: Record<string, number | string | null> = {}): void {
+  const key = searchKey(query)
+  const held = primedVersions.get(key)
+  if (held && cacheGet(key) && Object.keys(versions).some((name) => typeof versions[name] === 'number' && typeof held[name] === 'number' && (versions[name] as number) < (held[name] as number))) return
+  primedVersions.set(key, versions)
+  cacheSet(key, payload)
+}
+
+/** The fresh Products answer held for this query, or null. */
+export function peekProductSearch(query: string): unknown {
+  return cacheGet(searchKey(query))
+}
+
 export function searchProducts(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(canonicalizeSearchTerm(params))
-  const cacheKey = `products:search:${query}`
+  const cacheKey = searchKey(query)
   // Fixed group name (not the per-query cacheKey above) -- every call to
   // searchProducts, regardless of which page called it or what the query
   // text is, shares this group, so typing a new character aborts whatever

@@ -27,7 +27,8 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { persistClientImageVariants } from '../lib/imageVariantStore'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { readStockLedgerKeyset } from '../lib/stockLedgerKeyset'
+import { attachBeforeQty, buildStockLedgerQuery, decodeStockLedgerCursor, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
@@ -2204,10 +2205,12 @@ app.get('/stock-ledger', async (c) => {
   const clockError = localRangeClockError(query.startTime, query.endTime)
   if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const page = Math.max(1, Number(query.page) || 1)
+  // Read switch ledger_keyset: the list pages by cursor (lib/stockLedgerKeyset.ts) and its page cap is the plan's stockLedgerExportPageRows.
+  const keyset = await readSwitch(c.env, 'ledger_keyset')
   // 1000-cap (was 100): the Stock Changes CSV export walks pages of this
   // endpoint for a chosen date range -- 10x fewer round trips per export,
   // still bounded. Interactive views keep asking for 25-100.
-  const pageSize = Math.min(1000, Math.max(1, Number(query.pageSize) || 50))
+  const pageSize = Math.min(keyset ? getPlanLimits(c.env).stockLedgerExportPageRows : 1000, Math.max(1, Number(query.pageSize) || 50))
   const ledger = buildStockLedgerQuery({
     view: String(query.view || 'all') as StockLedgerView,
     productId: Number(query.productId) || 0,
@@ -2222,6 +2225,11 @@ app.get('/stock-ledger', async (c) => {
   })
 
   const db = getDb(c.env)
+  if (keyset) {
+    const cursor = query.cursor ? decodeStockLedgerCursor(query.cursor) : null
+    if (query.cursor && !cursor) return c.json({ code: 'invalid_cursor', error: 'The cursor is not valid. Start again from the first page.' }, 400)
+    return c.json(await readStockLedgerKeyset(db, ledger, { page, pageSize, cursor, totals: query.totals === '1', view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all' }))
+  }
   const countRow = await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params)
   const total = Number(countRow?.total || 0)
   const rows = await db.prepare(ledger.rowsSql).all<Record<string, unknown>>({

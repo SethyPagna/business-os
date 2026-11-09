@@ -2,7 +2,7 @@ import Ban from 'lucide-react/dist/esm/icons/ban.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InventoryCheckApproval, InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
-import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { ApprovalChip, approvalChipStatus } from './InventoryCheckSessionsList.tsx'
 
@@ -13,7 +13,9 @@ const EPSILON = 1e-9
 
 /** The lines an approval is about: counts that differ from the stock the counter's baseline recorded. The server judges the same way. */
 export function approvalLines(items: readonly InventoryCheckSessionItem[]): InventoryCheckSessionItem[] {
-  return items.filter(item => finite(item.baseline_quantity) && finite(item.counted_quantity) && Math.abs(item.baseline_quantity - item.counted_quantity) > EPSILON)
+  // A product counted per received date differs when ANY of its dates does (two wrong dates whose sums agree still need a decision), and is applied date by date.
+  return items.filter(item => item.lot_lines?.length ? item.lot_lines.some(line => finite(line.seen) && Math.abs(line.seen - line.counted) > EPSILON)
+    : finite(item.baseline_quantity) && finite(item.counted_quantity) && Math.abs(item.baseline_quantity - item.counted_quantity) > EPSILON)
 }
 
 /**
@@ -123,8 +125,10 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
       {lines.map(item => {
         const id = String(item.product_id)
         const done = approval.applied_lines?.[id]
-        const target = done ? done.after : approvalResult(item, approval)
-        const short = approvalShortfall(item, approval)
+        // Dated counts are applied per received date from what each date held at approval, which this page does not read: no product-level result or shortfall is invented for them.
+        const dated = !!item.lot_lines?.length
+        const target = dated ? null : done ? done.after : approvalResult(item, approval)
+        const short = dated ? null : approvalShortfall(item, approval)
         const notApplied = approval.closed?.lines[id], cannot = pending ? refused?.[id] : undefined, replacedBy = replaced[id]
         return <li key={id} data-approval-line={id} className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1">
           <span className="min-w-0 flex-1 basis-40 break-words font-medium">{item.product_snapshot?.name ?? item.current_product_name ?? id}</span>
@@ -135,6 +139,9 @@ export default function InventoryCheckApprovalPanel({ approval, items, canDecide
           {replacedBy ? <span data-approval-superseded={id} className="text-gray-600 dark:text-gray-300">{label(t, 'inventory_check_approval_superseded', 'Replaced by a newer count')}</span> : null}
           {notApplied ? <span data-approval-not-applied={id} className="text-amber-700 dark:text-amber-300">{label(t, 'inventory_check_approval_not_applied', 'Not applied')}: {reasonLabel(t, notApplied)}</span> : null}
           {cannot ? <span data-approval-refused={id} className="text-red-700 dark:text-red-300">{label(t, 'inventory_check_approval_cannot_apply', 'Cannot apply')}: {reasonLabel(t, cannot)}</span> : null}
+          {dated ? <ul data-approval-lot-lines={id} className="flex basis-full flex-wrap gap-x-3 tabular-nums text-gray-600 dark:text-gray-300">
+            {item.lot_lines!.map(line => <li key={line.batch_id}>{line.scope === 'branch' ? label(t, 'inventory_check_branch_total', 'Branch total') : label(t, 'inventory_check_lot_received', 'Received {date}').replace('{date}', line.received_at ? fmtDateOnly(line.received_at) : '—')}: {finite(line.seen) ? `${line.seen} → ` : ''}<strong>{line.counted}</strong></li>)}
+          </ul> : null}
           {replacedBy || target === null ? null : <span data-approval-target={id} className={`tabular-nums font-semibold ${done ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{label(t, 'inventory_check_approval_set_to', 'Set to')} {target}</span>}
         </li>
       })}

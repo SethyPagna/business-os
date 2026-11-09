@@ -198,6 +198,33 @@ function writeShapes() {
         try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission'), lines: ids.map((productId) => ({ productId, countedQuantity: 0, seenQuantity: null, checked: false })) }) }
         finally { await world.restoreSwitches() }
       } },
+    // ---- INV-B S5 (self-contained block; the lead unions it with builder A's): the count per received date and the direct Set from the row. ----
+    // 20 products, one received date each, counted one below the figure seen (every line differs, so one approval is queued). Sighted (the world's admin): the seen figure is guarded inside
+    // the batch. No stock ledger statement runs, which is what brings it from the 10.5K rows of the older submission to the lines it writes.
+    { id: 'w-inventory-check-submission-lots-20', label: 'POST /api/inventory-checks/submissions 20 products, one received date each (ic_lot_counts)', method: 'POST', url: '/api/inventory-checks/submissions',
+      prepare: async (world) => {
+        await world.addSwitches(['ic_simple', 'ic_fix_stock', 'ic_lot_counts'])
+        const rows = await lots(world, 20, 1300)
+        const seen = new Map((await world.all('SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = 1 AND batch_id IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.batch))).map((q) => [q.batch_id, Number(q.quantity)]))
+        return rows.map((r) => ({ ...r, seen: seen.get(r.batch) }))
+      },
+      run: async (world, send, rows) => {
+        try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission-lots'), lines: rows.map((r) => ({ productId: r.pid, lots: [{ batchId: r.batch, scope: 'lot', counted: r.seen - 1, seen: r.seen }] })) }) }
+        finally { await world.restoreSwitches() }
+      } },
+    // The direct Set from the row: the lot Set writer with the expected figure on screen, named as a Fix stock request so the (widened) hold on a waiting count runs first.
+    { id: 'w-inventory-check-row-set', label: 'POST /api/inventory/adjust Set one received date from the Inventory row (ic_lot_counts hold)', method: 'POST', url: '/api/inventory/adjust',
+      prepare: async (world) => {
+        await world.addSwitches(['ic_fix_stock', 'ic_lot_counts'])
+        const r = (await lots(world, 1, 1330))[0]
+        const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch)
+        return { ...r, was: Number(q[0].quantity) }
+      },
+      run: async (world, send, r) => {
+        try { return await send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: r.pid, branchId: 1, batchId: r.batch, quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Inventory check', client_request_id: `icfix_rbsession_${r.pid}_${key('rowset').replace(/[^A-Za-z0-9]/g, '')}` }) }
+        finally { await world.restoreSwitches() }
+      } },
+    // ---- end INV-B S5 ----
     // Approving a submitted count (ic_fix_stock). The lane's own shape measures the Free plan as it runs until call_counting is turned ON: the first request of
     // an approval applies ONE stock line (a lowering Set), records it and answers. The second is the same request under the write pass's own config, call_counting
     // ON (P1.1): the commit's cap becomes stockInLinesPerRequestByCalls (2 on Free), so one request applies both lines and finishes the approval.

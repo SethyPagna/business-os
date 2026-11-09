@@ -176,6 +176,19 @@ function getEntries(ctx) {
     ['products/search parent seek Products default', `/api/products/search?${P}&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`, { switches: ['products_parent_seek'] }],
     ['inventory-checks/products ic_simple not checked', `/api/inventory-checks/products?branchId=1&checkState=not_checked&page=1&pageSize=20`, { switches: ['ic_simple'] }],
     ['inventory-checks/products ic_simple in session', `/api/inventory-checks/products?sessionId={{checkId}}&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    // INV-B S1 (Inventory replan rev. 2): the BEFORE-numbers the later slices are judged against. Opening the Inventory Check sends this request with no branchId;
+    // when the answer lists one branch the page asks again with branchId (the other shapes above), so a first open costs both. Products pages 2 and 3 are the
+    // default list's page steps (each re-ranks the whole scope today). The branch-1 low-stock list is the existing shape products-search-products-branch-1-low-stock.
+    ['inventory-checks/products first open without a branch (OFF path)', `/api/inventory-checks/products?sortBy=name&sortDirection=asc&page=1&pageSize=20`],
+    ['inventory-checks/products first open without a branch (ic_simple ON)', `/api/inventory-checks/products?sortBy=name&sortDirection=asc&page=1&pageSize=20`, { switches: ['ic_simple'] }],
+    ['products/search Products page 2 (default sort, 50)', `/api/products/search?page=2&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    ['products/search Products page 3 (default sort, 50)', `/api/products/search?page=3&pageSize=50&searchMode=smart&sort=created_desc&include=branch_stock,images,batches,tagged_lots`],
+    // INV-B S8: the Stock Changes list, all time (33.5K movements in the seed), page 1 and page 400 of 25 (the list's own page size), with ledger_keyset OFF (offset paging, a COUNT and a summary on
+    // every page) and ON (page 1 the same plus the cursor; page 400 by the cursor of the row before it, no COUNT, no summary, no OFFSET).
+    ['products/stock-ledger all time page 1 (ledger_keyset OFF)', `/api/products/stock-ledger?page=1&pageSize=25`],
+    ['products/stock-ledger all time page 1 (ledger_keyset ON)', `/api/products/stock-ledger?page=1&pageSize=25`, { switches: ['ledger_keyset'] }],
+    ['products/stock-ledger all time deep page 400 (ledger_keyset OFF)', `/api/products/stock-ledger?page=400&pageSize=25`],
+    ['products/stock-ledger all time deep page 400 (ledger_keyset ON)', `/api/products/stock-ledger?page=400&pageSize=25&cursor={{ledgerCursor}}`, { switches: ['ledger_keyset'] }],
   ]
 }
 

@@ -1549,7 +1549,12 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // Loaded only for such an id, like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
   if (typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')) {
     const { fixStockHeldByApproval, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
-    if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
+    // Loaded with the hold, like the module above: only a Fix stock request reads the switch, and every other /adjust stays byte-identical.
+    const { readSwitch } = await import('../lib/readSwitches')
+    // ic_lot_counts: held while ANY count of this product at this branch waits, not only the count the request names.
+    const productId = Number.parseInt(String(body.productId ?? ''), 10), branchId = Number.parseInt(String(body.branchId ?? ''), 10)
+    const widened = Number.isSafeInteger(productId) && productId > 0 && Number.isSafeInteger(branchId) && branchId > 0 && await readSwitch(c.env, 'ic_lot_counts') ? { productId, branchId } : undefined
+    if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id, widened)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   }
   return withStockMutationReceipt(
     () => getDb(c.env),

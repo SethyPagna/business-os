@@ -92,5 +92,135 @@
    "14f7288fdd70",
    "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
   ]
+ ],
+ "w-inventory-check-row-set": [
+  [
+   "6fc52fae201c",
+   "WITH org AS ( SELECT id FROM organizations WHERE (public_id = ?1 OR slug = ?2) AND name = ?3 AND is_active = 1"
+  ],
+  [
+   "f575f147f46b",
+   "SELECT value AS flag, CASE WHEN json_valid(value) THEN CASE WHEN json_extract(value, '$.status') = 'verified' "
+  ],
+  [
+   "ed5837fc77e4",
+   "SELECT value FROM system_flags WHERE key = ?"
+  ],
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "d5a7bcc37603",
+   "SELECT key, value FROM system_flags WHERE key IN (?1, ?2)"
+  ],
+  [
+   "a736bb1a1508",
+   "SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('inventory_check_approvals','inventory_check_approvals_"
+  ],
+  [
+   "fc16da244943",
+   "SELECT 1 AS waiting FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id=a.session_id"
+  ],
+  [
+   "9d3c1231215d",
+   "SELECT 1 AS waiting FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id"
+  ],
+  [
+   "e412f648a145",
+   "INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(?1,?2,?3,?4) ON CONFLICT(act"
+  ],
+  [
+   "60676b2b3d62",
+   "SELECT 1 FROM stock_lot_adjustment_operations LIMIT 0"
+  ],
+  [
+   "d3be9f28a2f1",
+   "SELECT * FROM stock_lot_adjustment_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "6377508bb16b",
+   "SELECT id, name, role, is_active, successor_branch_id FROM branches"
+  ],
+  [
+   "038c9dcbf46a",
+   "SELECT (SELECT name FROM products WHERE id=?1) AS product_name, (SELECT name FROM branches WHERE id=?2) AS bra"
+  ],
+  [
+   "b45db7d003a6",
+   "B| INSERT INTO system_flags (key,value,updated_at) VALUES ('stock_transaction_permit', CASE WHEN (SELECT value"
+  ],
+  [
+   "2abd55d34c9b",
+   "B| INSERT INTO stock_session_guards(guard_value) SELECT 0 WHERE COALESCE((EXISTS(SELECT 1 FROM product_batches"
+  ],
+  [
+   "9963f71a7b6f",
+   "B| INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_jso"
+  ],
+  [
+   "b9f94a60a39c",
+   "B| UPDATE product_batches SET is_active=1, updated_at=datetime('now') WHERE id=?1 AND is_active IS NOT 1"
+  ],
+  [
+   "88e13b6a3aed",
+   "B| INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) SELECT ?1,?2,?3 WHERE ?4=1 ON CONFLICT(batch_id"
+  ],
+  [
+   "e58841114712",
+   "B| DELETE FROM branch_batch_stock WHERE batch_id=?1 AND branch_id=?2 AND ?3=0"
+  ],
+  [
+   "babe08e73dd8",
+   "B| INSERT INTO branch_stock(product_id,branch_id,quantity) SELECT ?1,?2,?3 WHERE ?4=1 ON CONFLICT(product_id,b"
+  ],
+  [
+   "247ab31c9b82",
+   "B| DELETE FROM branch_stock WHERE product_id=?1 AND branch_id=?2 AND ?3=0"
+  ],
+  [
+   "3d1af39ca320",
+   "B| UPDATE products SET stock_quantity=COALESCE(stock_quantity,0)+?1, updated_at=CURRENT_TIMESTAMP WHERE id=?2 "
+  ],
+  [
+   "600042b44c61",
+   "B| INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity, unit_"
+  ],
+  [
+   "d18819bc4d50",
+   "B| INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created"
+  ],
+  [
+   "a069e3d28f67",
+   "B| UPDATE stock_lot_adjustment_operations SET history_id=last_insert_rowid(), response_json=json_set(response_"
+  ],
+  [
+   "30b472dfa330",
+   "B| INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written) VALUES(?1,?2,?3,?4,json_"
+  ],
+  [
+   "c1308231e30a",
+   "B| DELETE FROM system_flags WHERE key='stock_transaction_permit' AND value='legacy-separate-pool-v1'"
+  ],
+  [
+   "d3be9f28a2f1",
+   "SELECT * FROM stock_lot_adjustment_operations WHERE actor_id=?1 AND request_id=?2"
+  ],
+  [
+   "dfc9f6162291",
+   "INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_val"
+  ],
+  [
+   "76e398625e8a",
+   "UPDATE stock_mutation_receipts SET response_status=?1, response_json=?2, completed_at=CURRENT_TIMESTAMP WHERE "
+  ],
+  [
+   "5f13c00d023d",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (SELECT value FROM json_each(?1))"
+  ],
+  [
+   "14f7288fdd70",
+   "INSERT INTO quota_usage (resource, window_key, used, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP) ON CON"
+  ]
  ]
 }

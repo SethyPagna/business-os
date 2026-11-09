@@ -28,6 +28,14 @@ const COUNT_ENTRIES_SQL = `SELECT i.product_id AS product_id, i.state AS state, 
   LEFT JOIN users u ON u.id = i.updated_by`
 const PENDING_LINES_SQL = `SELECT DISTINCT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id
   WHERE a.organization_id IS @organization AND i.branch_id = @branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${waitingLineSql('a', 'i')}`
+// ic_lot_counts: the received-date lines of the SAME latest session, by the table's primary key (session, product, batch) through its product index -- at most the lines a count may carry.
+const LOT_LINES_SQL = `SELECT l.product_id AS product_id, l.batch_id AS batch_id, l.scope AS scope, l.counted_quantity AS counted_quantity, l.seen_quantity AS seen_quantity
+  FROM json_each(@ids) wanted
+  JOIN inventory_check_lot_lines l ON l.product_id = wanted.value AND l.branch_id = @branchId AND l.session_id = (
+    SELECT x.session_id FROM inventory_check_items x JOIN inventory_check_sessions sx ON sx.id = x.session_id
+    WHERE x.product_id = wanted.value AND x.branch_id = @branchId AND x.state IN ('done', 'issue') AND sx.organization_id IS @organization AND sx.branch_id = x.branch_id
+    ORDER BY x.updated_at DESC, x.session_id DESC LIMIT 1)
+  ORDER BY l.product_id, l.batch_id`
 export const LAST_CHANGE_SQL = `WITH newest AS (
     SELECT CAST(wanted.value AS INTEGER) AS product_id,
            (SELECT substr(m.created_at, 1, 10) FROM inventory_movements m WHERE m.product_id = wanted.value ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS day
@@ -45,7 +53,9 @@ export type OverlayEntry = {
   product_id: number
   /** The latest recorded movement of the product (text as stored), or null when it has none. */
   last_change_at: string | null
-  check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number }
+  check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number
+    /** ic_lot_counts: what was typed per received date in that session (batch_id 0 = the branch total). */
+    lots?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }> }
   pending?: true
 }
 
@@ -58,7 +68,7 @@ export function parseOverlayIds(raw: string | undefined, env: Env): number[] {
   return ids.map(Number)
 }
 
-export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean }): Promise<OverlayEntry[]> {
+export async function readInventoryOverlay(env: Env, user: SessionUser, request: { branchId: number; ids: number[]; pendingAvailable: boolean; lotLines?: boolean }): Promise<OverlayEntry[]> {
   const access = getInventoryCheckAccess(user)
   if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const { branchId, ids } = request
@@ -70,11 +80,16 @@ export async function readInventoryOverlay(env: Env, user: SessionUser, request:
     { sql: COUNT_ENTRIES_SQL, params },
     ...(withPending ? [{ sql: PENDING_LINES_SQL, params }] : []),
     { sql: LAST_CHANGE_SQL, params: { ids: params.ids, lastChangeRows: getPlanLimits(env).inventoryLastChangeMaxRows } },
+    ...(request.lotLines ? [{ sql: LOT_LINES_SQL, params }] : []),
   ])
   const rows = (results[0]?.results ?? []) as CountRow[]
   const pending = new Set(withPending ? ((results[1]?.results ?? []) as Array<{ product_id: number }>).map((row) => Number(row.product_id)) : [])
   const lastRows = (results[withPending ? 2 : 1]?.results ?? []) as Array<{ product_id: number; last_at: string | null }>
   const lastChange = new Map(lastRows.map((row) => [Number(row.product_id), row.last_at ?? null]))
+  const linesOf = new Map<number, Array<{ product_id: number; batch_id: number; scope: string; counted_quantity: number; seen_quantity: number | null }>>()
+  if (request.lotLines) for (const line of (results[withPending ? 3 : 2]?.results ?? []) as Array<{ product_id: number; batch_id: number; scope: string; counted_quantity: number; seen_quantity: number | null }>) {
+    const list = linesOf.get(Number(line.product_id)) ?? []; list.push(line); linesOf.set(Number(line.product_id), list)
+  }
   const counts = new Map(rows.map((row) => [Number(row.product_id), row]))
   const viewer = { ...user, tokenHash: '' }
   return ids.map((id): OverlayEntry => {
@@ -86,7 +101,11 @@ export async function readInventoryOverlay(env: Env, user: SessionUser, request:
         // The counted figure follows the stock field or the session's creator (as the Issues list always did); the figure seen when counting is stock.
         ...(row.counted_quantity != null && (access.fields.stock || Number(row.created_by) === user.id) ? { counted_quantity: Number(row.counted_quantity) } : {}),
         ...(access.fields.stock && row.baseline_quantity != null ? { seen_quantity: Number(row.baseline_quantity) } : {}),
-        ...(byId !== null && row.by_name != null && canSeeStaffIdentity(viewer, byId) ? { by: String(row.by_name) } : {}) }
+        ...(byId !== null && row.by_name != null && canSeeStaffIdentity(viewer, byId) ? { by: String(row.by_name) } : {}),
+        // The dates are counts, so they follow the counted figure's rule; the seen figure of each is stock.
+        ...(linesOf.get(id)?.length && row.counted_quantity != null && (access.fields.stock || Number(row.created_by) === user.id)
+          ? { lots: linesOf.get(id)!.map((line) => ({ batch_id: Number(line.batch_id), scope: line.scope === 'branch' ? 'branch' as const : 'lot' as const, counted: Number(line.counted_quantity),
+            ...(access.fields.stock && line.seen_quantity != null ? { seen: Number(line.seen_quantity) } : {}) })) } : {}) }
     }
     if (pending.has(id)) entry.pending = true
     return entry

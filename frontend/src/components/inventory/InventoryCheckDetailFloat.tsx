@@ -59,7 +59,7 @@ export default function InventoryCheckDetailFloat({ product, observation, unavai
     fields.stock ? [tr('inventory_check_current_stock', 'Current stock'), now !== null ? `${now}${unit ? ` ${unit}` : ''}` : '—'] : null,
     start !== null ? [tr('inventory_check_starting_stock', 'Starting stock'), start] : null,
     start !== null && now !== null ? [tr('inventory_check_difference', 'Difference'), <span key="difference" className={now !== start ? amber : undefined}>{signedDelta(now - start)}</span>] : null,
-    fields.stock && finiteQuantity(product.damaged_quantity) ? [tr('inventory_check_damaged', 'Damaged'), product.damaged_quantity] : null,
+    fields.stock && finiteQuantity(product.damaged_quantity) ? [tr('inventory_check_held', 'Held'), product.damaged_quantity] : null,
     counted !== null ? [tr('inventory_check_counted', 'Counted'), now !== null && counted !== now ? <span key="counted">{counted} <span className={amber}>({signedDelta(counted - now)})</span></span> : counted] : null,
     state ? [tr('inventory_check_state', 'Check status'), <span key="state">{tr(STATE_LABELS[state][0], STATE_LABELS[state][1])}{state === 'issue' && observation?.reason ? <> · <span className={amber}>{observation.reason}</span></> : null}</span>] : null,
     listStatus ? [tr('inventory_check_state', 'Check status'), <span key="status">{tr(listLabels[listStatus][0], listLabels[listStatus][1])}{listStatus === 'issue' && product.check_note ? <> · <span className={amber}>{product.check_note}</span></> : null}</span>] : null,

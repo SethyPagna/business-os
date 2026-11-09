@@ -66,7 +66,7 @@ const cases: Array<[string, () => Promise<void>]> = [
     assert.deepEqual([501, 502, 503, 504, 505, 506].map(id => row(s, id).getAttribute('data-check-list-status')), ['ok', 'issue', 'in_check', 'not_checked', 'ok', 'issue'])
     assert.deepEqual([501, 502, 503, 504].map(id => inRow(s, id, 'data-check-status-text').textContent), ['Checked OK', 'Issue', 'In check', 'Not checked'])
     assert.ok(flat(cell(s, 501, 'now')).startsWith('Now 8 pcs'), 'stock now with its unit')
-    assert.ok(flat(cell(s, 502, 'now')).includes('Damaged 2'), 'damaged units ride beside Now as a chip')
+    assert.ok(flat(cell(s, 502, 'now')).includes('Held 2') && !flat(cell(s, 502, 'now')).includes('Damaged'), 'held units (every tag, not only damaged) ride beside Now as a Held chip')
     assert.equal(flat(cell(s, 501, 'counted')), 'Counted 8')
     assert.equal(flat(cell(s, 505, 'counted')), 'Counted 0', 'a counted zero is a count, not an empty cell')
     assert.equal(cell(s, 503, 'counted').textContent, '', 'no count, no figure')

@@ -154,6 +154,17 @@ export async function approvalsAvailable(db: D1Compat): Promise<boolean> {
   } catch { approvalsSchemaReady = false }
   return approvalsSchemaReady
 }
+let lotLinesSchemaReady = false
+/** True once migration 0294 (inventory_check_lot_lines) is applied; a positive answer is remembered for the isolate, a miss re-probes. */
+export async function lotLinesAvailable(db: D1Compat): Promise<boolean> {
+  if (lotLinesSchemaReady) return true
+  try {
+    // A zero-row probe of the table itself (the migration creates the table, its index and its two triggers together): it reads no schema rows, which a cold isolate pays for with a sqlite_master scan.
+    await db.prepare('SELECT 1 FROM inventory_check_lot_lines LIMIT 0').all()
+    lotLinesSchemaReady = true
+  } catch { lotLinesSchemaReady = false }
+  return lotLinesSchemaReady
+}
 export async function approvalsReady(db: D1Compat): Promise<void> {
   if (!await approvalsAvailable(db)) fail(503, 'inventory_check_schema_unavailable')
 }
@@ -214,6 +225,12 @@ export async function lineWaitsForApproval(db: D1Compat, sessionId: string, prod
     WHERE a.session_id=@sessionId AND i.product_id=@productId AND ${WAITING_LINE_SQL} LIMIT 1`).get<{ waiting: number }>({ sessionId, productId })
   return row?.waiting === 1
 }
+/** Does ANY count of this product at this branch still wait for approval? (ic_lot_counts: a direct Set is held while one does.) Index 0285 finds the product's lines at the branch, the approval is a primary-key step each. */
+export async function productWaitsForApproval(db: D1Compat, productId: number, branchId: number): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS waiting FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id
+    WHERE i.product_id=@productId AND i.branch_id=@branchId AND ${WAITING_LINE_SQL} LIMIT 1`).get<{ waiting: number }>({ productId, branchId })
+  return row?.waiting === 1
+}
 /** The page's counts that still wait for approval, as `${session id}:${product id}`: one query for a page of list rows, inside the viewer's organization. Only a count that differs from stock waits; a matching line of the same submission does not. */
 export async function pendingApprovalLines(db: D1Compat, actor: Actor, productIds: number[]): Promise<Set<string>> {
   if (!productIds.length) return new Set()
@@ -228,7 +245,7 @@ async function sessionApproval(db: D1Compat, actor: Actor, id: string, options: 
   const row = (await approvalRows(db, actor, [id], true))[0]
   return row ? { approval: projectApproval(actor, row, true) } : {}
 }
-export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean } = {}) {
+export async function getInventoryCheckSession(db: D1Compat, principal: InventoryCheckPrincipal, id: string, options: { approvals?: boolean; lotLines?: boolean } = {}) {
   let actor = await currentInventoryCheckActor(db, principal); await schemaReady(db)
   const session = await sessionRow(db, actor, id)
   const items = await db.prepare(`SELECT i.*,CASE WHEN ${CURRENT_PRODUCT_CHECKABLE_SQL} THEN 1 ELSE 0 END AS current_product_available,
@@ -240,7 +257,20 @@ export async function getInventoryCheckSession(db: D1Compat, principal: Inventor
   if (actor.organization_id !== session.organization_id) fail(404, 'inventory_check_session_not_found')
   const byId = new Map(current.map(row => [row.product_id, row]))
   const approval = await sessionApproval(db, actor, session.id, options)
-  return { item: await projectSession(db, actor, session), items: items.map(item => projectObservation(actor, item, session.created_by === actor.id, byId.get(item.product_id))), ...approval }
+  // ic_lot_counts: what was typed per received date (by the table's key, one read), shown under the counts of this session; the figures follow the counted/seen rules of the item itself.
+  const linesOf = new Map<number, Array<Record<string, unknown>>>()
+  const access = getInventoryCheckAccess(actor), ownSession = session.created_by === actor.id
+  if (options.lotLines && (access.fields.stock || ownSession) && await lotLinesAvailable(db)) {
+    const rows = await db.prepare(`SELECT l.product_id,l.batch_id,l.scope,l.counted_quantity,l.seen_quantity,pb.received_at FROM inventory_check_lot_lines l LEFT JOIN product_batches pb ON pb.id=l.batch_id
+      WHERE l.session_id=@id ORDER BY l.product_id,l.batch_id`).all<{ product_id: number; batch_id: number; scope: string; counted_quantity: number; seen_quantity: number | null; received_at: string | null }>({ id })
+    for (const row of rows) {
+      const list = linesOf.get(Number(row.product_id)) ?? []
+      list.push({ batch_id: Number(row.batch_id), scope: row.scope === 'branch' ? 'branch' : 'lot', counted: Number(row.counted_quantity),
+        ...(access.fields.stock && row.seen_quantity != null ? { seen: Number(row.seen_quantity) } : {}), ...(access.fields.received && row.received_at ? { received_at: row.received_at } : {}) })
+      linesOf.set(Number(row.product_id), list)
+    }
+  }
+  return { item: await projectSession(db, actor, session), items: items.map(item => ({ ...projectObservation(actor, item, ownSession, byId.get(item.product_id)), ...(linesOf.has(item.product_id) ? { lot_lines: linesOf.get(item.product_id) } : {}) })), ...approval }
 }
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 function businessDay(value: unknown): string | null {
@@ -319,6 +349,8 @@ async function commit(db: D1Compat, principal: InventoryCheckPrincipal, actor: A
     const text = error instanceof Error ? error.message : String(error)
     if (text.includes('inventory_check_authority_changed')) fail(403, 'inventory_check_authority_changed')
     if (text.includes('inventory_check_count_in_progress')) fail(409, 'inventory_check_count_in_progress')
+    if (text.includes('inventory_check_stock_changed')) fail(409, 'inventory_check_stock_changed')
+    if (text.includes('inventory_check_no_lot')) fail(409, 'inventory_check_no_lot')
     if (text.includes('inventory_check_conflict') || text.includes('inventory_check_baseline_changed')) {
       physicalSignature = undefined // a refused guard may mean the remembered signature is stale; the next attempt reads it again
       fail(409, text.includes('baseline_changed') ? 'inventory_check_baseline_changed' : 'inventory_check_conflict')
@@ -619,6 +651,169 @@ export async function createInventoryCheckSubmission(db: D1Compat, principal: In
   // Told once, after the commit that made the approval (never for a replay); an announcement never fails the submission it announces.
   if (differing > 0 && !saved.replayed) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   // The approvals this commit replaced were rejected by the system: each is a review decided, so each is told once (the statement that rejected them names them; a replay is never told again).
+  if (!saved.replayed && supersede.length) {
+    const replacedAt = statements.indexOf(supersede[2]) + 1 // the batch starts with the authority guard
+    const replacedIds = (saved.results?.[replacedAt]?.results ?? []).map(row => String((row as { session_id: string }).session_id))
+    if (replacedIds.length) { try { await options.onApprovalsReplaced?.({ sessionIds: replacedIds }) } catch { /* announced best-effort */ } }
+  }
+  return { ...(await committedSessionProjection(db, principal, saved.event.session_id)), ...(await sessionApproval(db, actor, saved.event.session_id, options)), receipt: receiptResponse(saved.event, saved.replayed), created: !saved.replayed }
+}
+// ---- ic_lot_counts: a count per received date (INV-B S5; migration 0294; Inventory replan rev. 2, sections 2.6 and 2.7) ----------------------------------------------------------
+// The submission of the owner's way to count, with a count typed per received date (or one branch total) for each product. Nothing here reads the stock ledger or verifies stock:
+//   - a counter who sees stock sends the figure SEEN for every line; the batch itself refuses (409 inventory_check_stock_changed) unless the quantity of that received date
+//     (the branch quantity, for a branch-total line) is that figure at the moment of the write -- the guard sits in the same atomic batch as the inserts;
+//   - a counter who may not see stock sends none: the seen figure is read from live stock INSIDE the insert (seen_source 'write'), so a blind count is measured from the stock of the write.
+// The product's item row keeps its state and total (counted = the sum of its lines, baseline = the sum of the seen figures), so sessions, history, the Issues filter, queue-first supersede and
+// the approval plan work as they always did; the lines ride in inventory_check_lot_lines. A refused stale figure answers with the figures of now, read only on that refusal path.
+type LotLine = { batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }
+// A plain line (countedQuantity / seenQuantity, as the older writer takes it) counts the product's branch total with no received-date lines: a submission may mix both kinds.
+type LotSubmissionLine = { productId: number; checked: boolean; note: string | null; lots: LotLine[]; plain?: { counted: number; seen: number | null } }
+const LOT_SUBMISSION_LINE_KEYS = new Set(['productId', 'lots', 'checked', 'note'])
+const PLAIN_SUBMISSION_LINE_KEYS = new Set(['productId', 'countedQuantity', 'seenQuantity', 'checked', 'note'])
+const LOT_LINE_KEYS = new Set(['batchId', 'scope', 'counted', 'seen'])
+/** The lines one product may carry (getPlanLimits.inventoryCheckLotLinesPerProduct): more received dates than that on one product is not a count of it. */
+function lotSubmissionLine(value: unknown, sighted: boolean, perProduct: number): LotSubmissionLine {
+  const line = object(value)
+  if (line.lots === undefined && line.countedQuantity !== undefined) {
+    if (Object.keys(line).some(key => !PLAIN_SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
+    if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
+    const plainNote = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
+    if (plainNote !== null && plainNote.length > 500) fail(400, 'inventory_check_invalid_note')
+    const plainSeen = line.seenQuantity == null ? null : submissionQuantity(line.seenQuantity)
+    if (sighted && plainSeen === null) fail(400, 'inventory_check_invalid_request')
+    return { productId: positive(line.productId), checked: line.checked === true, note: plainNote, lots: [], plain: { counted: submissionQuantity(line.countedQuantity), seen: sighted ? plainSeen : null } }
+  }
+  if (Object.keys(line).some(key => !LOT_SUBMISSION_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
+  if (line.checked !== undefined && typeof line.checked !== 'boolean') fail(400, 'inventory_check_invalid_request')
+  const note = line.note == null ? null : typeof line.note === 'string' ? line.note.trim() || null : fail(400, 'inventory_check_invalid_note')
+  if (note !== null && note.length > 500) fail(400, 'inventory_check_invalid_note')
+  if (!Array.isArray(line.lots) || line.lots.length < 1 || line.lots.length > perProduct) return fail(400, 'inventory_check_invalid_request')
+  const lots = line.lots.map((raw): LotLine => {
+    const lot = object(raw)
+    if (Object.keys(lot).some(key => !LOT_LINE_KEYS.has(key))) fail(400, 'inventory_check_invalid_request')
+    const scope = lot.scope === 'lot' || lot.scope === 'branch' ? lot.scope : fail(400, 'inventory_check_invalid_request')
+    const batchId = scope === 'branch' ? (lot.batchId === undefined || lot.batchId === 0 ? 0 : fail(400, 'inventory_check_invalid_id')) : positive(lot.batchId)
+    const seen = lot.seen == null ? null : submissionQuantity(lot.seen)
+    if (sighted && seen === null) fail(400, 'inventory_check_invalid_request')
+    return { batchId, scope, counted: submissionQuantity(lot.counted), seen: sighted ? seen : null }
+  })
+  // A product is counted by received date or by its branch total, not both; a received date is counted once.
+  if (lots.some(lot => lot.scope === 'branch') && lots.length !== 1) fail(400, 'inventory_check_invalid_request')
+  if (new Set(lots.map(lot => lot.batchId)).size !== lots.length) fail(400, 'inventory_check_invalid_id')
+  return { productId: positive(line.productId), checked: line.checked === true, note, lots }
+}
+/** The quantity a line stands for right now: the received date's quantity at the branch, or the branch quantity for a branch-total line. */
+const LIVE_LINE_SQL = (line: string) => `CASE json_extract(${line},'$.scope')
+  WHEN 'lot' THEN COALESCE((SELECT bbs.quantity FROM branch_batch_stock bbs WHERE bbs.batch_id=json_extract(${line},'$.batch_id') AND bbs.branch_id=@branchId),0)
+  ELSE COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(${line},'$.product_id') AND bs.branch_id=@branchId),0) END`
+const ACTIVE_LOT_SQL = (productId: string, batchId?: string) => `EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
+  WHERE pb.variant_product_id=${productId} AND pb.is_active=1${batchId ? ` AND pb.id=${batchId}` : ''})`
+export async function createInventoryCheckLotSubmission(db: D1Compat, principal: InventoryCheckPrincipal, input: unknown,
+  options: { approvals?: boolean; maxLines: number; maxLinesPerProduct: number; onApprovalCreated?: (created: { sessionId: string }) => Promise<void>; onApprovalsReplaced?: (replaced: { sessionIds: string[] }) => Promise<void> }) {
+  const body = object(input), actor = await currentInventoryCheckActor(db, principal, true); await schemaReady(db)
+  if (options.approvals) await approvalsReady(db)
+  const access = getInventoryCheckAccess(actor), sighted = access.fields.stock
+  const branchId = positive(body.branchId), key = requestId(body.requestId)
+  if (!Array.isArray(body.lines) || body.lines.length < 1 || body.lines.length > 500) return fail(400, 'inventory_check_product_ids_required')
+  const lines = body.lines.map(value => lotSubmissionLine(value, sighted, options.maxLinesPerProduct)).sort((a, b) => a.productId - b.productId)
+  const productIds = lines.map(line => line.productId)
+  if (new Set(productIds).size !== productIds.length) fail(400, 'inventory_check_invalid_id')
+  if (lines.reduce((sum, line) => sum + Math.max(1, line.lots.length), 0) > options.maxLines) fail(400, 'inventory_check_too_many_lines')
+  const title = body.title === undefined ? '' : typeof body.title === 'string' ? body.title.trim() : fail(400, 'inventory_check_invalid_title')
+  if (title.length > 120) fail(400, 'inventory_check_invalid_title')
+  if (!sighted && lines.some(line => line.checked)) fail(400, 'inventory_check_invalid_request')
+  const hash = await inventoryCheckDigest(JSON.stringify({ action: 'submit-lots', branchId, title, lines }))
+  const existing = await receipt(db, actor, key, hash)
+  if (existing) return { ...(await committedSessionProjection(db, principal, existing.session_id)), ...(await sessionApproval(db, actor, existing.session_id, options)), receipt: receiptResponse(existing, true), created: false }
+  // A product may be counted when it is a stock-visible, countable row (not a family header with children): the point lookups the snapshot guard repeats inside the batch. The older
+  // membership cohort is not used here: it carries the stock ledger, which a count per received date never reads.
+  const eligible = await db.prepare(`SELECT p.id FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${stockVisibleProductSql()} AND ${CHECKABLE_SQL}`).all<{ id: number }>({ ids: JSON.stringify(productIds) })
+  if (eligible.length !== productIds.length) fail(400, 'inventory_check_product_not_eligible')
+  const products = await db.prepare('SELECT id,name,image_path,unit,parent_id,is_group FROM products WHERE id IN (SELECT value FROM json_each(@ids)) ORDER BY id').all<Record<string, unknown>>({ ids: JSON.stringify(productIds) })
+  const productById = new Map(products.map(product => [Number(product.id), product]))
+  if (products.length !== productIds.length) fail(409, 'inventory_check_baseline_changed')
+  // "Marked checked" means the count the person saw equalled stock: the figures it was typed against are the ones the batch guards, so a mismatch here is a recount, never a difference.
+  const resolved = lines.map(line => {
+    const counted = line.plain ? line.plain.counted : line.lots.reduce((sum, lot) => sum + lot.counted, 0)
+    const seen = !sighted ? null : line.plain ? line.plain.seen : line.lots.reduce((sum, lot) => sum + (lot.seen ?? 0), 0)
+    // Every typed date must equal what it showed: a shortage on one date and a surplus on another (sums equal) is still two wrong figures.
+    const matched = seen !== null && Math.abs(seen - counted) <= COUNT_EPSILON && line.lots.every(lot => lot.seen !== null && Math.abs(lot.seen - lot.counted) <= COUNT_EPSILON)
+    const state: 'done' | 'issue' = !sighted || matched ? 'done' : 'issue'
+    return { line, counted, seen, matched, state, reason: state === 'issue' ? line.note ?? DEFAULT_COUNT_NOTE : null }
+  })
+  const stale = resolved.filter(item => item.line.checked && !item.matched).map(item => item.line.productId)
+  if (stale.length) fail(409, 'inventory_check_stock_changed', { productIds: stale })
+  const now = new Date().toISOString(), id = crypto.randomUUID()
+  const members = await Promise.all(resolved.map(async item => ({ product_id: item.line.productId, product: productById.get(item.line.productId), baseline: item.seen,
+    state: item.state, counted: item.counted, reason: item.reason,
+    event_request_id: `${key}-${item.line.productId}`, event_hash: await inventoryCheckDigest(JSON.stringify({ action: 'submit-line', hash, productId: item.line.productId })) })))
+  const lotLines = resolved.flatMap(item => item.line.lots.map(lot => ({ product_id: item.line.productId, batch_id: lot.batchId, scope: lot.scope, seen: lot.seen, counted: lot.counted })))
+  const params = { id, organization: actor.organization_id, branchId, actorId: actor.id, actorName: actorSnapshot(actor), title, scopeJson: JSON.stringify({ membership: 'submission' }), now,
+    members: JSON.stringify(members), lines: JSON.stringify(lotLines),
+    plain: JSON.stringify(resolved.filter(item => item.line.plain).map(item => ({ product_id: item.line.productId, seen: item.line.plain!.seen }))), count: productIds.length, sighted: sighted ? 1 : 0, eps: COUNT_EPSILON }
+  const supersede = options.approvals ? supersedeStatements({ ...params, submitted: JSON.stringify(productIds), key, hash }) : []
+  const lineAlias = 'e.value'
+  const statements: Statement[] = [
+    guard('EXISTS(SELECT 1 FROM branches WHERE id=@branchId AND is_active=1)', 'inventory_check_baseline_changed', params),
+    guard(`NOT EXISTS(SELECT 1 FROM json_each(@members) e LEFT JOIN products p ON p.id=json_extract(e.value,'$.product_id')
+      WHERE p.id IS NULL OR p.name IS NOT json_extract(e.value,'$.product.name') OR p.image_path IS NOT json_extract(e.value,'$.product.image_path')
+      OR p.unit IS NOT json_extract(e.value,'$.product.unit') OR p.parent_id IS NOT json_extract(e.value,'$.product.parent_id')
+      OR p.is_group IS NOT json_extract(e.value,'$.product.is_group') OR NOT (${stockVisibleProductSql()}) OR NOT ${CHECKABLE_SQL})`, 'inventory_check_baseline_changed', params),
+    // Each received date exists, belongs to its product and is active at this branch; a branch-total line needs an active received date to land on.
+    guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE json_extract(${lineAlias},'$.scope')='lot' AND NOT ${ACTIVE_LOT_SQL(`json_extract(${lineAlias},'$.product_id')`, `json_extract(${lineAlias},'$.batch_id')`)})`, 'inventory_check_baseline_changed', params),
+    guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE json_extract(${lineAlias},'$.scope')='branch' AND NOT ${ACTIVE_LOT_SQL(`json_extract(${lineAlias},'$.product_id')`)})`, 'inventory_check_no_lot', params),
+    // The seen figures, inside the batch: the quantity of each line is what the counter saw at the moment of the write, or nothing is written.
+    // A plain line is measured against the branch total the counter saw, inside the same batch.
+    ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@plain) e WHERE abs(COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(e.value,'$.product_id') AND bs.branch_id=@branchId),0)-json_extract(e.value,'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
+    ...(sighted ? [guard(`NOT EXISTS(SELECT 1 FROM json_each(@lines) e WHERE abs(${LIVE_LINE_SQL(lineAlias)}-json_extract(${lineAlias},'$.seen'))>@eps)`, 'inventory_check_stock_changed', params)] : []),
+    ...supersede,
+    { sql: `INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at)
+      VALUES(@id,@organization,@branchId,@actorId,@title,'closed',0,@scopeJson,@now,@now,@now)`, params },
+    // A blind count's baseline is the live sum of its lines, read by this very statement.
+    { sql: `INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,reason,revision,updated_by,updated_at)
+      SELECT @id,json_extract(m.value,'$.product_id'),@branchId,json_extract(m.value,'$.product'),
+        CASE WHEN @sighted=1 THEN json_extract(m.value,'$.baseline')
+          ELSE COALESCE((SELECT SUM(${LIVE_LINE_SQL('e.value')}) FROM json_each(@lines) e WHERE json_extract(e.value,'$.product_id')=json_extract(m.value,'$.product_id')),
+            (SELECT COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(m.value,'$.product_id') AND bs.branch_id=@branchId),0))) END,
+        '{}',json_extract(m.value,'$.state'),json_extract(m.value,'$.counted'),json_extract(m.value,'$.reason'),1,@actorId,@now FROM json_each(@members) m`, params },
+    { sql: `INSERT INTO inventory_check_lot_lines(session_id,product_id,branch_id,batch_id,scope,seen_quantity,counted_quantity,seen_source,created_at)
+      SELECT @id,json_extract(e.value,'$.product_id'),@branchId,json_extract(e.value,'$.batch_id'),json_extract(e.value,'$.scope'),
+        CASE WHEN @sighted=1 THEN json_extract(e.value,'$.seen') ELSE ${LIVE_LINE_SQL('e.value')} END,json_extract(e.value,'$.counted'),
+        CASE WHEN @sighted=1 THEN 'screen' ELSE 'write' END,@now FROM json_each(@lines) e`, params },
+    eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'closed', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),
+    { sql: `INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at)
+      SELECT @id,json_extract(value,'$.product_id'),@actorId,@actorName,'observe',json_extract(value,'$.event_request_id'),json_extract(value,'$.event_hash'),
+        json_object('state','unstarted','counted_quantity',NULL,'reason',NULL,'revision',0),
+        json_object('state',json_extract(value,'$.state'),'counted_quantity',json_extract(value,'$.counted'),'reason',json_extract(value,'$.reason'),'revision',1),
+        json_object('sessionRevision',0,'itemRevision',1),@now FROM json_each(@members)`, params },
+  ]
+  // The approval exists only when a count differs (judged from the stored figures, so a blind count is reviewed too); it carries the per-product seen totals.
+  const approvalAt = statements.length
+  if (options.approvals) statements.push({ sql: `INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json)
+    SELECT @id,@organization,@branchId,'pending',d.n,@actorId,@now,(SELECT json_group_object(CAST(i.product_id AS TEXT),i.baseline_quantity) FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL)
+    FROM (SELECT COUNT(*) AS n FROM inventory_check_items i WHERE i.session_id=@id AND i.baseline_quantity IS NOT NULL AND (abs(i.baseline_quantity-i.counted_quantity)>@eps
+      OR EXISTS(SELECT 1 FROM inventory_check_lot_lines l WHERE l.session_id=i.session_id AND l.product_id=i.product_id AND abs(l.seen_quantity-l.counted_quantity)>@eps))) d WHERE d.n>0 RETURNING session_id`, params })
+  let saved: Awaited<ReturnType<typeof commit>>
+  try { saved = await commit(db, principal, actor, statements, key, hash) }
+  catch (error) {
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_count_in_progress') {
+      const busy = await db.prepare(`SELECT DISTINCT i.product_id ${BEING_APPLIED_SQL} ORDER BY i.product_id`).all<{ product_id: number }>({ organization: actor.organization_id, branchId, submitted: JSON.stringify(productIds) }).catch(() => [])
+      fail(409, 'inventory_check_count_in_progress', { productIds: busy.map(row => row.product_id) })
+    }
+    if (error instanceof InventoryCheckSessionError && error.code === 'inventory_check_stock_changed') {
+      // The figures of now, read only because the write was refused: per line, what the quantity is at this moment (a few rows, never the ledger).
+      const liveRows = await db.prepare(`SELECT json_extract(e.value,'$.product_id') AS productId,json_extract(e.value,'$.batch_id') AS batchId,json_extract(e.value,'$.scope') AS scope,
+        json_extract(e.value,'$.seen') AS seen,${LIVE_LINE_SQL('e.value')} AS quantity FROM json_each(@lines) e`).all<{ productId: number; batchId: number; scope: string; seen: number | null; quantity: number }>({ lines: params.lines, branchId }).catch(() => [])
+      // A plain (whole-product) line is guarded against the branch total, so it answers the same shape: batchId 0, scope 'branch'.
+      const plainRows = await db.prepare(`SELECT json_extract(e.value,'$.product_id') AS productId,0 AS batchId,'branch' AS scope,json_extract(e.value,'$.seen') AS seen,
+        COALESCE((SELECT bs.quantity FROM branch_stock bs WHERE bs.product_id=json_extract(e.value,'$.product_id') AND bs.branch_id=@branchId),0) AS quantity FROM json_each(@plain) e`).all<{ productId: number; batchId: number; scope: string; seen: number | null; quantity: number }>({ plain: params.plain, branchId }).catch(() => [])
+      const changed = [...liveRows, ...plainRows].filter(row => row.seen === null || Math.abs(Number(row.quantity) - Number(row.seen)) > COUNT_EPSILON)
+      fail(409, 'inventory_check_stock_changed', { productIds: [...new Set(changed.map(row => Number(row.productId)))], current: changed.map(row => ({ productId: Number(row.productId), batchId: Number(row.batchId), scope: row.scope, quantity: Number(row.quantity) })) })
+    }
+    throw error
+  }
+  const created = options.approvals && !saved.replayed && (saved.results?.[approvalAt + 1]?.results ?? []).length > 0
+  if (created) { try { await options.onApprovalCreated?.({ sessionId: saved.event.session_id }) } catch { /* announced best-effort */ } }
   if (!saved.replayed && supersede.length) {
     const replacedAt = statements.indexOf(supersede[2]) + 1 // the batch starts with the authority guard
     const replacedIds = (saved.results?.[replacedAt]?.results ?? []).map(row => String((row as { session_id: string }).session_id))
