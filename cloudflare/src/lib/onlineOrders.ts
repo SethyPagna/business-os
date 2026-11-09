@@ -153,6 +153,16 @@ export const REQUEST_WINDOW_DAYS_DEFAULT = 7
 /** ABA refunds a KHQR payment for 30 days, so the window never exceeds that. */
 export const REQUEST_WINDOW_DAYS_MAX = 30
 
+/**
+ * The online (KHQR) payment method: empty clears it (the default 'ABA KHQR' applies); otherwise it must be a name in the configured method list. Used for a write of the
+ * setting itself and for a write of the list that would remove the method the setting names.
+ */
+export function validateOnlineOrderMethod(value: string, configured: readonly string[]): 'invalid_online_order_payment_method' | null {
+  const key = value.trim().toLowerCase()
+  if (!key) return null
+  return configured.some((method) => String(method).trim().toLowerCase() === key) ? null : 'invalid_online_order_payment_method'
+}
+
 export type OnlineOrderSettingsWriteError = 'invalid_online_order_payment_minutes' | 'invalid_online_order_request_days'
 const wholeNumberInRange = (value: unknown, min: number, max: number): boolean => {
   if (value === null || value === undefined) return true // cleared: the default applies

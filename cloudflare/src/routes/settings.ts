@@ -29,7 +29,8 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // the SAME validator the Settings form runs -- twin modules whose shared block
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
-import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
+import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
+import { ONLINE_PAYMENT_METHOD_KEY } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -276,6 +277,8 @@ const SALES_POLICY_KEYS = new Set([
   'display_currency',
   'pos_show_item_discount',
   'pos_payment_methods',
+  // Which configured method is the online (KHQR) money; it decides what a sale's tender may name, so it is sales policy like the method list itself.
+  'online_order_payment_method',
   // Recorded-sale edits are available to permitted employees by default.
   // Set a positive number to impose a window; 0 keeps the window open.
   'sale_amendment_window_minutes',
@@ -845,6 +848,11 @@ app.post('/payment-methods/replace', async (c) => {
             ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`,
       params: { value: nextRaw, stamp },
     },
+    // The online (KHQR) method follows its own rename, in the same batch, so Fulfil never names a method that no longer exists.
+    {
+      sql: `UPDATE settings SET value=@to,updated_at=@stamp WHERE key='online_order_payment_method' AND lower(trim(value))=@fromKey`,
+      params: { to, stamp, fromKey: paymentMethodKey(from) },
+    },
   ]
   if (scope === 'linked') {
     statements.push({
@@ -1273,6 +1281,29 @@ app.post('/', async (c) => {
       }
     }
     body.pos_payment_methods = JSON.stringify(normalized)
+  }
+
+  // The online (KHQR) payment method must be one of the configured methods, and a configured method that is the online one cannot be removed from the list:
+  // either would leave Fulfil naming a method the till cannot ring. A rename goes through /payment-methods/replace, which carries the setting along.
+  if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes('pos_payment_methods')) {
+    const listed = attemptedKeys.includes('pos_payment_methods')
+      ? (JSON.parse(String(body.pos_payment_methods)) as string[])
+      : (await loadPaymentMethodSetting(c.env))?.methods ?? []
+    const currentOnline = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
+      ? String(body[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
+      : String((await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value ?? '').trim()
+    // A list-only save is refused only when it REMOVES the online method that is in the list today, so an already stale setting never traps the list.
+    const before = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) ? null : (await loadPaymentMethodSetting(c.env))?.methods ?? []
+    const removing = before !== null && validateOnlineOrderMethod(currentOnline, before) === null && Boolean(currentOnline)
+    const methodError = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || removing ? validateOnlineOrderMethod(currentOnline, listed) : null
+    if (methodError) {
+      return c.json({
+        error: attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
+          ? 'The online payment method must be one of the configured payment methods.'
+          : 'This payment method is the online (KHQR) one. Choose another online method first, or rename it instead of removing it.',
+        code: methodError,
+      }, 400)
+    }
   }
 
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
