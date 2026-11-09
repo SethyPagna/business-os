@@ -650,6 +650,14 @@ async function main() {
     assert.ok(!JSON.stringify(h.all('SELECT network_key FROM online_orders')).includes('203.0.113'))
   })
 
+  await check('the storefront host reaches the order routes (the public-host gate allows /api/portal/*) and they are not staff paths', async () => {
+    const { isBlockedOnStorefrontHost } = world().load('lib/publicHostGate.ts')
+    for (const path of ['/api/portal/orders', '/api/portal/orders/abcdefghijklmnopqrstuv', '/api/portal/orders/abcdefghijklmnopqrstuv/status', '/api/portal/orders/abcdefghijklmnopqrstuv/requests/3/withdraw']) {
+      assert.equal(isBlockedOnStorefrontHost(`https://leangbeauty.com${path}`), false, path)
+    }
+    assert.equal(isBlockedOnStorefrontHost('https://leangbeauty.com/api/portal/%2e%2e/auth/me'), true, 'dot segments stay refused')
+  })
+
   await check('every order answer carries no gateway secret and no raw QR image; the QR string is what the page draws', async () => {
     const h = world()
     const res = await create(h)

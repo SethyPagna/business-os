@@ -120,7 +120,7 @@ function createOrdersHarness(options = {}) {
   const run = (sql, ...params) => raw.db.prepare(sql).run(...params)
 
   return {
-    env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
+    load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
     setNow: (ms) => { state.nowMs = ms },
     advance: (ms) => { state.nowMs += ms },
     clearStatements: () => { statements.length = 0; d1.calls = 0 },
