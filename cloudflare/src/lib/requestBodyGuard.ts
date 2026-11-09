@@ -13,6 +13,8 @@ const PUBLIC_SMALL_POSTS = new Set([
   '/api/auth/otp/verify', '/api/auth/oauth/start', '/api/auth/oauth/complete',
   '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout',
   '/api/portal/account/consent/renew',
+  // ABA PayWay's payment callback (routes/paywayCallback.ts): a server-to-server POST whose body is never read; the cap only keeps it small.
+  '/api/payway/callback',
 ])
 const STAFF_SMALL_POSTS = new Set([
   '/api/auth/session-duration', '/api/auth/otp/setup', '/api/auth/otp/confirm',

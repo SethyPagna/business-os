@@ -4,6 +4,11 @@ import productsRoute from './routes/products'
 import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
 import portalOrdersRoute from './routes/portalOrders'
+import paywayCallbackRoute from './routes/paywayCallback'
+import { sweepOrders } from './lib/onlineOrderSweep'
+import { getDb } from './lib/db'
+import { paywayCredentials } from './lib/payway'
+import { fetchPaywayTransport } from './lib/paywayTransport'
 import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
 import filesRoute from './routes/files'
@@ -630,6 +635,8 @@ app.route('/api/products', productsRoute)
 app.route('/api/products', productCostRoute)
 // Before /api/portal so the order paths are answered by their own app (its guards, its switch), never by the storefront's.
 app.route('/api/portal/orders', portalOrdersRoute)
+// ABA's payment callback (a nudge; the route verifies its token and asks PayWay itself). The shop host lets exactly this POST through (lib/publicHostGate.ts).
+app.route('/api/payway', paywayCallbackRoute)
 app.route('/api/portal', portalRoute)
 app.route('/api/sales', salesRoute)
 app.route('/api/auth', authRoute)
@@ -808,6 +815,8 @@ export default {
         // The backstop for a shift overview nothing else has sent (the request
         // path drains too, but only while someone is using the app).
         drainTelegram: label('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true })),
+        // Online orders: a payment that outlived its QR is checked once more and then expired. Same lane, own step, so a failure in one never skips the other.
+        sweepOnlineOrders: label('online-order-sweep', () => sweepOrders({ db: getDb(env), env, now: () => new Date(), random: (n) => crypto.getRandomValues(new Uint8Array(n)), transport: fetchPaywayTransport, origin: null }, paywayCredentials(env))),
         heavySteps: () => cronHeavySteps(env, label),
         rotationSteps: () => cronRotationSteps(env, label),
         storeFor: (key) => settingsRotationStore(env, key),

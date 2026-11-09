@@ -344,7 +344,8 @@
     {"method":"POST","route":"/api/portal/orders/:token/topup","class":"N","reason":"payway-write"},
     {"method":"POST","route":"/api/portal/orders/:token/requests","class":"N","reason":"payway-write"},
     {"method":"POST","route":"/api/portal/orders/:token/requests/:id/withdraw","class":"N","reason":"payway-write"},
-    {"method":"POST","route":"/api/portal/orders","class":"N","reason":"payway-write"}
+    {"method":"POST","route":"/api/portal/orders","class":"N","reason":"payway-write"},
+    {"method":"POST","route":"/api/payway/callback","class":"N","reason":"payway-write"}
   ],
   "shapes": [
     {"id":"auth-me","method":"GET","route":"/api/auth/me","params":"","status":200,"cold_calls_max":5,"rows_max":11,"rows_max_analyze":13,"rows_written_max":8,"class":"P","expect":"ok"},

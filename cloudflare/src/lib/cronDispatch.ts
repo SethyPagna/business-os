@@ -13,6 +13,8 @@ import {
 
 export interface CronDispatchDeps {
   drainTelegram(): Promise<unknown>
+  /** Optional second step of the Telegram lane (online-order sweep), run after the drain in its own try so neither can skip the other. */
+  sweepOnlineOrders?(): Promise<unknown>
   heavySteps(): RotationStep[]
   rotationSteps(): RotationStep[]
   storeFor(key: string): RotationStore
@@ -24,6 +26,7 @@ export async function dispatchCron(cron: string | undefined, scheduledTimeMs: nu
   if (cron === CRON_TELEGRAM) {
     // The backstop for a shift overview nothing else has sent.
     try { await deps.drainTelegram() } catch { /* logged by the caller's wrapper */ }
+    try { await deps.sweepOnlineOrders?.() } catch { /* logged by the caller's wrapper */ }
     return { lane: 'telegram' }
   }
   const at = Number.isFinite(scheduledTimeMs) ? scheduledTimeMs : Date.now()

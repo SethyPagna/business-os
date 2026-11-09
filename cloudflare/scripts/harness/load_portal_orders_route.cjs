@@ -95,6 +95,9 @@ function createOrdersHarness(options = {}) {
   // Deterministic but unique bytes: every call advances, so order numbers, tokens and tran ids never collide.
   const random = (length) => { const out = new Uint8Array(length); const seed = randomCounter.n++; for (let i = 0; i < length; i += 1) out[i] = (seed * 131 + i * 17 + (seed >> 3) * 29) & 255; return out }
   const app = routeModule.createPortalOrdersRoute({ transport, now: () => new Date(state.nowMs), random })
+  const sweepModule = load('lib/onlineOrderSweep.ts')
+  const paywayModule = load('lib/payway.ts')
+  const callbackApp = load('routes/paywayCallback.ts').createPaywayCallbackRoute({ transport, now: () => new Date(state.nowMs) })
 
   const env = { DB: raw, ...FAKE_ENV, ...(options.env || {}) }
   const limits = []
@@ -115,12 +118,26 @@ function createOrdersHarness(options = {}) {
     return { status: response.status, body: json, headers: response.headers }
   }
 
+  // The callback exactly as ABA would post it: the per-transaction token from the URL the Worker gave it, and a body nobody reads.
+  async function callback(tranId, { token, body = { status: 'approved' }, method = 'POST', envOverride, query } = {}) {
+    planTier.__resetPlanTierCacheForTests?.()
+    const merged = { ...env, ...(envOverride || {}) }
+    const s = token !== undefined ? token : (await paywayModule.callbackUrlFor(merged, 'https://shop.example.test', tranId)).split('s=')[1]
+    const url = query !== undefined ? `/callback?${query}` : `/callback?t=${encodeURIComponent(tranId)}&s=${encodeURIComponent(s ?? '')}`
+    const response = await callbackApp.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'POST' ? JSON.stringify(body) : undefined }, merged, { waitUntil() {}, passThroughOnException() {} })
+    let json = null
+    try { json = await response.json() } catch (_) { json = null }
+    return { status: response.status, body: json }
+  }
+  const deps = (over = {}) => ({ db, env: { ...env, ...(over.env || {}) }, now: () => new Date(state.nowMs), random, transport, origin: null })
+  const credentials = (over = {}) => paywayModule.paywayCredentials({ ...env, ...(over.env || {}) })
+  async function sweep(over = {}) { planTier.__resetPlanTierCacheForTests?.(); return sweepModule.sweepOrders(deps(over), over.noCredentials ? null : credentials(over)) }
   const one = (sql, ...params) => raw.db.prepare(sql).get(...params)
   const all = (sql, ...params) => raw.db.prepare(sql).all(...params)
   const run = (sql, ...params) => raw.db.prepare(sql).run(...params)
 
   return {
-    load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
+    callback, sweep, sweepModule, paywayModule, load, env, raw, request, calls, statements, d1, script, state, limits, one, all, run, store, orders, planTier, approved, pending,
     setNow: (ms) => { state.nowMs = ms },
     advance: (ms) => { state.nowMs += ms },
     clearStatements: () => { statements.length = 0; d1.calls = 0 },
