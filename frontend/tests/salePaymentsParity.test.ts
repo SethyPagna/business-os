@@ -144,6 +144,16 @@ await runTest('both copies build the same event and the same opening event', asy
   }
 })
 
+await runTest('both copies keep the change on an out event and drop none of it', async () => {
+  const worker = await loadWorkerCopy()
+  const change = { usd: 5, khr: 400, isActual: true, exchangeRate: 4000 }
+  const input = { eventId: 'o1', saleId: 7, direction: 'out' as const, origin: 'correction' as const, tender: [{ method: 'Cash', amount_usd: 20, amount_khr: 0 }], exchangeRate: 4000, receivedAt: '2026-11-12 03:30:00', change }
+  const built = uiCopy.buildPaymentEvent(input)
+  assert.deepEqual(worker.buildPaymentEvent(input), built)
+  assert.deepEqual([built.change_usd, built.change_khr, built.change_is_actual, built.change_exchange_rate], [5, 400, 1, 4000])
+  assert.deepEqual(uiCopy.buildPaymentEvent({ ...input, change: undefined }).change_usd, 0)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

@@ -167,11 +167,11 @@ check('an event refuses: no id, no rows, no money, a negative or unreadable amou
   assert.equal(event({ note: 'x'.repeat(500) }).note.length, 500)
 })
 
-check('change rides an incoming event and never an outgoing one', () => {
+check('change rides an incoming event and an outgoing undo/correction: the drawer held tender minus change, so the reversal must too', () => {
   const withChange = event({ tender: tender(10), change: { usd: 0, khr: 12000, isActual: true, exchangeRate: 4000 } })
   assert.deepEqual([withChange.change_khr, withChange.change_is_actual, withChange.change_exchange_rate], [12000, 1, 4000])
   const out = event({ origin: 'undo', direction: 'out', reversesEventId: 'e0', change: { usd: 5, khr: 0, isActual: true, exchangeRate: 4000 } })
-  assert.deepEqual([out.change_usd, out.change_is_actual, out.change_exchange_rate], [0, 0, null])
+  assert.deepEqual([out.change_usd, out.change_is_actual, out.change_exchange_rate], [5, 1, 4000])
 })
 
 check('the opening event copies the sale tender at the sale time, so SUM(events) equals the sale columns', () => {

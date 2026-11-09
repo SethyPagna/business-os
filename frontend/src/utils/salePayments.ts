@@ -6,7 +6,7 @@
 // that and drives BOTH copies through the same fixtures; cloudflare/scripts/test-sale-payments-pure.cjs
 // pins the answers themselves.
 //
-// INERT. Nothing imports this yet: no route writes an event (slices S3-S5 wire the readers and writers).
+// INERT. No route writes an event yet; the planner built on this (Worker lib/settlementPaymentEvents.ts) has no caller.
 //
 // Owner rulings (24 Oct 2026) this encodes:
 //   1. A part-paid sale stays Not Paid with a "Part paid" tag. There is no third status.
@@ -186,8 +186,8 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventIn
   })
   if (usd === 0n && khr === 0n) fail('payment_event_no_money', 'A payment event carries money; an event of $0 and 0 riel is not a payment.')
 
-  const out = input.direction === 'out'
-  const change = out || !input.change ? null : input.change
+  // An out carries the change of the tender it reverses: the drawer held tender minus change, so reversing the tender alone over-removes.
+  const change = input.change ?? null
   return {
     event_id: String(input.eventId).trim(),
     sale_id: input.saleId,
