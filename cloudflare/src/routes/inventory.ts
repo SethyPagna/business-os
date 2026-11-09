@@ -1732,13 +1732,16 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // Loaded on first use, like undoAppliers.ts loads it: only a scoped Set
     // needs it, and every other /adjust stays byte-identical.
     const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
+    // ic_lot_counts: a Set that leaves every line of the product's latest Issue matching stock closes it in the same batch (answered as issue_closed).
+    const closeIssue = !variance && await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
     const result = await applyStockLotSet(getDb(c.env), user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
       productId, branchId, batchId: Number(body.batchId), quantity,
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
       ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
       ...(variance ? { variance } : {}),
-    }, markWritten, () => branchRedirectTarget(c), atomicMark)
+    }, markWritten, () => branchRedirectTarget(c), atomicMark, closeIssue)
+    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
       // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
       const bumped = await scopedSetBump(c.env, result.body)

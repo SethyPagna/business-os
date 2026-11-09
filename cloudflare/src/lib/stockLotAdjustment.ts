@@ -91,6 +91,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { readSwitch } from './readSwitches'
+import { closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -367,6 +368,8 @@ export async function applyStockLotSet(
   // operator confirmed (on the lot as it exists there); without it the Set is refused branch_redirect_required.
   redirectTarget: RedirectTarget = null,
   atomicMark?: import('./stockMutationReceipt').StockMutationAtomicMark,
+  // ic_lot_counts: a Set that leaves every line of the product's latest Issue matching stock closes that Issue in the same batch (lib/stockSetClosesIssue.ts); answered as issue_closed.
+  closeIssue = false,
 ): Promise<StockLotSetResult> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return { status: 403, body: { error: 'Stock adjustments require Full Access to Inventory.' } }
@@ -473,7 +476,7 @@ export async function applyStockLotSet(
   const payload = JSON.stringify({ applier: STOCK_LOT_SET_KIND, operation_id: operationId, generation: 0 })
   const response = {
     ...base, movementType, quantity: Math.abs(lotDelta), conditionTag: request.conditionTag,
-    before, after, operation_id: recordOperation ? operationId : null, generation: 0, server_recorded: recordOperation,
+    before, after, operation_id: recordOperation ? operationId : null, generation: 0, server_recorded: recordOperation, issue_closed: false,
   }
   const opParams = {
     operation: operationId, actor: user.id, actorName: actorSnapshot(user), requestId: operationRequestId, requestJson,
@@ -494,6 +497,9 @@ export async function applyStockLotSet(
         VALUES('inventory','stock_quantity_set',@product,@label,1,'undoable',@payload,@payload,@actor,@actorName)`, params: opParams },
       { sql: `UPDATE stock_lot_adjustment_operations SET history_id=last_insert_rowid(),
         response_json=json_set(response_json,'$.action_history_id',last_insert_rowid()) WHERE id=@operation`, params: opParams },
+      // After the quantity statements, so the match is judged against the stock this Set leaves; conditional in SQL, so issue_closed in the stored answer is exact.
+      ...(closeIssue && !request.variance ? closeIssueStatements({ productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null,
+        operation: operationId, generation: 0, actorId: user.id, actorName: actorSnapshot(user) ?? '' }) : []),
     ] : []),
   ]
   if (!atomicMark) await markWritten()
@@ -542,6 +548,8 @@ export async function notifyStockLotSet(env: Env, productId?: number | string | 
     broadcast(env, 'products', { action: 'update', ...named }),
     broadcast(env, 'inventory', { action: 'adjust', ...named }),
     bumpVersion(env, 'products'),
+    // An Undo or Redo may have reopened or closed an Issue: the Issues sets are cached on this version.
+    bumpVersion(env, 'inventory_checks'),
   ])
 }
 
@@ -671,6 +679,11 @@ export async function replayStockLotSet(
   } else {
     statements.push(...deltaStatements(before, lotChange, branchChange))
     statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
+  }
+  // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
+  if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
+    const closing = { productId: before.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
+    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing)))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },

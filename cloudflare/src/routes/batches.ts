@@ -622,13 +622,15 @@ app.patch('/:id/branches/:branchId', async (c) => {
   const { scopedSetHeld, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
   if (await scopedSetHeld(c.env, db, { productId: batch.productId, branchId })) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
+  const closeIssue = await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
   const result = await applyStockLotSet(db, user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
     productId: batch.productId, branchId, batchId, quantity, setScope: 'lot', reason: reasonText, conditionTag: null,
     // The lot figure the editor showed: a count that moved since refuses 409.
     ...(typeof body.expectedLotQuantity === 'number' && Number.isFinite(body.expectedLotQuantity) && body.expectedLotQuantity >= 0
       ? { expectedLotQuantity: body.expectedLotQuantity } : {}),
-  }, undefined, () => branchRedirectTarget(c))
+  }, undefined, () => branchRedirectTarget(c), undefined, closeIssue)
   if (result.status !== 200) return c.json(result.body as never, result.status as never)
+  if (result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
 
   if (Number(result.body.quantity) > 0 && !result.body.replayed) {
     // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
