@@ -216,3 +216,26 @@ export async function announceOrderChange(env: Env, event: OrderAlertEvent): Pro
 export function orderNotifier(env: Env): (event: OrderAlertEvent) => Promise<void> {
   return (event) => deferRequestWork(() => runBackground(env, 'online-order-alert', async () => { await announceOrderChange(env, event); await sendOrderAlert(env, event) }))
 }
+
+/**
+ * A sale that fulfilled an online order was changed from the Sales side (cancelled, reopened, a bulk status Undo/Redo): the order's money view moved (refund due appears or
+ * goes), so the staff Orders screens and the bell refresh. Only linked sales cost anything (one indexed read); a shop with no online orders pays that read, deferred past the
+ * response. Best effort like announceOrderChange.
+ */
+export async function announceOrdersOfSales(env: Env, saleIds: readonly number[]): Promise<void> {
+  const ids = [...new Set(saleIds.filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 100)
+  if (!ids.length) return
+  try {
+    // sql-bound-params: at most 100 ids (slice above).
+    const rows = await getDb(env).prepare(`SELECT id FROM online_orders WHERE sale_id IN (${ids.map(() => '?').join(',')}) LIMIT 25`).all<{ id: number }>(ids)
+    if (rows?.length) await announceOrderChange(env, { kind: 'staff', orderId: Number(rows[0].id) })
+  } catch { /* a missing table or a failed read costs a staler screen, never the sale change */ }
+}
+
+/** The same for a bulk status operation's members (the history Undo/Redo knows the operation, not the sales). */
+export async function announceOrdersOfBulkOperation(env: Env, operationId: string): Promise<void> {
+  try {
+    const rows = await getDb(env).prepare('SELECT sale_id FROM sale_bulk_members WHERE operation_id = @operation LIMIT 100').all<{ sale_id: number }>({ operation: operationId })
+    await announceOrdersOfSales(env, (rows || []).map((row) => Number(row.sale_id)))
+  } catch { /* best effort */ }
+}

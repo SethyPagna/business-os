@@ -59,6 +59,21 @@ async function main() {
       assert.notEqual(await status(id), 'cancelled', `control ${name}: reopened`)
       console.log(`PASS control ${name}: with no refund Record the cancelled linked sale reopens`)
     }
+    // Screens: a status change on a sale that fulfilled an order moves the online_orders cache version (the staff Orders list and the bell re-read); a plain sale does not.
+    const kv = await h.mf.getKVNamespace('CACHE')
+    const version = async () => await kv.get('v2:online_orders')
+    const wait = async (before) => { for (let i = 0; i < 40 && (await version()) === before; i += 1) await new Promise((r) => setTimeout(r, 50)); return version() }
+    const linked = await cancelledLinkedSale({ refundNoted: false })
+    const v0 = await version()
+    assert.equal((await reopenPatch(linked)).status, 200)
+    const v1 = await wait(v0)
+    assert.notEqual(v1, v0, 'reopening a linked sale refreshes the online order screens')
+    const plainSale = await H.createSale(h, { key: 'plain-hook', lines: [{ productId: 12, quantity: 1 }], paymentDetails: [{ method: 'Cash', amount_usd: 12.5, amount_khr: 0 }] })
+    const plainRow = await h.one('SELECT updated_at FROM sales WHERE id = ?', plainSale.body.id)
+    assert.equal((await h.call('PATCH', '/api/sales/' + plainSale.body.id + '/status', { sale_status: 'cancelled', cancel_reason: 'mistake', expected_updated_at: plainRow.updated_at, client_request_id: 'plain-hook-cancel' }, 'plain cancel')).status, 200)
+    await new Promise((r) => setTimeout(r, 400))
+    assert.equal(await version(), v1, 'control: a plain sale change does not touch the online order screens')
+    console.log('PASS a status change on a linked sale refreshes the online order screens; a plain sale does not')
   } finally { await h.mf.dispose() }
 }
 main().then(() => { console.log('online order uncancel: ok'); process.exit(0) }).catch((e) => { console.error(e); process.exit(1) })

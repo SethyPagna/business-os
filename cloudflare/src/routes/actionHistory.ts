@@ -27,6 +27,7 @@ import { STOCK_IN_LINE_EDIT_KIND, notifyStockInLineEdit } from '../lib/stockInLi
 import { productMergeGroupPrefixFingerprint } from '../lib/undoAppliers'
 import { parseMergeCostOutcome } from '../lib/productCostReview'
 import { ACTION_REPLAY_FAILED_CODE, authoredFailureMessage } from '../lib/failureText'
+import { announceOrdersOfBulkOperation } from '../lib/onlineOrderAlerts'
 
 const SERVER_SALE_BULK_KINDS = new Set([BULK_STATUS_KIND, ...SALE_BULK_UPDATE_KINDS])
 const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION_KIND, STOCK_SESSION_KIND, SALE_SETTLEMENT_ACTION_KIND])
@@ -645,6 +646,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
             : applier.name === BULK_STATUS_KIND
               ? notifyBulkStatus(c.env)
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+      // Undoing or redoing a grouped sale status change can cancel or reopen a sale that fulfilled an online order: refresh the staff Orders screens.
+      if (applier.name === BULK_STATUS_KIND) c.executionCtx.waitUntil(announceOrdersOfBulkOperation(c.env, String(payload.operation_id)))
       // Telegram (owner, 27 Sep 2026): undoing or redoing a grouped return
       // STATUS change cancels or restores those returns, so it is announced
       // like the original action. The sender reads each return's status now,

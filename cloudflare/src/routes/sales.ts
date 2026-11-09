@@ -18,7 +18,7 @@ import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMisma
 import { audit } from '../lib/audit'
 import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/permissions'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
-import { announceOrderChange } from '../lib/onlineOrderAlerts'
+import { announceOrderChange, announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import {
   LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, sameMethod, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
@@ -2173,10 +2173,12 @@ function saleBulkFailure(c: Context, error: unknown, fallback: string, code: str
 
 app.post('/bulk-status', async (c) => {
   try {
-    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c),
+    const requestBody = await c.req.json()
+    const result = await applySaleBulkStatus(c.env, c.get('user'), requestBody, branchRedirectTarget(c),
       // Restoring sales in bulk takes their stock back out: one alert message per branch and tier for the whole batch.
       (lines) => c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines })))
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+    c.executionCtx.waitUntil(announceOrdersOfSales(c.env, (Array.isArray((requestBody as { items?: unknown })?.items) ? (requestBody as { items: Array<{ id?: unknown }> }).items : []).map((item) => Number(item?.id))))
     return c.json(result)
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -3218,6 +3220,8 @@ app.patch('/:id/status', async (c) => {
   // S4-2: echo the skip back so the client can badge the sale immediately
   // (and so a scripted caller can assert the flag actually took effect).
   const statusPayload = skipStock ? { ...payload, stock_skipped: 1 } : payload
+  // A sale that fulfilled an online order changed its money view (refund due on a cancel): refresh the staff Orders screens.
+  c.executionCtx.waitUntil(announceOrdersOfSales(c.env, [Number(id)]))
   return c.json(statusPayload)
 })
 
