@@ -271,6 +271,8 @@ export type PlanLimits = {
   //                                 (nudgeCheckDue). A longer gap means fewer reads and calls, so Free is the LARGER number: Paid 15, Free 30.
   //   onlineOrderAdminPageRows      rows per page of the staff order list (adminPageRows). Paid 100, Free 50.
   //   onlineOrderRequestMax         change/return requests one order may ever hold (requestAllowed). Paid 10, Free 5.
+  //   onlineOrderSweepMaxD1Calls    D1 calls one */5 tick may spend (its own statements plus an estimate per notice it sends), so a busy tick stops and the
+  //                                 rest waits for the next one instead of running into the 50-call limit of the invocation (which also drains Telegram). Paid 150, Free 25.
   //   onlineOrderLateCheckHours     how long after its QR ran out an EXPIRED payment is still re-checked with PayWay by the cron, so a payment whose
   //                                 callback was lost is found (findLateCandidates). A bigger window is more checks: Paid 72, Free 24.
   //   onlineOrderLateCheckEveryMinutes  at most one such re-check per payment per this many minutes (a longer gap is fewer reads and calls, so Free is the
@@ -284,6 +286,7 @@ export type PlanLimits = {
   onlineOrderNudgeCheckSeconds: number
   onlineOrderAdminPageRows: number
   onlineOrderRequestMax: number
+  onlineOrderSweepMaxD1Calls: number
   onlineOrderLateCheckHours: number
   onlineOrderLateCheckEveryMinutes: number
   onlineOrderPaywayTimeoutMs: number
@@ -424,6 +427,7 @@ const PAID_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 15,
   onlineOrderAdminPageRows: 100,
   onlineOrderRequestMax: 10,
+  onlineOrderSweepMaxD1Calls: 150,
   onlineOrderLateCheckHours: 72,
   onlineOrderLateCheckEveryMinutes: 10,
   onlineOrderPaywayTimeoutMs: 8000,
@@ -472,6 +476,7 @@ const FREE_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 30,
   onlineOrderAdminPageRows: 50,
   onlineOrderRequestMax: 5,
+  onlineOrderSweepMaxD1Calls: 25,
   onlineOrderLateCheckHours: 24,
   onlineOrderLateCheckEveryMinutes: 30,
   onlineOrderPaywayTimeoutMs: 8000,

@@ -404,7 +404,19 @@ export async function applyCheckResult(
   deps: OrderDeps, order: Pick<OrderRecord, 'id' | 'state'>, payment: Pick<PaymentRecord, 'id' | 'amount' | 'currency' | 'revision' | 'state'>,
   check: ParsedCheck, source: 'payway' | 'sweep', creds: PaywayCredentials | null = null,
 ): Promise<'paid' | 'review' | 'failed' | 'pending' | 'noop'> {
-  const outcome = await applyCheckResultRows(deps, order, payment, check, source, creds)
+  let outcome = await applyCheckResultRows(deps, order, payment, check, source, creds)
+  // Every payment write is guarded by the revision the caller READ. When another writer got there first (a sweep that expired the payment, an edit that
+  // cancelled it) the guard refuses and nothing changed: read the payment and the order again ONCE and apply the same check to what is there now (no
+  // second PayWay call). Without this a payment could turn paid while its order never moved, and the money would sit on an order nobody was shown.
+  if (outcome === 'noop') {
+    const [fresh, freshOrder] = await Promise.all([
+      deps.db.prepare('SELECT * FROM online_order_payments WHERE id = @id').get<PaymentRecord>({ id: payment.id }),
+      deps.db.prepare('SELECT state FROM online_orders WHERE id = @id').get<{ state: string }>({ id: order.id }),
+    ])
+    if (fresh && freshOrder && (Number(fresh.revision) !== Number(payment.revision) || fresh.state !== payment.state || freshOrder.state !== order.state)) {
+      outcome = await applyCheckResultRows(deps, { id: order.id, state: freshOrder.state }, fresh, check, source, creds)
+    }
+  }
   // The one place a check becomes Paid, Review or Failed, so the one place the shop hears of it: whichever of the poll, the callback or the sweep got there first.
   if (outcome === 'paid' || outcome === 'review' || outcome === 'failed') await announce(deps, { kind: outcome, orderId: order.id, paymentId: payment.id })
   return outcome
@@ -433,7 +445,7 @@ async function applyCheckResultRows(
     const orderMoves = canTransition(order.state, 'qr_failed', source)
     const failedGuard = `EXISTS (SELECT 1 FROM online_order_payments WHERE id = @pid AND state = 'failed' AND revision = @newRev)`
     const [result] = await db.batch([
-      { sql: `UPDATE online_order_payments SET state = 'failed', last_checked_at = @at, revision = revision + 1, updated_at = @at WHERE id = @pid AND state = 'awaiting'`, params: { pid: payment.id, at } },
+      { sql: `UPDATE online_order_payments SET state = 'failed', last_checked_at = @at, revision = revision + 1, updated_at = @at WHERE id = @pid AND state = 'awaiting' AND revision = @rev`, params: { pid: payment.id, at, rev } },
       {
         sql: `INSERT INTO online_order_events (order_id, payment_id, event, source, detail_json, created_at)
               SELECT @oid, @pid, 'note', @source, @detail, @at WHERE changes() = 1`,
@@ -468,8 +480,8 @@ async function applyCheckResultRows(
         sql: `UPDATE online_order_payments SET state = 'review', paid_at = NULL, paid_amount = @held, paid_currency = @currency, payway_apv = @apv,
                      payway_bank_ref = @bankRef, payway_payment_type = @paymentType, payway_bank_name = @bankName,
                      last_checked_at = @at, revision = revision + 1, updated_at = @at
-              WHERE id = @pid AND state IN ('awaiting','expired','cancelled','failed')`,
-        params: { pid: payment.id, at, held, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
+              WHERE id = @pid AND state IN ('awaiting','expired','cancelled','failed') AND revision = @rev`,
+        params: { pid: payment.id, at, rev, held, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
       },
       {
         sql: `UPDATE online_orders SET state = 'review', revision = revision + 1, updated_at = @at
@@ -502,8 +514,8 @@ async function applyCheckResultRows(
       sql: `UPDATE online_order_payments SET state = 'paid', paid_at = @at, paid_amount = @amount, paid_currency = @currency, payway_apv = @apv,
                    payway_bank_ref = @bankRef, payway_payment_type = @paymentType, payway_bank_name = @bankName,
                    last_checked_at = @at, revision = revision + 1, updated_at = @at
-            WHERE id = @pid AND state IN ('awaiting','expired')`,
-      params: { pid: payment.id, at, amount, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
+            WHERE id = @pid AND state IN ('awaiting','expired') AND revision = @rev`,
+      params: { pid: payment.id, at, rev, amount, currency: payment.currency, apv: check.apv, bankRef: check.bankRef, paymentType: check.paymentType, bankName: check.bankName },
     },
     {
       sql: `UPDATE online_orders SET state = 'paid', paid_at = COALESCE(paid_at, @at), revision = revision + 1, updated_at = @at
@@ -516,9 +528,9 @@ async function applyCheckResultRows(
       params: { oid: order.id, pid: payment.id, at, pstate: 'paid', newRev: rev + 1 },
     },
     {
+      // A payment turns paid once: a twin that raced the first writer finds the Records row already there (NOT EXISTS, through idx_online_order_events_payment) and adds none.
       sql: `INSERT INTO online_order_events (order_id, payment_id, event, from_state, to_state, source, amount_usd, detail_json, created_at)
             SELECT @oid, @pid, @event, @from, @to, @source, @usd, @detail, @at WHERE ${paidGuard}
-              -- a payment turns paid once: a twin that raced the first writer (same revision) finds the Records row already there and adds none
               AND NOT EXISTS (SELECT 1 FROM online_order_events WHERE payment_id = @pid AND event IN ('verified_paid','late_paid'))`,
       params: {
         oid: order.id, pid: payment.id, event, from: order.state, to: orderMoves ? 'paid' : order.state, source, at,

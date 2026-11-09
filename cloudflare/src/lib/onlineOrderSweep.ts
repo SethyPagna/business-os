@@ -80,6 +80,8 @@ export type SweepSummary = {
   checked: number; paid: number; review: number; failed: number; expired: Array<{ orderId: number; paymentId: number; purpose: string }>; skipped: number
   /** Expired payments re-checked for late money, and orders stuck in qr_failed that ended expired. */
   late: number; qrFailedExpired: number
+  /** True when the tick's D1 budget ran out: what is left waits for the next tick. */
+  deferred: boolean
 }
 
 /** The owner's QR lifetime in minutes (settings, 3..60, else the default) plus the grace, in seconds, read inside the same statement that uses it. */
@@ -118,7 +120,7 @@ export async function findStaleQrFailed(db: D1Compat, now: Date, limit: number):
 }
 
 /**
- * Expired payments worth asking about again: expired within the plan's late-check window and not asked about for the plan's interval. Both conditions
+ * Payments worth asking about again whose QR is gone: EXPIRED (it ran out) or CANCELLED (an edit replaced it) with a QR that was issued, inside the plan's late-check window and not asked about for the plan's interval. Both conditions
  * read only the partial index's own columns, so an idle tick reads no row.
  */
 export async function findLateCandidates(db: D1Compat, now: Date, env: OrderDeps['env'], limit: number): Promise<PaymentWithOrder[]> {
@@ -126,7 +128,7 @@ export async function findLateCandidates(db: D1Compat, now: Date, env: OrderDeps
   const rows = await db.prepare(`
     SELECT p.*, o.state AS order_state
     FROM online_order_payments p INDEXED BY idx_online_order_payments_expired JOIN online_orders o ON o.id = p.order_id
-    WHERE p.state = 'expired' AND p.expires_at >= @windowStart AND (p.last_checked_at IS NULL OR p.last_checked_at <= @recheckBefore)
+    WHERE p.state IN ('expired','cancelled') AND p.qr_string IS NOT NULL AND p.expires_at >= @windowStart AND (p.last_checked_at IS NULL OR p.last_checked_at <= @recheckBefore)
     ORDER BY p.expires_at ASC, p.id ASC LIMIT @limit
   `).all<PaymentWithOrder>({
     windowStart: sqlTime(new Date(now.getTime() - limits.onlineOrderLateCheckHours * 3_600_000)),
@@ -175,17 +177,45 @@ async function expireQrFailed(deps: OrderDeps, order: Pick<OrderRecord, 'id' | '
   return Number(result.meta?.changes ?? 0) === 1
 }
 
+/** What one notice costs the tick in D1 calls (version bump, settings read, the rows it names): an estimate of fixed code, measured by the lifecycle test. */
+export const NOTICE_D1_CALLS = 6
+
+/**
+ * The tick's own D1 budget (planTier onlineOrderSweepMaxD1Calls): every statement the tick runs, and an estimate per notice it sends, is counted. When the budget is spent the
+ * loops stop and the rest waits for the next tick, so one busy tick can never run into the invocation's 50-call limit (the same invocation also drains Telegram).
+ */
+function budgeted(deps: OrderDeps, limit: number): { deps: OrderDeps; spent: () => boolean } {
+  let used = 0
+  const db: D1Compat = {
+    prepare(sql: string) {
+      const statement = deps.db.prepare(sql)
+      return {
+        get: (...args: unknown[]) => { used += 1; return (statement.get as (...a: unknown[]) => Promise<unknown>)(...args) },
+        all: (...args: unknown[]) => { used += 1; return (statement.all as (...a: unknown[]) => Promise<unknown>)(...args) },
+        run: (...args: unknown[]) => { used += 1; return (statement.run as (...a: unknown[]) => Promise<unknown>)(...args) },
+      }
+    },
+    batch: (items: Parameters<D1Compat["batch"]>[0]) => { used += 1; return deps.db.batch(items) },
+  } as unknown as D1Compat
+  const notify = deps.notify ? async (event: Parameters<NonNullable<OrderDeps['notify']>>[0]) => { used += NOTICE_D1_CALLS; await deps.notify!(event) } : undefined
+  return { deps: { ...deps, db, ...(notify ? { notify } : {}) }, spent: () => used >= limit }
+}
+
 /** One cron tick. Without PayWay credentials nothing can be confirmed, so nothing is expired (a payment is never expired on a guess). */
 export async function sweepOrders(deps: OrderDeps, creds: PaywayCredentials | null): Promise<SweepSummary> {
-  const summary: SweepSummary = { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0 }
+  const summary: SweepSummary = { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0, deferred: false }
   if (!creds) return summary
   const batch = sweepBatchSize(deps.env)
+  const { deps: counted, spent } = budgeted(deps, getPlanLimits(deps.env).onlineOrderSweepMaxD1Calls)
+  const real = deps
+  deps = counted
   const settle = (outcome: string) => {
     if (outcome === 'paid') summary.paid += 1
     else if (outcome === 'review') summary.review += 1
     else if (outcome === 'failed') summary.failed += 1
   }
   for (const payment of await findStalePayments(deps.db, deps.now(), batch)) {
+    if (spent()) { summary.deferred = true; break }
     const check = await checkQuietly(deps, creds, payment.tran_id)
     summary.checked += 1
     // "Not found" is an answer: PayWay never saw this transaction (the QR was never issued). Any other failure is not, so the payment waits for the next tick.
@@ -195,12 +225,14 @@ export async function sweepOrders(deps: OrderDeps, creds: PaywayCredentials | nu
     if (outcome === 'pending' && await expirePayment(deps, payment)) summary.expired.push({ orderId: payment.order_id, paymentId: payment.id, purpose: payment.purpose })
   }
   for (const order of await findStaleQrFailed(deps.db, deps.now(), batch)) {
+    if (spent()) { summary.deferred = true; break }
     if (await expireQrFailed(deps, order)) { summary.qrFailedExpired += 1; summary.expired.push({ orderId: order.id, paymentId: 0, purpose: 'order' }) }
   }
   // Late money: the remaining PayWay budget of this tick goes to expired payments, each at most once per plan interval.
   const remaining = Math.max(0, batch - summary.checked)
   if (remaining > 0) {
     for (const payment of await findLateCandidates(deps.db, deps.now(), deps.env, remaining)) {
+      if (spent()) { summary.deferred = true; break }
       if (!(await claimCheck(deps, payment))) continue
       const check = await checkQuietly(deps, creds, payment.tran_id)
       summary.late += 1
@@ -209,7 +241,7 @@ export async function sweepOrders(deps: OrderDeps, creds: PaywayCredentials | nu
     }
   }
   // One message for the whole tick, however many payments ran out: the owner reads a digest, not a burst.
-  if (summary.expired.length) await announceOrderEvent(deps, { kind: 'expired', expired: summary.expired })
+  if (summary.expired.length) await announceOrderEvent(real, { kind: 'expired', expired: summary.expired })
   return summary
 }
 

@@ -145,7 +145,7 @@ async function main() {
     const h = world()
     h.clearStatements()
     const s = await h.sweep()
-    assert.deepEqual(s, { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0 })
+    assert.deepEqual(s, { checked: 0, paid: 0, review: 0, failed: 0, expired: [], skipped: 0, late: 0, qrFailedExpired: 0, deferred: false })
     assert.equal(h.statements.length, 3); assert.equal(h.d1.calls, 3); assert.equal(h.calls.length, 0)
     assert.match(h.statements[0], /INDEXED BY idx_online_order_payments_open/)
     assert.match(h.statements[1], /INDEXED BY idx_online_orders_qr_failed/)

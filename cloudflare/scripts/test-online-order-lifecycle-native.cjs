@@ -15,6 +15,8 @@ async function check(name, fn) {
 const T0 = Date.UTC(2026, 10, 9, 3, 0, 0)
 const MIN = 60_000
 const HOUR = 60 * MIN
+// The callback route's D1 calls with the real notifier and Telegram configured (measured 7 inside the route, middleware not included), plus a little.
+const CALLBACK_D1_CEILING = 10
 
 function world(options = {}) {
   const h = createOrdersHarness({ switchOn: true, nowMs: T0, ...options })
@@ -326,6 +328,102 @@ async function main() {
     await e.request(`/${r2.body.token}/edit`, 'POST', { name: 'Dara Two' }); assert.equal(e.bumps.length, 1)
     await e.request(`/${r2.body.token}/cancel`, 'POST', {}); assert.equal(e.bumps.length, 2)
     void res
+  })
+
+  // ------------------------------------------------------------------------------------------------------------ verifier R1: stale snapshots
+  const APPROVED = { ok: true, state: 'approved', originalAmount: 25, totalAmount: 25, discountAmount: 0, paymentAmount: 25, refundAmount: null, paymentCurrency: 'USD', apv: 'APV123', transactionDate: null, bankRef: null, paymentType: null, bankName: null }
+  await check('a callback holding a stale snapshot (the sweep expired the payment meanwhile) still lands the money on the order: paid, exactly one late_paid row, no second PayWay call (a wrong build leaves payment paid and order expired)', async () => {
+    const h = world(); await place(h)
+    const stale = payment(h); const staleOrder = order(h)
+    h.advance(20 * MIN); h.script.check = () => h.pending(); await h.sweep()
+    assert.equal(order(h).state, 'expired'); assert.equal(payment(h).state, 'expired')
+    const seen = []; h.calls.length = 0
+    const out = await h.store.applyCheckResult(h.deps({ notify: async (event) => { seen.push(event.kind) } }), { id: 1, state: staleOrder.state }, stale, APPROVED, 'payway', null)
+    assert.equal(out, 'paid'); assert.equal(order(h).state, 'paid'); assert.equal(payment(h).state, 'paid'); assert.equal(payment(h).paid_amount, 25)
+    assert.equal(events(h).filter((e) => e === 'late_paid').length, 1, 'one late_paid row'); assert.ok(!events(h).includes('verified_paid'))
+    assert.deepEqual(seen, ['paid']); assert.equal(countOf(h, 'check'), 0, 'the same answer is re-applied, PayWay is not asked again')
+    assert.equal(money(h).onlineInUsd, 25); assert.equal(money(h).refundDueUsd, 0)
+    // a mismatch through the same race: held in review on the order, which moves to review
+    const r = world(); await place(r)
+    const rs = payment(r); const ro = order(r)
+    r.advance(20 * MIN); r.script.check = () => r.pending(); await r.sweep()
+    const short = { ...APPROVED, originalAmount: 20, totalAmount: 20, paymentAmount: 20 }
+    assert.equal(await r.store.applyCheckResult(r.deps({ notify: async () => {} }), { id: 1, state: ro.state }, rs, short, 'payway', null), 'review')
+    assert.equal(order(r).state, 'review'); assert.equal(payment(r).paid_amount, 20); assert.equal(events(r).filter((e) => e === 'mismatch').length, 1)
+    // a decline through the race changes nothing (the payment is no longer awaiting)
+    const d = world(); await place(d); const ds = payment(d); const dob = order(d)
+    d.advance(20 * MIN); d.script.check = () => d.pending(); await d.sweep()
+    const before = rowsOf(d)
+    assert.equal(await d.store.applyCheckResult(d.deps({ notify: async () => {} }), { id: 1, state: dob.state }, ds, { ...APPROVED, state: 'declined' }, 'payway', null), 'noop')
+    assert.deepEqual(rowsOf(d), before)
+  })
+
+  await check('late money on a payment an edit had cancelled is found by the sweep without any callback: review with its amount, the paid_after_cancel mismatch, the order moves to review (a wrong build only re-checks expired payments)', async () => {
+    const h = world(); const res = await place(h); const first = payment(h).tran_id
+    await h.request('/' + res.body.token + '/edit', 'POST', { lines: [{ product_id: 1, quantity: 3 }] })
+    assert.equal(payment(h, 1).state, 'cancelled')
+    h.script.check = (b) => (b.tran_id === first ? h.approved(25) : h.pending())
+    h.advance(11 * MIN)
+    const s = await h.sweep()
+    assert.equal(s.late >= 1, true); assert.equal(s.review, 1)
+    const p = payment(h, 1); assert.equal(p.state, 'review'); assert.equal(p.paid_amount, 25); assert.equal(p.paid_at, null)
+    const mismatch = h.one("SELECT * FROM online_order_events WHERE event = 'mismatch'"); assert.equal(JSON.parse(mismatch.detail_json).reason, 'paid_after_cancel'); assert.equal(mismatch.source, 'sweep')
+    assert.equal(order(h).state, 'review')
+    // asked once per interval, and a cancelled payment with no QR is never asked about
+    h.calls.length = 0; h.advance(MIN); await h.sweep(); assert.equal(h.calls.filter((c) => c.op === 'check' && c.body.tran_id === first).length, 0, 'review is final for the sweep')
+    const n = world(); await place(n)
+    n.run("INSERT INTO online_order_payments (order_id, tran_id, purpose, amount, currency, state, expires_at, revision, created_at) VALUES (1, 'WNOQRCANCELLED00001', 'order', 25, 'USD', 'cancelled', '2026-11-09 03:10:00', 0, '2026-11-09 03:00:00')")
+    n.advance(MIN); n.script.check = () => n.approved(25); n.calls.length = 0; await n.sweep()
+    assert.equal(n.calls.filter((c) => c.body.tran_id === 'WNOQRCANCELLED00001').length, 0, 'nothing exists at ABA for a payment that never got a QR')
+  })
+
+  await check('every Records-row guard of a money transition plans through idx_online_order_events_payment, never a scan of the events table (verifier R3)', async () => {
+    const h = world()
+    const bind = (sql) => sql.replace(/@(\w+)/g, (_, name) => ({ pid: '1', oid: '1', source: "'payway'", at: "'2026-11-09 03:00:00'", amount: '1', detail: "'{}'", from: "'awaiting_payment'", to: "'paid'", usd: '1', event: "'verified_paid'", newRev: '1', pstate: "'paid'" }[name] ?? '1'))
+    const plansOf = async (drive) => {
+      h.clearStatements(); await drive()
+      return h.statements.filter((s) => /NOT EXISTS \(SELECT 1 FROM online_order_events WHERE payment_id = @pid/.test(s)).map((s) => h.all('EXPLAIN QUERY PLAN ' + bind(s)).map((r) => r.detail).join(' | '))
+    }
+    await place(h); const t1 = payment(h).tran_id
+    h.script.check = () => h.approved(25)
+    const paid = await plansOf(() => h.callback(t1))
+    await place(h); const t2 = payment(h, 2).tran_id
+    h.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 0, original_amount: 20 } })
+    const review = await plansOf(() => h.callback(t2))
+    await place(h); const t3 = payment(h, 3).tran_id
+    h.script.check = () => ({ status: { code: '0' }, data: { payment_status_code: 3, original_amount: 25 } })
+    const failed = await plansOf(() => h.callback(t3))
+    for (const [label, plans] of [['paid', paid], ['review', review], ['declined', failed]]) {
+      assert.ok(plans.length >= 1, label + ': the guard statement was found')
+      for (const plan of plans) { assert.match(plan, /idx_online_order_events_payment/, label); assert.doesNotMatch(plan, /SCAN online_order_events(?! USING)/, label) }
+    }
+  })
+
+  // ------------------------------------------------------------------------------------------------------------ verifier R4: D1 budget
+  await check('a busy Free tick stops at its D1 budget (real notifier, Telegram configured): the rest waits for the next tick, the invocation stays inside 50 calls; the Paid plan does not defer; the callback route has its own ceiling', async () => {
+    const realFetch = global.fetch
+    global.fetch = async (url) => { if (!String(url).startsWith('https://api.telegram.org/')) throw new Error('unexpected network call'); return new Response(JSON.stringify({ ok: true }), { status: 200 }) }
+    try {
+      const configured = (tier) => world({ env: { PLAN_TIER: tier, TELEGRAM_BOT_TOKEN: '123456:test-token' }, settings: { telegram_chat_id: '-1001' } })
+      const h = configured('free')
+      for (let i = 0; i < 5; i += 1) await place(h)
+      h.advance(20 * MIN); h.script.check = () => h.approved(25)
+      h.clearStatements()
+      const first = await h.sweep()
+      assert.equal(first.deferred, true, 'the budget ran out'); assert.ok(first.paid >= 1 && first.paid < 5, 'some were settled: ' + first.paid)
+      assert.ok(h.d1.calls <= 50, 'inside the invocation limit: ' + h.d1.calls); assert.ok(h.d1.calls <= 40, 'with margin for the Telegram drain that shares the invocation: ' + h.d1.calls)
+      const second = await h.sweep()
+      assert.equal(first.paid + second.paid, 5, 'nothing is lost, the rest is settled by the next tick')
+      assert.equal(h.one("SELECT COUNT(*) n FROM online_orders WHERE state = 'paid'").n, 5)
+      const paidPlan = configured('paid')
+      for (let i = 0; i < 5; i += 1) await place(paidPlan)
+      paidPlan.advance(20 * MIN); paidPlan.script.check = () => paidPlan.approved(25)
+      const all = await paidPlan.sweep(); assert.equal(all.deferred, false); assert.equal(all.paid, 5)
+      // the callback route: one money transition with the real notifier is bounded too
+      const c = configured('free'); await place(c); c.script.check = () => c.approved(25); c.clearStatements()
+      await c.callback(payment(c).tran_id)
+      assert.ok(c.d1.calls <= CALLBACK_D1_CEILING, 'callback D1 calls ' + c.d1.calls + ' > ' + CALLBACK_D1_CEILING)
+    } finally { global.fetch = realFetch }
   })
 
   console.log(`online order lifecycle: ${passed} checks passed`)
