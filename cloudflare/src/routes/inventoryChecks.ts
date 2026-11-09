@@ -66,6 +66,10 @@ const notWired = (c: IcContext) => c.json({ error: 'not_found', code: 'not_found
 const singleValued = (c: IcContext): void => {
   for (const [key, values] of Object.entries(c.req.queries())) if (values.length !== 1) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', key)
 }
+// The two answers a page needs beside its rows, built once for /list and /overlay: the same grants decide them in both. The counts are the check-state sets (Inventory Check tables only, cached by the
+// inventory_checks version), never a stock read.
+const fixStockCapabilities = (user: SessionUser) => ({ fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) })
+const checkCountsOf = (sets: CheckStateSets, fixStock: boolean) => ({ ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}) })
 app.get('/list', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
   singleValued(c)
@@ -90,12 +94,12 @@ app.get('/list', async c => {
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
   const { body, projected } = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
   const total = Number((payload as { total?: unknown }).total) || 0
-  const summary = sets && plan.wantSummary && !sets.tooLarge ? { ok: sets.ok.length, issue: sets.issue.length, ...(fixStock ? { pending: sets.pending.length } : {}),
+  const summary = sets && plan.wantSummary && !sets.tooLarge ? { ...checkCountsOf(sets, fixStock),
     // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
     ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
   return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, ...(summary ? { summary } : {}),
-    ...(fixStock ? { capabilities: { fixStock: true, approveCounts: getActionTier(user, 'inventory', 'adjust') === 'full' && canApproveInventoryCounts(user) } } : {}) })
+    ...(fixStock ? { capabilities: fixStockCapabilities(user) } : {}) })
 })
 app.get('/overlay', async c => {
   if (!await readSwitch(c.env, 'ic_wired')) return notWired(c)
@@ -107,16 +111,21 @@ app.get('/overlay', async c => {
   if (!/^\d+$/.test(branchWord) || !Number.isSafeInteger(Number(branchWord)) || Number(branchWord) <= 0) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'branchId')
   const branchId = Number(branchWord)
   const ids = parseOverlayIds(c.req.query('ids'), c.env)
+  // A page whose rows come from Products' store has no /list answer, so the overlay carries the strip's counts and the Fix stock capability, computed as /list computes them (summary=0 leaves the counts out, as on /list).
+  const fixStock = access.fields.stock && await fixStockOn(c)
+  const wantSummary = c.req.query('summary') !== '0'
   const wantLots = c.req.query('lots') === '1' && access.fields.received
   const [items, withLots] = await Promise.all([
-    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: access.fields.stock && await fixStockOn(c) }),
+    readInventoryOverlay(c.env, user, { branchId, ids, pendingAvailable: fixStock }),
     // Received dates for the same ids, for a screen whose shared store does not hold them: the same reader as the list (a first read, not a second).
     wantLots ? attachLotRows(c.env, user, new Set(['lots']), { items: ids.map((id) => ({ id })) }, true) : Promise.resolve(null),
   ])
   const lots = withLots ? (withLots.items as Array<{ id: number; lots?: Array<Record<string, unknown>>; lots_more?: true }>).map((row) => ({ product_id: row.id,
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
-  return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}) })
+  const sets = wantSummary ? (await readCheckStateSets(c, branchId, fixStock)).sets : null
+  return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
+    ...(sets && !sets.tooLarge ? { summary: checkCountsOf(sets, fixStock) } : {}), ...(fixStock ? { capabilities: fixStockCapabilities(user) } : {}) })
 })
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c) })))
 app.post('/sessions', async c => {

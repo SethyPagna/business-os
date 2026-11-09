@@ -19,6 +19,14 @@
   [
    "e7fc997dccb2",
    "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "6ca123f8ecd4",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ]
  ],
  "inventory-checks-overlay-wired-window-of-150-without-lots": [
@@ -33,6 +41,14 @@
   [
    "2225501941e9",
    "B| WITH newest AS ( SELECT CAST(wanted.value AS INTEGER) AS product_id, (SELECT substr(m.created_at, 1, 10) FR"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
+   "6ca123f8ecd4",
+   "WITH latest AS ( SELECT i.product_id AS product_id, i.state AS state, ROW_NUMBER() OVER (PARTITION BY i.produc"
   ],
   [
    "e7fc997dccb2",

@@ -228,6 +228,24 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
   check('a filtered list does not claim a Not checked figure', !('not_checked' in ok.json.summary))
   const noSummary = await app.get('/api/inventory-checks/list?branchId=1&summary=0')
   check('summary=0 skips the counts', !('summary' in noSummary.json))
+  // The overlay carries the same strip counts and the same Fix stock capability as the list, for the branch and grants of the viewer (a page fed from Products' store has no list answer).
+  for (const viewer of ['admin', 'checker', 'receivedOnly', 'blind']) {
+    app.setUser(U[viewer])
+    const listed = await app.get('/api/inventory-checks/list?branchId=1&checkState=ok')
+    const wholeList = await app.get('/api/inventory-checks/list?branchId=1')
+    const overlaid = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100,101')
+    check(`overlay summary equals the list summary (${viewer})`, listed.status === 200 && overlaid.status === 200 && JSON.stringify(overlaid.json.summary) === JSON.stringify(listed.json.summary) && Boolean(overlaid.json.summary))
+    const { not_checked: _notChecked, total: _total, ...wholeCounts } = wholeList.json.summary
+    check(`and the unfiltered list's counts (${viewer}); Not checked and total stay with the page's own Products total`, JSON.stringify(overlaid.json.summary) === JSON.stringify(wholeCounts))
+    check(`overlay capabilities equal the list capabilities (${viewer})`, JSON.stringify(overlaid.json.capabilities ?? null) === JSON.stringify(listed.json.capabilities ?? null))
+    check(`pending is in the overlay summary only for a viewer who may see stock (${viewer})`, ('pending' in overlaid.json.summary) === ('pending' in listed.json.summary))
+    const overlayNoSummary = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100&summary=0')
+    check(`summary=0 leaves the overlay counts out and keeps capabilities (${viewer})`, !('summary' in overlayNoSummary.json) && JSON.stringify(overlayNoSummary.json.capabilities ?? null) === JSON.stringify(listed.json.capabilities ?? null))
+  }
+  app.setUser(U.admin)
+  const capsAdmin = await app.get('/api/inventory-checks/overlay?branchId=1&ids=100'), capsChecker = await (async () => { app.setUser(U.checker); return app.get('/api/inventory-checks/overlay?branchId=1&ids=100') })()
+  app.setUser(U.admin)
+  check('capabilities differ by grant: the control that proves the comparison can fail (approveCounts for admin, not for the checker)', capsAdmin.json.capabilities.approveCounts === true && capsChecker.json.capabilities.approveCounts === false)
   app.setUser(U.receivedOnly)
   check('Pending is not offered to a viewer without the stock field', (await app.get('/api/inventory-checks/list?branchId=1&checkState=pending')).status === 400)
   app.setUser(U.checker)
