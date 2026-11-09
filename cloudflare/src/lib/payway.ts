@@ -30,7 +30,8 @@ export const KHR_MIN_AMOUNT = 100
 export const USD_MIN_AMOUNT = 0.01
 export const TRAN_ID_MAX_LENGTH = 20
 
-export type PaywayCredentials = { merchantId: string; apiKey: string; env: PaywayEnvName }
+/** `timeoutMs` is the plan's PayWay call limit (planTier onlineOrderPaywayTimeoutMs, attached by lib/paywayConfig.ts): a hung call must not hold a callback, a request or a cron tick. Absent = no limit (tests). */
+export type PaywayCredentials = { merchantId: string; apiKey: string; env: PaywayEnvName; timeoutMs?: number }
 
 /** Fixed-word failure. `reason` is one of PaywayFailureReason; nothing from the request or the key is ever included. */
 export type PaywayFailureReason =
@@ -236,6 +237,10 @@ export type ParsedCheck =
     paymentCurrency: string | null
     apv: string | null
     transactionDate: string | null
+    /** The bank's own reference, the payment type and the paying bank's name, when PayWay's answer carries them. Read from fields PayWay documents for this call but not yet seen on a live answer: absent means null, never a guess. */
+    bankRef: string | null
+    paymentType: string | null
+    bankName: string | null
   }
   | { ok: false; reason: PaywayFailureReason }
 const CHECK_STATES: Readonly<Record<string, CheckState>> = Object.freeze({
@@ -261,6 +266,9 @@ export function parseCheckResponse(json: unknown): ParsedCheck {
     paymentCurrency: optionalText(data.payment_currency, 8),
     apv: optionalText(data.apv, 64),
     transactionDate: optionalText(data.transaction_date, 40),
+    bankRef: optionalText(data.bank_ref, 64),
+    paymentType: optionalText(data.payment_type, 32),
+    bankName: optionalText(data.bank_name, 64),
   }
 }
 
@@ -273,12 +281,12 @@ export function parseCloseResponse(json: unknown): ParsedClose {
 
 // ---- injected transport ----------------------------------------------------
 
-export type PaywayTransport = (request: { url: string; body: Record<string, string | number> }) => Promise<{ status: number; json: unknown }>
+export type PaywayTransport = (request: { url: string; body: Record<string, string | number>; timeoutMs?: number }) => Promise<{ status: number; json: unknown }>
 
 async function send(transport: PaywayTransport, credentials: PaywayCredentials, request: PaywayRequest): Promise<unknown> {
   let answer: { status: number; json: unknown }
   try {
-    answer = await transport({ url: `${PAYWAY_BASE_URLS[credentials.env]}${request.path}`, body: request.body })
+    answer = await transport({ url: `${PAYWAY_BASE_URLS[credentials.env]}${request.path}`, body: request.body, timeoutMs: credentials.timeoutMs })
   } catch {
     // The thrown value can echo the URL or headers; it is dropped on purpose.
     throw new PaywayError('transport_failed')

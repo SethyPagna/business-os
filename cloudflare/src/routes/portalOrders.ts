@@ -26,7 +26,8 @@ import { getClientNetworkKey } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { getPortalAccountState } from '../lib/portalSession'
 import { hashOrderToken, isOrderToken } from '../lib/onlineOrders'
-import { paywayCredentials, type PaywayCredentials, type PaywayTransport } from '../lib/payway'
+import type { PaywayCredentials, PaywayTransport } from '../lib/payway'
+import { paywayCredentialsFor } from '../lib/paywayConfig'
 import { fetchPaywayTransport } from '../lib/paywayTransport'
 import { orderNotifier } from '../lib/onlineOrderAlerts'
 import {
@@ -109,7 +110,7 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
     c.header('Retry-After', '60')
     return c.json({ error: 'Too many attempts. Please wait a minute and try again.', code: 'rate_limited' }, 429)
   }
-  const credentials = (c: OrderContext): PaywayCredentials | null => paywayCredentials(c.env)
+  const credentials = (c: OrderContext): PaywayCredentials | null => paywayCredentialsFor(c.env)
   const needCredentials = (c: OrderContext): PaywayCredentials => {
     const creds = credentials(c)
     if (!creds) throw new OrderError(503, 'payway_not_configured', 'Online payment is not available right now. Please contact the shop.')

@@ -91,7 +91,12 @@ const independent = (obj, key) => crypto.createHmac('sha512', key).update(Object
   await t('check-transaction answers: each payment_status_code maps and amounts become numbers', async () => {
     const wrap = (data) => ({ status: { code: '00' }, data })
     const approved = P.parseCheckResponse(wrap({ payment_status_code: 0, original_amount: '15.50', total_amount: 15.5, discount_amount: 0, payment_amount: '15.5', refund_amount: 0, payment_currency: 'USD', apv: '123456', transaction_date: '2026-11-09 15:05:03' }))
-    assert.deepEqual(approved, { ok: true, state: 'approved', originalAmount: 15.5, totalAmount: 15.5, discountAmount: 0, paymentAmount: 15.5, refundAmount: 0, paymentCurrency: 'USD', apv: '123456', transactionDate: '2026-11-09 15:05:03' })
+    assert.deepEqual(approved, { ok: true, state: 'approved', originalAmount: 15.5, totalAmount: 15.5, discountAmount: 0, paymentAmount: 15.5, refundAmount: 0, paymentCurrency: 'USD', apv: '123456', transactionDate: '2026-11-09 15:05:03', bankRef: null, paymentType: null, bankName: null })
+    // the bank's own reference, the payment type and the paying bank are kept when PayWay's answer carries them (field names unverified against a live answer), else null; a non-text value is dropped
+    const withBank = P.parseCheckResponse(wrap({ payment_status_code: 0, original_amount: 1, bank_ref: 'BR-77', payment_type: 'KHQR', bank_name: 'ACLEDA Bank' }))
+    assert.deepEqual([withBank.bankRef, withBank.paymentType, withBank.bankName], ['BR-77', 'KHQR', 'ACLEDA Bank'])
+    const junkBank = P.parseCheckResponse(wrap({ payment_status_code: 0, original_amount: 1, bank_ref: { a: 1 }, payment_type: 5, bank_name: 'x'.repeat(500) }))
+    assert.deepEqual([junkBank.bankRef, junkBank.paymentType], [null, null]); assert.ok(junkBank.bankName === null || junkBank.bankName.length <= 64)
     const states = { 0: 'approved', 2: 'pending', 3: 'declined', 4: 'refunded', 7: 'cancelled' }
     for (const [code, state] of Object.entries(states)) assert.equal(P.parseCheckResponse(wrap({ payment_status_code: Number(code) })).state, state)
     assert.deepEqual(P.parseCheckResponse(wrap({ payment_status_code: 9 })), { ok: false, reason: 'bad_response' })

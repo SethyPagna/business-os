@@ -11,7 +11,8 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import type { Env } from '../index'
-import { paywayCredentials, validTranId, verifyCallbackToken, type PaywayTransport } from '../lib/payway'
+import { validTranId, verifyCallbackToken, type PaywayTransport } from '../lib/payway'
+import { paywayCredentialsFor } from '../lib/paywayConfig'
 import { fetchPaywayTransport } from '../lib/paywayTransport'
 import { orderNotifier } from '../lib/onlineOrderAlerts'
 import { settleByTranId, type SettleResult } from '../lib/onlineOrderSweep'
@@ -33,7 +34,10 @@ export function createPaywayCallbackRoute(options: PaywayCallbackOptions = {}) {
     const tranId = c.req.query('t')
     const token = c.req.query('s')
     if (!validTranId(tranId) || !(await verifyCallbackToken(c.env, tranId, token))) return c.json({ ok: false }, 403)
-    const creds = paywayCredentials(c.env)
+    // Whether ABA sent its signature header is worth knowing (it tells us if the signed callback is switched on at ABA). Only the yes/no is logged, never the
+    // value, and it is not used to trust anything: the check-transaction answer is what decides.
+    console.log('[payway-callback] signature header', c.req.header('x-payway-hmac-sha512') ? 'present' : 'absent')
+    const creds = paywayCredentialsFor(c.env)
     // Without credentials nothing can be confirmed. ABA is told "received" so it stops retrying; the sweep and the customer's page settle it once keys exist.
     if (!creds) return c.json({ ok: true })
     const deps: OrderDeps = {

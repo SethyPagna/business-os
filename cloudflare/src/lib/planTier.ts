@@ -271,6 +271,12 @@ export type PlanLimits = {
   //                                 (nudgeCheckDue). A longer gap means fewer reads and calls, so Free is the LARGER number: Paid 15, Free 30.
   //   onlineOrderAdminPageRows      rows per page of the staff order list (adminPageRows). Paid 100, Free 50.
   //   onlineOrderRequestMax         change/return requests one order may ever hold (requestAllowed). Paid 10, Free 5.
+  //   onlineOrderLateCheckHours     how long after its QR ran out an EXPIRED payment is still re-checked with PayWay by the cron, so a payment whose
+  //                                 callback was lost is found (findLateCandidates). A bigger window is more checks: Paid 72, Free 24.
+  //   onlineOrderLateCheckEveryMinutes  at most one such re-check per payment per this many minutes (a longer gap is fewer reads and calls, so Free is the
+  //                                 LARGER number): Paid 10, Free 30.
+  //   onlineOrderPaywayTimeoutMs    how long one PayWay call may take before the Worker gives up on it (paywayCredentialsFor -> fetchPaywayTransport). The
+  //                                 callback, a customer's request and the cron tick all wait on it, so it is the same on both tiers: 8000.
   // The request WINDOW (7 days) is the owner's policy, not a plan size: the setting online_order_request_days (resolveRequestWindowDays).
   onlineOrderMaxLines: number
   onlineOrderOpenUnpaidMax: number
@@ -278,6 +284,9 @@ export type PlanLimits = {
   onlineOrderNudgeCheckSeconds: number
   onlineOrderAdminPageRows: number
   onlineOrderRequestMax: number
+  onlineOrderLateCheckHours: number
+  onlineOrderLateCheckEveryMinutes: number
+  onlineOrderPaywayTimeoutMs: number
 
   // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
   // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
@@ -415,6 +424,9 @@ const PAID_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 15,
   onlineOrderAdminPageRows: 100,
   onlineOrderRequestMax: 10,
+  onlineOrderLateCheckHours: 72,
+  onlineOrderLateCheckEveryMinutes: 10,
+  onlineOrderPaywayTimeoutMs: 8000,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -460,6 +472,9 @@ const FREE_LIMITS: PlanLimits = {
   onlineOrderNudgeCheckSeconds: 30,
   onlineOrderAdminPageRows: 50,
   onlineOrderRequestMax: 5,
+  onlineOrderLateCheckHours: 24,
+  onlineOrderLateCheckEveryMinutes: 30,
+  onlineOrderPaywayTimeoutMs: 8000,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
