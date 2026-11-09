@@ -36,6 +36,7 @@ import { costViewProfit } from '../lib/reportProfitView'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
+import { onlineReceivedOverlay } from '../lib/onlineOrderReceived'
 import type { Env } from '../index'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
@@ -449,11 +450,25 @@ app.get('/overview', async (c) => {
     // The payments fold is the SAME grouped kernel the "Payment methods" view
     // reads (case-insensitive method key, canonical revenue / collected
     // figures), so the two can never disagree. It shares the totals' snapshot.
-    const [{ totals, paymentMethods: payments, couriers }, previous] = await Promise.all([
+    const [{ totals, paymentMethods: payments, couriers }, previous, onlineReceived] = await Promise.all([
       getSalesOverviewBlocks(c.env, f),
       prev ? getSalesTotals(c.env, prev) : Promise.resolve(null),
+      onlineReceivedOverlay(c.env, f),
     ])
     const paymentMethods = payments.rows
+    // KHQR online orders (lead condition 2): collected is by the day the money was received, so the online money PayWay took in this window is added and the part that
+    // arrived inside a sale of this window (the Fulfil tender) is taken off; revenue and every other figure stay as the kernel has them.
+    const onlineDelta = Math.round((onlineReceived.paidInWindowUsd - onlineReceived.recordedOnSalesUsd) * 10000) / 10000
+    if (onlineDelta !== 0) {
+      const mutable = totals as unknown as Record<string, unknown>
+      mutable.collected_total_usd = Math.round((num(mutable.collected_total_usd) + onlineDelta) * 100) / 100
+      const key = onlineReceived.method.trim().toLowerCase()
+      const row = paymentMethods.find((r) => String(r.key).trim().toLowerCase() === key || String(r.label ?? '').trim().toLowerCase() === key)
+      if (row) row.collected_total_usd = Math.round((num(row.collected_total_usd) + onlineDelta) * 100) / 100
+      else if (onlineReceived.paidInWindowUsd > 0) {
+        paymentMethods.push({ key, label: onlineReceived.method, tx_count: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: Math.round(onlineDelta * 100) / 100 } as unknown as (typeof paymentMethods)[number])
+      }
+    }
     out.sales = {
       totals: gateTotals(totals as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), 2, canViewCourierCost(user)),
       previous: previous ? gateTotals(previous as unknown as Record<string, unknown>, isAdmin, canViewAcquisitionCosts(user), 2, canViewCourierCost(user)) : null,

@@ -28,6 +28,7 @@ Module._load = function(request, parent, isMain) {
     isAdminControlUser: (user) => user.role === 'admin',
   }
   if (request === '../lib/db') return { getDb: () => ({}) }
+  if (request === '../lib/onlineOrderReceived') return { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }) }
   if (request === '../lib/acquisitionCostAccess' || request === '../lib/courierCostAccess' || request === '../lib/reportExport' || request === '../lib/reportProfitView') return originalLoad.call(this, request, parent, isMain)
   if (request === '../lib/salesAnalytics') return new Proxy({
     SALES_GROUP_KEYS: ['branch'], BUCKET_MONEY_PLACES: 4, reportMoneyDiagnostic: () => null,

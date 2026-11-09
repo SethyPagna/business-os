@@ -21,6 +21,7 @@ import {
   refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
   type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
+import { onlineReceivedOverlay } from './onlineOrderReceived'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
@@ -2252,7 +2253,7 @@ async function summarySectionFigures(
     const sameMoment = scope.runningAtMs == null ? {} : { createdTo: new Date(scope.runningAtMs + offsetDays * DAY_MS).toISOString() }
     return { startDate: date, endDate: date, branchId: filters.branchId, ...sameMoment }
   }
-  const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
+  let [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
     sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
     sections.cashiers && !cashierListShown ? groupedBy('cashier') : null,
     sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
@@ -2268,6 +2269,12 @@ async function summarySectionFigures(
     sections.compare ? getSalesTotals(env, onDay(-7)) : null,
   ])
   const { pending_tx_count: notPaidCount, total_discount_usd: totalDiscountUsd } = await totals
+  // KHQR online orders (lead condition 2): the Received line is by the day the money arrived. The tender reader leaves linked online money out of every day, so the day it
+  // was paid (PayWay's paid_at) adds it here, once, whenever the order is fulfilled.
+  if (received) {
+    const online = await onlineReceivedOverlay(env, filters)
+    if (online.paidInWindowUsd > 0) received = { ...received, digital: { ...received.digital, usd: round4(received.digital.usd + online.paidInWindowUsd) } }
+  }
   return {
     ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
     ...(sections.cashiers && { cashiers: { cashiers, branches } }),
