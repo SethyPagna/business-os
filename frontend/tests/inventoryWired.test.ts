@@ -191,7 +191,7 @@ const CANON = canonicalProductsQuery(wire({}))!
   const load = await loadWired({ params: params({ branchId: '1' }), skipSummary: false, access: FULL, deps: d })
   const result = wiredResult(load.raw)
   const [first, second] = result.items
-  assert.equal(first.quantity, 12, 'now = the branch quantity from the shared row'); assert.equal(first.damaged_quantity, 2, 'damaged comes from the tagged groups (the expired group is not damaged)')
+  assert.equal(first.quantity, 12, 'now = the branch quantity from the shared row'); assert.equal(first.damaged_quantity, 7, 'the held chip sums every tagged group (damaged 2 + expired 5): the older reader summed every damaged_stock_lots row (audit G5)')
   assert.equal(first.check_status, 'issue'); assert.equal(first.check_counted_quantity, 9); assert.equal(first.check_by, 'sok'); assert.equal(first.check_pending, true)
   assert.equal(first.check_difference, -3, 'difference = counted - now'); assert.equal(first.check_set_to, 9, 'seen 12 and now 12: the Set is the counted figure')
   assert.equal(first.latest_received_at, '2026-11-01'); assert.equal(first.next_expiry_date, '2026-12-01', 'earliest expiry among lots still holding stock here')
@@ -231,7 +231,7 @@ const CANON = canonicalProductsQuery(wire({}))!
   assert.deepEqual(log.lists.at(-1), { ids: '2', branchId: 1 }, 'the refresh reads the changed id, nothing else')
   const merged = wiredResult(mergeWiredRows(load.raw, fresh)).items
   assert.deepEqual(merged.map(item => item.id), [1, 2, 3], 'the page keeps its order'); assert.equal(merged[1].quantity, 4); assert.equal(merged[1].last_change_at, '2026-11-05 10:00:00'); assert.equal(merged[0].quantity, 12)
-  assert.equal(merged[0].damaged_quantity, 2, 'the other rows keep their held stock groups')
+  assert.equal(merged[0].damaged_quantity, 7, 'the other rows keep their held stock groups (every tag summed)')
 }
 
 // ---- which server this tab last saw ---------------------------------------------------------------------------------------------------------------------------
