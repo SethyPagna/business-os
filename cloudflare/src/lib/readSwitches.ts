@@ -30,8 +30,10 @@ export const SWITCH_ROWS_PARAMS = { switches: READ_SWITCH_KEY, epoch: DATA_EPOCH
 // read path (routes/fees.ts, routes/feesCatalog.ts); ic_simple / ic_fix_stock are the Inventory Check switches: the simple list with
 // count submissions (ic_simple) and the count approval flow with Fix stock (ic_fix_stock), see lib/inventoryCheckProducts.ts,
 // lib/inventoryCheckSessions.ts and lib/inventoryCheckApprovals.ts; dash_overview_5m is the Dashboard stock overview kept for up to 5 minutes
-// and stamped with the time it was computed (lib/dashboardStockOverview.ts).
-export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m'] as const
+// and stamped with the time it was computed (lib/dashboardStockOverview.ts); online_orders is the storefront paid-online ordering
+// (lib/onlineOrders.ts, migration 0293): off means the exact pre-feature behaviour, and the PayWay callback, the sweep and staff reads of
+// existing orders ignore it, so money already taken is always handled.
+export const KNOWN_READ_SWITCHES = ['probe', 'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'online_orders'] as const
 /** How long one isolate remembers the flags read: planTier.ts readSwitchMemoSeconds (Free 15 s, Paid 5 s). */
 export const readSwitchMemoMs = (env: Env): number => getPlanLimits(env).readSwitchMemoSeconds * 1000
 export const READ_SWITCH_SHADOW_MAX_RATE = 0.1

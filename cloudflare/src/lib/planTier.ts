@@ -261,6 +261,24 @@ export type PlanLimits = {
   // serverSignals.ts SIGNAL_TTL_MS) are sized from the Free value; scripts/test-plan-tier-pure.cjs pins that they still cover it.
   readSwitchMemoSeconds: number
 
+  // lib/onlineOrders.ts (migration 0293): the online ordering limits. The storefront cart is capped so one order is one bounded pricing
+  // pass and one bounded set of writes (a new order writes about 12-16 rows with their indexes).
+  //   onlineOrderMaxLines           distinct products in one order (orderLinesError). Paid 50, Free 20.
+  //   onlineOrderOpenUnpaidMax      shop-wide orders waiting for payment before the create route answers "we're busy" (openUnpaidAllowed),
+  //                                 which protects writes, PayWay and Telegram. Paid 100, Free 20.
+  //   onlineOrderSweepMaxPerTick    orders one */5 cron tick checks with PayWay (sweepBatchSize). Paid 25, Free 5.
+  //   onlineOrderNudgeCheckSeconds  at most one PayWay check per payment per this many seconds when a poll or a callback nudges it
+  //                                 (nudgeCheckDue). A longer gap means fewer reads and calls, so Free is the LARGER number: Paid 15, Free 30.
+  //   onlineOrderAdminPageRows      rows per page of the staff order list (adminPageRows). Paid 100, Free 50.
+  //   onlineOrderRequestMax         change/return requests one order may ever hold (requestAllowed). Paid 10, Free 5.
+  // The request WINDOW (7 days) is the owner's policy, not a plan size: the setting online_order_request_days (resolveRequestWindowDays).
+  onlineOrderMaxLines: number
+  onlineOrderOpenUnpaidMax: number
+  onlineOrderSweepMaxPerTick: number
+  onlineOrderNudgeCheckSeconds: number
+  onlineOrderAdminPageRows: number
+  onlineOrderRequestMax: number
+
   // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
   // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
   // "building since <time>" marker (a plain value); the others poll for its FINISHED result with their own timer and never await
@@ -391,6 +409,12 @@ const PAID_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
+  onlineOrderMaxLines: 50,
+  onlineOrderOpenUnpaidMax: 100,
+  onlineOrderSweepMaxPerTick: 25,
+  onlineOrderNudgeCheckSeconds: 15,
+  onlineOrderAdminPageRows: 100,
+  onlineOrderRequestMax: 10,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -430,6 +454,12 @@ const FREE_LIMITS: PlanLimits = {
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
+  onlineOrderMaxLines: 20,
+  onlineOrderOpenUnpaidMax: 20,
+  onlineOrderSweepMaxPerTick: 5,
+  onlineOrderNudgeCheckSeconds: 30,
+  onlineOrderAdminPageRows: 50,
+  onlineOrderRequestMax: 5,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
