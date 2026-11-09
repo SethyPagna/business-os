@@ -10,22 +10,25 @@ import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from '../../api/stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
-type Row = Record<string, unknown> & { id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
+type Row = Record<string, unknown> & { lots_more?: boolean; id: number | string; branch_stock?: Array<{ branch_id?: number | string; branch_name?: string | null; quantity?: number | null }>; stock_quantity?: number | null; lots?: Lot[] }
 export type Lot = { id: number | string; received_at?: string | null; expiry_date?: string | null; branches?: Array<{ branch_id: number | string; quantity?: number | null }> }
 type Tagged = { product_id: number | string; branch_id?: number | string | null; condition_tag?: string | null; quantity?: number | null }
 export type OverlayEntry = {
   product_id: number
   last_change_at: string | null
-  check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number }
+  check?: { state: 'ok' | 'issue'; counted_quantity?: number; seen_quantity?: number; note: string | null; by?: string; at: string | null; session_id: string; revision: number
+    lots?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }> }
   pending?: true
 }
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
 export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean } }
-export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; wired?: boolean; projected?: boolean } & WiredExtras
-export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[] }> } & WiredExtras
+export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; wired?: boolean; projected?: boolean; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
+export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
+/** The dates of one row; `more` is set when the plan's limit cut them. */
+type RowLots = Lot[] & { more?: boolean }
 
 /** Everything one wired screen is made of, kept raw so a by-id refresh or a write's patch can rebuild the rows without asking again. */
-export type WiredRaw = { list: WiredList; overlay: Map<number, OverlayEntry>; lots: Map<number, Lot[]>; branches: Branch[]; branchId: number; extras: WiredExtras }
+export type WiredRaw = { list: WiredList; overlay: Map<number, OverlayEntry>; lots: Map<number, RowLots>; branches: Branch[]; branchId: number; extras: WiredExtras }
 
 // ---- what is on the wire ----------------------------------------------------------------------------------------------------------------------------------
 
@@ -38,7 +41,8 @@ export function wiredListParams(params: QueryParams, options: { omitBranch?: boo
   const out: QueryParams = {}
   for (const key of LIST_KEYS) if (present(params[key])) out[key] = params[key]
   if (present(params.branchId) && !options.omitBranch) out.branchId = params.branchId
-  out.sortBy = params.sortBy === 'name' ? 'name' : 'created'
+  // The date of the check orders only a list of checked products, so it is sent with a check state (a stale choice never reaches the server alone).
+  out.sortBy = params.sortBy === 'name' ? 'name' : params.sortBy === 'checked' && ['ok', 'issue', 'pending'].includes(String(params.checkState)) ? 'checked' : 'created'
   out.sortDirection = params.sortDirection === 'asc' ? 'asc' : 'desc'
   if (options.skipSummary) out.summary = 0
   return out
@@ -84,7 +88,7 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   const { branchId } = raw
   const entry = branchId && Array.isArray(row.branch_stock) ? row.branch_stock.find(candidate => Number(candidate.branch_id) === branchId) : undefined
   const quantity = branchId ? (Array.isArray(row.branch_stock) ? (entry ? entry.quantity : 0) : undefined) : row.stock_quantity
-  const lots = raw.lots.get(id) ?? row.lots
+  const lots: RowLots | undefined = raw.lots.get(id) ?? (row.lots ? Object.assign([...row.lots], row.lots_more ? { more: true } : {}) : undefined)
   const heldHere = (lot: Lot) => (lot.branches ?? []).some(candidate => (!branchId || Number(candidate.branch_id) === branchId) && Number(candidate.quantity ?? 1) > 0)
   const received = lots?.map(lot => lot.received_at).filter((value): value is string => typeof value === 'string' && value !== '').sort().pop()
   const expiry = lots?.filter(heldHere).map(lot => lot.expiry_date).filter((value): value is string => typeof value === 'string' && value !== '').sort()[0]
@@ -107,6 +111,11 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
       product.check_seen_quantity = check.seen_quantity ?? null
       product.check_difference = countDifference(check.counted_quantity, quantity)
       product.check_set_to = setToAmount(check.counted_quantity, check.seen_quantity, quantity)
+      // A count typed on some received dates is measured on those dates only: counted - seen over its own lines, never against the whole branch (counting one of two dates is not a shortage).
+      if (check.lots?.length) {
+        product.check_lines = check.lots
+        if (check.lots.every(line => finite(line.seen))) product.check_difference = check.lots.reduce((sum, line) => sum + line.counted - (line.seen as number), 0)
+      }
     }
     if (overlay?.pending) product.check_pending = true
   }
@@ -115,10 +124,16 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
   if (branchId && lots?.length) {
     const held = lots.flatMap(lot => {
       const at = (lot.branches ?? []).find(candidate => Number(candidate.branch_id) === branchId)
-      return at && Number(at.quantity ?? 0) > 0 && Number(lot.id) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
+      // A date at 0 is listed too: units found on it are a count (and a Set to more than 0 goes through the writer).
+      return at && Number(lot.id) > 0 ? [{ batchId: Number(lot.id), receivedAt: lot.received_at ?? null, expiry: lot.expiry_date ?? null, quantity: Number(at.quantity) }] : []
     })
     if (held.length) product.lot_rows = held
+    if (lots.more) product.lots_more = true
+    // Units no received date holds, read-only: the branch total minus the dates (only when every date is known).
+    const unlotted = !lots.more && finite(quantity) ? quantity - held.reduce((sum, row) => sum + row.quantity, 0) : 0
+    if (unlotted > 0) product.unlotted_quantity = unlotted
   }
+  if (row.is_group) { product.is_group = true; product.checkable = false }
   return product
 }
 
@@ -127,7 +142,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
   const { list } = raw
   const damaged = new Map<string, number>()
   for (const group of list.tagged_lots ?? []) {
-    if (group.condition_tag !== 'damaged') continue
+    // Every held tag counts (broken, expired, opened, damaged ...): they all left sellable stock, as the older reader summed them.
     for (const key of [`${Number(group.product_id)}:${Number(group.branch_id)}`, `${Number(group.product_id)}:0`]) damaged.set(key, (damaged.get(key) ?? 0) + Number(group.quantity ?? 0))
   }
   // The check counts come with the answers that carry them (page 1 and a filter change); a page step or a Products-held answer keeps the last ones.
@@ -167,7 +182,8 @@ export type WiredLoadArgs = {
 }
 export type WiredLoad = { raw: WiredRaw; fromStore: boolean; listRequests: number }
 
-const OVERLAY_CHUNK = 100
+/** Used only until the server says how many ids an overlay read may carry (list.overlay_ids, the plan's limit). */
+const OVERLAY_CHUNK_UNTIL_TOLD = 100
 const isList = (value: unknown): value is WiredList => !!value && typeof value === 'object' && Array.isArray((value as WiredList).items)
 export class NotWired extends Error { constructor() { super('ic_wired is off'); this.name = 'NotWired' } }
 
@@ -229,15 +245,16 @@ export async function loadWired(args: WiredLoadArgs): Promise<WiredLoad> {
   // Counts are per branch, so the overlay waits for a chosen branch. A shop with one branch gets it chosen by the page from `branches` (a remount that takes this answer along):
   // the overlay is then asked once, on that remount, and never twice.
   const branchId = present(params.branchId) ? Number(params.branchId) : 0
-  const overlay = new Map<number, OverlayEntry>(), lots = new Map<number, Lot[]>()
+  const overlay = new Map<number, OverlayEntry>(), lots = new Map<number, RowLots>()
   let extras: WiredExtras = { summary: list.summary, capabilities: list.capabilities }
   if (branchId) {
     const wanted = ids(list.items)
     const needLots = access.received && list.items.some(row => !('lots' in row))
-    for (let start = 0; start < wanted.length; start += OVERLAY_CHUNK) {
-      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + OVERLAY_CHUNK), lots: needLots }, signal)
+    const chunk = Number.isSafeInteger(list.overlay_ids) && (list.overlay_ids as number) > 0 ? (list.overlay_ids as number) : OVERLAY_CHUNK_UNTIL_TOLD
+    for (let start = 0; start < wanted.length; start += chunk) {
+      const answer = await deps.readOverlay({ branchId, ids: wanted.slice(start, start + chunk), lots: needLots }, signal)
       for (const entry of answer.items ?? []) overlay.set(Number(entry.product_id), entry)
-      for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), entry.lots ?? [])
+      for (const entry of answer.lots ?? []) lots.set(Number(entry.product_id), Object.assign([...(entry.lots ?? [])], entry.lots_more ? { more: true } : {}))
       if (answer.summary || answer.capabilities) extras = { summary: answer.summary ?? extras.summary, capabilities: answer.capabilities ?? extras.capabilities }
     }
   }
@@ -253,7 +270,7 @@ export function mergeWiredRows(raw: WiredRaw, fresh: Awaited<ReturnType<typeof r
   const overlay = new Map(raw.overlay), lots = new Map(raw.lots)
   for (const id of fresh.ids) { overlay.delete(id); lots.delete(id) }
   for (const entry of fresh.overlay) overlay.set(Number(entry.product_id), entry)
-  for (const entry of fresh.lots) lots.set(Number(entry.product_id), entry.lots ?? [])
+  for (const entry of fresh.lots) lots.set(Number(entry.product_id), Object.assign([...(entry.lots ?? [])], (entry as { lots_more?: boolean }).lots_more ? { more: true } : {}))
   return { ...raw, overlay, lots, list: { ...raw.list, items: raw.list.items.map(row => byId.get(Number(row.id)) ?? row),
     tagged_lots: [...(raw.list.tagged_lots ?? []).filter(group => !taggedIds.has(Number(group.product_id))), ...fresh.tagged] } }
 }
@@ -266,7 +283,7 @@ export function patchWiredRaw(raw: WiredRaw, answer: StockWriteAnswer | StockCon
   const apply = <T extends Parameters<typeof patchProductFromStockAnswer>[0]>(row: T): T => 'after' in answer ? patchProductFromStockAnswer(row, answer) : patchProductFromStockConflict(row, answer)
   const lots = new Map(raw.lots)
   const held = lots.get(answer.productId)
-  if (held) lots.set(answer.productId, (apply({ id: answer.productId, lots: held }).lots ?? held) as Lot[])
+  if (held) lots.set(answer.productId, Object.assign([...(apply({ id: answer.productId, lots: held }).lots ?? held)], held.more ? { more: true } : {}) as RowLots)
   return { ...raw, lots, list: { ...raw.list, items: raw.list.items.map(row => Number(row.id) === answer.productId ? apply(row) : row) } }
 }
 

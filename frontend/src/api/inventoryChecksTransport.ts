@@ -196,6 +196,8 @@ export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, p
 export type InventoryCheckSubmission = {
   branchId: number
   requestId: string
+  /** Names the session in History (a count recorded after a Set from the row says so). */
+  title?: string
   /** A line is a product's one count, or (ic_lot_counts) the counts typed per received date, each with the figure it showed. */
   lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }
     | { productId: number; lots: Array<{ batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }>; checked: boolean; note?: string }>

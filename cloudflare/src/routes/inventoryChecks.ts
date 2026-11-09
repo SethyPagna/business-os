@@ -37,7 +37,7 @@ app.use('*', async (c, next) => { c.header('Cache-Control','private, no-store');
 app.onError((error,c) => {
   const status = error instanceof InventoryCheckSessionError ? error.status : 'status' in error && typeof error.status === 'number' && [400,403,409,503].includes(error.status) ? error.status as 400|403|409|503 : 503
   const code = 'code' in error && typeof error.code === 'string' ? error.code : 'inventory_check_unavailable'
-  const details = error instanceof InventoryCheckSessionError && error.details ? error.details : {}
+  const details = error instanceof InventoryCheckSessionError && error.details ? error.details : error instanceof InventoryCheckQueryError ? { parameter: error.parameter } : {}
   return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' ? { outcome: 'unknown' } : {}) }, status)
 })
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
@@ -126,7 +126,7 @@ app.get('/list', async c => {
     // Not checked is the catalogue total minus what was checked; it is only known when this list is the whole catalogue (no search, filter or check state).
     ...(plan.filtered ? {} : { not_checked: Math.max(0, total - sets.ok.length - sets.issue.length), total }) } : null
   // window_pages: how many pages (this one and the ones ahead) the page may read in one window; the ranking behind them is shared (catalog_ranked_scope), so a window costs rows, not rankings.
-  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, ...(summary ? { summary } : {}),
+  return c.json({ ...body, wired: true, projected, window_pages: getPlanLimits(c.env).catalogListWindowPages, overlay_ids: getPlanLimits(c.env).inventoryOverlayMaxRows, ...(summary ? { summary } : {}),
     ...(capabilities ? { capabilities } : {}) })
 })
 app.get('/overlay', async c => {

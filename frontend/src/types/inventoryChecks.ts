@@ -37,6 +37,12 @@ export type InventoryCheckProduct = {
   last_change_at?: string | null
   /** ic_wired rows with received dates: the dates this branch holds, oldest expiry first. */
   lot_rows?: InventoryCheckLotRow[]
+  /** The row's dates were cut at the plan's limit: the rest load on request ("More dates"). */
+  lots_more?: boolean
+  /** Branch units that no received date holds (branch total minus the dates), shown read-only; absent when there are none or the dates are not known. */
+  unlotted_quantity?: number
+  /** ic_wired rows: what the latest count typed per received date (batch_id 0 = the branch total). */
+  check_lines?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }>
 }
 
 /** One received date held at the listed branch (ic_lot_counts): the figure a count per date is typed against. */

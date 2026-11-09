@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHarness, type MemoryNode, type MountedSurface } from './mountedComponentHarness.ts'
 import { countTextFromLots, lotCountOf, lotSubmissionLine, lotTotals, rowSetPlan, staleLotFigures, type LotDraft } from '../src/components/inventory/inventoryCheckLots.ts'
-import { patchWiredRaw, setToAmount, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
+import { patchWiredRaw, setToAmount, wiredListParams, wiredResult, type WiredList } from '../src/components/inventory/inventoryWired.ts'
 import type { InventoryCheckProduct } from '../src/types/inventoryChecks.ts'
 
 // INV-B S5: counts typed per received date and the direct Set from a row (INVENTORY-REPLAN rev. 2 sections 2.6, 2.7).
@@ -60,15 +60,37 @@ const list: WiredList = {
 }
 const raw = { list, overlay: new Map(), lots: new Map(), branches: [{ id: 1, name: 'Main' }], branchId: 1, extras: {} }
 const before = wiredResult(raw)
-assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3]], 'the rows list the dates this branch holds, not another branch\'s lot')
+assert.deepEqual(before.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 5], [9, 3], [12, 0]], 'the rows list the dates this branch holds (a date at 0 too: found units are a count), not another branch\'s lot')
 const patched = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, after: { lotQuantity: 4, branchQuantity: 7 } })
 const after = wiredResult(patched)
 assert.equal(after.items[0].quantity, 7, 'the branch figure takes the answer')
-assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3]], 'and so does the date')
+assert.deepEqual(after.items[0].lot_rows?.map(row => [row.batchId, row.quantity]), [[7, 4], [9, 3], [12, 0]], 'and so does the date')
 assert.equal(wiredResult(raw).items[0].quantity, 8, 'the earlier raw is untouched')
 const conflicted = patchWiredRaw(raw, { productId: 5, branchId: 1, batchId: 7, current: { lotQuantity: 2, branchQuantity: 5 } })
-assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3], 'a refusal shows the figures the writer found')
+assert.deepEqual(wiredResult(conflicted).items[0].lot_rows?.map(row => row.quantity), [2, 3, 0], 'a refusal shows the figures the writer found')
 assert.equal(patchWiredRaw(raw, { productId: 99, branchId: 1, batchId: 7, after: { lotQuantity: 0, branchQuantity: 0 } }).list.items[0], raw.list.items[0], 'another product is not touched')
+
+// ---- audit G5, G10, G11, G4b, owner sort: what a row is made of ---------------------------------------------------------------------------------------------------
+{
+  const tagged = [{ product_id: 5, branch_id: 1, condition_tag: 'expired', quantity: 2 }, { product_id: 5, branch_id: 1, condition_tag: 'damaged', quantity: 1 }, { product_id: 5, branch_id: 2, condition_tag: 'broken', quantity: 9 }]
+  const held = wiredResult({ ...raw, list: { ...list, tagged_lots: tagged } }).items[0]
+  assert.equal(held.damaged_quantity, 3, 'G5: expired 2 + damaged 1 at the branch are 3 held units (another branch broken units are not)')
+  const family = wiredResult({ ...raw, list: { ...list, items: [{ id: 30, name: 'Family', is_group: 1, stock_quantity: 4, branch_stock: [{ branch_id: 1, quantity: 4 }] }, { id: 31, name: 'Child', parent_id: 30, stock_quantity: 4, branch_stock: [{ branch_id: 1, quantity: 4 }] }] } })
+  assert.deepEqual(family.items.map(item => [item.id, item.is_group === true, item.checkable]), [[30, true, false], [31, false, true]], 'G11: a family header is not countable, its child is')
+  const overlay = new Map([[5, { product_id: 5, last_change_at: null, check: { state: 'ok' as const, counted_quantity: 5, seen_quantity: 5, note: null, at: '2026-11-02T01:00:00.000Z', session_id: 's1', revision: 1, lots: [{ batch_id: 7, scope: 'lot' as const, counted: 5, seen: 5 }] } }]])
+  const partly = wiredResult({ ...raw, overlay }).items[0]
+  assert.equal(partly.check_difference, 0, 'G4b: one date counted at its own figure is a difference of 0, not -3 against the whole branch')
+  assert.equal(wiredResult({ ...raw, overlay: new Map([[5, { ...overlay.get(5)!, check: { ...overlay.get(5)!.check!, lots: undefined } }]]) }).items[0].check_difference, -3, 'without the lines the old comparison stands (5 against 8)')
+  assert.deepEqual(partly.check_lines, [{ batch_id: 7, scope: 'lot', counted: 5, seen: 5 }], 'the lines are on the row, so a reload still shows what was typed per date')
+  const loose = wiredResult({ ...raw, list: { ...list, items: [{ ...list.items[0], stock_quantity: 11, branch_stock: [{ branch_id: 1, quantity: 11 }] }] } }).items[0]
+  assert.equal(loose.unlotted_quantity, 3, 'G10: branch 11 with dates 5 + 3 + 0 leaves 3 units on no received date')
+  assert.equal(before.items[0].unlotted_quantity, undefined, 'and a row whose dates add up shows none')
+  const cut = wiredResult({ ...raw, list: { ...list, items: [{ ...list.items[0], lots_more: true }] } }).items[0]
+  assert.equal(cut.lots_more, true, 'G10: a row whose dates were cut at the plan limit says so'); assert.equal(cut.unlotted_quantity, undefined, 'and claims no unlotted remainder it cannot know')
+  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'issue' }).sortBy, 'checked')
+  assert.equal(wiredListParams({ sortBy: 'checked', checkState: '' }).sortBy, 'created', 'a stale date order never reaches the server without a status')
+  assert.equal(wiredListParams({ sortBy: 'checked', checkState: 'not_checked' }).sortBy, 'created', 'nor with a status that has no checked list')
+}
 
 // ---- the mounted row ----------------------------------------------------------------------------------------------------------------------------------------------
 const rowProduct: InventoryCheckProduct = { id: 5, name: 'Serum', quantity: 8, check_status: 'not_checked', lot_rows: product.lot_rows }

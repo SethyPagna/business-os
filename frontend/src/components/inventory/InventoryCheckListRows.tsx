@@ -127,6 +127,8 @@ export type InventoryCheckListRowsProps = {
   onLotCount?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => void
   /** Full stock adjusters: a Set button beside a typed date count that differs from stock. */
   onLotSet?: (product: InventoryCheckProduct, row: InventoryCheckLotRow, value: string) => void
+  /** The row's dates were cut at the plan's limit: load the rest of them. */
+  onMoreDates?: (product: InventoryCheckProduct) => void
 }
 
 type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focusRequest' | 'adornments'> & {
@@ -141,7 +143,7 @@ type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focus
   onAdvance: (id: InventoryCheckId) => void
 }
 
-function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered, lotCounts = false, onLotCount, onLotSet }: RowProps) {
+function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered, lotCounts = false, onLotCount, onLotSet, onMoreDates }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -256,6 +258,10 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
         </li>
       })}
     </ul> : null}
+    {lotCounts && counting && selected && canViewStock && (product.lots_more || product.unlotted_quantity) ? <div data-check-lots-extra className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 lg:pl-12 dark:text-gray-300">
+      {product.unlotted_quantity ? <span data-check-unlotted className="tabular-nums" title={tr('inventory_check_unlotted_hint', 'Stock that no received date holds. Stock it in on a date to count it.')}>{tr('inventory_check_unlotted', 'No received date')}: <strong>{product.unlotted_quantity}</strong></span> : null}
+      {product.lots_more ? <button type="button" data-check-action="more-dates" disabled={locked} className="min-h-11 rounded-lg px-2 font-semibold text-blue-700 hover:bg-gray-100 dark:text-blue-300" onClick={() => onMoreDates?.(product)}>{tr('inventory_check_more_dates', 'More dates')}</button> : null}
+    </div> : null}
     {note ? <p className="mt-1 break-words text-xs leading-relaxed text-amber-800 lg:pl-12 dark:text-amber-200" data-check-note>{note}</p> : null}
     {counting && selected && differs ? <label className="mt-1 flex min-w-0 items-center gap-2 text-xs text-amber-800 lg:pl-12 dark:text-amber-200" data-check-draft-note>
       <span data-check-difference className="shrink-0 font-semibold tabular-nums">{signedDelta((entry as { value: number }).value - (baseline as number))}</span>

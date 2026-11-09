@@ -74,19 +74,22 @@ export default function InventoryCheckControls({ query, onQueryChange, onQuerySu
   ]
   const sortOptions: FilterOption[] = [sortChoice('name', 'asc', t('sort_name_az')), sortChoice('name', 'desc', t('sort_name_za'))]
   if (fields.stock && !wired) sortOptions.push(...highLow('stock', t('stock')))
+  // The date of the check orders a list of checked products, so it is offered once a status that has such a list is chosen.
+  if (wired && ['ok', 'issue', 'pending'].includes(filters.checkState)) sortOptions.push(sortChoice('checked', 'desc', t('inventory_check_sort_checked')))
 
   const sections: FilterSection[] = [{ id: 'sort', label: t('sort'), options: sortOptions }]
   if (!soleBranch) sections.push({
     id: 'branchId', label: t('branch'), searchable: true,
     options: [choice('branchId', '', t('all_branches')), ...branches.map(branch => choice('branchId', String(branch.id), branch.name))],
   })
-  if (showStateFilter) sections.push(section('checkState', t('inventory_check_state'), inSession
+  // The wired page chooses a status in the chip rail above the list (one row, scrolling); the same choice is not repeated here.
+  if (showStateFilter && !wired) sections.push(section('checkState', t('inventory_check_state'), inSession
     ? [['in_check', t('inventory_check_unstarted')], ['ok', t('done')], ['issue', t('issues')]]
     : [['not_checked', t('inventory_check_status_not_checked')], ['in_check', t('inventory_check_status_in_check')], ['ok', t('inventory_check_status_ok')], ['issue', t('issues')]]))
   if (fields.stock) sections.push(section('stockState', t('stock_status'), [['in_stock', t('in_stock')], ['low_stock', t('low_stock')], ['out_of_stock', t('out_of_stock')]]))
   if (fields.brand && brands.length) sections.push(section('brand', t('brand'), brands.map(brand => [brand, brand]), true, limited.brands))
   if (fields.category && categories.length) sections.push(section('category', t('category'), categories.map(category => [category, category]), true, limited.categories))
-  const activeCount = countActiveFilters(filters, { branch: !soleBranch, state: showStateFilter })
+  const activeCount = countActiveFilters(filters, { branch: !soleBranch, state: showStateFilter && !wired })
 
   return (
     <div className="flex min-w-0 items-center gap-1" data-inventory-check-controls data-inventory-check-search-row>
