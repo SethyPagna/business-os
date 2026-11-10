@@ -52,14 +52,14 @@ const MUTANTS = {
   'reports returns search reads a numeric name': ['routes/reports.ts', sub('const unrestricted = phoneSearchAccessOf(user).fullPhone', 'const unrestricted = true')],
   // P2.8-F S1: a number saved in a column the response masks (a note, a cashier, a supplier) must read as empty to the search. (A branch is not a
   // person: since the review's B2 it is shown as stored, so it is searched as stored.)
-  'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number',", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number',`)],
-  'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.customer_name',", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.customer_name',`)],
+  'sales note that is a number readable': ['routes/sales.ts', sub("'s.payment_method', 's.notes', 'c.membership_number']", `'s.payment_method', ${RAW('s.notes')}, 'c.membership_number']`)],
+  'sales cashier that is a number readable': ['routes/sales.ts', sub("'s.legacy_receipt_number', 's.cashier_name', 's.branch_name'", `'s.legacy_receipt_number', ${RAW('s.cashier_name')}, 's.branch_name'`)],
   'sales cashier filter reads the number': ['routes/sales.ts', subAll("restrictedColumnSql('s.cashier_name')", "'s.cashier_name'")],
   'returns note that is a number readable': ['routes/returns.ts', sub("'r.reason', 'r.notes', 'r.return_type'", `'r.reason', ${RAW('r.notes')}, 'r.return_type'`)],
   'returns supplier saved under a number readable': ['routes/returns.ts', sub("'r.supplier_name', 'r.reason',", `${RAW('r.supplier_name')}, 'r.reason',`)],
 }
 
-const receiptsIn = (text) => [...new Set(String(text).match(/P28-000\d/g) || [])].sort()
+const receiptsIn = (text) => [...new Set(String(text).match(/P28-00\d\d/g) || [])].sort()
 const has = (text, needle) => String(text).includes(needle)
 
 async function main() {
@@ -96,6 +96,7 @@ async function main() {
   await insertSale('P28-0004', 'No1', 'Walk-in', '', 'p28-0004 n01 walk in main', 4)
   await insertSale('P28-0005', 'Admin', 'Fixture Legacy', 'Tel099456789', 'p28-0005 admin fixture legacy tel099456789 main', 5)
   await insertSale('P28-0006', 'Admin', 'O1988375', '', 'p28-0006 admin 01988375 main', 6)
+  await insertSale('P28-0010', 'Admin', 'Walk-in', '', 'p28-0010 admin walk in tel0771234 main', 3)
   const insertReturn = (number, name, saleReceipt, folded) => world.run(
     `INSERT INTO returns (return_number, customer_id, customer_name, sale_id, return_scope, status, total_refund_usd, total_refund_khr, receipt_number, search_normalized, created_at)
      VALUES (?, ?, ?, (SELECT id FROM sales WHERE receipt_number = ?), 'customer', 'completed', 1, 4000, ?, ?, datetime('now'))`,
@@ -498,6 +499,10 @@ async function main() {
     for (const q of ['tel0102', 'tel010222333', 'TEL0102']) {
       const r = await get(`/api/returns?search=${enc(q)}`, 'sales_only')
       t.ok(`returns ${q}: P28-RET-4 must not be found`, !has(r.text, 'P28-RET-4'), snippetOf(r.text))
+    }
+    for (const q of ['tel0771', 'TEL0771', 'tel0771234']) {
+      t.eq(`sales ${q}: the folded copy is not searched`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
+      t.eq(`sales ${q}: the holder reads it`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'admin')).text), ['P28-0010'])
     }
     for (const q of ['01988', 'o1988', 'O1988']) t.eq(`sales ${q}: a number typed with a letter O stays unreadable by its digits`, receiptsIn((await get(`/api/sales?search=${enc(q)}`, 'sales_only')).text), [])
     t.eq('positive control: the holder reads it', receiptsIn((await get(`/api/sales?search=${enc('01988')}`, 'admin')).text), ['P28-0006'])
