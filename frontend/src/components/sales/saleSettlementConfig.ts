@@ -1,6 +1,7 @@
 import { apiFetch } from '../../api/http.ts'
 import { configuredSettlementMethods } from './saleSettlement.ts'
 import { effectivePermissions, type PermissionUser } from '../../utils/permissions.ts'
+import { withoutOnlineMethod } from '../online-orders/onlineMethodVisibility.ts'
 
 export type SaleSecurityUser = NonNullable<PermissionUser> & {
   id?: unknown; organization_id?: unknown; organization_group_id?: unknown; organization_public_id?: unknown
@@ -38,7 +39,7 @@ export function parseSettlementConfig(value: unknown): SettlementConfig {
   }
   if (!Array.isArray(methods) || methods.some((method) => typeof method !== 'string')) throw new Error('Payment configuration is unavailable.')
   const rate = 'exchange_rate' in value ? Number(value.exchange_rate) : NaN
-  return { configuredMethods: configuredSettlementMethods(methods), exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : 4100 }
+  return { configuredMethods: withoutOnlineMethod(configuredSettlementMethods(methods), value), exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : 4100 }
 }
 
 export function readSettlementConfig(signal: AbortSignal): Promise<SettlementConfig> {

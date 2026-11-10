@@ -2221,8 +2221,10 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         targetChoices = ALL_STATUSES.filter((status) => !['partial_return', 'returned'].includes(status)).map((status) => ({ key: `value:${status.toLocaleLowerCase()}`, label: getStatusLabel(status, t), value: status }))
       } else if (field === 'payment_method') {
         let configured: unknown = settings?.pos_payment_methods
+        // The configured online method is not an ordinary tender (review N6; same rule as online-orders/onlineMethodVisibility.ts, inline because this handler is evaluated on its own in tests).
+        const hiddenOnlineMethod = String((settings as Record<string, unknown> | null | undefined)?.online_order_payment_method ?? '').trim().toLocaleLowerCase()
         if (typeof configured === 'string') { try { configured = JSON.parse(configured) } catch { configured = [] } }
-        targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).map((method) => valueChoice(method, translateOr('none', 'None')))])
+        targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).filter((method) => !hiddenOnlineMethod || String(method ?? '').trim().toLocaleLowerCase() !== hiddenOnlineMethod).map((method) => valueChoice(method, translateOr('none', 'None')))])
       } else {
         const result = field === 'customer'
           ? await getSalesCustomerPicker({ page: 1, pageSize: SALES_BULK_LINKED_PAGE_SIZE })

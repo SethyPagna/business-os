@@ -108,6 +108,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { hiddenOnlineMethod, withoutOnlineMethod } from '../online-orders/onlineMethodVisibility.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilTillFields, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
 import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
@@ -966,7 +967,8 @@ export default function POS() {
   useEffect(() => {
     if (!settings.pos_payment_methods) return
     try {
-      const methods = JSON.parse(settings.pos_payment_methods)
+      // The online method is never a plain sale's default (review N6): it only exists as the locked row of a Fulfil sale.
+      const methods = withoutOnlineMethod(JSON.parse(settings.pos_payment_methods) as string[], settings)
       if (!methods.length) return
       const firstMethod = methods[0]
       // Update any orders still on the hardcoded 'Cash' default
@@ -983,7 +985,7 @@ export default function POS() {
           : o
       ))
     } catch {}
-  }, [settings.pos_payment_methods]) // eslint-disable-line
+  }, [settings.pos_payment_methods, settings.online_order_payment_method]) // eslint-disable-line
 
   // Persist whenever orders or activeId change. The state above was loaded
   // for ONE storage scope; when the scope changes (the till mounted before
@@ -2376,7 +2378,7 @@ export default function POS() {
     () => buildProductBrandOptions(productFilterMeta.brands, String(settings?.product_brand_options || '[]')),
     [productFilterMeta.brands, settings?.product_brand_options],
   )
-  const posPaymentMethods = useMemo((): string[] => {
+  const configuredPosPaymentMethods = useMemo((): string[] => {
     const fallback = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
     try {
       const parsed = JSON.parse(asText(settings.pos_payment_methods || '[]')) as unknown
@@ -2390,6 +2392,8 @@ export default function POS() {
       return fallback
     }
   }, [settings.pos_payment_methods])
+  // What the payment pickers offer: the configured online method is left out (it is the Fulfil sale's locked row, not a tender to choose). The full list still answers "is it set up".
+  const posPaymentMethods = useMemo(() => { const offered = withoutOnlineMethod(configuredPosPaymentMethods, settings); return offered.length ? offered : ['Cash'] }, [configuredPosPaymentMethods, settings.online_order_payment_method]) // eslint-disable-line
 
   const updatePaymentDetails = useCallback((updater: (details: PaymentDetail[]) => PaymentDetail[]) => {
     setOrders((previous) => previous.map((order) => {
@@ -4145,7 +4149,7 @@ export default function POS() {
                   saleTotalUsd={totalUsd}
                   names={new Map(onlineOrder.lines.concat(fulfilCart.map((entry) => ({ product_id: entry.productId, quantity: entry.quantity }))).map((line) => [line.product_id, String(productsById.get(line.product_id)?.name || '')] as [number, string]))}
                   fmtUSD={fmtUSD}
-                  methodMissing={posPaymentMethods.some((method) => method.trim().toLowerCase() === onlineMethod.trim().toLowerCase()) ? null : onlineMethod}
+                  methodMissing={configuredPosPaymentMethods.some((method) => method.trim().toLowerCase() === onlineMethod.trim().toLowerCase()) ? null : onlineMethod}
                   onAddLine={(productId) => { const product = productsById.get(productId); if (product) openProductCard(product, { inStock: false }) }}
                   onDetach={() => { void detachOnlineOrder() }}
                 />

@@ -5,6 +5,7 @@ import { requireSalesStatsResult } from '../src/api/salesStatsContract.ts'
 import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent } from '../src/api/actorReadScope.ts'
 import { configuredSettlementMethods } from '../src/components/sales/saleSettlement.ts'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { withoutOnlineMethod } from '../src/components/online-orders/onlineMethodVisibility.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
 
 const source = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -12,7 +13,7 @@ const helper = fs.readFileSync(new URL('../src/components/sales/saleSettlementCo
 const module = { exports: {} as any }
 const requests: any[] = []
 new Function('require', 'module', 'exports', transformSync(helper, { loader: 'ts', format: 'cjs' }).code)(
-  (name: string) => name.includes('permissions') ? { effectivePermissions } : name.includes('saleSettlement') ? { configuredSettlementMethods } : { apiFetch: (...args: any[]) => { requests.push(args); return Promise.resolve({ pos_payment_methods: '["Cash","ABA"]', exchange_rate: '4100' }) } }, module, module.exports,
+  (name: string) => name.includes('permissions') ? { effectivePermissions } : name.includes('onlineMethodVisibility') ? { withoutOnlineMethod } : name.includes('saleSettlement') ? { configuredSettlementMethods } : { apiFetch: (...args: any[]) => { requests.push(args); return Promise.resolve({ pos_payment_methods: '["Cash","ABA"]', exchange_rate: '4100' }) } }, module, module.exports,
 )
 const { parseSettlementConfig, readSettlementConfig, startSettlementConfigRead, saleSecurityFingerprint, advanceSaleSecurityScope } = module.exports
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }

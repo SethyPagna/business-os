@@ -30,6 +30,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { transformSync } from 'esbuild'
+import { withoutOnlineMethod } from '../src/components/online-orders/onlineMethodVisibility.ts'
 
 import { saleStatusDestinations, saleStatusDisplay, saleStatusWords } from '../src/utils/saleStatusDisplay.ts'
 import { receiptTotalsFigures, returnOwedReductionUsd } from '../src/utils/receiptTotals.ts'
@@ -283,9 +284,9 @@ await check('the receipt and the sale detail owe $2, not $1', () => {
 await check('Record payment prefills the $2 still owed', () => {
   const start = detail.indexOf('  const settlementSnapshot = (selectedSale')
   const code = transformSync(detail.slice(start, detail.indexOf('  const [settlementSession, setSettlementSession]', start)), { loader: 'ts' }).code
-  const snapshot = new Function('settings', 'configuredSettlementMethods', 'saleUsesSavedExchangeRate', 'saleOwnExchangeRate', 'CURRENCY', 'initialSettlementRows', 'returnOwedReductionUsd', 'toNumber', 'subtractMoney4', 'recordedSettlementIssue', `${code}; return settlementSnapshot`)(
+  const snapshot = new Function('settings', 'configuredSettlementMethods', 'saleUsesSavedExchangeRate', 'saleOwnExchangeRate', 'CURRENCY', 'initialSettlementRows', 'returnOwedReductionUsd', 'toNumber', 'subtractMoney4', 'recordedSettlementIssue', 'withoutOnlineMethod', `${code}; return settlementSnapshot`)(
     { pos_payment_methods: '["Cash"]' }, configuredSettlementMethods, saleUsesSavedExchangeRate, saleOwnExchangeRate, CURRENCY, initialSettlementRows, returnOwedReductionUsd,
-    (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0, subtractMoney4, recordedSettlementIssue)
+    (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0, subtractMoney4, recordedSettlementIssue, withoutOnlineMethod)
   const rows = snapshot({ ...probe, payment_details: [{ method: 'Cash', amount_usd: 7, amount_khr: 0 }], payment_method: 'Cash' }).rows as Array<{ usd: string }>
   assert.equal(rows.at(-1)!.usd, '2.00', 'base: 1.00 -- settling it would leave the sale owing')
 })

@@ -46,6 +46,7 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { withoutOnlineMethod } from '../online-orders/onlineMethodVisibility.ts'
 import { abaRefundOffer, onlineMethodName, refundChannelFields } from './helpers/abaRefund.ts'
 import AbaRefundChoice from './AbaRefundChoice.tsx'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
@@ -880,7 +881,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const usdOrCatalog = (value: number | null) => value == null ? catalogPriceLabel : fmtUSD(value)
   // A money-v1 sale carries its replacement in the same call as the return: the Worker prices these lines, nets them against the refund and
   // takes the customer's payment (or hands the difference back) in one step. A part at the catalog price posts no price of its own.
-  const configuredMethods = configuredSettlementMethods(settings?.pos_payment_methods)
+  const configuredMethods = withoutOnlineMethod(configuredSettlementMethods(settings?.pos_payment_methods), settings)
   const replacementLinesV1 = isV1Sale ? exchangeReplacementItems(replacements, partsOf) : []
   const exchangeActive = replacementLinesV1.length > 0
   const methodKinds = parsePaymentMethodKinds(settings?.pos_payment_method_kinds)

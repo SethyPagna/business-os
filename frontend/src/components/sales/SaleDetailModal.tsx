@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { priceText } from '../../utils/pricing.ts'
+import { withoutOnlineMethod } from '../online-orders/onlineMethodVisibility.ts'
 import { createPortal } from 'react-dom'
 import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -484,7 +485,7 @@ export default function SaleDetailModal({
   const settlementMethodKinds = parsePaymentMethodKinds(settings && typeof settings === 'object' ? (settings as Record<string, unknown>).pos_payment_method_kinds : undefined)
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
-    const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
+    const configuredMethods = withoutOnlineMethod(configuredSettlementMethods(rawSettings.pos_payment_methods), rawSettings)
     const savedRate = saleUsesSavedExchangeRate(selectedSale)
     // The sale's own booked rate, legacy or v1 -- never today's setting. A
     // sale with none shows the 4100 default; the Worker refuses to settle it.
