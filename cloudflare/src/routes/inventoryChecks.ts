@@ -12,6 +12,7 @@ import type { ReviewAlertEvent, ReviewAlertHook } from '../lib/reviewAlert'
 import type { InventoryContext } from './inventory'
 import type { StockInCommitLine } from './stockInCommit'
 import { bumpVersion } from '../lib/cache'
+import { stockVisibleProductSql } from '../lib/productStockGuard'
 import { canApproveInventoryCounts, getInventoryCheckAccess, InventoryCheckQueryError } from '../lib/inventoryCheckAccess'
 import { canonicalProductsRequest, checkStateRestriction, inventoryChecksVersion, planInventoryList, projectInventoryList, readCheckStateSets, type CheckStateSets } from '../lib/inventoryCheckList'
 import { parseOverlayIds, readInventoryOverlay } from '../lib/inventoryCheckOverlay'
@@ -101,7 +102,8 @@ app.get('/list', async c => {
   const productsQuery = { ...plan.productsQuery }
   if (plan.codeLookup) {
     // A viewer without the barcode field finds a product by its WHOLE code only: an exact hit is read by id, anything else is searched by name.
-    const hit = await db.prepare('SELECT id FROM products WHERE barcode = @code OR sku = @code LIMIT 2').all<{ id: number }>({ code: plan.codeLookup })
+    // Only a product the list itself may show (active, or still holding stock): a retired product that happens to share the code must not capture the search.
+    const hit = await db.prepare(`SELECT p.id FROM products p WHERE (p.barcode = @code OR p.sku = @code) AND ${stockVisibleProductSql('p', false)} LIMIT 2`).all<{ id: number }>({ code: plan.codeLookup })
     if (hit.length === 1) { delete productsQuery.query; delete productsQuery.searchFields; productsQuery.ids = String(hit[0].id); productsQuery.page = '1'; productsQuery.pageSize = '1' }
   }
   let sets: CheckStateSets | null = null
