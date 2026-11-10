@@ -66,7 +66,7 @@ async function main() {
   const mutant = process.env.PHONE_MUTANT ? MUTANTS[process.env.PHONE_MUTANT] : null
   if (process.env.PHONE_MUTANT && !mutant) throw new Error(`unknown PHONE_MUTANT ${process.env.PHONE_MUTANT}`)
   const world = await bootPhoneWorld({ transformSources: mutant ? (file, source) => (file === mutant[0] ? mutant[1](source) : source) : undefined })
-  const { check, finish } = createReporter()
+  const { check, finish } = createReporter({ stopAtFirstMiss: Boolean(mutant) })
   const enc = encodeURIComponent
   const get = (route, as) => world.api('GET', route, undefined, { as })
 

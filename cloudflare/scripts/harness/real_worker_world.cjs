@@ -148,20 +148,25 @@ async function bootWorld({ adminPassword, transformEntry, transformSources, stat
 
 // A named case collects every violated expectation instead of stopping at the first, so one run on the base commit
 // lists everything that is wrong there.
-function createReporter() {
+const STOP_AT_FIRST_MISS = Symbol('stop at first miss')
+function createReporter({ stopAtFirstMiss = false } = {}) {
   const results = []
+  let stopped = false
   async function check(name, fn) {
+    if (stopped) return
     const misses = []
+    const miss = (text) => { misses.push(text); if (stopAtFirstMiss) throw STOP_AT_FIRST_MISS }
     const t = {
       eq(label, actual, expected) {
         const a = JSON.stringify(actual)
         const e = JSON.stringify(expected)
-        if (a !== e) misses.push(`${label}: expected ${e} but got ${a}`)
+        if (a !== e) miss(`${label}: expected ${e} but got ${a}`)
       },
-      ok(label, condition, detail) { if (!condition) misses.push(detail === undefined ? label : `${label}: ${JSON.stringify(detail)}`) },
+      ok(label, condition, detail) { if (!condition) miss(detail === undefined ? label : `${label}: ${JSON.stringify(detail)}`) },
     }
-    try { await fn(t) } catch (error) { misses.push(`THREW ${error && error.stack ? error.stack.split('\n').slice(0, 3).join(' | ') : String(error)}`) }
+    try { await fn(t) } catch (error) { if (error !== STOP_AT_FIRST_MISS) misses.push(`THREW ${error && error.stack ? error.stack.split('\n').slice(0, 3).join(' | ') : String(error)}`) }
     results.push({ name, misses })
+    if (stopAtFirstMiss && misses.length) stopped = true
     console.log(`${misses.length ? 'RED  ' : 'GREEN'} ${name}`)
     for (const miss of misses) console.log(`        - ${miss}`)
   }
