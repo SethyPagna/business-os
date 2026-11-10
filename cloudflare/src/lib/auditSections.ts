@@ -29,7 +29,7 @@ export const AUDIT_OTHER_SECTION = 'other'
 export const AUDIT_SECTION_ENTITIES: Record<AuditSectionId, readonly string[]> = {
   sales: [
     'sale', 'sale_creation', 'sale_item', 'sales', 'payment_method', 'pos_address_presets',
-    'promotion', 'promotion_rule', 'promotions', 'shift_session', 'shift',
+    'promotion', 'promotion_rule', 'promotions', 'shift_session', 'shift', 'online_order',
   ],
   products: [
     'product', 'products', 'product_group', 'product_batch', 'product_image', 'brand', 'category', 'unit',
