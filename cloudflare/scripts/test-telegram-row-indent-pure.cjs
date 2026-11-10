@@ -13,6 +13,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // cleans. NOTHING IS SENT: fetch is captured for the duration.
 //
 // Run (from cloudflare/): node scripts/test-telegram-row-indent-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -70,6 +71,7 @@ const settingsDb = {
   }),
 }
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
   './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,

@@ -57,6 +57,7 @@ for (const file of files) {
 // POS has the same stronger same-batch contract for its sole mutation and is
 // likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
+  if (file === 'paywayCallback.ts' || file === 'portalOrders.ts') continue // the PayWay callback and the storefront order routes write their Records as online_order_events rows in the same guarded batch as the money (lib/onlineOrderStore.ts applyCheckResult); there is no actor to audit
   if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts' || file === 'productCost.ts' || file === 'inventoryChecks.ts' || file === 'runtime.ts') continue
   // The expense routes commit every audit row INSIDE the mutation's own batch (a stronger contract than audit()); checked below.
   if (file === 'fees.ts' || file === 'feesCatalog.ts') continue

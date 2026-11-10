@@ -23,6 +23,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      stub that only records the request.
 //
 // Run (from cloudflare/): node scripts/test-telegram-topics-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -124,7 +125,7 @@ function makeDb(settingsRows) {
 function wireTelegram(settingsRows) {
   const singleDb = makeDb(settingsRows) // one instance: every getDb() call in this test shares it
   dbHolder.current = { getDb: () => singleDb }
-  return loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': dbProxy, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  return loadReal('lib/telegram.ts', { './onlineOrderReceived': ONLINE_RECEIVED_STUB, './lowStockSettings': lowStockStub, './db': dbProxy, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
 }
 
 const baseSettings = [
@@ -141,7 +142,7 @@ const baseSettings = [
 
 ;(async () => {
   // ---- 1. parseTelegramTopicId is a defensive integer-or-empty parse -------
-  const bare = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  const bare = loadReal('lib/telegram.ts', { './onlineOrderReceived': ONLINE_RECEIVED_STUB, './lowStockSettings': lowStockStub, './db': { getDb: () => { throw new Error('no DB in this test') } }, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
   assert.equal(bare.parseTelegramTopicId('42'), 42)
   assert.equal(bare.parseTelegramTopicId(' 7 '), 7)
   assert.equal(bare.parseTelegramTopicId(''), undefined)

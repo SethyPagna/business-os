@@ -34,6 +34,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Hono app, real Requests. Only auth, audit and telegram are stubbed.
 //
 // Run (from cloudflare/): node scripts/test-shift-close-report-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -361,6 +362,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
   const telegram = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => settingsOnly },
     './businessDateWindow': businessDateWindow,

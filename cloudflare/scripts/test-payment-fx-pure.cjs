@@ -54,6 +54,7 @@ function load(rel) {
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
     if (name.endsWith('/stockCrossingAlert')) return { recordStockCrossings: async () => ({ crossings: 0, claimed: 0, sent: 0 }) }
     if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
+    if (name.endsWith('/onlineOrderAlerts')) return { announceOrderChange: async () => {}, announceOrdersOfSales: async () => {} }
     if (name.startsWith('.')) {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)) + '.ts'
       if (actual.has(path.posix.basename(name))) return load(target)

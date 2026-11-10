@@ -19,6 +19,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // one the old and new implementations actually disagree about.
 //
 // Run (from cloudflare/): node scripts/test-telegram-day-report-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -160,6 +161,7 @@ const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': dbShim })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', { './db': dbShim, './salesAnalytics': analytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') })
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './db': dbShim,
   './lowStockSettings': lowStockStub,
   './businessDateWindow': businessDateWindow,

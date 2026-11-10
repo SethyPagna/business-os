@@ -19,6 +19,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // both, plus the options the route handed over.
 //
 // Run (from cloudflare/): node scripts/test-shift-telegram-actors-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -170,6 +171,7 @@ async function main() {
   const lang = loadReal('lib/telegramLang.ts')
   const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': dbModule })
   const telegram = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
     './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
     './salesAnalytics': kernelAnalytics, './nativeSaleChange': nativeSaleChange,

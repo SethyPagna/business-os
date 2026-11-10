@@ -63,6 +63,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // rather than re-typing the Khmer.
 //
 // Run (from cloudflare/): node scripts/test-shift-report-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -142,6 +143,7 @@ const reconciliationFor = (getDb, salesAnalytics) => loadReal('lib/shiftReconcil
 })
 const shiftReconciliation = reconciliationFor(() => { throw new Error('no DB in this test') }, analytics)
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -741,6 +743,7 @@ const analyticsForShift = {
   async getDeliveryContactTotals(env, filters) { breakdownCalls.couriers += 1; return stubAnalytics.getDeliveryContactTotals(env, filters) },
 }
 const wired = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
@@ -795,6 +798,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   statements.length = 0
   const emptyDb = { prepare: (sql) => ({ async all() { return [] }, async get() { return {} } }) }
   const wiredEmpty = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => emptyDb },
     './businessDateWindow': businessDateWindow,
@@ -890,6 +894,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     getSalesTotals: async () => { mappingTotalsCalls += 1; return { ...kernelRow } },
   }
   const wiredMapping = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => mappingDb },
     './businessDateWindow': businessDateWindow,
@@ -948,6 +953,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   console.log('OK test-shift-report-pure')
 }).then(async () => {
   const sender = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './db': { getDb: () => ({prepare:()=>({all:async()=>[
       {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
     ]})}) },

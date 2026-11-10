@@ -21,6 +21,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //   4. The right secret: 200, the command runs, the reply goes to the chat.
 //
 // Run (from cloudflare/): node scripts/test-telegram-webhook-secret-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
@@ -71,6 +72,7 @@ const reconciliation = load('lib/shiftReconciliation.ts', { './db': dbModule, '.
 const lang = load('lib/telegramLang.ts')
 const lowStockRule = load('lib/lowStockSettings.ts', { './db': dbModule })
 const telegram = load('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
   './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,

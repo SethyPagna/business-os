@@ -1,4 +1,5 @@
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const productStockGuard = require('./harness/product_stock_guard.cjs')
 // Owner, 29 Sep 2026: the overview in the Summary topic stays short by default,
 // and each extra section is a Settings switch that is off until turned on.
@@ -208,6 +209,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': dbModule, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockSettings, './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
 })

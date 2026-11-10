@@ -112,7 +112,7 @@ const PROJECTED = {
 }
 // route files that never put a cost-bearing field in a response (checked below)
 const NO_COST = ['ai.ts', 'auth.ts', 'branchCutoverOperator.ts', 'devices.ts', 'fees.ts', 'feesCatalog.ts', 'files.ts', 'lookups.ts', 'notes.ts', 'notifications.ts', 'organizations.ts',
-  'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts', 'inventoryChecks.ts']
+  'portal.ts', 'pos.ts', 'promotions.ts', 'runtime.ts', 'settings.ts', 'shifts.ts', 'sync.ts', 'system.ts', 'telegram.ts', 'users.ts', 'inventoryChecks.ts', 'onlineOrders.ts', 'paywayCallback.ts', 'portalOrders.ts']
 const COST_FIELD = /\b(cost_price_(?:usd|khr)|purchase_price_(?:usd|khr)|received_cost_usd|cost_usd|cogs|total_cost_usd)\b/
 
 check('SERVER: every cost-bearing route module is governed by the projection middleware or an explicit cost gate', () => {

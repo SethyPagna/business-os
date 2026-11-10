@@ -18,6 +18,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      still all there on an amended report, in order.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-amend-actor-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -125,6 +126,7 @@ const reconciliation = load('lib/shiftReconciliation.ts', {
 const lang = load('lib/telegramLang.ts')
 const lowStockRule = load('lib/lowStockSettings.ts', { './db': dbModule })
 const telegram = load('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
   './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,

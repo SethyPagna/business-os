@@ -16,6 +16,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      answers helpfully instead of throwing.
 //
 // Run (from cloudflare/): node scripts/test-telegram-bilingual-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -396,6 +397,7 @@ const reconciliationFor = (getDb, analytics) => loadReal('lib/shiftReconciliatio
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -617,6 +619,7 @@ for (const [runtime, cut] of CUTS) {
   }
 }
 const workerdTelegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -768,6 +771,7 @@ const stubDb = {
 }
 const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
 const wired = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
@@ -853,6 +857,7 @@ const lastSent = () => sent[sent.length - 1].body.text
     },
   }
   const stocked = loadReal('lib/telegram.ts', {
+    './onlineOrderReceived': ONLINE_RECEIVED_STUB,
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => stockedDb },
     './businessDateWindow': businessDateWindow,

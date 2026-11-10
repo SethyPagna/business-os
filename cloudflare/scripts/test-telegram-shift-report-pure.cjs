@@ -59,6 +59,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // without a database.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-report-pure.cjs
+const ONLINE_RECEIVED_STUB = { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received }
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
@@ -108,6 +109,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
 const telegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
@@ -836,6 +838,7 @@ check(`every section title, in all three modes and both families, keeps to one r
 // a probe key after itself, so an odd spare character, a name exactly the
 // row's width and a name longer than it are all judged too.
 const probeTelegram = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': ONLINE_RECEIVED_STUB,
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,

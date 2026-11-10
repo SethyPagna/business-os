@@ -132,7 +132,7 @@ const actual = new Set([
   'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'failureText', 'branchWrites',
   'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions',
   // the shift route and its drawer arithmetic, all real
-  'shiftReconciliation', 'salesAnalytics', 'nativeSaleChange', 'businessDateWindow', 'continuousReadWindow', 'clientTimestamp',
+  'shiftReconciliation', 'onlineOrderFulfil', 'salesAnalytics', 'nativeSaleChange', 'businessDateWindow', 'continuousReadWindow', 'clientTimestamp',
   'telegramLang', 'schemaProbe', 'removalLosses', 'moneyPrecision', 'reportMoneyPrecision', 'saleMoneyPrecision',
   'refundMoneyPrecision', 'customerReturnEntitlement', 'saleItemPricing', 'promotionRules', 'saleTotals', 'financialPrecision',
 ])
@@ -143,6 +143,7 @@ function load(rel, sourceText = null, cacheKey = rel) {
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const req = (name) => {
     if (name === 'hono') return require(name)
+    if (name.endsWith('/onlineOrderAlerts')) return { announceOrderChange: async () => {}, announceOrdersOfSales: async () => {}, announceOrdersOfBulkOperation: async () => {} }
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0 }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
