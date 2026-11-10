@@ -285,6 +285,16 @@ async function runTest(name, fn) {
     const real = await f.call(sales, '/bulk-update', single('preview-hide', 2, 1, 2))
     assert.equal(real.status, 200, JSON.stringify(real))
     assert.equal(feeDriver(f, 1), 2)
+    assert.equal(real.body.movedExpenseCount, undefined, 'the write reply carries no expense count for an amend-only caller')
+    const replay = await f.call(sales, '/bulk-update', single('preview-hide', 2, 1, 2))
+    assert.equal(replay.status, 200, JSON.stringify(replay))
+    assert.equal(replay.body.movedExpenseCount, undefined, 'nor does a replay of the same request')
+    // CONTROL: a caller who may view expenses still gets the count, on the write and on its replay.
+    const g = feeFixture()
+    user = { id: 4, name: 'Amend and view', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, fees: true }) }
+    const seen = await g.call(sales, '/bulk-update', single('view-write', 2, 1, 2))
+    assert.equal(seen.body.movedExpenseCount, 1)
+    assert.equal((await g.call(sales, '/bulk-update', single('view-write', 2, 1, 2))).body.movedExpenseCount, 1)
   })
 
   await runTest('G3: clearing the driver unlinks the delivery expense, and Undo links it back', async () => {
