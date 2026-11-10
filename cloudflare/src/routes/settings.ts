@@ -89,13 +89,20 @@ type StoredSettingRow = { key: string; value: string; updated_at: string | null 
 // the conflict payload scoped to exactly the fields the client was editing:
 // sending the whole table would leak unrelated configuration and make it far
 // too easy for a retry to overwrite another page's work.
-async function loadStoredSettingRows(env: Env, keys: string[]): Promise<Map<string, StoredSettingRow>> {
+// `alsoKeys` ride the SAME statement (no extra D1 call) but land in `aux`, never in the returned map, so the audit before-image, the conflict payload and the
+// updated_at scope still describe only the keys the client named.
+async function loadStoredSettingRows(env: Env, keys: string[], alsoKeys: string[] = [], aux?: Map<string, StoredSettingRow>): Promise<Map<string, StoredSettingRow>> {
   const stored = new Map<string, StoredSettingRow>()
   if (!keys.length) return stored
+  const wanted = new Set(keys)
+  const all = [...new Set([...keys, ...alsoKeys])]
   const rows = await getDb(env).prepare(
     `SELECT key, value, updated_at FROM settings WHERE key IN (SELECT value FROM json_each(@keysJson))`,
-  ).all<StoredSettingRow>({ keysJson: JSON.stringify(keys) })
-  for (const row of rows) stored.set(row.key, row)
+  ).all<StoredSettingRow>({ keysJson: JSON.stringify(all) })
+  for (const row of rows) {
+    if (wanted.has(row.key)) stored.set(row.key, row)
+    aux?.set(row.key, row)
+  }
   return stored
 }
 
@@ -1122,7 +1129,10 @@ app.post('/', async (c) => {
     sentAsText[key] = typeof raw === 'string' ? raw : JSON.stringify(raw)
   }
   // The one read every check below shares (see loadStoredSettingRows).
-  const stored = await loadStoredSettingRows(c.env, attemptedKeys)
+  // The online method and the kinds map ride the same statement when this save touches either, or the method list: the dedicated-method checks below read them from here.
+  const onlineAux = new Map<string, StoredSettingRow>()
+  const onlineChecked = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes(PAYMENT_METHOD_KINDS_SETTING) || attemptedKeys.includes('pos_payment_methods')
+  const stored = await loadStoredSettingRows(c.env, attemptedKeys, onlineChecked ? [ONLINE_PAYMENT_METHOD_KEY, PAYMENT_METHOD_KINDS_SETTING] : [], onlineAux)
 
   // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
   // need administrator control to CHANGE here. An unchanged value -- the
@@ -1319,14 +1329,14 @@ app.post('/', async (c) => {
       : (await loadPaymentMethodSetting(c.env))?.methods ?? []
     const currentOnline = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
       ? String(body[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
-      : String((await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value ?? '').trim()
+      : String(onlineAux.get(ONLINE_PAYMENT_METHOD_KEY)?.value ?? '').trim()
     // A list-only save is refused only when it REMOVES the online method that is in the list today, so an already stale setting never traps the list.
     const before = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) ? null : (await loadPaymentMethodSetting(c.env))?.methods ?? []
     const removing = before !== null && validateOnlineOrderMethod(currentOnline, before) === null && Boolean(currentOnline)
     const kinds = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
       ? parsePaymentMethodKinds(attemptedKeys.includes(PAYMENT_METHOD_KINDS_SETTING)
         ? body[PAYMENT_METHOD_KINDS_SETTING]
-        : (await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: PAYMENT_METHOD_KINDS_SETTING }))?.value)
+        : onlineAux.get(PAYMENT_METHOD_KINDS_SETTING)?.value)
       : undefined
     const methodError = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || removing ? validateOnlineOrderMethod(currentOnline, listed, kinds) : null
     if (methodError) {
