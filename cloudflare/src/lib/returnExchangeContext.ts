@@ -29,7 +29,7 @@ export type ExchangeContextInput = {
   customerId: number | null
 }
 
-export const EXCHANGE_SETTING_KEYS = ['pos_payment_methods', 'pos_payment_method_kinds', 'change_exchange_rate'] as const
+export const EXCHANGE_SETTING_KEYS = ['pos_payment_methods', 'pos_payment_method_kinds', 'change_exchange_rate', 'online_order_payment_method'] as const
 
 function returnMoneyExpression(): string {
   const sql = saleReturnMoneySql('s')

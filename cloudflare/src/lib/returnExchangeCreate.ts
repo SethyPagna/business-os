@@ -14,6 +14,7 @@ import { contactDisplayAddress } from './contactOptions'
 import { customerReturnAuthorityPredicate, customerReturnQuotePlanFromRows, publicCustomerReturnQuote } from './customerReturnQuotePlan'
 import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { multiplyMoney4 } from './moneyPrecision'
+import { configuredOnlineMethod, onlineMethodRefusalActive, onlineTender, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY } from './onlineOrderFulfil'
 import { isCashPaymentMethod, paymentMethodKey, parseConfiguredMethods, parsePaymentMethodKinds } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashRowRefused } from './saleStatusResolution'
 import { productStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE } from './productStockGuard'
@@ -243,6 +244,10 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
     if (intent.exchange_payment.details.some((row) => !known.has(paymentMethodKey(row.method)))) {
       return reply(400, { error: "Choose one of the shop's payment methods.", code: 'return_exchange_payment_method' })
     }
+  }
+  const onlineMethod = configuredOnlineMethod(ctx.settings[ONLINE_PAYMENT_METHOD_KEY])
+  if (onlineTender(intent.exchange_payment.details, onlineMethod).present && await onlineMethodRefusalActive(c.env, ctx.settings[ONLINE_PAYMENT_METHOD_KEY])) {
+    return reply(400, { error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
   }
   // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026; lib/saleStatusResolution.ts).
   const rielCashRow = rielCashRowRefused(intent.exchange_payment.details, (method) => isCashPaymentMethod(method, kinds))
