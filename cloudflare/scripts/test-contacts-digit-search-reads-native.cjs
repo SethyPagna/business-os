@@ -75,6 +75,13 @@ async function main() {
 
     await db.prepare(`UPDATE customers SET name='Tabbed', phone='', phone_normalized=NULL, address=? WHERE id=7`).bind(JSON.stringify([{ label: 'Work', phone: '012\t333\t444' }])).run()
 
+    const stored = [
+      [8, 'Nbsp', '012\u00a0333\u00a0555', null],
+      [9, 'Khmer', String.fromCharCode(0x17e0, 0x17e1, 0x17e2) + ' ' + String.fromCharCode(0x17e3, 0x17e3, 0x17e3) + ' ' + String.fromCharCode(0x17e6, 0x17e6, 0x17e6), null],
+      [10, 'Double zero', '00855 12 345 690', null],
+      [11, 'Option nbsp', '', JSON.stringify([{ label: 'Work', phone: '012\u00a0777\u00a0888' }])],
+    ]
+    for (const [id, name, phone, address] of stored) await db.prepare('UPDATE customers SET name=?, phone=?, phone_normalized=NULL, address=? WHERE id=?').bind(name, phone, address, id).run()
     const crowd = ['Aaron Lee', 'Amy Lee', 'Anna Lee', 'Bora Lee', 'Chan Lee', 'Eang Lee', 'Fern Lee', 'Gina Lee', 'Lee', 'Leesa']
     for (const [index, name] of crowd.entries()) await db.prepare('UPDATE customers SET name=? WHERE id=?').bind(name, 301 + index).run()
 
@@ -134,6 +141,20 @@ async function main() {
       assert.ok(whole.rows <= scanOnce, `a digit list read ${whole.rows} rows for a ${CUSTOMERS}-row table`)
       assert.ok(measured['contacts digit, holder (345678, a fragment)'].rows <= scanOnce)
       assert.ok(measured['contacts digit, no grant (whole number 012345678)'].rows <= scanOnce)
+    })
+
+    await check('a number saved with no-break spaces, in Khmer digits or as 00855 is found by the number typed in Latin digits', async () => {
+      for (const access of [HOLDER, NO_GRANT]) {
+        assert.deepEqual(ids(await list('012333555', access)), [8], 'no-break spaces')
+        assert.deepEqual(ids(await list('012333666', access)), [9], 'Khmer digits')
+        assert.deepEqual(ids(await list('012345690', access)), [10], '00855 form')
+        assert.deepEqual(ids(await list('012777888', access)), [11], 'Contact Option phone with no-break spaces')
+        assert.deepEqual(ids(await list('+855 12 333 555', access)), [8])
+        assert.deepEqual(ids(await picker('012333666', access)), [9], 'the picker agrees')
+      }
+      assert.deepEqual(ids(await list('333555', HOLDER)), [8])
+      assert.deepEqual(ids(await list('333555', NO_GRANT)), [], 'a fragment still finds nothing without the grant')
+      assert.deepEqual(ids(await list('333666', NO_GRANT)), [])
     })
 
     await check('Contacts list: a digit search costs two statements (scan + the page rows) beside the points reads, within the query ceiling', async () => {

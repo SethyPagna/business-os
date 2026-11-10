@@ -99,6 +99,18 @@ export function phoneDigitsSql(value: string): string {
   return `replace(replace(replace(${digits},char(9),''),char(10),''),char(13),'')`
 }
 
+const KHMER_DIGITS = Array.from({ length: 10 }, (_, digit) => String.fromCharCode(0x17e0 + digit))
+
+/**
+ * phoneDigitsSql for the contact tables, which also reads a number saved with no-break spaces or in Khmer digits as the digits it is
+ * (canonicalizePhone leaves such a phone out of phone_normalized, so nothing else finds it by number).
+ */
+export function contactPhoneDigitsSql(value: string): string {
+  let digits = phoneDigitsSql(value)
+  for (const [digit, khmer] of KHMER_DIGITS.entries()) digits = `replace(${digits},'${khmer}','${digit}')`
+  return `replace(${digits},char(160),'')`
+}
+
 // D1 refuses a LIKE or GLOB pattern over 50 bytes, so the decimal digits of the scripts a phone may be written in are tested in four
 // patterns of at most five families each (with ASCII): Arabic-Indic, Persian, N'Ko, Devanagari, Bengali; Gurmukhi, Gujarati, Oriya, Tamil,
 // Telugu; Kannada, Malayalam, Thai, Lao, Tibetan; Myanmar, Khmer, Mongolian, full-width, mathematical. A number written in a script not listed
@@ -204,9 +216,9 @@ export interface PhoneClause {
 }
 
 /** `column` IS this whole number (its digits equal one form of it; a number that merely contains the digits does not match). */
-export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string): PhoneClause {
+export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, digitsOf: (value: string) => string = phoneDigitsSql): PhoneClause {
   const params: Record<string, string> = {}
-  const digitsSql = phoneDigitsSql(columnSql)
+  const digitsSql = digitsOf(columnSql)
   const sql = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_${index}`
     params[key] = form
@@ -221,16 +233,23 @@ export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhonePro
  * The JSON escapes of a tab, line feed and carriage return are stripped as well, because the stored value is stripped of those characters.
  */
 function addressRunPrefilterSql(keys: readonly string[]): string {
-  const text = `replace(replace(replace(${phoneDigitsSql("COALESCE(address,'')")},'\\t',''),'\\n',''),'\\r','')`
-  return `(${keys.map((key) => `instr(${text},@${key})>0`).join(' OR ')})`
+  const text = `replace(replace(replace(${contactPhoneDigitsSql("COALESCE(address,'')")},'\\t',''),'\\n',''),'\\r','')`
+  return holdsAnyRunSql(text, keys)
+}
+
+/** True when the text holds any of the digit strings. The text is computed once per row, in a one-row subquery, however many strings are tried. */
+function holdsAnyRunSql(textSql: string, keys: readonly string[]): string {
+  return `(SELECT ${keys.map((key) => `instr(stripped,@${key})>0`).join(' OR ')} FROM (SELECT ${textSql} AS stripped))`
 }
 
 /** A contact whose primary phone or any Contact Option phone (JSON in `address`) holds this whole number. */
-export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, optionLimit: number): PhoneClause {
-  const primary = fullPhoneColumnClause("COALESCE(phone,'')", probe, paramPrefix)
+export function fullContactPhoneClause(narrow: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, optionLimit: number): PhoneClause {
+  // A primary phone saved as 00855 12 345 678 is the same number as 012 345 678.
+  const probe = { ...narrow, forms: [...narrow.forms, ...narrow.forms.filter((form) => form.startsWith('855')).map((form) => `00${form}`)] }
+  const primary = fullPhoneColumnClause("COALESCE(phone,'')", probe, paramPrefix, contactPhoneDigitsSql)
   const optionObject = "CASE WHEN phone_option.type='object' THEN phone_option.value ELSE '{}' END"
   const optionPhone = `CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`
-  const optionDigits = phoneDigitsSql(optionPhone)
+  const optionDigits = contactPhoneDigitsSql(optionPhone)
   const optionParams: Record<string, string> = {}
   const optionMatches = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_o${index}`
@@ -251,9 +270,9 @@ export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full'
  */
 export function contactPhoneContainsClause(forms: readonly string[], paramPrefix: string, optionLimit: number, normalizedColumn?: string): PhoneClause {
   const params: Record<string, string> = {}
-  const primaryDigits = phoneDigitsSql("COALESCE(phone,'')")
+  const primaryDigits = contactPhoneDigitsSql("COALESCE(phone,'')")
   const optionObject = "CASE WHEN phone_option.type='object' THEN phone_option.value ELSE '{}' END"
-  const optionDigits = phoneDigitsSql(`CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`)
+  const optionDigits = contactPhoneDigitsSql(`CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`)
   const primary: string[] = []
   const options: string[] = []
   forms.forEach((form, index) => {
