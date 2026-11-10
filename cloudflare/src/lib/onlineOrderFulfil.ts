@@ -57,7 +57,7 @@ export function onlineTender(details: ReadonlyArray<{ method: string; amount_usd
   return { usd: sumMoney4(rows.map((row) => row.amount_usd)), khr: rows.reduce((sum, row) => sum + row.amount_khr, 0), present: rows.length > 0 }
 }
 
-type OrderForFulfil = { id: number; order_no: string; state: string; sale_id: number | null; revision: number; branch_id: number | null; paid_json: string | null; has_review?: number | null }
+type OrderForFulfil = { id: number; order_no: string; state: string; sale_id: number | null; revision: number; branch_id: number | null; paid_json: string | null; has_review?: number | null; branch_successor_id?: number | null }
 
 /** One statement: the order and its paid payments. The only read Fulfil adds to a sale create. */
 export async function loadFulfilOrder(db: D1Compat, orderId: number): Promise<OrderForFulfil | null> {
@@ -65,7 +65,8 @@ export async function loadFulfilOrder(db: D1Compat, orderId: number): Promise<Or
     SELECT o.id, o.order_no, o.state, o.sale_id, o.revision, o.branch_id,
       (SELECT json_group_array(json_object('id', p.id, 'amount', COALESCE(p.paid_amount, p.amount), 'currency', COALESCE(p.paid_currency, p.currency)))
          FROM (SELECT * FROM online_order_payments WHERE order_id = o.id AND state = 'paid' ORDER BY id) p) AS paid_json,
-      EXISTS (SELECT 1 FROM online_order_payments WHERE order_id = o.id AND state = 'review') AS has_review
+      EXISTS (SELECT 1 FROM online_order_payments WHERE order_id = o.id AND state = 'review') AS has_review,
+      (SELECT successor_branch_id FROM branches WHERE id = o.branch_id) AS branch_successor_id
     FROM online_orders o WHERE o.id = @id
   `).get<OrderForFulfil>({ id: orderId })
   return row ?? null
@@ -85,7 +86,9 @@ export function planFulfil(
   // Review F4: a payment held in review (a sibling QR paid after the order was paid, or after a cancel) keeps the order out of Fulfil, so its money cannot vanish into a sale.
   if (order.state === 'review' || Number(order.has_review) === 1) return { ok: false, refusal: refuse(409, 'order_in_review', 'This order has a payment that needs a look first. Resolve it, then fulfil the order.') }
   if (order.state !== 'paid') return { ok: false, refusal: refuse(409, 'order_not_paid', 'Only a paid online order can be fulfilled.') }
-  if (order.branch_id != null && input.branchId != null && Number(order.branch_id) !== Number(input.branchId)) {
+  // Review F10: a branch cutover leaves the order on the retired branch; its recorded successor is the same shop, so the till there may fulfil it.
+  const sameShop = Number(order.branch_id) === Number(input.branchId) || (order.branch_successor_id != null && Number(order.branch_successor_id) === Number(input.branchId))
+  if (order.branch_id != null && input.branchId != null && !sameShop) {
     return { ok: false, refusal: refuse(409, 'order_other_branch', 'This order belongs to another branch.') }
   }
   let paid: Array<{ id: number; amount: number; currency?: string }> = []

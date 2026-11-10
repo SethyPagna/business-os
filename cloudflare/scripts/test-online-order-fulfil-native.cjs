@@ -129,6 +129,17 @@ async function main() {
     await h.db.prepare('DROP TRIGGER fulfil_test_move').run()
     console.log('PASS an order that moves between the preflight read and the batch rolls the whole sale back (409)')
 
+    // Security review F10: an order left on the retired branch by a cutover is fulfilled at the successor's till; a branch that is not the successor still refuses.
+    await h.db.prepare("INSERT INTO branches(id,name,is_default,is_active,successor_branch_id) VALUES(7,'Old Shop',0,0,1)").run()
+    await h.db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(8,'Elsewhere',0,0)").run()
+    const cutover = await paidOrder({ branch: 7 })
+    const successorSale = await sale('fulfil-f10-a', cutover)
+    assert.equal(successorSale.status, 200, 'the successor branch fulfils: ' + JSON.stringify(successorSale.body)); assert.equal((await order(cutover)).state, 'fulfilled')
+    const stranger = await paidOrder({ branch: 8 })
+    const strangerSale = await sale('fulfil-f10-b', stranger)
+    assert.equal(strangerSale.status, 409); assert.equal(strangerSale.body.code, 'order_other_branch', 'a branch with no successor link is still another branch')
+    console.log('PASS (F10) an order on the retired branch is fulfilled at its successor; an unrelated branch is still refused')
+
     // ------------------------------------------------------------------------------------------------------------------------------------------ review money (security review F4)
     const addReview = (orderId, usd, tag) => h.db.prepare(`INSERT INTO online_order_payments (order_id, tran_id, purpose, amount, currency, state, paid_amount, paid_currency, paid_at, qr_string, revision, created_at)
       VALUES (?, ?, 'order', ?, 'USD', 'review', ?, 'USD', '2026-11-09 03:30:00', 'QR', 1, '2026-11-09 02:56:00')`).bind(orderId, `WREV${tag}${String(orderId).padStart(10, '0')}`, usd, usd).run()
