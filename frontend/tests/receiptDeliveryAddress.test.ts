@@ -28,24 +28,6 @@ const renderToStaticMarkup = require('react-dom/server').renderToStaticMarkup as
 
 const receiptUrl = new URL('../src/components/receipt/Receipt.tsx', import.meta.url)
 const receiptSource = fs.readFileSync(receiptUrl, 'utf8')
-
-// The ONE owner of the receipt's grid geometry -- the component and the
-// print/image/PDF exporter both read it, and so does this test, rather than
-// restating the numbers and pinning a second copy of them.
-const {
-  RECEIPT_ITEM_COLUMN_FLOOR_EM,
-  RECEIPT_ITEM_NUMERIC_FONT_EM,
-  RECEIPT_ROW_COLUMN_GAP_PX,
-  RECEIPT_ROW_GRID_TEMPLATE,
-  RECEIPT_ROW_LABEL_PADDING_PX,
-  receiptItemGridTemplate,
-  receiptNameColumnWidthPx,
-  receiptNameLineCount,
-  receiptNumericWidthEm,
-  receiptResolveItemTracksPx,
-  receiptTextWidthPx,
-} = require('../src/utils/receiptItemColumns.ts') as typeof import('../src/utils/receiptItemColumns.ts')
-
 // The receipt's real collaborators are loaded for real (the money math, the
 // template normalizer, the applied-config merge); only the shell around it --
 // the app context, the icons, the portal menu -- is stubbed, because none of
