@@ -71,6 +71,7 @@ function loadHistoryRoute(db, undoAppliers) {
     '../lib/db': { getDb: () => db },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
     '../lib/audit': { audit: async () => {} },
+    '../lib/onlineOrderAlerts': { announceOrdersOfBulkOperation: async () => undefined },
     '../lib/permissions': {
       getActionTier: () => 'full', hasPermission: () => true, isAdminControlUser: () => true,
       isSensitiveActionHistory: () => false, permissionForActionHistory: () => '',
