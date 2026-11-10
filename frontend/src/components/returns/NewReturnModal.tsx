@@ -46,6 +46,9 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { abaRefundOffer, onlineMethodName } from './helpers/abaRefund.ts'
+import AbaRefundChoice from './AbaRefundChoice.tsx'
+import { onlineRefusalText } from '../online-orders/onlineOrdersLogic.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
@@ -193,6 +196,7 @@ interface SaleRow {
   exchange_rate?: number | string | null
   total_usd?: number | string | null
   created_at?: string | number | Date | null
+  payment_details?: unknown
   items?: SaleItemRow[] | null
 }
 
@@ -257,6 +261,7 @@ const useApp = useAppHook as () => {
   getPermissionTier?: (key: string) => string
   settings?: Record<string, unknown> | null
   fmtKHR?: (value: number | string) => string
+  can?: (key: string, action: string) => boolean
 }
 
 type SalesTransportModule = typeof import('../../api/salesTransport.ts')
@@ -353,7 +358,7 @@ function lineReturnQuantities(item: SaleItemRow, recorded: number, v1: boolean):
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
-  const { user, t, settings, fmtKHR } = useApp()
+  const { user, t, settings, fmtKHR, can } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -379,6 +384,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [exchangeQuote, setExchangeQuote] = useState<ExchangeQuoteV1 | null>(null)
   const [payRows, setPayRows] = useState<SettlementRow[]>([])
   const [changeCurrency, setChangeCurrency] = useState<ExchangeChangeCurrency>('USD')
+  // KHQR S6b: send the refund back through ABA instead of out of the drawer (offered only on a sale that took online money).
+  const [abaRefund, setAbaRefund] = useState(false)
   const [quoteBusy, setQuoteBusy] = useState(false)
   const [pendingV1, setPendingV1] = useState<PendingReturnCreateV1 | null>(null)
   const [reviewedPendingBody, setReviewedPendingBody] = useState<string | null>(null)
@@ -1060,6 +1067,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     setStep('confirm')
   }
 
+  const abaOffer = abaRefundOffer({
+    paymentDetails: foundSale?.payment_details, method: onlineMethodName(settings), canRefund: typeof can === 'function' && can('online_orders', 'refund'),
+    creditUsd: quote?.total_refund_usd ?? 0, exchangeActive, returnType,
+  })
+  const sendViaAba = abaOffer.offered && abaRefund && !abaOffer.overCap
+
   const submitNetReturn = async () => {
     if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
     const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
@@ -1079,6 +1092,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         pending = await transport.prepareReturnCreateV1(user?.id, {
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
+          ...(sendViaAba ? { refund_channel: 'aba' } : {}),
           items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
             stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
             ...(it.stock_action === 'damaged' ? {
@@ -1109,7 +1123,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       // Unknown, permission and capability failures never rewrite/remove the
       // frozen request: an earlier timed-out attempt could already be committed.
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
-      notify(T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+      notify(onlineRefusalText(error, (key, fallback) => T(key, fallback)) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       if (current()) setSubmitting(false)
@@ -1689,6 +1703,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 )}
               </div>
             </div>
+
+            <AbaRefundChoice offer={abaOffer} viaAba={abaRefund} disabled={submitting} T={T} fmtUSD={fmtUSD} onChange={setAbaRefund} />
 
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 space-y-1">
               {activeItems.map((it, i) => (
