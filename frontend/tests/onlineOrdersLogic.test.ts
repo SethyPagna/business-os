@@ -14,11 +14,13 @@ import {
 } from '../src/components/online-orders/onlineOrdersLogic.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+// The money of a detail is the Worker's own recorded staff-detail money (fixtures/staff-order-detail-contract.json), not a shape this test assumes.
+const workerPaid = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'staff-order-detail-contract.json'), 'utf8')).paid as StaffOrderDetail
 const row = (over = {}) => ({ state: 'paid', pending_requests: 0, held_review: 0, ...over })
 const detail = (over: Record<string, unknown> = {}, money = {}): StaffOrderDetail => ({
   order: { id: 7, order_no: 'W261109K7Q2', state: 'paid', revision: 4, sale_id: null, goods_total_usd: 25, currency: 'USD', branch_id: 2, customer_name: 'Sample Buyer', customer_phone: '*** 678', fulfilment: 'pickup', customer_address: null,
     items_json: JSON.stringify([{ product_id: 1000, name: 'Sample Cream', quantity: 2, unit_price_usd: 10, line_total_usd: 20 }, { product_id: 1001, name: 'Sample Soap', quantity: 1, unit_price_usd: 5, line_total_usd: 5 }]), ...over },
-  payments: [], requests: [], events: [], status: 'paid', chips: [], money: { paid_usd: 25, refunded_usd: 0, refund_due_usd: 0, balance_due_usd: 0, ...money },
+  payments: [], requests: [], events: [], status: 'paid', chips: [], money: { ...workerPaid.money, ...money },
 })
 const ALL = { canView: true, canDecide: true, canRefund: true }
 
@@ -195,8 +197,13 @@ test('money held in review is resolved before Fulfil is offered, even when the o
   assert.deepEqual(availableActions(held, { canView: true, canDecide: false, canRefund: false }), ['recheck', 'note'], 'resolving needs the decide grant')
   const clean = { ...detail(), payments: [{ id: 1, state: 'paid' }] } as unknown as StaffOrderDetail
   assert.ok(availableActions(clean, ALL).includes('fulfil') && !availableActions(clean, ALL).includes('resolve'))
+  // N2: after a Fulfil, a payment held in review is still resolved (it counts as refund due); cancel and fulfil are for an order without a sale.
   const sold = { ...held, order: { ...held.order, sale_id: 9, state: 'fulfilled' } } as unknown as StaffOrderDetail
-  assert.ok(!availableActions(sold, ALL).includes('resolve') && !availableActions(sold, ALL).includes('fulfil'))
+  const soldActions = availableActions(sold, ALL)
+  assert.ok(soldActions.includes('resolve') && !soldActions.includes('cancel') && !soldActions.includes('fulfil'))
+  assert.ok(!availableActions(sold, { canView: true, canDecide: false, canRefund: true }).includes('resolve'), 'resolving still needs the decide grant')
+  const soldClean = { ...sold, payments: [{ id: 1, state: 'paid' }] } as unknown as StaffOrderDetail
+  assert.ok(!availableActions(soldClean, ALL).includes('resolve'), 'a sold order with nothing held has nothing to resolve')
 })
 
 test('every refusal the till and Returns can get for an online order has a sentence in both packs, restated by code and never as the Worker\'s English', () => {

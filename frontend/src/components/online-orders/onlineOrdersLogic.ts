@@ -99,7 +99,8 @@ export type StaffRequest = {
 }
 export type StaffPayment = { id: number; purpose: string; amount: number; currency: string; state: string; paid_amount: number | null; paid_at: string | null; created_at: string; expires_at: string | null }
 export type StaffEvent = { id: number; event: string; source: string; actor_name: string | null; public_comment: string | null; internal_note: string | null; amount_usd: number | null; reference: string | null; created_at: string }
-export type StaffMoney = { paid_usd?: number; refunded_usd?: number; refund_due_usd?: number; balance_due_usd?: number }
+/** The money object of the Worker's staff detail: the customer view's snake_case names (the Worker also sends camelCase for its own tests; nothing here reads those). Pinned by onlineOrdersWorkerContract.test.ts. */
+export type StaffMoney = { paid_usd?: number; refunded_usd?: number; refund_due_usd?: number; balance_due_usd?: number; held_in_review_usd?: number }
 export type StaffOrderDetail = {
   order: Record<string, unknown> & { id: number; order_no: string; state: string; revision: number; sale_id: number | null; goods_total_usd: number; currency: string }
   payments: StaffPayment[]
@@ -192,7 +193,8 @@ export function availableActions(detail: Pick<StaffOrderDetail, 'order' | 'money
   const held = (detail.payments ?? []).some((payment) => String(payment.state) === 'review')
   if (access.canView && (['paid', 'review', 'awaiting_payment', 'expired', 'cancelled', 'qr_failed'].includes(order.state))) out.push('recheck')
   if (access.canView) out.push('note')
-  if (access.canDecide && open && (order.state === 'review' || held)) out.push('resolve')
+  // Review money is resolved even after the sale exists (a late review after Fulfil): it counts as refund due and the Worker accepts Resolve then. Cancel stays for an order without a sale.
+  if (access.canDecide && (held || (open && order.state === 'review'))) out.push('resolve')
   if (access.canDecide && open && (order.state === 'paid' || order.state === 'review')) out.push('cancel')
   if (access.canRefund && round2(Number(money.refund_due_usd ?? 0)) > 0) out.push('refund')
   if (order.state === 'paid' && open && !held) out.push('fulfil')
