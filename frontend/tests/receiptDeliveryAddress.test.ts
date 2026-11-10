@@ -98,6 +98,8 @@ const REAL_OPTIONS = JSON.stringify([
 ])
 const AREA_ONLY = JSON.stringify([{ label: 'Default', name: '', phone: '', email: '', address: '', area: 'Toul Kork' }])
 
+const DRIVER = 'Driver Dara'
+
 const sale = (address: unknown) => ({
   receipt_number: '20261110-130012',
   created_at: '2026-11-10T06:00:12Z',
@@ -128,7 +130,8 @@ for (const receipt_language of ['en', 'km', 'both']) {
     const html = render(sale(JSON_ADDRESS), { receipt_language })
         assert.ok(!html.includes('&quot;label'), 'no escaped JSON quotes')
     assert.ok(!html.includes('[{'), 'no array text')
-    assert.ok(html.includes('ta'), 'the driver name still prints')
+    assert.ok(render({ ...sale(JSON_ADDRESS), delivery_contact_name: DRIVER }, { receipt_language }).includes(DRIVER), 'the driver name still prints')
+    assert.ok(!render({ ...sale(JSON_ADDRESS), delivery_contact_name: '' }, { receipt_language }).includes(DRIVER), 'control: the same render without the name does not print it')
     const driverBlock = html.split('data-receipt-line="true"').filter((row) => /អាសយដ្ឋាន|Address/.test(row))
     assert.equal(driverBlock.length, 0, 'no address row at all: customer has none either')
   })
@@ -145,6 +148,18 @@ await runTest('an area-only entry prints the area, a plain string prints as type
   assert.ok(render(sale('Street 9, Siem Reap')).includes('Street 9, Siem Reap'))
 })
 
+await runTest('a typed address that starts with a bracket prints as typed, a non-string address never prints as an object', () => {
+  assert.ok(render(sale('[Bldg A] St 9')).includes('[Bldg A] St 9'))
+  const objectAddress = render(sale(JSON.stringify([{ label: 'Default', address: { street: 'x' }, area: '' }])))
+  assert.ok(!objectAddress.includes('[object Object]'))
+  assert.ok(!objectAddress.includes('street'))
+})
+
+await runTest('a stored null or 0 for the hide switch still prints the address, as the settings toggle shows it ON', () => {
+  for (const stored of [null, 0, undefined]) assert.ok(render(sale('Street 9, Siem Reap'), { delivery_show_address: stored }).includes('Street 9'), String(stored))
+  assert.ok(!render(sale('Street 9, Siem Reap'), { delivery_show_address: false }).includes('Street 9'))
+})
+
 await runTest('a sale whose only delivery field is an empty address array prints no delivery block', () => {
   const html = render({ ...sale(JSON_ADDRESS), delivery_contact_name: '' })
   assert.equal(occurrences(html, 'border-t border-dashed border-gray-300 pt-2'), occurrences(render({ ...sale(null), delivery_contact_name: '' }), 'border-t border-dashed border-gray-300 pt-2'))
@@ -154,7 +169,7 @@ for (const address of [REAL_OPTIONS, JSON_ADDRESS, 'Street 9, Siem Reap']) {
   await runTest('delivery_show_address false hides the address in every shape, default shows it', () => {
     const hidden = render(sale(address), { delivery_show_address: false })
     assert.ok(!hidden.includes('St 271') && !hidden.includes('Street 9') && !hidden.includes('&quot;label'))
-    assert.ok(hidden.includes('ta'), 'only the address goes')
+    assert.ok(render({ ...sale(address), delivery_contact_name: DRIVER }, { delivery_show_address: false }).includes(DRIVER), 'only the address goes, the driver name stays')
   })
 }
 
