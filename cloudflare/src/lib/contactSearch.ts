@@ -107,17 +107,20 @@ function buildTextOrPhoneMatchClause(
   return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params }, scansRows: true }
 }
 
-function customerDigitsIndexClause(forms: readonly string[], param: string): ContactMatchClause {
+// A fragment is read in the phone digits only; the cached canonical key (phone_normalized) is matched whole, as it always was.
+function customerDigitsIndexClause(forms: readonly string[], param: string, withKey = true): ContactMatchClause {
+  const runs = `{digits} : (${forms.map((form) => `"${form}"`).join(' OR ')})`
+  const keys = `{key} : (${forms.map((form) => `"=${form}="`).join(' OR ')})`
   return {
     sql: `id IN (SELECT rowid FROM ${CUSTOMER_DIGITS_FTS} WHERE ${CUSTOMER_DIGITS_FTS} MATCH @${param})`,
-    params: { [param]: forms.map((form) => `"${form}"`).join(' OR ') },
+    params: { [param]: withKey ? `${runs} OR ${keys}` : runs },
   }
 }
 
 // A whole number typed with separators the digit scan above does not accept (012,345,678): the index narrows to the customers whose digits
 // hold it, and the exact comparison (the digits ARE the number, not merely hold it) runs only on those.
 function customerWholeNumberClause(forms: readonly string[], exact: { sql: string; params: Record<string, string> }, param: string): ContactMatchClause {
-  const narrowed = customerDigitsIndexClause([...new Set([...forms, ...forms.filter((form) => form.startsWith('855')).map((form) => `00${form}`)])], param)
+  const narrowed = customerDigitsIndexClause([...new Set([...forms, ...forms.filter((form) => form.startsWith('855')).map((form) => `00${form}`)])], param, false)
   return { sql: `(${narrowed.sql} AND ${exact.sql})`, params: { ...narrowed.params, ...exact.params } }
 }
 

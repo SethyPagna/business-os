@@ -34,7 +34,7 @@ const digitsOf = (value) => khmer(String(value ?? '')).replace(/[ \-().+\t\n\r 
 const expectedDoc = (row) => {
   let options = []
   try { const parsed = JSON.parse(row.address); if (Array.isArray(parsed)) options = parsed.slice(0, 3).map((o) => (o && typeof o === 'object' && !Array.isArray(o) && typeof o.phone === 'string' ? digitsOf(o.phone) : '')) } catch { /* not JSON */ }
-  return `${digitsOf(row.phone)} ${row.phone_normalized ?? ''} ${options.join(' ')}`
+  return { digits: `${digitsOf(row.phone)} ${options.join(' ')}`, key: row.phone_normalized ? `=${row.phone_normalized}=` : '' }
 }
 const khmerDigits = (text) => text.replace(/\d/g, (d) => String.fromCharCode(0x17e0 + Number(d)))
 
@@ -53,9 +53,10 @@ const fixtures = [
   [12, 'Blank', null, null, null],
 ]
 const insert = (db, rows) => { for (const [id, name, phone, normalized, address] of rows) db.prepare('INSERT INTO customers (id,name,phone,phone_normalized,address) VALUES (?,?,?,?,?)').run(id, name, phone, normalized, address) }
-const index = (db) => Object.fromEntries(db.prepare('SELECT rowid AS id, digits FROM customers_phone_digits_fts ORDER BY rowid').all().map((r) => [r.id, r.digits]))
+const index = (db) => Object.fromEntries(db.prepare('SELECT rowid AS id, digits, key FROM customers_phone_digits_fts ORDER BY rowid').all().map((r) => [r.id, { digits: r.digits, key: r.key }]))
 const wanted = (db) => Object.fromEntries(db.prepare('SELECT id, phone, phone_normalized, address FROM customers ORDER BY id').all().map((r) => [r.id, expectedDoc(r)]))
-const found = (db, digits) => db.prepare('SELECT rowid AS id FROM customers_phone_digits_fts WHERE customers_phone_digits_fts MATCH ? ORDER BY rowid').all(`"${digits}"`).map((r) => r.id)
+const found = (db, digits) => db.prepare('SELECT rowid AS id FROM customers_phone_digits_fts WHERE customers_phone_digits_fts MATCH ? ORDER BY rowid').all(`{digits} : ("${digits}")`).map((r) => r.id)
+const foundKey = (db, key) => db.prepare('SELECT rowid AS id FROM customers_phone_digits_fts WHERE customers_phone_digits_fts MATCH ? ORDER BY rowid').all(`{key} : ("=${key}=")`).map((r) => r.id)
 
 ;(async () => {
   await check('the file is LF-only and splits into whole statements (no comment-only statement, no compound SELECT, every trigger closed)', () => {
@@ -88,7 +89,7 @@ const found = (db, digits) => db.prepare('SELECT rowid AS id FROM customers_phon
     db.exec(sql)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM customers_phone_digits_fts').get().n, fixtures.length)
     assert.deepEqual(index(db), wanted(db))
-    assert.equal(index(db)[7], '  012777888 85512999000 096111222')
+    assert.deepEqual(index(db)[7], { digits: ' 012777888 85512999000 096111222', key: '' })
   })
 
   await check('a number is found whatever separators, digit script or country prefix it was stored with', () => {
@@ -104,7 +105,9 @@ const found = (db, digits) => db.prepare('SELECT rowid AS id FROM customers_phon
     assert.deepEqual(found(db, '011222333'), [], 'an option behind scalars is the fifth entry')
     assert.deepEqual(found(db, '012333444'), [], 'a scalar, a number, a bad address and an object address hold no Contact Option phone')
     assert.deepEqual(found(db, '012333999'), [11], 'the tab of a stored option phone is not part of the digits')
-    assert.deepEqual(found(db, '0123'), [1, 2, 3, 4, 5, 11], 'the cached key holds the local form of a +855 number')
+    assert.deepEqual(found(db, '0123'), [1, 2, 4, 5, 11], 'a fragment is read in the phone digits only, never in the cached key')
+    assert.deepEqual(foundKey(db, '012345679'), [3], 'the whole cached key finds the +855 number it is the local form of')
+    assert.deepEqual(foundKey(db, '2345679'), [], 'a fragment of the cached key finds nobody')
   })
 
   await check('drift test: insert, update of the phone, of the address and of the cached key, and delete leave the index equal to a recomputation', () => {
