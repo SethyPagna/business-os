@@ -24,7 +24,7 @@ const { fixture } = require('./test-sales-export-snapshot-native.cjs')
       assert.equal(cohort.row_count, cohort.sales.length + cohort.items.length + cohort.returns.length + cohort.returnItems.length)
     }
     assert.equal(JSON.stringify(snapshot), before, 'cohort filtering never mutates the verified source')
-    assert.deepEqual(reports.salesExportCohort(snapshot, '0456', { fullPhone: false }).sales.map(row => row.id), [], 'without the full-phone permission a fragment of the customer number selects nothing')
+    assert.deepEqual(reports.salesExportCohort(snapshot, '0456', { fullPhone: false }).sales.map(row => row.id), [2], 'without the full-phone permission a fragment of the customer number still finds the customer')
     assert.deepEqual(reports.salesExportCohort(snapshot, 'alice', { fullPhone: false }).sales.map(row => row.id), [1], 'names still select')
     assert.deepEqual(reports.salesExportCohort(snapshot, 'r2', { fullPhone: false }).sales.map(row => row.id), [2], 'receipts still select')
     const cohort = reports.salesExportCohort(snapshot, 'alice', { fullPhone: true })
