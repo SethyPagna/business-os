@@ -192,6 +192,19 @@ async function main() {
     assert.ok(full.order.contact_whatsapp.includes('85512345678') && full.requests[0].after_json.includes('87654321'), 'with the permission the text is whole')
   })
 
+  await check('D6 (owner 10 Nov): text the buyer typed (order note, delivery address, a typed request note or address) shows as typed to staff without the full-phone permission; only structured phone fields stay masked', async () => {
+    const h = world(); const res = await paidOrder(h, { phone: PHONE, fulfilment: 'delivery', address: 'House 5, call 077 111 222 at the gate', note: 'ring 098 765 432 when you arrive', contacts: { whatsapp: '+855 12 345 678' } })
+    const as = (permissions) => user(9, 'U', { online_orders: true, ...permissions })
+    const typed = h.request(`/${res.body.token}/requests`, 'POST', { kind: 'note', phone: h.one('SELECT customer_phone p FROM online_orders WHERE id = 1').p, after: { note: 'my cousin is 011 222 333' } })
+    assert.equal((await typed).status, 201)
+    const seen = (await ask(h, as({}), '/1')).body
+    assert.ok(seen.order.customer_address.includes('077 111 222'), 'the address shows as typed: ' + seen.order.customer_address)
+    assert.ok(seen.order.note.includes('098 765 432'), 'the note shows as typed: ' + seen.order.note)
+    assert.ok(seen.requests[0].after_json.includes('011 222 333'), 'a typed request note shows as typed: ' + seen.requests[0].after_json)
+    assert.ok(!JSON.stringify(seen.order.contact_whatsapp).includes('345 678'), 'the structured contact stays masked: ' + seen.order.contact_whatsapp)
+    assert.ok(!JSON.stringify(seen.order.customer_phone).includes('345 678'), 'the phone field stays masked')
+  })
+
   await check('N5 + owner ruling 10 Nov: a signed-in buyer links their own customer (auto); a typed phone AND name only SUGGESTS exactly one customer; a shared number with another name, two matches, six rows, a sold order or no customer name nobody; a zero-width space in the name does not hide a match', async () => {
     const h = world(); await paidOrder(h, { phone: '+855 12 777 888', name: 'Dara' })
     const as = (id) => ask(h, FULL, `/${id}`).then((res) => res.body.customer_match)
