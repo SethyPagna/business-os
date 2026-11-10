@@ -201,6 +201,9 @@ function maskPhonesInJson(raw: string | null | undefined): string | null {
   return JSON.stringify(walk(value, false))
 }
 
+/** Zero-width characters a buyer's keyboard can add are ignored by the online-order customer match only; the shared contact name comparison is untouched. */
+const orderCustomerName = (value: unknown): string => normalizeContactName(String(value ?? '').replace(/[\u200b-\u200d\u2060\ufeff]/g, ''))
+
 /**
  * Review N5 and the owner's 10 Nov 2026 ruling "suggest, the cashier confirms". The till sale that fulfils an order is made for the order's customer. `auto: true` only when the
  * buyer was signed in: the order's portal account points at the customer (portal_accounts.contact_id), so the till may link it. Otherwise the typed phone AND name (the existing
@@ -215,11 +218,11 @@ export async function matchOrderCustomer(db: D1Compat, order: { state?: unknown;
     if (signedIn) return { id: Number(signedIn.id), name: String(signedIn.name ?? ''), auto: true }
   }
   const phone = canonicalizePhone(order.customer_phone)
-  const name = normalizeContactName(order.customer_name)
+  const name = orderCustomerName(order.customer_name)
   if (!phone || !name) return null
   const rows = await db.prepare('SELECT id, name FROM customers WHERE phone_normalized = @phone AND COALESCE(is_anonymous, 0) = 0 ORDER BY id LIMIT 6')
     .all<{ id: number; name: string | null }>({ phone }) || []
-  const same = rows.filter((row) => normalizeContactName(row.name) === name)
+  const same = rows.filter((row) => orderCustomerName(row.name) === name)
   return rows.length < 6 && same.length === 1 ? { id: Number(same[0].id), name: String(same[0].name), auto: false } : null
 }
 

@@ -96,6 +96,7 @@ async function main() {
 
   await runTest('normalizeContactName/normalizePhone: case/whitespace/formatting tolerant', async () => {
   assert.strictEqual(normalizeContactName('  Sok   Dara '), 'sok dara')
+  assert.strictEqual(normalizeContactName('Sok​Dara'), 'sok​dara', 'the shared name key keeps zero-width characters, so it still equals the SQL lower(trim(name)) comparison')
   assert.strictEqual(normalizePhone('(012) 345-678'), '012345678')
   assert.strictEqual(normalizePhone('   '), null)
 })
