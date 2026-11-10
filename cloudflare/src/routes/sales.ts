@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange, announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import {
-  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, onlineMethodRefusalActive, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -1331,7 +1331,7 @@ app.post('/', async (c) => {
   // sale covers. One preflight read; everything it decides is re-asserted inside the batch by the guard statement.
   const onlineMethod = configuredOnlineMethod(rateSettings[ONLINE_PAYMENT_METHOD_KEY])
   const wantsOrder = body.online_order_id !== undefined && body.online_order_id !== null && body.online_order_id !== ''
-  if (!wantsOrder && onlineTender(effectivePaymentDetails, onlineMethod).present) {
+  if (!wantsOrder && onlineTender(effectivePaymentDetails, onlineMethod).present && await onlineMethodRefusalActive(c.env, rateSettings[ONLINE_PAYMENT_METHOD_KEY])) {
     return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: 'online_method_requires_order' }, 400)
   }
   if (wantsOrder) {
@@ -2734,7 +2734,7 @@ app.patch('/:id/status', async (c) => {
       try { recordedDetails = paymentCorrection || !sale.payment_details ? [] : JSON.parse(String(sale.payment_details)) } catch { recordedDetails = [] }
       const sentOnline = onlineTender(asDetails(body.payment_details), onlineMethod)
       const recordedOnline = onlineTender(asDetails(recordedDetails), onlineMethod)
-      if (sentOnline.usd > recordedOnline.usd + 0.00005 || sentOnline.khr > recordedOnline.khr) {
+      if ((sentOnline.usd > recordedOnline.usd + 0.00005 || sentOnline.khr > recordedOnline.khr) && await onlineMethodRefusalActive(c.env, settingMap[ONLINE_PAYMENT_METHOD_KEY])) {
         return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
       }
       if (paymentCorrection && (await linkedOnlineSaleIds(db, [Number(id)])).size) {

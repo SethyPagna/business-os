@@ -8,7 +8,7 @@ import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindo
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
-import { configuredOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY } from './onlineOrderFulfil'
+import { configuredOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, onlineMethodRefusalActive } from './onlineOrderFulfil'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
   BULK_STATUS_LIMIT,
@@ -465,7 +465,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     const target = configured.methods.find((method) => paymentMethodKey(method) === targetKey)
     if (!target || RETIRED_PAYMENT_METHODS.has(targetKey)) fail('Choose an active configured payment method.', 400)
     // The online (KHQR) method exists on a sale only through Fulfilling its order: a relabel cannot create online money.
-    if (targetKey === onlineMethodKey) throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 400, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
+    if (targetKey === onlineMethodKey && await onlineMethodRefusalActive(env, settingRows.find((row) => row.key === ONLINE_PAYMENT_METHOD_KEY)?.value)) throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 400, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
     expectedPaymentMethodsRaw = setting.value
     request.action = { ...request.action, target }
   }

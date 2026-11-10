@@ -83,6 +83,45 @@ async function main() {
     const linkedCash = await relabel(extra.saleId, 'Cash', 'Card')
     assert.equal(linkedCash.status, 200, `control: the till part of a linked sale can be relabelled: ${JSON.stringify(linkedCash.body)}`)
     console.log('PASS bulk relabel cannot create or remove KHQR money; ordinary relabels and the till part of a linked sale still work')
+
+    // Review F1 (10 Nov 2026): the KHQR-method refusal on plain sales, settlements and relabels is behind the stored setting / the online_orders switch. Before online
+    // ordering is set up, a till that already spells a method "ABA KHQR" keeps working; the linked-sale locks above are unconditional (and were asserted with the setting stored).
+    await h.db.prepare("DELETE FROM settings WHERE key = 'online_order_payment_method'").run()
+    await h.db.prepare("UPDATE settings SET value = ? WHERE key = 'pos_payment_methods'").bind('["Cash","ABA","Card","ABA KHQR"]').run()
+    const khqrSale = (key) => H.createSale(h, { key, lines: [{ productId: 12, quantity: 2 }], status: 'completed', paymentDetails: [{ method: 'ABA KHQR', amount_usd: 25, amount_khr: 0 }] })
+    const cashSale = async (key) => {
+      const made = await H.createSale(h, { key, lines: [{ productId: 12, quantity: 2 }], status: 'completed', paymentDetails: [{ method: 'Cash', amount_usd: 25, amount_khr: 0 }] })
+      assert.equal(made.status, 200, JSON.stringify(made.body)); return made.body.id
+    }
+    const khqrSettle = (id) => settle(id, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }, { method: 'ABA KHQR', amount_usd: 20, amount_khr: 0 }])
+    const ungatedSale = await khqrSale('f1-ungated-plain')
+    assert.equal(ungatedSale.status, 200, 'ungated: a plain sale naming ABA KHQR works: ' + JSON.stringify(ungatedSale.body))
+    const ungatedSettle = await khqrSettle(await plainNotPaid())
+    assert.equal(ungatedSettle.status, 200, 'ungated: a settlement naming ABA KHQR works: ' + JSON.stringify(ungatedSettle.body))
+    const ungatedRelabel = await relabel(await cashSale('f1-cash-a'), 'Cash', 'ABA KHQR')
+    assert.equal(ungatedRelabel.status, 200, 'ungated: a relabel to ABA KHQR works: ' + JSON.stringify(ungatedRelabel.body))
+    console.log('PASS (F1) with no stored method and the switch off, a plain sale, a settlement and a relabel naming ABA KHQR all work')
+
+    await h.db.prepare("INSERT INTO settings(key,value) VALUES('online_order_payment_method','ABA KHQR') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+    const gatedSale = await khqrSale('f1-gated-plain')
+    assert.equal(gatedSale.status, 400, JSON.stringify(gatedSale.body)); assert.equal(gatedSale.body.code, 'online_method_requires_order')
+    const gatedSettle = await khqrSettle(await plainNotPaid())
+    assert.equal(gatedSettle.status, 400, JSON.stringify(gatedSettle.body)); assert.equal(gatedSettle.body.code, 'online_method_requires_order')
+    const gatedRelabel = await relabel(await cashSale('f1-cash-b'), 'Cash', 'ABA KHQR')
+    assert.equal(gatedRelabel.status, 400, JSON.stringify(gatedRelabel.body)); assert.equal(gatedRelabel.body.code, 'online_method_requires_order')
+    console.log('PASS (F1) with the method stored, the same three actions are refused')
   } finally { await h.mf.dispose() }
+
+  // The switch alone also arms the refusal (no stored method: the default name). A fresh Worker, so no switch memo from the first one.
+  const g = await H.startWorker()
+  try {
+    await H.seedProduct(g, 12, 'Lock Serum', 12.5, 100, 2)
+    await g.db.prepare("UPDATE settings SET value = ? WHERE key = 'pos_payment_methods'").bind('["Cash","ABA KHQR"]').run()
+    await g.db.prepare("DELETE FROM settings WHERE key = 'online_order_payment_method'").run()
+    await g.db.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(JSON.stringify({ epoch: 1, switches: { online_orders: 'on' } })).run()
+    const viaSwitch = await H.createSale(g, { key: 'f1-switch-plain', lines: [{ productId: 12, quantity: 2 }], status: 'completed', paymentDetails: [{ method: 'ABA KHQR', amount_usd: 25, amount_khr: 0 }] })
+    assert.equal(viaSwitch.status, 400, JSON.stringify(viaSwitch.body)); assert.equal(viaSwitch.body.code, 'online_method_requires_order')
+    console.log('PASS (F1) the online_orders switch ON refuses the default-named KHQR method on a plain sale')
+  } finally { await g.mf.dispose() }
 }
 main().then(() => { console.log('online order money lock: ok'); process.exit(0) }).catch((e) => { console.error(e); process.exit(1) })

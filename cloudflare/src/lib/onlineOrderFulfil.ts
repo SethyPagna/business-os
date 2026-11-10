@@ -12,6 +12,8 @@
 
 import type { D1Compat } from './db'
 import { roundMoney4, sumMoney4 } from './moneyPrecision'
+import { readSwitch } from './readSwitches'
+import type { Env } from '../index'
 
 export const ONLINE_PAYMENT_METHOD_KEY = 'online_order_payment_method'
 export const ONLINE_PAYMENT_METHOD_DEFAULT = 'ABA KHQR'
@@ -37,6 +39,16 @@ export const sameMethod = (a: unknown, b: unknown): boolean => String(a ?? '').t
 export function configuredOnlineMethod(settingValue: unknown): string {
   const text = String(settingValue ?? '').trim()
   return text || ONLINE_PAYMENT_METHOD_DEFAULT
+}
+
+/**
+ * Review F1 (10 Nov 2026): the "KHQR method only through Fulfil" refusal on plain sales, settlements and relabels applies only once online ordering is set up: the
+ * owner has stored `online_order_payment_method`, or the `online_orders` switch is ON. Before that, a till that already spells a method "ABA KHQR" keeps working.
+ * The linked-sale locks (`linked_sale_money_locked`) are NOT behind this: a linked sale exists only after a Fulfil. The switch is read only when the setting is absent.
+ */
+export async function onlineMethodRefusalActive(env: Env, storedSetting: unknown): Promise<boolean> {
+  if (String(storedSetting ?? '').trim() !== '') return true
+  return readSwitch(env, 'online_orders')
 }
 
 /** The dollars of a tender that name `method`, and whether any row does. */
