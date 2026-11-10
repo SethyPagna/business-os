@@ -37,6 +37,7 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parse
 import SectionSwitcher from '../shared/SectionSwitcher'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import { onlineMethodChoices } from '../online-orders/onlineMethodVisibility.ts'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -2153,7 +2154,7 @@ export default function Settings() {
               {t('online_payment_method_label') || 'Online payment method'}
             </label>
             <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-              {t('online_payment_method_hint') || 'The method a paid online order is rung on its sale. Choose it from the list above; it is kept for online orders only.'}
+              {t('online_payment_method_hint') || 'The method a paid online order is rung on. It becomes online-only: the till will hide it and refuse it on ordinary sales, so cash methods are not offered. Best: add a separate method such as "ABA KHQR" above and choose that.'}
             </p>
             <div className="flex items-center gap-2">
               <select
@@ -2164,7 +2165,7 @@ export default function Settings() {
                 onChange={(event) => setOnlineMethodDraft(event.target.value)}
               >
                 <option value="">{t('online_payment_method_not_set') || 'Not set'}</option>
-                {(pmList.includes(savedOnlineMethod) || !savedOnlineMethod ? pmList : [savedOnlineMethod, ...pmList]).map((paymentMethod) => (
+                {onlineMethodChoices(pmList, settings.pos_payment_method_kinds, savedOnlineMethod).map((paymentMethod) => (
                   <option key={paymentMethod} value={paymentMethod}>{paymentMethod}</option>
                 ))}
               </select>

@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { hiddenOnlineMethod, withoutOnlineMethod } from '../src/components/online-orders/onlineMethodVisibility.ts'
+import { hiddenOnlineMethod, onlineMethodChoices, withoutOnlineMethod } from '../src/components/online-orders/onlineMethodVisibility.ts'
 import { withOnlineTender } from '../src/components/online-orders/fulfilOrder.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -62,4 +62,33 @@ test('every picker of payment methods goes through the filter', () => {
   assert.ok(/withoutOnlineMethod\(configuredSettlementMethods\(methods\), value\)/.test(read('src', 'components', 'sales', 'saleSettlementConfig.ts')))
   assert.ok(/withoutOnlineMethod\(configuredSettlementMethods\(settings\?\.pos_payment_methods\), settings\)/.test(read('src', 'components', 'returns', 'NewReturnModal.tsx')))
   assert.ok(/\.filter\(\(method\) => !hiddenOnlineMethod \|\| String\(method \?\? ''\)\.trim\(\)\.toLocaleLowerCase\(\) !== hiddenOnlineMethod\)/.test(read('src', 'components', 'sales', 'Sales.tsx')), 'the bulk relabel list')
+})
+
+test('KHQR round 6 N1: the Settings field never offers a cash-kind method (the Worker refuses one: online_order_method_is_cash)', () => {
+  // CATCHES: the owner picking Cash (or the shop's ordinary in-store method) as the online method, which reserves it at once and makes the till refuse cash sales; the token rule, the Khmer token and an explicit kind each being ignored.
+  const list = ['Cash', 'សាច់ប្រាក់ ដុល្លារ', 'Wing', 'ABA KHQR', 'Bakong']
+  assert.deepEqual(onlineMethodChoices(list, undefined), ['Wing', 'ABA KHQR', 'Bakong'])
+  assert.deepEqual(onlineMethodChoices(list, JSON.stringify({ Wing: 'cash', 'ABA KHQR': 'digital' })), ['ABA KHQR', 'Bakong'], 'an explicit kind wins in both directions')
+  assert.deepEqual(onlineMethodChoices(['Cash', 'Cash KHQR'], JSON.stringify({ 'cash khqr': 'digital' })), ['Cash KHQR'])
+  assert.deepEqual(onlineMethodChoices(['Cash'], ''), [], 'only cash configured: nothing to choose, the owner adds a separate method')
+  assert.deepEqual(onlineMethodChoices(list, undefined, 'Cash'), ['Cash', 'Wing', 'ABA KHQR', 'Bakong'], 'a stored cash method stays visible so the owner can see and replace it')
+  assert.deepEqual(onlineMethodChoices(list, undefined, 'aba khqr'), ['Wing', 'ABA KHQR', 'Bakong'], 'a stored method already offered is not listed twice')
+})
+
+test('KHQR round 6 N1: the field uses the filter and explains, in both languages, that the method becomes online-only', () => {
+  // CATCHES: the select still listing pmList directly; helper text that does not say the till will hide the method; a refusal with no sentence of its own.
+  const settingsSource = read('src', 'components', 'utils-settings', 'Settings.tsx')
+  assert.ok(/onlineMethodChoices\(pmList, settings\.pos_payment_method_kinds, savedOnlineMethod\)/.test(settingsSource))
+  const pack = (name: string) => JSON.parse(read('src', 'lang', `${name}.json`)) as Record<string, string>
+  const en = pack('en')
+  const km = pack('km')
+  assert.match(en.online_payment_method_hint, /online-only/)
+  assert.match(en.online_payment_method_hint, /till will hide it/)
+  assert.match(en.online_payment_method_hint, /ABA KHQR/)
+  assert.match(km.online_payment_method_hint, /[ក-៿]/)
+  assert.match(km.online_payment_method_hint, /ABA KHQR/)
+  for (const key of ['write_rejected_online_order_method_is_cash', 'write_rejected_online_method_merge_refused']) {
+    assert.ok(en[key] && !/[ក-៿]/.test(en[key]), `en ${key}`)
+    assert.match(km[key], /[ក-៿]/, `km ${key}`)
+  }
 })

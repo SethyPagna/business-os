@@ -18,6 +18,8 @@ const CODES = [
   ['invalid_online_order_request_days', 'write_rejected_online_order_request_days', /from 1 to 30/, /1 ដល់ 30/],
   ['invalid_online_order_payment_method', 'write_rejected_online_order_payment_method', /configured payment methods/, /វិធីបង់ប្រាក់/],
   ['online_method_required', 'write_rejected_online_method_required', /Turn them off before clearing/, /បិទវាសិន/],
+  ['online_order_method_is_cash', 'write_rejected_online_order_method_is_cash', /cannot be a cash method/, /សាច់ប្រាក់/],
+  ['online_method_merge_refused', 'write_rejected_online_method_merge_refused', /cannot be merged/, /បញ្ចូល/],
 ] as const
 
 test('each settings refusal shows its own sentence in both languages, not the generic one', () => {
@@ -60,3 +62,4 @@ test('Settings has an admin-only field that sets the online payment method throu
     assert.match(km[key], /[ក-៿]/, `km ${key}`)
   }
 })
+
