@@ -15,6 +15,7 @@ import { cachedPhoneJson } from '../lib/phoneCache'
 import type { PhoneActor } from '../lib/phoneAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
+import { peekReadSwitch } from '../lib/readSwitches'
 import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
@@ -857,9 +858,9 @@ app.get('/summary', async (c) => {
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  // Online orders: a queue someone must act on (money in review, paid goods to hand over), so like the portal approvals it has no mute switch. Staff with the
+  // Online orders: a queue someone must act on (money in review, paid goods to hand over), so like the portal approvals it has no mute switch; with the online_orders switch off (as this request's switch read saw it) the section is not asked for and costs no call. Staff with the
   // online_orders:view action only (Admin passes): the same rule as the /api/online-orders staff API.
-  if (getOnlineOrderAccess(user as never).canView) tasks.push(cachedSection('online_orders', ['online_orders'], 'queue', () => buildOnlineOrdersSection(c.env)))
+  if (getOnlineOrderAccess(user as never).canView && peekReadSwitch('online_orders')) tasks.push(cachedSection('online_orders', ['online_orders'], 'queue', () => buildOnlineOrdersSection(c.env)))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
   // Supplier credit reminders (0065): money owed to suppliers is cost

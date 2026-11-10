@@ -75,7 +75,7 @@ function createOrdersHarness(options = {}) {
     '../durable-objects/broadcastHub': { broadcast: async (_env, channel, payload) => { broadcasts.push({ channel, payload }) } },
     '../lib/db': { getDb: () => db },
     './db': { getDb: () => db },
-    '../lib/readSwitches': { readSwitch: async () => state.switchOn },
+    '../lib/readSwitches': { readSwitch: async () => state.switchOn, peekReadSwitch: () => state.switchOn },
     '../lib/portalSession': { getPortalAccountState: async () => (state.account ? { status: 'authenticated', account: state.account } : { status: 'unauthenticated', account: null }) },
     ...(options.overrides || {}),
   }
