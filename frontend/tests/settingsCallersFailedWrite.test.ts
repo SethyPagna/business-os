@@ -17,12 +17,14 @@ async function test(name: string, fn: () => void | Promise<void>): Promise<void>
 
 await test('callers that ignored a failed write now read the answer: Receipt, Print, Loyalty, notification switches, session duration', () => {
   const receipt = read('../src/components/receipt-settings/ReceiptSettings.tsx')
-  assert.match(receipt, /settingsSaveOutcome\(result\) === 'failed'/)
+  const saver = read('../src/utils/receiptSettingsSaver.ts')
+  assert.match(receipt, /createReceiptSettingsSaver\(/, 'the receipt page writes through the saver')
+  assert.match(saver, /outcome === 'failed' \|\| outcome === 'conflict'\) return \{ outcome: 'failed'/)
   assert.doesNotMatch(receipt, /loadSettingsRef/, 'the receipt page no longer re-reads every setting after each autosave')
   assert.doesNotMatch(receipt, /RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS/)
-  const failedAt = receipt.indexOf("settingsSaveOutcome(result) === 'failed'")
-  assert.ok(failedAt > 0 && failedAt < receipt.indexOf('persistedTemplateRef.current = serializedTemplate'), 'a failed template is not marked persisted')
-  assert.match(read('../src/components/receipt-settings/PrintSettings.tsx'), /settingsSaveSucceeded\(result\)\) notify\?\./)
+  const failedAt = saver.indexOf("outcome === 'failed' || outcome === 'conflict') return { outcome: 'failed' }")
+  assert.ok(failedAt > 0 && failedAt < saver.indexOf('persistedTemplate = serialized'), 'a failed template is not marked persisted')
+  assert.match(read('../src/components/receipt-settings/PrintSettings.tsx'), /outcome === 'failed'\) notifyRef\.current\?\./)
   const loyalty = read('../src/components/loyalty-points/LoyaltyPointsPage.tsx')
   assert.ok(loyalty.indexOf('settingsSaveSucceeded(result)') > 0 && loyalty.indexOf('settingsSaveSucceeded(result)') < loyalty.indexOf("notify(copy('saved'"))
   assert.match(read('../src/components/shared/NotificationCenter.tsx'), /if \(!settingsSaveSucceeded\(result\)\) return\n\s+void loadSummary\(true\)/)

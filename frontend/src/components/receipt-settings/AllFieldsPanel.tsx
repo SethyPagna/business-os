@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { getFieldItems } from './constants'
+import { receiptFlagOn } from '../../utils/receiptTemplateFlags.ts'
 
 type ReceiptTemplate = Record<string, unknown>
 
@@ -105,7 +106,7 @@ export default function AllFieldsPanel({ tpl, setT }: AllFieldsPanelProps) {
                       key={field.key}
                       label={field.label}
                       desc={field.desc}
-                      value={!!tpl[field.key]}
+                      value={receiptFlagOn(tpl, field.key)}
                       onChange={(value) => setT(field.key, value)}
                     />
                   ))}

@@ -12,7 +12,8 @@ import { isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSett
 import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 import InfoHint from '../shared/InfoHint.tsx'
-import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
+import { settingsSaveOutcome } from '../../utils/settingsSave.ts'
+import type { PrintFlusher, WriteOutcome } from '../../utils/receiptSettingsSaver.ts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 type AppSettings = Record<string, unknown> & { receipt_print_settings?: unknown }
@@ -36,6 +37,10 @@ interface PrintSettingsProps {
   settings?: AppSettings
   saveSettings?: SaveSettings | null
   notify?: ((message: string, type?: string) => void) | null
+  saveRegistry?: {
+    registerPrintFlusher: (flusher: PrintFlusher) => () => void
+    markSilentSaved: () => void
+  } | null
 }
 
 // The three test exports below print the live preview, QR codes included, so
@@ -107,7 +112,7 @@ function buildSafePreviewSource(previewNode: unknown, rendition: ReceiptRenditio
   }
 }
 
-export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null, notify = null }: PrintSettingsProps) {
+export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null, notify = null, saveRegistry = null }: PrintSettingsProps) {
   const T = (key: string, fallback: string): string => tProp?.(key, fallback) || fallback
   const [testBusy, setTestBusy] = useState<TestExport | ''>('')
   const [waitingForQr, setWaitingForQr] = useState(false)
@@ -159,8 +164,54 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     }
   })
   const saveTimerRef = useRef<number | null>(null)
+  const pendingRef = useRef<ReceiptPrintSettings | null>(null)
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve())
+  const writingRef = useRef(0)
+  const saveAppSettingsRef = useRef(saveAppSettings)
+  const notifyRef = useRef(notify)
+  const saveRegistryRef = useRef(saveRegistry)
+  const tRef = useRef(T)
+  saveAppSettingsRef.current = saveAppSettings
+  notifyRef.current = notify
+  saveRegistryRef.current = saveRegistry
+  tRef.current = T
+
+  // One write at a time; the pending edit is sent when its debounce fires, when
+  // the page's Save asks for it, or when this section is left.
+  const writePending = (announce: boolean): Promise<WriteOutcome | 'idle'> => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = null
+    const next = pendingRef.current
+    const save = saveAppSettingsRef.current
+    if (!next || typeof save !== 'function') return writeChainRef.current.then(() => 'idle' as const)
+    pendingRef.current = null
+    writingRef.current += 1
+    const run = writeChainRef.current.then(async (): Promise<WriteOutcome> => {
+      let outcome: WriteOutcome = 'failed'
+      try {
+        const answer = settingsSaveOutcome(await save(
+          { receipt_print_settings: JSON.stringify(next) },
+          {
+            silentToast: true,
+            refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+            reason: 'receipt-print-settings-saved',
+            source: 'receipt-settings:print',
+          },
+        ))
+        if (answer === 'saved' || answer === 'unchanged') outcome = answer
+      } catch (_) {
+        outcome = 'failed'
+      }
+      if (announce && outcome === 'saved') saveRegistryRef.current?.markSilentSaved()
+      if (announce && outcome === 'failed') notifyRef.current?.(tRef.current('settings_save_failed_kept', 'Settings were not saved. Your changes are still here.'), 'error')
+      return outcome
+    })
+    writeChainRef.current = run
+    return run.finally(() => { writingRef.current -= 1 })
+  }
 
   useEffect(() => {
+    if (pendingRef.current || writingRef.current > 0) return
     try {
       setPs(getPrintSettings(settings))
     } catch (_) {
@@ -168,27 +219,19 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     }
   }, [settings?.receipt_print_settings])
 
+  useEffect(() => saveRegistry?.registerPrintFlusher(() => writePending(false)), [saveRegistry])
+
   useEffect(() => () => {
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    if (pendingRef.current) void writePending(true)
   }, [])
 
   const persistPrintSettings = (next: ReceiptPrintSettings) => {
     if (typeof saveAppSettings !== 'function') return
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    pendingRef.current = next
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
     saveTimerRef.current = window.setTimeout(() => {
-      // saveSettings answers a failed write instead of throwing; a silent
-      // autosave that failed must still say so.
-      void Promise.resolve(saveAppSettings(
-        { receipt_print_settings: JSON.stringify(next) },
-        {
-          silentToast: true,
-          refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
-          reason: 'receipt-print-settings-saved',
-          source: 'receipt-settings:print',
-        },
-      )).then((result) => {
-        if (!settingsSaveSucceeded(result)) notify?.(T('settings_save_failed_kept', 'Settings were not saved. Your changes are still here.'), 'error')
-      }).catch(() => {})
+      saveTimerRef.current = null
+      void writePending(true)
     }, 350)
   }
 

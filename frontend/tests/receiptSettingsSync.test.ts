@@ -4,6 +4,7 @@ import { DEFAULT_RECEIPT_PRINT_SETTINGS, isReceiptCardPaper, normalizeReceiptPri
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
+const receiptSaverSource = fs.readFileSync(new URL('../src/utils/receiptSettingsSaver.ts', import.meta.url), 'utf8')
 const printSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/PrintSettings.tsx', import.meta.url), 'utf8')
 const receiptPreviewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
@@ -17,10 +18,11 @@ assert.match(appContextSource, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/)
 assert.match(appContextSource, /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(changed, sendOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/)
 assert.match(appContextSource, /else notify\(t\('settings_saved'\)\)/)
 
-assert.match(receiptSettingsSource, /silentToast:\s*true,/)
-assert.match(receiptSettingsSource, /manualSaveNotice\(outcome, savedSilentlyRef\.current\)/)
-assert.match(receiptSettingsSource, /reason:\s*'receipt-template-saved'/)
-assert.match(receiptSettingsSource, /source:\s*options\.showToast \? 'receipt-settings:manual-save' : 'receipt-settings:auto-save'/)
+assert.match(receiptSaverSource, /silentToast:\s*true,/)
+assert.match(receiptSaverSource, /manualSaveNotice\(wrote \? 'saved' : 'unchanged', silentSaves\)/)
+assert.match(receiptSaverSource, /reason:\s*'receipt-template-saved'/)
+assert.match(receiptSaverSource, /source:\s*force \? 'receipt-settings:manual-save' : 'receipt-settings:auto-save'/)
+assert.match(receiptSettingsSource, /await saver\.manualSave\(\)/, 'the Save button runs the saver')
 assert.match(receiptSettingsSource, /buildAppliedReceiptConfig/)
 
 assert.match(printSettingsSource, /receipt_print_settings/)
