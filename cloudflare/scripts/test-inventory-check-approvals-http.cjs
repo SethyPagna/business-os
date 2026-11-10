@@ -24,8 +24,11 @@ function load(file) {
   return module.exports
 }
 const { APPROVAL_CLAIM_HELD_SQL, APPROVAL_CLAIM_LOST } = load(path.join(__dirname, '../src/lib/stockMutationReceipt.ts'))
-// The stock writer double: the Set sessions' commit. It enforces the line cap, refuses what the test says to refuse, and applies a Set to the tables the stock reader reads.
-const writer = { cap: 24, fail: new Set(), calls: [], replays: 0, afterWrite: null, beforeLine: null }
+// The stock writer double: the Set sessions' commit, standing in for the lot-level Set writer (lib/stockLotAdjustment.ts). It enforces the line cap, refuses what the test says to refuse, and applies
+// a Set WITH A VARIANCE exactly as the real writer does: the target is max(0, live + counted - seen) of the lot (or of the branch, for a branch-total line), computed here from the quantity it reads, and
+// it answers with the before and after figures, the variance and the operation it recorded (the real writer's answer; the real writer itself is exercised in
+// scripts/test-inventory-check-approval-lines-native.cjs and scripts/test-inventory-check-approvals-world-native.cjs).
+const writer = { cap: 24, fail: new Set(), calls: [], replays: 0, afterWrite: null, beforeLine: null, operations: 0 }
 cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { runStockInCommit: async (c, lines) => {
   assert.ok(c.get('user'), 'the approver is the acting user')
   const results = []
@@ -41,31 +44,33 @@ cache.set(path.join(__dirname, '../src/routes/stockInCommit.ts'), { exports: { r
     assert.equal(line.wire, 'adjust'); assert.match(body.client_request_id, /^[A-Za-z0-9_-]{8,120}$/); assert.ok(body.reason.length > 0 && body.reason.length < 200)
     // The stock writers' receipt: per approver and request id, the same request is replayed, a different one under the same id is refused.
     const canonical = JSON.stringify(body)
-    const receipt = db.prepare('SELECT request_json FROM stock_mutation_receipts WHERE actor_id=? AND request_id=?').get(actor, body.client_request_id)
+    const receipt = db.prepare('SELECT request_json,response_json FROM stock_mutation_receipts WHERE actor_id=? AND request_id=?').get(actor, body.client_request_id)
     if (receipt) {
       if (receipt.request_json !== canonical) { results.push({ ok: false, key: line.key, error: 'used for different data', code: 'idempotency_conflict' }); continue }
-      writer.replays++; results.push({ ok: true, key: line.key, success: true, replayed: true }); continue
+      writer.replays++; results.push({ ok: true, key: line.key, ...JSON.parse(receipt.response_json || '{}'), success: true, replayed: true }); continue
     }
     if (writer.fail.has(body.productId)) { results.push({ ok: false, key: line.key, error: 'Stock changed while saving.', code: 'stock_changed' }); continue }
     writer.calls.push(JSON.parse(JSON.stringify(body)))
-    const ordinary = db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?').get(body.productId, body.branchId).quantity
-    let delta
-    if (body.type === 'remove') {
-      assert.equal(body.setScope, undefined); assert.ok(body.quantity > 0)
-      if (body.quantity > ordinary) { results.push({ ok: false, key: line.key, error: 'Insufficient stock', code: 'insufficient_stock' }); continue }
-      delta = -body.quantity
-    } else {
-      assert.equal(body.type, 'set'); assert.equal(body.setScope, 'branch', 'raising uses the lot-level Set writer'); assert.equal(typeof body.batchId, 'number')
-      if (body.expectedBranchQuantity !== ordinary) { results.push({ ok: false, key: line.key, error: 'Stock changed since this received date was loaded.', code: 'stock_conflict' }); continue }
-      delta = body.quantity - ordinary; assert.ok(delta > 0)
+    assert.equal(body.type, 'set'); assert.ok(body.setScope === 'lot' || body.setScope === 'branch'); assert.equal(typeof body.batchId, 'number'); assert.equal(body.quantity, undefined, 'a variance line carries no figure of its own')
+    assert.ok(Number.isFinite(body.variance.counted) && Number.isFinite(body.variance.seen)); assert.ok(body.approvalClaim, 'a variance is accepted only under an approval claim')
+    const lotRow = db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=?').get(body.batchId, body.branchId)
+    const lotNow = lotRow?.quantity ?? 0, branchNow = db.prepare('SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=?').get(body.productId, body.branchId).quantity
+    const wanted = (body.setScope === 'lot' ? lotNow : branchNow) + body.variance.counted - body.variance.seen, target = Math.max(0, wanted)
+    if (Math.abs(target - Math.round(target)) > 1e-9) { results.push({ ok: false, key: line.key, error: 'not whole', code: 'inventory_check_target_not_whole' }); continue }
+    const lotDelta = body.setScope === 'lot' ? target - lotNow : target - branchNow
+    if (lotNow + lotDelta < 0) { results.push({ ok: false, key: line.key, error: 'The selected received date does not have enough stock.', code: 'selected_lot_unavailable' }); continue }
+    const branchAfter = body.setScope === 'lot' ? Math.max(0, branchNow + lotDelta) : target
+    if (lotDelta !== 0) {
+      db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=?').run(body.batchId, body.branchId, lotNow + lotDelta, lotNow + lotDelta)
+      db.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?').run(branchAfter, body.productId, body.branchId)
+      db.prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?').run(branchAfter - branchNow, body.productId)
     }
-    const lot = body.type === 'set' ? body.batchId : db.prepare('SELECT batch_id FROM branch_batch_stock WHERE batch_id IN (SELECT id FROM product_batches WHERE variant_product_id=?) AND branch_id=? AND quantity>0 ORDER BY batch_id').get(body.productId, body.branchId).batch_id
-    db.prepare('UPDATE branch_stock SET quantity=quantity+? WHERE product_id=? AND branch_id=?').run(delta, body.productId, body.branchId)
-    if (delta > 0) db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+?').run(lot, body.branchId, delta, delta)
-    else db.prepare('UPDATE branch_batch_stock SET quantity=quantity+? WHERE batch_id=? AND branch_id=?').run(delta, lot, body.branchId)
-    db.prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?').run(delta, body.productId)
-    db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at) VALUES(?,?,'adjust',?,1,200,'{}',CURRENT_TIMESTAMP)").run(actor, body.client_request_id, canonical)
-    results.push({ ok: true, key: line.key, success: true })
+    const answer = { success: true, branchId: body.branchId, productId: body.productId, batchId: body.batchId, setScope: body.setScope, quantity: Math.abs(lotDelta),
+      before: { lotQuantity: lotNow, branchQuantity: branchNow }, after: { lotQuantity: lotNow + lotDelta, branchQuantity: branchAfter },
+      variance: { counted: body.variance.counted, seen: body.variance.seen, wanted, ...(wanted < 0 ? { clamped: true } : {}) },
+      ...(lotDelta !== 0 ? { operation_id: `op-${++writer.operations}`, action_history_id: writer.operations } : {}) }
+    db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,completed_at) VALUES(?,?,'adjust',?,?,200,?,CURRENT_TIMESTAMP)").run(actor, body.client_request_id, canonical, lotDelta !== 0 ? 1 : 0, JSON.stringify(answer))
+    results.push({ ok: true, key: line.key, ...answer })
   }
   writer.afterWrite?.()
   return results
@@ -124,11 +129,12 @@ function reset() {
   db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910003,1,2)").run()
   writer.cap = 24; writer.fail = new Set(); writer.calls = []; writer.replays = 0; writer.afterWrite = null; failApprovalRecord = false; beforeBatch = null; beforeBatchWhen = null; planEnv = {}; __resetPlanTierCacheForTests(); alerts.length = 0; writer.beforeLine = null
 }
-const setSwitches = (simple, fix) => {
+const setSwitches = (simple, fix, lots) => {
   db.exec("DELETE FROM system_flags WHERE key='read_switches'")
   const switches = {}
   if (simple) switches.ic_simple = simple
   if (fix) switches.ic_fix_stock = fix
+  if (lots) switches.ic_lot_counts = lots
   db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?)").run(JSON.stringify({ epoch: 1, set_at: '2026-11-03T00:00:00.000Z', set_by: 1, switches }))
   resetReadSwitchMemo()
 }
@@ -150,7 +156,9 @@ const moveStock = (id, quantity) => { for (const sql of [`UPDATE branch_stock SE
 const line = (productId, countedQuantity, extra = {}) => ({ productId, countedQuantity, ...extra })
 let groups = 0
 // ONLY=<text> runs the groups whose name contains it (diagnosis only; the gate runs them all).
-const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; await run(); groups++; console.log(`PASS ${name}`) }
+// FROM=<n> skips the first n groups (diagnosis only, after fixing group n).
+let seenGroups = 0
+const check = async (name, run) => { if (process.env.ONLY && !name.includes(process.env.ONLY)) return; if (process.env.FROM && ++seenGroups <= Number(process.env.FROM)) return; await run(); groups++; console.log(`PASS ${name}`) }
 /** A pending approval for one product created behind the API's back, as data from before a rule existed (or a racing submission) would be. */
 const injectPending = (sessionId, productId, { submittedAt = new Date().toISOString(), counted = 3, seen = 5, branchId = 1, organizationId = 1 } = {}) => {
   db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,?,?,'','closed',0,'{\"membership\":\"submission\"}',?,?,?)").run(sessionId, organizationId, branchId, COUNTER, submittedAt, submittedAt, submittedAt)
@@ -174,11 +182,13 @@ const injectClaim = (sessionId, { by = ADMIN, key = 'n1-claim-key-01', plan = {}
   .run(key, by, `-${idleSeconds} seconds`, JSON.stringify(plan), sessionId)
 const idle = seconds => db.prepare("UPDATE inventory_check_approvals SET applying_at=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)").run(`-${seconds} seconds`)
 /** The stock writers' receipt of one line: written = 1 when the write landed, 0 for a request that claimed the id and has not written. */
-const receipt = (actor, requestId, { written = 1, ageSeconds = 0 } = {}) => db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,created_at) VALUES(?,?,'adjust','{}',?,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
-  .run(actor, requestId, written, written ? 200 : null, written ? '{}' : null, `-${ageSeconds} seconds`)
+// `answer`: what the writer answered (the figures the approval records for a line whose write landed but was never recorded); by default the line went from 5 to 3.
+const receipt = (actor, requestId, { written = 1, ageSeconds = 0, answer = { before: { lotQuantity: 5, branchQuantity: 5 }, after: { lotQuantity: 3, branchQuantity: 3 } } } = {}) => db.prepare("INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json,written,response_status,response_json,created_at) VALUES(?,?,'adjust','{}',?,?,?,strftime('%Y-%m-%d %H:%M:%S','now',?))")
+  .run(actor, requestId, written, written ? 200 : null, written ? JSON.stringify(answer) : null, `-${ageSeconds} seconds`)
 const deactivate = id => db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(id)
 const eventOf = requestId => { const event = db.prepare('SELECT before_json,after_json FROM inventory_check_events WHERE request_id=?').get(requestId); return event && { before: JSON.parse(event.before_json), after: JSON.parse(event.after_json) } }
-const planOf = (before, target, counted) => ({ before, target, counted, damaged: 0 })
+// What a line is sent with: the received date (here the product's own, whose id is the product's), what was counted and what the counter saw.
+const planOf = (productId, seen, counted) => ({ lot: productId, scope: 'branch', counted, seen })
 
 /** A product merged into another the way a merge leaves it: its stock moved to the survivor, the product and its received dates retired. */
 const mergeInto = (from, into) => {
@@ -337,14 +347,16 @@ async function main() {
     assert.equal(ordinary(910001), 5, 'a matching count is never written')
     assert.equal(writer.calls.length, 3)
     const bodies = Object.fromEntries(writer.calls.map(call => [call.productId, call]))
-    assert.deepEqual({ type: bodies[910002].type, quantity: bodies[910002].quantity, setScope: bodies[910002].setScope }, { type: 'remove', quantity: 2, setScope: undefined })
-    assert.deepEqual({ quantity: bodies[910003].quantity, setScope: bodies[910003].setScope, batchId: bodies[910003].batchId, expected: bodies[910003].expectedBranchQuantity }, { quantity: 10, setScope: 'branch', batchId: 910003, expected: 5 })
-    assert.equal(bodies[910002].client_request_id, 'approve-request-01-910002'); assert.match(bodies[910003].reason, /counted 12, 2 damaged/)
+    assert.deepEqual({ type: bodies[910002].type, setScope: bodies[910002].setScope, batchId: bodies[910002].batchId, variance: bodies[910002].variance, quantity: bodies[910002].quantity }, { type: 'set', setScope: 'branch', batchId: 910002, variance: { counted: 3, seen: 5 }, quantity: undefined }, 'a line is told what the count found, never the figure to write')
+    assert.deepEqual({ setScope: bodies[910003].setScope, batchId: bodies[910003].batchId, variance: bodies[910003].variance, expected: bodies[910003].expectedBranchQuantity }, { setScope: 'branch', batchId: 910003, variance: { counted: 12, seen: 7 }, expected: undefined })
+    assert.equal(bodies[910002].client_request_id, 'approve-request-01-910002'); assert.match(bodies[910003].reason, /^Inventory check approved: counted 12$/)
     const row = approvalRow()
     assert.deepEqual({ status: row.status, decided_by: row.decided_by, decided_by_name: row.decided_by_name, decision_note: row.decision_note, decision_request_id: row.decision_request_id }, { status: 'approved', decided_by: ADMIN, decided_by_name: 'admin-one', decision_note: 'Counted twice', decision_request_id: 'approve-request-01' })
     assert.match(row.decided_at, /^\d{4}-\d{2}-\d{2}T/)
     assert.deepEqual(Object.keys(JSON.parse(row.applied_json).lines).sort(), ['910002', '910003', '910004'])
-    assert.deepEqual(JSON.parse(row.applied_json).lines['910003'], { before: 5, target: 10, after: 10, at: JSON.parse(row.applied_json).lines['910003'].at })
+    const recorded = JSON.parse(row.applied_json).lines['910003']
+    assert.deepEqual({ before: recorded.before, target: recorded.target, after: recorded.after }, { before: 5, target: 10, after: 10 })
+    assert.deepEqual(recorded.lots.map(lot => ({ batchId: lot.batchId, scope: lot.scope, before: lot.before, after: lot.after, counted: lot.counted, seen: lot.seen, history: Number.isSafeInteger(lot.historyId) })), [{ batchId: 910003, scope: 'branch', before: 5, after: 10, counted: 12, seen: 7, history: true }], 'what moved, and the history row that can undo it')
     const items = db.prepare('SELECT product_id,state,counted_quantity,reason,revision,updated_by FROM inventory_check_items ORDER BY product_id').all().map(item => ({ ...item }))
     assert.deepEqual(items, [
       { product_id: 910001, state: 'done', counted_quantity: 5, reason: null, revision: 1, updated_by: COUNTER },
@@ -430,8 +442,9 @@ async function main() {
     const done = await decide(id, {})
     assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.done, true)
     assert.equal(ordinary(910002), 2, 'live 4 + (counted 3 - saw 5) = 2')
-    assert.deepEqual(writer.calls.map(call => ({ type: call.type, quantity: call.quantity })), [{ type: 'remove', quantity: 2 }], 'the variance the count found (3 against the 5 it saw) is removed from the stock of now')
-    assert.deepEqual(JSON.parse(approvalRow().applied_json).lines['910002'], { before: 4, target: 2, after: 2, at: JSON.parse(approvalRow().applied_json).lines['910002'].at })
+    assert.deepEqual(writer.calls.map(call => ({ type: call.type, setScope: call.setScope, variance: call.variance, quantity: call.quantity })), [{ type: 'set', setScope: 'branch', variance: { counted: 3, seen: 5 }, quantity: undefined }], 'the writer is told what the count found (3 against the 5 it saw), and computes the figure from the stock of now')
+    const recorded = JSON.parse(approvalRow().applied_json).lines['910002']
+    assert.deepEqual({ before: recorded.before, target: recorded.target, after: recorded.after }, { before: 4, target: 2, after: 2 }, 'the approval records the before and after the writer answered with')
     // The same sale happened between loading the page and submitting: the stock the server holds (4) differs from what the counter saw (5), so the count is a recount (N3), never measured from a stale screen.
     reset(); setSwitches('on', 'on'); moveStock(910002, 4)
     const earlier = await submit([line(910002, 3, { seenQuantity: 5 })])
@@ -440,17 +453,19 @@ async function main() {
     reset(); setSwitches('on', 'on'); moveStock(910002, 24)
     const raise = await submit([line(910002, 26, { seenQuantity: 24 })]); moveStock(910002, 23)
     assert.equal((await decide(raise.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 25)
-    assert.deepEqual({ type: writer.calls[0].type, quantity: writer.calls[0].quantity, expected: writer.calls[0].expectedBranchQuantity }, { type: 'set', quantity: 25, expected: 23 })
+    assert.deepEqual({ type: writer.calls[0].type, variance: writer.calls[0].variance, expected: writer.calls[0].expectedBranchQuantity }, { type: 'set', variance: { counted: 26, seen: 24 }, expected: undefined }, 'a raise is a guarded lot-level Set, pinned inside the writer, never by a figure the engine read')
     // A sale that takes more than the count found never goes below zero.
     reset(); setSwitches('on', 'on')
     const empty = await submit([line(910002, 0, { seenQuantity: 5 })]); moveStock(910002, 3)
     assert.equal((await decide(empty.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 0, 'max(0, 3 + 0 - 5)')
-    // Everything the count found has already left the shelf (a sale took the last units): there is nothing to remove, so nothing is written and nothing is claimed; the line is recorded as settled.
+    // Everything the count found has already left the shelf (a sale took the last units): the writer, asked under the claim, finds nothing to write (max(0, 0 + 3 - 5) is 0, the stock it read), and the line is
+    // recorded with that: not silent (clamped, with the figure wanted) and not a write (before and after are both 0, no operation to undo).
     reset(); setSwitches('on', 'on')
     const same = await submit([line(910002, 3, { seenQuantity: 5 })]); const sameId = same.body.item.id; moveStock(910002, 0)
     const settled = await decide(sameId, {})
-    assert.equal(settled.status, 200); assert.equal(settled.body.done, true); assert.equal(writer.calls.length, 0); assert.equal(ordinary(910002), 0)
-    assert.equal(JSON.parse(approvalRow().applied_json).lines['910002'].settled, true); assert.equal(approvalRow().applying_request_id, null, 'nothing was written, so nothing was claimed')
+    assert.equal(settled.status, 200); assert.equal(settled.body.done, true); assert.equal(ordinary(910002), 0)
+    const nothing = JSON.parse(approvalRow().applied_json).lines['910002']
+    assert.deepEqual({ before: nothing.before, after: nothing.after, clamped: nothing.clamped, wanted: nothing.wanted, operation: nothing.lots[0].operationId }, { before: 0, after: 0, clamped: true, wanted: -2, operation: undefined })
     // A viewer who could not see stock is measured against the stock at submit (the same variance, with that figure as the baseline).
     reset(); setSwitches('on', 'on')
     const blind = await submit([line(910002, 3)], { requestId: 'blind-request-02' }, BLIND); moveStock(910002, 4)
@@ -458,21 +473,17 @@ async function main() {
     assert.equal((await decide(blind.body.item.id, {})).status, 200); assert.equal(ordinary(910002), 2)
   })
 
-  await check('what cannot be applied safely is refused before any write, line by line: inconsistent stock, a fractional target, a raise with no received date', async () => {
+  await check('what cannot be applied safely is refused before any write, line by line: a fractional target, a raise with no received date, no recorded baseline; the stock ledger is never read or verified', async () => {
     reset(); setSwitches('on', 'on')
     let made = await standard(); let id = made.body.item.id
+    // The owner's rule: a count Sets what the count found. A drifted product cache (99) is neither verified nor refused: every line is applied from the figures of its own count and the writer's own read.
     db.exec('UPDATE products SET stock_quantity=99 WHERE id=910002')
-    // One bad line no longer keeps the rest from being applied: the two healthy lines land, the answer names the refused one, and the next request has nothing it can apply.
-    const partly = await decide(id, {})
-    assert.equal(partly.status, 200, JSON.stringify(partly.body)); assert.equal(partly.body.applied, 2); assert.equal(partly.body.remaining, 1); assert.equal(partly.body.done, false)
-    assert.deepEqual(partly.body.refused, [{ productId: 910002, code: 'inventory_check_stock_inconsistent' }])
-    assert.equal(writer.calls.length, 2, 'the healthy lines were written'); assert.deepEqual(writer.calls.map(call => call.productId), [910003, 910004])
-    let refused = await decide(id, {})
-    assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_stock_inconsistent'); assert.deepEqual(refused.body.productIds, [910002])
-    assert.deepEqual(refused.body.refused, [{ productId: 910002, code: 'inventory_check_stock_inconsistent' }]); assert.equal(writer.calls.length, 2)
+    const all = await decide(id, {})
+    assert.equal(all.status, 200, JSON.stringify(all.body)); assert.equal(all.body.applied, 3); assert.equal(all.body.remaining, 0); assert.equal(all.body.done, true); assert.equal('refused' in all.body, false)
+    assert.deepEqual(writer.calls.map(call => call.productId), [910002, 910003, 910004])
     reset(); setSwitches('on', 'on')
     made = await submit([line(910002, 2.5)]); id = made.body.item.id
-    refused = await decide(id, {})
+    let refused = await decide(id, {})
     assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_target_not_whole'); assert.deepEqual(refused.body.productIds, [910002])
     reset(); setSwitches('on', 'on')
     // A product with no stock and no live received date (its only lot was emptied and closed) cannot be raised by a lot-level Set.
@@ -481,12 +492,13 @@ async function main() {
     refused = await decide(id, {})
     assert.equal(refused.status, 409); assert.equal(refused.body.code, 'inventory_check_no_lot'); assert.deepEqual(refused.body.productIds, [910004])
     assert.equal(writer.calls.length, 0); assert.equal(approvalRow().status, 'pending')
-    // A count below the damaged units cannot be true (they are on the shelf too): refused clearly, nothing written.
+    // A count below the damaged units is applied like any other: damaged units are tagged stock the count never touches, and the floor holds the shortage back, told (clamped, with the figure wanted).
     reset(); setSwitches('on', 'on')
     made = await submit([line(910003, 1)])
     const low = await decide(made.body.item.id, {})
-    assert.equal(low.status, 409); assert.equal(low.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(low.body.productIds, [910003])
-    assert.equal(writer.calls.length, 0); assert.equal(ordinary(910003), 5); assert.equal(approvalRow().status, 'pending'); assert.equal(approvalRow().applying_request_id, null)
+    assert.equal(low.status, 200, JSON.stringify(low.body)); assert.equal(ordinary(910003), 0, 'max(0, 5 + 1 - 7)')
+    assert.equal(db.prepare('SELECT quantity_remaining AS q FROM damaged_stock_lots WHERE product_id=910003').get().q, 2, 'the damaged units are untouched')
+    assert.deepEqual({ clamped: low.body.approval.applied_lines['910003'].clamped, wanted: low.body.approval.applied_lines['910003'].wanted }, { clamped: true, wanted: -1 })
     // An approval with no recorded baseline for a line (a row from before baselines were kept) is refused for that line, not guessed.
     reset(); setSwitches('on', 'on')
     made = await submit([line(910002, 3)])
@@ -639,7 +651,7 @@ async function main() {
     assert.deepEqual([await held(910002), await held(910003), await held(910004)], [true, true, true], 'every difference of a waiting count is held')
     assert.equal(await held(910001), false, 'a line that matched has nothing to fix'); assert.equal(await held(910009), false, 'nor a product that is not in the count')
     assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${id.split('').reverse().join('')}_910002_a1b2c3d4e5f60718`), false, 'nor a count that does not exist')
-    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), 'stockline_a1b2c3d4e5f60718'), false, 'a request that names no count is never held')
+    assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), 'stockline_a1b2c3d4e5f60718'), false, 'a request that names no count is never held by itself: only the product-wide ask (a scoped Set) holds it')
     await decide(id, {})
     assert.deepEqual([await held(910002), await held(910003), await held(910004)], [false, true, true], 'a line already applied is released; the rest stay held')
     writer.cap = 24; await decide(id, {})
@@ -648,9 +660,9 @@ async function main() {
     const rejected = await standard()
     await decide(rejected.body.item.id, { decision: 'reject', requestId: 'reject-request-01' })
     assert.equal(await fixStockHeldByApproval(getDb({ DB: binding() }), `icfix_${rejected.body.item.id}_910002_a1b2c3d4e5f60718`), false, 'a rejected count leaves the Issue to be fixed by hand')
-    // The adjust kernel asks before it claims a receipt, and only for such an id.
+    // The adjust kernel asks before it claims a receipt: for an id that names a count, and (G3) for every scoped Set whatever its id is.
     const kernel = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.ts'), 'utf8')
-    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,700}startsWith\('icfix_'\)[\s\S]{0,700}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
+    assert.ok(/stockMutationRequestIdMissing\(body\)\) return[^\n]*\r?\n[\s\S]{0,1800}startsWith\('icfix_'\)[\s\S]{0,900}if \(\(scopedSet \|\| namesCount\) && !underClaim\)[\s\S]{0,1600}return withStockMutationReceipt\(/.test(kernel), 'the hold sits after the id check and before the receipt claim')
   })
 
   await check('the approval cannot be forged around the API: its rows are immutable once decided and never deleted', async () => {
@@ -806,7 +818,7 @@ async function main() {
     // A claim lands between the submission's check and its commit (the guard sits in the same atomic batch, ahead of the replacement).
     reset(); setSwitches('on', 'on')
     const first = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n2q-race-00001' })
-    beforeBatch = () => injectClaim(first.body.item.id, { plan: { 910002: planOf(5, 3, 3) } })
+    beforeBatch = () => injectClaim(first.body.item.id, { plan: { 910002: planOf(910002, 5, 3) } })
     const racing = await submit([line(910002, 2, { seenQuantity: 5 })], { requestId: 'n2q-race-00002' }, LEAD)
     assert.equal(racing.status, 409, JSON.stringify(racing.body)); assert.equal(racing.body.code, 'inventory_check_count_in_progress'); assert.deepEqual(racing.body.productIds, [910002])
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM inventory_check_sessions').get().n, 1, 'the losing submission left nothing behind'); assert.deepEqual(supersededOf(first.body.item.id), {})
@@ -892,41 +904,41 @@ async function main() {
     assert.equal(done.body.approval.applied_lines['910002'].clamped, true); assert.equal(done.body.approval.applied_lines['910002'].wanted, -4)
     const event = db.prepare("SELECT after_json FROM inventory_check_events WHERE product_id=910002 AND request_id LIKE 'n4-approve-004-%'").get()
     assert.equal(JSON.parse(event.after_json).clamped, true); assert.equal(JSON.parse(event.after_json).wanted, -4)
-    // Nothing left to remove at all (the sale took every unit): settled, and still not silent.
+    // Nothing left to remove at all (the sale took every unit): the writer finds nothing to write, and the line still says what the floor held back.
     reset(); setSwitches('on', 'on')
     const empty = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-empty-00001' }); moveStock(910002, 0)
     assert.equal((await decide(empty.body.item.id, { requestId: 'n4-approve-005' })).status, 200)
     const settled = JSON.parse(approvalRow().applied_json).lines['910002']
-    assert.deepEqual({ settled: settled.settled, clamped: settled.clamped, wanted: settled.wanted }, { settled: true, clamped: true, wanted: -2 })
+    assert.deepEqual({ before: settled.before, after: settled.after, clamped: settled.clamped, wanted: settled.wanted }, { before: 0, after: 0, clamped: true, wanted: -2 })
     // A count the stock took fully (live 4, saw 5, counted 3: 2) is not marked.
     reset(); setSwitches('on', 'on')
     const plain = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n4-plain-00001' }); moveStock(910002, 4)
     assert.equal((await decide(plain.body.item.id, { requestId: 'n4-approve-006' })).status, 200)
-    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines['910002']).sort(), ['after', 'at', 'before', 'target'])
+    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).lines['910002']).sort(), ['after', 'at', 'before', 'lots', 'target'], 'a line the stock took fully carries no clamp mark')
   })
 
   await check('N1: a line that cannot be applied is refused on its own, and the answer says which; the others are applied', async () => {
-    // Damaged units tagged after line 1 (the probe): that line is refused with its reason every time, the other lines are not held back by it.
+    // A hand correction of line 2's product after the count (the probe): that line is refused with its reason every time, the other lines are not held back by it.
     reset(); setSwitches('on', 'on')
     const made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 1, { seenQuantity: 5 }), line(910005, 4, { seenQuantity: 5 })], { requestId: 'n1-line-by-line' })
-    db.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910004,1,2)').run()
+    movement(910004, 'set')
     const first = await decide(made.body.item.id, { requestId: 'n1-line-approve' })
     assert.equal(first.status, 200, JSON.stringify(first.body)); assert.equal(first.body.applied, 2); assert.equal(first.body.remaining, 1); assert.equal(first.body.done, false)
-    assert.deepEqual(first.body.refused, [{ productId: 910004, code: 'inventory_check_count_below_damaged' }])
+    assert.deepEqual(first.body.refused, [{ productId: 910004, code: 'inventory_check_stock_adjusted' }])
     assert.deepEqual([ordinary(910002), ordinary(910004), ordinary(910005)], [3, 5, 4], 'the healthy lines landed, the refused one did not move')
     const second = await decide(made.body.item.id, { requestId: 'n1-line-approve' })
-    assert.equal(second.status, 409); assert.equal(second.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(second.body.productIds, [910004])
-    assert.deepEqual(second.body.refused, [{ productId: 910004, code: 'inventory_check_count_below_damaged' }])
+    assert.equal(second.status, 409); assert.equal(second.body.code, 'inventory_check_stock_adjusted'); assert.deepEqual(second.body.productIds, [910004])
+    assert.deepEqual(second.body.refused, [{ productId: 910004, code: 'inventory_check_stock_adjusted' }])
     assert.equal(approvalRow().status, 'pending'); assert.equal(writer.calls.length, 2, 'asking again writes nothing')
     // Mixed reasons are all named, the most fundamental first.
     reset(); setSwitches('on', 'on')
     const mixed = await submit([line(910002, 3, { seenQuantity: 5 }), line(910003, 1, { seenQuantity: 7 }), line(910004, 2.5, { seenQuantity: 5 })], { requestId: 'n1-mixed-0001' })
+    movement(910003, 'adjustment')
     const refusedAll = await decide(mixed.body.item.id, { requestId: 'n1-mixed-approve' })
-    db.exec('UPDATE products SET stock_quantity=99 WHERE id=910002') // inconsistent from now on
     const again = await decide(mixed.body.item.id, { requestId: 'n1-mixed-approve' })
     assert.equal(refusedAll.status, 200, 'the line that can be applied goes first')
-    assert.equal(again.status, 409); assert.deepEqual(again.body.refused.map(entry => entry.code), ['inventory_check_count_below_damaged', 'inventory_check_target_not_whole'])
-    assert.equal(again.body.code, 'inventory_check_count_below_damaged'); assert.deepEqual(again.body.productIds, [910003])
+    assert.equal(again.status, 409); assert.deepEqual(again.body.refused.map(entry => entry.code), ['inventory_check_target_not_whole', 'inventory_check_stock_adjusted'])
+    assert.equal(again.body.code, 'inventory_check_target_not_whole'); assert.deepEqual(again.body.productIds, [910004])
   })
 
   await check('N1: an approval whose claimer is gone is taken over by another approver: the receipts say what landed, the rest is sent under the new approver\'s own key, never the old one', async () => {
@@ -988,7 +1000,7 @@ async function main() {
     // A receipt that wrote nothing (a request still running, or one that crashed) says nothing and holds nobody back: the claim moves with the takeover, so that request can no longer write (R1), and the line is planned again.
     reset(); setSwitches('on', 'on')
     id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-flight-sub-1' })).body.item.id
-    injectClaim(id, { key: 'n1-flight-key-01', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-flight-key-01-910002', { written: 0, ageSeconds: 10 }); deactivate(ADMIN)
+    injectClaim(id, { key: 'n1-flight-key-01', plan: { 910002: planOf(910002, 5, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-flight-key-01-910002', { written: 0, ageSeconds: 10 }); deactivate(ADMIN)
     const running = await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)
     assert.equal(running.status, 200, JSON.stringify(running.body)); assert.equal(running.body.takeover, true); assert.equal(running.body.applied, 0, 'it wrote nothing, so it is planned again'); assert.equal(approvalRow().applying_by, LEAD)
     assert.equal((await decide(id, { requestId: 'n1-flight-lead-1' }, LEAD)).status, 200); assert.equal(ordinary(910002), 3); assert.equal(writer.calls.length, 1)
@@ -996,28 +1008,28 @@ async function main() {
   })
 
   await check('N1: a claimed approval that cannot be finished can be closed by any approver: no stock moves, what landed stays applied, the rest is recorded as not applied with its reason', async () => {
-    // Damaged units tagged after line 1 (the probe): refused every time, cannot be rejected after line 1 landed; Close ends it.
+    // A hand correction of line 2's product after line 1 (the probe): refused every time, cannot be rejected after line 1 landed; Close ends it.
     reset(); setSwitches('on', 'on'); writer.cap = 1
     let made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 1, { seenQuantity: 5 })], { requestId: 'n1-close-sub-01' }); let id = made.body.item.id
     assert.equal((await decide(id, { requestId: 'n1-close-first' })).status, 200)
-    db.prepare('INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910004,1,2)').run()
+    movement(910004, 'set')
     const stuck = await decide(id, { requestId: 'n1-close-first' })
-    assert.equal(stuck.status, 409); assert.equal(stuck.body.code, 'inventory_check_count_below_damaged')
+    assert.equal(stuck.status, 409); assert.equal(stuck.body.code, 'inventory_check_stock_adjusted')
     assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-close-reject' })).status, 409, 'rejecting after a line landed is still refused')
     const tables = () => stockRows().slice(0, 5), before = tables(), writes = writer.calls.length
-    const underActiveClaimer = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'Damaged units were tagged' }, LEAD)
+    const underActiveClaimer = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'A hand correction was made' }, LEAD)
     assert.equal(underActiveClaimer.status, 409); assert.equal(underActiveClaimer.body.code, 'inventory_check_approval_in_progress', 'another approver closes only once the claimer is gone'); assert.equal(approvalRow().status, 'pending')
     idle(1000)
-    const closed = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'Damaged units were tagged' }, LEAD)
+    const closed = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1', note: 'A hand correction was made' }, LEAD)
     assert.equal(closed.status, 200, JSON.stringify(closed.body)); assert.equal(closed.body.done, true); assert.equal(closed.body.approval.status, 'approved', 'something was applied')
-    assert.deepEqual(closed.body.approval.closed, { lines: { 910004: 'inventory_check_count_below_damaged' } }); assert.equal(closed.body.approval.applied, 1)
+    assert.deepEqual(closed.body.approval.closed, { lines: { 910004: 'inventory_check_stock_adjusted' } }); assert.equal(closed.body.approval.applied, 1)
     assert.deepEqual(tables(), before, 'no stock table changed')
     assert.equal(writer.calls.length, writes, 'closing writes no stock'); assert.deepEqual([ordinary(910002), ordinary(910004)], [3, 5])
     const row = approvalRow()
-    assert.deepEqual({ status: row.status, by: row.decided_by, key: row.decision_request_id, note: row.decision_note, plan: row.plan_json }, { status: 'approved', by: LEAD, key: 'n1-close-lead-1', note: 'Damaged units were tagged', plan: '{}' })
+    assert.deepEqual({ status: row.status, by: row.decided_by, key: row.decision_request_id, note: row.decision_note, plan: row.plan_json }, { status: 'approved', by: LEAD, key: 'n1-close-lead-1', note: 'A hand correction was made', plan: '{}' })
     assert.deepEqual(Object.keys(JSON.parse(row.applied_json).lines), ['910002']); assert.equal(db.prepare("SELECT state FROM inventory_check_items WHERE product_id=910004").get().state, 'issue', 'the line not applied is still a difference')
     const audit = eventOf('n1-close-lead-1')
-    assert.deepEqual({ approval: audit.after.approval, closed: audit.after.closed, applied: audit.after.applied, notApplied: audit.after.not_applied }, { approval: 'approved', closed: true, applied: 1, notApplied: { 910004: 'inventory_check_count_below_damaged' } })
+    assert.deepEqual({ approval: audit.after.approval, closed: audit.after.closed, applied: audit.after.applied, notApplied: audit.after.not_applied }, { approval: 'approved', closed: true, applied: 1, notApplied: { 910004: 'inventory_check_stock_adjusted' } })
     assert.equal(alerts.at(-1).kind, 'approved'); assert.equal(alerts.filter(alert => alert.kind !== 'created').length, 1)
     // Decided and idempotent: the same close again is the same answer, any other decision is refused.
     const replay = await decide(id, { decision: 'close', requestId: 'n1-close-lead-1' }, LEAD)
@@ -1025,7 +1037,7 @@ async function main() {
     assert.equal((await decide(id, { decision: 'approve', requestId: 'n1-close-lead-1' }, LEAD)).status, 409); assert.equal((await decide(id, { decision: 'reject', requestId: 'n1-close-lead-1' }, LEAD)).status, 409)
     assert.equal((await decide(id, { decision: 'close', requestId: 'n1-close-lead-2' }, LEAD)).status, 409, 'closed once')
     // The product is free to be counted again (its count no longer waits).
-    assert.equal((await submit([line(910004, 3, { seenQuantity: 7 })], { requestId: 'n1-close-recount' })).status, 201)
+    assert.equal((await submit([line(910004, 3, { seenQuantity: 5 })], { requestId: 'n1-close-recount' })).status, 201)
 
     // A product merged after line 1 (lowering shortage lost its lot before: no_lot / retired) closes the same way, by the approver himself.
     for (const [name, code, prepare] of [
@@ -1055,7 +1067,7 @@ async function main() {
     // A claimer who is still active holds a close back from other approvers; once he is gone a receipt that wrote nothing does not: the close moves the claim, so that request can no longer write, and nothing was applied.
     reset(); setSwitches('on', 'on')
     id = (await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'n1-fl-close-sub1' })).body.item.id
-    injectClaim(id, { key: 'n1-fl-close-key1', plan: { 910002: planOf(5, 3, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-fl-close-key1-910002', { written: 0, ageSeconds: 10 })
+    injectClaim(id, { key: 'n1-fl-close-key1', plan: { 910002: planOf(910002, 5, 3) }, idleSeconds: 20 }); receipt(ADMIN, 'n1-fl-close-key1-910002', { written: 0, ageSeconds: 10 })
     const busy = await decide(id, { decision: 'close', requestId: 'n1-fl-close-lead' }, LEAD)
     assert.equal(busy.status, 409); assert.equal(busy.body.code, 'inventory_check_approval_in_progress'); assert.equal(approvalRow().status, 'pending')
     idle(1000)
@@ -1205,7 +1217,7 @@ async function main() {
   // Re-review F1: a close compared the plan only through the receipts of the lines it had read in the plan. A line that joins the plan after that read (the plan was '{}' after a takeover
   // or after a refusal; the claimer plans it and writes it) landed in stock while the close recorded it as not applied. The close now commits only if the plan is the one it read.
   const lineJoinsThePlan = (key, productId) => () => {
-    db.prepare('UPDATE inventory_check_approvals SET plan_json=?').run(JSON.stringify({ [productId]: planOf(5, 3, 3) })); moveStock(productId, 3); receipt(ADMIN, `${key}-${productId}`)
+    db.prepare('UPDATE inventory_check_approvals SET plan_json=?').run(JSON.stringify({ [productId]: planOf(productId, 5, 3) })); moveStock(productId, 3); receipt(ADMIN, `${key}-${productId}`)
   }
   await check('F1 G1: the claimer closes in a second tab while the first plans a line that had been refused and writes it: the close is refused, the retry records the line as applied', async () => {
     let made, id, raced
@@ -1243,7 +1255,7 @@ async function main() {
     let made, id, raced
     reset(); setSwitches('on', 'on'); writer.cap = 1
     made = await submit([line(910002, 3, { seenQuantity: 5 }), line(910004, 3, { seenQuantity: 5 })], { requestId: 'f1-land-sub-001' }); id = made.body.item.id
-    const other = JSON.stringify({ 910002: planOf(5, 3, 3), 910004: planOf(5, 2, 2) })
+    const other = JSON.stringify({ 910002: planOf(910002, 5, 3), 910004: planOf(910004, 5, 2) })
     beforeBatchWhen = { test: /SET applied_json=\S+,plan_json=/, run: () => db.prepare('UPDATE inventory_check_approvals SET plan_json=?').run(other) }
     raced = await decide(id, { requestId: 'f1-land-a0001' })
     assert.equal(raced.status, 409, JSON.stringify(raced.body)); assert.equal(raced.body.code, 'inventory_check_conflict')
@@ -1267,7 +1279,7 @@ async function main() {
     // Another request of the same claimer recorded a different plan since: that plan may be written right now, so the release leaves the claim alone.
     reset(); setSwitches('on', 'on'); writer.fail = new Set([910002])
     made = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'f1-rel-sub-0003' }); id = made.body.item.id
-    const replanned = JSON.stringify({ 910002: planOf(5, 2, 2) })
+    const replanned = JSON.stringify({ 910002: planOf(910002, 5, 2) })
     beforeBatchWhen = { test: /applying_request_id=NULL,applying_by=NULL/, run: () => db.prepare('UPDATE inventory_check_approvals SET plan_json=?').run(replanned) }
     assert.equal((await decide(id, { requestId: 'f1-rel-c0001' })).status, 409)
     assert.deepEqual({ key: approvalRow().applying_request_id, plan: approvalRow().plan_json }, { key: 'f1-rel-c0001', plan: replanned }, 'a plan recorded in between is neither cleared nor released')
@@ -1324,6 +1336,104 @@ async function main() {
     assert.equal((await submit([line(910002, 4, { seenQuantity: 5 })], { requestId: 'f3-mixed-000002' }, LEAD)).status, 201)
     assert.equal((await decide(mixed.body.item.id, { decision: 'close', requestId: 'f3-mixed-close01', note: 'Not now' })).status, 200)
     assert.deepEqual({ by: approvalRow().decided_by, note: approvalRow().decision_note }, { by: ADMIN, note: 'Not now' })
+  })
+
+  // ---- INV S6: a count per received date is applied to ITS received date ----------------------------------------------------------------------------------------------
+  /** Migration 0294 on the current database, and product 910001 holding a second received date (batch 920001, 4 units): A = batch 910001 (5), B = batch 920001 (4). */
+  const withDates = () => {
+    db.exec(fs.readFileSync(path.join(__dirname, '../migrations/0294_inventory_check_lot_lines.sql'), 'utf8'))
+    setSwitches('on', 'on', 'on')
+    db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active) VALUES(920001,910001,'batch-920001','2026-10-25',1)").run()
+    db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(920001,1,4)').run()
+    db.exec('UPDATE branch_stock SET quantity=9 WHERE product_id=910001 AND branch_id=1; UPDATE products SET stock_quantity=9 WHERE id=910001')
+  }
+  const lotQty = batch => db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get(batch).quantity
+  const dated = (productId, lots, requestId = 'dated-request-01') => submit([{ productId, lots: lots.map(([batchId, counted, seen]) => ({ batchId, scope: 'lot', counted, seen })) }], { requestId })
+  /** A sale of units from one received date, in every ledger together. */
+  const sell = (batch, productId, units) => { for (const sql of [`UPDATE branch_batch_stock SET quantity=quantity-${units} WHERE batch_id=${batch} AND branch_id=1`, `UPDATE branch_stock SET quantity=quantity-${units} WHERE product_id=${productId} AND branch_id=1`, `UPDATE products SET stock_quantity=stock_quantity-${units} WHERE id=${productId}`]) db.exec(sql) }
+
+  await check('S6: each counted received date is applied to ITS date: A=5, B=4, counted A=5, B=2, one sold from A: A=4, B=2 (first-in first-out would leave A=2, B=4)', async () => {
+    reset(); withDates()
+    const made = await dated(910001, [[910001, 5, 5], [920001, 2, 4]])
+    assert.equal(made.status, 201, JSON.stringify(made.body)); assert.equal(made.body.approval.lines, 1)
+    sell(910001, 910001, 1)
+    const done = await decide(made.body.item.id, {})
+    assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.done, true); assert.equal(done.body.applied, 1)
+    assert.deepEqual([lotQty(910001), lotQty(920001), ordinary(910001)], [4, 2, 6], 'B is Set from what the count found (4 -> 2); the sale from A survives; A, which matched, is never written')
+    assert.deepEqual(writer.calls.map(call => ({ batchId: call.batchId, setScope: call.setScope, variance: call.variance, quantity: call.quantity })), [{ batchId: 920001, setScope: 'lot', variance: { counted: 2, seen: 4 }, quantity: undefined }])
+    const line = JSON.parse(approvalRow().applied_json).lines['910001']
+    assert.deepEqual({ before: line.before, after: line.after, lots: line.lots.map(lot => [lot.batchId, lot.before, lot.after]) }, { before: 8, after: 6, lots: [[920001, 4, 2]] }, 'before and after are the branch figures; the lots say which date moved')
+    assert.ok(Number.isSafeInteger(line.lots[0].historyId) && typeof line.lots[0].operationId === 'string', 'the line carries what undoes it')
+    assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE product_id=910001').get().state, 'done')
+  })
+
+  await check('S6: a product counted on several dates is applied date by date, one line per request on the Free plan, each repeat continuing; a lost answer applies nothing twice', async () => {
+    reset(); withDates(); writer.cap = 1
+    const made = await dated(910001, [[910001, 3, 5], [920001, 2, 4]]); const id = made.body.item.id
+    failApprovalRecord = true
+    const lost = await decide(id, {})
+    assert.equal(lost.status, 503); assert.equal(lost.body.code, 'inventory_check_outcome_unknown')
+    assert.deepEqual([lotQty(910001), lotQty(920001)], [3, 4], 'the first date landed; the answer was lost')
+    failApprovalRecord = false
+    const writes = writer.calls.length
+    const first = await decide(id, {})
+    assert.deepEqual({ applied: first.body.applied, remaining: first.body.remaining, done: first.body.done }, { applied: 1, remaining: 1, done: false })
+    assert.equal(writer.calls.length, writes, 'the date that landed was replayed from its receipt, not applied again'); assert.equal(writer.replays, 1)
+    assert.deepEqual(Object.keys(JSON.parse(approvalRow().applied_json).units), ['910001:910001'], 'what landed of a part-applied product is kept, the product is not recorded yet')
+    assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE product_id=910001').get().state, 'issue', 'still a difference until every date landed')
+    const waiting = (await products('branchId=1&pageSize=12')).body.items.find(item => item.id === 910001)
+    assert.equal(waiting.check_pending, true, 'it still waits: a direct Set stays held')
+    const second = await decide(id, {})
+    assert.deepEqual({ applied: second.body.applied, remaining: second.body.remaining, done: second.body.done, status: second.body.approval.status }, { applied: 1, remaining: 0, done: true, status: 'approved' })
+    assert.deepEqual([lotQty(910001), lotQty(920001), ordinary(910001)], [3, 2, 5], 'each date from its own count, once')
+    const applied = JSON.parse(approvalRow().applied_json)
+    assert.equal(applied.units, undefined, 'the product is recorded whole'); assert.deepEqual(applied.lines['910001'].lots.map(lot => [lot.batchId, lot.before, lot.after]), [[910001, 5, 3], [920001, 4, 2]])
+    assert.deepEqual({ before: applied.lines['910001'].before, after: applied.lines['910001'].after }, { before: 9, after: 5 })
+    assert.deepEqual(writer.calls.map(call => call.client_request_id), ['approve-request-01-910001-910001', 'approve-request-01-910001-920001'], 'one stock request per date, under the key that claimed the approval')
+    assert.equal(db.prepare('SELECT state FROM inventory_check_items WHERE product_id=910001').get().state, 'done')
+  })
+
+  await check('S6: closing an approval keeps what landed of a part-applied product (marked partial) and records nothing as not applied for it', async () => {
+    reset(); withDates(); writer.cap = 1
+    const made = await dated(910001, [[910001, 3, 5], [920001, 2, 4]]); const id = made.body.item.id
+    await decide(id, {})
+    assert.deepEqual([lotQty(910001), lotQty(920001)], [3, 4])
+    const writes = writer.calls.length
+    const closed = await decide(id, { decision: 'close', requestId: 'close-request-01', note: 'Stop here' })
+    assert.equal(closed.status, 200, JSON.stringify(closed.body)); assert.equal(closed.body.approval.status, 'approved'); assert.equal(writer.calls.length, writes, 'closing writes no stock')
+    const line = JSON.parse(approvalRow().applied_json).lines['910001']
+    assert.equal(line.partial, true); assert.deepEqual(line.lots.map(lot => [lot.batchId, lot.before, lot.after]), [[910001, 5, 3]])
+    assert.deepEqual(closed.body.approval.closed, { lines: {} }); assert.deepEqual([lotQty(910001), lotQty(920001)], [3, 4])
+  })
+
+  await check('S6: a claimer who is gone after one date landed (answer lost): the takeover records that date from its receipt and the new approver applies the other under his own key', async () => {
+    reset(); withDates(); writer.cap = 1
+    const made = await dated(910001, [[910001, 3, 5], [920001, 2, 4]]); const id = made.body.item.id
+    failApprovalRecord = true
+    assert.equal((await decide(id, {})).status, 503); failApprovalRecord = false
+    deactivate(ADMIN)
+    const takeover = await decide(id, { requestId: 'takeover-lead-01' }, LEAD)
+    assert.equal(takeover.status, 200, JSON.stringify(takeover.body)); assert.equal(takeover.body.takeover, true); assert.equal(takeover.body.applied, 1)
+    const held = JSON.parse(approvalRow().applied_json).units['910001:910001']
+    assert.deepEqual({ before: held.before, after: held.after, counted: held.counted, seen: held.seen }, { before: 5, after: 3, counted: 3, seen: 5 }, 'recorded from the answer the receipt holds')
+    const finished = await decide(id, { requestId: 'takeover-lead-01' }, LEAD)
+    assert.equal(finished.status, 200, JSON.stringify(finished.body)); assert.equal(finished.body.done, true)
+    assert.deepEqual([lotQty(910001), lotQty(920001)], [3, 2], 'each date once')
+    assert.equal(writer.calls.length, 2); assert.equal(writer.calls[1].client_request_id, 'takeover-lead-01-910001-920001', 'the new approver\'s own key, never the old one')
+  })
+
+  await check('S6: a branch-total line lands on the newest received date holding stock; a count with no dates (older) is the same line', async () => {
+    reset(); withDates()
+    const made = await submit([{ productId: 910001, lots: [{ scope: 'branch', counted: 7, seen: 9 }] }], { requestId: 'branch-total-01' })
+    assert.equal(made.status, 201, JSON.stringify(made.body))
+    sell(910001, 910001, 1)
+    const done = await decide(made.body.item.id, {})
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    assert.deepEqual(writer.calls.map(call => ({ batchId: call.batchId, setScope: call.setScope, variance: call.variance })), [{ batchId: 920001, setScope: 'branch', variance: { counted: 7, seen: 9 } }], 'the newest date holding stock (920001, 25 Oct)')
+    assert.deepEqual([ordinary(910001), lotQty(910001), lotQty(920001)], [6, 4, 2], 'branch 8 + (7 - 9) = 6, taken from that date')
+    const legacy = await submit([line(910002, 3, { seenQuantity: 5 })], { requestId: 'legacy-count-01' })
+    assert.equal((await decide(legacy.body.item.id, { requestId: 'approve-request-02' })).status, 200); assert.equal(ordinary(910002), 3)
+    assert.equal(writer.calls[1].batchId, 910002); assert.equal(writer.calls[1].setScope, 'branch')
   })
 
   console.log(`${groups} groups passed`)

@@ -36,7 +36,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, StockMutationBudgetError, withStockMutationReceipt, executeStockMutationBatch, approvalClaimOf, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1545,11 +1545,23 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   const metrics = (c as unknown as { get(key: string): unknown }).get('requestMetrics') as RequestMetrics | undefined
   const callCounting = (await metrics?.callCounting?.()) === true
-  // Fix stock (ic_fix_stock) names the count it fixes in its request id: while that count waits for approval it is decided first, not settled beside it.
-  // Loaded only for such an id, like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
-  if (typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')) {
-    const { fixStockHeldByApproval, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
-    if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
+  // A direct Set is held while any count of that product at that branch waits for approval (owner rule), whatever the request says: EVERY Set asks (scoped, or the older branch-total Set that is converted to an add or a remove: lot-less Set-session lines and fast stock-in lines arrive that way), and a request that names its
+  // count (icfix_..., Fix stock) is held for that count on any /adjust. The approval's own writes carry their approvalClaim and step over that approval only. Loaded only for such a request,
+  // like the lot writer below, so every other /adjust stays byte-identical. Ahead of the receipt claim: a held request opens none.
+  const scopedSet = body.type === 'set'
+  const namesCount = typeof body.client_request_id === 'string' && body.client_request_id.startsWith('icfix_')
+  // An approval's own variance line (a valid claim) is not asked: queue-first supersedes every older count of the product and refuses a newer one while an approval applies, so no other count of it
+  // can wait, and the claim itself is checked inside the stock batch. That is one hold query fewer for every line of every approval.
+  const underClaim = body.variance !== undefined && body.approvalClaim != null
+  if ((scopedSet || namesCount) && !underClaim) {
+    const { fixStockHeldByApproval, approvalClaimSession, FIX_STOCK_COUNT_PENDING } = await import('../lib/inventoryCheckFixStock')
+    const { readSwitch } = await import('../lib/readSwitches')
+    const productId = Number.parseInt(String(body.productId ?? ''), 10), requestedBranch = Number.parseInt(String(body.branchId ?? ''), 10)
+    // A scoped Set is held product-wide while the counts queue is live (ic_fix_stock); a named count on any other /adjust keeps its ic_lot_counts widening.
+    const productWide = Number.isSafeInteger(productId) && productId > 0 && await readSwitch(c.env, scopedSet ? 'ic_fix_stock' : 'ic_lot_counts')
+    const branchId = Number.isSafeInteger(requestedBranch) && requestedBranch > 0 ? requestedBranch : productWide && scopedSet ? await defaultBranchId(c.env) : null
+    const widened = productWide && branchId ? { productId, branchId, alsoBranchId: branchRedirectTarget(c), exceptSession: approvalClaimSession(body) } : undefined
+    if (await fixStockHeldByApproval(getDb(c.env), body.client_request_id, widened)) return c.json(FIX_STOCK_COUNT_PENDING, 409)
   }
   return withStockMutationReceipt(
     () => getDb(c.env),
@@ -1614,6 +1626,19 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
+  // A count variance (INV S6) is an approved count line: the lot writer computes the target (max(0, live + counted - seen)) from what it reads inside its own pinned write, so the line carries no
+  // quantity of its own, no expected figure and no tag. It is accepted only as a scoped Set written under an approval claim, which the receipt wrapper checks inside the stock batch.
+  let variance: { counted: number; seen: number } | undefined
+  if (body.variance !== undefined) {
+    const sent = body.variance && typeof body.variance === 'object' && !Array.isArray(body.variance) ? body.variance as Record<string, unknown> : null
+    const figure = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    if (type !== 'set' || (body.setScope !== 'lot' && body.setScope !== 'branch') || !approvalClaimOf(body) || !sent || !figure(sent.counted) || !figure(sent.seen)
+      || Object.keys(sent).length !== 2 || body.quantity !== undefined || body.expectedLotQuantity != null || body.expectedBranchQuantity != null || (body.conditionTag ?? body.condition_tag) != null) {
+      return c.json({ error: 'A count variance is a scoped Set under an approval claim, with the counted and seen figures and no quantity.', code: 'invalid_variance' }, 400)
+    }
+    variance = { counted: sent.counted, seen: sent.seen }
+    quantity = 0
+  }
   const reason = body.reason != null ? String(body.reason).trim() || null : null
   const requestedBranchId = body.branchId != null ? Number(body.branchId) : null
   // D4 (11.28): stock recorded late may carry the REAL received date. It
@@ -1709,22 +1734,30 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
     // Loaded on first use, like undoAppliers.ts loads it: only a scoped Set
     // needs it, and every other /adjust stays byte-identical.
-    const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
+    const { applyStockLotSet, scopedSetBump } = await import('../lib/stockLotAdjustment')
+    // ic_lot_counts: a Set that leaves every line of the product's latest Issue matching stock closes it in the same batch (answered as issue_closed).
+    const closeIssue = !variance && await (await import('../lib/readSwitches')).readSwitch(c.env, 'ic_lot_counts')
     const result = await applyStockLotSet(getDb(c.env), user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
       productId, branchId, batchId: Number(body.batchId), quantity,
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
       ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
-    }, markWritten, () => branchRedirectTarget(c), atomicMark)
+      ...(variance ? { variance } : {}),
+    }, markWritten, () => branchRedirectTarget(c), atomicMark, closeIssue)
+    if (result.status === 200 && result.body.issue_closed === true && !result.body.replayed) c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory_checks'))
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
+      // A Set that only changed quantities bumps the version a sale bumps (stock_bump_narrow); anything more, or the switch OFF, bumps 'products' as before.
+      const bumped = await scopedSetBump(c.env, result.body)
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
-          type: 'set', setScope: body.setScope, quantity, reason, branchId, batchId: Number(body.batchId), conditionTag,
+          // A variance line names no figure of its own: the figure written is the writer's, from its answer.
+          type: 'set', setScope: body.setScope, quantity: variance ? (body.setScope === 'lot' ? (result.body.after as { lotQuantity?: number } | undefined)?.lotQuantity : (result.body.after as { branchQuantity?: number } | undefined)?.branchQuantity) ?? null : quantity,
+          reason, branchId, batchId: Number(body.batchId), conditionTag, ...(result.body.variance ? { variance: result.body.variance } : {}),
           operationId: result.body.operation_id ?? null, before: result.body.before, after: result.body.after,
         }),
         broadcast(c.env, 'products', { action: 'update', id: productId }),
         broadcast(c.env, 'inventory', { action: 'adjust', id: productId }),
-        bumpVersion(c.env, 'products'),
+        bumpVersion(c.env, bumped),
       ]))
     }
     return c.json(result.body as never, result.status as never)

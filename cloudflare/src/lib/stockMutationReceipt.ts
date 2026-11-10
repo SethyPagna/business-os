@@ -115,7 +115,7 @@ export const APPROVAL_CLAIM_HELD_SQL = `EXISTS(SELECT 1 FROM inventory_check_app
 const approvalClaimParams = (claim: ApprovalClaim): Record<string, string> => ({ claimSession: claim.sessionId, claimKey: claim.key })
 
 /** undefined: the request carries no claim. null: it carries a malformed one (refused before anything is claimed). Otherwise the claim. */
-function approvalClaimOf(body: Record<string, unknown>): ApprovalClaim | null | undefined {
+export function approvalClaimOf(body: Record<string, unknown>): ApprovalClaim | null | undefined {
   const value = body.approvalClaim
   if (value === undefined) return undefined
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null

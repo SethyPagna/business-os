@@ -44,6 +44,7 @@ export const CUTOVER_HISTORY_RULES: Readonly<Record<string, CutoverHistoryRule>>
   'sale.customer.bulk': 'leave',
   'sale.customer.v2.bulk': 'leave',
   'sale.customer.single': 'leave',
+  'sale.delivery.single': 'leave',
   'sale.settlement': 'leave',
   'supplier.backfill': 'leave',
   'product.conflict_mark': 'leave',

@@ -81,6 +81,7 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
       hint={translate('bulk_skipped_count', '{n} selected with another source value will be skipped.', 'ជម្រើស {n} ដែលមានតម្លៃប្រភពផ្សេងនឹងត្រូវរំលង។').replace('{n}', String(skipped))}
       alerts={(
         <>
+          {field === 'delivery_contact' ? <div className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{translate('driver_bulk_expenses_note', 'Delivery expenses linked to these sales and their old driver move to the new driver.', 'ចំណាយដឹកជញ្ជូនដែលភ្ជាប់នឹងការលក់ទាំងនេះ និងអ្នកដឹកជញ្ជូនចាស់ នឹងផ្លាស់ទៅអ្នកដឹកជញ្ជូនថ្មី។')}</div> : null}
           {cancelledCount > 0 ? <div className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">{translate('sale_bulk_cancelled_skipped', '{n} cancelled sale(s) left out: a cancelled sale cannot be edited.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(cancelledCount))}</div> : null}
           {blocked.length ? (
             <div role="status" className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">

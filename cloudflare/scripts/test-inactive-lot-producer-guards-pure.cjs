@@ -143,12 +143,18 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './stockReason': loadReal('lib/stockReason.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   './cache': { bumpVersion: async () => {} },
+  // INV S6: the narrow-bump switch (OFF here) and the Issue-closing statements (not under test) the writer now imports.
+  './readSwitches': { readSwitch: async () => false },
+  './stockSetClosesIssue': { closeIssueStatements: () => [], reopenIssueStatements: () => [] },
   // RET-D: names the blocker of a refused Undo; no refusal here is about naming it.
   './stockRefusalBlocker': { findLaterChangeBlocker: async () => null },
 })
 const baseModuleLoad = Module._load
 Module._load = function stockLotAdjustmentHook(request, parent, isMain) {
   if (request === '../lib/stockLotAdjustment') return stockLotAdjustment
+  // INV S6: the Set's hold (no count waits here, the switches are OFF) and the switch reader the PATCH route now asks.
+  if (request === '../lib/inventoryCheckFixStock') return { scopedSetHeld: async () => false, FIX_STOCK_COUNT_PENDING: {} }
+  if (request === '../lib/readSwitches') return { readSwitch: async () => false }
   return baseModuleLoad.call(this, request, parent, isMain)
 }
 

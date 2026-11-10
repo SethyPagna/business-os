@@ -90,3 +90,8 @@ export function navLayerToggle(current: NavLayerState, page: string, hasSections
   if (current.open) return { open: false, expanded: null }
   return { open: true, expanded: hasSections ? page : null }
 }
+
+/** The z-index of the subpage list the top bar title expands: above the sticky rows (z-30), the bar
+ *  and pages layer (z-40/50), floats and modals (z-60 to 1200) and the toasts (z-1100). Only the
+ *  app-update bar (z-1500) is higher, and it never overlaps the menu's anchor. */
+export const SECTION_TITLE_MENU_Z = 1300

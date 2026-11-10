@@ -51,6 +51,16 @@ async function ensureFeeCursor(world) {
   return token
 }
 
+// The cursor of the row just before page 400 of 25 of the all-time Stock Changes list (INV-B S8: lib/stockLedgerQuery.ts encodeStockLedgerCursor, version 1): its instant
+// as the ORDER BY computes it, its UTC date and its id. test-stock-ledger-keyset-native.cjs proves this cursor lands on the offset list's page 200.
+async function ensureLedgerCursor(world) {
+  if (world.state?.ledgerCursor) return world.state.ledgerCursor
+  const [row] = await world.all("SELECT id, substr(created_at, 1, 10) AS d, COALESCE(strftime('%Y-%m-%d %H:%M:%f', created_at), created_at) AS i FROM inventory_movements ORDER BY COALESCE(strftime('%Y-%m-%d %H:%M:%f', created_at), created_at) DESC, id DESC LIMIT 1 OFFSET 9974")
+  const token = Buffer.from(JSON.stringify({ v: 1, d: row.d, i: row.i, id: row.id })).toString('base64url')
+  world.state = { ...world.state, ledgerCursor: token }
+  return token
+}
+
 // The ids the GET shapes name exist before anything is measured, so the order of shapes never changes the data.
 async function prepareWorld(world) {
   await ensureCheckId(world)
@@ -63,6 +73,7 @@ async function resolveUrl(world, url) {
   if (out.includes('{{checkId}}')) out = out.replaceAll('{{checkId}}', await ensureCheckId(world))
   if (out.includes('{{stockKey}}')) out = out.replaceAll('{{stockKey}}', encodeURIComponent(await ensureStockKey(world)))
   if (out.includes('{{feeCursor}}')) out = out.replaceAll('{{feeCursor}}', await ensureFeeCursor(world))
+  if (out.includes('{{ledgerCursor}}')) out = out.replaceAll('{{ledgerCursor}}', await ensureLedgerCursor(world))
   return out
 }
 

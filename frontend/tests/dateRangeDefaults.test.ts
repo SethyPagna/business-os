@@ -201,7 +201,8 @@ function todayPair(file: string, fromState: string, toState: string) {
 }
 
 const stockLedger = todayPair('products/StockChangeSection.tsx', '[startDate, setStartDate]', '[endDate, setEndDate]')
-const stockLedgerRequest = evaluate(requestArgs(stockLedger.source, 'getStockLedger')[0], {
+// the interactive list reads through the pager (StockLedgerPager), which takes the server filter as one 'scope' object
+const stockLedgerRequest = evaluate(variable(stockLedger.source, 'scope'), {
   view: 'all', page: 1, PAGE_SIZE: 20, debouncedSearch: '', branchId: 0,
   startDate: stockLedger.from, endDate: stockLedger.to, startTime: '', endTime: '', supplierId: 0,
 })

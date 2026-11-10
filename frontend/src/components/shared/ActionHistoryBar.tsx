@@ -48,6 +48,14 @@ function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
     .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
     .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
   if (p?.applier === 'sale.fields.bulk' || p?.applier === 'sale.customer.bulk') return item.label || ''
+  // One sale's driver change reads "Driver of #R: A → B" in the reader's language from the saved receipt and names
+  // (rows saved before those fields existed keep the stored English label).
+  if (p?.applier === 'sale.delivery.single' && p.receipt_number != null && p.receipt_number !== '') {
+    return T('sale_driver_history_label', 'Driver of #{receipt}: {before} → {after}')
+      .replace('{receipt}', String(p.receipt_number))
+      .replace('{before}', String(p.before_name || T('no_driver', 'No driver')))
+      .replace('{after}', String(p.after_name || T('no_driver', 'No driver')))
+  }
   if (p?.applier === 'return.legacy_convert') return legacyConvertHistoryLabel(item, T)
   if (p?.applier === 'return.fields.bulk') {
     const noun = T('returns', 'returns')
@@ -76,12 +84,14 @@ function serverDoneLabel(item: HistoryItem, direction: 'undo' | 'redo', T: Trans
   return (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
 }
 
-const isGroupedHistory = (item: HistoryItem): boolean => ['sale.status.bulk', 'sale.fields.bulk', 'sale.customer.bulk', 'return.fields.bulk'].includes(String(item.undo_payload?.applier || ''))
+const isGroupedHistory = (item: HistoryItem): boolean => ['sale.status.bulk', 'sale.fields.bulk', 'sale.customer.bulk', 'sale.delivery.single', 'return.fields.bulk'].includes(String(item.undo_payload?.applier || ''))
 
 function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
   type Detail = { id: number; receipt_number: string; before: string | Record<string, unknown>; after: string | Record<string, unknown>; stock_skipped?: boolean; changed?: boolean; reason?: string }
   const [details, setDetails] = useState<Detail[]>([])
   const [action, setAction] = useState('')
+  // The receipt's action is an object ({ kind: 'delivery_contact', ... }); the field it changed is its kind.
+  const [actionKind, setActionKind] = useState('')
   const [total, setTotal] = useState(0)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -92,8 +102,9 @@ function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
     setError('')
     try {
       const api = await import('../../api/actionHistoryTransport.ts')
-      const result = await api.getActionHistoryDetails(item.id!, details.length) as { action?: string; items: typeof details; total: number }
+      const result = await api.getActionHistoryDetails(item.id!, details.length) as { action?: string | { kind?: string }; items: typeof details; total: number }
       setAction(String(result.action || ''))
+      setActionKind(typeof result.action === 'object' && result.action ? String(result.action.kind || '') : String(result.action || ''))
       setDetails(previous => [...previous, ...result.items]); setTotal(result.total); setOpen(true)
     } catch (e) { setError(e instanceof Error ? e.message : T('error', 'Error')) }
     finally { setBusy(false) }
@@ -106,9 +117,9 @@ function BulkHistoryDetails({ item, T }: { item: HistoryItem; T: Translate }) {
       {details.map(sale => {
         const display = (value: Detail['before']) => {
           if (typeof value === 'string') return action ? value : T(`status_${value}`, value.replaceAll('_', ' '))
-          if (action === 'customer') return String(value?.customer_name || value?.name || (value?.customer_id ? `#${value.customer_id}` : '—'))
-          if (action === 'delivery_contact') return String(value?.delivery_contact_name || value?.name || (value?.delivery_contact_id ? `#${value.delivery_contact_id}` : '—'))
-          if (action === 'payment_method') return String(value?.payment_method || value?.value || '—')
+          if (actionKind === 'customer') return String(value?.customer_name || value?.name || (value?.customer_id ? `#${value.customer_id}` : '—'))
+          if (actionKind === 'delivery_contact') return String(value?.delivery_contact_name || value?.name || (value?.delivery_contact_id ? `#${value.delivery_contact_id}` : '—'))
+          if (actionKind === 'payment_method') return String(value?.payment_method || value?.value || '—')
           return String(value?.name || value?.value || '—')
         }
         return <div key={sale.id} className="break-words">{sale.receipt_number}: {display(sale.before)} → {display(sale.after)}{sale.stock_skipped ? ` · ${T('sale_stock_skipped', 'Stock skipped')}` : ''}{sale.changed === false && sale.reason ? ` · ${sale.reason.replaceAll('_', ' ')}` : ''}</div>

@@ -217,6 +217,7 @@ const RECEIPT_SNAPSHOTS = new Map([
   ['transfer_operation_members.source_product_id', 'durable transfer provenance: the exact product stock left'],
   ['transfer_operation_members.destination_product_id', 'durable transfer provenance: the exact product stock entered'],
   ['inventory_check_items.product_id', 'immutable count baseline: the exact product selected when the session began'],
+  ['inventory_check_lot_lines.product_id', 'immutable count line (0294): the exact product counted, per received date'],
   ['inventory_check_events.product_id', 'immutable observation provenance: the exact product observed'],
 ])
 

@@ -151,8 +151,17 @@ const PAID = {
   buildShareStaleMs: 3000,
   buildShareMemoMaxEntries: 32,
   expenseExportPageRows: 500,
+  stockLedgerExportPageRows: 1000,
   expenseReportFoldMaxRows: 50000,
   expenseReportFoldUnboundedWindows: true,
+  productListLotsPerRow: 50,
+  inventoryOverlayMaxRows: 300,
+  inventoryCheckLotLinesPerSubmission: 240,
+  inventoryCheckLotLinesPerProduct: 100,
+  inventoryLastChangeMaxRows: 8,
+  inventoryCheckFilterMaxIds: 10000,
+  productListCacheSeconds: 60,
+  catalogListWindowPages: 4,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -189,8 +198,17 @@ const FREE = {
   buildShareStaleMs: 5000,
   buildShareMemoMaxEntries: 16,
   expenseExportPageRows: 500,
+  stockLedgerExportPageRows: 500,
   expenseReportFoldMaxRows: 1500,
   expenseReportFoldUnboundedWindows: false,
+  productListLotsPerRow: 20,
+  inventoryOverlayMaxRows: 150,
+  inventoryCheckLotLinesPerSubmission: 60,
+  inventoryCheckLotLinesPerProduct: 50,
+  inventoryLastChangeMaxRows: 4,
+  inventoryCheckFilterMaxIds: 2000,
+  productListCacheSeconds: 3600,
+  catalogListWindowPages: 3,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -222,7 +240,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
 // inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
 // approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
+const FREE_IS_LONGER = ['productListCacheSeconds', 'coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
@@ -382,6 +400,19 @@ check('no test or harness keeps its own literal copy of a plan query budget', as
   const helper = require(path.join(scripts, 'harness', 'plan_query_limits.cjs'))
   assert.equal(helper.FREE_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.free.d1QueriesPerInvocation)
   assert.equal(helper.PAID_QUERY_LIMIT, PLAN_LIMITS_BY_TIER.paid.d1QueriesPerInvocation)
+})
+
+check('Inventory Check bounds come from the plan: no numeric literal caps the lines per product or the ids of a list read', async () => {
+  const sessions = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckSessions.ts'), 'utf8')
+  const list = fs.readFileSync(path.join(__dirname, '../src/lib/inventoryCheckList.ts'), 'utf8')
+  assert.ok(!/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test(sessions), 'the per-product line cap is the plan field')
+  assert.ok(sessions.includes('line.lots.length > perProduct'), 'and it is what the writer compares against')
+  assert.ok(!/ids\.length\s*>\s*\d/.test(list), 'the ids of a /list read are bounded by the plan, not by a literal')
+  assert.ok(list.includes('ids.length > options.maxIds'))
+  // the negative pins must be able to fire: the same patterns match the literal forms they forbid
+  assert.ok(/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test('const LOT_LINES_PER_PRODUCT = 50') && /ids\.length\s*>\s*\d/.test('ids.length > 100'), 'the control: both patterns match what they forbid')
+  const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
+  assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

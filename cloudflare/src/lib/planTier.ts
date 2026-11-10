@@ -291,6 +291,13 @@ export type PlanLimits = {
   // cost: Free is therefore the same 500 as Paid (E1-F review N2).
   expenseExportPageRows: number
 
+  // ---- Stock Changes ledger paging (behind the read switch `ledger_keyset`) ----
+  //
+  // routes/products.ts GET /stock-ledger: the most rows ONE page may carry when the ledger pages by cursor. The Stock Changes export walks pages of this size
+  // (the interactive list asks for 25), and each page is one D1 call plus a correlated before/after walk per row, so Free takes the smaller page. With the
+  // switch off the route keeps the 1,000-row cap it always had.
+  stockLedgerExportPageRows: number
+
   // routes/fees.ts GET /report: the most expense rows the single grouped pass may read (a window has at most this many groups, one per day, type and label
   // spelling). The pass reads the expense table once instead of four times and hands the groups to the Worker to fold; a window with more rows than this is
   // answered by the four statements instead, which return a few hundred rows however large the window is. The cap is on ROWS, not groups, so a window over it
@@ -307,6 +314,46 @@ export type PlanLimits = {
   // so the attempt (cap + 1 rows read, 2 reads each) is a pure cost before the four statements run anyway: Free skips it and the all-time report reads
   // exactly what 6.0.1053 reads. A window with both ends can still be over the cap and pays the attempt once. Paid tries every window (it folds the table).
   expenseReportFoldUnboundedWindows: boolean
+
+  // ---- Received dates in the Products list (INV-A S3; token-gated, additive) ----
+  //
+  // routes/products.ts GET /search with include=lots: the most received dates (lots) ONE row carries. The answer lists a row's active lots that have a branch
+  // row, first-in-first-out, and sets `lots_more: true` on a row that has more; the rest load through GET /api/batches as before. The cap bounds the payload
+  // bytes and the per-row work on the tier that rations both (Free 20, Paid 50); the statement still reads every active lot of the page's rows (a lot costs its own
+  // row plus one per branch it sits in), because ordering in SQL would be counted as rows read again.
+  productListLotsPerRow: number
+
+  // ---- The wired Inventory Check read path (INV-A S4a; behind the read switch `ic_wired`) ----
+  //
+  // routes/inventoryChecks.ts GET /overlay: the most product ids ONE overlay request reads count entries, pending marks and last movements for (a window is
+  // a page plus the prefetch pages after it). Above it the request is refused 400, so the statements stay bounded by a number the client was told.
+  inventoryOverlayMaxRows: number
+
+  // lib/inventoryCheckSessions.ts createInventoryCheckLotSubmission (INV-B S5; behind the read switch `ic_lot_counts`): the most received-date lines ONE count submission
+  // carries across all its products (a branch-total line counts as one). Above it the submission is refused 400, so its insert statements stay bounded by a number the client was
+  // told. A ceiling like the ones above: Paid carries 4 times what Free does.
+  inventoryCheckLotLinesPerSubmission: number
+  // The most received dates ONE product carries in a count (a product with more is not counted date by date). Paid carries twice what Free does.
+  inventoryCheckLotLinesPerProduct: number
+
+  // lib/inventoryCheckOverlay.ts: the most movement rows read per product to find its last recorded stock change. The newest day's rows are read in index order
+  // (created_at mixes 'YYYY-MM-DD HH:MM:SS' and ISO 'T...Z', so the text order alone puts ISO 09:00 above 14:00) and the latest by julianday among these wins.
+  inventoryLastChangeMaxRows: number
+
+  // lib/inventoryCheckList.ts: the most ids a check-state filter (Issues, Counted, Pending, Not checked) may carry into the Products kernel as ONE json_each
+  // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
+  inventoryCheckFilterMaxIds: number
+
+  // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
+  //
+  // lib/rankedScope.ts: how long a cached ranking (the ordered family keys of a window of pages, and the family total) may be served. The entry is also keyed on the products,
+  // stock, promotions and Inventory Check versions and ends at the next promotion boundary, so this only bounds what no version moves: Free keeps a ranking for an hour (reads are
+  // what Free rations), Paid for a minute. Replaces the 20 s literal the page payload cache used.
+  productListCacheSeconds: number
+
+  // The prefetch window of a paged list that reads the shared ranking (the Inventory Check list tells its client): the current page and the pages ahead it may fetch, so a window of
+  // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
+  catalogListWindowPages: number
 
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
@@ -396,8 +443,17 @@ const PAID_LIMITS: PlanLimits = {
   buildShareStaleMs: 3000,
   buildShareMemoMaxEntries: 32,
   expenseExportPageRows: 500,
+  stockLedgerExportPageRows: 1000,
   expenseReportFoldMaxRows: 50_000,
   expenseReportFoldUnboundedWindows: true,
+  productListLotsPerRow: 50,
+  inventoryOverlayMaxRows: 300,
+  inventoryCheckLotLinesPerSubmission: 240,
+  inventoryCheckLotLinesPerProduct: 100,
+  inventoryLastChangeMaxRows: 8,
+  inventoryCheckFilterMaxIds: 10_000,
+  productListCacheSeconds: 60,
+  catalogListWindowPages: 4,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -435,8 +491,17 @@ const FREE_LIMITS: PlanLimits = {
   buildShareStaleMs: 5000,
   buildShareMemoMaxEntries: 16,
   expenseExportPageRows: 500,
+  stockLedgerExportPageRows: 500,
   expenseReportFoldMaxRows: 1_500,
   expenseReportFoldUnboundedWindows: false,
+  productListLotsPerRow: 20,
+  inventoryOverlayMaxRows: 150,
+  inventoryCheckLotLinesPerSubmission: 60,
+  inventoryCheckLotLinesPerProduct: 50,
+  inventoryLastChangeMaxRows: 4,
+  inventoryCheckFilterMaxIds: 2_000,
+  productListCacheSeconds: 3_600,
+  catalogListWindowPages: 3,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

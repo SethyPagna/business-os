@@ -105,10 +105,11 @@ function returnOf(n, offset, saleLines = 10) {
 
 // A counter submits two counts of 0 (an approved device, as every non-administrator needs: nobody approves their own count) and the administrator approves the
 // session once. `counting` false = the pass's call_counting switch is taken away for this request (the Free plan before it is turned on); true = as the pass has it.
-function approvalStep({ id, label, offset, counting }) {
+// `lots`: the count is typed per received date (ic_lot_counts, INV S6): each line is one received date, which the approval Sets from what the count found (the writer computes the target).
+function approvalStep({ id, label, offset, counting, lots: dated = false }) {
   return { id, label, method: 'POST', url: '/api/inventory-checks/sessions/:id/approval',
     prepare: async (world) => {
-      await world.addSwitches(['ic_simple', 'ic_fix_stock'], counting ? {} : { without: ['call_counting'] })
+      await world.addSwitches(dated ? ['ic_simple', 'ic_fix_stock', 'ic_lot_counts'] : ['ic_simple', 'ic_fix_stock'], counting ? {} : { without: ['call_counting'] })
       // The switches are memoized per isolate for 15 s: the counter's submission below must meet the row just written.
       await world.restart()
       const rows = await lots(world, 2, offset)
@@ -118,7 +119,10 @@ function approvalStep({ id, label, offset, counting }) {
       await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(902,'budget-device','budget device','approved',datetime('now'))").run()
       const login = await world.send('POST', '/api/auth/login', { username: 'budget_counter', password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
       if (!login.setCookie) throw new Error('approval fixture: the counter could not sign in: ' + login.text.slice(0, 200))
-      const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines: rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false })) }, { cookie: login.setCookie.split(';')[0] })
+      const seen = dated ? new Map((await world.all('SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = 1 AND batch_id IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.batch))).map((q) => [q.batch_id, Number(q.quantity)])) : null
+      const lines = dated ? rows.map((r) => ({ productId: r.pid, lots: [{ batchId: r.batch, scope: 'lot', counted: seen.get(r.batch) - 2, seen: seen.get(r.batch) }] }))
+        : rows.map((r) => ({ productId: r.pid, countedQuantity: 0, seenQuantity: null, checked: false }))
+      const made = await world.send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('approval-submit'), lines }, { cookie: login.setCookie.split(';')[0] })
       if (made.status !== 201) throw new Error('approval fixture: submission answered ' + made.status)
       return { id: made.json.item.id, request: key('approval') }
     },
@@ -173,6 +177,14 @@ function writeShapes() {
     { id: 'w-adjust', label: 'POST /api/inventory/adjust (remove 1)', method: 'POST', url: '/api/inventory/adjust',
       prepare: async (world) => (await lots(world, 1, 900))[0],
       run: async (world, send, r) => send('POST', '/api/inventory/adjust', { productId: r.pid, branchId: 1, quantity: 1, type: 'remove', reason: 'damaged', client_request_id: key('adjust') }) },
+    // ---- INV-A S2: the surgical Set (Inventory count / Products received-date edit). Self-contained block: the lead unions it with builder B's shapes. ----
+    { id: 'w-adjust-set-lot', label: 'POST /api/inventory/adjust Set one received date (expectedLotQuantity)', method: 'POST', url: '/api/inventory/adjust',
+      prepare: async (world) => { const r = (await lots(world, 1, 1100))[0]; const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch); return { ...r, was: Number(q[0].quantity) } },
+      run: async (world, send, r) => send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: r.pid, branchId: 1, batchId: r.batch, quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Physical count', client_request_id: key('set-lot') }) },
+    { id: 'w-batch-branch-set', label: 'PATCH /api/batches/:id/branches/:branchId Set one received date at a branch', method: 'PATCH', url: '/api/batches/:id/branches/1',
+      prepare: async (world) => { const r = (await lots(world, 1, 1110))[0]; const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch); return { ...r, was: Number(q[0].quantity) } },
+      run: async (world, send, r) => send('PATCH', `/api/batches/${r.batch}/branches/1`, { quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Physical count', client_request_id: key('batch-set') }) },
+    // ---- end INV-A S2 ----
     { id: 'w-fast-stock-in-1-line', label: 'POST /api/inventory/fast-stock-in/commit 1 line', method: 'POST', url: '/api/inventory/fast-stock-in/commit',
       prepare: async (world) => lots(world, 1, 910), run: async (world, send, rows) => send('POST', '/api/inventory/fast-stock-in/commit', fastStockIn(rows)) },
     { id: 'w-fast-stock-in-3-lines', label: 'POST /api/inventory/fast-stock-in/commit 3 lines', method: 'POST', url: '/api/inventory/fast-stock-in/commit',
@@ -190,11 +202,40 @@ function writeShapes() {
         try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission'), lines: ids.map((productId) => ({ productId, countedQuantity: 0, seenQuantity: null, checked: false })) }) }
         finally { await world.restoreSwitches() }
       } },
+    // ---- INV-B S5 (self-contained block; the lead unions it with builder A's): the count per received date and the direct Set from the row. ----
+    // 20 products, one received date each, counted one below the figure seen (every line differs, so one approval is queued). Sighted (the world's admin): the seen figure is guarded inside
+    // the batch. No stock ledger statement runs, which is what brings it from the 10.5K rows of the older submission to the lines it writes.
+    { id: 'w-inventory-check-submission-lots-20', label: 'POST /api/inventory-checks/submissions 20 products, one received date each (ic_lot_counts)', method: 'POST', url: '/api/inventory-checks/submissions',
+      prepare: async (world) => {
+        await world.addSwitches(['ic_simple', 'ic_fix_stock', 'ic_lot_counts'])
+        const rows = await lots(world, 20, 1300)
+        const seen = new Map((await world.all('SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = 1 AND batch_id IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.batch))).map((q) => [q.batch_id, Number(q.quantity)]))
+        return rows.map((r) => ({ ...r, seen: seen.get(r.batch) }))
+      },
+      run: async (world, send, rows) => {
+        try { return await send('POST', '/api/inventory-checks/submissions', { branchId: 1, requestId: key('submission-lots'), lines: rows.map((r) => ({ productId: r.pid, lots: [{ batchId: r.batch, scope: 'lot', counted: r.seen - 1, seen: r.seen }] })) }) }
+        finally { await world.restoreSwitches() }
+      } },
+    // The direct Set from the row: the lot Set writer with the expected figure on screen, named as a Fix stock request so the (widened) hold on a waiting count runs first.
+    { id: 'w-inventory-check-row-set', label: 'POST /api/inventory/adjust Set one received date from the Inventory row (ic_lot_counts hold)', method: 'POST', url: '/api/inventory/adjust',
+      prepare: async (world) => {
+        await world.addSwitches(['ic_fix_stock', 'ic_lot_counts'])
+        const r = (await lots(world, 1, 1330))[0]
+        const q = await world.all('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1', r.batch)
+        return { ...r, was: Number(q[0].quantity) }
+      },
+      run: async (world, send, r) => {
+        try { return await send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: r.pid, branchId: 1, batchId: r.batch, quantity: r.was - 1, expectedLotQuantity: r.was, reason: 'Inventory check', client_request_id: `icfix_rbsession_${r.pid}_${key('rowset').replace(/[^A-Za-z0-9]/g, '')}` }) }
+        finally { await world.restoreSwitches() }
+      } },
+    // ---- end INV-B S5 ----
     // Approving a submitted count (ic_fix_stock). The lane's own shape measures the Free plan as it runs until call_counting is turned ON: the first request of
     // an approval applies ONE stock line (a lowering Set), records it and answers. The second is the same request under the write pass's own config, call_counting
     // ON (P1.1): the commit's cap becomes stockInLinesPerRequestByCalls (2 on Free), so one request applies both lines and finishes the approval.
     approvalStep({ id: 'w-inventory-check-approval-step', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, first line)', offset: 1100, counting: false }),
     approvalStep({ id: 'w-inventory-check-approval-step-counted', label: 'POST /api/inventory-checks/sessions/:id/approval 2 lines (ic_fix_stock, call_counting ON, both lines)', offset: 1150, counting: true }),
+    // INV S6: the same two-line step with the count typed per received date (ic_lot_counts): each line is one received date Set from what the count found, no stock ledger read.
+    approvalStep({ id: 'w-inventory-check-approval-lot-line', label: 'POST /api/inventory-checks/sessions/:id/approval 2 received-date lines (ic_fix_stock, ic_lot_counts, call_counting ON, both lines)', offset: 1200, counting: true, lots: true }),
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',

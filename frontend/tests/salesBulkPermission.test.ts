@@ -12,7 +12,9 @@ assert.match(sales, /const toggleSelected = \([^)]*\) => \{\s*if \(!canBulkSales
 assert.match(sales, /const toggleSelectionScope = useCallback\([^]*?if \(!canBulkSales\) return[^]*?\}, \[canBulkSales\]\)/)
 assert.match(sales, /if \(canBulkSales\) return[^]*?setSelectedIds\(new Set<number>\(\)\)[^]*?current\?\.mode === 'bulk'/)
 assert.match(sales, /\{canBulkSales && pendingBulkRequest \? \(/)
-assert.match(sales, /\{canBulkSales && pendingBulkFieldRequest \? \(/)
+// The unknown-outcome banner is bulk-only, with ONE exception (sale-delivery-edit, 6.0.1295): a sales:amend user without sales:bulk keeps the retry/discard
+// banner for the single-sale driver change they started. Any other kind, or more than one sale, still needs sales:bulk.
+assert.match(sales, /\{\(canBulkSales \|\| \(canAmendSales && pendingBulkFieldRequest\?\.action\.kind === 'delivery_contact' && pendingBulkFieldRequest\.items\.length === 1\)\) && pendingBulkFieldRequest \? \(/)
 assert.match(sales, /\{canBulkSales && selectedSales\.length > 0 \? \(/)
 assert.match(sales, /\{canBulkSales && bulkChangePrompt \? \(/)
 assert.equal((sales.match(/await getSalesCustomerPicker\(/g) || []).length, 3, 'bulk initial/search choices and the one-sale customer editor use the narrow picker')

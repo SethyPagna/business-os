@@ -14,7 +14,7 @@ import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import { RETURN_LEGACY_CONVERT_KIND, canConvertLegacyReturns, notifyLegacyReturnConversion } from '../lib/returnLegacyConvert'
 import type { Env } from '../index'
 import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
-import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
+import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS, SINGLE_DELIVERY_UPDATE_KIND } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { sendReturnStatusTelegramEvents } from '../lib/telegram'
@@ -608,7 +608,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: failureMessage, id: existing.id })
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
-        const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
+        const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name' || applier.name === SINGLE_DELIVERY_UPDATE_KIND)
         const status = (stockReplay || saleCustomerReplay || genderReplay || legacyConvertReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
         // Every 409 refusal names a machine code, so the client can restate it
         // in the operator's language.
@@ -633,7 +633,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         : applier.name === TRANSFER_OPERATION_KIND
         ? notifyTransferOperation(c.env)
         : applier.name === STOCK_LOT_SET_KIND
-        ? notifyStockLotSet(c.env)
+        ? notifyStockLotSet(c.env, existing.entity_id)
         : applier.name === STOCK_IN_LINE_EDIT_KIND
         ? notifyStockInLineEdit(c.env)
         : applier.name === STOCK_SESSION_KIND

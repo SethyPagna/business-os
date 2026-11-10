@@ -13,6 +13,7 @@ function loadDependency(name) {
   })
   return mod.exports
 }
+const { withFixStockHoldStub } = require('./fix_stock_hold_stub.cjs')
 const productStockGuard = loadDependency('productStockGuard')
 const stockTransaction = loadDependency('stockTransaction')
 module.exports = productStockGuard
@@ -22,6 +23,6 @@ function withProductStockGuard(nextRequire) {
     ? productStockGuard
     : request === './stockTransaction' || request === '../lib/stockTransaction'
       ? stockTransaction
-      : nextRequire(request)
+      : withFixStockHoldStub(nextRequire)(request)
 }
 module.exports.withProductStockGuard = withProductStockGuard

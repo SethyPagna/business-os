@@ -350,7 +350,8 @@ runTest('the bar, the tiles and the title carry the design language, not grey ut
   assert.match(header, /bos-nav-chrome bos-nav-topbar fixed left-0 right-0 z-50/,
     'the top bar is a chrome surface')
   assert.doesNotMatch(header, /border-b border-gray-200 bg-white/, 'and no longer a grey-on-white box')
-  assert.match(header, /className="bos-nav-title min-w-0 flex-1 [^"]*text-sm font-semibold/,
+  assert.match(header, /<SectionTitleMenu/, 'the bar title is the section title component')
+  assert.match(read('components/navigation/SectionTitleMenu.tsx'), /bos-nav-title min-w-0 [^"]*text-sm font-semibold/,
     'the title uses the display face')
   assert.match(css, /\.bos-nav-title \{[\s\S]*?font-family: var\(--nav-display-font\)/)
   assert.match(css, /body\.lang-km \.bos-nav-chrome \{[\s\S]*?--nav-display-font: var\(--ui-khmer-font-family/,
@@ -538,9 +539,10 @@ runTest('the chip row stays compact and touch-safe on every screen it appears on
 })
 
 runTest('mobile page titles scroll locally rather than losing their ending', () => {
-  assert.match(sidebar, /bos-nav-title[^"\n]*overflow-x-auto[^"\n]*whitespace-nowrap/)
-  assert.doesNotMatch(sidebar, /bos-nav-title[^"\n]*truncate/)
-  assert.match(sidebar, /bos-nav-title[^"\n]*\[scrollbar-width:none\]/)
+  const title = read('components/navigation/SectionTitleMenu.tsx')
+  assert.match(title, /bos-nav-title[^"\n]*overflow-x-auto[^"\n]*whitespace-nowrap/)
+  assert.doesNotMatch(title, /bos-nav-title[^"\n]*truncate/)
+  assert.match(title, /bos-nav-title[^"\n]*\[scrollbar-width:none\]/)
 })
 
 runTest('the header always paints above the open page menu, and the sheet never grows under it', () => {

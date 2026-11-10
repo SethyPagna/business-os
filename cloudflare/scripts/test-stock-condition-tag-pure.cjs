@@ -1,4 +1,5 @@
 const productStockGuard = require('./harness/product_stock_guard.cjs')
+const { withFixStockHoldStub } = require('./harness/fix_stock_hold_stub.cjs')
 // P3-L6 contract: TAGGED (held, non-sellable) stock -- the owner's "keep in
 // group with tag or remove entirely" choice, "Restock with tag", and the two
 // row actions that lead back out of the held state.
@@ -97,7 +98,7 @@ function loadReal(relPath, requireOverrides = {}) {
   const moduleObj = { exports: {} }
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-      moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+      moduleObj.exports, withFixStockHoldStub(require), moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } catch (error) {
     error.message = `${error.message} (while loading ${relPath})`

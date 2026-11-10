@@ -51,6 +51,16 @@ try {
   const inSession = Object.fromEntries(sheetProducts.map(product => [product.id, started(Number(product.id))])) as Record<string, InventoryCheckObservation>
   const refusal = (code: string) => Object.assign(new Error('refused'), { code, status: 409 })
   const cases: Array<[string, () => Promise<void>]> = [
+    ['G4: a session item lists what was typed per received date (date, counted, saw) and a branch-total line says so', async () => {
+      const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301, { state: 'issue', counted_quantity: 6, reason: 'short', revision: 1, lot_lines: [{ batch_id: 7, scope: 'lot', counted: 4, seen: 5, received_at: '2026-10-01' }, { batch_id: 0, scope: 'branch', counted: 2 }] }) } })
+      const lines = s.findAll(node => node.getAttribute('data-check-lot-lines') !== null)
+      assert.equal(lines.length, 1)
+      const text = lines[0].textContent.replace(/\s+/g, ' ')
+      assert.ok(/Received.*: 4 \/ 5/.test(text) && /Branch total: 2/.test(text), text)
+      await s.unmount()
+      const plain = await mount({ products: [sheetProducts[1]], observations: { 302: started(302, { state: 'done', counted_quantity: 12, revision: 1 }) } })
+      assert.equal(plain.findAll(node => node.getAttribute('data-check-lot-lines') !== null).length, 0, 'an item without lines shows no list')
+    }],
     ['the phone line counts first: Now with its unit and damaged chip, Start, Counted, and nothing about money or sales', async () => {
       const s = await mount({ products: [sheetProducts[0]], observations: { 301: started(301, { state: 'done', counted_quantity: 9, revision: 2, stock_changed: true, baseline_quantity: 12 }) }, canCheck: false })
       assert.equal(metaOf(s, 301), 'Now 10 pcs Damaged 1 · Start 12 (−2) · Counted 9')

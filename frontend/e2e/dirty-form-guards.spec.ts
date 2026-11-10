@@ -185,7 +185,7 @@ async function chromeTo(page: Page, lang: Lang, dest: Dest): Promise<void> {
     } else {
       await page.locator(`aside [data-bos-nav-id="${dest.nav}"]`).click()
     }
-    if (dest.pill !== undefined) await page.locator('button.hub-section-pill').nth(dest.pill).click()
+    if (dest.pill !== undefined) await page.locator('.hub-section-pills .chip-rail-item').nth(dest.pill).click()
     return
   }
   // The phone's default "pages" mode: the header Back chevron opens the page menu; a hub's tile unfolds its sections.

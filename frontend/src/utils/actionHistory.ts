@@ -81,6 +81,7 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
     || (applier === 'product.merge' && payload?.merge_version === 3)
     || applier === 'sale.settlement'
     || applier === 'sale.customer.single'
+    || applier === 'sale.delivery.single'
     || applier === 'product.merge.group'
     || applier === 'product.remove'
     || applier === 'stock.transfer'

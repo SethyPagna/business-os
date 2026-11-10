@@ -15,6 +15,9 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 // products.stock_quantity, H = the held (tagged) row. q = the operator's
 // target, d = the lot delta.
 //
+//   variance      q is computed here, not sent: q = max(0, live + counted - seen) of the scope's
+//                 quantity (lot L, or branch B), read by this writer's own facts and pinned by
+//                 stateGuard; then exactly one of the two rows below (INV S6, count approvals)
 //   scope lot     d = q - L        L' = q      B' = max(0, B + d)   P += B' - B
 //   scope branch  d = q - B        L' = L + d  B' = q               P += d
 //                 (refused 409 when L + d < 0: the lot cannot cover it)
@@ -32,6 +35,11 @@ import { productStockGuardStatement, productStockGuardError } from './productSto
 // has always carried: the lot figure being set is authoritative and a drifted
 // aggregate must not make the repair impossible. The exact B'/B pair is kept
 // in the snapshots, so undo still restores B exactly.
+//
+// VARIANCE (INV S6). An approved count line is applied as what the count FOUND: request.variance = {counted, seen} (what was counted, and the figure the counter saw). The target is
+// max(0, live + counted - seen), computed from the quantity this writer reads in its own facts, so a sale between the count and the approval survives it, and pinned by stateGuard in the
+// same batch. It is accepted only inside an approval's claim (the receipt wrapper's atomicMark carries the claim into the batch; without one the request is refused 400), never from a
+// plain Set. The answer carries variance: {counted, seen, wanted, clamped?} so the approval records what was applied; the request id keys the receipt like any Set, so a repeat is replayed.
 //
 // IDEMPOTENCY. The whole forward write is one ordinaryBusinessBatch (the
 // maintenance guard is its last statement), so a Set either lands completely
@@ -82,6 +90,8 @@ import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
+import { readSwitch } from './readSwitches'
+import { closeIssueStatements, reopenIssueStatements } from './stockSetClosesIssue'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import {
   UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
@@ -102,6 +112,8 @@ export type StockLotSetRequest = {
   conditionTag: StockConditionTag | null
   expectedLotQuantity?: number
   expectedBranchQuantity?: number
+  /** An approved count line: the target is computed from what the count found, inside this writer. Only under an approval claim. */
+  variance?: { counted: number; seen: number }
 }
 
 export type StockLotSetResult = { status: number; body: Record<string, unknown> }
@@ -156,10 +168,10 @@ export function resetStockLotSetSchemaProbe(): void { operationsReady = false }
 async function operationsAvailable(db: D1Compat): Promise<boolean> {
   if (operationsReady) return true
   try {
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'",
-    ).get<{ ready: number }>()
-    operationsReady = Number(row?.ready ?? 0) > 0
+    // Ask the table itself, not the schema: COUNT(*) over sqlite_master scanned every object (751 rows on the budget seed) on each cold isolate. A missing table
+    // throws, which is the same "not ready yet" answer; LIMIT 0 reads no row.
+    await db.prepare('SELECT 1 FROM stock_lot_adjustment_operations LIMIT 0').all()
+    operationsReady = true
   } catch {
     operationsReady = false
   }
@@ -183,8 +195,8 @@ const MAINTENANCE_RESPONSE: StockLotSetResult = {
   body: { error: 'Maintenance is in progress. No stock was changed; try again shortly.', code: 'maintenance_active' },
 }
 
-function conflict(error: string, code = 'stock_conflict'): StockLotSetResult {
-  return { status: 409, body: { error, code } }
+function conflict(error: string, code = 'stock_conflict', extra: Record<string, unknown> = {}): StockLotSetResult {
+  return { status: 409, body: { error, code, ...extra } }
 }
 
 function stateGuard(from: Snapshot): Statement {
@@ -356,6 +368,8 @@ export async function applyStockLotSet(
   // operator confirmed (on the lot as it exists there); without it the Set is refused branch_redirect_required.
   redirectTarget: RedirectTarget = null,
   atomicMark?: import('./stockMutationReceipt').StockMutationAtomicMark,
+  // ic_lot_counts: a Set that leaves every line of the product's latest Issue matching stock closes that Issue in the same batch (lib/stockSetClosesIssue.ts); answered as issue_closed.
+  closeIssue = false,
 ): Promise<StockLotSetResult> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return { status: 403, body: { error: 'Stock adjustments require Full Access to Inventory.' } }
@@ -376,7 +390,9 @@ export async function applyStockLotSet(
   const replay = (row: OperationRow): StockLotSetResult => row.request_json !== requestJson
     ? conflict('client_request_id was already used for different stock adjustment data.', 'idempotency_conflict')
     : { status: 200, body: { ...JSON.parse(row.response_json), replayed: true } }
-  if (recordOperation && requestId) {
+  // Under the receipt wrapper (atomicMark) a repeat was already answered from its receipt, which commits in the same batch as the operation row, so no operation row can exist for a request the
+  // wrapper let through: the look-up is skipped there (one D1 call per Set). Called without the wrapper (Products' PATCH), the operation row is what answers a repeat.
+  if (recordOperation && requestId && !atomicMark?.execute) {
     const existing = await previous()
     if (existing) return replay(existing)
   }
@@ -396,11 +412,12 @@ export async function applyStockLotSet(
       (SELECT variant_product_id FROM product_batches WHERE id=@batch) AS lot_product_id,
       (SELECT unit_cost_usd FROM product_batches WHERE id=@batch) AS unit_cost_usd,
       (SELECT received_at FROM product_batches WHERE id=@batch) AS received_at,
+      (SELECT is_active FROM product_batches WHERE id=@batch) AS lot_active,
       COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch),0) AS lot_quantity,
       COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_quantity,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch) AS lot_exists,
       EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists`)
-    .get<{ product_name: string | null; branch_name: string | null; lot_product_id: number | null; unit_cost_usd: number | null; received_at: string | null
+    .get<{ product_name: string | null; branch_name: string | null; lot_product_id: number | null; unit_cost_usd: number | null; received_at: string | null; lot_active: number | null
       lot_quantity: number; branch_quantity: number; lot_exists: number; branch_exists: number }>({ product: request.productId, branch: request.branchId, batch: request.batchId })
   if (!facts?.product_name) return { status: 404, body: { error: 'Product not found' } }
   if (!facts.branch_name) return { status: 400, body: { error: 'An active branch is required before stock can be changed' } }
@@ -411,9 +428,22 @@ export async function applyStockLotSet(
     lotQuantity: Number(facts.lot_quantity) || 0, branchQuantity: Number(facts.branch_quantity) || 0,
     lotExists: Number(facts.lot_exists) ? 1 : 0, branchExists: Number(facts.branch_exists) ? 1 : 0,
   }
+  // An approved count line: the target is what the count found, applied to the quantity read above, and pinned by stateGuard in the batch below.
+  let variance: { counted: number; seen: number; wanted: number; clamped?: true } | undefined
+  if (request.variance) {
+    const { counted, seen } = request.variance
+    if (!atomicMark?.execute) return { status: 400, body: { error: 'A count variance is applied only under an approval claim.', code: 'variance_requires_claim' } }
+    if (!Number.isFinite(counted) || !Number.isFinite(seen) || counted < 0 || seen < 0) return { status: 400, body: { error: 'A count variance needs the counted and the seen figures.', code: 'invalid_variance' } }
+    const wanted = (request.setScope === 'lot' ? before.lotQuantity : before.branchQuantity) + counted - seen
+    const target = Math.max(0, wanted)
+    if (Math.abs(target - Math.round(target)) > 0.000000001) return conflict('The count does not leave a whole number of units.', 'inventory_check_target_not_whole')
+    request = { ...request, quantity: Math.round(target) }
+    variance = { counted, seen, wanted, ...(wanted < 0 ? { clamped: true as const } : {}) }
+  }
   if ((request.expectedLotQuantity !== undefined && request.expectedLotQuantity !== before.lotQuantity)
     || (request.expectedBranchQuantity !== undefined && request.expectedBranchQuantity !== before.branchQuantity)) {
-    return conflict('Stock changed since this received date was loaded. Refresh and try again.')
+    // The figures the writer itself just read (the facts statement above): the screen patches its row to them and the person confirms or recounts. No extra read.
+    return conflict('Stock changed since this received date was loaded. Refresh and try again.', 'stock_conflict', { current: { lotQuantity: before.lotQuantity, branchQuantity: before.branchQuantity } })
   }
   const planned = snapshotAfter(before, request)
   if (!planned) return conflict('The selected received date does not have enough stock for this branch total.', 'selected_lot_unavailable')
@@ -424,8 +454,31 @@ export async function applyStockLotSet(
   const base = {
     success: true, branchId: request.branchId, productId: request.productId, productName: facts.product_name,
     batchId: request.batchId, setScope: request.setScope, createdSibling: false,
+    // A write that finds the lot retired puts it back in use (0154): the caches that list received dates must hear about it, which is not the quantity-only change a sale is.
+    ...(after.lotQuantity > 0 && Number(facts.lot_active) !== 1 && lotDelta !== 0 ? { reactivated: true } : {}),
+    ...(variance ? { variance } : {}),
   }
-  if (lotDelta === 0) return { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after } }
+  if (lotDelta === 0) {
+    const unchanged: StockLotSetResult = { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after, issue_closed: false } }
+    if (!closeIssue || request.variance || !recordOperation) return unchanged
+    // A Set to the figure stock already has (a sale got there first) changes nothing, but it can still be what makes every line of the latest Issue match: the close runs alone, pinned by the
+    // same state guard, and the answer says whether it landed. There is no operation and no history row: there is nothing to undo.
+    const sessionId = crypto.randomUUID()
+    const closing = closeIssueStatements({ productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: operationRequestId, generation: 0, actorId: user.id,
+      actorName: actorSnapshot(user) ?? '' }, undefined, { sessionId, answer: false })
+    if (!atomicMark) await markWritten()
+    try {
+      if (atomicMark?.execute) await atomicMark.execute(db, addressedStatements(landing, [stateGuard(before), ...closing]))
+      else await executeStockTransaction(db, addressedStatements(landing, [stateGuard(before), ...closing]), 'retry')
+    } catch (error) {
+      if (atomicMark?.answered?.(error)) throw error
+      if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error
+      if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
+      return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
+    }
+    const made = await db.prepare('SELECT 1 AS closed FROM inventory_check_sessions WHERE id=@sid').get<{ closed: number }>({ sid: sessionId })
+    return { status: 200, body: { ...unchanged.body, issue_closed: made?.closed === 1 } }
+  }
   if (lotDelta > 0) {
     try { await requireReceivingBranch(db, request.branchId) } catch (error) {
       if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
@@ -443,7 +496,7 @@ export async function applyStockLotSet(
   const payload = JSON.stringify({ applier: STOCK_LOT_SET_KIND, operation_id: operationId, generation: 0 })
   const response = {
     ...base, movementType, quantity: Math.abs(lotDelta), conditionTag: request.conditionTag,
-    before, after, operation_id: recordOperation ? operationId : null, generation: 0, server_recorded: recordOperation,
+    before, after, operation_id: recordOperation ? operationId : null, generation: 0, server_recorded: recordOperation, issue_closed: false,
   }
   const opParams = {
     operation: operationId, actor: user.id, actorName: actorSnapshot(user), requestId: operationRequestId, requestJson,
@@ -464,6 +517,9 @@ export async function applyStockLotSet(
         VALUES('inventory','stock_quantity_set',@product,@label,1,'undoable',@payload,@payload,@actor,@actorName)`, params: opParams },
       { sql: `UPDATE stock_lot_adjustment_operations SET history_id=last_insert_rowid(),
         response_json=json_set(response_json,'$.action_history_id',last_insert_rowid()) WHERE id=@operation`, params: opParams },
+      // After the quantity statements, so the match is judged against the stock this Set leaves; conditional in SQL, so issue_closed in the stored answer is exact.
+      ...(closeIssue && !request.variance ? closeIssueStatements({ productId: request.productId, branchId: before.branchId, organization: user.organization_id ?? null,
+        operation: operationId, generation: 0, actorId: user.id, actorName: actorSnapshot(user) ?? '' }) : []),
     ] : []),
   ]
   if (!atomicMark) await markWritten()
@@ -492,11 +548,28 @@ export async function applyStockLotSet(
   return { status: 200, body: stored ? JSON.parse(stored.response_json) : response }
 }
 
-export async function notifyStockLotSet(env: Env): Promise<void> {
+/**
+ * The cache version a scoped Set bumps (read switch stock_bump_narrow, default OFF). OFF: 'products', as every Set always did. ON: 'stock' alone -- the version a sale bumps, so every cached read
+ * already follows it (a page's membership is cached, its stock is refreshed live; stock-dependent memberships key on both) -- but only for a Set that changed quantities and nothing else. A date that
+ * gained or lost its row at the branch, a branch that gained or lost its aggregate row, or a retired date the Set put back in use is more than a sale ever does, so it keeps bumping 'products'.
+ */
+export async function scopedSetBump(env: Env, body: Record<string, unknown>): Promise<'stock' | 'products'> {
+  if (!await readSwitch(env, 'stock_bump_narrow')) return 'products'
+  const before = body.before as Partial<Snapshot> | undefined, after = body.after as Partial<Snapshot> | undefined
+  const structural = !before || !after || body.reactivated === true || before.lotExists !== after.lotExists || before.branchExists !== after.branchExists
+  return structural ? 'products' : 'stock'
+}
+
+/** The product id rides on the broadcast (audit G9) so a client refreshes that product's rows; an unreadable id (a legacy row) still announces the change, id-less. */
+export async function notifyStockLotSet(env: Env, productId?: number | string | null): Promise<void> {
+  const id = Number(productId)
+  const named = Number.isInteger(id) && id > 0 ? { id } : {}
   await Promise.all([
-    broadcast(env, 'products', { action: 'update' }),
-    broadcast(env, 'inventory', { action: 'adjust' }),
+    broadcast(env, 'products', { action: 'update', ...named }),
+    broadcast(env, 'inventory', { action: 'adjust', ...named }),
     bumpVersion(env, 'products'),
+    // An Undo or Redo may have reopened or closed an Issue: the Issues sets are cached on this version.
+    bumpVersion(env, 'inventory_checks'),
   ])
 }
 
@@ -626,6 +699,11 @@ export async function replayStockLotSet(
   } else {
     statements.push(...deltaStatements(before, lotChange, branchChange))
     statements.push(...forwardMovementStatements(before, effect, user, stockSetReference(row.id, next), row.id))
+  }
+  // The Issue this Set closed (issue_closed in its stored answer) is open again after an Undo, and closed again by a Redo; both only while the Set's own count is still the latest (stockSetClosesIssue.ts).
+  if ((JSON.parse(row.response_json || '{}') as { issue_closed?: unknown }).issue_closed === true) {
+    const closing = { productId: before.productId, branchId: before.branchId, organization: user.organization_id ?? null, operation: row.id, generation: next, actorId: user.id, actorName: actorSnapshot(user) ?? '' }
+    statements.push(...(direction === 'undo' ? reopenIssueStatements(closing) : closeIssueStatements(closing)))
   }
   statements.push(
     { sql: "UPDATE stock_lot_adjustment_operations SET generation=@next,state=@target,revision_json=json_set(revision_json,'$.generation',@next) WHERE id=@operation", params },

@@ -96,7 +96,14 @@ export type BulkSaleUpdatePayload = {
     | { kind: 'payment_method'; source: string | null; target: string }
     | { kind: 'delivery_contact' | 'customer'; source_id: number | null; target_id: number | null }
 }
-export type BulkSaleUpdateResult = { actionHistoryId?: number; changedCount: number; unchangedCount: number; changedIds?: number[]; unchangedIds?: number[] }
+export type BulkSaleUpdateResult = { actionHistoryId?: number; changedCount: number; unchangedCount: number; changedIds?: number[]; unchangedIds?: number[]; movedExpenseCount?: number }
+// What a driver change would move, read without writing: the delivery expenses linked to the sale and its old driver
+// (labels only; the Worker never returns their amounts).
+export type BulkSaleUpdatePreview = { preview: true; changedCount: number; unchangedCount: number; movedExpenseCount: number; movedExpenses: Array<{ id: number; sale_id: number; label: string | null }> }
+
+export async function previewSalesBulkField(payload: BulkSaleUpdatePayload): Promise<BulkSaleUpdatePreview> {
+  return await apiFetch('POST', '/api/sales/bulk-update', { ...payload, preview: true }) as BulkSaleUpdatePreview
+}
 
 export async function updateSalesBulkField(payload: BulkSaleUpdatePayload): Promise<BulkSaleUpdateResult> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false && !(await confirmServerReachable())) throw new Error('Connect to the server to update sales.')

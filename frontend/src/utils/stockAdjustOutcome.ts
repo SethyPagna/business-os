@@ -225,6 +225,8 @@ const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = 
     key: 'stock_request_id_invalid',
     fallback: 'This line lost its request id. Remove it and add it again.',
   },
+  // A direct Set is held while a count of that product waits for approval (lib/inventoryCheckFixStock.ts).
+  inventory_check_count_pending: { key: 'inventoryCheckCountPending', fallback: 'This count is waiting for approval. Approve or reject it first.' },
   stock_removal_conflict: STOCK_CHANGED_RETRY,
   tagged_lot_conflict: STOCK_CHANGED_RETRY,
 }

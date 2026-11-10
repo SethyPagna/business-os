@@ -30,7 +30,23 @@ export type InventoryCheckProduct = {
   check_branch_id?: number | null
   /** This count differs from stock and waits for an administrator's approval (ic_fix_stock; sent only to a viewer who may see stock). */
   check_pending?: boolean
+  /** ic_wired rows: computed on the client from the shared row and the overlay, never read. difference = counted - now; set_to = the figure a Set would write; last_change_at = the last recorded movement. */
+  check_difference?: number | null
+  check_set_to?: number | null
+  check_seen_quantity?: number | null
+  last_change_at?: string | null
+  /** ic_wired rows with received dates: the dates this branch holds, oldest expiry first. */
+  lot_rows?: InventoryCheckLotRow[]
+  /** The row's dates were cut at the plan's limit: the rest load on request ("More dates"). */
+  lots_more?: boolean
+  /** Branch units that no received date holds (branch total minus the dates), shown read-only; absent when there are none or the dates are not known. */
+  unlotted_quantity?: number
+  /** ic_wired rows: what the latest count typed per received date (batch_id 0 = the branch total). */
+  check_lines?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number }>
 }
+
+/** One received date held at the listed branch (ic_lot_counts): the figure a count per date is typed against. */
+export type InventoryCheckLotRow = { batchId: number; receivedAt: string | null; expiry: string | null; quantity: number }
 
 export type InventoryCheckListStatus = 'not_checked' | 'in_check' | 'ok' | 'issue'
 
@@ -38,6 +54,8 @@ export type InventoryCheckTranslator = (key: string) => string | null | undefine
 
 export type InventoryCheckObservation = {
   product_id: InventoryCheckId
+  /** ic_lot_counts: what the count typed per received date (batch_id 0 = the branch total). */
+  lot_lines?: Array<{ batch_id: number; scope: 'lot' | 'branch'; counted: number; seen?: number; received_at?: string }>
   state: 'unstarted' | 'done' | 'issue'
   counted_quantity: number | null
   reason: string | null

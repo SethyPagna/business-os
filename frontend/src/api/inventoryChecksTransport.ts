@@ -103,6 +103,8 @@ export type InventoryCheckSessionItem = Omit<InventoryCheckObservation, 'state'>
   current_product_name?: string | null
   current_quantity?: number | null
   stock_changed?: boolean
+  /** ic_lot_counts: what the count typed per received date (the approval is applied date by date). */
+  lot_lines?: InventoryCheckObservation['lot_lines']
   /** The damaged units now (a Set excludes them); sent with the stock field. */
   current_stock?: { recorded_ordinary_quantity?: number | null; recorded_damaged_quantity?: number | null; consistent?: boolean }
 }
@@ -158,6 +160,16 @@ export function readInventoryCheckProducts<T>(params: QueryParams, signal?: Abor
   return apiFetch('GET', appendQuery(`${base}/products`, buildQueryString(params)), undefined, undefined, { signal })
 }
 
+/** ic_wired: the Products rows for the scope, cut to this viewer's Inventory grants. A server with the switch off answers 404 (the page then keeps readInventoryCheckProducts). */
+export function readInventoryCheckList<T>(params: QueryParams, signal?: AbortSignal): Promise<T> {
+  return apiFetch('GET', appendQuery(`${base}/list`, buildQueryString(params)), undefined, undefined, { signal })
+}
+
+/** ic_wired: the users' count entries and last stock change for the visible ids of one branch (lots=1 also brings the received dates the shared rows lack). */
+export function readInventoryCheckOverlay<T>(params: { branchId: number | string; ids: Array<number | string>; lots?: boolean }, signal?: AbortSignal): Promise<T> {
+  return apiFetch('GET', appendQuery(`${base}/overlay`, buildQueryString({ branchId: params.branchId, ids: params.ids.join(','), ...(params.lots ? { lots: 1 } : {}) })), undefined, undefined, { signal })
+}
+
 export function readInventoryCheckSessions(params: InventoryCheckSessionsParams = {}, signal?: AbortSignal): Promise<{ items: InventoryCheckSession[]; total: number; page: number; pageSize: number; approvals?: boolean }> {
   return apiFetch('GET', appendQuery(`${base}/sessions`, buildQueryString(params)), undefined, undefined, { signal })
 }
@@ -186,7 +198,11 @@ export function saveInventoryCheckObservation(scope: InventoryCheckWriteScope, p
 export type InventoryCheckSubmission = {
   branchId: number
   requestId: string
-  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }>
+  /** Names the session in History (a count recorded after a Set from the row says so). */
+  title?: string
+  /** A line is a product's one count, or (ic_lot_counts) the counts typed per received date, each with the figure it showed. */
+  lines: Array<{ productId: number; countedQuantity: number; seenQuantity: number | null; checked: boolean; note?: string }
+    | { productId: number; lots: Array<{ batchId: number; scope: 'lot' | 'branch'; counted: number; seen: number | null }>; checked: boolean; note?: string }>
 }
 export function submitInventoryCheckCounts(scope: InventoryCheckWriteScope, input: InventoryCheckSubmission): Promise<{ item: InventoryCheckSession; receipt: InventoryCheckReceipt; created: boolean }> {
   if (scope.context.sessionId) throw new Error('Counts are submitted from the list, not from inside a session.')

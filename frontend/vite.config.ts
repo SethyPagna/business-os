@@ -734,6 +734,7 @@ function manualChunks(id: string): string | undefined {
     ) return 'branch-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
+    if (normalized.endsWith('/src/components/inventory/stockAnswerPatch.ts')) return 'inventory-stock-patch'
     if (normalized.endsWith('/src/components/inventory/inventoryExport.ts')) return 'inventory-export'
     if (normalized.endsWith('/src/api/inventoryWriteTransport.ts')) return 'inventory-write-api'
     if (

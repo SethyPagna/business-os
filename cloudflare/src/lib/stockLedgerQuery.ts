@@ -83,6 +83,8 @@ export type StockLedgerQuery = {
   countSql: string
   rowsSql: string
   summarySql: string
+  // The row statement with extra clauses and the cursor-paged forms (see planStockLedgerKeyset); rowsSql is rowsSqlWith('', 'offset', false).
+  rowsSqlWith(extraClause: string, paging: 'offset' | 'keyset', cursorColumns: boolean): string
 }
 
 const OUT_LIST = LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')
@@ -464,13 +466,25 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   //               rows dated after hi (a range count) -- rows dated after hi
   //               precede the page in both orders.
   // Only the page's rows then run the correlated walk below.
-  const windowWhere = (extra: string) => `WHERE ${[...whereClauses, extra].join(' AND ')}`
-  const rowsSql = `
+  // The row statement for a set of clauses. Plain (`paging` 'offset', no `cursorColumns`) it is exactly what it always was. For the cursor-paged list (read switch
+  // ledger_keyset, lib/stockLedgerKeyset.ts): `paging` 'keyset' drops the OFFSET and the skip count -- the position is a cursor predicate in `clauses`, so the page
+  // is the first @limit rows of the set that follows it -- and `cursorColumns` returns the page's own instant and UTC day (keyset_instant, keyset_day), so the
+  // next cursor needs no second read.
+  const rowsSqlFor = (clauses: string[], paging: 'offset' | 'keyset', cursorColumns: boolean): string => {
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+    const windowWhere = (extra: string) => `WHERE ${[...clauses, extra].join(' AND ')}`
+    const rawOffset = paging === 'keyset' ? '' : ' OFFSET @offset'
+    const pageOffset = paging === 'keyset' ? '' : ` OFFSET MAX(0, @offset - (
+        SELECT COUNT(*)${LEDGER_FROM}
+        ${windowWhere(`m.created_at >= (SELECT CASE WHEN hi IS NULL THEN '' ELSE hi || '~' END FROM day_window)`)}
+      ))`
+    const cursorSelect = cursorColumns ? ', pg.instant AS keyset_instant, substr(m.created_at, 1, 10) AS keyset_day' : ''
+    return `
     WITH raw_page AS (
       SELECT m.created_at${LEDGER_FROM}
-      ${whereSql}
+      ${where}
       ORDER BY m.created_at DESC, m.id DESC
-      LIMIT @limit OFFSET @offset
+      LIMIT @limit${rawOffset}
     ),
     day_window AS (
       SELECT MIN(substr(created_at, 1, 10)) AS lo, MAX(substr(created_at, 1, 10)) AS hi,
@@ -489,10 +503,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     page AS (
       SELECT id, instant FROM page_rows
       ORDER BY instant DESC, id DESC
-      LIMIT @limit OFFSET MAX(0, @offset - (
-        SELECT COUNT(*)${LEDGER_FROM}
-        ${windowWhere(`m.created_at >= (SELECT CASE WHEN hi IS NULL THEN '' ELSE hi || '~' END FROM day_window)`)}
-      ))
+      LIMIT @limit${pageOffset}
     )
     SELECT
       m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
@@ -514,13 +525,16 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
          AND (mx.reference_id IS NULL OR CAST(mx.reference_id AS TEXT) NOT LIKE 'revert:%')) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       ${movementTotalDeltaSql('m')} AS total_delta,
-      ${movementStockAfterSql('m', 'p')} AS after_qty
+      ${movementStockAfterSql('m', 'p')} AS after_qty${cursorSelect}
     FROM page pg
     JOIN inventory_movements m ON m.id = pg.id
     LEFT JOIN products p ON p.id = m.product_id
     LEFT JOIN product_batches b ON b.id = m.batch_id
     ORDER BY pg.instant DESC, m.id DESC
   `
+  }
+  const rowsSql = rowsSqlFor(whereClauses, 'offset', false)
+  const rowsSqlWith = (extra: string, paging: 'offset' | 'keyset', cursorColumns: boolean): string => rowsSqlFor(extra ? [...whereClauses, extra] : whereClauses, paging, cursorColumns)
 
   // Stats summary: one row carrying the In vs Out record counts and
   // magnitude totals over the BASE scope (it deliberately ignores the view
@@ -537,8 +551,79 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     ${baseWhereSql}
   `
 
-  return { whereSql, baseWhereSql, params, countSql, rowsSql, summarySql }
+  return { whereSql, baseWhereSql, params, countSql, rowsSql, summarySql, rowsSqlWith }
 }
+// ---- Keyset paging (read switch ledger_keyset) ----------------------------------------------------------------------------------------------------
+//
+// The list is ordered by (instant DESC, id DESC) (see the comment above the row statement). A cursor is the last row of a page: its instant as the ORDER BY
+// expression computes it, its UTC date (the first 10 characters of created_at, which is what the raw index walk is bounded by) and its id. The next page is
+// the first @limit rows STRICTLY AFTER that position, found with the same two index steps as an offset page: a precise predicate on the instant (it is the
+// ordering, so ties at one instant break on id exactly as the ORDER BY does) over a sargable raw-date bound (rows dated at or before the cursor's day), and
+// no COUNT, no OFFSET and no skip count -- so a page costs the day it starts in plus its own rows, whatever its depth.
+//
+// A row with a NULL created_at sorts last in both orders. Its cursor is { d: null, i: null, id }; a page that runs out of dated rows is topped up from the
+// NULL rows by a second, tiny statement (tailSql), so the walk visits every row once, like the offset list does.
+export type StockLedgerCursor = { d: string | null; i: string | null; id: number }
+
+const CURSOR_VERSION = 1
+
+export function encodeStockLedgerCursor(cursor: StockLedgerCursor): string {
+  const bytes = new TextEncoder().encode(JSON.stringify({ v: CURSOR_VERSION, d: cursor.d, i: cursor.i, id: cursor.id }))
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/** null for anything that is not a cursor this module made: the route answers 400 invalid_cursor and the client starts over from page 1. */
+export function decodeStockLedgerCursor(token: unknown): StockLedgerCursor | null {
+  if (typeof token !== 'string' || token.length < 8 || token.length > 200 || !/^[A-Za-z0-9_-]+$/.test(token)) return null
+  try {
+    const padded = token.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (token.length % 4)) % 4)
+    const parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)))) as Record<string, unknown> | null
+    if (!parsed || typeof parsed !== 'object' || parsed.v !== CURSOR_VERSION) return null
+    const id = parsed.id
+    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) return null
+    if (parsed.i === null && parsed.d === null) return { d: null, i: null, id }
+    if (typeof parsed.i !== 'string' || parsed.i.length < 10 || parsed.i.length > 40) return null
+    if (typeof parsed.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(parsed.d)) return null
+    return { d: parsed.d, i: parsed.i, id }
+  } catch {
+    return null
+  }
+}
+
+export type StockLedgerKeysetPlan = {
+  /** The page after the cursor (bind limit + params; no offset). */
+  rowsSql: string
+  /** The NULL-created_at rows to top up a short page (bind limit + params); null when rowsSql already covers them (the cursor is one of them). */
+  tailSql: string | null
+  /** The cursor's bindings (cursorId; cursorInstant and cursorDayEnd for a dated cursor). */
+  params: Record<string, unknown>
+}
+
+/** The statements for the page after `cursor`, over the same filters, joins and view predicate as the offset list's. */
+export function planStockLedgerKeyset(query: StockLedgerQuery, cursor: StockLedgerCursor): StockLedgerKeysetPlan {
+  const instant = movementInstantSql('m')
+  if (cursor.i === null || cursor.d === null) {
+    return { rowsSql: query.rowsSqlWith('m.created_at IS NULL AND m.id < @cursorId', 'keyset', true), tailSql: null, params: { cursorId: cursor.id } }
+  }
+  return {
+    rowsSql: query.rowsSqlWith(`m.created_at < @cursorDayEnd AND (${instant} < @cursorInstant OR (${instant} = @cursorInstant AND m.id < @cursorId))`, 'keyset', true),
+    tailSql: query.rowsSqlWith('m.created_at IS NULL', 'keyset', true),
+    params: { cursorId: cursor.id, cursorInstant: cursor.i, cursorDayEnd: `${cursor.d}~` },
+  }
+}
+
+/** The cursor that follows a page: its last row's position, from the columns the cursor statements return. null for an empty page. */
+export function nextStockLedgerCursor(rows: Array<{ id?: unknown; keyset_instant?: unknown; keyset_day?: unknown }>): StockLedgerCursor | null {
+  const last = rows[rows.length - 1]
+  if (!last) return null
+  const id = Number(last.id)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  if (last.keyset_instant == null || last.keyset_day == null) return { d: null, i: null, id }
+  return { d: String(last.keyset_day), i: String(last.keyset_instant), id }
+}
+
 
 // before_qty derivation shared by the route and the test: one place owns
 // the "before = after - delta" arithmetic. The delta is the row's effect on

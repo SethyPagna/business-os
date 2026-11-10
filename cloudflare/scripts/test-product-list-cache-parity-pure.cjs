@@ -46,19 +46,38 @@ function extractHandler(src, routePath) {
   return src.slice(start, i + 1)
 }
 
+// The body of an exported function, from its first "{" after the signature's closing ") {" by brace counting.
+function readerBodyOf(src, start) {
+  const open = src.indexOf(') {', start)
+  let depth = 0
+  let i = src.indexOf('{', open)
+  const from = i
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth += 1
+    else if (src[i] === '}') { depth -= 1; if (depth === 0) break }
+  }
+  return src.slice(from, i + 1)
+}
+
 function main() {
   const src = read('routes/products.ts')
   const searchHandler = extractHandler(src, '/search')
   const listHandler = extractHandler(src, '/')
+  // Since INV-A S4a GET /search is a thin call to the exported reader the Inventory Check list shares; the cache wrapper, the version and the live refresh of a hit live in it.
+  const readerStart = src.indexOf('export async function readProductSearchList')
+  assert.ok(readerStart >= 0, 'readProductSearchList not found')
+  const readerHandler = readerBodyOf(src, readerStart)
 
   check('GET /search uses cachedJsonResponse with a products-namespace version (reference behaviour)', () => {
     // I2-1: the version comes from productSearchCacheVersion ('products', plus
     // 'stock' only for stock-filtered membership); a hit is refreshed live.
-    assert.match(searchHandler, /productSearchCacheVersion\(c\.env, query\)/)
-    assert.match(searchHandler, /refreshCachedProductRows\(c\.env,/)
+    assert.match(searchHandler, /readProductSearchList\(c, query\)/, 'GET /search must serve through the shared reader')
+    assert.match(readerHandler, /productSearchCacheVersion\(c\.env, query\)/)
+    assert.match(readerHandler, /refreshCachedProductRows\(c\.env,/)
     const versionFn = src.slice(src.indexOf('async function productSearchCacheVersion'), src.indexOf('async function refreshCachedProductRows'))
     assert.match(versionFn, /getVersionWithFallback\(env, 'products'\)/)
-    assert.match(searchHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, 20,/)
+    assert.match(readerHandler, /cachedJsonResponse\(keyRequest, c\.executionCtx, version, PRODUCT_LIST_LEGACY_CACHE_SECONDS,/)
+    assert.match(src, /const PRODUCT_LIST_LEGACY_CACHE_SECONDS = 20\b/, 'the OFF path keeps the 20 s lifetime the list always had')
   })
 
   check('GET / (bare list) now routes through the SAME cachedJsonResponse wrapper, same namespace and TTL', () => {

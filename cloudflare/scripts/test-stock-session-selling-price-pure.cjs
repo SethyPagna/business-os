@@ -18,6 +18,7 @@ const path = require('path')
 const ts = require('typescript')
 const assert = require('assert')
 const Module = require('module')
+const { withFixStockHoldStub } = require('./harness/fix_stock_hold_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -42,7 +43,7 @@ function loadReal(relPath, overrides = {}) {
   Module._load = patchedLoad
   const moduleObj = { exports: {} }
   try {
-    new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath))
+    new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(moduleObj.exports, withFixStockHoldStub(require), moduleObj, sourcePath, path.dirname(sourcePath))
   } finally { Module._load = originalLoad }
   return moduleObj.exports
 }

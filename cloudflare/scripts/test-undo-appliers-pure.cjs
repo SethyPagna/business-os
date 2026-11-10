@@ -147,6 +147,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
     BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk',
     MULTI_CUSTOMER_UPDATE_KIND: 'sale.customer.v2.bulk',
     SINGLE_CUSTOMER_UPDATE_KIND: 'sale.customer.single',
+    SINGLE_DELIVERY_UPDATE_KIND: 'sale.delivery.single',
     replaySaleBulkUpdate: async () => { throw new Error('Use the dedicated bulk fixture') },
   }
   if (id === './returnBulkAction') return {
@@ -517,6 +518,7 @@ await check('resolveUndoApplier recognizes a registered applier and falls throug
   assert.ok(registeredUndoAppliers().includes('sale.customer.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.v2.bulk'))
   assert.ok(registeredUndoAppliers().includes('sale.customer.single'))
+  assert.ok(registeredUndoAppliers().includes('sale.delivery.single'))
   assert.ok(registeredUndoAppliers().includes('return.fields.bulk'))
 })
 
@@ -697,6 +699,7 @@ await check('sale bulk replay needs sales.bulk while one-customer replay keeps s
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.v2.bulk' })?.action, 'bulk')
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.bulk' })?.action, 'customer', 'legacy outer gate remains compatible; replay rechecks multi size')
   assert.strictEqual(resolveUndoApplier({ applier: 'sale.customer.single' })?.action, 'customer')
+  assert.strictEqual(resolveUndoApplier({ applier: 'sale.delivery.single' })?.action, 'amend')
 })
 
 await check('combined merge permission effects use one root snapshot per phase and retain malformed identity refusals', async () => {

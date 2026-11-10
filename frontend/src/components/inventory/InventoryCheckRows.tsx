@@ -383,6 +383,9 @@ function CheckRow({ product, observation, pending, error, header, adornment, fro
       </span>}
     </div>
     {!header && note ? <p className="mt-1 break-words text-xs lg:pl-12 leading-relaxed text-amber-800 dark:text-amber-200" data-check-note>{note}</p> : null}
+    {!header && observation?.lot_lines?.length ? <p data-check-lot-lines className="mt-1 flex flex-wrap gap-x-3 text-xs leading-relaxed tabular-nums text-gray-600 lg:pl-12 dark:text-gray-300">
+      {observation.lot_lines.map(line => <span key={line.batch_id}>{line.scope === 'branch' ? tr('inventory_check_branch_total', 'Branch total') : tr('inventory_check_lot_received', 'Received {date}').replace('{date}', line.received_at ? fmtDateOnly(line.received_at) : '—')}: <strong>{line.counted}</strong>{typeof line.seen === 'number' ? ` / ${line.seen}` : ''}</span>)}
+    </p> : null}
     {failure ? <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-red-700 dark:text-red-300">
       <p role="alert" className="min-w-0 break-words leading-relaxed">{failure}</p>
       {!draft && retryable && canCheck ? <button type="button" disabled={busy} aria-label={retryLabel} title={retryLabel} className={rowIconButton} onClick={() => { void save(retryable.patch, retryable.revision, retryable.via ?? 'tick') }}><RotateCcw className="h-4 w-4" aria-hidden="true" /></button> : null}

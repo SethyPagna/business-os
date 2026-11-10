@@ -14,8 +14,17 @@ const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 //   - change and clear work on a Completed, Not Paid and awaiting-delivery sale,
 //     each writing one driver_changed record with the before/after driver;
 //   - Undo restores the previous driver and records the undo;
-//   - the grants are the group path's (sales:bulk + sales:amend);
-//   - a cancelled sale is refused (owner rule: every status except cancelled).
+//   - the grant is the delivery cost's, sales:amend alone (sales:bulk stays the
+//     multi-sale switch);
+//   - a cancelled sale is refused (owner rule: every status except cancelled);
+//   - G1: outside the sale edit window a non-admin is refused with the window
+//     code (the delivery-cost edit's rule); an admin and a sale inside the window pass;
+//   - G2: a driver contact deleted after the sale was saved does not block a
+//     change or a clear, and Undo restores the snapshot;
+//   - G3: a delivery expense linked to the sale and the old driver moves to the
+//     new driver in the same write (and back on Undo); other expense types and
+//     other sales' expenses stay;
+//   - G6: the audit row names the sale and receipt and the driver before and after.
 //
 // DISCRIMINATING: on 0293aeb0 the cancelled case answers 200 and re-points the
 // cancelled sale's driver.
@@ -30,7 +39,7 @@ const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs
 const ADMIN = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 let user = ADMIN
 const cache = new Map()
-const actual = new Set(['businessMaintenanceGuard', 'acquisitionCostAccess','courierCostAccess', 'saleCustomerAssignmentGuard','customerPointsReturn', 'actorSnapshot', 'anonymousCustomer', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions','failureText'])
+const actual = new Set(['businessMaintenanceGuard', 'acquisitionCostAccess','courierCostAccess', 'saleCustomerAssignmentGuard','customerPointsReturn', 'actorSnapshot', 'anonymousCustomer', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites', 'conflictControl', 'saleAmendments', 'productStockGuard', 'searchMatch', 'paymentMethodRegistry', 'contactOptions','failureText'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }
@@ -115,7 +124,7 @@ async function runTest(name, fn) {
       assert.deepEqual(driverOf(f, id), { id: 2, name: 'Driver B', phone: '222', address: 'B road' })
       assert.deepEqual(events(f, id), [{ kind: 'driver_changed', via: 'apply', changes: [{ field: 'driver', before: A, after: B }] }])
       const row = f.sql.prepare("SELECT status,json_extract(undo_payload,'$.applier') applier FROM action_history WHERE id=?").get(changed.body.actionHistoryId)
-      assert.deepEqual(row, { status: 'undoable', applier: 'sale.fields.bulk' })
+      assert.deepEqual(row, { status: 'undoable', applier: 'sale.delivery.single' })
       const undone = await f.call(history, `/${changed.body.actionHistoryId}/undo`, { require_applied: true, expected_generation: 0 })
       assert.equal(undone.status, 200, JSON.stringify(undone))
       assert.deepEqual(driverOf(f, id), { id: 1, name: 'Driver A', phone: '111', address: 'A road' })
@@ -147,12 +156,156 @@ async function runTest(name, fn) {
     assert.deepEqual(events(f, 1), [])
   })
 
-  await runTest('the single change needs the group path\'s grants (sales:bulk + sales:amend)', async () => {
+  await runTest('the single change needs sales:amend, and sales:bulk alone is not enough', async () => {
     const f = fixture()
-    user = { id: 2, name: 'Amender', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, 'sales:bulk': false }) }
-    const denied = await f.call(sales, '/bulk-update', single('no-bulk-grant', 2, 1, 2))
+    user = { id: 2, name: 'Bulk only', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': false, 'sales:bulk': true }) }
+    const denied = await f.call(sales, '/bulk-update', single('no-amend-grant', 2, 1, 2))
     assert.equal(denied.status, 403, JSON.stringify(denied))
     assert.equal(driverOf(f, 2).id, 1)
+    user = { id: 3, name: 'Amender', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, 'sales:bulk': false }) }
+    const allowed = await f.call(sales, '/bulk-update', single('amend-grant', 2, 1, 2))
+    assert.equal(allowed.status, 200, JSON.stringify(allowed))
+    assert.equal(driverOf(f, 2).id, 2)
+  })
+
+  const setWindow = (f, minutes) => f.sql.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('sale_amendment_window_minutes',?)").run(String(minutes))
+  const amendOnly = { id: 3, name: 'Amender', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, 'sales:bulk': false }) }
+  const feeDriver = (f, id) => f.sql.prepare('SELECT delivery_contact_id d FROM fees WHERE id=?').get(9000 + id).d
+
+  await runTest('G1: outside the sale edit window an amend-only user is refused with the window code; an admin and a sale inside the window pass', async () => {
+    const f = fixture()
+    setWindow(f, 60)
+    f.sql.prepare("UPDATE sales SET created_at=datetime('now','-2 hours') WHERE id=2").run()
+    f.sql.prepare("UPDATE sales SET created_at=datetime('now','-5 minutes') WHERE id=3").run()
+    user = amendOnly
+    const refused = await f.call(sales, '/bulk-update', single('window-refused', 2, 1, 2))
+    assert.equal(refused.status, 400, JSON.stringify(refused))
+    assert.equal(refused.body.code, 'window')
+    assert.deepEqual(refused.body.sale_ids, [2])
+    assert.equal(driverOf(f, 2).id, 1)
+    assert.deepEqual(events(f, 2), [])
+    const cleared = await f.call(sales, '/bulk-update', single('window-refused-clear', 2, 1, null))
+    assert.equal(cleared.body.code, 'window', 'clearing is a driver edit too')
+    const inside = await f.call(sales, '/bulk-update', single('window-inside', 3, 1, 2))
+    assert.equal(inside.status, 200, JSON.stringify(inside))
+    assert.equal(driverOf(f, 3).id, 2)
+    user = ADMIN
+    const admin = await f.call(sales, '/bulk-update', single('window-admin', 2, 1, 2))
+    assert.equal(admin.status, 200, JSON.stringify(admin))
+    assert.equal(driverOf(f, 2).id, 2)
+  })
+
+  await runTest('G1: a returned sale is never refused by the returns rule (23 Sep: editable in every status except cancelled)', async () => {
+    const f = fixture()
+    setWindow(f, 0)
+    f.sql.prepare("UPDATE sales SET sale_status='returned' WHERE id=2").run()
+    user = amendOnly
+    const allowed = await f.call(sales, '/bulk-update', single('returned-allowed', 2, 1, 2))
+    assert.equal(allowed.status, 200, JSON.stringify(allowed))
+  })
+
+  await runTest('G2: a deleted source driver contact does not block changing or clearing the driver, and Undo restores it', async () => {
+    const f = fixture()
+    f.sql.prepare('DELETE FROM delivery_contacts WHERE id=1').run()
+    const changed = await f.call(sales, '/bulk-update', single('deleted-source-change', 2, 1, 2))
+    assert.equal(changed.status, 200, JSON.stringify(changed))
+    assert.deepEqual(driverOf(f, 2), { id: 2, name: 'Driver B', phone: '222', address: 'B road' })
+    assert.deepEqual(events(f, 2), [{ kind: 'driver_changed', via: 'apply', changes: [{ field: 'driver', before: A, after: B }] }])
+    const undone = await f.call(history, '/' + changed.body.actionHistoryId + '/undo', { require_applied: true, expected_generation: 0 })
+    assert.equal(undone.status, 200, JSON.stringify(undone))
+    assert.deepEqual(driverOf(f, 2), { id: 1, name: 'Driver A', phone: '111', address: 'A road' })
+    const cleared = await f.call(sales, '/bulk-update', single('deleted-source-clear', 4, 1, null))
+    assert.equal(cleared.status, 200, JSON.stringify(cleared))
+    assert.equal(driverOf(f, 4).id, null)
+  })
+
+  const feeFixture = () => {
+    const f = fixture()
+    f.sql.exec("INSERT INTO fees(id,fee_type,label,amount_usd,fee_date,sale_id,delivery_contact_id) VALUES (9001,'delivery','Courier',1.5,'2026-11-09',2,1),(9002,'other','Box',0.5,'2026-11-09',2,1),(9003,'delivery','Courier',1.5,'2026-11-09',3,1),(9004,'delivery','Courier',1.5,'2026-11-09',2,2)")
+    return f
+  }
+  await runTest('G3: the delivery expense linked to the sale and the old driver moves to the new driver, with Undo; other types and other sales stay', async () => {
+    const f = feeFixture()
+    const changed = await f.call(sales, '/bulk-update', single('fee-move', 2, 1, 2))
+    assert.equal(changed.status, 200, JSON.stringify(changed))
+    assert.equal(changed.body.movedExpenseCount, 1)
+    assert.equal(feeDriver(f, 1), 2, 'the delivery expense follows the delivery')
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM fees WHERE sale_id=2 AND delivery_contact_id=1 AND fee_type='delivery'").get().n, 0)
+    assert.equal(feeDriver(f, 2), 1, 'a non-delivery expense stays')
+    assert.equal(feeDriver(f, 3), 1, "another sale's expense stays")
+    assert.equal(feeDriver(f, 4), 2)
+    const undone = await f.call(history, '/' + changed.body.actionHistoryId + '/undo', { require_applied: true, expected_generation: 0 })
+    assert.equal(undone.status, 200, JSON.stringify(undone))
+    assert.equal(feeDriver(f, 1), 1, 'Undo moves the expense back')
+    assert.equal(feeDriver(f, 4), 2, 'an expense that was already on the new driver is not pulled back')
+    const redone = await f.call(history, '/' + changed.body.actionHistoryId + '/redo', { require_applied: false, expected_generation: 1 })
+    assert.equal(redone.status, 200, JSON.stringify(redone))
+    assert.equal(feeDriver(f, 1), 2)
+  })
+
+  await runTest('G3: the review preview lists the delivery expenses that would move, writes nothing, and obeys the same refusals', async () => {
+    const f = feeFixture()
+    f.sql.prepare('UPDATE fees SET label=? WHERE id=9001').run('Courier run')
+    const tables = ['sales', 'fees', 'audit_logs', 'action_history', 'sale_bulk_operations', 'sale_record_events', 'undo_snapshots']
+    const state = () => JSON.stringify(tables.map((t) => f.sql.prepare('SELECT * FROM ' + t + ' ORDER BY rowid').all()))
+    const before = state()
+    const preview = await f.call(sales, '/bulk-update', { ...single('preview-1', 2, 1, 2), preview: true })
+    assert.equal(preview.status, 200, JSON.stringify(preview))
+    assert.equal(preview.body.preview, true)
+    assert.deepEqual(preview.body.movedExpenses, [{ id: 9001, sale_id: 2, label: 'Courier run' }])
+    assert.ok(!/amount|usd|khr/i.test(JSON.stringify(preview.body.movedExpenses)), 'the preview names the expense, never its amount')
+    assert.equal(state(), before, 'a preview writes nothing')
+    // The same request id can then be used for the real write: the preview did not consume it.
+    const real = await f.call(sales, '/bulk-update', single('preview-1', 2, 1, 2))
+    assert.equal(real.status, 200, JSON.stringify(real))
+    assert.equal(real.body.movedExpenseCount, 1)
+    const g = fixture()
+    g.sql.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('sale_amendment_window_minutes','60')").run()
+    g.sql.prepare("UPDATE sales SET created_at=datetime('now','-2 hours') WHERE id=2").run()
+    user = amendOnly
+    const refused = await g.call(sales, '/bulk-update', { ...single('preview-2', 2, 1, 2), preview: true })
+    assert.equal(refused.body.code, 'window', 'a preview is refused where the write would be')
+  })
+
+  await runTest('G3: clearing the driver unlinks the delivery expense, and Undo links it back', async () => {
+    const f = feeFixture()
+    const cleared = await f.call(sales, '/bulk-update', single('fee-clear', 2, 1, null))
+    assert.equal(cleared.status, 200, JSON.stringify(cleared))
+    assert.equal(feeDriver(f, 1), null)
+    assert.equal(feeDriver(f, 2), 1)
+    await f.call(history, '/' + cleared.body.actionHistoryId + '/undo', { require_applied: true, expected_generation: 0 })
+    assert.equal(feeDriver(f, 1), 1)
+  })
+
+  await runTest('G6: the audit row names the sale, the receipt and the driver before and after, never the courier cost', async () => {
+    const f = feeFixture()
+    f.sql.prepare('UPDATE sales SET delivery_actual_cost_usd=7.77 WHERE id=2').run()
+    const changed = await f.call(sales, '/bulk-update', single('audit-single', 2, 1, 2))
+    assert.equal(changed.status, 200, JSON.stringify(changed))
+    const rows = f.sql.prepare("SELECT entity_id,record_id,details FROM audit_logs WHERE action='sale_fields_bulk'").all()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].entity_id, '2')
+    assert.equal(rows[0].record_id, '2')
+    const details = JSON.parse(rows[0].details)
+    assert.equal(details.kind, 'sale.delivery.single')
+    assert.equal(details.receipt_number, 'R2')
+    assert.equal(details.before.name, 'Driver A')
+    assert.equal(details.after.name, 'Driver B')
+    assert.equal(details.expenses_moved, 1)
+    assert.ok(!/7\.77|cost/i.test(rows[0].details), 'no courier cost in the audit row')
+  })
+
+  await runTest('G5: the history row carries the receipt and both names for the History bar', async () => {
+    const f = fixture()
+    const changed = await f.call(sales, '/bulk-update', single('history-single', 2, 1, 2))
+    const row = f.sql.prepare('SELECT label,undo_payload,redo_payload FROM action_history WHERE id=?').get(changed.body.actionHistoryId)
+    const payload = JSON.parse(row.undo_payload)
+    assert.equal(payload.applier, 'sale.delivery.single')
+    assert.equal(payload.receipt_number, 'R2')
+    assert.equal(payload.before_name, 'Driver A')
+    assert.equal(payload.after_name, 'Driver B')
+    assert.equal(row.label, 'Driver of #R2: Driver A -> Driver B')
+    assert.equal(JSON.parse(row.redo_payload).after_name, 'Driver B')
   })
 
   if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

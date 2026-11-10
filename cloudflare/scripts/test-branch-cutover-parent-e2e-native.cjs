@@ -185,7 +185,9 @@ function world({ control, generatedProducts = 28, duplicate = false, legacySeed 
     INSERT INTO shift_sessions(id,shift_code,user_id,branch_id,branch_name,business_date,opened_at,closed_at) VALUES(900001,'SH1',7,2,NULL,'2026-09-01','2026-09-01 08:00:00','2026-09-01 20:00:00');
     INSERT INTO stock_transfers(id,product_id,from_branch_id,to_branch_id,quantity) VALUES(900001,2,1,2,1);
     INSERT INTO pending_actions(section,action_type,entity_type,status) VALUES('inventory','adjust','product','rejected'),('inventory','adjust','product','approved');`)
-  const history = seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 }, 20000)
+  const archivedRules = completedCutover.readSource('lib/branchCutoverHistory.ts'), classified = new Set([...archivedRules.matchAll(/^ {2}'([a-z_.]+)': '(?:leave|close|close_if_source|close_if_either)',/gm)].map(m => m[1]))
+  assert.ok(classified.has('sale.settlement') && classified.has('stock.transfer') && !classified.has('sale.delivery.single'), 'the archived rule table was read')
+  const history = seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 }, 20000, classified)
   if (legacySeed) {
     legacySeed(raw)
     const tables = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'damaged_stock_lots']

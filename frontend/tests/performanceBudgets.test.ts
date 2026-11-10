@@ -119,6 +119,10 @@ function closureBytesAndCount(graph: Map<string, string[]>, entryFiles: string[]
 // rules (utils/posOrdersSchema.ts) stay out of it; serverSignals, dataEpoch and readBudgetShed join api-http-core, which imports them.
 const CATALOG_PRODUCTS_BASELINE_BYTES = 884_917
 const CATALOG_PRODUCTS_P07_GROWTH_BYTES = 6_657
+// B4 (rc/20261110a): the closure grew 1,198 bytes (main aa0d45c38 = 979,207 B, the candidate 980,405 B) and no chunk. Measured split: about 692 B is lane/sale-delivery-edit's
+// driver-change client code in app-shared, and about 506 B is the Inventory lanes' product-read-api / app-api-methods additions (the wired list and overlay reads, the lot-count and
+// stock-answer helpers). Same pattern as 6.0.1048: the baseline above stays, and the ceiling is the old one plus what this client code really weighs.
+const CATALOG_PRODUCTS_B4_GROWTH_BYTES = 1_198
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -140,8 +144,8 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
     'no chunk of the catalog-products closure carries the Expenses report endpoint',
   )
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES,
-    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES,
+    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048 and the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(
     chunks <= Math.ceil(CATALOG_PRODUCTS_BASELINE_CHUNKS * BUDGET_TOLERANCE),

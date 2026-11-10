@@ -3,6 +3,7 @@ import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
+import { StockLedgerPager, walkLedgerForExport } from './stockLedgerPaging.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type LaterOpenSet, type StockMovementRevertPreview, type StockRevertEffect } from '../../api/actionHistoryTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
@@ -76,6 +77,7 @@ import {
   emitFailedAttemptsChanged,
   readFailedStockAttempts,
   FAILED_ATTEMPTS_EVENT,
+  stockFailureText,
   type FailedStockAttempt,
 } from '../../utils/stockAdjustOutcome.ts'
 
@@ -172,6 +174,9 @@ type LedgerView = 'all' | 'in' | 'out'
 type Translate = (key: string) => string
 
 const PAGE_SIZE = 25
+// The CSV export asks for the biggest page and takes what the server gives (it caps a page by the plan); it stops at this many rows.
+const EXPORT_PAGE_ASKED = 1000
+const EXPORT_MAX_ROWS = 10_000
 
 const EMPTY_SUMMARY: LedgerSummary = { inCount: 0, outCount: 0, inQty: 0, outQty: 0, total: 0 }
 
@@ -329,6 +334,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const failedUserKey = app.user?.id ?? app.user?.username ?? null
   const [failedAttempts, setFailedAttempts] = useState<FailedStockAttempt[]>([])
   const requestRef = useRef(0)
+  // Pages the list by cursor when the server does (read switch ledger_keyset): the total and summary come with page 1 and are kept, later pages ask for rows only,
+  // and the page after the one on screen is read ahead once the person has paged forward. A server that pages by number is asked exactly as before.
+  const pagerRef = useRef<StockLedgerPager<LedgerRow> | null>(null)
+  if (!pagerRef.current) pagerRef.current = new StockLedgerPager<LedgerRow>(getStockLedger)
+  const lastPageRef = useRef(1)
   const stockWorkflowOpen = fastStockInOpen
   // The scanner gun fills the ledger search the camera and the keyboard fill
   // (setSearch). While the Stock Session is open it is a dialog above this
@@ -393,14 +403,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     markRestoreHandled('fast_stockin')
   }, [app, canAdjust, t])
 
-  const load = useCallback(async () => {
+  // `fresh`: after a write made here (a revert, a reason edit, a stock-in) or a Retry, what was read is dropped and the page is read again with its totals.
+  const load = useCallback(async (options: { fresh?: boolean } = {}) => {
     const requestId = ++requestRef.current
     setLoading(true)
     try {
-      const response = await getStockLedger({
+      const scope = {
         view,
-        page,
-        pageSize: PAGE_SIZE,
         search: debouncedSearch || undefined,
         branchId: branchId || undefined,
         startDate: startDate || undefined,
@@ -408,12 +417,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         startTime: startTime || (endTime ? '00:00' : undefined),
         endTime: endTime || (startTime ? '23:59' : undefined),
         supplierId: supplierId || undefined,
-      }) as LedgerResponse
+      }
+      const pager = pagerRef.current!
+      const result = await pager.load(scope, page, PAGE_SIZE, options)
       if (requestRef.current !== requestId) return
-      setRows(Array.isArray(response?.items) ? response.items : [])
-      setTotal(Number(response?.total || 0))
-      setSummary(response?.summary ? { ...EMPTY_SUMMARY, ...response.summary } : EMPTY_SUMMARY)
+      const movedForward = page > lastPageRef.current
+      lastPageRef.current = page
+      setRows(result.items)
+      setTotal(result.total)
+      setSummary(result.summary ? { ...EMPTY_SUMMARY, ...result.summary } : EMPTY_SUMMARY)
       setLoadError('')
+      if (movedForward) void pager.prefetch(scope, page)
     } catch (error) {
       if (requestRef.current !== requestId) return
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -549,31 +563,21 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   )
 
   // Ranged CSV export of the ledger, honoring the section's current search/
-  // branch/supplier/view filters. Walks /stock-ledger pages (1000/page,
-  // 10-page cap) and says so honestly if the range holds more.
+  // branch/supplier/view filters. Walks /stock-ledger pages (as many rows a page
+  // as the server allows, 10,000 rows in all -- the page size is the server's
+  // answer, so a plan with a smaller page only takes more pages) and says so
+  // honestly if the range holds more.
   const runLedgerExport = useCallback(async (range: { startDate: string; endDate: string; startTime?: string; endTime?: string }) => {
-    const pageSize = 1000
-    const maxPages = 10
-    const rows: LedgerRow[] = []
-    let grandTotal = 0
-    for (let exportPage = 1; exportPage <= maxPages; exportPage += 1) {
-      const response = await getStockLedger({
-        view,
-        page: exportPage,
-        pageSize,
-        search: debouncedSearch || undefined,
-        branchId: branchId || undefined,
-        startDate: range.startDate || undefined,
-        endDate: range.endDate || undefined,
-        startTime: range.startTime || (range.endTime ? '00:00' : undefined),
-        endTime: range.endTime || (range.startTime ? '23:59' : undefined),
-        supplierId: supplierId || undefined,
-      }) as LedgerResponse
-      const items = Array.isArray(response?.items) ? response.items : []
-      grandTotal = Number(response?.total || 0)
-      rows.push(...items)
-      if (rows.length >= grandTotal || items.length < pageSize) break
-    }
+    const { rows, grandTotal } = await walkLedgerForExport<LedgerRow>(getStockLedger, {
+      view,
+      search: debouncedSearch || undefined,
+      branchId: branchId || undefined,
+      startDate: range.startDate || undefined,
+      endDate: range.endDate || undefined,
+      startTime: range.startTime || (range.endTime ? '00:00' : undefined),
+      endTime: range.endTime || (range.startTime ? '23:59' : undefined),
+      supplierId: supplierId || undefined,
+    }, EXPORT_PAGE_ASKED, EXPORT_MAX_ROWS)
     if (grandTotal > rows.length) {
       app.notify(tr(t, 'export_truncated', `Export capped at ${rows.length} of ${grandTotal} records — narrow the range for the rest.`), 'warning')
     }
@@ -670,7 +674,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       if (!isCurrent()) return
       app.notify(tr(t, 'movement_reverted', 'Change reverted'))
       closeDetail()
-      void load()
+      void load({ fresh: true })
     } catch (error) {
       if (isCurrent()) {
         app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
@@ -701,7 +705,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       app.notify(tr(t, 'reason_updated', 'Reason updated'))
       setDetail((current) => (current ? { ...current, reason: next } : current))
       setEditingReason(null)
-      void load()
+      void load({ fresh: true })
     } catch (error) {
       app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
     } finally {
@@ -1185,7 +1189,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       {loadError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
           {loadError}
-          <button type="button" className="ml-2 underline" onClick={() => void load()}>{tr(t, 'retry', 'Retry')}</button>
+          <button type="button" className="ml-2 underline" onClick={() => void load({ fresh: true })}>{tr(t, 'retry', 'Retry')}</button>
         </div>
       ) : null}
 
@@ -1243,7 +1247,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     {row.reason ? ` · ${row.reason}` : ''}
                   </span>
                   <div className="mt-0.5 break-words text-rose-700 dark:text-rose-300">
-                    {row.failure?.message}
+                    {row.failure ? stockFailureText({ code: row.failure.code, message: row.failure.message }, (key, fallback) => tr(t, key, fallback), row.failure.message) : null}
                     {row.failure?.available != null ? ` (${tr(t, 'available', 'Available')}: ${row.failure.available})` : ''}
                   </div>
                 </div>
@@ -1583,7 +1587,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             onClose={() => { setFastStockInOpen(false); setFastStockInResume(null) }}
             onDone={() => {
               if (fastStockInResume) discardFailedAttempt(fastStockInResume.attemptId)
-              void load()
+              void load({ fresh: true })
             }}
             onMinimize={(label: string) => {
               minimizeWork({

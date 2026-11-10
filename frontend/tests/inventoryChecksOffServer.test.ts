@@ -30,6 +30,8 @@ open('hub:inventory:products')
 type Wire = { url: string; query: URLSearchParams }
 const wire: Wire[] = []
 let server: 'off' | 'on' = 'off'
+// A server that refuses every key it is asked in (a misconfigured proxy, say): the page may ask in each list's words once, and then it must stop.
+let refuseEverything = false
 // A server that already carries the fix maps checkState=issue to its old issue state; the server this page was built against does not.
 let aliasUnderstood = false
 const OFF_KEYS = new Set(['query', 'branchId', 'category', 'brand', 'stockState', 'page', 'pageSize', 'sortBy', 'sortDirection', 'sessionId', 'state'])
@@ -64,10 +66,12 @@ const doubles = {
   },
   'api/inventoryChecksTransport.ts': {
     captureInventoryCheckWriteScope: (context: unknown, isCurrent: unknown) => ({ context, readScope: {}, writeIdentity: {}, isCurrent }),
+    readInventoryCheckList: async () => { throw Object.assign(new Error('Not found'), { status: 404, code: 'not_found' }) }, // ic_wired is off here: the older list is what this test is about
     readInventoryCheckProducts: async (params: QueryParams) => {
       const url = appendQuery('/api/inventory-checks/products', buildQueryString(params))
       const query = new URL(url, 'https://admin.example.test').searchParams
       wire.push({ url, query })
+      if (refuseEverything) throw Object.assign(new Error('inventory_check_invalid_query'), { status: 400, code: 'inventory_check_invalid_query' })
       const known = server === 'off' ? OFF_KEYS : ON_KEYS
       for (const key of query.keys()) {
         if (!known.has(key) && !(server === 'off' && aliasUnderstood && key === 'checkState' && query.get(key) === 'issue')) throw Object.assign(new Error('inventory_check_invalid_query'), { status: 400, code: 'inventory_check_invalid_query', parameter: key })
@@ -172,20 +176,72 @@ try {
   await cold.unmount()
   aliasUnderstood = false
 
-  // ---- The switch moves under an open tab: a refused key makes the page forget the server, and Retry speaks the words both understand ----
+  // ---- The switch moves under an open tab (IC-R0): the held key belongs to the other list, the first ask is refused, and the SAME load asks once in the other list's words ----
+  // OFF -> ON: the tab learned the old list on the Issues tab (state=issue); the ic_simple list refuses that word.
   open('hub:inventory:products')
   const turning = await mount()
   await turning.click(turning.button('issues'))
   assert.equal(last().query.get('state'), 'issue', 'the tab learned the old list and speaks its words')
   server = 'on'
+  let from = wire.length
   await step(turning)
-  assert.equal(last().query.get('state'), 'issue'); assert.ok(turning.text().includes('unavailable'), 'the ic_simple server refuses the old word: the page says so and offers Retry')
-  await turning.click(turning.button('retry'))
-  assert.equal(last().query.get('checkState'), 'issue', 'Retry asks Issues in the shared words'); assert.equal(last().query.has('state'), false); assert.equal(last().query.has('summary'), false)
-  noError(turning, 'after Retry'); assert.ok(turning.text().includes('Issue page 2'), 'and the page recovers on the page it was on')
+  noError(turning, 'OFF->ON page step')
+  assert.equal(wire.length - from, 2, 'a refused key costs one more ask, not a loop: the old word, then the shared one')
+  assert.equal(wire[from].query.get('state'), 'issue'); assert.equal(last().query.get('checkState'), 'issue'); assert.equal(last().query.has('state'), false)
+  assert.ok(turning.text().includes('Issue page 2'), 'and the page recovers on the page it was on, with no Retry')
+  from = wire.length
   await step(turning)
-  assert.equal(last().query.get('page'), '3'); assert.equal(last().query.get('summary'), '0', 'now that the answer was the check-status list, page steps skip the counts again'); assert.equal(last().query.get('checkState'), 'issue')
+  assert.equal(wire.length - from, 1); assert.equal(last().query.get('page'), '3'); assert.equal(last().query.get('summary'), '0', 'now that the answer was the check-status list, page steps skip the counts again'); assert.equal(last().query.get('checkState'), 'issue')
   await turning.unmount()
+  server = 'off'
+
+  // ON -> OFF with a STATUS FILTER held: the ic_simple list offered "Checked OK"; once the switch is off the old list refuses checkState, and it has no word for it outside a session.
+  server = 'on'
+  open('hub:inventory:products')
+  const held = await mount()
+  await chooseFilter(held, 'checkState', 'inventory_check_status_ok')
+  assert.equal(last().query.get('checkState'), 'ok', 'the tab holds the status filter on the ic_simple list')
+  server = 'off'
+  from = wire.length
+  await step(held)
+  noError(held, 'ON->OFF with a held status filter')
+  assert.equal(wire.length - from, 2, 'the held status costs one more ask: the shared word is refused, then the old list is asked without it')
+  assert.equal(wire[from].query.get('checkState'), 'ok'); assert.deepEqual(keysOf(last()), ['page', 'pageSize', 'sortBy', 'sortDirection'], 'the old list is asked for its page, size and sort only: the status is dropped, not sent')
+  assert.ok(held.text().includes('Product page 2'), 'and the page is drawn, on the page it was on')
+  from = wire.length
+  await step(held)
+  assert.equal(wire.length - from, 1, 'afterwards the tab speaks the old list directly (no refusal on every step)'); assert.equal(last().query.has('checkState'), false); noError(held, 'step after recovery')
+  assert.ok(!(await menuSections(held)).includes('checkState'), 'and the old list is not offered a status choice it would refuse')
+  // flipping ON again with the filter still held in the tab brings it back, honoured, with no Retry
+  server = 'on'
+  from = wire.length
+  await held.click(held.button('back', pager(held)))
+  noError(held, 'OFF->ON with the filter still held')
+  assert.equal(wire.length - from, 2, 'the tab still speaks the old words and the ic_simple list answers them WITHOUT the status, so it asks again with it (one extra ask, not a loop)')
+  assert.equal(wire[from].query.has('checkState'), false); assert.equal(last().query.get('checkState'), 'ok', 'the held status is honoured again: rows are never shown unfiltered under a status chip')
+  from = wire.length
+  await step(held)
+  assert.equal(wire.length - from, 1); assert.equal(last().query.get('checkState'), 'ok'); assert.equal(last().query.get('summary'), '0', 'and the tab speaks the check-status list again')
+  await held.unmount()
+  server = 'off'
+
+  // Refused in both lists' words: the page says so, asks in each list's words ONCE per load, and then stops (a loop here would hammer a Worker that is already refusing).
+  open('hub:inventory:products')
+  const refused = await mount()
+  refuseEverything = true
+  from = wire.length
+  await step(refused)
+  assert.equal(wire.length - from, 2, 'two asks (one per list dialect), never a third')
+  assert.ok(refused.text().includes('unavailable'), 'the page says the checks are unavailable')
+  await new Promise(resolve => setTimeout(resolve, 60))
+  assert.equal(wire.length - from, 2, 'and nothing keeps asking while the error is shown')
+  from = wire.length
+  await refused.click(refused.button('retry'))
+  assert.equal(wire.length - from, 2, 'Retry asks again once per dialect, not in a loop')
+  refuseEverything = false
+  await refused.click(refused.button('retry'))
+  noError(refused, 'after the server stops refusing'); assert.ok(refused.text().includes('Product page 2'))
+  await refused.unmount()
   server = 'off'
 
   // ---- Control: the same walk against the ic_simple server does send them, and does offer the filter (the instrument sees both keys) ----
@@ -209,9 +265,11 @@ try {
   server = 'off'
 
   // ---- The pure rule the page uses ----
-  const { productsWireParams, productsServerOf } = await import('../src/components/inventory/inventoryCheckProductsRequest.ts')
+  const { productsWireParams, productsServerOf, oldListDropsStatus } = await import('../src/components/inventory/inventoryCheckProductsRequest.ts')
   const logical = { branchId: '1', stockState: '', checkState: '', brand: '', category: '', sortBy: 'name', sortDirection: 'asc', query: '', page: 2, pageSize: 20, sessionId: '' }
   const wired = (params: Record<string, string | number>, kind: 'unknown' | 'simple' | 'old', skip: boolean) => Object.fromEntries(new URLSearchParams(buildQueryString(productsWireParams(params, kind, skip))))
+  assert.equal(oldListDropsStatus({ ...logical, checkState: 'ok' }), true); assert.equal(oldListDropsStatus({ ...logical, checkState: 'not_checked' }), true); assert.equal(oldListDropsStatus({ ...logical, checkState: 'issue' }), false, 'Issues has an old word')
+  assert.equal(oldListDropsStatus({ ...logical, checkState: 'ok', sessionId: 'check-1' }), false, 'inside a session the old list has a word for ok'); assert.equal(oldListDropsStatus({ ...logical, checkState: 'not_checked', sessionId: 'check-1' }), true); assert.equal(oldListDropsStatus(logical), false, 'no status held, nothing dropped')
   assert.equal(productsServerOf({}), 'old'); assert.equal(productsServerOf({ simple: false }), 'old'); assert.equal(productsServerOf({ simple: true }), 'simple')
   assert.deepEqual(wired(logical, 'old', true), { branchId: '1', sortBy: 'name', sortDirection: 'asc', page: '2', pageSize: '20' }, 'an old server is never asked to skip a summary it does not have')
   assert.deepEqual(wired(logical, 'unknown', true), { branchId: '1', sortBy: 'name', sortDirection: 'asc', page: '2', pageSize: '20' }, 'nor one that has not answered yet')
