@@ -7826,7 +7826,6 @@
   "inventory_check_branch_total": "Branch total",
   "inventory_check_held": "Held",
   "inventory_check_error_lot_counts_off": "Counting by received date was turned off. The page was reloaded: count again.",
-  "inventory_check_error_count_pending": "A count of this product is waiting for approval. Approve or reject it first.",
   "inventory_check_error_maintenance": "Maintenance is in progress. Nothing was changed; try again shortly.",
   "inventory_check_error_lot_unavailable": "This received date no longer has that stock. Nothing was changed.",
   "inventory_check_fixed_title": "Set from Inventory",
@@ -8132,5 +8131,5 @@
   "perm_contacts_full_phone": "See full phone numbers",
   "perm_short_full_phone": "Full phones",
   "perm_hint_full_phone": "Without it, phone numbers show masked (012 *** 678) everywhere. Searching by the full number still works.",
-  "inventoryCheckCountPending": "This count is waiting for approval. Approve or reject it first."
+  "inventoryCheckCountPending": "Set is blocked while a count of this product is waiting for approval. Approve or reject that count first."
 }
