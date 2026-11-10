@@ -713,7 +713,9 @@ function assertRevisionTriggerStatic(files, chainText, repairText) {
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
-  const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(({ name }) => {
+  const virtual = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE 'CREATE VIRTUAL TABLE%'").all().map(({ name }) => name)
+  const shadow = new Set(virtual.flatMap(name => ['_data', '_idx', '_content', '_docsize', '_config'].map(suffix => name + suffix)))
+  const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().filter(({ name }) => !shadow.has(name)).map(({ name }) => {
     const columns = raw.prepare(`PRAGMA table_info(${quote(name)})`).all().map(({ name: column }) => column)
     const fields = columns.map(column => `quote(${quote(column)}) AS ${quote(column)}`)
     try { raw.prepare(`SELECT rowid FROM ${quote(name)} LIMIT 0`); fields.unshift('quote(rowid) AS "__probe_rowid__"') }
