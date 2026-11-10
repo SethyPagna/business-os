@@ -404,7 +404,7 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
   const topUps = [...newestUnpaid.values()]
   const states = requestStates(requests, events)
   const stateOf = new Map(states.map((s) => [s.id, s]))
-  const { held_in_review_usd: _held, available_usd: _available, ...customerMoney } = orderMoneyWire(view.money, events); void _held; void _available
+  const { held_in_review_usd: _held, available_usd: _available, ...customerMoney } = orderMoneyWire(view.money); void _held; void _available
   const editable = order.state === 'awaiting_payment' || order.state === 'qr_failed'
   return {
     order_no: order.order_no,

@@ -244,7 +244,7 @@ export async function staffDetail(db: D1Compat, id: unknown, now: Date, requestW
     requests: requests.map((request) => ({ ...request, ...(options.fullPhones ? {} : { before_json: maskPhonesInJson(request.before_json), after_json: maskPhonesInJson(request.after_json) }), state: requestStates([request], bundle.events).find((s) => s.id === request.id)?.status ?? 'pending' })),
     events: events || [],
     customer_match: await matchOrderCustomer(db, order),
-    status: view.status, chips: view.chips, money: { ...view.money, ...orderMoneyWire(view.money, bundle.events) },
+    status: view.status, chips: view.chips, money: { ...view.money, ...orderMoneyWire(view.money) },
   }
 }
 
