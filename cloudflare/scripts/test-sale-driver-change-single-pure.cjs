@@ -267,6 +267,26 @@ async function runTest(name, fn) {
     assert.equal(refused.body.code, 'window', 'a preview is refused where the write would be')
   })
 
+  await runTest('G3: the preview shows expense labels and the count only to a caller who may view expenses', async () => {
+    const f = feeFixture()
+    f.sql.prepare('UPDATE fees SET label=? WHERE id=9001').run('Courier run')
+    user = amendOnly
+    const hidden = await f.call(sales, '/bulk-update', { ...single('preview-hide', 2, 1, 2), preview: true })
+    assert.equal(hidden.status, 200, JSON.stringify(hidden))
+    assert.deepEqual(hidden.body.movedExpenses, [], 'no labels for an amend-only caller')
+    assert.equal(hidden.body.movedExpenseCount, 0)
+    assert.ok(!JSON.stringify(hidden.body).includes('Courier run'))
+    user = { id: 4, name: 'Amend and view', role_code: 'user', permissions: JSON.stringify({ sales: true, 'sales:amend': true, fees: true }) }
+    const shown = await f.call(sales, '/bulk-update', { ...single('preview-show', 2, 1, 2), preview: true })
+    assert.deepEqual(shown.body.movedExpenses, [{ id: 9001, sale_id: 2, label: 'Courier run' }])
+    assert.equal(shown.body.movedExpenseCount, 1)
+    // The write itself still moves the expense whoever asks: only the review's detail is gated.
+    user = amendOnly
+    const real = await f.call(sales, '/bulk-update', single('preview-hide', 2, 1, 2))
+    assert.equal(real.status, 200, JSON.stringify(real))
+    assert.equal(feeDriver(f, 1), 2)
+  })
+
   await runTest('G3: clearing the driver unlinks the delivery expense, and Undo links it back', async () => {
     const f = feeFixture()
     const cleared = await f.call(sales, '/bulk-update', single('fee-clear', 2, 1, null))

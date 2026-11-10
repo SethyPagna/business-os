@@ -680,13 +680,16 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     guards.push(bulkAssertion(`(SELECT COUNT(*) FROM fees WHERE sale_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@sale_ids)) AND delivery_contact_id=@old AND ${DELIVERY_FEE_MATCH})=@n`, { sale_ids: JSON.stringify(changedMemberIds), old: request.action.source_id, n: feeMoves.ids.length }))
   }
   if (preview) {
+    // The expenses move with the driver whoever asks, but naming or counting them is expense detail: only a caller
+    // who may view expenses sees it. An amend-only caller gets an empty list and a zero count.
+    const mayViewExpenses = getActionTier(user, 'fees', 'view') !== 'none'
     return {
       preview: true as const,
       action: request.action,
       changedCount: changedMemberIds.length,
       unchangedCount: members.length - changedMemberIds.length,
-      movedExpenseCount: movedExpenses.length,
-      movedExpenses,
+      movedExpenseCount: mayViewExpenses ? movedExpenses.length : 0,
+      movedExpenses: mayViewExpenses ? movedExpenses : [],
     }
   }
   const changedReference = members.find((member) => member.changed)

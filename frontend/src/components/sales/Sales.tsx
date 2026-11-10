@@ -2521,7 +2521,8 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
         items: [{ id: Number(sale.id), expected_updated_at: sale.updated_at == null ? null : String(sale.updated_at) }],
         action: { kind: 'delivery_contact', source_id: source.id ?? null, target_id: target?.id ?? null },
       })
-      return { expenseCount: Number(result.movedExpenseCount) || 0 }
+      // Expense detail is for people who may view expenses; the Worker already sends an amend-only caller a zero count.
+      return { expenseCount: canViewFees ? Number(result.movedExpenseCount) || 0 : 0 }
     } catch (error) {
       const code = (error as { code?: string } | null)?.code
       const cancelled = saleCancelledRefusal(error)
