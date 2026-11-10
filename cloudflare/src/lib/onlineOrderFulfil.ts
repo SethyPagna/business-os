@@ -67,6 +67,9 @@ export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) 
 /** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
 export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
 
+/** A batch statement that aborts the batch when the stored online method is no longer the one (trimmed) the save was judged against: a kinds-only save checked its cash rule on it. */
+export const ONLINE_METHOD_UNCHANGED_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) = @expected THEN 1 ELSE json_extract('[1]', '$[online_method_changed]') END`
+
 /**
  * Guard statement for storing a NEW online method (KHQR round 7, N1): aborts the batch when one of the most recent `@windowRows` sales (idx_sales_created_pg, no scan) is an ORDINARY
  * sale (not linked from online_orders.sale_id, idx_online_orders_sale) that used `@methodKey` (lower(trim)) as its payment_method or in a payment_details row. Such a method would

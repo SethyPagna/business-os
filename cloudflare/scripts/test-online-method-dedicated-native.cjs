@@ -39,6 +39,24 @@ async function main() {
       t.eq('an unlisted method keeps its own code', [unlisted.status, unlisted.json && unlisted.json.code], [400, 'invalid_online_order_payment_method'])
     })
 
+    await check('D2 (round 7): a kinds-only save cannot make the stored online method cash-kind (manager or administrator), and nothing is stored', async (t) => {
+      await world.account('kinds_manager', { roleCode: 'kinds_manager_role', permissions: { settings: true, sales_policy: true } })
+      await put('pos_payment_methods', JSON.stringify(['Cash', 'ABA KHQR', 'Wing']))
+      await put('online_order_payment_method', 'ABA KHQR')
+      await world.run("DELETE FROM settings WHERE key = 'pos_payment_method_kinds'")
+      const asManager = await world.api('POST', '/api/settings', { pos_payment_method_kinds: JSON.stringify({ 'ABA KHQR': 'cash' }) }, { as: 'kinds_manager' })
+      t.eq('manager', [asManager.status, asManager.json && asManager.json.code], [400, 'online_order_method_is_cash'])
+      const asAdmin = await world.api('POST', '/api/settings', { pos_payment_method_kinds: JSON.stringify({ ' aba khqr ': 'cash' }) })
+      t.eq('administrator, other spelling', [asAdmin.status, asAdmin.json && asAdmin.json.code], [400, 'online_order_method_is_cash'])
+      t.eq('kinds not stored', await setting('pos_payment_method_kinds'), null)
+      const control = await world.api('POST', '/api/settings', { pos_payment_method_kinds: JSON.stringify({ Wing: 'cash' }) })
+      t.eq('control: kinds for another method are saved', [control.status, await setting('pos_payment_method_kinds')], [200, JSON.stringify({ Wing: 'cash' })])
+      // An already cash-kind online method (stale state) never traps an unrelated kinds edit.
+      await put('pos_payment_method_kinds', JSON.stringify({ 'ABA KHQR': 'cash' }))
+      const stale = await world.api('POST', '/api/settings', { pos_payment_method_kinds: JSON.stringify({ 'ABA KHQR': 'cash', Wing: 'digital' }) })
+      t.eq('control: a stale cash-kind online method does not trap an unrelated kinds edit', stale.status, 200)
+    })
+
   } finally { await world.dispose() }
   finish('online method dedicated')
 }

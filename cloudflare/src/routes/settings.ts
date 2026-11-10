@@ -33,7 +33,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_UNCHANGED_GUARD_SQL, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -1398,12 +1398,23 @@ app.post('/', async (c) => {
     return c.json({ error: 'Only an administrator can change the online payment method.', code: 'online_method_admin_only' }, 403)
   }
 
+  // A kinds-only save must not turn the stored online method into a cash-kind one (the same refusal as storing a cash method). Judged from the rows read with the save, and
+  // pinned in the batch below so a method changed in between aborts it. A method that is ALREADY cash-kind never traps an unrelated kinds edit.
+  const storedOnlineForKinds = String(onlineAux.get(ONLINE_PAYMENT_METHOD_KEY)?.value ?? '').trim()
+  const guardsOnlineKinds = changedKeys.includes(PAYMENT_METHOD_KINDS_SETTING) && !attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && storedOnlineForKinds !== ''
+  if (guardsOnlineKinds
+    && isCashPaymentMethod(storedOnlineForKinds, parsePaymentMethodKinds(settingsAfter[PAYMENT_METHOD_KINDS_SETTING]))
+    && !isCashPaymentMethod(storedOnlineForKinds, parsePaymentMethodKinds(onlineAux.get(PAYMENT_METHOD_KINDS_SETTING)?.value))) {
+    return c.json({ error: 'The online payment method cannot be a cash method: it becomes online-only and the till hides it. Choose another online method first.', code: 'online_order_method_is_cash' }, 400)
+  }
+
   const db = getDb(c.env)
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = changedKeys.map((key) => ({
     sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
     params: { key, value: settingsAfter[key] },
   }))
+  if (guardsOnlineKinds) statements.unshift({ sql: ONLINE_METHOD_UNCHANGED_GUARD_SQL, params: { expected: storedOnlineForKinds } })
   const clearsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(settingsAfter[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
   if (clearsOnlineMethod) statements.unshift({ sql: CLEAR_ONLINE_METHOD_GUARD_SQL, params: {} })
   // A NEW online method must not be one ordinary sales already use (the till would hide and refuse it). Bounded: only the latest plan-limit window of sales, inside this batch.
@@ -1433,6 +1444,9 @@ app.post('/', async (c) => {
   } catch (error) {
     if (setsOnlineMethod && String(error).includes(ONLINE_METHOD_IN_USE_CODE)) {
       return c.json({ error: 'That payment method is already used by recent sales. Choose a method that only online orders will use, such as a separate "ABA KHQR".', code: ONLINE_METHOD_IN_USE_CODE }, 409)
+    }
+    if (guardsOnlineKinds && /online_method_changed/.test(String(error))) {
+      return c.json({ error: 'The online payment method changed while this save was being prepared. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
     }
     if (clearsOnlineMethod && /online_method_required/.test(String(error))) {
       return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)
