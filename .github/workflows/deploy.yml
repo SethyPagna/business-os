@@ -52,7 +52,7 @@ jobs:
     name: Release to production
     runs-on: windows-latest
     environment: production
-    timeout-minutes: 240
+    timeout-minutes: 330
     defaults:
       run:
         shell: pwsh

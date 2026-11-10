@@ -294,7 +294,7 @@ const MUTANTS = [
   ['the job reaches a remote URL', (t) => mutate(t, '          Write-Output "Browser suite $env:E2E_PROJECT:', '          Invoke-WebRequest https://admin.leangbeauty.com\n          Write-Output "Browser suite $env:E2E_PROJECT:'), 'loopback only'],
   ['a push trigger is added', (t) => mutate(t, 'on:\n  workflow_dispatch:\n', 'on:\n  push:\n  workflow_dispatch:\n'), 'workflow_dispatch only'],
   ['the switch defaults to blocking', (t) => mutate(t, '        default: false\n        type: boolean\n', '        default: true\n        type: boolean\n'), 'defaults to report-only'],
-  ['the e2e job may run longer than the safety job', (t) => mutate(t, '    timeout-minutes: 90\n', '    timeout-minutes: 240\n'), 'can never outlive'],
+  ['the e2e job may run longer than the safety job', (t) => mutate(t, '    timeout-minutes: 90\n', '    timeout-minutes: 400\n'), 'can never outlive'],
   ['a third job is added without anyone deciding it belongs in the gate', (t) => `${t.replace(/\n*$/, '\n')}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`, 'exactly two jobs'],
   ['the worker count is hard-coded, so a 2-CPU runner would be oversubscribed', (t) => mutate(t, '$cpus = [Environment]::ProcessorCount', '$cpus = 4'), 'worker count follows'],
 ]
