@@ -66,8 +66,10 @@ app.use('*', async (c, next) => {
   // anyway (the version is also moved by every later writer).
   const wired = await readSwitch(c.env, 'ic_wired')
   try { await bumpVersion(c.env, 'inventory_checks') } catch (error) {
-    if (wired) throw new InventoryCheckSessionError(503, SAVED_REFRESH_CODE)
-    console.error('[inventory_checks] version not advanced while ic_wired is OFF', error)
+    // Only an answer that said the write was made (below 400) becomes 'saved, refresh'. A writer that itself answered 5xx may not have committed anything: it keeps its own answer
+    // (a D1 failure, outcome unknown) and the bump failure is only logged, so 'Saved' is never claimed over a failed write.
+    if (wired && status < 400) throw new InventoryCheckSessionError(503, SAVED_REFRESH_CODE)
+    console.error(`[inventory_checks] version not advanced (ic_wired ${wired ? 'ON' : 'OFF'}, writer answered ${status})`, error)
   }
 })
 
