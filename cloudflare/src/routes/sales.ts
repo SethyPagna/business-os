@@ -2004,7 +2004,7 @@ app.post('/', async (c) => {
       if (fulfilPlan && /malformed JSON/i.test(message)) {
         // The order guard shares the abort text of the other guards: attribute by re-reading the order, never by message.
         const now = await loadFulfilOrder(db, fulfilPlan.orderId)
-        if (!now || now.state !== 'paid' || now.sale_id != null || Number(now.revision) !== fulfilPlan.revision) {
+        if (!now || now.state !== 'paid' || now.sale_id != null || Number(now.revision) !== fulfilPlan.revision || Math.round(Number(now.refund_noted_usd || 0) * 100) !== Math.round(fulfilPlan.notedUsd * 100)) {
           return c.json({ error: 'This online order changed while the sale was being saved. Nothing was recorded. Open the order again.', code: 'online_order_changed' }, 409)
         }
       }
