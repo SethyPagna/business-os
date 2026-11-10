@@ -12,7 +12,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { canSeeFullPhones } from '../lib/phoneAccess'
+import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { paywayCredentialsFor } from '../lib/paywayConfig'
 import { fetchPaywayTransport } from '../lib/paywayTransport'
@@ -59,7 +59,7 @@ export function createOnlineOrdersRoute(options: OnlineOrdersRouteOptions = {}) 
   const record = (c: Ctx, action: string, id: unknown, details: Record<string, unknown> = {}) =>
     audit(c.env, c.get('user').id, c.get('user').name || null, action, 'online_order', Number(id) || null, details)
 
-  app.get('/', guard('view', async (c) => c.json(await listOrders(getDb(c.env), c.env, { filter: c.req.query('filter'), cursor: c.req.query('cursor'), limit: c.req.query('limit'), q: c.req.query('q') }))))
+  app.get('/', guard('view', async (c) => c.json(await listOrders(getDb(c.env), c.env, { filter: c.req.query('filter'), cursor: c.req.query('cursor'), limit: c.req.query('limit'), q: c.req.query('q'), access: phoneSearchAccessOf(c.get('user') as never) }))))
 
   app.get('/:id', guard('view', async (c) => {
     const settings = await loadOrderSettings(getDb(c.env))

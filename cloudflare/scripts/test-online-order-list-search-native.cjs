@@ -56,6 +56,13 @@ async function main() {
     const shortPhone = await list('q=01'); assert.equal(shortPhone.status, 400); assert.equal(shortPhone.body.code, 'search_too_short')
     console.log('PASS search q: order number prefix (case/dash forgiven), phone prefix in canonical form (+855 folded), every state unless a filter narrows, short input refused')
 
+    // ---- staff without "See full phone numbers" (owner ruling 10 Nov 2026): a part of a number finds the order, the number stays masked
+    const clerk = await h.addEmployee(962, 'list_clerk', { online_orders: true })
+    const asClerk = await h.call('GET', H.fresh('/api/online-orders?q=0123'), undefined, 'clerk search', { cookie: clerk })
+    assert.equal(asClerk.status, 200, JSON.stringify(asClerk.body)); assert.deepEqual(nos(asClerk), ['W261109AB12'], 'a fragment finds the order without the grant')
+    assert.ok(!JSON.stringify(asClerk.body).includes('012345678') && asClerk.body.rows[0].customer_phone.includes('*'), 'the number stays masked on screen: ' + asClerk.body.rows[0].customer_phone)
+    console.log('PASS staff without the full-phone grant search by part of a number and read it masked')
+
     // ---- requests filter
     const requests = await list('filter=requests')
     assert.deepEqual(nos(requests), ['W261106JK90']); assert.equal(requests.body.rows[0].pending_requests, 1)

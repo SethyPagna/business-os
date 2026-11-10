@@ -9,6 +9,7 @@
 
 import type { D1Compat } from './db'
 import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
+import { FULL_NUMBER_MIN_DIGITS, type PhoneSearchAccess } from './phoneSearchGuard'
 import { canonicalizePhone } from './phone'
 import { normalizeContactName } from './contactDuplicates'
 import { checkTransaction, makeTranId, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
@@ -55,14 +56,18 @@ const MONEY_STATES = new Set(['paid', 'review', 'cancelled', 'fulfilled'])
 const DECIDED = "('request_accepted','request_rejected','request_withdrawn')"
 const END_OF_PREFIX = '￿'
 
+/** Owner ruling 10 Nov 2026: staff without the full-phone grant may search by part of a number; the list still shows the number masked. The one place to change if that rule moves. */
+const fragmentSearchAllowed = (_access: PhoneSearchAccess): boolean => true
+
 /** The `q` box: an order number prefix (letters, e.g. W2611) or a phone prefix (digits, the canonical form the order stores). Refused when too short to be useful. */
-function searchClause(raw: unknown): { sql: string; params: Record<string, unknown> } | null {
+function searchClause(raw: unknown, access: PhoneSearchAccess): { sql: string; params: Record<string, unknown> } | null {
   const q = typeof raw === 'string' ? raw.trim() : ''
   if (!q) return null
   if (q.length > 40) return refuse(400, 'search_invalid', 'That search is too long.')
   if (/^[+\d][\d\s().-]*$/.test(q)) {
     const digits = q.replace(/\D/g, '')
     if (digits.length < 3) return refuse(400, 'search_too_short', 'Type at least 3 digits of the phone number.')
+    if (digits.length < FULL_NUMBER_MIN_DIGITS && !access.fullPhone && !fragmentSearchAllowed(access)) return refuse(400, 'search_phone_whole_number', 'Type the whole phone number.')
     // The stored form folds 855xxxxxxxx to 0xxxxxxxx (lib/phone.ts), so a typed +855 prefix is looked up in both spellings.
     const prefixes = digits.startsWith('855') && digits.length > 3 ? [digits, `0${digits.slice(3)}`] : [digits]
     return {
@@ -119,8 +124,8 @@ async function attachRefundDue(db: D1Compat, rows: ListRow[]): Promise<void> {
  * `requests` lists orders with an undecided change request; `refund_due` lists orders inside ABA's refund window that still owe the customer money (read exactly, a few rounds
  * of candidates at most, the cursor continues where they stopped).
  */
-export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { filter?: unknown; cursor?: unknown; limit?: unknown; q?: unknown; now?: Date }): Promise<{ rows: ListRow[]; next_cursor: string | null; page_size: number }> {
-  const search = searchClause(input.q)
+export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { filter?: unknown; cursor?: unknown; limit?: unknown; q?: unknown; now?: Date; access: PhoneSearchAccess }): Promise<{ rows: ListRow[]; next_cursor: string | null; page_size: number }> {
+  const search = searchClause(input.q, input.access)
   const given = (LIST_FILTERS as readonly string[]).includes(String(input.filter))
   const filter = given ? String(input.filter) as ListFilter : search ? 'all' : 'attention'
   const size = adminPageRows(env)
