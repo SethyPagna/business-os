@@ -28,7 +28,7 @@ import { persistClientImageVariants } from '../lib/imageVariantStore'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { readStockLedgerKeyset } from '../lib/stockLedgerKeyset'
-import { attachBeforeQty, buildStockLedgerQuery, decodeStockLedgerCursor, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, decodeStockLedgerCursor, ledgerLeanTotals, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { laterOpenSets, type LaterOpenSet } from '../lib/stockRevertEffect'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown, productLedgerGroups } from '../lib/productSalesLedger'
@@ -2207,6 +2207,8 @@ app.get('/stock-ledger', async (c) => {
   const page = Math.max(1, Number(query.page) || 1)
   // Read switch ledger_keyset: the list pages by cursor (lib/stockLedgerKeyset.ts) and its page cap is the plan's stockLedgerExportPageRows.
   const keyset = await readSwitch(c.env, 'ledger_keyset')
+  // Read switch ledger_summary_lean: the total and the In/Out summary are one scan of the movements, not a scan joined to products and batches per row, and a view chip's count is read from it.
+  const lean = await readSwitch(c.env, 'ledger_summary_lean')
   // 1000-cap (was 100): the Stock Changes CSV export walks pages of this
   // endpoint for a chosen date range -- 10x fewer round trips per export,
   // still bounded. Interactive views keep asking for 25-100.
@@ -2228,7 +2230,13 @@ app.get('/stock-ledger', async (c) => {
   if (keyset) {
     const cursor = query.cursor ? decodeStockLedgerCursor(query.cursor) : null
     if (query.cursor && !cursor) return c.json({ code: 'invalid_cursor', error: 'The cursor is not valid. Start again from the first page.' }, 400)
-    return c.json(await readStockLedgerKeyset(db, ledger, { page, pageSize, cursor, totals: query.totals === '1', view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all' }))
+    return c.json(await readStockLedgerKeyset(db, ledger, { page, pageSize, cursor, totals: query.totals === '1', lean, view: ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all' }))
+  }
+  const viewName = ['all', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all'
+  if (lean) {
+    const rowsLean = await db.prepare(ledger.rowsSql).all<Record<string, unknown>>({ ...ledger.params, limit: pageSize, offset: (page - 1) * pageSize })
+    const totals = ledgerLeanTotals(await db.prepare(ledger.leanSummarySql).get<Record<string, number>>(ledger.params), viewName)
+    return c.json({ items: attachBeforeQty(rowsLean || []), total: totals.total, page, pageSize, totalPages: Math.max(1, Math.ceil(totals.total / pageSize)), view: viewName, summary: totals.summary })
   }
   const countRow = await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params)
   const total = Number(countRow?.total || 0)

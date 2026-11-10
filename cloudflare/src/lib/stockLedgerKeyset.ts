@@ -7,7 +7,7 @@
 // write that moved them). `next_cursor` is present on every answer of this path -- null on the last page -- so its presence is how a client knows the
 // server pages by cursor; a server with the switch off never sends it and the client keeps asking by page number.
 import type { D1Compat } from './db'
-import { attachBeforeQty, encodeStockLedgerCursor, nextStockLedgerCursor, planStockLedgerKeyset, type StockLedgerCursor, type StockLedgerQuery } from './stockLedgerQuery'
+import { attachBeforeQty, encodeStockLedgerCursor, ledgerLeanTotals, nextStockLedgerCursor, planStockLedgerKeyset, type StockLedgerCursor, type StockLedgerQuery } from './stockLedgerQuery'
 
 type Row = Record<string, unknown>
 
@@ -19,6 +19,8 @@ export type StockLedgerKeysetArgs = {
   /** With a cursor: also count and summarise (a client refreshing after a write). Without one the totals are always sent. */
   totals: boolean
   view: string
+  /** Read switch `ledger_summary_lean`: the summary reads the movements alone when no filter needs the joins, and the view's count comes out of it. */
+  lean?: boolean
 }
 
 export async function readStockLedgerKeyset(db: D1Compat, ledger: StockLedgerQuery, args: StockLedgerKeysetArgs): Promise<Record<string, unknown>> {
@@ -42,6 +44,17 @@ export async function readStockLedgerKeyset(db: D1Compat, ledger: StockLedgerQue
   }))
   const body: Record<string, unknown> = { items }
   if (!cursor || args.totals) {
+    if (args.lean) {
+      const lean = ledgerLeanTotals(await db.prepare(ledger.leanSummarySql).get<Record<string, number>>(ledger.params), args.view)
+      body.total = lean.total
+      body.page = page
+      body.pageSize = pageSize
+      body.totalPages = Math.max(1, Math.ceil(lean.total / pageSize))
+      body.view = args.view
+      body.summary = lean.summary
+      body.next_cursor = next ? encodeStockLedgerCursor(next) : null
+      return body
+    }
     // The two statements the offset list runs, over the same scope. With no In/Out view the count IS the summary's own total (same joins, same base filters),
     // so one statement does both; with a view chip the count differs from the summary's and runs as it always did.
     const summaryRow = await db.prepare(ledger.summarySql).get<{ in_count: number; out_count: number; in_qty: number; out_qty: number; total: number }>(ledger.params)
