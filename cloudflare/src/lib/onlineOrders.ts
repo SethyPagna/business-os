@@ -338,6 +338,8 @@ export type OrderMoney = {
   toRecordUsd: number
   /** Refund notes already written. */
   notedUsd: number
+  /** What the till may still take as online tender: what PayWay confirmed minus the refund notes written before the sale. */
+  availableUsd: number
   /** What may still be refunded through ABA. */
   refundDueUsd: number
   /** What a linked sale still owes (Not Paid sale). 0 when covered or without a sale. */
@@ -370,7 +372,8 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   const recordedOnSaleUsd = sumMoney4(paid.filter((p) => recorded.has(Number(p.id))).map((p) => { const stated = recorded.get(Number(p.id)); return stated == null ? amountOf(p) : Math.min(amountOf(p), num(stated)) }))
   const refunds = events.filter((e) => e.event === 'refund_noted')
   const notedUsd = sumMoney4(refunds.map((e) => num(e.amount_usd)))
-  const notedAfterSaleUsd = sumMoney4(refunds.filter((e) => e.sale_id != null).map((e) => num(e.amount_usd)))
+  const notedBeforeSaleUsd = sumMoney4(refunds.filter((e) => e.sale_id == null).map((e) => num(e.amount_usd)))
+  const availableUsd = Math.max(0, roundMoney4(onlineInUsd - notedBeforeSaleUsd))
   const goods = num(order.goods_total_usd)
   let refundDue: number
   let balanceDueUsd = 0
@@ -397,19 +400,19 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
       // it is refundable through ABA. A top-up the sale is still waiting for is covered by its balance due, so it is not.
       const unrecordedExcessUsd = Math.max(0, roundMoney4(toRecordUsd - balanceDueUsd))
       // Review F4: money PayWay took on a payment still held in review (a late one, after the Fulfil) is the customer's until staff resolve it.
-      refundDue = saleOverpaidUsd(sale, returns, recordedOnSaleUsd) + unrecordedExcessUsd + heldInReviewUsd - notedAfterSaleUsd
+      refundDue = saleOverpaidUsd(sale, returns, recordedOnSaleUsd) + unrecordedExcessUsd + heldInReviewUsd - notedUsd
     }
   }
-  return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }
+  return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, availableUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }
 }
 /**
  * The ONE wire shape of an order's money, shared by the customer view and the staff detail (security review N1: the staff screens read these snake_case names, the
  * Worker used to send camelCase only, so every Fulfil and Refund read as zero). `refunded_usd` is the sum of refund notes.
  */
-export type OrderMoneyWire = { paid_usd: number; refunded_usd: number; refund_due_usd: number; balance_due_usd: number; held_in_review_usd: number }
+export type OrderMoneyWire = { paid_usd: number; available_usd: number; refunded_usd: number; refund_due_usd: number; balance_due_usd: number; held_in_review_usd: number }
 export function orderMoneyWire(money: OrderMoney, events: readonly Pick<EventRow, 'event' | 'amount_usd'>[]): OrderMoneyWire {
   const refunded = events.filter((e) => e.event === 'refund_noted').reduce((sum, e) => sum + Number(e.amount_usd ?? 0), 0)
-  return { paid_usd: money.onlineInUsd, refunded_usd: refunded, refund_due_usd: money.refundDueUsd, balance_due_usd: money.balanceDueUsd, held_in_review_usd: money.heldInReviewUsd }
+  return { paid_usd: money.onlineInUsd, available_usd: money.availableUsd, refunded_usd: refunded, refund_due_usd: money.refundDueUsd, balance_due_usd: money.balanceDueUsd, held_in_review_usd: money.heldInReviewUsd }
 }
 
 export const refundDueUsd = (order: OrderRow, payments: readonly PaymentRow[], events: readonly EventRow[], sale: SaleRow | null, returns: readonly ReturnRow[] = []): number =>

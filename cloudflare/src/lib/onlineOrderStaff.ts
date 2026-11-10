@@ -347,7 +347,8 @@ export async function resolveReview(deps: OrderDeps, actor: Actor, id: unknown, 
 export const REFUND_NOTE_INSERT_SQL = `INSERT INTO online_order_events (order_id, event, source, actor_id, actor_name, internal_note, amount_usd, reference, sale_id, created_at)
           SELECT @oid, 'refund_noted', 'staff', @aid, @aname, @note, @amount, @ref, @sale, @at
           WHERE (SELECT COALESCE(SUM(CAST(ROUND(amount_usd * 100) AS INTEGER)), 0) FROM online_order_events WHERE order_id = @oid AND event = 'refund_noted') = @noted
-            AND (SELECT COUNT(*) FROM returns WHERE sale_id = @sale AND refund_channel = 'aba') = @abaCount`
+            AND (SELECT COUNT(*) FROM returns WHERE sale_id = @sale AND refund_channel = 'aba') = @abaCount
+            AND (SELECT sale_id FROM online_orders WHERE id = @oid) IS @sale`
 
 export async function noteRefund(deps: OrderDeps, actor: Actor, id: unknown, body: Record<string, unknown>): Promise<{ due_after_usd: number }> {
   const amount = Number(body.amount_usd)

@@ -3,7 +3,7 @@
 // itself, so the sale, its stock, the link and the order Records commit or roll back together.
 //
 //   * The sale is an ORDINARY sale (payments_version 0, lead ruling 10 Nov 2026): revenue on the sale date at Fulfil. The online money is part of its tender as the
-//     KHQR method the owner configured (`online_order_payment_method`), equal to min(what the order took, what the sale is worth). Whatever the order took beyond
+//     KHQR method the owner configured (`online_order_payment_method`), equal to min(what the order took minus refund notes written before the sale, what the sale is worth). Whatever the order took beyond
 //     that stays unrecorded and is refundable through ABA (lib/onlineOrders.ts orderMoney); lines added beyond it are the sale's normal Not Paid balance.
 //   * The shift reader removes that online part by the order link (lib/shiftReconciliation.ts linkedOnlineMoney): no cashier took it.
 //   * The KHQR method may appear on a sale ONLY through this path, so the method cannot be used to fake online money.
@@ -28,7 +28,11 @@ export type FulfilPlan = {
   paid: FulfilPaid[]
   /** What the order took in dollars (the paid payments). */
   onlineUsd: number
-  /** What goes onto the sale as the KHQR tender: min(onlineUsd, the sale's payable). */
+  /** What is still the shop's to put on a sale: onlineUsd minus the refund notes written before it. */
+  availableUsd: number
+  /** The refund notes the plan was priced against; the batch refuses when another note landed since. */
+  notedUsd: number
+  /** What goes onto the sale as the KHQR tender: min(availableUsd, the sale's payable). */
   coverUsd: number
   /** One entry per paid payment: how much of it the sale covers (allocated in payment id order). */
   recorded: Array<{ paymentId: number; amountUsd: number }>
@@ -57,7 +61,7 @@ export function onlineTender(details: ReadonlyArray<{ method: string; amount_usd
   return { usd: sumMoney4(rows.map((row) => row.amount_usd)), khr: rows.reduce((sum, row) => sum + row.amount_khr, 0), present: rows.length > 0 }
 }
 
-type OrderForFulfil = { id: number; order_no: string; state: string; sale_id: number | null; revision: number; branch_id: number | null; paid_json: string | null; has_review?: number | null; branch_successor_id?: number | null }
+type OrderForFulfil = { id: number; order_no: string; state: string; sale_id: number | null; revision: number; branch_id: number | null; paid_json: string | null; has_review?: number | null; refund_noted_usd?: number | null; branch_successor_id?: number | null }
 
 /** One statement: the order and its paid payments. The only read Fulfil adds to a sale create. */
 export async function loadFulfilOrder(db: D1Compat, orderId: number): Promise<OrderForFulfil | null> {
@@ -66,6 +70,7 @@ export async function loadFulfilOrder(db: D1Compat, orderId: number): Promise<Or
       (SELECT json_group_array(json_object('id', p.id, 'amount', COALESCE(p.paid_amount, p.amount), 'currency', COALESCE(p.paid_currency, p.currency)))
          FROM (SELECT * FROM online_order_payments WHERE order_id = o.id AND state = 'paid' ORDER BY id) p) AS paid_json,
       EXISTS (SELECT 1 FROM online_order_payments WHERE order_id = o.id AND state = 'review') AS has_review,
+      (SELECT COALESCE(SUM(amount_usd), 0) FROM online_order_events WHERE order_id = o.id AND event = 'refund_noted' AND sale_id IS NULL) AS refund_noted_usd,
       (SELECT successor_branch_id FROM branches WHERE id = o.branch_id) AS branch_successor_id
     FROM online_orders o WHERE o.id = @id
   `).get<OrderForFulfil>({ id: orderId })
@@ -96,7 +101,9 @@ export function planFulfil(
   if (!paid.length) return { ok: false, refusal: refuse(409, 'order_not_paid', 'Only a paid online order can be fulfilled.') }
   if (paid.some((p) => String(p.currency || 'USD') !== 'USD')) return { ok: false, refusal: refuse(409, 'online_currency_unsupported', 'This order was paid in a currency that cannot be fulfilled here yet.') }
   const onlineUsd = sumMoney4(paid.map((p) => Number(p.amount) || 0))
-  const coverUsd = Math.min(onlineUsd, roundMoney4(input.payableUsd))
+  const notedUsd = roundMoney4(Number(order.refund_noted_usd) || 0)
+  const availableUsd = Math.max(0, roundMoney4(onlineUsd - notedUsd))
+  const coverUsd = Math.min(availableUsd, roundMoney4(input.payableUsd))
   const tender = onlineTender(input.details, input.method)
   if (Math.abs(tender.usd - coverUsd) > 0.005 || tender.khr !== 0) {
     return { ok: false, refusal: refuse(409, 'online_tender_mismatch', `The ${input.method} part of the payment must be exactly $${coverUsd.toFixed(2)}, the part of the online payment this sale covers.`) }
@@ -107,7 +114,7 @@ export function planFulfil(
     left = roundMoney4(left - amount)
     return { paymentId: Number(p.id), amountUsd: roundMoney4(amount) }
   })
-  return { ok: true, plan: { orderId: Number(order.id), revision: Number(order.revision), orderNo: order.order_no, method: input.method, paid: paid.map((p) => ({ id: Number(p.id), amount: Number(p.amount) || 0 })), onlineUsd, coverUsd, recorded } }
+  return { ok: true, plan: { orderId: Number(order.id), revision: Number(order.revision), orderNo: order.order_no, method: input.method, paid: paid.map((p) => ({ id: Number(p.id), amount: Number(p.amount) || 0 })), onlineUsd, availableUsd, notedUsd, coverUsd, recorded } }
 }
 
 type Statement = { sql: string; params: Record<string, unknown> }
@@ -124,8 +131,9 @@ export function fulfilStatements(plan: FulfilPlan, input: { saleWriteKey: string
   return [
     {
       sql: `UPDATE online_orders SET state = 'fulfilled', sale_id = ${sale}, revision = revision + 1, updated_at = @at
-            WHERE id = @oid AND state = 'paid' AND sale_id IS NULL AND revision = @rev`,
-      params: { ...base, rev: plan.revision },
+            WHERE id = @oid AND state = 'paid' AND sale_id IS NULL AND revision = @rev
+              AND (SELECT COALESCE(SUM(CAST(ROUND(amount_usd * 100) AS INTEGER)), 0) FROM online_order_events WHERE order_id = @oid AND event = 'refund_noted') = @notedCents`,
+      params: { ...base, rev: plan.revision, notedCents: Math.round(plan.notedUsd * 100) },
     },
     // The unchanged-rows check: a header that was not written, or an order that moved, must not look like a Fulfil.
     {
