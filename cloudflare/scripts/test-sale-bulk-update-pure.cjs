@@ -326,5 +326,29 @@ async function run(){
   assert.equal(paymentDenied.status,403)
   user={id:1,name:'Admin',username:'admin',role_code:'admin',permissions:{all:true}}
   console.log('PASS new and legacy one-customer replay use individual authority while every true bulk action is refused without sales.bulk')
+
+  f=fixture()
+  const ownerJson='[{"label":"Default","name":"B","phone":"","email":"","address":"","area":""}]'
+  const aJson='[{"label":"Default","name":"A","phone":"","email":"","address":"A road","area":""}]'
+  f.sql.prepare('UPDATE delivery_contacts SET address=? WHERE id=2').run(ownerJson)
+  f.sql.prepare('UPDATE delivery_contacts SET address=? WHERE id=1').run(aJson)
+  f.sql.prepare('UPDATE sales SET delivery_contact_address=? WHERE id=1').run(aJson)
+  const jsonDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'json-driver-1',[1]))
+  assert.equal(jsonDriver.status,200,JSON.stringify(jsonDriver))
+  assert.equal(f.sql.prepare('SELECT delivery_contact_address a FROM sales WHERE id=1').get().a,'B area','the stored value is the resolved area when every address entry is empty')
+  const driverEvent=JSON.parse(f.sql.prepare("SELECT changes_json c FROM sale_record_events WHERE sale_id=1 AND kind='driver_changed'").get().c)
+  const driverChange=driverEvent.find(change=>change.field==='driver')
+  assert.deepEqual([driverChange.before.value.address,driverChange.after.value.address],['A road','B area'],'the Records entry carries resolved addresses on both sides')
+  assert.doesNotMatch(JSON.stringify(driverEvent),/label|"address":"\[/,'no Contact Options JSON reaches the Records entry')
+  console.log('PASS a driver change stores and records the resolved address, never the Contact Options JSON')
+
+  f=fixture()
+  f.sql.prepare('UPDATE delivery_contacts SET address=? WHERE id=1').run(aJson)
+  f.sql.prepare('UPDATE sales SET delivery_contact_address=? WHERE id=1').run(aJson)
+  const sameDriver=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:1},'same-driver-1',[1]))
+  assert.equal(sameDriver.status,200,JSON.stringify(sameDriver))
+  assert.deepEqual([sameDriver.body.changedCount,sameDriver.body.unchangedCount],[0,1],'a legacy JSON snapshot of the same driver is not a change')
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE sale_id=1 AND kind='driver_changed'").get().n,0,'no driver_changed record is written for the same driver')
+  console.log('PASS a bulk change to the same driver compares resolved addresses')
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

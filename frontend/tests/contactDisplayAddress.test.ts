@@ -19,9 +19,9 @@
 // Run: node tests/contactDisplayAddress.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { contactDisplayAddress } from '../src/components/contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryDisplayAddress } from '../src/components/contacts/contactOptionUtils.ts'
 import { buildSalesImportRows } from '../src/utils/salesImportContract.ts'
-import { contactDisplayAddress as workerContactDisplayAddress } from '../../cloudflare/src/lib/contactOptions.ts'
+import { contactDisplayAddress as workerContactDisplayAddress, deliveryDisplayAddress as workerDeliveryDisplayAddress } from '../../cloudflare/src/lib/contactOptions.ts'
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
@@ -58,6 +58,18 @@ const cases: Array<[unknown, string, string]> = [
   ['{"address":"x"', '', 'truncated object JSON shows nothing'],
   // A bare object is machine text too, not an address.
   ['{"label":"Default","address":"St 271"}', '', 'a bare options object is not a display address'],
+  // A non-string field is never stringified into "[object Object]".
+  ['[{"address":{"x":1}}]', '', 'an object-valued address entry is ignored'],
+  ['[{"address":{"x":1}},{"address":"St 9"}]', 'St 9', 'a later string address wins over an ignored object one'],
+  ['[{"address":["a"]}]', '', 'an array-valued address entry is ignored'],
+  [{ address: 'x' }, '', 'a non-string, non-number input is empty'],
+  [271, '271', 'a numeric input is still an address'],
+  // A typed address that merely starts with a bracket is not machine text.
+  ['[Bldg A] St 9', '[Bldg A] St 9', 'a typed bracketed address prints as typed'],
+  ['[Bldg A', '[Bldg A', 'an unclosed typed bracket prints as typed'],
+  ['[', '', 'a lone bracket is truncated machine text'],
+  ['[ {', '', 'a spaced truncated array is machine text'],
+  ['["St', '', 'a truncated string array is machine text'],
   // Emptiness in every form.
   [null, '', 'null -> empty'],
   [undefined, '', 'undefined -> empty'],
@@ -80,6 +92,19 @@ assert.equal(workerContactDisplayAddress(AREA_JSON, 'area'), 'Chamkarmon')
 assert.equal(contactDisplayAddress(AREA_JSON), '')
 assert.equal(workerContactDisplayAddress(AREA_JSON), '')
 
+const deliveryCases: Array<[unknown, string, string]> = [
+  [JSON.stringify([{ label: 'Default', name: 'ta', phone: null, address: null, area: null }]), '', 'a contact with nothing to print'],
+  [JSON.stringify([{ area: 'Toul Kork' }]), 'Toul Kork', 'area-only prints the area'],
+  [JSON.stringify([{ area: 'Toul Kork' }, { address: 'St 271' }]), 'St 271', 'a later address beats an earlier area'],
+  ['[Bldg A] St 9', '[Bldg A] St 9', 'a typed bracketed delivery address prints as typed'],
+  ['[{"address":{"x":1}}]', '', 'an object address never prints'],
+  ['["St 9"]', 'St 9', 'a legacy string array prints its entry'],
+]
+for (const [input, expected, label] of deliveryCases) {
+  assert.equal(deliveryDisplayAddress(input), expected, `frontend delivery: ${label}`)
+  assert.equal(workerDeliveryDisplayAddress(input), expected, `worker delivery: ${label}`)
+}
+
 // ---------------------------------------------------------------------------
 // 2. The two copies are byte-identical. A behavioral test alone would let the
 //    two drift into "agrees on the cases we thought of".
@@ -98,6 +123,16 @@ assert.equal(
   frontendKernel,
   workerKernel,
   'contactDisplayAddress must be byte-identical in contactOptionUtils.ts and cloudflare/src/lib/contactOptions.ts',
+)
+const extractDelivery = (source: string) => {
+  const start = source.indexOf('export function deliveryDisplayAddress(')
+  assert.ok(start > 0, 'expected deliveryDisplayAddress in the source')
+  return source.slice(start, source.indexOf('\n}', start) + 2).replace(/\r\n/g, '\n')
+}
+assert.equal(
+  extractDelivery(read('src/components/contacts/contactOptionUtils.ts')),
+  extractDelivery(readFileSync(new URL('../../cloudflare/src/lib/contactOptions.ts', import.meta.url), 'utf8')),
+  'deliveryDisplayAddress must be byte-identical in both twins',
 )
 
 // ---------------------------------------------------------------------------

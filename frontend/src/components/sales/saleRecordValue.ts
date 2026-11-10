@@ -1,4 +1,5 @@
 import { priceText } from '../../utils/pricing.ts'
+import { deliveryDisplayAddress } from '../contacts/contactOptionUtils.ts'
 
 type FormatUsd = (value: number | string) => string
 type FormatKhr = (value: number | string) => string
@@ -123,7 +124,7 @@ export function formatSaleRecordValueLinesLocalized(
     const row = objectRow(parsed)
     if (!row) return [fallbackLine(value, label)]
     const id = finiteNumber(row.id)
-    const parts = [row.name, id === null ? null : `#${id}`, row.phone, row.address].map((part) => String(part ?? '').trim()).filter(Boolean)
+    const parts = [row.name, id === null ? null : `#${id}`, row.phone, deliveryDisplayAddress(row.address)].map((part) => String(part ?? '').trim()).filter(Boolean)
     return [parts.join(' · ') || label('value_changed', 'Value changed')]
   }
   if (field === 'membership') {

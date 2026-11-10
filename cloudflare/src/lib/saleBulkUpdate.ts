@@ -218,7 +218,7 @@ function driverState(row: Row): SaleRecordValueState {
   const id = row.delivery_contact_id == null ? null : Number(row.delivery_contact_id)
   const name = String(row.delivery_contact_name || '').trim() || null
   const phone = String(row.delivery_contact_phone || '').trim() || null
-  const address = String(row.delivery_contact_address || '').trim() || null
+  const address = deliveryDisplayAddress(row.delivery_contact_address) || null
   return id === null && name === null && phone === null && address === null
     ? { state: 'known_none' }
     : { state: 'known_value', value: { id, name, phone, address } }
@@ -242,6 +242,12 @@ function paymentDetailsState(value: unknown): SaleRecordValueState {
   } catch (_) {
     return { state: 'unknown' }
   }
+}
+
+function comparableState(action: SaleBulkUpdateAction, row: Row): Row {
+  return action.kind === 'delivery_contact'
+    ? { ...row, delivery_contact_address: deliveryDisplayAddress(row.delivery_contact_address) || null }
+    : row
 }
 
 function updateChanges(action: SaleBulkUpdateAction, before: Row, after: Row): SaleRecordChange[] {
@@ -652,7 +658,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
       const anonymousSourceGuard = anonymousReferenceGuard(request.action, before)
       if (sourceMatched && anonymousSourceGuard) guards.push(anonymousSourceGuard)
     }
-    const changed = sourceMatched && JSON.stringify(before) !== JSON.stringify(after)
+    const changed = sourceMatched && JSON.stringify(comparableState(request.action, before)) !== JSON.stringify(comparableState(request.action, after))
     members.push({
       id: expected.id,
       receipt: String(sale.receipt_number || expected.id),
