@@ -9,6 +9,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Unlock from 'lucide-react/dist/esm/icons/unlock.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
+import { claimSyncProblemPresentation } from '../../utils/syncProblemLifecycle.ts'
 import { captureActorReadScope, captureActorWriteIdentity, isActorReadScopeCurrent, isActorWriteIdentityCurrent } from '../../api/actorReadScope.ts'
 import { captureInventoryCheckWriteScope, changeInventoryCheckSession, createInventoryCheckSession, decideInventoryCheckApproval, readInventoryCheckHistory, readInventoryCheckList, readInventoryCheckOverlay, readInventoryCheckProducts, readInventoryCheckSession, readInventoryCheckSessions, saveInventoryCheckObservation, submitInventoryCheckCounts, type InventoryCheckApproval, type InventoryCheckSession, type InventoryCheckSessionItem } from '../../api/inventoryChecksTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
@@ -121,10 +122,6 @@ const REFUSAL_MESSAGES: Record<string, { key: string; fallback: string }> = {
 function knownRefusal(cause: unknown) {
   const code = (cause as { code?: unknown } | null)?.code
   return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined
-}
-/** The text key for an answer with outcome 'unknown'. A write that committed but whose cache version could not be advanced says so (saved, refresh); any other unknown outcome says the result is unknown. */
-function unknownSaveKey(cause: unknown) {
-  return (cause as { code?: unknown } | null)?.code === 'inventory_check_saved_refresh' ? 'inventory_check_saved_refresh' : 'inventory_check_save_unknown'
 }
 function isStaleConflict(cause: unknown) {
   const { status, code } = (cause ?? {}) as { status?: unknown; code?: unknown }
@@ -250,6 +247,18 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
+  // The text key for an answer with outcome 'unknown'. A write that committed but whose cache version could not be advanced says so (saved, retry or refresh). This page then owns that
+  // message, so it claims the problem's presentation: the app-wide "Write result is unknown" banner would contradict it. Claims end when the page closes.
+  const savedRefreshClaims = useRef<Array<() => void>>([])
+  useEffect(() => () => { savedRefreshClaims.current.forEach(release => release()); savedRefreshClaims.current = [] }, [])
+  const unknownSaveKey = (cause: unknown): string => {
+    const problem = (cause ?? {}) as { code?: unknown; syncErrorId?: unknown; syncErrorChannel?: unknown }
+    if (problem.code !== 'inventory_check_saved_refresh') return 'inventory_check_save_unknown'
+    if (typeof problem.syncErrorId === 'string' && typeof problem.syncErrorChannel === 'string') {
+      savedRefreshClaims.current.push(claimSyncProblemPresentation({ actorId: userIdentity(user), requestId: problem.syncErrorId, problem: { errorId: problem.syncErrorId, channel: problem.syncErrorChannel, code: problem.code } }))
+    }
+    return 'inventory_check_saved_refresh'
+  }
   const compact = useIsCompactViewport()
   const [section, setSection] = useHubSection<Section>('inventory', () => 'products', ['products', 'sessions', 'issues'], navigateTo)
   const [sessionRange, setSessionRange] = useState<DateTimeRange>(() => statsPresetRange('all'))

@@ -7802,7 +7802,7 @@
   "inventory_check_load_failed": "Could not load Inventory. Try again.",
   "inventory_check_changed_elsewhere": "Changed on another device. Tap to refresh.",
   "inventory_check_save_unknown": "Save result unknown. Check the session before retrying.",
-  "inventory_check_saved_refresh": "Saved, but this page may be out of date. Refresh the page to see it.",
+  "inventory_check_saved_refresh": "Saved. Retry to finish, or refresh the page.",
   "inventory_check_page_session": "This page’s products",
   "inventory_check_current_stock": "Current stock",
   "inventory_check_leave_session": "Leave session",
