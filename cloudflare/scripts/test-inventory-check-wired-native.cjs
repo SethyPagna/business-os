@@ -372,6 +372,8 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
     const revisionNow = async () => (await app.get('/api/inventory-checks/sessions/sA')).json.item.revision
     const onFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'close', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-on1' })
     check('ON: a writer whose version bump fails does not answer success', onFail.status >= 500, JSON.stringify({ s: onFail.status, b: onFail.json }))
+    check('ON: that answer says the change was saved and the page may need a refresh, with outcome unknown', onFail.status === 503 && onFail.json.code === 'inventory_check_saved_refresh' && onFail.json.outcome === 'unknown', JSON.stringify(onFail.json))
+    check('ON: the saved write really is committed (the session is closed)', (await revisionNow()) > 0 && (await app.get('/api/inventory-checks/sessions/sA')).json.item.status === 'closed', JSON.stringify((await app.get('/api/inventory-checks/sessions/sA')).json.item))
     app.setSwitch('ic_wired', 'off')
     const offFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-off' })
     check('OFF: the same failure does not turn the write into an error', offFail.status < 500, String(offFail.status))

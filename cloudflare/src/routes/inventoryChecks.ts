@@ -31,6 +31,9 @@ const announceCount = (env: Env, user: SessionUser, event: Pick<ReviewAlertEvent
     row: { section: 'inventory_checks', action_type: 'approve', entity_type: 'count', entity_id: event.sessionId, payload_json: '{}', requested_by_name: event.kind === 'created' ? actorSnapshot(user) : null },
   }))
 
+// The write committed but the cache version that keeps the check-state sets honest could not be advanced. The answer says so (the page shows 'saved, refresh'), and keeps outcome 'unknown'
+// so the page keeps its frozen request: a retry replays the stored receipt and tries the bump again.
+const SAVED_REFRESH_CODE = 'inventory_check_saved_refresh'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', async (c, next) => { c.header('Cache-Control','private, no-store'); await next() })
@@ -38,7 +41,7 @@ app.onError((error,c) => {
   const status = error instanceof InventoryCheckSessionError ? error.status : 'status' in error && typeof error.status === 'number' && [400,403,409,503].includes(error.status) ? error.status as 400|403|409|503 : 503
   const code = 'code' in error && typeof error.code === 'string' ? error.code : 'inventory_check_unavailable'
   const details = error instanceof InventoryCheckSessionError && error.details ? error.details : error instanceof InventoryCheckQueryError ? { parameter: error.parameter } : {}
-  return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' ? { outcome: 'unknown' } : {}) }, status)
+  return c.json({ ...details, error: code, code, ...(code === 'inventory_check_outcome_unknown' || code === SAVED_REFRESH_CODE ? { outcome: 'unknown' } : {}) }, status)
 })
 /** ic_fix_stock counts as ON only once migration 0286 is applied: with the switch on and the table missing every count would fail, so it answers exactly as OFF. */
 const fixStockOn = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Promise<boolean> => await readSwitch(c.env, 'ic_fix_stock') && await approvalsAvailable(getDb(c.env))
@@ -63,7 +66,7 @@ app.use('*', async (c, next) => {
   // anyway (the version is also moved by every later writer).
   const wired = await readSwitch(c.env, 'ic_wired')
   try { await bumpVersion(c.env, 'inventory_checks') } catch (error) {
-    if (wired) throw error
+    if (wired) throw new InventoryCheckSessionError(503, SAVED_REFRESH_CODE)
     console.error('[inventory_checks] version not advanced while ic_wired is OFF', error)
   }
 })

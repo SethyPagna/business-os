@@ -122,6 +122,10 @@ function knownRefusal(cause: unknown) {
   const code = (cause as { code?: unknown } | null)?.code
   return typeof code === 'string' && Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code] : undefined
 }
+/** The text key for an answer with outcome 'unknown'. A write that committed but whose cache version could not be advanced says so (saved, refresh); any other unknown outcome says the result is unknown. */
+function unknownSaveKey(cause: unknown) {
+  return (cause as { code?: unknown } | null)?.code === 'inventory_check_saved_refresh' ? 'inventory_check_saved_refresh' : 'inventory_check_save_unknown'
+}
 function isStaleConflict(cause: unknown) {
   const { status, code } = (cause ?? {}) as { status?: unknown; code?: unknown }
   return status === 409 && code !== 'inventory_check_owner_required'
@@ -591,7 +595,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       if (refusal) attempts.current.delete(id)
       // A definite conflict means the page is behind the server (revision, baseline or stock moved): reload it.
       if (current() && isStaleConflict(cause)) reloadAll()
-      if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
+      if (current()) setRowErrors(previous => ({ ...previous, [id]: refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', (cause as { outcome?: string })?.outcome === 'unknown' ? 'Save not confirmed. Retry the same check to recover its receipt.' : 'Check not saved. Retry the same check or reload this session.') }))
       throw cause
     } finally { inFlight.current = false; if (current()) { setBusy(false); setSavingId(null) } }
   }
@@ -624,7 +628,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
       if (refusal) createAttempt.current = null
-      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -654,7 +658,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
     } catch (cause) {
       const refusal = (cause as { outcome?: string })?.outcome === 'unknown' ? undefined : knownRefusal(cause)
       if (refusal) lifecycleAttempt.current = null
-      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
+      if (current()) setWriteError(refusal ? tr(refusal.key, refusal.fallback) : tr((cause as { outcome?: string })?.outcome === 'unknown' ? unknownSaveKey(cause) : 'inventory_check_save_failed', 'Save not confirmed. Retry the same operation or reload.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
 
@@ -868,7 +872,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       // The server names the products whose earlier count is being applied (the refusal is the same whatever figure was typed): the person is told which, and the counts are kept.
       const busy = (cause as { code?: unknown })?.code === 'inventory_check_count_in_progress' && Array.isArray((cause as { productIds?: unknown }).productIds)
         ? ((cause as { productIds: unknown[] }).productIds).map(id => draftsRef.current[String(id)]?.name).filter((name): name is string => typeof name === 'string' && name !== '') : []
-      if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}${stale ? ` ${stale.changed.map(item => `${item.name}${item.receivedAt ? ` (${fmtDateOnly(item.receivedAt)})` : ''}: ${item.was ?? '—'} → ${item.now}`).join('; ')}` : ''}` : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+      if (current()) setWriteError(refusal ? `${tr(refusal.key, refusal.fallback)}${busy.length ? ` ${t('products')}: ${busy.join(', ')}` : ''}${stale ? ` ${stale.changed.map(item => `${item.name}${item.receivedAt ? ` (${fmtDateOnly(item.receivedAt)})` : ''}: ${item.was ?? '—'} → ${item.now}`).join('; ')}` : ''}` : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
     } finally { inFlight.current = false; if (current()) setBusy(false) }
   }
   // Counts approval (ic_fix_stock): approving changes stock, so the person must hold the extra, may adjust stock and be online.
@@ -918,7 +922,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
       if (!unknown) decideAttempt.current = null
       if (current()) {
         setRefusedLines(refusedMap((cause as { refused?: unknown }).refused))
-        setWriteError(refusal ? withCloseHint(tr(refusal.key, refusal.fallback)) : tr(unknown ? 'inventory_check_save_unknown' : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
+        setWriteError(refusal ? withCloseHint(tr(refusal.key, refusal.fallback)) : tr(unknown ? unknownSaveKey(cause) : 'inventory_check_save_failed', unknown ? 'Save not confirmed. Retry the same operation or reload.' : 'Check not saved. Try again.'))
         reloadAll()
       }
     } finally { inFlight.current = false; if (current()) setBusy(false) }
