@@ -187,3 +187,14 @@ test('the bell anchor the Worker sends for an online order opens the Orders sect
   const viewOnly = { ...everything, can: (key: string) => key === 'online_orders' }
   assert.deepEqual(getHubDestinations('sales', viewOnly).map((d) => d.id), ['orders'], 'online_orders view alone shows the Orders section and nothing else')
 })
+
+test('money held in review is resolved before Fulfil is offered, even when the order itself says paid', () => {
+  // CATCHES: Fulfil on a paid order whose second payment is held (the held money then vanishes from the order once a sale exists), and Resolve missing for it.
+  const held = { ...detail(), payments: [{ id: 1, state: 'paid' }, { id: 2, state: 'review' }] } as unknown as StaffOrderDetail
+  assert.deepEqual(availableActions(held, ALL), ['recheck', 'note', 'resolve', 'cancel'])
+  assert.deepEqual(availableActions(held, { canView: true, canDecide: false, canRefund: false }), ['recheck', 'note'], 'resolving needs the decide grant')
+  const clean = { ...detail(), payments: [{ id: 1, state: 'paid' }] } as unknown as StaffOrderDetail
+  assert.ok(availableActions(clean, ALL).includes('fulfil') && !availableActions(clean, ALL).includes('resolve'))
+  const sold = { ...held, order: { ...held.order, sale_id: 9, state: 'fulfilled' } } as unknown as StaffOrderDetail
+  assert.ok(!availableActions(sold, ALL).includes('resolve') && !availableActions(sold, ALL).includes('fulfil'))
+})

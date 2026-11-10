@@ -149,3 +149,12 @@ test('this client\'s notion of finished states matches the Worker\'s own order s
   const viewStatuses = /export type ViewStatus =([^;]+?)\nexport type ViewChip/s.exec(source)?.[1].match(/'([a-z_]+)'/g)?.map((s) => s.slice(1, -1)) ?? []
   assert.deepEqual(viewStatuses.sort(), ['awaiting_payment', 'balance_due', 'cancelled', 'completed', 'delivery_pending', 'expired', 'paid', 'qr_failed', 'review', 'sale_cancelled'])
 })
+
+test('a pickup order never sends an address, even one typed before switching from delivery', () => {
+  // CATCHES: the shop keeping a home address for an order the customer collects (the policy keeps an address only to deliver).
+  const typed = { ...emptyCheckoutForm(), name: 'A', phone: '012345678', address: '12 Street 271' }
+  const pickup = buildCheckoutBody({ ...typed, fulfilment: 'pickup' }, [{ id: 7, qty: 1 }], 'RID1234567890abc')
+  assert.equal('address' in pickup, false)
+  const delivery = buildCheckoutBody({ ...typed, fulfilment: 'delivery' }, [{ id: 7, qty: 1 }], 'RID1234567890abc')
+  assert.equal(delivery.address, '12 Street 271')
+})

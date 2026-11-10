@@ -130,7 +130,7 @@ export function checkoutProblems(form: CheckoutForm): CheckoutProblem[] {
 
 export type CheckoutLine = { id: string | number; qty: number }
 
-/** The request body of POST /api/portal/orders. Empty optional fields are left out, the address only travels when it is needed or given. */
+/** The request body of POST /api/portal/orders. Empty optional fields are left out. The address travels only for delivery: pickup never sends one, even if one was typed before switching (the shop keeps an address only to deliver). */
 export function buildCheckoutBody(form: CheckoutForm, lines: readonly CheckoutLine[], clientRequestId: string): Record<string, unknown> {
   const contacts = Object.fromEntries(ORDER_CONTACT_FIELDS.map((field) => [field, form.contacts[field].trim()]).filter(([, value]) => value))
   const address = form.address.trim()
@@ -139,7 +139,7 @@ export function buildCheckoutBody(form: CheckoutForm, lines: readonly CheckoutLi
     name: form.name.trim(),
     phone: form.phone.trim(),
     fulfilment: form.fulfilment,
-    ...(address ? { address } : {}),
+    ...(address && form.fulfilment === 'delivery' ? { address } : {}),
     ...(form.note.trim() ? { note: form.note.trim() } : {}),
     ...(Object.keys(contacts).length ? { contacts } : {}),
     client_request_id: clientRequestId,

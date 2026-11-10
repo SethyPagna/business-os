@@ -188,12 +188,14 @@ export function availableActions(detail: Pick<StaffOrderDetail, 'order' | 'money
   const out: OrderActionId[] = []
   if (!access.canView) return out
   const open = order.sale_id == null && order.state !== 'fulfilled'
+  // Money held in review is settled first, whatever the order's own state says: a paid order with a second payment held (paid twice, or after the order closed) is not fulfilled until staff accept or return that money.
+  const held = (detail.payments ?? []).some((payment) => String(payment.state) === 'review')
   if (access.canView && (['paid', 'review', 'awaiting_payment', 'expired', 'cancelled', 'qr_failed'].includes(order.state))) out.push('recheck')
   if (access.canView) out.push('note')
-  if (access.canDecide && open && order.state === 'review') out.push('resolve')
+  if (access.canDecide && open && (order.state === 'review' || held)) out.push('resolve')
   if (access.canDecide && open && (order.state === 'paid' || order.state === 'review')) out.push('cancel')
   if (access.canRefund && round2(Number(money.refund_due_usd ?? 0)) > 0) out.push('refund')
-  if (order.state === 'paid' && open) out.push('fulfil')
+  if (order.state === 'paid' && open && !held) out.push('fulfil')
   return out
 }
 
