@@ -205,6 +205,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+// DELETE /delivery-contacts/:id refuses a person still named by a sale or delivery fee with this code (409).
+function isDeliveryHasSalesRefusal(error: unknown): boolean {
+  return Boolean(error) && typeof error === 'object' && (error as { code?: unknown }).code === 'contact_has_sales'
+}
+
 // P4-4b item 6 (parity): handleSave's edit path used to call
 // load({ silent: true }) after every update -- a full re-search of the
 // current filtered/sorted/paginated Delivery contacts page just to reflect
@@ -1034,7 +1039,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       setSelected(null)
       await load({ silent: true, label: 'Delivery contacts after delete' })
     }
-    catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
+    catch (error: unknown) {
+      notify(isDeliveryHasSalesRefusal(error) ? tr('delivery_contact_has_sales', getErrorMessage(error, 'Failed')) : getErrorMessage(error, 'Failed'), 'error')
+    }
     finally { finishSingleAction(deleteInFlightRef) }
   }
 
@@ -1099,7 +1106,8 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         })
       }
       if (failedIds.length) {
-        notify(`Deleted ${deletedCount} delivery contact(s), ${failedIds.length} failed`, 'warning')
+        const keptOnSales = deleteRun.failures.some((entry) => isDeliveryHasSalesRefusal(entry.error))
+        notify(`Deleted ${deletedCount} delivery contact(s), ${failedIds.length} failed${keptOnSales ? `. ${tr('delivery_contact_has_sales', '')}` : ''}`, 'warning')
       } else {
         notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
       }

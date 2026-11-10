@@ -363,7 +363,7 @@ const CURSOR_GUARD = `
 const MUTANTS = [
   { name: 'cursor guard removed from the chunk batch (duplicate delivery applies twice)', file: BULK, from: CURSOR_GUARD, to: `
             AND 1=1)`, world: 'bulk', catches: ['A2', 'A4'] },
-  { name: 'audit statement left out of the atomic batch', file: BULK, from: '...deleteStatements, ...extraStatements, auditStatement, progress(failedIds, null),', to: '...deleteStatements, ...extraStatements, progress(failedIds, null),', world: 'bulk', catches: ['A1'] },
+  { name: 'audit statement left out of the atomic batch', file: BULK, from: '...deleteStatements, ...extraStatements, auditStatement, progress(failedIds, keptNote),', to: '...deleteStatements, ...extraStatements, progress(failedIds, keptNote),', world: 'bulk', catches: ['A1'] },
   { name: 'chunk size a literal 500 instead of the plan field', file: BULK, from: 'const chunk = allIds.slice(cursor, cursor + bulkDeleteChunkSize)\n    const next', to: 'const chunk = allIds.slice(cursor, cursor + 500)\n    const next', world: 'bulk', catches: ['A1', 'A7'] },
   { name: 'every delivery bumps and broadcasts instead of only the last', file: BULK, from: `await dispatchImportWork(env, { jobId, kind: 'bulk-delete' })\n      return\n    }\n  } else {`, to: `await dispatchImportWork(env, { jobId, kind: 'bulk-delete' })\n    }\n  } else {`, world: 'bulk', catches: ['A1'] },
   { name: 'in-batch anonymous-customer guard dropped', file: BULK, from: "...(job.entity_type === 'customers' && deleteChunk.length ? [buildAnonymousCustomerBulkDeleteGuard(deleteChunk)] : []),", to: '', world: 'bulk', catches: ['A5'] },

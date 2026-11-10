@@ -16,6 +16,7 @@ import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { customerIsAnonymousSql } from './anonymousCustomer'
+import { buildDeliveryContactUsageGuard, CONTACT_HAS_SALES_CODE, loadDeliveryContactUsage } from './contactDeleteGuard'
 
 export type BulkDeleteEntityType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -36,6 +37,8 @@ interface EntityConfig {
   // it's batching already has; contacts.ts's own DELETE /:id has never
   // checked for that either, so a dangling customer_id after a hard
   // delete is pre-existing behavior, not a new gap this introduces.
+  // Exception: delivery_contacts keep any person named by a sale or fee
+  // (lib/contactDeleteGuard.ts), as DELETE /delivery-contacts/:id does.
   deleteMode: 'soft' | 'hard'
   // Entity-specific statements beyond the core delete, scoped to this chunk.
   buildExtraStatements: (db: D1Compat, ids: number[], reason: string, user: { id: number | null; name: string | null }, jobId: string) => Promise<D1Statement[]>
@@ -312,6 +315,17 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
         deleteChunk = chunk.filter((id) => !protectedIds.has(id))
       }
     }
+    // A delivery person named by a sale or delivery fee is kept (never leave sales pointing at a missing id): its id
+    // joins the failed list and the job says why, the rest of the chunk still deletes.
+    let keptNote: string | null = null
+    if (job.entity_type === 'delivery_contacts') {
+      const named = await loadDeliveryContactUsage(db, chunk)
+      if (named.size) {
+        for (const id of named.keys()) if (!failedIds.includes(id)) failedIds.push(id)
+        deleteChunk = chunk.filter((id) => !named.has(id))
+        keptNote = `${CONTACT_HAS_SALES_CODE}: ${JSON.stringify([...named.keys()])}`
+      }
+    }
     const progress = (failed: number[], error: string | null): D1Statement => ({
       sql: `UPDATE bulk_delete_jobs SET processed_count = @next, failed_count = @failedCount, failed_ids_json = @failedIds,
           status = @status, finished_at = CASE WHEN @status = 'completed' THEN CURRENT_TIMESTAMP ELSE finished_at END,
@@ -358,7 +372,8 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
         // the race where a profile is marked after that read but before the
         // hard delete.
         ...(job.entity_type === 'customers' && deleteChunk.length ? [buildAnonymousCustomerBulkDeleteGuard(deleteChunk)] : []),
-        ...deleteStatements, ...extraStatements, auditStatement, progress(failedIds, null),
+        ...(job.entity_type === 'delivery_contacts' && deleteChunk.length ? [buildDeliveryContactUsageGuard(deleteChunk)] : []),
+        ...deleteStatements, ...extraStatements, auditStatement, progress(failedIds, keptNote),
       ])
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) throw error

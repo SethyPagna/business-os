@@ -45,6 +45,7 @@ import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
 import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
+import { deleteDeliveryContactUnlessUsed } from '../lib/contactDeleteGuard'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
@@ -2191,13 +2192,20 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
 
+    // A delivery person still named by a sale or delivery fee is never hard-deleted: the rows would point at a missing id.
+    if (config.table === 'delivery_contacts') {
+      const outcome = await deleteDeliveryContactUnlessUsed(db, Number(id), current.name)
+      if (!outcome.deleted) return c.json(outcome.body, 409)
+    }
+
     try {
       if (config.table === 'customers') {
         await db.batch([
           anonymousCustomerGuardStatement(id),
           { sql: 'DELETE FROM customers WHERE id = @customerId', params: { customerId: id } },
         ])
-      } else {
+      } else if (config.table !== 'delivery_contacts') {
+        // delivery_contacts were deleted above, behind the sales/fees guard
         await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
       }
     } catch (error) {
