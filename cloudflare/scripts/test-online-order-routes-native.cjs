@@ -141,6 +141,18 @@ async function main() {
     assert.equal((await create(broken)).status, 201, 'a limiter outage must not close the shop')
   })
 
+  await check('F8: the phone-guess limit is per order LINK, not per network: guesses from many networks share one budget, another link has its own', async () => {
+    const seen = new Map()
+    const h = world({ limiter: (key) => { seen.set(key, (seen.get(key) || 0) + 1); return !key.startsWith('phone') || seen.get(key) <= 3 } })
+    const first = tokenOf(await create(h)); const second = tokenOf(await create(h, { phone: '099 333 444' }))
+    const guess = (token, ip) => h.request('/' + token + '/requests', 'POST', { kind: 'note', phone: '0 99 000 000', after: { note: 'x' } }, { ip })
+    for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) assert.notEqual((await guess(first, ip)).status, 429, 'within the budget from ' + ip)
+    const over = await guess(first, '198.51.100.4')
+    assert.equal(over.status, 429, 'a fourth network guessing the same link is limited'); assert.equal(over.body.code, 'rate_limited')
+    assert.notEqual((await guess(second, '198.51.100.4')).status, 429, 'control: another link has its own budget')
+    assert.ok([...seen.keys()].filter((key) => key.startsWith('phone')).every((key) => !/\d+\.\d+\.\d+\.\d+|hmac/.test(key)), 'the key carries no network')
+  })
+
   await check('responses are never cached: Cache-Control private, no-store on every answer, errors included', async () => {
     const h = world()
     for (const res of [await create(h), await create(h, { name: '' }), await view(h, 'abcdefghijklmnopqrstuv'), await poll(h, 'bad')]) {

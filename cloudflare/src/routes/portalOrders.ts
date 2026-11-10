@@ -96,11 +96,11 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
     return body as Record<string, unknown>
   }
   /** Per network, through the Workers RateLimit binding: no D1 write. The limiter is a guard, not a dependency: its outage opens nothing and closes nothing. */
-  const limited = async (c: OrderContext, scope: string, extra = ''): Promise<boolean> => {
+  const limited = async (c: OrderContext, scope: string, extra = '', perNetwork = true): Promise<boolean> => {
     const limiter = c.env.ORDER_LIMITER
     if (!limiter) return false
     try {
-      return !(await limiter.limit({ key: `${scope}:${getClientNetworkKey(c.req.raw)}${extra}` })).success
+      return !(await limiter.limit({ key: perNetwork ? `${scope}:${getClientNetworkKey(c.req.raw)}${extra}` : `${scope}${extra}` })).success
     } catch (error) {
       console.error('[online-orders] rate limiter unavailable', error)
       return false
@@ -192,11 +192,11 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
   }))
 
   // ---- requests after payment ----
-  // Guessing the phone behind a leaked link is bounded per link as well as per network.
+  // Guessing the phone behind a leaked link is bounded per LINK (review F8): the key carries no network, so many networks cannot multiply the guesses. The ordinary 'write' limit stays per network.
   app.post('/:token/requests', (c) => run(c, async () => {
     if (await limited(c, 'write')) return tooMany(c)
     const token = c.req.param('token')
-    if (isOrderToken(token) && await limited(c, 'phone', `:${(await hashOrderToken(token)).slice(0, 16)}`)) return tooMany(c)
+    if (isOrderToken(token) && await limited(c, 'phone-link', `:${(await hashOrderToken(token)).slice(0, 16)}`, false)) return tooMany(c)
     const body = await readBody(c)
     const networkKey = await portalAbuseKey(c.env, 'online-order:network', getClientNetworkKey(c.req.raw))
     return present(c, await submitRequest(depsFor(c), token, body, networkKey), 201)
@@ -204,7 +204,7 @@ export function createPortalOrdersRoute(options: PortalOrdersOptions = {}) {
   app.post('/:token/requests/:id/withdraw', (c) => run(c, async () => {
     if (await limited(c, 'write')) return tooMany(c)
     const token = c.req.param('token')
-    if (isOrderToken(token) && await limited(c, 'phone', `:${(await hashOrderToken(token)).slice(0, 16)}`)) return tooMany(c)
+    if (isOrderToken(token) && await limited(c, 'phone-link', `:${(await hashOrderToken(token)).slice(0, 16)}`, false)) return tooMany(c)
     const body = await readBody(c)
     return present(c, await withdrawRequest(depsFor(c), token, c.req.param('id'), body.phone))
   }))
