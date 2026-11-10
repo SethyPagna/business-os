@@ -40,7 +40,7 @@ import { unexpectedFailureBody } from '../lib/failureText'
 import { ABA_REFUND_CAP_PREDICATE, planAbaRefund } from '../lib/onlineReturnChannel'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrdersOfSales } from '../lib/onlineOrderAlerts'
-import { configuredOnlineMethod, onlineMethodRefusalActive, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_RESERVED_PREDICATE, ONLINE_PAYMENT_METHOD_KEY, sameMethod } from '../lib/onlineOrderFulfil'
+import { configuredOnlineMethod, onlineMethodRefusalActive, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_RESERVED_PREDICATE, ONLINE_PAYMENT_METHOD_KEY, methodFold, sameMethod } from '../lib/onlineOrderFulfil'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
   readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
@@ -2090,7 +2090,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   } | null = null
   const replacementPaymentMethod = replacementUnpaid ? null : String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
   // The online (KHQR) method is refused for a replacement paid by it, inside the commit's own precondition (no read of its own: the setting and the switch are read by the batch).
-  const reservedMethodKey = replacementLines.length && replacementPaymentMethod && !sameMethod(replacementPaymentMethod, DEFAULT_REPLACEMENT_PAYMENT_METHOD) ? replacementPaymentMethod.trim().toLowerCase() : null
+  const reservedMethodKey = replacementLines.length && replacementPaymentMethod && !sameMethod(replacementPaymentMethod, DEFAULT_REPLACEMENT_PAYMENT_METHOD) ? methodFold(replacementPaymentMethod) : null
   const refuseReservedMethod = async () => {
     const stored = (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value
     return sameMethod(replacementPaymentMethod, configuredOnlineMethod(stored)) && await onlineMethodRefusalActive(c.env, stored)

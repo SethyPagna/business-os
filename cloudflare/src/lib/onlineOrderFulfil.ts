@@ -38,7 +38,10 @@ export type FulfilPlan = {
   recorded: Array<{ paymentId: number; amountUsd: number }>
 }
 
-export const sameMethod = (a: unknown, b: unknown): boolean => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+/** The fold SQLite's lower(trim(x)) applies: spaces trimmed, A-Z lower-cased, every other character as it is. JS toLowerCase() also folds non-ASCII capitals, so a comparison across JS and SQL must use this on both sides. */
+export const methodFold = (value: unknown): string => String(value ?? '').replace(/^ +| +$/g, '').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+export const sameMethod = (a: unknown, b: unknown): boolean => methodFold(a) === methodFold(b)
 
 export function configuredOnlineMethod(settingValue: unknown): string {
   const text = String(settingValue ?? '').trim()
