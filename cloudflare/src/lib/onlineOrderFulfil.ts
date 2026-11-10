@@ -55,6 +55,9 @@ export async function onlineMethodRefusalActive(env: Env, storedSetting: unknown
   return readSwitch(env, 'online_orders')
 }
 
+/** True when a non-empty online method is stored: the precondition of turning online_orders ON, written inside the flip's own statement. */
+export const ONLINE_METHOD_STORED_SQL = `EXISTS (SELECT 1 FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}' AND trim(COALESCE(value, '')) <> '')`
+
 /** The online_orders switch read from D1 inside the statement that uses it: never the memo. */
 export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.switches.online_orders') END FROM system_flags WHERE key = 'read_switches') = 'on'`
 

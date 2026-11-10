@@ -21,6 +21,7 @@ function load(relative, requireFor) {
 const audit = load('lib/audit.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : require(id)))
 const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? load('lib/planTier.ts', require) : require(id)))
 
+const fulfil = load('lib/onlineOrderFulfil.ts', (id) => (id === './readSwitches' ? sw : id === './moneyPrecision' ? load('lib/moneyPrecision.ts', require) : require(id)))
 const db = openDb(loadAll())
 const MAINTENANCE = JSON.stringify({ mode: 'restore', token: 't', backupKey: 'k', startedAt: '2026-01-01T00:00:00.000Z', startedBy: 'x', phase: 'deleting', updatedAt: '2026-01-01T00:00:00.000Z' })
 const row = () => db.db.prepare("SELECT value FROM system_flags WHERE key = 'read_switches'").get()?.value ?? null
@@ -35,7 +36,7 @@ const hold = () => {
   db.db.prepare("INSERT INTO system_flags (key, value) VALUES ('maintenance', ?)").run(MAINTENANCE)
 }
 
-function statements(storedRaw, name, token) {
+function statements(storedRaw, name, token, requirement) {
   const current = sw.parseReadSwitches(storedRaw)
   const target = sw.parseFlipState(token)
   const epoch = current.epoch + 1
@@ -43,7 +44,7 @@ function statements(storedRaw, name, token) {
   const from = sw.formatSwitchToken(current.switches[name])
   const to = sw.formatSwitchToken(target)
   const record = audit.buildAuditStatement(1, 'admin', 'read_switch_set', 'read_switch', name, { name, from, to }, audit.changedFields({ state: from, epoch: current.epoch }, { state: to, epoch }))
-  return { value, list: sw.buildFlipStatements({ record, value, expected: storedRaw, off: target.state === 'off' }) }
+  return { value, list: sw.buildFlipStatements({ record, value, expected: storedRaw, off: target.state === 'off', requirement }) }
 }
 
 let passed = 0
@@ -88,6 +89,30 @@ async function main() {
     assert.ok(await rejects(db.batch(list)))
     assert.equal(row(), theirs)
     assert.equal(audits(), 0)
+  })
+
+  await check('R5-6: online_orders ON with the stored-method precondition inside the swap: the method removed after the route read it aborts the batch, nothing is written; stored, it commits; a switch without the precondition is unchanged', async () => {
+    const seen = JSON.stringify({ epoch: 2, switches: { online_orders: 'off' } })
+    reset(seen)
+    db.db.exec("DELETE FROM settings WHERE key = 'online_order_payment_method'")
+    db.db.exec("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR')")
+    const { list } = statements(seen, 'online_orders', 'on', fulfil.ONLINE_METHOD_STORED_SQL)
+    db.db.exec("DELETE FROM settings WHERE key = 'online_order_payment_method'")
+    assert.ok(await rejects(db.batch(list)), 'the swap matches nothing and the guard aborts')
+    assert.equal(row(), seen)
+    assert.equal(audits(), 0)
+    db.db.exec("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', '   ')")
+    assert.ok(await rejects(db.batch(statements(seen, 'online_orders', 'on', fulfil.ONLINE_METHOD_STORED_SQL).list)), 'a blank method is no method')
+    db.db.exec("UPDATE settings SET value = 'ABA KHQR' WHERE key = 'online_order_payment_method'")
+    const stored = statements(seen, 'online_orders', 'on', fulfil.ONLINE_METHOD_STORED_SQL)
+    await db.batch(stored.list)
+    assert.equal(row(), stored.value)
+    assert.equal(audits(), 1)
+    reset(seen)
+    db.db.exec("DELETE FROM settings WHERE key = 'online_order_payment_method'")
+    const probe = statements(seen, 'online_orders', 'off')
+    await db.batch(probe.list)
+    assert.equal(row(), probe.value, 'OFF needs no method')
   })
 
   await check('writes held: ON is refused by the statement itself and writes nothing; OFF goes through', async () => {

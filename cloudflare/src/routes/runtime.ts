@@ -4,7 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getMaintenance } from '../lib/maintenance'
-import { ONLINE_PAYMENT_METHOD_KEY } from '../lib/onlineOrderFulfil'
+import { ONLINE_METHOD_STORED_SQL, ONLINE_PAYMENT_METHOD_KEY } from '../lib/onlineOrderFulfil'
 import {
   KNOWN_READ_SWITCHES, buildFlipStatements, formatSwitchToken, isKnownReadSwitch, parseFlipState,
   parseReadSwitches, primeReadSwitches, serializeReadSwitches, splitSwitchRows, SWITCH_ROWS_PARAMS, SWITCH_ROWS_SQL, type ReadSwitches,
@@ -274,7 +274,8 @@ app.put('/read-switches', async (c) => {
     return c.json({ success: true, changed: false, ...switchListing(c.env, current) })
   }
 
-  if (name === 'online_orders' && target.state === 'on') {
+  const needsMethod = name === 'online_orders' && target.state === 'on'
+  if (needsMethod) {
     const method = await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY })
     if (!String(method?.value ?? '').trim()) return c.json({ success: false, error: 'Choose the online payment method in Settings before turning online orders on.', code: 'online_method_required' }, 409)
   }
@@ -284,11 +285,12 @@ app.put('/read-switches', async (c) => {
   const record = buildAuditStatement(user.id, user.name, 'read_switch_set', 'read_switch', name,
     { name, from, to, epochBefore: current.epoch, epochAfter: epoch }, changedFields({ state: from, epoch: current.epoch }, { state: to, epoch }))
   try {
-    await db.batch(buildFlipStatements({ record, value, expected: storedRaw, off: target.state === 'off' }))
+    await db.batch(buildFlipStatements({ record, value, expected: storedRaw, off: target.state === 'off', requirement: needsMethod ? ONLINE_METHOD_STORED_SQL : undefined }))
   } catch (error) {
     const after = await storedSwitches(db)
     if (after !== value) {
       if (after !== storedRaw) return c.json({ success: false, error: 'The switches changed since this page loaded.', code: 'read_switch_epoch_stale', epoch: parseReadSwitches(after).epoch }, 409)
+      if (needsMethod && !String((await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value ?? '').trim()) return c.json({ success: false, error: 'Choose the online payment method in Settings before turning online orders on.', code: 'online_method_required' }, 409)
       if (target.state !== 'off' && await getMaintenance(c.env)) return c.json({ success: false, error: 'Writes are held; only OFF is allowed now.', code: 'read_switch_maintenance' }, 503)
       throw error
     }

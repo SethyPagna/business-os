@@ -266,16 +266,21 @@ export function createReadSwitchStore(options: StoreOptions = {}) {
 // The flip is one compare-and-swap on the exact stored text, its audit row tied to the swap (WHERE changes() = 1), and a guard
 // that aborts the batch when the swap matched nothing. Turning something ON also refuses while a restore or cutover holds
 // writes; an OFF flip always may.
-export const SWITCH_FLIP_UPSERT_SQL = `INSERT INTO system_flags (key, value, updated_at)
+/** `requirement` is one more boolean SQL condition the swap needs (turning online_orders ON needs a stored online method); it sits in the same statement as the swap, so nothing can change between the check and the write. */
+export const switchFlipUpsertSql = (requirement?: string): string => {
+  const gate = `(@off = 1 OR (NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance')${requirement ? ` AND ${requirement}` : ''}))`
+  return `INSERT INTO system_flags (key, value, updated_at)
   SELECT @key, @value, CURRENT_TIMESTAMP
-  WHERE (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))
+  WHERE ${gate}
   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  WHERE system_flags.value = @expected AND (@off = 1 OR NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance'))`
+  WHERE system_flags.value = @expected AND ${gate}`
+}
+export const SWITCH_FLIP_UPSERT_SQL = switchFlipUpsertSql()
 export const SWITCH_FLIP_GUARD_SQL = `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('[1]', '$[read_switch_conflict]') END`
 
-export function buildFlipStatements(flip: { record: { sql: string; params: Record<string, unknown> }; value: string; expected: string | null; off: boolean }): Array<{ sql: string; params?: Record<string, unknown> }> {
+export function buildFlipStatements(flip: { record: { sql: string; params: Record<string, unknown> }; value: string; expected: string | null; off: boolean; requirement?: string }): Array<{ sql: string; params?: Record<string, unknown> }> {
   return [
-    { sql: SWITCH_FLIP_UPSERT_SQL, params: { key: READ_SWITCH_KEY, value: flip.value, expected: flip.expected, off: flip.off ? 1 : 0 } },
+    { sql: flip.requirement ? switchFlipUpsertSql(flip.requirement) : SWITCH_FLIP_UPSERT_SQL, params: { key: READ_SWITCH_KEY, value: flip.value, expected: flip.expected, off: flip.off ? 1 : 0 } },
     { sql: `${flip.record.sql} WHERE changes() = 1`, params: flip.record.params },
     { sql: SWITCH_FLIP_GUARD_SQL },
   ]
