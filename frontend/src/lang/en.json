@@ -4654,6 +4654,7 @@
   "reset_business_data": "Reset All Business Data",
   "reset_business_desc": "Permanently deletes all sales, products, inventory, customers, and suppliers. Users, roles, branches, and settings are kept.",
   "reset_complete": "Reset complete",
+  "reset_delivery_contacts_some_kept": "Delivery contacts reset. {count} kept because sales or fees still name them.",
   "reset_confirm": "Reset receipt template to defaults?",
   "reset_customers_deleted": "All customers",
   "reset_customers_desc": "Deletes all customers. Their past sales and returns keep their own record of the name/phone/address, so old receipts and history still read fine. Takes a fresh backup first.",

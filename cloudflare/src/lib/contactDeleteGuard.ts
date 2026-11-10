@@ -75,3 +75,9 @@ export async function deleteDeliveryContactUnlessUsed(db: D1Compat, id: number, 
   }
   return { deleted: true }
 }
+
+// reset-section "Delivery contacts": clears every delivery person no sale or fee names. Named ones stay, so no sale or
+// fee is left pointing at a missing id; the rest of the table is what remains after this runs (the kept count).
+export const RESET_UNUSED_DELIVERY_CONTACTS_SQL = `DELETE FROM delivery_contacts
+  WHERE NOT EXISTS (SELECT 1 FROM sales WHERE sales.delivery_contact_id = delivery_contacts.id)
+    AND NOT EXISTS (SELECT 1 FROM fees WHERE fees.delivery_contact_id = delivery_contacts.id)`
