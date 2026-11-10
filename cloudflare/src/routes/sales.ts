@@ -1,7 +1,7 @@
 import { executeStockTransaction, stockTransactionStatementCount } from '../lib/stockTransaction'
 import { loyaltyAccrualSql, loyaltyPointsEnabled as isLoyaltyEnabled } from '../lib/loyaltyEligibility'
 import { productStockGuardError, productStockGuardStatement } from '../lib/productStockGuard'
-import { Hono, type Context } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange, announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import {
-  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, sameMethod, type FulfilPlan,
+  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -221,6 +221,14 @@ async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId:
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
 app.use('*', courierCostResponses)
+// A sale that fulfilled an online order changes the order's money view when its lines are amended or added to (an amendment down leaves the customer a refund due through ABA):
+// after a successful write the staff Orders screens refresh. Deferred, one indexed read, nothing for a sale that has no order.
+const announceLinkedOrderAfterWrite: MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> = async (c, next) => {
+  await next()
+  if (c.req.method === 'POST' && c.res.status < 300) c.executionCtx.waitUntil(announceOrdersOfSales(c.env, [Number(c.req.param('id'))]))
+}
+app.use('/:id/amendments', announceLinkedOrderAfterWrite)
+app.use('/:id/items', announceLinkedOrderAfterWrite)
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
 

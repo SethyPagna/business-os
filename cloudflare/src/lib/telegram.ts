@@ -3130,6 +3130,8 @@ export type TelegramReturnSummary = {
   items: TelegramReturnLine[]; refundUsd?: number | null; refundKhr?: number | null
   /** Part of a customer return that lowered a Not Paid sale's debt; refundUsd/refundKhr are then the cash part. */
   debtLoweredUsd?: number | null
+  /** 'aba': the refund went back through ABA (an online order's sale), not out of the till. */
+  refundChannel?: 'aba' | null
   compensationUsd?: number | null; compensationKhr?: number | null; lossUsd?: number | null; lossKhr?: number | null
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
@@ -3214,7 +3216,8 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
       // No refund money means no refund line. A settlement that moved no cash
       // (a replacement, a write-off) already says so on its own Settlement
       // line, so "Refund: none" was a line that stated nothing.
-      : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : ''),
+      : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}${ret.refundChannel === 'aba' ? ' (through ABA)' : ''}` : ''),
+    ret.kind === 'customer' && ret.refundChannel === 'aba' ? '🌐 Online order' : '',
     ret.kind === 'customer' && (ret.debtLoweredUsd || 0) > 0 ? `Debt lowered: ${usd(Number(ret.debtLoweredUsd))}` : '',
     ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
     ret.by ? `By: ${ret.by}` : '',

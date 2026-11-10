@@ -37,6 +37,9 @@ import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEve
 import { loadReturnRecords } from '../lib/returnRecords'
 import { returnExportWindow } from '../lib/returnExportWindow'
 import { unexpectedFailureBody } from '../lib/failureText'
+import { planAbaRefund } from '../lib/onlineReturnChannel'
+import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
+import { announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
   readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
@@ -1961,6 +1964,14 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     return c.json({ error: 'This return has no riel price to refund in riel. Refund it in dollars.', code: 'return_refund_khr_unavailable' }, 400)
   }
 
+  // KHQR S6b: a refund sent back through ABA (the sale fulfilled an online order). It needs the online order refund action, is dollars only, and fits in what was paid online.
+  const refundChannel = canonicalIntent.refund_channel === 'aba' ? 'aba' : null
+  if (refundChannel) {
+    if (!getOnlineOrderAccess(user as never).canRefund) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    const abaPlan = await planAbaRefund(db, { saleId: requestedSaleId, cashRefundUsd })
+    if (!abaPlan.ok) return c.json({ error: abaPlan.error, code: abaPlan.code }, abaPlan.status)
+  }
+
   const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of returnItems) {
     const quantity = Number(item.quantity)
@@ -2239,12 +2250,12 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
       customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
       notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
-      money_precision_version,calculated_refund_usd,rounding_adjustment_usd,refund_currency,owed_reduction_usd${addressedBranchName ? ',addressed_branch_name' : ''}
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd,refund_currency,owed_reduction_usd${refundChannel ? ',refund_channel' : ''}${addressedBranchName ? ',addressed_branch_name' : ''}
     ) VALUES(
       @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
       @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
       @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
-      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd,@refund_currency,@owed_reduction_usd${addressedBranchName ? ',@addressed_branch_name' : ''}
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd,@refund_currency,@owed_reduction_usd${refundChannel ? ",'aba'" : ''}${addressedBranchName ? ',@addressed_branch_name' : ''}
     )`,
     params: {
       return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
@@ -2660,8 +2671,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
+  // A return on a sale of an online order moves the order's money view (and the Reports block of ABA refunds): refresh the staff Orders screens.
+  if (requestedSaleId) c.executionCtx.waitUntil(announceOrdersOfSales(c.env, [requestedSaleId]))
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, response.id, {
-    kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
+    kind: 'customer', ...(refundChannel ? { refundChannel } : {}), returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
     party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,
     returnType: String(canonicalIntent.return_type), by: actorSnapshot(user),
     // What left the till, in the currency it left in, beside the debt the return lowered.

@@ -92,7 +92,10 @@ export function receivedWithOnlinePaid<T extends { digital: { usd: number } }>(r
 export type OnlineReportBlocks = {
   /** Money PayWay took in the window for orders still waiting to be handed over (paid, no sale yet): by paid_at. Not revenue; it becomes revenue on the sale date at Fulfil. */
   paidToFulfil: { orders: number; usd: number }
-  /** Refunds staff wrote down as sent back through ABA in the window (the Records row's own date). */
+  /**
+   * Refunds sent back through ABA in the window, from TWO disjoint sources: the refund_noted notes staff wrote for a refund sent outside a return (the Records row's date) and the
+   * returns refunded through ABA (returns.refund_channel = 'aba', the return's date, the cash part). A return writes no note, so nothing counts twice.
+   */
   abaRefunds: { count: number; usd: number }
 }
 
@@ -107,6 +110,7 @@ export async function onlineReportBlocks(env: Env, f: SalesFilters): Promise<Onl
   try {
     const orders = paidWindow(f, 'o.paid_at', 'o.branch_id')
     const refunds = paidWindow(f, 'e.created_at', null)
+    const returnsWindow = paidWindow(f, 'r.created_at', 'r.branch_id')
     const refundBranch = f.branchId ? ' AND e.order_id IN (SELECT id FROM online_orders WHERE branch_id = @branchId)' : ''
     const where = (clauses: string[]) => (clauses.length ? ` AND ${clauses.join(' AND ')}` : '')
     const row = await getDb(env).prepare(`SELECT
@@ -114,9 +118,11 @@ export async function onlineReportBlocks(env: Env, f: SalesFilters): Promise<Onl
         (SELECT COALESCE(SUM(COALESCE(op.paid_amount, op.amount)), 0) FROM online_orders o INDEXED BY idx_online_orders_attention JOIN online_order_payments op ON op.order_id = o.id AND op.state = 'paid'
           WHERE o.state IN ('paid','review') AND o.state = 'paid' AND o.sale_id IS NULL${where(orders.clauses)}) AS paid_usd,
         (SELECT COUNT(*) FROM online_order_events e WHERE e.event = 'refund_noted'${where(refunds.clauses)}${refundBranch}) AS refunds,
-        (SELECT COALESCE(SUM(e.amount_usd), 0) FROM online_order_events e WHERE e.event = 'refund_noted'${where(refunds.clauses)}${refundBranch}) AS refund_usd`)
-      .get<{ orders: unknown; paid_usd: unknown; refunds: unknown; refund_usd: unknown }>({ ...orders.params, ...refunds.params })
-    return { paidToFulfil: { orders: Number(row?.orders) || 0, usd: money(row?.paid_usd) }, abaRefunds: { count: Number(row?.refunds) || 0, usd: money(row?.refund_usd) } }
+        (SELECT COALESCE(SUM(e.amount_usd), 0) FROM online_order_events e WHERE e.event = 'refund_noted'${where(refunds.clauses)}${refundBranch}) AS refund_usd,
+        (SELECT COUNT(*) FROM returns r WHERE r.refund_channel = 'aba' AND COALESCE(r.status, 'completed') <> 'cancelled'${where(returnsWindow.clauses)}) AS aba_returns,
+        (SELECT COALESCE(SUM(r.total_refund_usd - COALESCE(r.owed_reduction_usd, 0)), 0) FROM returns r WHERE r.refund_channel = 'aba' AND COALESCE(r.status, 'completed') <> 'cancelled'${where(returnsWindow.clauses)}) AS aba_return_usd`)
+      .get<{ orders: unknown; paid_usd: unknown; refunds: unknown; refund_usd: unknown; aba_returns: unknown; aba_return_usd: unknown }>({ ...orders.params, ...refunds.params, ...returnsWindow.params })
+    return { paidToFulfil: { orders: Number(row?.orders) || 0, usd: money(row?.paid_usd) }, abaRefunds: { count: (Number(row?.refunds) || 0) + (Number(row?.aba_returns) || 0), usd: money(money(row?.refund_usd) + money(row?.aba_return_usd)) } }
   } catch {
     return zero
   }

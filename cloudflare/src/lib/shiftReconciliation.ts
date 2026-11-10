@@ -534,6 +534,30 @@ async function linkedOnlineMoney(env: Env, clauses: string[], params: Record<str
   } catch { return new Map() }
 }
 
+/**
+ * An amendment that lowers a line of a Fulfilled sale records the excess as `change`, but change is handed out of the till and the excess here is the customer's ONLINE money
+ * (it comes back through ABA, lib/onlineOrders.ts saleOverpaidUsd). Read as cash change it would leave a tender with no cash to hand it from (review codes change_ambiguous /
+ * tender_incomplete) and ask the drawer for money that never left it. So the excess is taken off the row: the change, the amount paid, and the online tender row that equals the
+ * sale's online money by construction (Fulfil's KHQR tender is exactly the online money it covers). A row that does not match is returned unchanged.
+ */
+export function withoutOnlineExcessChange<T extends ShiftTenderRow>(row: T, online: { usd: number } | undefined): T {
+  if (!online || !(online.usd > 0)) return row
+  const paid = Number(row.amount_paid_usd) || 0
+  const change = Number(row.change_usd) || 0
+  if (!(change > 0)) return row
+  const excess = round2(change - Math.min(change, Math.max(0, paid - online.usd)))
+  if (!(excess > 0)) return row
+  let details: Array<Record<string, unknown>>
+  try { details = JSON.parse(String(row.payment_details ?? '[]')) } catch { return row }
+  if (!Array.isArray(details)) return row
+  const index = details.findIndex((detail) => Math.abs((Number(detail?.amount_usd) || 0) - online.usd) < 0.005 && Number(detail?.amount_khr || 0) === 0)
+  if (index < 0) return row
+  const next = details.map((detail, i) => (i === index ? { ...detail, amount_usd: round2((Number(detail.amount_usd) || 0) - excess) } : detail))
+  // The riel twin of the change shrinks in the same proportion (it is the same change shown in riel).
+  const keep = (change - excess) / change
+  return { ...row, payment_details: JSON.stringify(next), amount_paid_usd: round2(paid - excess), change_usd: round2(change - excess), change_khr: Math.round((Number(row.change_khr) || 0) * keep) }
+}
+
 /** Takes the linked online money off a digital figure; never below zero (the money is a part of that tender, so it can only shrink it). */
 function withoutOnlineMoney(digital: ShiftMoney, online: { usd: number; khr: number }): ShiftMoney {
   return { usd: round2(Math.max(0, digital.usd - online.usd)), khr: roundKhr(Math.max(0, digital.khr - online.khr)) }
@@ -547,12 +571,12 @@ export async function tenderWhere(
   options?: ShiftCashOptions,
 ): Promise<ShiftCashResult> {
   const where = [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"]
-  const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr,
+  const rows = await getDb(env).prepare(`SELECT id, payment_method, payment_details, amount_paid_usd, amount_paid_khr,
       change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
-    FROM sales WHERE ${where.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
-  const cashRaw = summarizeShiftCashDetail(rows.slice(0, 5000), options ?? await readCashConfig(env))
+    FROM sales WHERE ${where.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow & { id: number }>(params)
   // Online money on linked sales was taken by no cashier: out of the digital figure too (see linkedOnlineMoney).
   const linked = await linkedOnlineMoney(env, where, params)
+  const cashRaw = summarizeShiftCashDetail(rows.slice(0, 5000).map((row) => withoutOnlineExcessChange(row, linked.get(Number(row.id)))), options ?? await readCashConfig(env))
   const online = [...linked.values()].reduce((sum, value) => ({ usd: sum.usd + value.usd, khr: sum.khr + value.khr }), { usd: 0, khr: 0 })
   const cash = linked.size ? { ...cashRaw, digital: withoutOnlineMoney(cashRaw.digital, online) } : cashRaw
   // Bound memory and refuse a partial drawer total rather than reporting one.
@@ -1041,8 +1065,8 @@ export async function shiftSaleTenders(
   const linked = await linkedOnlineMoney(env, [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"], params)
   const entries = new Map<number, ShiftSaleTender>()
   for (const row of rows) {
-    const entry = Number(row.payments_version) === 1 ? [Number(row.id), 0, 0, 0, 0] as ShiftSaleTender : shiftSaleTenderEntry(row, config)
     const online = linked.get(Number(row.id))
+    const entry = Number(row.payments_version) === 1 ? [Number(row.id), 0, 0, 0, 0] as ShiftSaleTender : shiftSaleTenderEntry(withoutOnlineExcessChange(row, online), config)
     if (online) {
       const digital = withoutOnlineMoney({ usd: entry[3], khr: entry[4] }, online)
       entries.set(Number(row.id), [entry[0], entry[1], entry[2], digital.usd, digital.khr])

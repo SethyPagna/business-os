@@ -344,11 +344,16 @@ export type OrderMoney = {
   balanceDueUsd: number
 }
 
-/** Dollars the customer paid beyond what the sale asks, after returns that lowered a debt and after change handed back. */
-function saleOverpaidUsd(sale: SaleRow, returns: readonly ReturnRow[]): number {
+/**
+ * Dollars the customer paid beyond what the sale asks, after returns that lowered a debt and after change handed back. Change comes out of the till, never out of the customer's
+ * online money: an amendment that lowers a line records the excess as change, but only the tender that is NOT online can be handed back, so the rest stays owed (to be refunded
+ * through ABA). `onlineTenderUsd` is the part of the tender that arrived online.
+ */
+function saleOverpaidUsd(sale: SaleRow, returns: readonly ReturnRow[], onlineTenderUsd = 0): number {
   const rate = num(sale.exchange_rate)
   const paidUsd = num(sale.amount_paid_usd) + (rate > 0 ? num(sale.amount_paid_khr) / rate : 0)
-  const changeUsd = num(sale.change_usd) + (rate > 0 ? num(sale.change_khr) / rate : 0)
+  const recordedChangeUsd = num(sale.change_usd) + (rate > 0 ? num(sale.change_khr) / rate : 0)
+  const changeUsd = Math.min(recordedChangeUsd, Math.max(0, paidUsd - onlineTenderUsd))
   const payable = subtractMoney4(num(sale.total_usd), num(sumRefundsUsd(returns.filter(isActiveReturn).map(returnDebtLowered))))
   return Math.max(0, roundMoney4(paidUsd - changeUsd - payable))
 }
@@ -391,7 +396,7 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
       // Money paid online that the sale did not take (the cashier Fulfilled with fewer or cheaper lines) and that the sale does not still owe is the customer's:
       // it is refundable through ABA. A top-up the sale is still waiting for is covered by its balance due, so it is not.
       const unrecordedExcessUsd = Math.max(0, roundMoney4(toRecordUsd - balanceDueUsd))
-      refundDue = saleOverpaidUsd(sale, returns) + unrecordedExcessUsd - notedAfterSaleUsd
+      refundDue = saleOverpaidUsd(sale, returns, recordedOnSaleUsd) + unrecordedExcessUsd - notedAfterSaleUsd
     }
   }
   return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }

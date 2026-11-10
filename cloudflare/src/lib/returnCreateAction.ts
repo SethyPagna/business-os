@@ -14,6 +14,17 @@ function refundCurrencyKey(body: Record<string, unknown>): { refund_currency?: '
   throw new Error('Refund currency must be USD or KHR')
 }
 
+// KHQR S6b: a refund for a sale that fulfilled an online order goes back through ABA, not out of a drawer. The key exists only when it is 'aba' so every request sent
+// before it keeps its digest bytes; it cannot be combined with a riel refund (ABA refunds dollars).
+function refundChannelKey(body: Record<string, unknown>): { refund_channel?: 'aba' } {
+  const value = body.refund_channel
+  const channel = typeof value === 'string' ? value.trim().toLowerCase() : value == null ? '' : null
+  if (channel === '') return {}
+  if (channel !== 'aba') throw new Error('Refund channel must be aba')
+  if (Object.keys(refundCurrencyKey(body)).length) throw new Error('A refund through ABA is in dollars')
+  return { refund_channel: 'aba' }
+}
+
 export type ReturnCreateStatement = { sql: string; params: Record<string, unknown> }
 
 export const RETURN_CREATE_MAX_ITEMS = 50
@@ -244,12 +255,16 @@ function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<st
     // The exchange keys exist only when there are replacement lines: a plain v1 return keeps the exact digest bytes it always had.
     ...(replacements.length ? exchangeIntentKeys(body) : {}),
     ...refundCurrencyKey(body),
+    ...refundChannelKey(body),
   }
 }
 
 function exchangeIntentKeys(body: Record<string, unknown>): Record<string, unknown> {
   if (Object.keys(refundCurrencyKey(body)).length) {
     throw new ReturnExchangeError('return_exchange_refund_currency', 'An exchange is refunded in dollars; the difference is handed back as change.')
+  }
+  if (body.refund_channel != null && String(body.refund_channel).trim() !== '') {
+    throw new ReturnExchangeError('return_exchange_refund_channel', 'An exchange has no refund to send back through ABA; return the goods first, then refund the difference.')
   }
   return { expected_exchange: canonicalExchangeExpected(body.expected_exchange), exchange_payment: canonicalExchangePayment(body.exchange_payment) }
 }
@@ -287,6 +302,7 @@ export function canonicalReturnCreateIntent(body: Record<string, unknown>): Reco
     replacement_items: replacements.map(canonicalReplacementItem),
     replacement_payment_method: boundedText(body.replacement_payment_method, 120) || 'Cash',
     ...refundCurrencyKey(body),
+    ...refundChannelKey(body),
   }
 }
 

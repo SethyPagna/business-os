@@ -196,15 +196,16 @@ async function createSale(h, { key, lines, status = 'completed', paymentDetails 
 
 // The v1 customer return the Returns screen records: server quote, then the
 // create carrying that exact quote.
-async function customerReturn(h, { key, saleId, lines, label }) {
+async function customerReturn(h, { key, saleId, lines, label, extra = {}, cookie }) {
+  const options = cookie ? { cookie } : {}
   const quote = await h.call('POST', '/api/returns/quote', { sale_id: saleId,
-    items: lines.map(line => ({ sale_item_id: line.saleItemId, quantity: line.quantity })) }, `quote ${label || key}`)
+    items: lines.map(line => ({ sale_item_id: line.saleItemId, quantity: line.quantity })) }, `quote ${label || key}`, options)
   if (quote.status !== 200) return { quote, created: null }
   const { customer_return_create_version: _c, customer_return_edit_version: _e, ...expected } = quote.body
   const created = await h.call('POST', '/api/returns', { client_request_id: key, money_precision_version: 1, sale_id: saleId,
     reason: 'AL money probe', expected_quote: expected,
     items: lines.map(line => ({ sale_item_id: line.saleItemId, product_id: line.productId, quantity: line.quantity,
-      stock_action: line.stockAction || 'restock', branch_id: 1 })) }, label || `POST /api/returns ${key}`)
+      stock_action: line.stockAction || 'restock', branch_id: 1 })), ...extra }, label || `POST /api/returns ${key}`, options)
   return { quote, created }
 }
 
