@@ -40,7 +40,7 @@ import { unexpectedFailureBody } from '../lib/failureText'
 import { ABA_REFUND_CAP_PREDICATE, planAbaRefund } from '../lib/onlineReturnChannel'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrdersOfSales } from '../lib/onlineOrderAlerts'
-import { configuredOnlineMethod, onlineMethodRefusalActive, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, sameMethod } from '../lib/onlineOrderFulfil'
+import { configuredOnlineMethod, onlineMethodRefusalActive, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_RESERVED_PREDICATE, ONLINE_PAYMENT_METHOD_KEY, sameMethod } from '../lib/onlineOrderFulfil'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
   readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
@@ -2089,11 +2089,12 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     customer_id: number; exists: number; is_anonymous: number; membership_number: string
   } | null = null
   const replacementPaymentMethod = replacementUnpaid ? null : String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
-  if (replacementLines.length && replacementPaymentMethod && !sameMethod(replacementPaymentMethod, DEFAULT_REPLACEMENT_PAYMENT_METHOD)) {
+  // The online (KHQR) method is refused for a replacement paid by it, inside the commit's own precondition (no read of its own: the setting and the switch are read by the batch).
+  const reservedMethodKey = replacementLines.length && replacementPaymentMethod && !sameMethod(replacementPaymentMethod, DEFAULT_REPLACEMENT_PAYMENT_METHOD) ? replacementPaymentMethod.trim().toLowerCase() : null
+  const refuseReservedMethod = async () => {
     const stored = (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value
-    if (sameMethod(replacementPaymentMethod, configuredOnlineMethod(stored)) && await onlineMethodRefusalActive(c.env, stored)) {
-      return c.json({ error: `The ${configuredOnlineMethod(stored)} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
-    }
+    return sameMethod(replacementPaymentMethod, configuredOnlineMethod(stored)) && await onlineMethodRefusalActive(c.env, stored)
+      ? c.json({ error: `The ${configuredOnlineMethod(stored)} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400) : null
   }
   const replacementStatus = replacementUnpaid ? 'awaiting_payment' : 'completed'
   if (replacementLines.length) {
@@ -2247,10 +2248,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     effectGuardPredicate: effectGuards.length ? branchEffectGuardPredicate('@effectsJson') : null,
   })
   // Review F7: the ABA cap is re-proved inside the commit, so a concurrent ABA return or refund note cannot slip past the preflight above.
-  const precondition = refundChannel ? `${basePrecondition} AND ${ABA_REFUND_CAP_PREDICATE}` : basePrecondition
+  const abaPrecondition = refundChannel ? `${basePrecondition} AND ${ABA_REFUND_CAP_PREDICATE}` : basePrecondition
+  const precondition = reservedMethodKey ? `${abaPrecondition} AND NOT ${ONLINE_METHOD_RESERVED_PREDICATE}` : abaPrecondition
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     ...(customerReturnV1Plan ? customerReturnSnapshotGuardStatements(operationId, Number(customerReturnV1Plan.authority.sale.id), customerReturnV1Plan.snapshot_rows) : []),
-    returnCreateGuardStatement(operationId, 'precondition', precondition, refundChannel ? { ...commonGuardParams, abaSaleId: requestedSaleId, abaCashUsd: cashRefundUsd } : commonGuardParams),
+    returnCreateGuardStatement(operationId, 'precondition', precondition, { ...commonGuardParams, ...(refundChannel ? { abaSaleId: requestedSaleId, abaCashUsd: cashRefundUsd } : {}), ...(reservedMethodKey ? { reservedMethodKey } : {}) }),
   ]
   const returnIdExpression = returnCreateIdSql()
   const replacementSaleExpression = replacementSaleIdSql()
@@ -2662,6 +2664,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       if (refundChannel) {
         const again = await planAbaRefund(db, { saleId: requestedSaleId, cashRefundUsd })
         if (!again.ok) return c.json({ error: again.error, code: again.code }, again.status)
+      }
+      if (reservedMethodKey) {
+        const refused = await refuseReservedMethod()
+        if (refused) return refused
       }
       return c.json({ error: 'The sale or stock changed while this return was being recorded. Reload and try again.', code: 'write_conflict', action: 'reload_required' }, 409)
     } catch (_) {

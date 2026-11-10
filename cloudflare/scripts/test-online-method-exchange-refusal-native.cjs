@@ -45,6 +45,24 @@ async function main() {
     const manualCash = await manual('Cash')
     assert.equal(manualCash.status, 200, JSON.stringify(manualCash.body))
     console.log('PASS the replacement_payment_method path refuses it too')
+
+    // R3-8: the refusal is decided inside the commit (no read of its own), so each way the rule applies is held here: the stored name (any spelling), the default name while the switch is ON
+    // with nothing stored, a different non-cash method that is not reserved, and nothing reserved while the setting is absent and the switch is off.
+    const setting = (value) => value === null ? h.db.prepare("DELETE FROM settings WHERE key = 'online_order_payment_method'").run() : h.db.prepare("INSERT INTO settings(key,value) VALUES('online_order_payment_method',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(value).run()
+    const switchState = (state) => h.db.prepare("INSERT INTO system_flags(key,value) VALUES('read_switches',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify({ epoch: 1, switches: { online_orders: state } })).run()
+    await h.db.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_methods',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(['Cash', 'ABA KHQR', 'Bakong', 'Wing'])).run()
+    let m = 0
+    const attempt = async (method) => { m += 1; await new Promise((resolve) => setTimeout(resolve, 1100)); return h.call('POST', '/api/returns', { client_request_id: `ex-rule-${m}`, reason: 'manual exchange',
+      items: [{ product_id: 9700, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }], replacement_items: [{ product_id: 9701, quantity: 1, branch_id: 1, applied_price_usd: 25 }], replacement_payment_method: method }, `rule ${m}`) }
+    await setting('Bakong'); await switchState('off')
+    assert.equal((await attempt('  bakong ')).body.code, 'online_method_requires_order', 'the stored name is reserved whatever its spelling')
+    assert.equal((await attempt('ABA KHQR')).status, 200, 'the old default name is free once another method is stored')
+    await setting(null); await switchState('on')
+    assert.equal((await attempt('ABA KHQR')).body.code, 'online_method_requires_order', 'the switch ON with nothing stored reserves the default name')
+    assert.equal((await attempt('Wing')).status, 200, 'another non-cash method is never refused')
+    await switchState('off')
+    assert.equal((await attempt('ABA KHQR')).status, 200, 'nothing stored and the switch off: nothing is reserved')
+    console.log('PASS the in-commit refusal follows the stored name, the default name while the switch is ON, and nothing else')
   } finally { await h.mf.dispose() }
 }
 main().then(() => { console.log('online method exchange refusal: ok'); process.exit(0) }).catch((error) => { console.error(error); process.exit(1) })
