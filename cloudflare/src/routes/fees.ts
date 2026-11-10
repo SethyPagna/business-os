@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { buildDeliveryContactExistsGuard, DELIVERY_CONTACT_MISSING_CODE, isDeliveryContactMissingError } from '../lib/contactDeleteGuard'
 import { getDb } from '../lib/db'
 
 // Positive answers only: a missing schema is re-probed on the next call, a
@@ -734,6 +735,7 @@ app.post('/', async (c) => {
   try {
     const feeEffectGuard = feeRedirect ? effectGuardStatement([{ ...feeRedirect, sells: 1 }]) : null
     await db.batch([
+      ...(deliveryContactId != null ? [buildDeliveryContactExistsGuard(deliveryContactId)] : []),
       ...(feeEffectGuard ? [feeEffectGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []),
       {
         sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
@@ -763,6 +765,7 @@ app.post('/', async (c) => {
       }),
     ])
   } catch (error) {
+    if (isDeliveryContactMissingError(error)) return c.json({ error: 'Invalid delivery contact', code: DELIVERY_CONTACT_MISSING_CODE }, 400)
     // Two equal requests can race past the pre-read. The receipt uniqueness
     // constraint rolls the losing fee+audit batch back; read and return the
     // winner. A different digest is an explicit conflict, never equality by
@@ -901,6 +904,7 @@ app.put('/:id', async (c) => {
   // the consumers that read it; old_value/new_value hold the fields that moved.
   try {
     await db.batch([
+      ...(deliveryContactId != null && deliveryContactId !== existing.delivery_contact_id ? [buildDeliveryContactExistsGuard(deliveryContactId)] : []),
       ...(editGuard ? [editGuard, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []),
       { sql: updateSql, params: updateParams },
       { sql: `SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('fee_changed_since_read', '$') END AS fee_edit_guard`, params: {} },
@@ -912,6 +916,7 @@ app.put('/:id', async (c) => {
       }, changedFields(existing as unknown as Record<string, unknown>, fee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS })),
     ])
   } catch (error) {
+    if (isDeliveryContactMissingError(error)) return c.json({ error: 'Invalid delivery contact', code: DELIVERY_CONTACT_MISSING_CODE }, 400)
     // The pre-read check gives callers an immediate conflict response, while
     // the predicate closes the interval between that read and the write. A
     // concurrent editor (or delete) in that interval is a conflict; any other

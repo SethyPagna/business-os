@@ -117,6 +117,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
+import { buildDeliveryContactExistsGuard, DELIVERY_CONTACT_MISSING_CODE, isDeliveryContactMissingError } from '../lib/contactDeleteGuard'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -1593,6 +1594,7 @@ app.post('/', async (c) => {
       capturedSourceGuard,
       receiptNumberGuard,
       ...(redemptionGuard ? [redemptionGuard] : []),
+      ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),
       saleInsertStatement,
       {
         // D1 batch rolls back only on an exception, not a zero-row INSERT.
@@ -1969,6 +1971,9 @@ app.post('/', async (c) => {
         const sourceConflict = await classifyPricingSourceConflict(db, products, pricingRuleRows)
         if (sourceConflict === 'pricing') return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409)
         if (sourceConflict === 'stock') return c.json({error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE},409)
+      }
+      if (deliveryContact && isDeliveryContactMissingError(error)) {
+        return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
       }
       if (redemptionGuard && /malformed JSON/i.test(message)) {
         return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)

@@ -79,3 +79,20 @@ export async function deleteDeliveryContactUnlessUsed(db: D1Compat, id: number, 
 export const RESET_UNUSED_DELIVERY_CONTACTS_SQL = `DELETE FROM delivery_contacts
   WHERE NOT EXISTS (SELECT 1 FROM sales WHERE sales.delivery_contact_id = delivery_contacts.id)
     AND NOT EXISTS (SELECT 1 FROM fees WHERE fees.delivery_contact_id = delivery_contacts.id)`
+
+// The reverse of the delete guard: a sale or fee that names a delivery person must find that person INSIDE its own write
+// batch, so a delete that lands between the route's read and its write aborts the write instead of leaving a link to a
+// missing id.
+export const DELIVERY_CONTACT_MISSING_CODE = 'delivery_contact_missing'
+
+export function buildDeliveryContactExistsGuard(id: number): Statement {
+  return {
+    sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM delivery_contacts WHERE id = @id)
+      THEN 1 ELSE json_extract('[]', '$[${DELIVERY_CONTACT_MISSING_CODE}]') END AS delivery_contact_exists_guard`,
+    params: { id },
+  }
+}
+
+export function isDeliveryContactMissingError(error: unknown): boolean {
+  return String(error instanceof Error ? error.message : error).includes(DELIVERY_CONTACT_MISSING_CODE)
+}

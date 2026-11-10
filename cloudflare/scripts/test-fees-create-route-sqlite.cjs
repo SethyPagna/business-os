@@ -124,6 +124,7 @@ const route = loadReal('routes/fees.ts', {
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-11' },
   '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'),
