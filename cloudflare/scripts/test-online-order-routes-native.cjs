@@ -208,6 +208,18 @@ async function main() {
     assert.equal(delivery.status, 201); assert.equal(order(h, 2).customer_address, ADDRESS)
   })
 
+  await check('F9: a pickup order never stores an address (create, edit to pickup, and an address typed on a pickup order); delivery keeps it', async () => {
+    const h = world()
+    const pickup = await create(h, { address: ADDRESS })
+    assert.equal(pickup.status, 201, JSON.stringify(pickup.body)); assert.equal(order(h, 1).customer_address, null, 'pickup with a typed address stores none')
+    const delivery = await create(h, { fulfilment: 'delivery', address: ADDRESS, phone: '099 222 444' })
+    assert.equal(delivery.status, 201); assert.equal(order(h, 2).customer_address, ADDRESS, 'control: delivery keeps it')
+    const toPickup = await h.request("/" + tokenOf(delivery) + "/edit", 'POST', { fulfilment: 'pickup', address: ADDRESS })
+    assert.equal(toPickup.status, 200, JSON.stringify(toPickup.body)); assert.equal(order(h, 2).fulfilment, 'pickup'); assert.equal(order(h, 2).customer_address, null, 'edit to pickup drops the address')
+    const typed = await h.request("/" + tokenOf(pickup) + "/edit", 'POST', { address: ADDRESS })
+    assert.equal(typed.status, 200, JSON.stringify(typed.body)); assert.equal(order(h, 1).customer_address, null, 'an address typed on a pickup order is not kept')
+  })
+
   await check('every optional social contact is accepted and kept; blank ones stay empty; a control character is cleaned', async () => {
     const h = world()
     const contacts = { telegram: '@dara', instagram: 'dara.ig', facebook: 'fb.com/dara', tiktok: '@dara.tt', whatsapp: '+855 12 345 678', other: 'Line: dara\u0007 99' }

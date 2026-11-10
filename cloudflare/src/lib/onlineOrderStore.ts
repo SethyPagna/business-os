@@ -196,6 +196,7 @@ export function normalizeFulfilment(value: unknown, address: string | null): 'pi
   }
   return fulfilment
 }
+export const addressFor = (fulfilment: 'pickup' | 'delivery', address: string | null): string | null => (fulfilment === 'delivery' ? address : null)
 export const normalizeAddress = (value: unknown): string | null => cleanText(value, 300, 'address', 'The address')
 export const normalizeNote = (value: unknown): string | null => cleanText(value, 300, 'note', 'The note')
 export const normalizeComment = (value: unknown): string | null => cleanText(value, 300, 'comment', 'The comment')
@@ -212,10 +213,12 @@ export function parseLines(value: unknown, env: Pick<Env, 'PLAN_TIER'>): OrderLi
   return (value as OrderLineInput[]).map((line) => ({ product_id: Number(line.product_id), quantity: Number(line.quantity) }))
 }
 export function parseOrderInput(body: Record<string, unknown>, env: Pick<Env, 'PLAN_TIER'>): OrderInput {
-  const address = normalizeAddress(body.address)
+  const typed = normalizeAddress(body.address)
+  const fulfilment = normalizeFulfilment(body.fulfilment, typed)
   return {
     lines: parseLines(body.lines, env), name: normalizeName(body.name), phone: normalizePhone(body.phone),
-    fulfilment: normalizeFulfilment(body.fulfilment, address), address,
+    // Review F9: the address is kept only for delivery; a pickup order never stores one, whatever the client sent.
+    fulfilment, address: addressFor(fulfilment, typed),
     note: normalizeNote(body.note), contacts: normalizeContacts(body.contacts),
   }
 }
@@ -779,8 +782,9 @@ export async function editOrder(deps: OrderDeps, creds: PaywayCredentials | null
   const changedFields: string[] = []
   const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key)
   const name = has('name') ? normalizeName(body.name) : order.customer_name
-  const address = has('address') ? normalizeAddress(body.address) : order.customer_address
-  const fulfilment = has('fulfilment') || has('address') ? normalizeFulfilment(has('fulfilment') ? body.fulfilment : order.fulfilment, address) : (order.fulfilment as 'pickup' | 'delivery')
+  const typedAddress = has('address') ? normalizeAddress(body.address) : order.customer_address
+  const fulfilment = has('fulfilment') || has('address') ? normalizeFulfilment(has('fulfilment') ? body.fulfilment : order.fulfilment, typedAddress) : (order.fulfilment as 'pickup' | 'delivery')
+  const address = addressFor(fulfilment, typedAddress)
   const note = has('note') ? normalizeNote(body.note) : order.note
   const current: Contacts = Object.fromEntries(CONTACT_FIELDS.map((f) => [f, (order as unknown as Record<string, string | null>)[`contact_${f}`] ?? null])) as Contacts
   const contacts = has('contacts') ? { ...current, ...normalizeContacts(body.contacts) } : current
@@ -977,7 +981,7 @@ export function buildRequestChange(order: OrderRecord, kind: RequestKind, body: 
       return { before: { items: currentItems }, after: { items: parseLines(after.lines ?? after.items, env), ...(kind === 'return' ? { reason: normalizeComment(after.reason) } : {}) } }
     case 'fulfilment': {
       const address = after.address === undefined ? order.customer_address : normalizeAddress(after.address)
-      return { before: { fulfilment: order.fulfilment, address: order.customer_address }, after: { fulfilment: normalizeFulfilment(after.fulfilment, address), address } }
+      return { before: { fulfilment: order.fulfilment, address: order.customer_address }, after: { fulfilment: normalizeFulfilment(after.fulfilment, address), address: addressFor(normalizeFulfilment(after.fulfilment, address), address) } }
     }
     case 'address': {
       const address = normalizeAddress(after.address)

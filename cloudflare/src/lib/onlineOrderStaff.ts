@@ -421,7 +421,7 @@ export async function applyRequest(deps: OrderDeps, creds: PaywayCredentials | n
       const address = normalizeAddress(after.address)
       if (!address) return refuse(400, 'address_required', 'The request has no address to apply.')
       statements = [
-        { sql: `UPDATE online_orders SET customer_address = @address, revision = @newRev, updated_at = @at WHERE id = @oid AND revision = @rev AND state = 'paid' AND sale_id IS NULL`, params: { ...common, address } },
+        { sql: `UPDATE online_orders SET customer_address = CASE WHEN fulfilment = 'delivery' THEN @address ELSE NULL END, revision = @newRev, updated_at = @at WHERE id = @oid AND revision = @rev AND state = 'paid' AND sale_id IS NULL`, params: { ...common, address } },
         { ...applied, params: { ...common, to: 'paid', delta: null, detail: JSON.stringify({ kind: 'address' }) } },
       ]
       break
@@ -429,8 +429,9 @@ export async function applyRequest(deps: OrderDeps, creds: PaywayCredentials | n
     case 'fulfilment': {
       const address = after.address === undefined ? order.customer_address : normalizeAddress(after.address)
       const fulfilment = normalizeFulfilment(after.fulfilment, address)
+      const kept = fulfilment === 'delivery' ? address : null
       statements = [
-        { sql: `UPDATE online_orders SET fulfilment = @fulfilment, customer_address = @address, revision = @newRev, updated_at = @at WHERE id = @oid AND revision = @rev AND state = 'paid' AND sale_id IS NULL`, params: { ...common, fulfilment, address } },
+        { sql: `UPDATE online_orders SET fulfilment = @fulfilment, customer_address = @address, revision = @newRev, updated_at = @at WHERE id = @oid AND revision = @rev AND state = 'paid' AND sale_id IS NULL`, params: { ...common, fulfilment, address: kept } },
         { ...applied, params: { ...common, to: 'paid', delta: null, detail: JSON.stringify({ kind: 'fulfilment' }) } },
       ]
       break
