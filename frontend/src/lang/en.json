@@ -1917,6 +1917,7 @@
   "delivery_contact": "Delivery Contact",
   "delivery_contact_added": "Delivery contact added",
   "delivery_contact_deleted": "Delivery contact deleted",
+  "delivery_contacts_bulk_partial": "Deleted {deleted}, {failed} not deleted.",
   "delivery_contact_has_sales": "This delivery person is on sales or delivery fees, so it can't be deleted. If it's a duplicate, merge it in Conflicts.",
   "delivery_contact_updated": "Delivery contact updated",
   "delivery_contacts_load_slow": "Delivery contacts are taking longer than expected. Tap Retry or revisit the page in a moment.",

@@ -1,5 +1,6 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { deliveryBulkDeleteMessage, isDeliveryHasSalesRefusal, localizeDeliveryHasSalesRefusal } from './deliveryRefusal'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { contactWriteAccess, isContactFormAllowed } from './contactWriteAccess.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
@@ -203,11 +204,6 @@ function isSectionRow(row: DeliveryDisplayRow | null | undefined): row is Sectio
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
-}
-
-// DELETE /delivery-contacts/:id refuses a person still named by a sale or delivery fee with this code (409).
-function isDeliveryHasSalesRefusal(error: unknown): boolean {
-  return Boolean(error) && typeof error === 'object' && (error as { code?: unknown }).code === 'contact_has_sales'
 }
 
 // P4-4b item 6 (parity): handleSave's edit path used to call
@@ -783,6 +779,14 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const runDeliveryMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<DeliveryMutationResult> => (
     await withLoaderTimeout(loader, label, DELIVERY_CONTACT_MUTATION_TIMEOUT_MS) as DeliveryMutationResult
   ), [])
+  // Every delete (button, undo of an add, redo, bulk and its redo) goes through here so a driver a sale still names is refused in the user's language.
+  const removeDeliveryContact = useCallback(async (id: number | string, expectedUpdatedAt: string | null | undefined, label: string): Promise<DeliveryMutationResult> => {
+    try {
+      return await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id, expectedUpdatedAt), label)
+    } catch (error) {
+      throw localizeDeliveryHasSalesRefusal(error, tr)
+    }
+  }, [runDeliveryMutation, tr])
 
   const clearLoadWatchdog = useCallback(() => {
     if (loadWatchdogRef.current != null) {
@@ -932,7 +936,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           actionHistory.pushAction({
             label: `Add delivery contact ${createdSnapshot.name || ''}`.trim(),
             undo: async () => {
-              await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(createdContactId), 'Undo delivery contact create')
+              await removeDeliveryContact(createdContactId, undefined, 'Undo delivery contact create')
               await load({ silent: true, label: 'Delivery contacts undo create' })
             },
             redo: async () => {
@@ -1014,7 +1018,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     try {
       const snapshot = cloneHistorySnapshot(c)
-      await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(c.id, c.updated_at), 'Delete delivery contact')
+      await removeDeliveryContact(c.id, c.updated_at, 'Delete delivery contact')
       let restoredContactId = 0
       actionHistory.pushAction({
         label: `Delete delivery contact ${snapshot.name || ''}`.trim(),
@@ -1030,7 +1034,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         redo: async () => {
           const targetId = restoredContactId || Number(snapshot.id || 0)
           if (!targetId) return
-          await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(targetId), 'Redo delivery contact delete')
+          await removeDeliveryContact(targetId, undefined, 'Redo delivery contact delete')
           await load({ silent: true, label: 'Delivery contacts redo delete' })
         },
       })
@@ -1040,7 +1044,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       await load({ silent: true, label: 'Delivery contacts after delete' })
     }
     catch (error: unknown) {
-      notify(isDeliveryHasSalesRefusal(error) ? tr('delivery_contact_has_sales', getErrorMessage(error, 'Failed')) : getErrorMessage(error, 'Failed'), 'error')
+      notify(getErrorMessage(error, 'Failed'), 'error')
     }
     finally { finishSingleAction(deleteInFlightRef) }
   }
@@ -1063,7 +1067,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
-        await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id, snapshotById.get(Number(id))?.updated_at as string | null | undefined), 'Bulk delete delivery contacts')
+        await removeDeliveryContact(id, snapshotById.get(Number(id))?.updated_at as string | null | undefined, 'Bulk delete delivery contacts')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length
@@ -1098,7 +1102,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             if (!canBulkContactsRef.current) throw new Error(t('no_permission') || 'No permission')
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             const redoRun = await runConcurrentTasks(idsToDelete, async (id: number) => (
-              runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Redo bulk delivery contact delete')
+              removeDeliveryContact(id, undefined, 'Redo bulk delivery contact delete')
             ))
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete delivery contact'))
             await load({ silent: true, label: 'Delivery contacts redo delete' })
@@ -1107,7 +1111,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       }
       if (failedIds.length) {
         const keptOnSales = deleteRun.failures.some((entry) => isDeliveryHasSalesRefusal(entry.error))
-        notify(`Deleted ${deletedCount} delivery contact(s), ${failedIds.length} failed${keptOnSales ? `. ${tr('delivery_contact_has_sales', '')}` : ''}`, 'warning')
+        notify(deliveryBulkDeleteMessage(tr, deletedCount, failedIds.length, keptOnSales), 'warning')
       } else {
         notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
       }
