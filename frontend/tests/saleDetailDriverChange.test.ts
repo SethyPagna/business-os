@@ -53,14 +53,14 @@ const slice = (from: string, to: string): string => {
   return transformSync(salesPage.slice(start, end), { loader: 'ts' }).code
 }
 
-function harness(options: { pending?: unknown; changedCount?: number; canBulkSales?: boolean; canAmendSales?: boolean; onPage?: boolean; previewError?: unknown; movedExpenseCount?: number } = {}) {
+function harness(options: { pending?: unknown; changedCount?: number; canBulkSales?: boolean; canAmendSales?: boolean; onPage?: boolean; previewError?: unknown; movedExpenseCount?: number; canViewFees?: boolean } = {}) {
   const sent: any[] = []
   const previews: any[] = []
   const rereads: number[] = []
   const detailUpdates: any[] = []
   const notes: unknown[] = []
   const scope: any = {
-    canBulkSales: options.canBulkSales ?? true, canAmendSales: options.canAmendSales ?? true, canReassignSaleCustomer: true,
+    canViewFees: options.canViewFees ?? true, canBulkSales: options.canBulkSales ?? true, canAmendSales: options.canAmendSales ?? true, canReassignSaleCustomer: true,
     pendingBulkFieldRequest: options.pending ?? null, bulkFieldSaving: false, bulkStatusInFlightRef: { current: false },
     beginSingleAction: (ref: { current: boolean }) => { if (ref.current) return false; ref.current = true; return true },
     finishSingleAction: (ref: { current: boolean }) => { ref.current = false },
@@ -200,6 +200,9 @@ await runTest('G3: the review preview asks the Worker (writing nothing) and repo
   assert.deepEqual(await moves.previewSaleDriver(withDriver, { id: 2, name: 'Driver B' }), { expenseCount: 2 })
   assert.deepEqual(moves.previews, [{ client_request_id: 'request-0001', items: [{ id: 7, expected_updated_at: 'v1' }], action: { kind: 'delivery_contact', source_id: 1, target_id: 2 } }])
   assert.deepEqual(moves.sent, [], 'a preview sends no write')
+  // Expense detail is for people who may view expenses: an amend-only caller is told nothing about them, even from an older Worker that still sends a count.
+  const amendOnly = harness({ movedExpenseCount: 2, canViewFees: false })
+  assert.deepEqual(await amendOnly.previewSaleDriver(withDriver, { id: 2, name: 'Driver B' }), { expenseCount: 0 })
   const refused = harness({ previewError: Object.assign(new Error('closed'), { code: 'window' }) })
   assert.equal(await refused.previewSaleDriver(withDriver, { id: 2, name: 'Driver B' }), null)
   assert.deepEqual(refused.notes, ['window closed'])

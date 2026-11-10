@@ -1592,6 +1592,8 @@ function registerContactRoutes(config: ContactConfig) {
     // Promise.allSettled did to keep a cache-bump failure from surfacing.
     await bumpVersions(c.env, [...new Set(mergeVersions)]).catch(() => {})
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedIds: plan.mergedIds }).catch(() => {}))
+    // A merged driver moves its sales and expenses to the keeper: the Expenses list shows the driver's name.
+    if (config.table === 'delivery_contacts') c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }).catch(() => {}))
     try {
       committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper
     } catch (_) {
@@ -2139,6 +2141,8 @@ function registerContactRoutes(config: ContactConfig) {
     }
     await Promise.all([...new Set(updateVersions)].map((namespace) => bumpVersion(c.env, namespace)))
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
+    // A driver's new name is carried onto its sales (the courier rows the Expenses list shows), which no longer reload on a sales push.
+    if (config.table === 'delivery_contacts' && nameChanged && snapshotCarry) c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     // `partial`/`partialFields` are additive -- every existing caller reads
     // specific known fields off this response (id, name, etc.) or just

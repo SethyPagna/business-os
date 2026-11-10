@@ -2006,6 +2006,8 @@ app.post('/', async (c) => {
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    // A sale that carries a courier cost adds a row to the Expenses list, which no longer reloads on a sales push.
+    ...(deliveryActualCostUsd != null ? [broadcast(c.env, 'fees', { action: 'update' })] : []),
   ]))
   // Owner, 6 Oct 2026: a low or out-of-stock alert fires when THIS sale crosses the threshold, once per crossing.
   // recordStockCrossings reads the branch quantity AFTER the commit, inside this waitUntil (never before the
@@ -3121,7 +3123,9 @@ app.patch('/:id/status', async (c) => {
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
-    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
+    // The cancel fee is an expense row; a sale entering or leaving 'cancelled' also adds or drops its courier row on
+    // the Expenses list (cancelled sales are not listed). That page no longer reloads on a sales push, so say so here.
+    ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) || (oldStatus === 'cancelled') !== (saleStatus === 'cancelled'))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
   ]))
@@ -5819,6 +5823,8 @@ function planAmendedTax(input: {
  * is asking what a given user did last Tuesday. Both are wanted, and the same
  * pairing already exists for POST /:id/items.
  */
+const AMENDMENT_KINDS_THAT_MOVE_COURIER_ROWS = new Set(['delivery_added', 'delivery_actual_cost_changed'])
+
 async function auditAmendment(
   c: AmendmentContext,
   user: SessionUser | undefined,
@@ -5841,6 +5847,9 @@ async function auditAmendment(
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    // These amendments set or change the courier cost the Expenses list shows through the sale; that page no
+    // longer reloads on a sales push, so it hears about them on the fees channel.
+    ...(AMENDMENT_KINDS_THAT_MOVE_COURIER_ROWS.has(String(details.kind)) ? [broadcast(c.env, 'fees', { action: 'update' })] : []),
   ]))
 }
 

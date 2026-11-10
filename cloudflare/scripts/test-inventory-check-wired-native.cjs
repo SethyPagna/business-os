@@ -372,9 +372,26 @@ const ledger = /recorded_ordinary_quantity|ordinary_totals|stock_schema_epoch|in
     const revisionNow = async () => (await app.get('/api/inventory-checks/sessions/sA')).json.item.revision
     const onFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'close', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-on1' })
     check('ON: a writer whose version bump fails does not answer success', onFail.status >= 500, JSON.stringify({ s: onFail.status, b: onFail.json }))
+    check('ON: that answer says the change was saved and the page may need a refresh, with outcome unknown', onFail.status === 503 && onFail.json.code === 'inventory_check_saved_refresh' && onFail.json.outcome === 'unknown', JSON.stringify(onFail.json))
+    check('ON: the saved write really is committed (the session is closed)', (await revisionNow()) > 0 && (await app.get('/api/inventory-checks/sessions/sA')).json.item.status === 'closed', JSON.stringify((await app.get('/api/inventory-checks/sessions/sA')).json.item))
+    // G4: a writer that itself answered 5xx never becomes 'saved'. Its table is made unavailable, so the write fails with the route's own 503 while the bump also fails.
+    const eventsTable = app.raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='inventory_check_events'").get()
+    assert.ok(eventsTable, 'control: the events table exists before it is hidden')
+    app.raw.exec('ALTER TABLE inventory_check_events RENAME TO inventory_check_events_hidden')
+    let hardFail
+    try { hardFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-5xx' }) }
+    finally { app.raw.exec('ALTER TABLE inventory_check_events_hidden RENAME TO inventory_check_events') }
+    check('ON: a writer that answered 5xx and whose bump also fails keeps its own answer, never saved_refresh', hardFail.status >= 500 && hardFail.json.code !== 'inventory_check_saved_refresh', JSON.stringify({ s: hardFail.status, b: hardFail.json }))
     app.setSwitch('ic_wired', 'off')
     const offFail = await app.send('PATCH', '/api/inventory-checks/sessions/sA', { action: 'resume', expectedRevision: await revisionNow(), requestId: 'req-bumpfail-off' })
     check('OFF: the same failure does not turn the write into an error', offFail.status < 500, String(offFail.status))
   } finally { cache.bumpVersion = realBump; console.error = quiet; app.setSwitch('ic_wired', 'on') }
+  // AUDIT-INVENTORY row 14: the blind code lookup ignores a retired product. 990 is inactive with no stock and owns the code as its barcode; the active 991 owns it as its SKU. Before the filter the lookup
+  // found two rows and gave up (an empty list); now only the active one counts, so the exact hit is read by id.
+  app.seedStockFixture(app.raw.db, () => app.raw.exec("INSERT INTO products(id,name,sku,barcode,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,created_at,updated_at) VALUES(990,'Retired 990','R990','CODE990001',0,1,4000,1,4000,0,'2026-09-01 00:00:00','2026-09-01 00:00:00'),(991,'Active 991','CODE990001',NULL,0,1,4000,1,4000,1,'2026-09-02 00:00:00','2026-09-02 00:00:00')"))
+  app.setUser(U.blind); app.clearCaches()
+  const coded = await app.get('/api/inventory-checks/list?branchId=1&query=CODE990001')
+  app.setUser(U.admin)
+  check('row 14: a retired product owning the code does not block the blind code lookup; the active product with that code is found', coded.status === 200 && (coded.json.items || []).map(item => item.id).join(',') === '991', JSON.stringify({ s: coded.status, ids: (coded.json.items || []).map(item => item.id) }))
   console.log(`\n${checks} checks passed`)
 })().catch((e) => { console.error(e); process.exit(1) })

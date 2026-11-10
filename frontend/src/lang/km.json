@@ -7802,6 +7802,7 @@
   "inventory_check_load_failed": "មិនអាចផ្ទុកបញ្ជីស្តុកបានទេ។ សូមព្យាយាមម្តងទៀត។",
   "inventory_check_changed_elsewhere": "ត្រូវបានផ្លាស់ប្តូរនៅឧបករណ៍ផ្សេង។ ចុចដើម្បីផ្ទុកឡើងវិញ។",
   "inventory_check_save_unknown": "មិនទាន់ដឹងលទ្ធផលនៃការរក្សាទុក។ សូមពិនិត្យវគ្គមុនពេលសាកល្បងម្តងទៀត។",
+  "inventory_check_saved_refresh": "បានរក្សាទុករួចហើយ។ សូមព្យាយាមម្តងទៀតដើម្បីបញ្ចប់ ឬផ្ទុកទំព័រឡើងវិញ។",
   "inventory_check_page_session": "ផលិតផលនៅទំព័រនេះ",
   "inventory_check_current_stock": "ស្តុកបច្ចុប្បន្ន",
   "inventory_check_leave_session": "ចាកចេញពីវគ្គ",
@@ -7826,7 +7827,6 @@
   "inventory_check_branch_total": "សរុបសាខា",
   "inventory_check_held": "ទុកដាច់",
   "inventory_check_error_lot_counts_off": "ការរាប់តាមថ្ងៃចូលត្រូវបានបិទ។ ទំព័របានផ្ទុកឡើងវិញ៖ សូមរាប់ម្តងទៀត។",
-  "inventory_check_error_count_pending": "ការរាប់ផលិតផលនេះកំពុងរង់ចាំការអនុម័ត។ សូមអនុម័ត ឬបដិសេធជាមុន។",
   "inventory_check_error_maintenance": "កំពុងថែទាំប្រព័ន្ធ។ គ្មានអ្វីត្រូវបានផ្លាស់ប្តូរទេ សូមព្យាយាមម្តងទៀតបន្តិចក្រោយ។",
   "inventory_check_error_lot_unavailable": "ថ្ងៃចូលនេះលែងមានស្តុកនោះទៀតហើយ។ គ្មានអ្វីត្រូវបានផ្លាស់ប្តូរទេ។",
   "inventory_check_fixed_title": "កំណត់ពីការត្រួតពិនិត្យស្តុក",
@@ -8132,5 +8132,5 @@
   "perm_contacts_full_phone": "មើលលេខទូរស័ព្ទពេញ",
   "perm_short_full_phone": "លេខពេញ",
   "perm_hint_full_phone": "បើគ្មានសិទ្ធិនេះ លេខទូរស័ព្ទបង្ហាញជា 012 *** 678 គ្រប់កន្លែង។ ស្វែងរកដោយលេខពេញនៅតែបាន។",
-  "inventoryCheckCountPending": "ការរាប់នេះកំពុងរង់ចាំការអនុម័ត។ សូមអនុម័ត ឬបដិសេធវាជាមុនសិន។"
+  "inventoryCheckCountPending": "មិនអាចកំណត់ចំនួនបានទេ ខណៈការរាប់ផលិតផលនេះកំពុងរង់ចាំការអនុម័ត។ សូមអនុម័ត ឬបដិសេធការរាប់នោះជាមុន។"
 }
