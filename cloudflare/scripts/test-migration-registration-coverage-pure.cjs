@@ -65,6 +65,8 @@ const NAMED_COMPANIONS = {
   286: 'test-migration-0286-inventory-check-approvals-native.cjs',
   // 0294 adds the received-date lines of an Inventory Check count (ic_lot_counts); its companion applies the real chain and pins the table, its constraints and the index.
   294: 'test-migration-0294-inventory-check-lot-lines-native.cjs',
+  // 0302 indexes the digits of every customer's phones (customers_phone_digits_fts) so a typed number is an index search; its companion applies the real chain, pins the drift triggers and measures the writes.
+  302: 'test-migration-0302-customers-phone-digits-fts-native.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',
