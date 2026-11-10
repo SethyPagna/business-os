@@ -172,6 +172,51 @@ async function main() {
     })
   }
 
+  // the switch must DO something: capture the SQL each state runs
+  const sqlRun = async (names, tail) => {
+    const seen = []
+    const real = h.raw.prepare.bind(h.raw)
+    h.raw.prepare = (sql) => { seen.push(String(sql)); return real(sql) }
+    try { setSwitches(names); await get(tail) } finally { h.raw.prepare = real }
+    return seen
+  }
+  const summaryOf = (seen) => seen.filter((s) => /SUM\(CASE WHEN m\.movement_type/.test(s))
+  const countOf = (seen) => seen.filter((s) => /^\s*SELECT COUNT\(\*\) AS total\s+FROM inventory_movements m/.test(s))
+  await check('the switch changes the SQL that runs: ON uses the lean summary (no products / batches join) and no separate COUNT; OFF and a stored-off switch use the old statements', async () => {
+    for (const tail of ['pageSize=7&page=1', 'pageSize=7&page=1&view=in&startDate=2026-10-02&endDate=2026-10-10', 'pageSize=7&page=1&view=out&branchId=1']) {
+      for (const [names, label] of [[['ledger_summary_lean'], 'lean'], [['ledger_keyset', 'ledger_summary_lean'], 'keyset + lean']]) {
+        const seen = await sqlRun(names, tail)
+        const sums = summaryOf(seen)
+        assert.equal(sums.length, 1, `${label} ${tail}: one summary statement`)
+        assert.match(sums[0], /COUNT\(m\.movement_type\) AS typed/, `${label} ${tail}: the lean statement`)
+        assert.doesNotMatch(sums[0], /LEFT JOIN/, `${label} ${tail}: no join`)
+        assert.equal(countOf(seen).length, 0, `${label} ${tail}: no separate COUNT`)
+      }
+      for (const [names, label] of [[null, 'unset'], [[], 'stored off'], [['ledger_keyset'], 'keyset only']]) {
+        const seen = await sqlRun(names, tail)
+        const sums = summaryOf(seen)
+        assert.equal(sums.length, 1)
+        assert.doesNotMatch(sums[0], /typed/, `${label} ${tail}: the old statement`)
+        assert.match(sums[0], /LEFT JOIN products p/, `${label} ${tail}: the old summary joins`)
+        if (tail.includes('view=') && !(names && names.includes('ledger_keyset'))) assert.equal(countOf(seen).length, 1, `${label} ${tail}: the old COUNT runs`)
+      }
+    }
+    // a search needs the joins: the lean statement keeps them
+    const seen = await sqlRun(['ledger_summary_lean'], 'pageSize=7&page=1&search=Serum')
+    assert.match(summaryOf(seen)[0], /LEFT JOIN products p/)
+    assert.match(summaryOf(seen)[0], /AS typed/)
+  })
+
+  await check('key order of the ON answers: the old order, and next_cursor last with ledger_keyset', async () => {
+    const order = ['items', 'total', 'page', 'pageSize', 'totalPages', 'view', 'summary']
+    setSwitches(['ledger_summary_lean'])
+    assert.deepEqual(Object.keys(await get('pageSize=9&page=2&view=in')), order)
+    setSwitches(['ledger_keyset', 'ledger_summary_lean'])
+    assert.deepEqual(Object.keys(await get('pageSize=9&page=1&view=in')), [...order, 'next_cursor'])
+    setSwitches(['ledger_keyset'])
+    assert.deepEqual(Object.keys(await get('pageSize=9&page=1&view=in')), [...order, 'next_cursor'])
+  })
+
   await check('OFF path: stored-off, unset and on-then-removed answer the same bytes, in the old key order', async () => {
     const tail = 'pageSize=9&page=2&view=in&branchId=1&startDate=2026-10-02&endDate=2026-10-10'
     setSwitches(null); const unset = JSON.stringify(await get(tail))
