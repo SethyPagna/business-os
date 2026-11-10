@@ -38,6 +38,9 @@ import {
 } from '../ops-d1-physical-lib.mjs'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const DERIVED_FTS = {
+  customers_phone_digits_fts: 'INSERT INTO customers_phone_digits_fts(rowid, digits, key) SELECT id, digits, key FROM customers_phone_digits_v',
+}
 const MANIFEST_FILE = /^d1phys-([a-z0-9]+)-manifest\.enc\.json$/
 const CHUNK_FILE = /^d1phys-[a-z0-9]+-f\d{4,}\.enc\.json$/
 
@@ -344,7 +347,12 @@ export function buildDatabase({ manifest, inputDir, privateKey, outPath, schemaM
   }
   for (const e of localObjects(db, 'table').filter(isVirtual)) {
     if (!/USING\s+fts5/i.test(e.sql)) continue
-    if (!/\bcontent\s*=\s*'[^']+'/i.test(e.sql)) { warnings.push(`FTS table ${e.name} keeps its own content, which the export does not carry; it stays empty`); continue }
+    if (!/\bcontent\s*=\s*'[^']+'/i.test(e.sql)) {
+      const derived = DERIVED_FTS[e.name]
+      if (!derived) { warnings.push(`FTS table ${e.name} keeps its own content, which the export does not carry; it stays empty`); continue }
+      try { db.exec(derived); fts += 1 } catch (err) { warnings.push(`FTS rebuild of ${e.name} failed (${err.message})`) }
+      continue
+    }
     try { db.exec(`INSERT INTO ${quoteIdent(e.name)}(${quoteIdent(e.name)}) VALUES('rebuild')`); fts += 1 } catch (err) { warnings.push(`FTS rebuild of ${e.name} failed (${err.message})`) }
   }
   log(`rebuilt ${fts} FTS indexes`)
