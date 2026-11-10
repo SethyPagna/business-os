@@ -1293,7 +1293,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
             <button
               type="button"
               className="relative flex-shrink-0 self-stretch rounded-xl text-left"
-              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : productName}
               aria-disabled={!thumbnailState.hasImage}
               onMouseDown={(event) => event.stopPropagation()}
               onMouseUp={(event) => event.stopPropagation()}
