@@ -214,6 +214,16 @@ const telegram = loadReal('lib/telegram.ts', {
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
 })
 
+// The same Telegram module with the REAL online-received fold and a scripted overlay (what lib/onlineOrderReceived.ts onlineReceivedOverlay would read from the database for the
+// day): the daily Received line is judged by the message it prints, not by the shape of the source (review carry, 10 Nov 2026).
+const onlineState = { overlay: { method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 } }
+const onlineReceived = loadReal('lib/onlineOrderReceived.ts', { './db': dbModule, './salesAnalytics': salesAnalytics, './businessDateWindow': businessDateWindow, './onlineOrderFulfil': { configuredOnlineMethod: () => 'ABA KHQR', ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method' } })
+const telegramOnline = loadReal('lib/telegram.ts', {
+  './onlineOrderReceived': { ...onlineReceived, onlineReceivedOverlay: async () => onlineState.overlay },
+  './lowStockSettings': lowStockSettings, './db': dbModule, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
+  './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
+})
+
 const posts = []
 globalThis.fetch = async (url, init) => {
   assert.ok(String(url).startsWith('https://api.telegram.org/botSYNTHETIC-TOKEN/sendMessage'), `unexpected fetch ${url}`)
@@ -238,12 +248,12 @@ function closeShift(db, extra = {}) {
   })
   return nextShiftId
 }
-async function overview(env, extra) {
+async function overview(env, extra, mod = telegram) {
   const shiftId = closeShift(env.DB, extra)
   const shift = env.DB.raw.prepare('SELECT id, revision FROM shift_sessions WHERE id = ?').get(shiftId)
-  assert.equal(await telegram.scheduleTelegramShiftOverview(env, shiftId, T0), 'fallback')
+  assert.equal(await mod.scheduleTelegramShiftOverview(env, shiftId, T0), 'fallback')
   const before = posts.length
-  assert.equal(await telegram.deliverTelegramShiftOverview(env, telegram.shiftOverviewKey(shift.id, shift.revision), T0 + 60_000), 'sent')
+  assert.equal(await mod.deliverTelegramShiftOverview(env, mod.shiftOverviewKey(shift.id, shift.revision), T0 + 60_000), 'sent')
   assert.equal(posts.length, before + 1)
   return posts[posts.length - 1]
 }
@@ -319,6 +329,21 @@ async function main() {
   check('Received: dollars net of change, riel, bank; cancelled, other-branch and other-day sales out; the 00:30 local sale in',
     JSON.stringify(rowsUnder(single.sales, '=====Received=====')) === JSON.stringify(['· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00']),
     rowsUnder(single.sales, '=====Received=====').join('\n'))
+
+  // The online order paid on day 1 and fulfilled on day 3 (lead condition 2): Received counts its $25 on day 1 only. Through the whole overview, with the real fold.
+  setting(shopA, SWITCH.sales, 'true')
+  const receivedFor = async (overlay) => {
+    onlineState.overlay = { method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0, ...overlay }
+    return rowsUnder((await overview(envA, undefined, telegramOnline)).text, '=====Received=====')
+  }
+  const day1 = await receivedFor({ paidInWindowUsd: 25 })
+  const day3 = await receivedFor({ recordedOnSalesUsd: 25 })
+  const day2 = await receivedFor({})
+  clearSetting(shopA, SWITCH.sales)
+  check('Received (Telegram, the whole message): the online money joins the Bank line on the day PayWay took it (day 1: $30 + $25)',
+    JSON.stringify(day1) === JSON.stringify(['· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $55.00']), day1.join('\n'))
+  check('Received (Telegram): the day the order is fulfilled adds nothing, and a day with no online payment prints the kernel figure unchanged',
+    JSON.stringify(day3) === JSON.stringify(day2) && day2.includes('· Bank: $30.00'), day3.join('\n'))
   const salesRows = rowsUnder(single.sales, '=====Sales=====')
   check('sales & payments: Not Paid carries its receipt count, and the total discount sits under its two parts',
     salesRows.includes('· Still owed: 3 · $40.00') && salesRows.indexOf('· Total discount: $37.50') === salesRows.indexOf('· Discount on invoices: $25.00') + 1,
