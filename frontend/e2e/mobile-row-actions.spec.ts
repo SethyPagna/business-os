@@ -49,6 +49,25 @@ async function openSales(page: Page, size: { width: number; height: number }): P
   await expect(page.getByRole('button', { name: 'Print', exact: true }).first()).toBeVisible({ timeout: 30_000 })
 }
 
+const visiblePrint = (page: Page): Locator => page.getByRole('button', { name: 'Print', exact: true }).locator('visible=true').first()
+// The mobile header has its own Back (.bos-nav-back, which opens the section menu); the receipt's Back is the other one.
+const receiptBack = (page: Page): Locator => page.locator('button[aria-label="Back"]:not(.bos-nav-back)')
+
+async function expectPrintShowsOnlyTheReceipt(page: Page, print: Locator, isMobile: boolean): Promise<void> {
+  await expect(print).toBeVisible()
+  await press(print, isMobile)
+  await expect(receiptBack(page).first(), 'the receipt is shown').toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Thank you for your patronage', { exact: false }).first()).toBeVisible()
+  await expect(page.getByRole('dialog'), 'the details must not open on the print tap').toHaveCount(0)
+}
+
+async function closeReceipt(page: Page): Promise<void> {
+  await receiptBack(page).first().click()
+  await expect(receiptBack(page)).toHaveCount(0, { timeout: 15_000 })
+  await expect(visiblePrint(page)).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('dialog'), 'the details must not be waiting behind the receipt').toHaveCount(0)
+}
+
 test.describe('row action buttons do only their own action', () => {
   test.describe.configure({ timeout: 150_000 })
 
@@ -56,17 +75,23 @@ test.describe('row action buttons do only their own action', () => {
     test(`sales: print opens the receipt, not the details (${size.width}px)`, async ({ page, isMobile }, testInfo) => {
       await openSales(page, size)
       await shot(page, `sales-list-${size.width}`, testInfo)
-      const print = page.getByRole('button', { name: 'Print', exact: true }).first()
-      await expect(print).toBeVisible()
+      const print = visiblePrint(page)
       const box = await print.boundingBox()
       expect(Math.min(box!.width, box!.height), 'print tap target').toBeGreaterThanOrEqual(isMobile ? 36 : 24)
-      await press(print, isMobile)
-      await expect(page.getByRole('button', { name: 'Back', exact: true }).first()).toBeVisible({ timeout: 15_000 })
-      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expectPrintShowsOnlyTheReceipt(page, print, isMobile)
       await shot(page, `sales-print-receipt-${size.width}`, testInfo)
-      await page.getByRole('button', { name: 'Back', exact: true }).first().click()
-      await expect(page.getByRole('button', { name: 'Print', exact: true }).first()).toBeVisible({ timeout: 15_000 })
-      await expect(page.getByRole('dialog'), 'the details must not be waiting behind the receipt').toHaveCount(0)
+      await closeReceipt(page)
+    })
+
+    test(`sales: print after the details were opened and closed once still shows the receipt (${size.width}px)`, async ({ page, isMobile }, testInfo) => {
+      await openSales(page, size)
+      await press(page.getByText('Completed', { exact: true }).locator('visible=true').first(), isMobile)
+      await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 15_000 })
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expectPrintShowsOnlyTheReceipt(page, visiblePrint(page), isMobile)
+      await shot(page, `sales-print-after-details-${size.width}`, testInfo)
+      await closeReceipt(page)
     })
 
     test(`sales: the receipt number is plain text, so tapping it still opens the details (${size.width}px)`, async ({ page, isMobile }) => {
