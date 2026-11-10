@@ -631,6 +631,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               aria-expanded={moreOpen}
               aria-controls="mobile-nav-layer"
               aria-label={moreOpen ? (t('close') || 'Close') : (t('back') || 'Back')}
+              title={moreOpen ? (t('close') || 'Close') : (t('back') || 'Back')}
               className="bos-nav-back flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors"
             >
               <ChevronLeft className={`h-5 w-5 transition-transform ${moreOpen ? 'rotate-90' : ''}`} />
