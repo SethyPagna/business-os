@@ -21,6 +21,15 @@ test('with the online method configured it is left out of every list, whatever i
   assert.deepEqual(withoutOnlineMethod(['KHQR Pay', 'Cash'], { online_order_payment_method: 'KHQR Pay' }), ['Cash'])
 })
 
+test('the Worker method in force is the one rule: stored or not, the UI hides exactly what the Worker publishes', () => {
+  // CATCHES: the switch ON with nothing stored (the Worker refuses "ABA KHQR" on plain sales) while the UI still offers it, and the UI hiding a stored name the Worker is not refusing yet.
+  assert.deepEqual(withoutOnlineMethod(methods, { online_order_method_in_force: 'ABA KHQR', online_order_payment_method: '' }), ['Cash', 'Card', 'Wing'])
+  assert.deepEqual(withoutOnlineMethod(methods, { online_order_method_in_force: '', online_order_payment_method: 'ABA KHQR' }), methods, 'the Worker says nothing is refused')
+  assert.equal(hiddenOnlineMethod({ online_order_method_in_force: ' Bakong ' }), 'Bakong')
+  assert.deepEqual(withoutOnlineMethod(methods, { online_order_payment_method: 'ABA KHQR' }), ['Cash', 'Card', 'Wing'], 'an answer without the key falls back to the stored setting')
+  assert.ok(/online_order_method_in_force/.test(read('src', 'components', 'sales', 'Sales.tsx')), 'the bulk relabel list reads the same key')
+})
+
 test('with no online method configured nothing is hidden: a shop that uses "ABA KHQR" as an ordinary method keeps it', () => {
   // CATCHES: hiding the default name for everyone (breaking shops that never turned online orders on).
   for (const settings of [{}, { online_order_payment_method: '' }, { online_order_payment_method: '   ' }, null, undefined]) {

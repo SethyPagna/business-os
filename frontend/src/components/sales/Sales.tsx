@@ -2222,7 +2222,7 @@ ${buildEquation(profitExclDelivery ? { key: 'rpt_profit_excl_delivery', fallback
       } else if (field === 'payment_method') {
         let configured: unknown = settings?.pos_payment_methods
         // The configured online method is not an ordinary tender (review N6; same rule as online-orders/onlineMethodVisibility.ts, inline because this handler is evaluated on its own in tests).
-        const hiddenOnlineMethod = String((settings as Record<string, unknown> | null | undefined)?.online_order_payment_method ?? '').trim().toLocaleLowerCase()
+        const hiddenOnlineMethod = String((settings as Record<string, unknown> | null | undefined)?.online_order_method_in_force ?? '').trim().toLocaleLowerCase()
         if (typeof configured === 'string') { try { configured = JSON.parse(configured) } catch { configured = [] } }
         targetChoices = uniqueChoices([...sourceChoices, ...(Array.isArray(configured) ? configured : []).filter((method) => !hiddenOnlineMethod || String(method ?? '').trim().toLocaleLowerCase() !== hiddenOnlineMethod).map((method) => valueChoice(method, translateOr('none', 'None')))])
       } else {
