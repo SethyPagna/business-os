@@ -21,6 +21,10 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "3cfa4241a8ef",
    "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
   ],
@@ -41,6 +45,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",
@@ -97,6 +105,10 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "be3d747f51a3",
    "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
   ],
@@ -135,6 +147,10 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "bc711be04e31",
    "SELECT s.*, CASE WHEN COALESCE(c.is_anonymous,0)=1 THEN NULL ELSE c.membership_number END AS customer_membersh"
   ],
@@ -155,6 +171,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",

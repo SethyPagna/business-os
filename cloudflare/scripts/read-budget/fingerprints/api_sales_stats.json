@@ -21,6 +21,10 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "51360b2bda23",
    "SELECT value FROM system_flags WHERE key IN ('maintenance','maintenance_mode') ORDER BY key"
   ],
@@ -85,6 +89,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",
@@ -175,6 +183,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",
@@ -449,6 +461,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",

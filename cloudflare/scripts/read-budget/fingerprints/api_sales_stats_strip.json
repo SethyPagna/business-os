@@ -21,6 +21,10 @@
    "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
+  ],
+  [
    "1ea921e14352",
    "SELECT id,total_usd,sale_status,money_precision_version FROM sales WHERE date(created_at, '+7 hours') >= ?1 AN"
   ],
@@ -105,6 +109,10 @@
   [
    "88c34ec15c17",
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e7fc997dccb2",
+   "SELECT version FROM cache_versions WHERE namespace = ?1"
   ],
   [
    "e7fc997dccb2",
