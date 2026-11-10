@@ -22,6 +22,7 @@
 // searchMatch.ts instead of duplicating it here.
 import { tokenizeSearchWords, expandAliasCandidatesForFts } from './searchMatch'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
+import { formatMembershipNumber, MEMBERSHIP_PREFIX } from './membershipNumber'
 import { contactPhoneContainsClause, fullContactPhoneClause, hasDigit, phoneProbeOf, phoneShapedSql, typedPhoneDigitForms, type PhoneSearchAccess } from './phoneSearchGuard'
 
 export type ContactSearchTable = 'customers' | 'suppliers' | 'delivery_contacts'
@@ -64,6 +65,32 @@ export interface ContactMatchClause {
 // query already uses (mirrors buildHybridMatchClause's own reason for
 // taking one).
 export function buildContactMatchClause(
+  table: ContactSearchTable,
+  rawSearch: unknown,
+  paramPrefix: string,
+  access: PhoneSearchAccess,
+): ContactMatchClause | undefined {
+  const clause = buildTextOrPhoneMatchClause(table, rawSearch, paramPrefix, access)
+  const member = table === 'customers' ? membershipLookupOf(rawSearch, paramPrefix) : null
+  if (!member) return clause
+  return { sql: clause ? `(${clause.sql} OR ${member.sql})` : member.sql, params: { ...clause?.params, ...member.params }, ...(clause?.scansRows ? { scansRows: true } : {}) }
+}
+
+// A membership number typed as the whole search with or without its hyphen (lc20, lc00020, LC-00020) is looked up by equality on the
+// expression migration 0122 indexes, which the word index cannot do for the unhyphenated form (it holds the tokens lc and 00020).
+function membershipLookupOf(rawSearch: unknown, paramPrefix: string): ContactMatchClause | null {
+  const shape = /^lc-?(\d{1,9})$/i.exec(String(rawSearch ?? '').trim())
+  if (!shape || !Number(shape[1])) return null
+  const forms = [...new Set([formatMembershipNumber(Number(shape[1])).toLowerCase(), `${MEMBERSHIP_PREFIX}${shape[1]}`.toLowerCase()])]
+  const params: Record<string, string> = {}
+  const marks = forms.map((form, index) => {
+    params[`${paramPrefix}_member${index}`] = form
+    return `@${paramPrefix}_member${index}`
+  })
+  return { sql: `lower(trim(membership_number)) IN (${marks.join(',')})`, params }
+}
+
+function buildTextOrPhoneMatchClause(
   table: ContactSearchTable,
   rawSearch: unknown,
   paramPrefix: string,
