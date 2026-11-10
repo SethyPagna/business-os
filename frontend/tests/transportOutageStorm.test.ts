@@ -2,6 +2,7 @@
 // and coming back must not clear every cache and refresh every channel. Runs the real api/http.ts with a window
 // that records every event, a /health that answers on demand and reads that fail on demand.
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -117,7 +118,10 @@ await runTest('recovery refreshes the channels without clearing every cache, and
   assert.equal(page.events.filter((event) => event.type === 'sync:reconnected').length, 1)
   assert.equal(page.events.filter((event) => event.type === 'sync:transient-outage' && event.detail.active === false).length, 1)
   const refreshed = page.events.filter((event) => event.type === 'sync:update').map((event) => event.detail.channel)
-  assert.ok(refreshed.length > 0 && refreshed.length <= 17, `${refreshed.length} refresh events (listeners coalesce them into one bulk sync:flush)`)
+  const declared = /const RECONNECT_REFRESH_CHANNELS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8'))?.[1] || ''
+  const declaredChannels = [...declared.replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map((m) => m[1])
+  assert.ok(declaredChannels.length >= 17 && declaredChannels.length <= 24, `reconnect channel list stays bounded (${declaredChannels.length})`)
+  assert.deepEqual([...refreshed].sort(), [...declaredChannels].sort(), `recovery refreshes exactly the declared channels once each (${refreshed.length} refresh events; listeners coalesce them into one bulk sync:flush)`)
   assert.deepEqual(cacheGet('someoneselse:cached'), { keep: true }, 'a cache entry outside the refreshed channels is not thrown away')
 }))
 
