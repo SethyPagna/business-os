@@ -378,8 +378,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    // A sale edit (a driver or courier cost) changes the courier rows this list shows through the sale.
-    if (syncChannel.channel === 'fees' || syncChannel.channel === 'sales') void load(true)
+    // Not 'sales': every POS sale pushes it, and reloading here costs about 1.5K rows per sale on a month range. The
+    // writers that change a courier row shown through a sale (driver change, courier-cost amendment, add delivery,
+    // cancel or restore, a sale created with a courier cost) broadcast 'fees' themselves.
+    if (syncChannel.channel === 'fees') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):

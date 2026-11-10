@@ -1573,7 +1573,10 @@ await runTest('G4: a sales change also clears the Expenses read, and an open Exp
   assert.deepEqual(cacheGet('sales:get:'), [1])
   cacheInvalidate('sales')
   const feesPage = fs.readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
-  assert.ok(feesPage.includes("if (syncChannel.channel === 'fees' || syncChannel.channel === 'sales') void load(true)"), 'FeesPage reloads on a sales push too')
+  // B5 follow-up 1: every POS sale pushes 'sales' and an open Expenses page would re-read ~1.5K rows per sale. It reloads on
+  // 'fees' only; the Worker's courier-row writers broadcast 'fees' (pinned by test-sale-courier-rows-broadcast-fees-pure.cjs).
+  assert.ok(feesPage.includes("if (syncChannel.channel === 'fees') void load(true)"), 'FeesPage reloads on a fees push')
+  assert.ok(!/syncChannel.channel === 'sales'/.test(feesPage), 'FeesPage must not reload on a sales push')
   const reportModal = fs.readFileSync(new URL('../src/components/contacts/DeliveryContactReportModal.tsx', import.meta.url), 'utf8')
   assert.ok(reportModal.includes("syncChannel?.channel === 'sales' || syncChannel?.channel === 'deliveryContacts') void load()"), 'an open Deliveries report reloads on a sale or driver change (G8)')
 })
