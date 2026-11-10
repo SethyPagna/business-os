@@ -857,6 +857,14 @@ export default function Settings() {
   }
 
   const saveOnlineMethod = async (method: string) => {
+    const clearing = !method
+    const confirmed = await askToConfirm({
+      title: clearing ? t('online_payment_method_confirm_clear_title') || 'Clear the online payment method?' : t('online_payment_method_confirm_set_title') || 'Set the online payment method?',
+      items: [{ label: t('online_payment_method_label') || 'Online payment method', value: `${savedOnlineMethod || t('online_payment_method_not_set') || 'Not set'} → ${method || t('online_payment_method_not_set') || 'Not set'}` }],
+      note: clearing ? t('online_payment_method_confirm_clear_note') || 'Online orders cannot be turned on without one.' : t('online_payment_method_confirm_set_note') || 'It becomes online-only: the till stops offering it for ordinary sales.',
+      danger: clearing,
+    })
+    if (!confirmed) return
     try {
       const result = await saveSettings(
         { online_order_payment_method: method },

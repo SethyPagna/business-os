@@ -18,6 +18,7 @@ const CODES = [
   ['invalid_online_order_request_days', 'write_rejected_online_order_request_days', /from 1 to 30/, /1 ដល់ 30/],
   ['invalid_online_order_payment_method', 'write_rejected_online_order_payment_method', /configured payment methods/, /វិធីបង់ប្រាក់/],
   ['online_method_required', 'write_rejected_online_method_required', /Turn them off before clearing/, /បិទវាសិន/],
+  ['online_method_admin_only', 'write_rejected_online_method_admin_only', /Only an administrator/, /អ្នកគ្រប់គ្រង/],
   ['online_order_method_is_cash', 'write_rejected_online_order_method_is_cash', /cannot be a cash method/, /សាច់ប្រាក់/],
   ['online_method_merge_refused', 'write_rejected_online_method_merge_refused', /cannot be merged/, /បញ្ចូល/],
 ] as const
@@ -63,3 +64,28 @@ test('Settings has an admin-only field that sets the online payment method throu
   }
 })
 
+test('KHQR round 6 N4: the online_method_admin_only code has its own English and Khmer text under both keys the app looks up', () => {
+  // CATCHES: the Worker's English sentence reaching a Khmer screen, because neither the code key nor the write_rejected key was in the packs.
+  for (const key of ['online_method_admin_only', 'write_rejected_online_method_admin_only']) {
+    assert.match(en[key], /Only an administrator/)
+    assert.match(km[key], /[ក-៿]/)
+  }
+})
+
+test('KHQR round 6 N4: Save and clear on the online method field ask through the shared review dialog before writing, never the native confirm()', () => {
+  // CATCHES: a write with no review (the owner's convention is one compact review dialog for every mutating action), window.confirm, and a dialog that answers after the write.
+  const source = fs.readFileSync(path.join(here, '..', 'src', 'components', 'utils-settings', 'Settings.tsx'), 'utf8').split('\r\n').join('\n')
+  const from = source.indexOf('const saveOnlineMethod = async')
+  const body = source.slice(from, source.indexOf('\n  }\n', from))
+  const ask = body.indexOf('await askToConfirm(')
+  const write = body.indexOf('saveSettings(')
+  assert.ok(ask > -1 && write > ask, 'the dialog is awaited before the settings save')
+  assert.ok(/if \(!confirmed\) return/.test(body.slice(ask, write)), 'a Cancel writes nothing')
+  assert.ok(!/window\.confirm|[^.\w]confirm\(/.test(body))
+  assert.ok(/danger: clearing/.test(body), 'clearing is a danger ask')
+  assert.ok(source.includes('onClick={() => void saveOnlineMethod(onlineMethodDraft)}') && source.includes("onClick={() => void saveOnlineMethod('')}"), 'both buttons go through saveOnlineMethod')
+  for (const key of ['online_payment_method_confirm_set_title', 'online_payment_method_confirm_clear_title', 'online_payment_method_confirm_set_note', 'online_payment_method_confirm_clear_note']) {
+    assert.ok(en[key], `en ${key}`)
+    assert.match(km[key], /[ក-៿]/, `km ${key}`)
+  }
+})

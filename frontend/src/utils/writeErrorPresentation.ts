@@ -26,6 +26,7 @@ const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, 
   ['invalid_online_order_request_days', ['write_rejected_online_order_request_days', 'The change window for online orders must be a whole number of days from 1 to 30.']],
   ['invalid_online_order_payment_method', ['write_rejected_online_order_payment_method', 'The online payment method must be one of the configured payment methods.']],
   ['online_method_required', ['write_rejected_online_method_required', 'Online orders are on. Turn them off before clearing the online payment method.']],
+  ['online_method_admin_only', ['write_rejected_online_method_admin_only', 'Only an administrator can change the online payment method.']],
   ['online_order_method_is_cash', ['write_rejected_online_order_method_is_cash', 'The online payment method cannot be a cash method. Add a separate method such as "ABA KHQR" and choose that.']],
   ['online_method_merge_refused', ['write_rejected_online_method_merge_refused', 'The online payment method cannot be merged into another method. Choose a different online method first.']],
 ])
