@@ -179,6 +179,18 @@ async function main() {
     assert.ok(/345\s?678/.test(full.before_json) && /765\s?432/.test(full.after_json), 'with the permission the numbers are there')
   })
 
+  await check('R3-7: a phone typed into a top-level contact_whatsapp key of a change request is masked in before_json and after_json without the full-phone permission, and whole with it (a build whose pattern reads contact_w+ leaves it raw)', async () => {
+    const h = world(); const res = await paidOrder(h, { phone: PHONE })
+    void res
+    h.run("INSERT INTO online_order_requests (order_id, kind, stage, before_json, after_json) VALUES (1, 'contact', 'paid', '{\"contact_whatsapp\":\"012 345 678\"}', '{\"contact_whatsapp\":\"098 765 432\",\"contact_instagram\":\"dara_k\"}')")
+    const as = (permissions) => user(9, 'U', { online_orders: true, ...permissions })
+    const masked = (await ask(h, as({}), '/1')).body.requests[0]
+    for (const text of [masked.before_json, masked.after_json]) assert.ok(!/345\s?678|765\s?432/.test(text), 'no full number: ' + text)
+    assert.equal(JSON.parse(masked.after_json).contact_instagram, 'dara_k', 'a handle that is not a phone stays readable: ' + masked.after_json)
+    const full = (await ask(h, as({ contacts_full_phone: true }), '/1')).body.requests[0]
+    assert.ok(/345\s?678/.test(full.before_json) && /765\s?432/.test(full.after_json), 'with the permission the numbers are there')
+  })
+
   await check('N9: a phone number inside longer contact text (a wa.me link, "call 012...") is masked in the order and in request JSON without the full-phone permission, and whole with it (a wrong build masks only a value that is wholly a number)', async () => {
     const h = world(); const res = await paidOrder(h, { phone: PHONE, contacts: { whatsapp: 'https://wa.me/85512345678', telegram: 't.me/+85598765432', other: 'call me 077 111 222 after 5pm', instagram: 'dara.shop' } })
     const as = (permissions) => user(9, 'U', { online_orders: true, ...permissions })

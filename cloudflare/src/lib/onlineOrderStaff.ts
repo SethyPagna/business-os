@@ -187,7 +187,7 @@ export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { f
  * without the full-phone permission: the contact handles (a social handle can be a phone number under any key) and a phone field. Text the buyer typed (a note, an address, a name, a
  * reason) shows as typed. Text that cannot be parsed is not shown at all.
  */
-const STRUCTURED_PHONE_KEY = /^(contacts|contact_w+|customer_phone|phone)$/
+const STRUCTURED_PHONE_KEY = /^(contacts|contact_\w+|customer_phone|phone)$/
 function maskPhonesInJson(raw: string | null | undefined): string | null {
   if (raw == null) return null
   let value: unknown
