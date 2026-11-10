@@ -8,7 +8,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  FIRST_PAGE, ORDER_FILTERS, SEARCH_MAX, searchState, STAFF_ERROR_FALLBACK, STAFF_ERROR_KEYS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, nextTrail, noteBody,
+  FIRST_PAGE, ONLINE_REFUSAL_FALLBACK, ONLINE_REFUSAL_KEYS, ORDER_FILTERS, SEARCH_MAX, onlineRefusalText, searchState, STAFF_ERROR_FALLBACK, STAFF_ERROR_KEYS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, nextTrail, noteBody,
   orderAccess, pageNumber, previousTrail, refundBody, refundProblem, requestCanBeApplied, requestChanges, resolveBody, rowChips, staffErrorKey, staffMessage, stateChip,
   type StaffOrderDetail,
 } from '../src/components/online-orders/onlineOrdersLogic.ts'
@@ -197,4 +197,27 @@ test('money held in review is resolved before Fulfil is offered, even when the o
   assert.ok(availableActions(clean, ALL).includes('fulfil') && !availableActions(clean, ALL).includes('resolve'))
   const sold = { ...held, order: { ...held.order, sale_id: 9, state: 'fulfilled' } } as unknown as StaffOrderDetail
   assert.ok(!availableActions(sold, ALL).includes('resolve') && !availableActions(sold, ALL).includes('fulfil'))
+})
+
+test('every refusal the till and Returns can get for an online order has a sentence in both packs, restated by code and never as the Worker\'s English', () => {
+  // CATCHES: a code the Worker answers with no pack key (a Khmer till then shows English), a key with no Khmer, and a code that falls back to the generic sentence.
+  const en = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', 'en.json'), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', 'km.json'), 'utf8')) as Record<string, string>
+  const wanted = ['order_in_review', 'order_other_branch', 'online_tender_mismatch', 'online_order_changed', 'aba_refund_over_online', 'refund_channel_requires_online_order', 'return_exchange_refund_channel', 'order_already_fulfilled', 'order_not_paid', 'online_currency_unsupported', 'online_order_invalid', 'order_not_found']
+  assert.deepEqual(Object.keys(ONLINE_REFUSAL_KEYS).sort(), [...wanted].sort())
+  for (const [code, key] of Object.entries(ONLINE_REFUSAL_KEYS)) {
+    assert.equal(en[key], ONLINE_REFUSAL_FALLBACK[key], `${code}: the English pack text is the fallback`)
+    assert.ok(km[key] && km[key] !== en[key] && /[ក-៿]/.test(km[key]), `${code}: a real Khmer sentence`)
+  }
+  const tt = (key: string, fallback: string) => (key === 'oo_err_in_review' ? 'PACK' : fallback)
+  assert.equal(onlineRefusalText({ code: 'order_in_review' }, tt), 'PACK')
+  assert.equal(onlineRefusalText({ code: 'online_tender_mismatch' }, tt), ONLINE_REFUSAL_FALLBACK.oo_err_tender_mismatch)
+  assert.equal(onlineRefusalText({ code: 'something_else' }, tt), null)
+  assert.equal(onlineRefusalText(new Error('x'), tt), null)
+  // Against the Worker's own codes when its source for them is present in this tree.
+  const worker = path.join(here, '..', '..', 'cloudflare', 'src', 'lib', 'onlineOrderFulfil.ts')
+  if (fs.existsSync(worker)) {
+    const source = fs.readFileSync(worker, 'utf8')
+    for (const m of source.matchAll(/refuse\(\d+, '([a-z_]+)'/g)) assert.ok(m[1] in ONLINE_REFUSAL_KEYS, `the Worker's ${m[1]} has a sentence`)
+  }
 })
