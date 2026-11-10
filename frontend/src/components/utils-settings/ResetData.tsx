@@ -36,6 +36,7 @@ type ResetApiResult = {
   success?: boolean
   message?: string
   error?: string
+  keptCount?: number
 }
 
 // Only the 'products' mode reads these -- an additive, opt-in trio of
@@ -419,7 +420,10 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
           label: result.message || T('reset_complete', 'Reset complete'),
           undo_payload: { mode },
         })
-        notify(result.message || T('reset_complete', 'Reset complete'), 'success')
+        const keptDrivers = Number(result.keptCount) || 0
+        notify(keptDrivers > 0
+          ? `${result.message || T('reset_complete', 'Reset complete')} ${T('reset_delivery_contacts_some_kept', 'Delivery contacts reset. {count} kept because sales or fees still name them.').replace('{count}', String(keptDrivers))}`
+          : (result.message || T('reset_complete', 'Reset complete')), 'success')
         refreshAppData()
       } else {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
@@ -574,8 +578,8 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
       id: 'delivery_contacts',
       kind: 'section',
       label: T('reset_delivery_contacts_label', 'Delivery Contacts'),
-      desc: T('reset_delivery_contacts_desc', 'Deletes all delivery contacts. Past sales keep their own record of the delivery name/phone/address, so old history still reads fine. Takes a fresh backup first.'),
-      deleted: T('reset_delivery_contacts_deleted', 'All delivery contacts'),
+      desc: T('reset_delivery_contacts_desc', 'Deletes delivery contacts that no sale or fee names. Drivers on sales or fees stay. Takes a fresh backup first.'),
+      deleted: T('reset_delivery_contacts_deleted', 'Delivery contacts not on any sale or fee'),
       kept: T('reset_delivery_contacts_kept', 'Sales, returns, products, customers, suppliers, everything else'),
       word: 'RESET DELIVERY CONTACTS',
       icon: RotateCcw,
@@ -627,7 +631,10 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
           label: result.message || T('reset_complete', 'Reset complete'),
           undo_payload: isProducts ? { mode: 'products', ...productToggles } : undefined,
         })
-        notify(result.message || T('reset_complete', 'Reset complete'), 'success')
+        const keptDrivers = Number(result.keptCount) || 0
+        notify(keptDrivers > 0
+          ? T('reset_delivery_contacts_some_kept', 'Delivery contacts reset. {count} kept because sales or fees still name them.').replace('{count}', String(keptDrivers))
+          : (result.message || T('reset_complete', 'Reset complete')), 'success')
         refreshAppData()
       } else {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')

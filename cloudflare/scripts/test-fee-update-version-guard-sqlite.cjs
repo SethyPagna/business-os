@@ -129,6 +129,7 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
   '../lib/conflictControl': conflictControl,
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),

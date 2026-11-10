@@ -240,6 +240,22 @@ async function main() {
       }
     })
 
+    await check('delivery-person delete guard: the usage read and the in-batch guard SEARCH sales by idx_sales_delivery_contact (0300), never SCAN it', async () => {
+      const src = fs.readFileSync(path.join(root, 'src', 'lib', 'contactDeleteGuard.ts'), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))
+      const between = (from, to) => { const a = src.indexOf(from); return src.slice(a + from.length, src.indexOf(to, a + from.length)) }
+      const named = between('const named = `', '`')
+      const usageSql = between('db.prepare(`', '`)').replace(/@ids/g, '?')
+      const guardSql = ('SELECT CASE WHEN EXISTS (SELECT 1 FROM sales WHERE ' + named + ')' + between('SELECT 1 FROM sales WHERE ${named})', '`')).split('${named}').join(named).split('${DELIVERY_CONTACT_IN_USE_MARKER}').join('x').replace(/@ids/g, '?')
+      const ids = JSON.stringify([1, 2])
+      const { plans } = await call('explain', { items: [{ sql: usageSql, params: [ids, ids] }, { sql: guardSql, params: [ids, ids] }] })
+      assert.equal(plans.length, 2)
+      for (const plan of plans) {
+        const text = plan.join(' | ')
+        assert.ok(/SEARCH sales USING (COVERING )?INDEX idx_sales_delivery_contact/.test(text), text)
+        assert.ok(!/SCAN sales/.test(text), text)
+      }
+    })
+
     await check(`search with ${MATCHES} matches reads under 15,000 rows in 2 statements`, async () => {
       const r = await call('search', { term: 'glow' })
       report('search', r)

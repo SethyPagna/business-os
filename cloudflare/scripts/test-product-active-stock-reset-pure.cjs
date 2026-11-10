@@ -38,7 +38,7 @@ const { withStepUp } = require('./harness/step_up_lib.cjs')
 const app = withStepUp(load, 'routes/system.ts', {
  hono:require('hono'), '../lib/auth':{requireAuth:async(c,next)=>{c.set('user',actor);return next()}},
  '../lib/permissions':load('lib/permissions.ts'), '../lib/db':{getDb:()=>db}, '../lib/audit':{audit:noop},
- '../lib/dataIntegrity':{}, '../lib/productStockGuard':guard,
+ '../lib/dataIntegrity':{}, '../lib/contactDeleteGuard':load('lib/contactDeleteGuard.ts'), '../lib/productStockGuard':guard,
  '../lib/r2':{listObjects:async()=>[],deleteObject:noop,deleteObjectsBulk:async()=>({deleted:0,errors:[]})},
  '../lib/imageVariantStore':{variantKeysForUploadKeys:()=>[]}, '../lib/importRetention':{}, '../lib/media':{sanitizeMediaList:x=>x},
  '../lib/coreDataInvariants':{...core,dropAllCustomTables:async()=>[]},

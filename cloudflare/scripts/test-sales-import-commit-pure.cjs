@@ -401,6 +401,24 @@ function customerMatch(overrides = {}) {
     assert.equal(racedBranch.sqlite.prepare('SELECT stock_quantity FROM products WHERE id = 10').get().stock_quantity, 5, `${label}: stock must not change`)
   }
 
+  // DRIVER-DELETE-GUARD: the delivery person the row matched at preview must still exist inside the commit batch. A delete in the window
+  // refuses the row with a clear reason and writes nothing; with the driver present the sale carries the id (control).
+  const deliveryRow = () => saleData({ is_delivery: 1, delivery_contact_id: 77, delivery_contact_name: 'Driver 77' })
+  const driverOk = setup()
+  driverOk.sqlite.prepare("INSERT INTO delivery_contacts (id, name) VALUES (77, 'Driver 77')").run()
+  await subject.applyHistoricalSaleImport(driverOk.db, { jobId: 'job-driver-ok', rowNumber: 9, data: deliveryRow(), nowIso: input.nowIso, actor })
+  assert.equal(driverOk.sqlite.prepare('SELECT delivery_contact_id d FROM sales').get().d, 77, 'control: the matched driver id is written')
+  const driverRace = setup()
+  driverRace.sqlite.prepare("INSERT INTO delivery_contacts (id, name) VALUES (77, 'Driver 77')").run()
+  driverRace.setBeforeBatch(() => driverRace.sqlite.prepare('DELETE FROM delivery_contacts WHERE id = 77').run())
+  await assert.rejects(
+    () => subject.applyHistoricalSaleImport(driverRace.db, { jobId: 'job-driver-race', rowNumber: 9, data: deliveryRow(), nowIso: input.nowIso, actor }),
+    /Sale on row 9 names a delivery person who no longer exists; nothing was written for this row/,
+  )
+  assert.equal(driverRace.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, 'driver race: no sale written')
+  assert.equal(driverRace.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0, 'driver race: no items written')
+  assert.equal(driverRace.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0, 'driver race: no marker written')
+
   const returned = setup()
   const returnedData = saleData({ sale_status: 'partial_return', items: [{ ...saleData().items[0], returned_quantity: 1 }] })
   const returnedInput = { jobId: 'job-return', rowNumber: 8, data: returnedData, nowIso: '2026-08-28T08:00:00.000Z', actor }

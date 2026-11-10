@@ -117,6 +117,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
+import { buildDeliveryContactExistsGuard, DELIVERY_CONTACT_MISSING_CODE, isDeliveryContactMissingError } from '../lib/contactDeleteGuard'
 import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -1336,6 +1337,10 @@ app.post('/', async (c) => {
   // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
   if (deliveryContactRead) deliveryContact = await deliveryContactRead || null
+  // A driver deleted before this request is refused like one deleted during it (409), never saved as a sale with no driver.
+  if (deliveryContactRead && !deliveryContact) {
+    return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+  }
 
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
@@ -1592,6 +1597,7 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
+      ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1969,6 +1975,9 @@ app.post('/', async (c) => {
         const sourceConflict = await classifyPricingSourceConflict(db, products, pricingRuleRows)
         if (sourceConflict === 'pricing') return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409)
         if (sourceConflict === 'stock') return c.json({error:SALE_STOCK_CHANGED_ERROR,code:SALE_STOCK_CHANGED_CODE},409)
+      }
+      if (deliveryContact && isDeliveryContactMissingError(error)) {
+        return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
       }
       if (redemptionGuard && /malformed JSON/i.test(message)) {
         return c.json({ error: 'Membership points or checkout state changed before the sale was recorded. Refresh and try again.', code: 'loyalty_redemption_conflict' }, 409)
@@ -4532,7 +4541,7 @@ app.post('/:id/amendments', async (c) => {
       SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
     `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
-    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
 
     const feeRaw = body.delivery_fee_usd
     if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {

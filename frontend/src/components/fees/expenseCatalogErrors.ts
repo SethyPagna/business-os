@@ -17,6 +17,8 @@ const CODE_TEXT: Record<string, [key: string, fallback: string]> = {
   fee_type_invalid: ['expense_err_type_unavailable', 'That type is archived or no longer exists. Choose a type from the list.'],
   fee_type_archived: ['expense_err_type_archived', 'That type is archived. Choose an active type.'],
   fee_type_unknown: ['expense_err_type_unknown', 'That type no longer exists (it may have been renamed). Choose the current name from the list.'],
+  // The delivery person picked for an expense was deleted before it was saved (fees.ts 400, in-batch guard).
+  delivery_contact_missing: ['delivery_contact_missing', 'That delivery person no longer exists. Choose another one.'],
   type_archived: ['expense_err_type_name_archived', 'That type is archived. Restore it instead.'],
 }
 

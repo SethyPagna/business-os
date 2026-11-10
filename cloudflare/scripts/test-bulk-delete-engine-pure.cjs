@@ -63,6 +63,7 @@ function stubRequire(id) {
   // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
   if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
   if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
+  if (id === './contactDeleteGuard') return loadRealLib('contactDeleteGuard')
   if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
   if (id === './importMaintenanceFence') return {
     getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by these pure tests') },

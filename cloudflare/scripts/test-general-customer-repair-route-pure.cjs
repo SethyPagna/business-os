@@ -117,6 +117,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/permissions': permissions,
   '../lib/db': dbKernel,
   '../lib/actorSnapshot': actorSnapshot,
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/audit': { audit: async () => { throw new Error('General repair route must not call the generic audit helper') } },
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
   '../lib/errorReporting': { reportError: async () => false },
