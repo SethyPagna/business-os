@@ -54,6 +54,12 @@ test('the add-delivery and courier-cost amendments broadcast fees; line amendmen
   assert.ok(!kinds.includes('delivery_fee_changed'))
 })
 
+test('a sales import broadcasts fees (it inserts sales with courier costs)', () => {
+  const engine = read('lib/importEngine.ts')
+  assert.ok(engine.includes("if (job.type === 'sales') await broadcast(env, 'fees', { action: 'import', jobId })"), 'the sales-import finalize step tells the Expenses page')
+  assert.ok(read('lib/salesImportCommit.ts').includes('delivery_actual_cost_usd'), 'control: the import really writes courier costs')
+})
+
 // notifySaleBulkUpdate and notifyBulkStatus, run for real with the broadcast hub recorded.
 function load(rel, sent) {
   const mod = { exports: {} }

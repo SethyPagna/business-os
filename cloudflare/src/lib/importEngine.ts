@@ -7941,6 +7941,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // response path, so there's no early-return race to avoid.
       await bumpVersion(env, 'products').catch(() => {})
       await broadcast(env, job.type === 'sales' ? 'sales' : job.type === 'inventory' ? 'inventory' : 'products', { action: 'import', jobId }).catch(() => {})
+      // An imported sale can carry a courier cost, which the Expenses list shows (and no longer reloads on 'sales').
+      if (job.type === 'sales') await broadcast(env, 'fees', { action: 'import', jobId }).catch(() => {})
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
       await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type], { action: 'import', jobId }).catch(() => {})
     }
