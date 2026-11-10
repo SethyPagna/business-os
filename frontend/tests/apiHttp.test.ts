@@ -24,6 +24,7 @@ import {
   cacheInvalidateWithDerived,
   cacheSet,
   createApiVersionMismatchError,
+  dispatchGlobalDataRefresh,
   isTransientGatewayError,
   isCloudflareAccessRedirectResponse,
   isReachableServerResponseStatus,
@@ -867,6 +868,24 @@ await runTest('local mirror helper returns server data while mirroring asynchron
   assert.equal(mirrorReadResult(async (value) => { mirrored = value }, result), result)
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(mirrored, result)
+})
+
+// B5 G1: the Expenses page no longer reloads on a 'sales' push, so a reconnect or a new data epoch (restore, cutover, maintenance clear,
+// reset) has to name 'fees' itself. 'sales' stays as the control that the list was not replaced.
+await runTest('the global data refresh (reconnect, new data epoch) reaches the Expenses page', () => {
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const channels: string[] = []
+  globalThis.CustomEvent = class { detail: unknown; constructor(_type: string, init: { detail?: unknown } = {}) { this.detail = init.detail } } as unknown as typeof CustomEvent
+  globalThis.window = { dispatchEvent: (event: Event) => channels.push((event as CustomEvent).detail.channel) } as unknown as Window & typeof globalThis
+  try {
+    dispatchGlobalDataRefresh()
+    assert.ok(channels.includes('fees'), 'fees is refreshed on reconnect / epoch change')
+    assert.ok(channels.includes('sales'), 'control: sales is still refreshed')
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+  }
 })
 
 await runTest('sync runtime helpers emit compact window events with timestamps', () => {

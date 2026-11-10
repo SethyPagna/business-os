@@ -161,6 +161,9 @@ const RECONNECT_REFRESH_CHANNELS = [
   'products',
   'inventory',
   'sales',
+  // The Expenses list carries courier rows through sales and no longer reloads on a 'sales' push, so a
+  // reconnect or a new data epoch (restore, cutover, maintenance clear, reset) must refresh it by name.
+  'fees',
   'returns',
   'customers',
   'suppliers',
