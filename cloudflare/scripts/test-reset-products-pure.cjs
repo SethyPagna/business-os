@@ -137,6 +137,7 @@ const dataEpoch = loadReal('lib/dataEpoch.ts', {
 })
 const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/dataEpoch': dataEpoch,
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.

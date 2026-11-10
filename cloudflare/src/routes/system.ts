@@ -553,7 +553,8 @@ app.post('/reset-data', async (c) => {
         { sql: 'DELETE FROM branch_stock' },
         { sql: 'DELETE FROM customers' },
         { sql: 'DELETE FROM suppliers' },
-        { sql: 'DELETE FROM delivery_contacts' },
+        // Fees survive both modes, so a driver an expense still names stays (same rule as the Delivery contacts section reset).
+        { sql: RESET_UNUSED_DELIVERY_CONTACTS_SQL },
         { sql: 'DELETE FROM custom_fields' },
         // Import bookkeeping added after the original reset route. Clear
         // every job-scoped ledger before deleting import_jobs so a genuine
@@ -654,10 +655,14 @@ app.post('/reset-data', async (c) => {
       }
     }
 
+    // What remains of the table after a full reset is exactly the drivers a surviving expense names.
+    const keptDrivers = mode === 'all'
+      ? Number((await db.prepare('SELECT COUNT(*) AS n FROM delivery_contacts').get<{ n: number }>())?.n || 0)
+      : 0
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined, kept_referenced: keptDrivers || undefined })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -679,8 +684,9 @@ app.post('/reset-data', async (c) => {
     return c.json({
       success: true,
       message: mode === 'all'
-        ? 'Reset complete - sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
+        ? `Reset complete - sales, returns, products, and contacts deleted${keptDrivers ? ` (${keptDrivers} delivery contact(s) kept because expenses still name them)` : ''}. Settings, users, and branches kept.`
         : 'Sales reset - sales, returns, and stock cleared. Products and contacts kept.',
+      keptCount: keptDrivers,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)

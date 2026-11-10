@@ -25,13 +25,14 @@ const FEE_PUT_ANCHOR = '  const editGuard = editRedirect ?'
 const raceTransform = (mutant) => (file, source) => {
   if (file === 'routes/sales.ts') {
     let text = once(source, SALE_ANCHOR, "    if (deliveryContact) await db.prepare('DELETE FROM delivery_contacts WHERE id = ?').run([deliveryContact.id])\n" + SALE_ANCHOR)
-    if (mutant) text = once(text, '      ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),\n', '')
+    if (mutant === true) text = once(text, '      ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),\n', '')
+    if (mutant === 'early') text = once(text, "  if (deliveryContactRead && !deliveryContact) {\n    return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)\n  }\n", '')
     return text
   }
   if (file === 'routes/fees.ts') {
     let text = once(source, FEE_POST_ANCHOR, "    if (deliveryContactId != null) await db.prepare('DELETE FROM delivery_contacts WHERE id = @id').run({ id: deliveryContactId })\n" + FEE_POST_ANCHOR)
     text = once(text, FEE_PUT_ANCHOR, "  if (deliveryContactId != null && deliveryContactId !== existing.delivery_contact_id) await db.prepare('DELETE FROM delivery_contacts WHERE id = @id').run({ id: deliveryContactId })\n" + FEE_PUT_ANCHOR)
-    if (mutant) {
+    if (mutant === true) {
       text = once(text, '      ...(deliveryContactId != null ? [buildDeliveryContactExistsGuard(deliveryContactId)] : []),\n', '')
       text = once(text, '      ...(deliveryContactId != null && deliveryContactId !== existing.delivery_contact_id ? [buildDeliveryContactExistsGuard(deliveryContactId)] : []),\n', '')
     }
@@ -98,6 +99,15 @@ async function run(label, mutant) {
       t.eq('no sale points at a missing driver', (await world.first('SELECT COUNT(*) n FROM sales s LEFT JOIN delivery_contacts d ON d.id=s.delivery_contact_id WHERE s.delivery_contact_id IS NOT NULL AND d.id IS NULL')).n, 0)
     })
 
+    await check('sale create: a driver deleted BEFORE the request is refused 409 delivery_contact_missing, never saved as a sale with no driver', async (t) => {
+      await clearLimits()
+      const p = await product()
+      const body = await saleBody(p, 'rr-sale-2', 79)
+      const r = await world.api('POST', '/api/sales', body)
+      t.eq('status and code', [r.status, r.json && r.json.code], [409, 'delivery_contact_missing'])
+      t.eq('no sale recorded', (await world.first("SELECT COUNT(*) n FROM sales WHERE client_request_id = 'rr-sale-2'")).n, 0)
+    })
+
     await check('fee create: the driver deleted between the read and the write batch aborts the expense (400 Invalid delivery contact), nothing recorded', async (t) => {
       await clearLimits()
       await world.run("INSERT INTO delivery_contacts(id,name) VALUES (72,'Gone driver 2')")
@@ -124,7 +134,9 @@ async function run(label, mutant) {
 async function main() {
   await run('real source', false)
   if (process.exitCode) return
-  await run('MUTANT: in-batch driver guards removed', true)
-  if (process.exitCode) { console.log('KILLED mutant (red as required)'); process.exitCode = 0 } else { console.log('SURVIVED mutant'); process.exitCode = 1 }
+  for (const [name, kind] of [['in-batch driver guards removed', true], ['early missing-driver refusal removed', 'early']]) {
+    await run('MUTANT: ' + name, kind)
+    if (process.exitCode) { console.log('KILLED mutant (red as required)'); process.exitCode = 0 } else { console.log('SURVIVED mutant'); process.exitCode = 1; return }
+  }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1 })

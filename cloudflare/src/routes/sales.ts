@@ -1337,6 +1337,10 @@ app.post('/', async (c) => {
   // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
   if (deliveryContactRead) deliveryContact = await deliveryContactRead || null
+  // A driver deleted before this request is refused like one deleted during it (409), never saved as a sale with no driver.
+  if (deliveryContactRead && !deliveryContact) {
+    return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+  }
 
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
@@ -1593,8 +1597,8 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
-      ...(redemptionGuard ? [redemptionGuard] : []),
       ...(deliveryContact ? [buildDeliveryContactExistsGuard(deliveryContact.id)] : []),
+      ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
         // D1 batch rolls back only on an exception, not a zero-row INSERT.
@@ -4533,7 +4537,7 @@ app.post('/:id/amendments', async (c) => {
       SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
     `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
-    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+    if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
 
     const feeRaw = body.delivery_fee_usd
     if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {

@@ -420,7 +420,10 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
           label: result.message || T('reset_complete', 'Reset complete'),
           undo_payload: { mode },
         })
-        notify(result.message || T('reset_complete', 'Reset complete'), 'success')
+        const keptDrivers = Number(result.keptCount) || 0
+        notify(keptDrivers > 0
+          ? `${result.message || T('reset_complete', 'Reset complete')} ${T('reset_delivery_contacts_some_kept', 'Delivery contacts reset. {count} kept because sales or fees still name them.').replace('{count}', String(keptDrivers))}`
+          : (result.message || T('reset_complete', 'Reset complete')), 'success')
         refreshAppData()
       } else {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')

@@ -69,6 +69,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
+  '../lib/contactDeleteGuard': loadReal('lib/contactDeleteGuard.ts'),
   '../lib/audit': { audit: async (_env, _id, _name, action, entity, route, details) => { sideEffects.push({ action, entity, route, reason: details?.reason }) } },
   '../lib/currentPasswordGuard': {
     CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.',
