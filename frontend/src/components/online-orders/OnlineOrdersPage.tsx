@@ -331,8 +331,10 @@ function OrderDetail({ id, tt, access, onBack, onChanged }: { id: number; tt: Tx
 
       {done ? <div role="status" className="rounded-xl bg-emerald-50 p-2.5 text-sm leading-6 text-emerald-900 dark:bg-emerald-400/10 dark:text-emerald-100">{done}</div> : null}
 
-      {order.state === 'review' ? (
-        <div className="rounded-xl bg-rose-50 p-2.5 text-sm leading-6 text-rose-900 dark:bg-rose-400/10 dark:text-rose-100">{tt('oo_review_banner', 'A payment came in that does not match this order: {amount} is held. Check it in ABA, then accept it or cancel the order.').replace('{amount}', usd(heldUsd))}</div>
+      {heldPayments.length ? (
+        <div className="rounded-xl bg-rose-50 p-2.5 text-sm leading-6 text-rose-900 dark:bg-rose-400/10 dark:text-rose-100">{(order.state === 'review'
+          ? tt('oo_review_banner', 'A payment came in that does not match this order: {amount} is held. Check it in ABA, then accept it or cancel the order.')
+          : tt('oo_review_banner_late', 'A payment came in on this order that needs a look: {amount} is held. Check it in ABA, then accept it or send it back.')).replace('{amount}', usd(heldUsd))}</div>
       ) : null}
       {refundDue > 0 ? (
         <div className="rounded-xl bg-amber-50 p-2.5 text-sm leading-6 text-amber-900 dark:bg-amber-400/10 dark:text-amber-100">{tt('oo_refund_banner', 'A refund of {amount} is due to the customer. Send it from the ABA app, then record it here.').replace('{amount}', usd(refundDue))}</div>
@@ -636,7 +638,7 @@ function ActionDialog(props: DialogProps) {
         items={[
           { label: tt('oo_status', 'Status'), value: `${statusWord(String(order.state))} → ${statusWord('cancelled')}` },
           { label: tt('oo_paid', 'Paid'), value: usd(paid) },
-          { label: tt('oo_refund_due', 'Refund due'), value: `${usd(refundDue)} → ${usd(Math.max(refundDue, paid - Number(money.refunded_usd ?? 0)))}` },
+          { label: tt('oo_refund_due', 'Refund due'), value: `${usd(refundDue)} → ${usd(Math.max(0, paid + heldUsd - Number(money.refunded_usd ?? 0)))}` },
         ]}
         note={tt('oo_cancel_note', 'The money stays where it is until you send the refund from the ABA app and record it here.')}
         confirmLabel={tt('oo_act_cancel_order', 'Cancel order')}
@@ -653,12 +655,14 @@ function ActionDialog(props: DialogProps) {
         title={tt('oo_resolve_title', 'Accept the held payment?')}
         message={<span translate="no">{String(order.order_no)}</span>}
         items={[
-          { label: tt('oo_status', 'Status'), value: `${statusWord('review')} → ${statusWord('paid')}` },
+          { label: tt('oo_status', 'Status'), value: order.state === 'review' ? `${statusWord('review')} → ${statusWord('paid')}` : statusWord(String(order.state)) },
           { label: tt('oo_held', 'Money held'), value: usd(heldUsd) },
           { label: tt('oo_total', 'Total for the goods'), value: usd(order.goods_total_usd) },
           { label: tt('oo_paid', 'Paid'), value: `${usd(paid)} → ${usd(paid + heldUsd)}` },
         ]}
-        note={heldUsd + 0.005 < Number(order.goods_total_usd) ? tt('oo_resolve_short', 'The held money is less than the total. Collect the difference when you hand the order over.') : undefined}
+        note={order.state !== 'review'
+          ? tt('oo_resolve_late', 'The held money joins what the customer paid. If it is not wanted, send it back through ABA and record the refund here.')
+          : paid + heldUsd + 0.005 < Number(order.goods_total_usd) ? tt('oo_resolve_short', 'The held money is less than the total. Collect the difference when you hand the order over.') : undefined}
         confirmLabel={tt('oo_act_accept_payment', 'Accept payment')}
       >
         {textArea(tt('oo_note_field', 'Note (only staff see it)'), textA, setTextA, 500)}

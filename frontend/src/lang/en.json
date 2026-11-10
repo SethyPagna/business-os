@@ -4641,6 +4641,8 @@
   "oo_resolve_title": "Accept the held payment?",
   "oo_held": "Money held",
   "oo_resolve_short": "The held money is less than the total. Collect the difference when you hand the order over.",
+  "oo_resolve_late": "The held money joins what the customer paid. If it is not wanted, send it back through ABA and record the refund here.",
+  "oo_review_banner_late": "A payment came in on this order that needs a look: {amount} is held. Check it in ABA, then accept it or send it back.",
   "oo_act_accept_payment": "Accept payment",
   "oo_note_field": "Note (only staff see it)",
   "oo_note_title": "Add a note",
