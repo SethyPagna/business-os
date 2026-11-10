@@ -25,7 +25,7 @@ assert.equal(deliveryDisplayAddress('Street 9, Siem Reap'), 'Street 9, Siem Reap
 assert.equal(deliveryDisplayAddress('[{"address":'), '', 'truncated JSON is never printed')
 
 const writers = {
-  'routes/sales.ts': [/delivery_contact_address: deliveryDisplayAddress\(deliveryContact\?\.address\)/, /address: deliveryDisplayAddress\(contactRow\.delivery_address\)/, /deliveryContactAddress: deliveryDisplayAddress\(/, /index === 0 \? deliveryDisplayAddress\(sale\.delivery_contact_address\)/],
+  'routes/sales.ts': [/delivery_contact_address: deliveryDisplayAddress\(deliveryContact\?\.address\)/, /const snapshotAddress = deliveryDisplayAddress\(contactRow\.address\) \|\| deliveryDisplayAddress\(contactRow\.area\)/, /address: snapshotAddress,/, /deliveryContactAddress: snapshotAddress,/, /index === 0 \? deliveryDisplayAddress\(sale\.delivery_contact_address\)/],
   'lib/saleBulkUpdate.ts': [/deliveryDisplayAddress\(targetContact\.address\)/],
   'lib/saleRecords.ts': [/deliveryDisplayAddress\(snapshot\.delivery_contact_address\)/],
   'lib/importEngine.ts': [/deliveryDisplayAddress\(str\(first\.delivery_contact_address\)\)/],
