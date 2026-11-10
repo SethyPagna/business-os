@@ -76,5 +76,79 @@
    "693edbe8cc9e",
    "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
   ]
+ ],
+ "products-stock-ledger-all-time-page-1-ledger-summary-lean-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "edab2c73a334",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "f61fba33d6bd",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-all-time-page-1-ledger-keyset-and-ledger-summary-lean-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "e991508e5e25",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "f61fba33d6bd",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-all-time-in-view-page-1-ledger-keyset-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "224f9db9fa18",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "a952391fc310",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ],
+  [
+   "1920a751a91d",
+   "SELECT COUNT(*) AS total FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id LEFT JOIN prod"
+  ]
+ ],
+ "products-stock-ledger-all-time-in-view-page-1-ledger-keyset-and-ledger-summary-lean-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "224f9db9fa18",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "f61fba33d6bd",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
+ ],
+ "products-stock-ledger-month-window-page-1-ledger-summary-lean-on": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "7f475e6fa17b",
+   "WITH raw_page AS ( SELECT m.created_at FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id "
+  ],
+  [
+   "eb362bf44afb",
+   "SELECT SUM(CASE WHEN m.movement_type IN ('remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out"
+  ]
  ]
 }

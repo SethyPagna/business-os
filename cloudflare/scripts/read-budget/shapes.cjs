@@ -189,6 +189,13 @@ function getEntries(ctx) {
     ['products/stock-ledger all time page 1 (ledger_keyset ON)', `/api/products/stock-ledger?page=1&pageSize=25`, { switches: ['ledger_keyset'] }],
     ['products/stock-ledger all time deep page 400 (ledger_keyset OFF)', `/api/products/stock-ledger?page=400&pageSize=25`],
     ['products/stock-ledger all time deep page 400 (ledger_keyset ON)', `/api/products/stock-ledger?page=400&pageSize=25&cursor={{ledgerCursor}}`, { switches: ['ledger_keyset'] }],
+    // Lane stock-changes-summary (read switch ledger_summary_lean): the same first page when the total and the In/Out summary read the movements alone (no products / batches lookup per
+    // movement) and an In view's count comes out of the summary instead of a second scan. Alone, with ledger_keyset, with an In view chip, and over the default 30-day window.
+    ['products/stock-ledger all time page 1 (ledger_summary_lean ON)', `/api/products/stock-ledger?page=1&pageSize=25`, { switches: ['ledger_summary_lean'] }],
+    ['products/stock-ledger all time page 1 (ledger_keyset and ledger_summary_lean ON)', `/api/products/stock-ledger?page=1&pageSize=25`, { switches: ['ledger_keyset', 'ledger_summary_lean'] }],
+    ['products/stock-ledger all time In view page 1 (ledger_keyset ON)', `/api/products/stock-ledger?page=1&pageSize=25&view=in`, { switches: ['ledger_keyset'] }],
+    ['products/stock-ledger all time In view page 1 (ledger_keyset and ledger_summary_lean ON)', `/api/products/stock-ledger?page=1&pageSize=25&view=in`, { switches: ['ledger_keyset', 'ledger_summary_lean'] }],
+    ['products/stock-ledger month window page 1 (ledger_summary_lean ON)', `/api/products/stock-ledger?${P}&${R(M, T)}`, { switches: ['ledger_summary_lean'] }],
   ]
 }
 
