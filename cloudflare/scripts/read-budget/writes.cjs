@@ -238,6 +238,18 @@ function writeShapes() {
     approvalStep({ id: 'w-inventory-check-approval-lot-line', label: 'POST /api/inventory-checks/sessions/:id/approval 2 received-date lines (ic_fix_stock, ic_lot_counts, call_counting ON, both lines)', offset: 1200, counting: true, lots: true }),
     { id: 'w-fee', label: 'POST /api/fees', method: 'POST', url: '/api/fees',
       run: async (world, send) => send('POST', '/api/fees', { fee_type: 'other', label: 'Ice', amount_usd: 1, amount_khr: 0, fee_date: world.ctx.today, branch_id: 1, client_request_id: key('fee') }) },
+    // Deleting a delivery person: one atomic batch (guard + delete). A person no sale or fee names is deleted; one a sale names is refused with contact_has_sales and writes nothing.
+    // The sale-to-driver link is set up directly here (the seed has no delivering sale), so the refused request meets a real linked row.
+    { id: 'w-delivery-contact-delete', label: 'DELETE /api/delivery-contacts/:id (no sale or fee names it)', method: 'DELETE', url: '/api/delivery-contacts/:id',
+      prepare: async (world) => (await world.all('SELECT id FROM delivery_contacts ORDER BY id DESC LIMIT 1'))[0].id,
+      run: async (world, send, id) => send('DELETE', `/api/delivery-contacts/${id}`) },
+    { id: 'w-delivery-contact-delete-refused', label: 'DELETE /api/delivery-contacts/:id (a sale names it: refused)', method: 'DELETE', url: '/api/delivery-contacts/:id',
+      prepare: async (world) => {
+        const id = (await world.all('SELECT id FROM delivery_contacts ORDER BY id LIMIT 1'))[0].id
+        await world.db.prepare('UPDATE sales SET delivery_contact_id = ? WHERE id = (SELECT MIN(id) FROM sales)').bind(id).run()
+        return id
+      },
+      run: async (world, send, id) => send('DELETE', `/api/delivery-contacts/${id}`) },
     { id: 'w-customer-create', label: 'POST /api/customers', method: 'POST', url: '/api/customers',
       run: async (world, send) => send('POST', '/api/customers', { name: 'Budget Customer', phone: '0009990001', client_request_id: key('customer') }) },
     { id: 'w-product-price-edit', label: 'PUT /api/products/:id price edit', method: 'PUT', url: '/api/products/1003',

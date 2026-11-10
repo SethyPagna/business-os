@@ -62,11 +62,9 @@ export function deliveryContactInUseBody(name: unknown, usage: DeliveryContactUs
   }
 }
 
-// DELETE /delivery-contacts/:id: refuse (409 body) while a sale or fee names the person, else delete. The read gives
-// the counts for the message; the guard inside the delete batch catches a sale saved in between.
+// DELETE /delivery-contacts/:id: one atomic batch, the guard then the delete. A person a sale or fee names aborts the batch and
+// nothing is deleted; only then are the counts read, for the message. A successful delete therefore costs one D1 call and no scan.
 export async function deleteDeliveryContactUnlessUsed(db: D1Compat, id: number, name: unknown): Promise<{ deleted: true } | { deleted: false; body: ReturnType<typeof deliveryContactInUseBody> }> {
-  const usage = (await loadDeliveryContactUsage(db, [id])).get(id)
-  if (usage) return { deleted: false, body: deliveryContactInUseBody(name, usage) }
   try {
     await db.batch([buildDeliveryContactUsageGuard([id]), { sql: 'DELETE FROM delivery_contacts WHERE id = @id', params: { id } }])
   } catch (error) {

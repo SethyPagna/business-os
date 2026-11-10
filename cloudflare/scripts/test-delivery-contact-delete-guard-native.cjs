@@ -55,7 +55,9 @@ check('D2 single delete of a person on a delivery fee only is refused', async ()
 })
 check('D3 single delete of an unreferenced person succeeds', async () => {
   const w = world()
+  w.counter.state.calls = 0
   assert.deepEqual(await w.guard.deleteDeliveryContactUnlessUsed(w.env.DB, 3, 'Free driver'), { deleted: true })
+  assert.equal(w.counter.state.calls, 1, 'a successful delete is one D1 call (no pre-read)')
   assert.deepEqual(live(w), [1, 2, 4, 5])
 })
 check('D4 a sale saved between the read and the delete aborts the delete (in-batch guard), still a refusal', async () => {
