@@ -1217,6 +1217,23 @@ function registerContactRoutes(config: ContactConfig) {
     const offset = (page - 1) * pageSize
     const version = await getContactReadCacheVersion(c.env, config.table)
     const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      if (contactMatch?.scansRows) {
+        // A digit search reads every row of the table whichever way it is asked, so it asks once: the matching ids in list order with
+        // their year and whether they pass the date filter. The count, the year facet and the page all come from that one scan, and
+        // only the page's own rows are read afterwards.
+        const dateFilter = where.slice(baseWhere.length)
+        const matches = await db.prepare(`SELECT id, substr(${localDateExpr('created_at')}, 1, 4) AS year, ${dateFilter.length ? `CASE WHEN ${dateFilter.join(' AND ')} THEN 1 ELSE 0 END` : '1'} AS in_range FROM ${config.table} ${facetWhereSql} ${orderSql}`).all<{ id: number; year: string | null; in_range: number }>(params)
+        const listed = (matches || []).filter((row) => Number(row.in_range) === 1)
+        const pageIds = listed.slice(offset, offset + pageSize).map((row) => Number(row.id))
+        const rows = pageIds.length
+          ? await db.prepare(`SELECT * FROM ${config.table} WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))`).all<Record<string, unknown>>({ ids: JSON.stringify(pageIds) })
+          : []
+        const byId = new Map((rows || []).map((row) => [Number(row.id), row]))
+        const pageItems = pageIds.map((id) => byId.get(id)).filter((row): row is Record<string, unknown> => !!row)
+        const availableYears = [...new Set((matches || []).map((row) => String(row.year || '')).filter((value) => /^\d{4}$/.test(value)))].sort((left, right) => Number(right) - Number(left))
+        const total = listed.length
+        return { items: (await withPoints(pageItems)), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
+      }
       const [totalRow, items, yearRows] = await Promise.all([
         db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params),
         db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset }),

@@ -230,7 +230,9 @@ function run(load, { baseLoad }) {
   check('no grant: the whole-number branch compares ONE digit string (the repeated-word trick fails)', () => {
     const clause = buildContactMatchClause('customers', '654 654 654', 'search', CLOSED)
     assert.ok(clause.params.search_digits_0 === '654654654', JSON.stringify(clause.params))
-    assert.ok(/=@search_digits_0/.test(clause.sql) && !/instr\(/.test(clause.sql), 'equality, never containment')
+    // The only instr() an equality clause may hold is the address prefilter: a stripped-address text test that runs before the Contact Option equality.
+    const withoutPrefilter = clause.sql.replace(/instr\([^@]*?\\t[^@]*?,@search_digits_o\d+\)>0/g, 'PREFILTER')
+    assert.ok(/=@search_digits_0/.test(clause.sql) && !/instr\(/.test(withoutPrefilter), 'equality, never containment')
   })
   check('no grant: a digit fragment disguised from the raw text is still a fragment (the matcher reads accents away and a letter o as a zero)', () => {
     const disguised = ['0891\u0301', '089\u03001', '0891\u200D', 'o8910', 'O8910', 'dara 0891\u0301', '089 1\u0301', '٠٨٩١', '０８９１', '0\u0301891']

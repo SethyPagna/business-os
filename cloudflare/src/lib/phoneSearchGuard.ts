@@ -215,6 +215,16 @@ export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhonePro
   return { sql: `(${sql.join(' OR ')})`, params }
 }
 
+/**
+ * A cheap necessary condition for a Contact Option phone to hold one of these digit strings: the stripped text of the whole `address` column
+ * holds it. It is checked before the json_each probe so that probe runs only on the few rows that can match, never on every customer.
+ * The JSON escapes of a tab, line feed and carriage return are stripped as well, because the stored value is stripped of those characters.
+ */
+function addressRunPrefilterSql(keys: readonly string[]): string {
+  const text = `replace(replace(replace(${phoneDigitsSql("COALESCE(address,'')")},'\\t',''),'\\n',''),'\\r','')`
+  return `(${keys.map((key) => `instr(${text},@${key})>0`).join(' OR ')})`
+}
+
 /** A contact whose primary phone or any Contact Option phone (JSON in `address`) holds this whole number. */
 export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, optionLimit: number): PhoneClause {
   const primary = fullPhoneColumnClause("COALESCE(phone,'')", probe, paramPrefix)
@@ -227,10 +237,10 @@ export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full'
     optionParams[key] = form
     return `${optionDigits}=@${key}`
   })
-  const options = `EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
+  const options = `(${addressRunPrefilterSql(probe.forms.map((_, index) => `${paramPrefix}_o${index}`))} AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
     THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
     WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
-      AND (${optionMatches.join(' OR ')}))`
+      AND (${optionMatches.join(' OR ')})))`
   return { sql: `(${primary.sql} OR ${options})`, params: { ...primary.params, ...optionParams } }
 }
 
@@ -253,10 +263,10 @@ export function contactPhoneContainsClause(forms: readonly string[], paramPrefix
     primary.push(`instr(${primaryDigits},@${key})>0`)
     options.push(`instr(${optionDigits},@${key})>0`)
   })
-  const optionExists = `EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
+  const optionExists = `(${addressRunPrefilterSql(forms.map((_, index) => `${paramPrefix}_${index}`))} AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
     THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
     WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
-      AND (${options.join(' OR ')}))`
+      AND (${options.join(' OR ')})))`
   return { sql: `(${primary.join(' OR ')} OR ${optionExists})`, params }
 }
 

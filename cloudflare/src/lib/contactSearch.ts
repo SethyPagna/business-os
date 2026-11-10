@@ -53,6 +53,8 @@ const PERSON_COLUMNS: Record<ContactSearchTable, readonly string[]> = {
 export interface ContactMatchClause {
   sql: string
   params: Record<string, string>
+  /** True when the clause compares typed digits to stored phones, which reads every row of the table (no index serves it). */
+  scansRows?: boolean
 }
 
 // Builds `(id IN (... MATCH @wordQuery) OR id IN (... MATCH @phoneQuery))`
@@ -77,10 +79,10 @@ export function buildContactMatchClause(
     const forms = typedPhoneDigitForms(rawSearch)
     if (forms) {
       const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT, normalizedColumn)
-      return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params } } : contains
+      return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params }, scansRows: true } : { ...contains, scansRows: true }
     }
-    if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params } : undefined)
-    return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params } }
+    if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params, scansRows: true } : undefined)
+    return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params }, scansRows: true }
   }
   // The account cannot see numbers. The restriction is decided on the words the matcher searches, for every search, so no
   // spelling of a digit fragment (accent, letter o, punctuation) reaches a phone column: a digit-only word searches the
@@ -97,8 +99,8 @@ export function buildContactMatchClause(
     })
     whole = `(${exact.sql} OR ${normalizedColumn} IN (${marks.join(',')}))`
   }
-  if (!restricted) return { sql: whole, params: exactParams }
-  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...exactParams, ...restricted.params } }
+  if (!restricted) return { sql: whole, params: exactParams, scansRows: true }
+  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...exactParams, ...restricted.params }, scansRows: true }
 }
 
 function buildOpenContactMatchClause(
