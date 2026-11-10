@@ -168,6 +168,10 @@ export function contactDisplayAddress(raw: unknown, mode: 'address' | 'area' = '
   return text
 }
 
+export function deliveryDisplayAddress(raw: unknown): string {
+  return contactDisplayAddress(raw, 'address') || contactDisplayAddress(raw, 'area')
+}
+
 export function getPrimaryContactOption(options: readonly unknown[] = [], { fallback = {} }: { fallback?: Partial<ContactOption> } = {}): ContactOption {
   const first = limitContactOptions(options).find(hasContactOptionData)
   if (first) return normalizeOption(first)

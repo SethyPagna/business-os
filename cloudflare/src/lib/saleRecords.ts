@@ -77,6 +77,7 @@
 //                    explicitly unknown rather than silently erasing them.
 
 import { parseSqliteTimestampMs } from './saleAmendments'
+import { deliveryDisplayAddress } from './contactOptions'
 import { parseSaleCreationSnapshot, type SaleCreationSnapshotV1 } from './saleCreationSnapshot'
 
 // ---------------------------------------------------------------------------
@@ -1377,7 +1378,7 @@ function driverValue(snapshot: Record<string, unknown>): Record<string, unknown>
   const id = numberOrNull(snapshot.delivery_contact_id)
   const name = text(snapshot.delivery_contact_name)
   const phone = text(snapshot.delivery_contact_phone)
-  const address = text(snapshot.delivery_contact_address)
+  const address = deliveryDisplayAddress(snapshot.delivery_contact_address) || null
   return id === null && name === null && phone === null && address === null
     ? null : { id, name, phone, address }
 }

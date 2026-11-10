@@ -19,7 +19,7 @@ import {
 } from './saleBulkStatus'
 import type { StockStatement } from './saleTransitions'
 import { actorSnapshot } from './actorSnapshot'
-import { contactDisplayAddress } from './contactOptions'
+import { contactDisplayAddress, deliveryDisplayAddress } from './contactOptions'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordKind, SaleRecordValueState } from './saleRecords'
 import { ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from './anonymousCustomer'
@@ -601,7 +601,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
         delivery_contact_id: targetContact?.id ?? null,
         delivery_contact_name: targetContact?.name ?? null,
         delivery_contact_phone: targetContact?.phone ?? null,
-        delivery_contact_address: targetContact ? (targetContact.address || targetContact.area || null) : null,
+        delivery_contact_address: targetContact ? (deliveryDisplayAddress(targetContact.address) || deliveryDisplayAddress(targetContact.area) || null) : null,
       } : { ...before }
     } else {
       sourceMatched = matchedAtRead

@@ -191,6 +191,10 @@ export function contactDisplayAddress(raw: unknown, mode: 'address' | 'area' = '
   return text
 }
 
+export function deliveryDisplayAddress(raw: unknown): string {
+  return contactDisplayAddress(raw, 'address') || contactDisplayAddress(raw, 'area')
+}
+
 export function getPrimaryContactOption(options: ContactOptionSource[] = [], mode: ContactOptionMode = 'address'): NormalizedContactOption {
   for (const entry of Array.isArray(options) ? options : []) {
     if (hasContactOptionData(entry, mode)) return normalizeContactOption(entry, mode)

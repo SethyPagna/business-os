@@ -86,7 +86,7 @@ import {
 } from './importCsv'
 import { parseImportCost, importCostSource, parseImportNumericValue, normalizeImportMoney, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
-import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
+import { buildImportedContactState, contactDisplayAddress, deliveryDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
 import { canonicalizePhone } from './phone'
 import { MASKED_PHONE_MESSAGE, rowHasMaskedPhone } from './phoneWriteGuard'
@@ -4462,7 +4462,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
       delivery_contact_id: matchedDeliveryContactId,
       delivery_contact_name: rowIsDelivery ? (str(first.delivery_contact_name) || null) : null,
       delivery_contact_phone: rowIsDelivery ? (str(first.delivery_contact_phone) || null) : null,
-      delivery_contact_address: rowIsDelivery ? (str(first.delivery_contact_address) || null) : null,
+      delivery_contact_address: rowIsDelivery ? (deliveryDisplayAddress(str(first.delivery_contact_address)) || null) : null,
       delivery_fee_usd: deliveryFeeUsd, delivery_fee_khr: deliveryFeeKhr,
       delivery_fee_paid_by: rowIsDelivery ? (str(first.delivery_fee_paid_by) || 'customer') : 'customer',
       // C4: the staff export carries the actual courier cost (0068), so a
