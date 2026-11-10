@@ -149,6 +149,7 @@ async function main() {
       // 6.0.1041: the read-switch routes added three imports; /cron-health never reaches them, and the switch module is the real one.
       '../lib/audit': { buildAuditStatement: () => ({ sql: 'SELECT 1', params: {} }), changedFields: () => null },
       '../lib/maintenance': { getMaintenance: async () => null },
+      '../lib/onlineOrderFulfil': { ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method' },
       '../lib/readSwitches': load('lib/readSwitches.ts', { './analytics': { recordAnalytics: () => {} } }),
     }
     new Function('require', 'module', 'exports', output)((r) => (r in stubs ? stubs[r] : require(r)), mod, mod.exports)

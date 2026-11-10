@@ -279,7 +279,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnCreateAction': returnCreateActionKernel,
   // 6.0.925's failure text (it imports nothing): the route's two fixed-text 500s, a failed supplier return and a failed return edit, answer through it.
   '../lib/failureText': loadReal('lib/failureText.ts'),
-  '../lib/onlineReturnChannel': { planAbaRefund: async () => ({ ok: true, orderId: 0 }) }, '../lib/onlineOrdersAccess': { getOnlineOrderAccess: () => ({ canView: true, canDecide: true, canRefund: true }) }, '../lib/onlineOrderAlerts': { announceOrdersOfSales: async () => undefined },
+  '../lib/onlineReturnChannel': { planAbaRefund: async () => ({ ok: true, orderId: 0 }) }, '../lib/onlineOrdersAccess': { getOnlineOrderAccess: () => ({ canView: true, canDecide: true, canRefund: true }) }, '../lib/onlineOrderAlerts': { announceOrdersOfSales: async () => undefined }, '../lib/onlineOrderFulfil': loadReal('lib/onlineOrderFulfil.ts', { './readSwitches': { readSwitch: async () => false }, './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   // Security follow-up B: the replacement-price floor and the supplier-return receipt the route now imports, REAL over the same kernels.
   '../lib/returnReplacementPrice': loadReal('lib/returnReplacementPrice.ts', {
     './permissions': permissions, './moneyPrecision': moneyPrecisionKernel, './promotionRules': promotionRulesKernel,

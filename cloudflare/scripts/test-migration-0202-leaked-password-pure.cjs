@@ -157,6 +157,7 @@ const promisedDb = (raw) => ({
 
 const authRoute = load('routes/auth.ts', {
   '../lib/readSwitches': { readDataEpoch: async () => null, epochTag: async () => null }, // 6.0.1048: /bootstrap announces the data epoch
+  '../lib/onlineOrderFulfil': { withOnlineMethodInForce: async (_env, settings) => settings },
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
