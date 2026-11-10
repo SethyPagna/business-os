@@ -386,7 +386,7 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
     const stored = saleStoredState(sale)
     if (stored.saleStatus === 'cancelled') {
       // Everything the customer paid online comes back once the sale is cancelled, the part still waiting to be recorded (a paid top-up) included.
-      refundDue = onlineInUsd - sumMoney4(returns.map(abaCashOut)) - notedUsd
+      refundDue = sumMoney4([onlineInUsd, heldInReviewUsd]) - sumMoney4(returns.map(abaCashOut)) - notedUsd
     } else {
       if (stored.saleStatus === NOT_PAID_STATUS) {
         try {
@@ -396,7 +396,8 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
       // Money paid online that the sale did not take (the cashier Fulfilled with fewer or cheaper lines) and that the sale does not still owe is the customer's:
       // it is refundable through ABA. A top-up the sale is still waiting for is covered by its balance due, so it is not.
       const unrecordedExcessUsd = Math.max(0, roundMoney4(toRecordUsd - balanceDueUsd))
-      refundDue = saleOverpaidUsd(sale, returns, recordedOnSaleUsd) + unrecordedExcessUsd - notedAfterSaleUsd
+      // Review F4: money PayWay took on a payment still held in review (a late one, after the Fulfil) is the customer's until staff resolve it.
+      refundDue = saleOverpaidUsd(sale, returns, recordedOnSaleUsd) + unrecordedExcessUsd + heldInReviewUsd - notedAfterSaleUsd
     }
   }
   return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }

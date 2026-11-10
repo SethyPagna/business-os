@@ -263,7 +263,7 @@ export async function resolveReview(deps: OrderDeps, actor: Actor, id: unknown, 
   const note = text(body.note, 500, 'note_invalid', 'The note')
   const bundle = await loadBundleById(deps.db, id)
   const { order } = bundle
-  if (order.sale_id != null) return refuse(409, 'order_has_sale', 'This order was already handed over.')
+  // Review F4: a late review (after the Fulfil) is resolved here too: the payment turns paid, the order keeps its state and the money view reads the rest as refundable.
   const held = bundle.payments.filter((p) => p.state === 'review')
   if (!held.length) return refuse(409, 'nothing_to_resolve', 'No payment of this order is waiting for review.')
   if (held.some((p) => !(Number(p.paid_amount) > 0))) return refuse(409, 'no_amount_held', 'PayWay did not report an amount for this payment. Check it in ABA and cancel the order instead.')
