@@ -109,7 +109,6 @@ import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { clearFulfilHandoff, fulfilMoney, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
-import { onlineRefusalText } from '../online-orders/onlineOrdersLogic.ts'
 import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
@@ -659,7 +658,13 @@ export function resolveOrderLoyaltyAccrual(override: unknown, setting: unknown):
 async function createPosSale(payload: Record<string, unknown>, scope = captureActorReadScope('pos-checkout')): Promise<SaleResult> {
   const { createSale } = await getSaleWriteTransport()
   assertActorSessionDispatchAllowed(scope)
-  return createSale(payload) as Promise<SaleResult>
+  const created = createSale(payload) as Promise<SaleResult>
+  // A sale that fulfils an online order can be refused for reasons only that sale has (order_in_review, online_tender_mismatch ...): a Khmer till gets the sentence in Khmer.
+  // The table is loaded only then, so an ordinary sale and every other page carry none of it.
+  if (payload.online_order_id == null) return created
+  return created.catch(async (error: Error & { code?: unknown }) => {
+    throw await (await import('../online-orders/onlineRefusalKeys.ts')).restateOnlineRefusal(error)
+  })
 }
 
 function assertPosCheckoutOwner(payload: Record<string, unknown> | undefined, user: AppContextValue['user']): void {
@@ -1031,10 +1036,6 @@ export default function POS() {
       membershipRedeemUnits: '',
     })
   }, [active.customer, patchActive])
-
-  // A refusal of a sale about an online order reads in the staff language; any other coded refusal reads as it did.
-  const saleRefusal = (error: unknown): string | null =>
-    onlineRefusalText(error, (key, fallback) => { const value = t(key); return value && value !== key ? value : fallback }) ?? saleSubmitRefusalText(error, t)
 
   const addNewOrder = () => {
     if (orders.length >= LAYOUT.MAX_CONCURRENT_ORDERS) {
@@ -3272,9 +3273,9 @@ export default function POS() {
     if (!handoff) return
     const open = ordersRef.current
     const bound = open.find((order) => (order.onlineOrder as FulfilHandoff | undefined)?.online_order_id === handoff.online_order_id)
-    if (bound) { clearFulfilHandoff(); setActiveId(bound.id); return }
+    if (bound) { clearFulfilHandoff(); setActiveId(bound.id); setMobileView('cart'); return }
     const current = open.find((order) => order.id === resolvedActiveId)
-    if (current && current.cart.length === 0 && !current.checkoutRequestId && !current.onlineOrder) { clearFulfilHandoff(); patchActive({ onlineOrder: handoff }); return }
+    if (current && current.cart.length === 0 && !current.checkoutRequestId && !current.onlineOrder) { clearFulfilHandoff(); patchActive({ onlineOrder: handoff }); setMobileView('cart'); return }
     if (open.length >= LAYOUT.MAX_CONCURRENT_ORDERS) { notify(t('pos_max_open_orders').replace('{count}', String(LAYOUT.MAX_CONCURRENT_ORDERS)), 'info'); return }
     const nextNum = open.length + 1
     const fresh = normalizeOrder({ ...(createEmptyOrder(nextNum) as Partial<PosOrder>), onlineOrder: handoff }, nextNum)
@@ -3282,6 +3283,8 @@ export default function POS() {
     setOrders((previous) => [...previous, fresh])
     setActiveId(fresh.id)
     setOrderCounter(nextNum + 1)
+    // On a phone the basket and its strip are behind the Cart tab; the order is what the cashier came for.
+    setMobileView('cart')
   }, [isActive, authReady, user, can, resolvedActiveId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 2. Put the ordered lines in the basket through the till's own add (stock, lots, wholesale and promotions are its rules, not ours). One try per line and count, so a line that cannot be
@@ -3480,11 +3483,11 @@ export default function POS() {
         const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
         if (!isActorReadScopeCurrent(checkoutScope)) return
         if (isSaleRecorded(result)) finishRecorded(result)
-        else notify(saleRefusal(result) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        else notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
-          notify(saleRefusal(error) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
+          notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
       return
@@ -3707,7 +3710,7 @@ export default function POS() {
         // A warehouse line refused by the Worker reads back as the pack
         // sentence the sheet's greyed pill shows, not as the server's
         // English -- this is the path a stale tab actually arrives on.
-        notify(saleRefusal(result) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
@@ -3722,7 +3725,7 @@ export default function POS() {
           'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
         ), 'error')
       } else {
-        notify(saleRefusal(e) ?? localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
+        notify(saleSubmitRefusalText(e, t) ?? localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
     } finally {
       checkoutInFlightRef.current = false

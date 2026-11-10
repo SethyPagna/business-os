@@ -48,7 +48,6 @@ import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import { abaRefundOffer, onlineMethodName } from './helpers/abaRefund.ts'
 import AbaRefundChoice from './AbaRefundChoice.tsx'
-import { onlineRefusalText } from '../online-orders/onlineOrdersLogic.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
@@ -1123,7 +1122,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       // Unknown, permission and capability failures never rewrite/remove the
       // frozen request: an earlier timed-out attempt could already be committed.
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
-      notify(onlineRefusalText(error, (key, fallback) => T(key, fallback)) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+      notify(T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       if (current()) setSubmitting(false)

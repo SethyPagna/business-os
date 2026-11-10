@@ -87,8 +87,8 @@ test('Fulfil opens the till with the order filled in and posts the sale linked t
   expect(Number(online[0].usd ?? online[0].amount_usd)).toBeCloseTo(PRODUCT.price, 2)
   expect(sales[0].items).toHaveLength(1)
 
-  // the Worker's refusal reads as a sentence in the staff language, not as a code
-  await expect(page.getByText('The online payment on this sale does not match what the customer paid for it. Open the order again from Orders.')).toBeVisible()
+  // the Worker's refusal is shown to the cashier (Khmer restating is pinned by tests/onlineOrdersLogic.test.ts)
+  await expect(page.getByText('The online payment on this sale does not match.')).toBeVisible()
   expect(health.pageErrors).toEqual([])
 })
 

@@ -225,6 +225,8 @@ export const refundBody = (amountText: string, reference: string, note: string) 
 // ---- the Fulfil hand-off to the till (S6a) -------------------------------------------------------------------------------------------
 
 /** Fulfil hands the order to the till through session storage (fulfilOrder.ts reads it); the till posts the sale with `online_order_id`. */
+import { ONLINE_REFUSAL_KEYS } from './onlineRefusalKeys.ts'
+
 export const FULFIL_HANDOFF_KEY = 'bos:online-order-fulfil'
 export type FulfilHandoff = {
   online_order_id: number
@@ -325,28 +327,15 @@ export const staffMessage = (tt: (key: string, fallback: string) => string, code
  * on Returns, which are admin screens, so their text lives here in the lazy staff chunk and never in the storefront's refusal tables. The Worker's own sentence is English only
  * and some carry a figure (the exact online part, what is left to refund); the pack sentences point at the screen that shows the figure.
  */
-export const ONLINE_REFUSAL_KEYS: Readonly<Record<string, string>> = {
-  order_in_review: 'oo_err_in_review',
-  order_other_branch: 'oo_err_other_branch',
-  online_tender_mismatch: 'oo_err_tender_mismatch',
-  online_order_changed: 'oo_err_order_changed_till',
-  aba_refund_over_online: 'oo_err_aba_over',
-  refund_channel_requires_online_order: 'oo_err_aba_needs_order',
-  return_exchange_refund_channel: 'oo_err_aba_exchange',
-  order_already_fulfilled: 'oo_err_already_fulfilled',
-  order_not_paid: 'oo_err_till_not_paid',
-  online_currency_unsupported: 'oo_err_currency',
-  online_order_invalid: 'oo_err_order_invalid',
-  order_not_found: 'oo_err_not_found',
-}
+export { ONLINE_REFUSAL_KEYS }
 export const ONLINE_REFUSAL_FALLBACK: Readonly<Record<string, string>> = {
   oo_err_in_review: 'This order has a payment that needs a look first. Open Orders, resolve it, then fulfil the order.',
   oo_err_other_branch: 'This order belongs to another branch. Fulfil it at that branch\'s till.',
   oo_err_tender_mismatch: 'The online payment on this sale does not match what the customer paid for it. Open the order again from Orders.',
   oo_err_order_changed_till: 'This online order changed while the sale was being saved. Nothing was recorded. Open the order again.',
-  oo_err_aba_over: 'That is more than the customer paid online and has not been refunded yet. Lower the amount, or refund the rest in cash.',
-  oo_err_aba_needs_order: 'Only a sale that fulfilled an online order can be refunded through ABA.',
-  oo_err_aba_exchange: 'An exchange has no refund to send through ABA. Return the goods first, then refund the difference.',
+  aba_refund_over_online: 'That is more than the customer paid online and has not been refunded yet. Lower the amount, or refund the rest in cash.',
+  refund_channel_requires_online_order: 'Only a sale that fulfilled an online order can be refunded through ABA.',
+  return_exchange_refund_channel: 'An exchange has no refund to send through ABA. Return the goods first, then refund the difference.',
   oo_err_already_fulfilled: 'This order already has a sale.',
   oo_err_till_not_paid: 'Only a paid online order can be fulfilled. If a payment is on hold, resolve it in Orders first.',
   oo_err_currency: 'This order was paid in a currency that cannot be fulfilled here yet.',

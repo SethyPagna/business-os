@@ -40,7 +40,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     replacements: [], replacementLinesV1: [], exchangeActive: false, exchangeQuote: null, payRows: [], configuredMethods: ['Cash', 'ABA'], changeCurrency: 'USD', exchangePayIssue: null,
     exchangePaymentBody: () => ({ details: [], change_currency: 'USD' }),
     activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
-    notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
+    notes: '', returnType: 'refund', sendViaAba: false, foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
     notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message,
     window: { dispatchEvent: () => events.push('invalidate') }, CustomEvent: class {},
@@ -161,6 +161,23 @@ for (const outcome of ['success', 'error', 'unmount']) {
   assert.equal(prepared.length, 1)
   assert.deepEqual(prepared[0][3], { quote: exchange, payment, lines }, 'prepareReturnCreateV1 freezes the replacement quote, the payment and the lines with the return')
   assert.ok(h.events.includes('POST') && h.events.includes('clear'))
+}
+{
+  // KHQR: a refund the cashier chose to send through ABA is frozen into the request as refund_channel 'aba'; the default sends no channel at all.
+  for (const viaAba of [true, false]) {
+    const h = setup(), prepared: unknown[][] = []
+    h.bindings.sendViaAba = viaAba
+    h.bindings.loadReturnsTransport = async () => ({
+      loadPendingReturnCreateV1: () => null, authorizeReturnCreateRecovery: () => undefined,
+      prepareReturnCreateV1: (...args: unknown[]) => { prepared.push(args); return { bodyJson: '{"client_request_id":"x"}' } },
+      submitReturnCreateV1: () => Promise.resolve({ id: 1 }), clearPendingReturnCreateV1: () => {},
+    })
+    const run = callback('../src/components/returns/NewReturnModal.tsx', 'submitNetReturn', h.bindings)()
+    await new Promise(resolve => setTimeout(resolve, 0)); h.success.resolve(); await run
+    assert.equal(prepared.length, 1)
+    assert.equal((prepared[0][1] as Record<string, unknown>).refund_channel, viaAba ? 'aba' : undefined)
+    assert.equal(Object.hasOwn(prepared[0][1] as object, 'refund_channel'), viaAba)
+  }
 }
 {
   // A tender that does not cover the amount due is the operator's to fix on this screen: nothing is frozen, nothing is sent.

@@ -221,3 +221,27 @@ test('every refusal the till and Returns can get for an online order has a sente
     for (const m of source.matchAll(/refuse\(\d+, '([a-z_]+)'/g)) assert.ok(m[1] in ONLINE_REFUSAL_KEYS, `the Worker's ${m[1]} has a sentence`)
   }
 })
+
+test('a refused order sale reads in Khmer on a Khmer screen and is left as the Worker said it on an English one; other errors are untouched', async () => {
+  // CATCHES: the Worker's English on a Khmer till, a pack text replacing English that was already right, and an unrelated refusal being rewritten.
+  // The module under test, with its pack import served from the real Khmer pack (a Node test cannot import JSON the way the bundler does).
+  const km = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', 'km.json'), 'utf8')) as Record<string, string>
+  const { transformSync } = await import('esbuild')
+  const source = fs.readFileSync(path.join(here, '..', 'src', 'components', 'online-orders', 'onlineRefusalKeys.ts'), 'utf8').replace("import('../../lang/km.json')", 'Promise.resolve({ default: __km })')
+  const mod = { exports: {} as { restateOnlineRefusal: <T extends Error & { code?: unknown }>(error: T) => Promise<T> } }
+  new Function('module', 'exports', '__km', transformSync(source, { loader: 'ts', format: 'cjs' }).code)(mod, mod.exports, km)
+  const { restateOnlineRefusal } = mod.exports
+  const document = { documentElement: { getAttribute: (name: string) => (name === 'lang' ? lang : null) } }
+  let lang = 'km'
+  Object.assign(globalThis, { document })
+  const refusal = (code: string) => Object.assign(new Error('Worker English'), { code })
+  assert.equal((await restateOnlineRefusal(refusal('order_in_review'))).message, km.oo_err_in_review)
+  assert.equal((await restateOnlineRefusal(refusal('aba_refund_over_online'))).message, km.aba_refund_over_online)
+  assert.equal((await restateOnlineRefusal(refusal('something_else'))).message, 'Worker English')
+  assert.equal((await restateOnlineRefusal(new Error('no code'))).message, 'no code')
+  lang = 'en'
+  assert.equal((await restateOnlineRefusal(refusal('order_in_review'))).message, 'Worker English')
+  // only a sale that carries an order pays for the lookup
+  const till = fs.readFileSync(path.join(here, '..', 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
+  assert.match(till, /if \(payload\.online_order_id == null\) return created/)
+})
