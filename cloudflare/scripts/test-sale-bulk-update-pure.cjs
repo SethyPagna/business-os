@@ -284,7 +284,7 @@ async function run(){
   f.sql.prepare("UPDATE sales SET created_at=datetime('now','-2 hours') WHERE id=2").run()
   f.sql.exec("INSERT INTO fees(id,fee_type,label,amount_usd,fee_date,sale_id,delivery_contact_id) VALUES (9101,'delivery','Courier',1,'2026-11-09',1,1),(9102,'delivery','Courier',1,'2026-11-09',2,1),(9103,'delivery','Courier',1,'2026-11-09',3,1),(9104,'other','Box',1,'2026-11-09',3,1)")
   const feeOwner=id=>f.sql.prepare('SELECT delivery_contact_id d FROM fees WHERE id=?').get(id).d
-  user={id:5,name:'Bulk and amend',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':true})}
+  user={id:5,name:'Bulk and amend',role_code:'user',permissions:JSON.stringify({sales:true,'sales:amend':true,'sales:bulk':true,fees:true})}
   const groupBefore=snapshot(f)
   const groupWindow=await f.call(sales,'/bulk-update',request(f,{kind:'delivery_contact',source_id:1,target_id:2},'group-driver-window',[1,2,3]))
   assert.equal(groupWindow.status,400,JSON.stringify(groupWindow))
