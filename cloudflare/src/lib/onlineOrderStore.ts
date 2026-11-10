@@ -24,7 +24,7 @@ import {
   type ParsedCheck, type PaywayCredentials, type PaywayFailureReason, type PaywayTransport,
 } from './payway'
 import {
-  PAYMENT_MINUTES_DEFAULT, PAYMENT_MINUTES_KEY, PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_KEY, canTransition, classifyCheck, createOrderToken, hashOrderToken, makeOrderNo, nudgeCheckDue, onlineOrderView,
+  PAYMENT_MINUTES_DEFAULT, PAYMENT_MINUTES_KEY, PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_KEY, canTransition, classifyCheck, createOrderToken, hashOrderToken, makeOrderNo, nudgeCheckDue, onlineOrderView, orderMoneyWire,
   openUnpaidAllowed, orderLinesError, priceOrder, requestAllowed, requestKindsForStage, requestStates, requestStage, resolveRequestWindowDays,
   type EventRow, type OrderLineInput, type OrderRow, type PaymentRow, type PricedOrder, type RequestKind, type RequestRow, type ReturnRow, type SaleRow,
 } from './onlineOrders'
@@ -404,7 +404,7 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
   const topUps = [...newestUnpaid.values()]
   const states = requestStates(requests, events)
   const stateOf = new Map(states.map((s) => [s.id, s]))
-  const refundedUsd = events.filter((e) => e.event === 'refund_noted').reduce((sum, e) => sum + Number(e.amount_usd ?? 0), 0)
+  const { held_in_review_usd: _held, ...customerMoney } = orderMoneyWire(view.money, events); void _held
   const editable = order.state === 'awaiting_payment' || order.state === 'qr_failed'
   return {
     order_no: order.order_no,
@@ -432,7 +432,7 @@ export function publicOrderView(bundle: OrderBundle, now: Date, settings: Pick<O
       id: r.id, kind: r.kind, stage: r.stage, status: stateOf.get(r.id)?.status ?? 'pending', staff_reply: stateOf.get(r.id)?.publicComment ?? null,
       comment: r.customer_comment, attachments: parseJson<string[]>(r.attachments_json, []), created_at: r.created_at,
     })),
-    money: { paid_usd: view.money.onlineInUsd, refunded_usd: refundedUsd, refund_due_usd: view.money.refundDueUsd, balance_due_usd: view.money.balanceDueUsd },
+    money: customerMoney,
     can_edit: editable,
     can_cancel: editable,
     requests_open: view.requestsOpen,

@@ -10,7 +10,7 @@
 import type { D1Compat } from './db'
 import { isPhoneShaped, maskPhone } from './phoneMask'
 import { checkTransaction, makeTranId, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
-import { adminPageRows, onlineOrderView, orderMoney, refundNoteAllowed, requestStates, type RequestKind } from './onlineOrders'
+import { adminPageRows, onlineOrderView, orderMoney, orderMoneyWire, refundNoteAllowed, requestStates, type RequestKind } from './onlineOrders'
 import {
   OrderError, applyCheckResult, announceOrderEvent, closeQuietly, itemsJson, loadBundle, loadOrderSettings, normalizeAddress, normalizeContacts, normalizeFulfilment,
   normalizeName, normalizeNote, parseJson, parseLines, priceAndCheckStock, refuse, resolveAttachments, sqlTime, CONTACT_FIELDS,
@@ -211,7 +211,7 @@ export async function staffDetail(db: D1Compat, id: unknown, now: Date, requestW
     payments: payments.map(({ qr_string: _qr, deeplink: _link, ...rest }) => { void _qr; void _link; return rest }),
     requests: requests.map((request) => ({ ...request, ...(options.fullPhones ? {} : { before_json: maskPhonesInJson(request.before_json), after_json: maskPhonesInJson(request.after_json) }), state: requestStates([request], bundle.events).find((s) => s.id === request.id)?.status ?? 'pending' })),
     events: events || [],
-    status: view.status, chips: view.chips, money: view.money,
+    status: view.status, chips: view.chips, money: { ...view.money, ...orderMoneyWire(view.money, bundle.events) },
   }
 }
 

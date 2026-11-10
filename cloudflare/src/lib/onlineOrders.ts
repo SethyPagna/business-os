@@ -402,6 +402,16 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
   }
   return { onlineInUsd, heldInReviewUsd, recordedOnSaleUsd, toRecordUsd, notedUsd, refundDueUsd: Math.max(0, roundMoney4(refundDue)), balanceDueUsd }
 }
+/**
+ * The ONE wire shape of an order's money, shared by the customer view and the staff detail (security review N1: the staff screens read these snake_case names, the
+ * Worker used to send camelCase only, so every Fulfil and Refund read as zero). `refunded_usd` is the sum of refund notes.
+ */
+export type OrderMoneyWire = { paid_usd: number; refunded_usd: number; refund_due_usd: number; balance_due_usd: number; held_in_review_usd: number }
+export function orderMoneyWire(money: OrderMoney, events: readonly Pick<EventRow, 'event' | 'amount_usd'>[]): OrderMoneyWire {
+  const refunded = events.filter((e) => e.event === 'refund_noted').reduce((sum, e) => sum + Number(e.amount_usd ?? 0), 0)
+  return { paid_usd: money.onlineInUsd, refunded_usd: refunded, refund_due_usd: money.refundDueUsd, balance_due_usd: money.balanceDueUsd, held_in_review_usd: money.heldInReviewUsd }
+}
+
 export const refundDueUsd = (order: OrderRow, payments: readonly PaymentRow[], events: readonly EventRow[], sale: SaleRow | null, returns: readonly ReturnRow[] = []): number =>
   orderMoney(order, payments, events, sale, returns).refundDueUsd
 /** A refund note may not exceed what is still due, and must be a positive whole-cent amount. */
