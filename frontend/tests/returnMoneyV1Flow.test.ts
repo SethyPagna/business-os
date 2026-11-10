@@ -1,3 +1,4 @@
+import { refundChannelFields } from '../src/components/returns/helpers/abaRefund.ts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
@@ -40,7 +41,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     replacements: [], replacementLinesV1: [], exchangeActive: false, exchangeQuote: null, payRows: [], configuredMethods: ['Cash', 'ABA'], changeCurrency: 'USD', exchangePayIssue: null,
     exchangePaymentBody: () => ({ details: [], change_currency: 'USD' }),
     activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
-    notes: '', returnType: 'refund', sendViaAba: false, foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
+    notes: '', returnType: 'refund', abaChannel: {}, foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
     notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message,
     window: { dispatchEvent: () => events.push('invalidate') }, CustomEvent: class {},
@@ -166,7 +167,7 @@ for (const outcome of ['success', 'error', 'unmount']) {
   // KHQR: a refund the cashier chose to send through ABA is frozen into the request as refund_channel 'aba'; the default sends no channel at all.
   for (const viaAba of [true, false]) {
     const h = setup(), prepared: unknown[][] = []
-    h.bindings.sendViaAba = viaAba
+    h.bindings.abaChannel = refundChannelFields({ offered: true }, viaAba)
     h.bindings.loadReturnsTransport = async () => ({
       loadPendingReturnCreateV1: () => null, authorizeReturnCreateRecovery: () => undefined,
       prepareReturnCreateV1: (...args: unknown[]) => { prepared.push(args); return { bodyJson: '{"client_request_id":"x"}' } },
