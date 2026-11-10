@@ -326,6 +326,8 @@ const isActiveReturn = (row: ReturnRow): boolean => String(row.status || 'comple
 const returnDebtLowered = (row: ReturnRow): number => num(row.owed_reduction_usd)
 const abaCashOut = (row: ReturnRow): number => (row.refund_channel === 'aba' && isActiveReturn(row)
   ? Math.max(0, roundMoney4(num(row.total_refund_usd) - num(row.owed_reduction_usd))) : 0)
+const drawerCashOut = (row: ReturnRow): number => (row.refund_channel !== 'aba' && isActiveReturn(row)
+  ? Math.max(0, roundMoney4(num(row.total_refund_usd) - num(row.owed_reduction_usd))) : 0)
 
 export type OrderMoney = {
   /** Money PayWay confirmed (sum of paid payment rows). */
@@ -362,6 +364,13 @@ function saleOverpaidUsd(sale: SaleRow, returns: readonly ReturnRow[], onlineTen
   return Math.max(0, roundMoney4(paidUsd - changeUsd - payable))
 }
 
+function saleCashTenderUsd(sale: SaleRow, onlineTenderUsd: number): number {
+  const rate = num(sale.exchange_rate)
+  const paidUsd = num(sale.amount_paid_usd) + (rate > 0 ? num(sale.amount_paid_khr) / rate : 0)
+  const changeUsd = num(sale.change_usd) + (rate > 0 ? num(sale.change_khr) / rate : 0)
+  return Math.max(0, roundMoney4(paidUsd - changeUsd - onlineTenderUsd))
+}
+
 export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], events: readonly EventRow[], sale: SaleRow | null, returns: readonly ReturnRow[] = []): OrderMoney {
   const paid = payments.filter((p) => p.state === 'paid')
   const amountOf = (p: PaymentRow): number => num(p.paid_amount ?? p.amount)
@@ -391,7 +400,10 @@ export function orderMoney(order: OrderRow, payments: readonly PaymentRow[], eve
     const stored = saleStoredState(sale)
     if (stored.saleStatus === 'cancelled') {
       // Everything the customer paid online comes back once the sale is cancelled, the part still waiting to be recorded (a paid top-up) included.
-      refundDue = sumMoney4([onlineInUsd, heldInReviewUsd]) - sumMoney4(returns.map(abaCashOut)) - notedUsd
+      // Returns paid out of the drawer came out of the customer's cash first; only what exceeds the cash they tendered came out of their online money.
+      const cashTenderUsd = saleCashTenderUsd(sale, recordedOnSaleUsd)
+      const drawerOverCashUsd = Math.max(0, subtractMoney4(sumMoney4(returns.map(drawerCashOut)), cashTenderUsd))
+      refundDue = sumMoney4([onlineInUsd, heldInReviewUsd]) - sumMoney4(returns.map(abaCashOut)) - drawerOverCashUsd - notedUsd
     } else {
       if (stored.saleStatus === NOT_PAID_STATUS) {
         try {

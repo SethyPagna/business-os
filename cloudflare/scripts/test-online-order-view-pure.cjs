@@ -139,7 +139,7 @@ check('change handed back is not an overpayment', () => {
   assert.equal(money(fulfilled(), [orderPay()], [recorded(1)], sale({ amount_paid_usd: 30 })).refundDueUsd, 5.5, 'without the change it would read as 5.50 over')
 })
 
-check('a cancelled sale: refund due is the recorded online money, less KHQR-channel return cash and notes (drawer returns and cancelled returns do not count)', () => {
+check('a cancelled sale: refund due is the online money, less returns already paid back (ABA, or cash out of the drawer past the cash tendered) and notes; cancelled returns do not count', () => {
   const cancelled = sale({ sale_status: 'cancelled' })
   const events = [recorded(1)]
   const view = O.onlineOrderView(fulfilled(), [orderPay()], events, cancelled)
@@ -148,8 +148,12 @@ check('a cancelled sale: refund due is the recorded online money, less KHQR-chan
   assert.ok(view.chips.includes('refund_due'))
   const aba = { id: 1, status: 'completed', total_refund_usd: 5, owed_reduction_usd: 0, refund_channel: 'aba' }
   assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [aba]).refundDueUsd, 19.5)
-  assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [{ ...aba, refund_channel: 'drawer' }]).refundDueUsd, 24.5, 'cash handed over in the shop was not refunded through ABA')
-  assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [{ ...aba, refund_channel: null }]).refundDueUsd, 24.5, 'NULL is the old drawer reading')
+  assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [{ ...aba, refund_channel: 'drawer' }]).refundDueUsd, 19.5, 'cash already handed over in the shop is not refunded again through ABA')
+  assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [{ ...aba, refund_channel: null }]).refundDueUsd, 19.5, 'NULL is the old drawer reading')
+  const mixedSale = sale({ sale_status: 'cancelled', total_usd: 24.5, amount_paid_usd: 34.5 })
+  const mixedEvents = [recorded(1, { amount_usd: 24.5 })]
+  assert.equal(money(fulfilled(), [orderPay()], mixedEvents, mixedSale, [{ ...aba, refund_channel: null, total_refund_usd: 10 }]).refundDueUsd, 24.5, 'a cash return that fits in the cash tendered leaves the online money whole')
+  assert.equal(money(fulfilled(), [orderPay()], mixedEvents, mixedSale, [{ ...aba, refund_channel: null, total_refund_usd: 12 }]).refundDueUsd, 22.5, 'only the part past the cash tendered came out of the online money')
   assert.equal(money(fulfilled(), [orderPay()], events, cancelled, [{ ...aba, status: 'cancelled' }]).refundDueUsd, 24.5, 'a cancelled return refunded nothing')
   assert.equal(money(fulfilled(), [orderPay()], [...events, noted(4)], cancelled, [aba]).refundDueUsd, 15.5)
   assert.equal(money(fulfilled(), [orderPay()], [...events, noted(24.5)], cancelled, []).refundDueUsd, 0)
