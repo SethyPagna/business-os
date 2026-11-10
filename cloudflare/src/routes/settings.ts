@@ -133,7 +133,7 @@ app.get('/', async (c) => {
   // every logged-in cashier gets this map. Rows only the Settings screen reads
   // (Telegram routing, Drive sync, audit retention) go to accounts with
   // Settings access alone -- see lib/settingsVisibility.ts.
-  return c.json({ ...await withOnlineMethodInForce(c.env, settingsVisibleTo(user, map)), updatedAt })
+  return c.json({ ...withOnlineMethodInForce(settingsVisibleTo(user, map)), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings

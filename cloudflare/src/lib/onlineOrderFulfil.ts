@@ -12,7 +12,7 @@
 
 import type { D1Compat } from './db'
 import { roundMoney4, sumMoney4 } from './moneyPrecision'
-import { readSwitch } from './readSwitches'
+import { peekReadSwitch, readSwitch } from './readSwitches'
 import type { Env } from '../index'
 
 export const ONLINE_PAYMENT_METHOD_KEY = 'online_order_payment_method'
@@ -85,10 +85,15 @@ export const ONLINE_METHOD_RESERVED_PREDICATE = `(lower(trim(COALESCE(NULLIF(tri
 /** Settings key the Worker publishes (never stores): the method name the till must not offer on an ordinary sale, '' while the refusal is not in force. */
 export const ONLINE_METHOD_IN_FORCE_KEY = 'online_order_method_in_force'
 
-/** The ONE rule for which method is reserved: the refusal's own test (onlineMethodRefusalActive) decides, the name is the one a Fulfil rings (configuredOnlineMethod). */
-export async function withOnlineMethodInForce<T extends Record<string, string | null>>(env: Env, settings: T): Promise<T & Record<typeof ONLINE_METHOD_IN_FORCE_KEY, string>> {
+/**
+ * The ONE rule for which method is reserved: a stored method, or the online_orders switch ON, and the name is the one a Fulfil rings (configuredOnlineMethod). It only labels a screen,
+ * so it reads no database: the switch is the isolate's last-seen value (a stored method is what puts a method in force in practice, and ON cannot be reached without one).
+ * Every refusal that enforces the rule uses onlineMethodRefusalActive or the batch predicate, not this.
+ */
+export function withOnlineMethodInForce<T extends Record<string, string | null>>(settings: T): T & Record<typeof ONLINE_METHOD_IN_FORCE_KEY, string> {
   const stored = settings[ONLINE_PAYMENT_METHOD_KEY]
-  return { ...settings, [ONLINE_METHOD_IN_FORCE_KEY]: (await onlineMethodRefusalActive(env, stored)) ? configuredOnlineMethod(stored) : '' }
+  const active = String(stored ?? '').trim() !== '' || peekReadSwitch('online_orders')
+  return { ...settings, [ONLINE_METHOD_IN_FORCE_KEY]: active ? configuredOnlineMethod(stored) : '' }
 }
 
 /** The dollars of a tender that name `method`, and whether any row does. */

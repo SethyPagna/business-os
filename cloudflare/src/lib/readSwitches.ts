@@ -289,6 +289,8 @@ export function buildFlipStatements(flip: { record: { sql: string; params: Recor
 const store = createReadSwitchStore()
 
 export const readSwitchState = (env: Env, name: string): Promise<ReadSwitchReading> => store.read(env, name)
+/** The switch as this isolate last saw it: no read, off before the first one. For values a screen only displays; a decision that writes or refuses reads the switch itself. */
+export const peekReadSwitch = (name: ReadSwitchName): boolean => store.peek()?.switches[name].state === 'on'
 export const readSwitch = async (env: Env, name: string): Promise<boolean> => (await store.read(env, name)).on
 export const primeReadSwitches = (env: Env, value: ReadSwitches): void => store.prime(env, value)
 export const switchHeaderValue = (): string | null => store.header()

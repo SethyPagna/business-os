@@ -569,12 +569,12 @@ app.get('/bootstrap', async (c) => {
   // payload reaches every logged-in account, so Drive OAuth tokens and system
   // rows are stripped, and the Settings-only rows (Telegram routing, Drive sync,
   // audit retention) go to accounts with Settings access alone.
-  const settings = await withOnlineMethodInForce(c.env, settingsVisibleTo(
+  const dataEpoch = await epochTag(await epochRead)
+  const settings = withOnlineMethodInForce(settingsVisibleTo(
     user,
     Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value])),
   ))
 
-  const dataEpoch = await epochTag(await epochRead)
   return c.json({
     user,
     settings,
