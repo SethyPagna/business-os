@@ -4525,10 +4525,11 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
     }
     const contactRow = await db.prepare(`
-      SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
+      SELECT id,name,phone,address,area,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
-    `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
+    `).get<{ id: number; name: string | null; phone: string | null; address: string | null; area: string | null; delivery_address: string | null }>([contactId])
     if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.' }, 409)
+    const snapshotAddress = deliveryDisplayAddress(contactRow.address) || deliveryDisplayAddress(contactRow.area) || null
 
     const feeRaw = body.delivery_fee_usd
     if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {
@@ -4553,7 +4554,7 @@ app.post('/:id/amendments', async (c) => {
         id: Number(contactRow.id),
         name: contactRow.name ?? null,
         phone: contactRow.phone ?? null,
-        address: deliveryDisplayAddress(contactRow.delivery_address) || null,
+        address: snapshotAddress,
       },
       feeUsd: feeParsed.usd,
       actualCostUsd,
@@ -4599,7 +4600,7 @@ app.post('/:id/amendments', async (c) => {
       deliveryContactId: contactRow.id,
       deliveryContactName: contactRow.name ?? null,
       deliveryContactPhone: contactRow.phone ?? null,
-      deliveryContactAddress: deliveryDisplayAddress(contactRow.delivery_address) || null,
+      deliveryContactAddress: snapshotAddress,
       deliveryFeeUsd: feeParsed.usd,
       deliveryFeeKhr: receiptKhrFromUsd(feeParsed.usd, exchangeRate),
       deliveryFeePaidBy: 'customer',

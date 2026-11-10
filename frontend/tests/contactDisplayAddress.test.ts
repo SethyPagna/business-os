@@ -19,7 +19,7 @@
 // Run: node tests/contactDisplayAddress.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { contactDisplayAddress, deliveryDisplayAddress } from '../src/components/contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryDisplayAddress, deliveryOptionHint } from '../src/components/contacts/contactOptionUtils.ts'
 import { buildSalesImportRows } from '../src/utils/salesImportContract.ts'
 import { contactDisplayAddress as workerContactDisplayAddress, deliveryDisplayAddress as workerDeliveryDisplayAddress } from '../../cloudflare/src/lib/contactOptions.ts'
 
@@ -104,6 +104,13 @@ for (const [input, expected, label] of deliveryCases) {
   assert.equal(deliveryDisplayAddress(input), expected, `frontend delivery: ${label}`)
   assert.equal(workerDeliveryDisplayAddress(input), expected, `worker delivery: ${label}`)
 }
+
+const optionsJson = JSON.stringify([{ label: 'Default', name: 'ta', phone: '', email: '', address: '', area: '' }])
+assert.equal(deliveryOptionHint({ phone: '012', address: optionsJson }), '012', 'the driver picker shows the phone first')
+assert.equal(deliveryOptionHint({ phone: '', address: optionsJson, area: null }), '', 'a phone-less driver with empty Contact Options JSON shows nothing, never JSON')
+assert.equal(deliveryOptionHint({ phone: null, address: optionsJson, area: 'Toul Kork' }), 'Toul Kork', 'the area column is the fallback')
+assert.equal(deliveryOptionHint({ phone: null, address: JSON.stringify([{ address: 'St 271' }]) }), 'St 271', 'JSON resolves to its address')
+assert.match(read('src/components/sales/SaleDetailModal.tsx'), /\{deliveryOptionHint\(option\)\}/, 'the sale-detail driver picker renders through the hint')
 
 // ---------------------------------------------------------------------------
 // 2. The two copies are byte-identical. A behavioral test alone would let the

@@ -171,6 +171,11 @@ export function deliveryDisplayAddress(raw: unknown): string {
   return contactDisplayAddress(raw, 'address') || contactDisplayAddress(raw, 'area')
 }
 
+export function deliveryOptionHint(option: { phone?: unknown; address?: unknown; area?: unknown }): string {
+  const phone = typeof option.phone === 'string' ? option.phone.trim() : ''
+  return phone || deliveryDisplayAddress(option.address) || deliveryDisplayAddress(option.area)
+}
+
 export function getPrimaryContactOption(options: readonly unknown[] = [], { fallback = {} }: { fallback?: Partial<ContactOption> } = {}): ContactOption {
   const first = limitContactOptions(options).find(hasContactOptionData)
   if (first) return normalizeOption(first)
