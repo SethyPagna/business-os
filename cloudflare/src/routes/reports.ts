@@ -34,7 +34,7 @@ import { parseReportExport, readRecordExport, recordExportTotals, reportExportSt
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { costViewProfit } from '../lib/reportProfitView'
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { customerLookupColumnSql, restrictedColumnSql, salesReportSearchMatcher, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { refundDrawerKhrSql, refundDrawerUsdSql } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
@@ -695,10 +695,11 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
     if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
     if (query.q?.trim()) {
       const fields = kind === 'returns' ? ['return_number', 'receipt_number', 'customer_name', 'reason'] : ['label', 'notes', 'fee_type']
-      // Without the full-phone permission a field the response masks (a customer, label or note that is a number, a reason that
-      // quotes one) reads as empty to the search: the projection's own rule (restrictedColumnSql), not a list of columns kept here.
+      // Without the full-phone permission a field the response masks (a label or note that is a number, a reason that quotes one)
+      // reads as empty to the search: the projection's own rule (restrictedColumnSql), not a list of columns kept here. The customer is
+      // searched as stored: a customer is found by part of their number.
       const unrestricted = phoneSearchAccessOf(user).fullPhone
-      const fieldSql = (name: string) => (unrestricted ? `COALESCE(${alias}.${name}, '')` : restrictedColumnSql(`${alias}.${name}`))
+      const fieldSql = (name: string) => (unrestricted || name === 'customer_name' ? customerLookupColumnSql(`${alias}.${name}`) : restrictedColumnSql(`${alias}.${name}`))
       clauses.push(`instr(lower(${fields.map(fieldSql).join(" || ' ' || ")}), lower(@search)) > 0`)
       params.search = query.q.trim()
     }

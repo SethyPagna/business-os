@@ -30,19 +30,22 @@ function run(w, source = {}) {
   const src = (rel) => (source[rel] || ((text) => text))(readSrc(rel))
 
   // ---- 1. Reports > Sales: the JS row filter ------------------------------------------------------------------------------------------
-  check('Reports > Sales: a customer saved under a number is not found by a fragment of it; the whole number, the name and the phone rules are unchanged', () => {
+  check('Reports > Sales: a customer (name or phone) is found by a fragment of its number by every account (owner decision of 10 Nov 2026); a cashier saved under a number is not', () => {
     const rows = [
       { id: 1, receipt_number: 'P28-0301', customer: '093 456 789', cashier: 'admin', branch: 'main', payment_method: 'cash', customer_phone: '' },
       { id: 2, receipt_number: 'P28-0302', customer: 'Dara', cashier: 'admin', branch: 'main', payment_method: 'cash', customer_phone: '087 654 321' },
+      { id: 3, receipt_number: 'P28-0303', customer: 'Walk-in', cashier: '094 555 818', branch: 'main', payment_method: 'cash', customer_phone: '' },
     ]
     const found = (search, access) => rows.filter(w.guard.salesReportSearchMatcher(search, access)).map((row) => row.id)
-    assert.deepEqual(found('456', CLOSED), [], 'no grant: a fragment of the number-as-name')
+    assert.deepEqual(found('456', CLOSED), [1], 'no grant: a fragment of the number-as-name finds the customer')
     assert.deepEqual(found('456', OPEN), [1], 'holder')
     assert.deepEqual(found('093456789', CLOSED), [1], 'the whole number still finds it')
     assert.deepEqual(found('dara', CLOSED), [2])
     assert.deepEqual(found('admin', CLOSED), [1, 2])
-    assert.deepEqual(found('654', CLOSED), [], 'the phone column is never matched by substring')
+    assert.deepEqual(found('654', CLOSED), [2], 'the customer phone is matched by substring for every account')
     assert.deepEqual(found('654', OPEN), [2])
+    assert.deepEqual(found('555', CLOSED), [], 'a number saved as a cashier is not searchable without the grant')
+    assert.deepEqual(found('555', OPEN), [3], 'holder')
   })
 
   // ---- 2. the audit log ---------------------------------------------------------------------------------------------------------------
@@ -166,6 +169,7 @@ function run(w, source = {}) {
     const reports = src('routes/reports.ts')
     assert.ok(reports.includes('const unrestricted = phoneSearchAccessOf(user).fullPhone'), 'reports record search takes the account\'s access')
     assert.ok(reports.includes('restrictedColumnSql(`${alias}.${name}`)'), 'every field goes through restrictedColumnSql')
+    assert.ok(reports.includes("unrestricted || name === 'customer_name' ? customerLookupColumnSql"), 'the customer is searched as stored: a customer is found by part of their number')
     assert.ok(!reports.includes('hideNumericName'), 'the single-column special case is gone')
   })
   check('Stock-in sessions and Movement log routes pass the account\'s phone access into the shared query', () => {
@@ -183,7 +187,7 @@ function run(w, source = {}) {
 
 const MUTANTS = [
   ['rule: a name or note that is a number is not masked in search', { lib: { phoneAccess: replaceOnce("if (kind & NAME) return 'name'", "if (kind & NAME) return 'none'") } }],
-  ['reports sales: the customer is read raw', { lib: { phoneSearchGuard: replaceOnce("restrictedTextOf(key, row[key] || '').toLowerCase().includes(search)", 'text(row, key).includes(search)') } }],
+  ['reports sales: the cashier is read raw', { lib: { phoneSearchGuard: replaceOnce("restrictedTextOf(key, row[key] || '').toLowerCase().includes(search)", 'text(row, key).includes(search)') } }],
   ['audit: the name columns are read raw', { lib: { auditLogQuery: replaceOnce("input.phoneTextBlocked && keyMaskOf(column) === 'name'", 'false') } }],
   ['stock-in sessions: the supplier is read raw', { lib: { stockInSessionsQuery: replaceOnce("readable('s.supplier_name', 'supplier_name')", "'s.supplier_name'") } }],
   ['stock-in sessions: the actor is read raw', { lib: { stockInSessionsQuery: replaceOnce("readable('s.user_name', 'user_name')", "'s.user_name'") } }],
@@ -192,6 +196,7 @@ const MUTANTS = [
   ['expenses list: the note is read raw', { source: { 'routes/fees.ts': replaceOnce("searchableColumnSql('f.notes', access)", "'f.notes'") } }],
   ['expenses list: the label is read raw', { source: { 'routes/fees.ts': replaceOnce("searchableColumnSql('f.label', access)", "'f.label'") } }],
   ['shift list: the user name is read raw', { source: { 'routes/shifts.ts': replaceOnce("${searchableColumnSql('user_name', phoneSearchAccessOf(user))} LIKE @search", 'user_name LIKE @search') } }],
+  ['reports records: the customer is closed again without the grant', { source: { 'routes/reports.ts': replaceOnce("unrestricted || name === 'customer_name'", 'unrestricted') } }],
   ['reports records: the fields are read raw', { source: { 'routes/reports.ts': replaceOnce('restrictedColumnSql(`${alias}.${name}`)', '`COALESCE(${alias}.${name}, \'\')`') } }],
   ['stock-in sessions route: the account\'s access is not passed', { source: { 'routes/products.ts': replaceOnce("(sql, key) => searchableColumnSql({ sql, key }, phoneSearchAccessOf(user))", '(sql) => sql') } }],
   ['movements route: the account\'s access is not passed', { source: { 'routes/inventory.ts': replaceOnce("(sql, key) => searchableColumnSql({ sql, key }, phoneAccess)", '(sql) => sql') } }],

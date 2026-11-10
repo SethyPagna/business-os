@@ -31,8 +31,8 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson, phoneCacheVariant } from '../lib/phoneCache'
-import { canSeeFullPhones, phoneSearchAccessOf } from '../lib/phoneAccess'
-import { fullContactPhoneClause, fullPhoneColumnClause, hasDigit, nameWithoutPhoneSql, phoneProbeOf, RESTRICTED_HAYSTACK, restrictedColumnSql, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { phoneSearchAccessOf } from '../lib/phoneAccess'
+import { customerNameLookupSql, customerPhoneLookupSql, fullPhoneColumnClause, hasDigit, phoneProbeOf, RESTRICTED_HAYSTACK, restrictedColumnSql, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 // The POS payment-method field is free text (a datalist, not a select), so a
 // sale can introduce a method Settings has never heard of. See
@@ -4114,27 +4114,17 @@ app.get('/delivery-options', async (c) => {
   }
   const search = String(c.req.query('search') || '').trim().toLowerCase()
   const pattern = `%${search.replace(/[%_]/g, '\\$&')}%`
-  // Without the full-phone permission a number fragment matches neither the phone nor the address (which can hold
-  // Contact Option phones); a whole number finds the contact whose phone is that number (lib/phoneSearchGuard.ts).
-  const probe = canSeeFullPhones(user) ? ({ kind: 'none' } as const) : phoneProbeOf(search)
-  const whole = probe.kind === 'full' ? fullContactPhoneClause(probe, 'deliveryPhoneDigits', CONTACT_OPTION_LIMIT) : null
-  // A courier saved under its number has that number as its name: a digit word does not read such a name either.
-  const nameColumn = probe.kind === 'none' ? "lower(COALESCE(name,''))" : `lower(${nameWithoutPhoneSql('name')})`
-  const phoneBearingMatches = probe.kind === 'none'
-    ? `
-      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'`
-    : whole ? `
-      OR ${whole.sql}` : ''
   const rows = await getDb(c.env).prepare(`
     SELECT id,name,phone,area,address
     FROM delivery_contacts
     WHERE @search=''
-      OR ${nameColumn} LIKE @pattern ESCAPE '\\'
-      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'${phoneBearingMatches}
+      OR lower(COALESCE(name,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(area,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(phone,'')) LIKE @pattern ESCAPE '\\'
+      OR lower(COALESCE(address,'')) LIKE @pattern ESCAPE '\\'
     ORDER BY lower(COALESCE(name,'')) ASC, id ASC
     LIMIT 25
-  `).all<Record<string, unknown>>({ search, pattern, ...(whole?.params ?? {}) })
+  `).all<Record<string, unknown>>({ search, pattern })
   return c.json({ items: rows })
 })
 
@@ -5992,8 +5982,7 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
   if (!groups.length) return undefined
-  // Without the full-phone permission a digit-only word (as the matcher reads it: accents folded, a letter o beside a digit read
-  // as zero) never matches the customer's number (lib/phoneSearchGuard.ts); a whole number, in any form, matches by equality.
+  // A whole number, in any form, also matches the customer's phone by equality (lib/phoneSearchGuard.ts).
   const probe = phoneProbeOf(raw)
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
@@ -6018,13 +6007,13 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
     "COALESCE(c.membership_number, '')",
   ])
-  // A digit word of an account without the grant reads these columns through the projection's own rule (restrictedColumnSql): a
-  // note, cashier, branch or customer name that is itself a number shows masked, so it reads as empty here. The haystack is computed
-  // once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
-  const flatHaystackWithoutPhones = concatBalanced(restrictedHaystackParts([
-    's.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.customer_name',
-    's.branch_name', 's.payment_method', 's.notes', 'c.membership_number',
-  ]))
+  // A digit word of an account without the grant reads the customer's name and phone as stored (a customer is found by part of their number)
+  // and every other column through the projection's own rule (restrictedColumnSql): a note, cashier or branch that is itself a number
+  // shows masked, so it reads as empty here. The haystack is computed once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+  const flatHaystackWithoutPhones = concatBalanced([
+    ...restrictedHaystackParts(['s.receipt_number', 's.legacy_receipt_number', 's.cashier_name', 's.branch_name', 's.payment_method', 's.notes', 'c.membership_number']),
+    customerNameLookupSql('s.customer_name'), customerPhoneLookupSql('s.customer_phone'),
+  ])
   let usesRestrictedHaystack = false
   const itemHaystack = concatBalanced([
     "COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')", "COALESCE(sip.barcode, '')",

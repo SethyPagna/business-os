@@ -1,13 +1,11 @@
 'use strict'
-// P2.8 (6.0.1046): search must not spell out a hidden phone number (lib/phoneSearchGuard.ts and its call sites).
+// Owner decision of 10 Nov 2026 ("Allow partial"): an account without `contacts_full_phone` finds a customer or contact by PART of a number, the
+// same as a holder (this reverses the closed-fragment rule of P2.8, 6.0.1046, for customer lookups); only the response masks the phone.
 //
-// Real transpiled sources run against REAL SQLite FTS5 (better-sqlite3, migration 0020 applied verbatim), so a column filter
-// the guard writes is parsed by the same engine family the Worker uses. Part 1 classifies a typed search. Part 2 pins the
-// holder: byte-equal SQL and params to the base commit's contactSearch.ts / salesCustomerSearch.ts for every query in a
-// table (nothing a holder had is lost). Part 3 is the oracle: an account without the grant gets NO row from a digit
-// fragment of a hidden number (prefix, middle, suffix, option phone, repeated-word trick, +855, Khmer digits) and DOES get
-// the customer from the whole number in each common format, while name, membership and e-mail searches are unchanged.
-// Part 4 runs MUTANTS of the same sources through the same assertions: each must fail.
+// Real transpiled sources run against REAL SQLite FTS5 (better-sqlite3, migration 0020 applied verbatim). Part 1 classifies a typed search.
+// Part 2 pins the one search every account shares: base-commit parity (or a superset), fragments, whole numbers in every format, and
+// the Reports > Sales matcher, where a number in a cashier column stays closed without the grant. Part 3 covers the audit log and import
+// review, which stay closed. Part 4 runs MUTANTS of the same sources through the same assertions: each must fail.
 //
 // Run (from cloudflare/): node scripts/test-phone-search-guard-pure.cjs
 const assert = require('node:assert/strict')
@@ -60,6 +58,7 @@ function freshDb() {
   customer.run(5, 'Fixture Pairs', '12 34 56 78', null, null, null, 'LC-P28-5', '12345678')
   customer.run(6, 'Fixture Short', '1234567', null, null, null, 'LC-P28-6', '1234567')
   customer.run(7, 'Fixture Legacy', 'Tel099456789', null, null, null, 'LC-P28-7', '099456789')
+  customer.run(8, 'Fixture Option', '', null, option('Home', '+855 97 333 444', 'Street 5'), null, 'LC-P28-8', null)
   customer.run(4, 'Fixture Visal', '+855 12 777 888', null, null, 'Visal Trading', 'LC-P28-4', '012777888')
   const supplier = db.prepare('INSERT INTO suppliers (id, name, phone, address, company, contact_person) VALUES (?, ?, ?, ?, ?, ?)')
   supplier.run(1, 'Fixture Supplies', '077 333 444', option('Office', '078 444 555', 'Street 3'), 'Fixture Co', 'Vanna')
@@ -88,13 +87,13 @@ function run(load, { baseLoad }) {
   const { buildAuditLogFilters } = load('auditLogQuery')
   const { buildImportReviewWhere } = load('importReviewQuery')
   const db = freshDb()
-  const ids = (table, query, access) => {
-    const clause = buildContactMatchClause(table, query, 'search', access)
+  const ids = (table, query) => {
+    const clause = buildContactMatchClause(table, query, 'search')
     if (!clause) return null
     return db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params).map((row) => row.id)
   }
-  const pickerIds = (query, access) => {
-    const clause = buildSalesCustomerMatchClause(query, access)
+  const pickerIds = (query) => {
+    const clause = buildSalesCustomerMatchClause(query)
     if (!clause) return null
     return db.prepare(`SELECT id FROM customers WHERE ${clause.sql} ORDER BY id`).all(clause.params).map((row) => row.id)
   }
@@ -115,176 +114,155 @@ function run(load, { baseLoad }) {
     for (const word of ['dara', 'RCP-1234', 'a1', '', '-', '087a', 'p28-0001']) assert.ok(!guard.isBareNumberWord(word), word)
   })
 
-  // ---- 2. a holder searches exactly as before -----------------------------------------------------------------------
-  check('holder: byte-equal to the base commit for every query and table', () => {
+  // ---- 2. every account searches exactly like the holder did before --------------------------------------------------------
+  check('every account: byte-equal to the base commit for every query and table, or a superset of it', () => {
     const baseContact = baseLoad('contactSearch')
     const baseSales = baseLoad('salesCustomerSearch')
-    // A whole number in a form the word match cannot find (+855, 00855, another script) now also finds its contact for a holder: a superset.
+    // A typed number (whatever separators the stored phone has), or digits of another script, now also finds its contact: a superset.
     const sameOrMore = (label, table, q, lane, base) => {
       if (JSON.stringify(lane) === JSON.stringify(base)) return
       const probe = guard.phoneProbeOf(q)
-      assert.ok((probe.kind === 'full' && !probe.plain) || /[^\x00-\x7f]/.test(q), `${label}: only a whole number in another form, or digits of another script, may differ from the base`)
+      assert.ok((probe.kind === 'full' && !probe.plain) || guard.typedPhoneDigitForms(q) !== null || /[^\x00-\x7f]/.test(q), `${label}: only a typed number (whatever separators the stored phone has), or digits of another script, may differ from the base`)
       const run = (clause) => (clause ? db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params).map((row) => row.id) : [])
       const laneIds = run(lane)
-      assert.ok(run(base).every((id) => laneIds.includes(id)), `${label}: a holder loses nothing (${laneIds} vs ${run(base)})`)
+      assert.ok(run(base).every((id) => laneIds.includes(id)), `${label}: nothing the base found is lost (${laneIds} vs ${run(base)})`)
     }
     for (const table of TABLES) for (const q of QUERIES) {
-      sameOrMore(`${table} ${JSON.stringify(q)}`, table, q, buildContactMatchClause(table, q, 'search', OPEN), baseContact.buildContactMatchClause(table, q, 'search'))
+      sameOrMore(`${table} ${JSON.stringify(q)}`, table, q, buildContactMatchClause(table, q, 'search'), baseContact.buildContactMatchClause(table, q, 'search'))
     }
-    for (const q of QUERIES) sameOrMore(`picker ${JSON.stringify(q)}`, 'customers', q, buildSalesCustomerMatchClause(q, OPEN), baseSales.buildSalesCustomerMatchClause(q))
+    for (const q of QUERIES) sameOrMore(`picker ${JSON.stringify(q)}`, 'customers', q, buildSalesCustomerMatchClause(q), baseSales.buildSalesCustomerMatchClause(q))
   })
-  check('holder: a number fragment still finds the contact', () => {
-    assert.deepEqual(ids('customers', '087', OPEN), [1])
-    assert.deepEqual(ids('customers', '654', OPEN), [1])
-    assert.deepEqual(ids('customers', '111', OPEN), [1])
-    assert.deepEqual(ids('suppliers', '444', OPEN), [1])
-    assert.deepEqual(ids('delivery_contacts', '666', OPEN), [1])
-    assert.deepEqual(pickerIds('0876', OPEN), [1])
-    assert.deepEqual(pickerIds('876', OPEN), [1])
+  check('a number fragment finds the contact (owner decision of 10 Nov 2026: the same for an account without the grant)', () => {
+    assert.deepEqual(ids('customers', '087'), [1])
+    assert.deepEqual(ids('customers', '654'), [1])
+    assert.deepEqual(ids('customers', '111'), [1])
+    assert.deepEqual(ids('customers', '0876'), [1])
+    assert.deepEqual(ids('suppliers', '444'), [1])
+    assert.deepEqual(ids('delivery_contacts', '666'), [1])
+    assert.deepEqual(pickerIds('0876'), [1])
+    assert.deepEqual(pickerIds('876'), [1])
+    assert.deepEqual(ids('customers', '98 111'), [1], 'a Contact Option phone')
+    assert.deepEqual(ids('suppliers', '333'), [1])
+    assert.deepEqual(ids('suppliers', '444 555'), [1])
+    assert.deepEqual(ids('delivery_contacts', '555'), [1])
+    assert.deepEqual(ids('delivery_contacts', '666 777'), [1])
+    assert.deepEqual(ids('customers', '0891'), [2])
+    assert.deepEqual(ids('customers', '12345').sort(), [5, 6])
   })
-
-  // ---- 3. an account without the grant: no oracle, still finds the customer by the whole number -----------------------
-  check('no grant: a digit fragment finds nothing through a phone column', () => {
-    const fragments = ['087', '0876', '087 654', '654', '321', '654321', '98 111', '111', '222', '111 111 111 111', '654 654 654', '0123 0123 0123', '345 345 345', '1 2 3 4 5 6 7']
-    for (const q of fragments) {
-      for (const table of TABLES) assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${JSON.stringify(q)}`)
-      assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${JSON.stringify(q)}`)
+  check('the last digits and the first digits find the customer, across the separators the stored phone has', () => {
+    for (const [q, expected] of [['7654', [1]], ['765432', [1]], ['0876 5432', [1]], ['4321', [1]], ['321', [1]], ['12777', [4]], ['7888', [4]], ['012 777 888', [4]], ['012777888', [4]], ['+855 12 777 888', [4]], ['85512777888', [4]]]) {
+      assert.deepEqual(ids('customers', q), expected, `customers ${q}`)
+      assert.deepEqual(pickerIds(q), expected, `picker ${q}`)
     }
-    for (const [table, q] of [['suppliers', '333'], ['suppliers', '444 555'], ['suppliers', '078'], ['delivery_contacts', '555'], ['delivery_contacts', '095'], ['delivery_contacts', '666 777']]) assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${q}`)
+    assert.deepEqual(ids('suppliers', '8444'), [1], 'a run across the separators of a Contact Option phone')
+    assert.deepEqual(ids('delivery_contacts', '5666'), [1], 'a delivery contact')
+    assert.deepEqual(ids('customers', '1234'), [5, 6])
+    db.prepare("INSERT INTO customers (id, name, phone, phone_normalized) VALUES (90, 'Cache Only', 'ask at the shop', '011222333')").run()
+    assert.deepEqual(ids('customers', '011222333'), [90], 'the cache column finds a customer whose phone text holds no digits')
+    assert.deepEqual(ids('customers', '222333'), [3], 'the cache column is compared whole: a fragment of it finds nobody')
+    db.prepare('DELETE FROM customers WHERE id = 90').run()
   })
-  check('no grant: the whole number in a common format finds the customer', () => {
-    for (const q of ['087 654 321', '(087) 654 321']) assert.deepEqual(ids('customers', q, CLOSED), [1], `customers ${q}`)
-    // The directory list never found a compact number typed against a spaced one (a holder neither); the picker does.
-    for (const q of ['087654321', '087-654-321']) assert.deepEqual(ids('customers', q, CLOSED), ids('customers', q, OPEN), `customers ${q} behaves as for a holder`)
-    for (const q of ['087654321', '087 654 321', '087-654-321', '(087) 654 321']) assert.deepEqual(pickerIds(q, CLOSED), [1], `picker ${q}`)
-    for (const q of ['+855 87 654 321', '85587654321']) assert.deepEqual(pickerIds(q, CLOSED), [1], `picker ${q}`)
-    assert.deepEqual(ids('customers', '098 111 222', CLOSED), [1], 'a Contact Option number finds its customer')
-    assert.deepEqual(ids('customers', '089100200', CLOSED), [2])
-    assert.deepEqual(ids('customers', '010 222 333', CLOSED), [3])
-    assert.deepEqual(ids('suppliers', '077 333 444', CLOSED), [1])
-    // The supplier index has no address column, so a supplier's Contact Option number is not searchable for anyone (as before).
-    assert.deepEqual(ids('suppliers', '078 444 555', CLOSED), ids('suppliers', '078 444 555', OPEN))
-    assert.deepEqual(ids('delivery_contacts', '096 555 666', CLOSED), [1])
-    assert.deepEqual(ids('delivery_contacts', '095-666-777', CLOSED), [1])
+  check('a number typed with other punctuation is compared as one whole number (equality, never containment)', () => {
+    assert.deepEqual(ids('customers', '087/654/321'), [1])
+    assert.deepEqual(ids('customers', '098/111/222'), [1], 'a Contact Option number finds its customer')
+    assert.deepEqual(ids('customers', '87/654/321'), [], 'a tail typed with such punctuation is not read as a fragment')
+    assert.deepEqual(ids('customers', '98/111/222'), [], 'the same for a Contact Option number')
+    assert.deepEqual(ids('customers', '097/333/444'), [8], 'a Contact Option number saved with +855 (the digits are held as 85597333444)')
+    assert.deepEqual(ids('delivery_contacts', '096/555/666'), [1])
   })
-  check('no grant: a whole number written in short groups finds its customer (the open word match is kept)', () => {
-    assert.deepEqual(ids('customers', '12 34 56 78', OPEN), [5])
-    assert.deepEqual(ids('customers', '12 34 56 78', CLOSED), [5])
-    assert.deepEqual(ids('customers', '12 34 56', CLOSED), [], 'a fragment of it is still a probe')
+  check('the whole number in a common format finds the customer', () => {
+    for (const q of ['087 654 321', '(087) 654 321', '087654321', '087-654-321']) {
+      assert.deepEqual(ids('customers', q), [1], `customers ${q}`)
+      assert.deepEqual(pickerIds(q), [1], `picker ${q}`)
+    }
+    for (const q of ['+855 87 654 321', '85587654321']) assert.deepEqual(pickerIds(q), [1], `picker ${q}`)
+    assert.deepEqual(ids('customers', '098 111 222'), [1], 'a Contact Option number finds its customer')
+    assert.deepEqual(ids('customers', '089100200'), [2])
+    assert.deepEqual(ids('customers', '010 222 333'), [3])
+    assert.deepEqual(ids('suppliers', '077 333 444'), [1])
+    assert.deepEqual(ids('suppliers', '078 444 555'), [1], 'a supplier Contact Option number finds the supplier')
+    assert.deepEqual(ids('delivery_contacts', '096 555 666'), [1])
+    assert.deepEqual(ids('delivery_contacts', '095-666-777'), [1])
+    assert.deepEqual(ids('customers', '12 34 56 78'), [5])
+    assert.deepEqual(ids('customers', '12 34 56'), [5, 6])
   })
-  check('no grant: a near-miss whole number finds nobody (compared as one string)', () => {
+  check('a near-miss number finds nobody', () => {
     for (const q of ['087 654 322', '087 654 320', '087 655 321', '187 654 321']) {
-      assert.deepEqual(ids('customers', q, CLOSED), [], q)
-      assert.deepEqual(pickerIds(q, CLOSED), [], q)
+      assert.deepEqual(ids('customers', q), [], q)
+      assert.deepEqual(pickerIds(q), [], q)
     }
   })
-  check('no grant: names, membership numbers, e-mail and company search as before', () => {
+  check('names, membership numbers, e-mail and company search as before', () => {
     for (const [table, q] of [['customers', 'dara'], ['customers', 'soph'], ['customers', 'dara@example'], ['customers', 'visal trading'], ['suppliers', 'vanna'], ['suppliers', 'fixture co'], ['delivery_contacts', 'north'], ['delivery_contacts', 'courier']]) {
-      assert.deepEqual(ids(table, q, CLOSED), ids(table, q, OPEN), `${table} ${q}`)
-      assert.ok((ids(table, q, CLOSED) || []).length >= 1, `${table} ${q} finds something`)
+      assert.ok((ids(table, q) || []).length >= 1, `${table} ${q} finds something`)
     }
-    // The digit in a membership number is a digit word: it reads the membership column, not the phone tokens a holder's search also hits.
-    assert.deepEqual(ids('customers', 'LC-P28-1', CLOSED), [1], 'a membership number made of digits and letters still finds its customer')
-    assert.deepEqual(ids('customers', 'lc p28 2', CLOSED), [2])
-    assert.ok(ids('customers', 'LC-P28-1', OPEN).length > 1, 'positive control: the open search also matches the phone tokens that begin with 1')
-    assert.deepEqual(pickerIds('dara', CLOSED), pickerIds('dara', OPEN))
+    assert.ok(ids('customers', 'LC-P28-1').includes(1), 'a membership number made of digits and letters finds its customer')
+    assert.ok(ids('customers', 'lc p28 2').includes(2))
   })
-  check('no grant: a name that is itself a number is not a way to read that number', () => {
-    assert.deepEqual(ids('customers', '010 222 333', CLOSED), [3], 'found as a whole number (its phone is the same number)')
-    for (const q of ['010', '222', '333', '222 333', '0102 2']) assert.deepEqual(ids('customers', q, CLOSED), [], q)
-    assert.ok(ids('customers', '222', OPEN).includes(3), 'positive control: the open search reads the numeric name')
+  check('a customer saved under its number, and a supplier whose contact person is one, are found by a fragment of it', () => {
+    assert.deepEqual(ids('customers', '0102 2'), [3])
+    assert.ok(ids('customers', '222').includes(3))
+    assert.ok(ids('suppliers', '252').includes(2))
+    assert.ok(ids('suppliers', '097 252').includes(2))
+    assert.deepEqual(ids('suppliers', 'noted'), [2])
   })
-  check('no grant: a supplier whose contact person is a number is not a way to read that number (review B3)', () => {
-    for (const q of ['252', '812', '097 252', '0972528', '252 812', '097 252 812']) assert.deepEqual(ids('suppliers', q, CLOSED), [], `suppliers ${JSON.stringify(q)}`)
-    assert.ok(ids('suppliers', '252', OPEN).includes(2), 'positive control: the open search reads the contact person')
-    assert.deepEqual(ids('suppliers', 'noted', CLOSED), [2], 'a word of the name still finds the supplier')
+  check('mixed text and digits searches the words together', () => {
+    assert.deepEqual(ids('customers', 'dara 087'), [1])
+    assert.deepEqual(ids('customers', 'dara 111'), [1])
+    assert.deepEqual(ids('customers', 'sophea 087'), [])
   })
-  check('no grant: mixed text and digits never reaches a phone column', () => {
-    assert.deepEqual(ids('customers', 'dara 087', CLOSED), [])
-    assert.deepEqual(ids('customers', 'dara 087 654 321', CLOSED), [])
-    assert.deepEqual(ids('customers', 'dara 111', CLOSED), [])
-  })
-  check('no grant: SQL never references the phone-only trigram table for a digit word', () => {
-    for (const table of TABLES) for (const q of ['087', '654 321', '087 654 321', 'dara 087']) {
-      const clause = buildContactMatchClause(table, q, 'search', CLOSED)
-      assert.ok(clause && !/_fts_phone/.test(clause.sql) || /_fts_phone/.test(clause.sql) && guard.phoneProbeOf(q).kind === 'full', `${table} ${q}: ${clause && clause.sql}`)
-    }
-  })
-  check('no grant: the whole-number branch compares ONE digit string (the repeated-word trick fails)', () => {
-    const clause = buildContactMatchClause('customers', '654 654 654', 'search', CLOSED)
-    assert.ok(clause.params.search_digits_0 === '654654654', JSON.stringify(clause.params))
-    assert.ok(/=@search_digits_0/.test(clause.sql) && !/instr\(/.test(clause.sql), 'equality, never containment')
-  })
-  check('no grant: a digit fragment disguised from the raw text is still a fragment (the matcher reads accents away and a letter o as a zero)', () => {
-    const disguised = ['0891\u0301', '089\u03001', '0891\u200D', 'o8910', 'O8910', 'dara 0891\u0301', '089 1\u0301', '٠٨٩١', '０８９１', '0\u0301891']
-    for (const q of disguised) {
+  check('a digit fragment disguised from the raw text finds what the plain fragment finds (the matcher reads accents away and a letter o as a zero)', () => {
+    for (const q of ['0891́', '089̀1', '0891‍', 'o8910', 'O8910', 'dara 0891́', '089 1́', '٠٨٩١', '０８９１', '0́891']) {
       assert.equal(guard.phoneProbeOf(q).kind, 'partial', `kind(${JSON.stringify(q)}) is decided on the words the matcher searches`)
-      for (const table of TABLES) assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${JSON.stringify(q)}`)
-      assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${JSON.stringify(q)}`)
     }
-    assert.deepEqual(ids('customers', '0891', OPEN), [2], 'positive control: a holder finds customer 2 by the plain fragment')
-    for (const [disguise, plain] of [['0891\u0301', '0891'], ['o8910', '08910'], ['0891\u200D', '0891']]) {
-      assert.deepEqual(ids('customers', disguise, OPEN), ids('customers', plain, OPEN), `a holder reads ${JSON.stringify(disguise)} as the plain digits`)
+    assert.deepEqual(ids('customers', '0891'), [2])
+    for (const [disguise, plain] of [['0891́', '0891'], ['o8910', '08910'], ['0891‍', '0891'], ['٠٨٩١', '0891'], ['０８９１', '0891']]) {
+      assert.deepEqual(ids('customers', disguise), ids('customers', plain), `${JSON.stringify(disguise)} reads as the plain digits`)
+      assert.deepEqual(pickerIds(disguise), pickerIds(plain), `picker ${JSON.stringify(disguise)}`)
     }
   })
-  check('no grant: a digit fragment glued to a combining mark, a variation selector, an enclosing mark or a letter is still a fragment', () => {
-    // The FTS tokenizer (unicode61) drops these marks, so "654" + U+FE0F finds what "654" finds; each is a word that holds a digit.
-    const MARKS = [0xfe0f, 0xfe00, 0x1dc0, 0x20d0, 0xfe20, 0xe31, 0x17c9, 0x20e3, 0x483, 0x5b0, 0x610, 0x93c, 0x301, 0x34f, 0x1ab0].map((cp) => String.fromCodePoint(cp))
-    const FRAGMENTS = [['customers', '654'], ['customers', '0891'], ['customers', '098 111'], ['suppliers', '333'], ['suppliers', '077'], ['delivery_contacts', '555'], ['delivery_contacts', '096']]
-    for (const [table, plain] of FRAGMENTS) {
-      assert.ok(ids(table, plain, OPEN).length >= 1, `positive control: a holder finds ${table} by ${plain}`)
-      for (const mark of MARKS) {
-        for (const q of [plain + mark, plain.slice(0, 1) + mark + plain.slice(1), 'x ' + plain + mark]) {
-          assert.deepEqual(ids(table, q, CLOSED), [], `${table} ${JSON.stringify(q)}`)
-        }
-      }
+  check('a legacy phone saved glued to letters is found by its digits', () => {
+    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'tel 0994', 'TEL0994']) {
+      assert.deepEqual(ids('customers', q), [7], q)
+      assert.deepEqual(pickerIds(q), [7], `picker ${q}`)
     }
-    for (const mark of MARKS) {
-      assert.deepEqual(pickerIds('654' + mark, CLOSED), [], `picker 654 + U+${mark.codePointAt(0).toString(16)}`)
-      assert.deepEqual(pickerIds('0891' + mark, CLOSED), [])
-    }
-    for (const q of ['tel0994', 'tel09945', 'tel099456789', 'tel 0994', 'TEL0994', 'dara tel0994']) {
-      assert.deepEqual(ids('customers', q, CLOSED), [], `legacy phone glued to letters: ${q}`)
-      assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${q}`)
-    }
-    assert.deepEqual(ids('customers', 'tel0994', OPEN), [7], 'positive control: a holder finds the legacy "Tel099456789" by the prefix')
-    assert.deepEqual(ids('customers', 'tel099456789', OPEN), [7])
+    assert.deepEqual(ids('customers', '099456789'), [7], 'the whole number finds it through the cache column')
+    assert.deepEqual(ids('customers', '56789'), [7])
   })
-  check('no grant: the whole number is EQUAL to the phone, never contained in it (an 8-digit tail names nobody)', () => {
+  check('a fragment of eight digits or more is contained in the phone, not only equal to it', () => {
     for (const q of ['87654321', '+87654321', '08765432', '(87654321)']) {
-      assert.deepEqual(ids('customers', q, CLOSED), [], `customers ${q}`)
-      assert.deepEqual(pickerIds(q, CLOSED), [], `picker ${q}`)
+      assert.deepEqual(ids('customers', q), [1], `customers ${q}`)
+      assert.deepEqual(pickerIds(q), [1], `picker ${q}`)
     }
-    assert.deepEqual(pickerIds('87654321', OPEN), [1], 'positive control: a holder keeps the containment match of the picker')
   })
-  check('every account finds a whole number written +855, 00855, in Khmer digits or in full-width digits (a holder too)', () => {
+  check('a whole number written +855, 00855, in Khmer digits or in full-width digits finds its customer', () => {
     for (const q of ['00855 87 654 321', '0085587654321', '+៨៥៥ ៨៧ ៦៥៤ ៣២១', '០៨៧ ៦៥៤ ៣២១', '０８７６５４３２１', '+855 87 654 321', '855 87 654 321']) {
-      for (const [label, access] of [['holder', OPEN], ['no grant', CLOSED]]) {
-        assert.deepEqual(ids('customers', q, access), [1], `customers ${label} ${q}`)
-        assert.deepEqual(pickerIds(q, access), [1], `picker ${label} ${q}`)
-      }
+      assert.deepEqual(ids('customers', q), [1], `customers ${q}`)
+      assert.deepEqual(pickerIds(q), [1], `picker ${q}`)
     }
-    assert.deepEqual(ids('suppliers', '00855 77 333 444', CLOSED), [1])
-    assert.deepEqual(ids('delivery_contacts', '+៨៥៥ ៩៦ ៥៥៥ ៦៦៦', OPEN), [1])
+    assert.deepEqual(ids('suppliers', '00855 77 333 444'), [1])
+    assert.deepEqual(ids('delivery_contacts', '+៨៥៥ ៩៦ ៥៥៥ ៦៦៦'), [1])
   })
-  check('Reports > Sales search: a holder matches the phone by substring; without the grant only a whole number matches', () => {
+  check('the contact search takes no account: the phone is searched as stored and only the response masks it', () => {
+    const source = readLib('contactSearch') + readLib('salesCustomerSearch')
+    assert.ok(!/fullPhone|PhoneSearchAccess/.test(source), 'no branch on the access level is left in the contact search')
+    assert.equal(buildContactMatchClause.length, 3)
+    assert.equal(buildSalesCustomerMatchClause.length, 1)
+  })
+  check('Reports > Sales search: the customer is found by a fragment of the name or phone, for every account; a number in another column stays closed without the grant', () => {
     const rows = [
       { id: 1, receipt_number: 'P28-0001', customer: 'Fixture Dara', customer_phone: '087 654 321', cashier: 'Za', branch: 'Shop', payment_method: 'Cash' },
       { id: 2, receipt_number: 'P28-0002', customer: '010 222 333', customer_phone: '010 222 333', cashier: 'Za', branch: 'Shop', payment_method: 'Cash' },
       { id: 3, receipt_number: 'P28-0003', customer: 'Fixture Sophea', customer_phone: '+855 89 100 200', cashier: 'Za', branch: 'Shop', payment_method: 'ABA' },
+      { id: 4, receipt_number: 'P28-0004', customer: 'Walk-in', customer_phone: '', cashier: '093 456 789', branch: 'Shop', payment_method: 'Cash' },
     ]
     const found = (search, access) => rows.filter(guard.salesReportSearchMatcher(search.trim().toLowerCase(), access)).map((row) => row.id)
-    for (const q of ['654', '65', '8765', '087', '321', '054 3', '222', '010 2', '0102', '910', '100 200', '089 1']) {
-      assert.deepEqual(found(q, CLOSED), [], `no grant: fragment ${JSON.stringify(q)}`)
+    for (const [q, expected] of [['654', [1]], ['65', [1]], ['087', [1]], ['321', [1]], ['054 3', []], ['222', [2]], ['010 2', [2]], ['100 200', [3]], ['87654321', []], ['087 654 321', [1]], ['087654321', [1]], ['+855 87 654 321', [1]], ['0085587654321', [1]], ['០៨៧ ៦៥៤ ៣២១', [1]], ['010 222 333', [2]], ['010222333', [2]], ['089100200', [3]], ['dara', [1]], ['P28-0001', [1]], ['za', [1, 2, 3]], ['aba', [3]], ['', [1, 2, 3, 4]]]) {
+      for (const [label, access] of [['holder', OPEN], ['no grant', CLOSED]]) assert.deepEqual(found(q, access), expected, `${label}: ${JSON.stringify(q)}`)
     }
-    for (const [q, expected] of [['087 654 321', [1]], ['087654321', [1]], ['+855 87 654 321', [1]], ['0085587654321', [1]], ['០៨៧ ៦៥៤ ៣២១', [1]], ['010 222 333', [2]], ['010222333', [2]], ['089100200', [3]], ['dara', [1]], ['P28-0001', [1]], ['za', [1, 2, 3]], ['aba', [3]], ['', [1, 2, 3]]]) {
-      assert.deepEqual(found(q, CLOSED), expected, `no grant: ${JSON.stringify(q)}`)
-    }
-    for (const q of ['087 654 322', '87654321', '0102223333']) assert.deepEqual(found(q, CLOSED), [], `no grant: near miss ${q}`)
-    assert.deepEqual(found('654', OPEN), [1], 'positive control: a holder matches the phone by substring')
-    assert.deepEqual(found('222', OPEN), [2])
-    assert.deepEqual(found('0085587654321', OPEN), [1], 'a holder finds a whole number in any form too')
-    assert.deepEqual(found('dara', OPEN), found('dara', CLOSED))
+    for (const q of ['087 654 322', '0102223333']) assert.deepEqual(found(q, CLOSED), [], `no grant: near miss ${q}`)
+    assert.deepEqual(found('456', OPEN), [4], 'positive control: a holder finds the sale by the number its cashier was saved under')
+    assert.deepEqual(found('456', CLOSED), [], 'without the grant a number saved as a cashier is not searchable (the response masks it)')
   })
 
   // ---- the other search surfaces --------------------------------------------------------------------------------------
@@ -345,27 +323,24 @@ console.log('PASS phone search guard: classification, holder parity, no-oracle, 
 
 // ---- 4. mutants ------------------------------------------------------------------------------------------------------
 const mutants = [
-  ['the two matches share parameter names', { contactSearch: replaceOnce('`${paramPrefix}_restricted`', 'paramPrefix') }],
-  ['guard ignored (every account searches open)', { contactSearch: replaceOnce('if (access.fullPhone) {', 'if (true) {') }],
-  ['digit words restricted only when the raw text is all digits (the disguised-search bypass)', { contactSearch: replaceOnce('`${paramPrefix}_restricted`, true)', "`${paramPrefix}_restricted`, /^[\\d\\s+().-]+$/.test(String(rawSearch ?? '')))") }],
   ['whole number classified from the raw words, not the matcher words', { phoneSearchGuard: replaceOnce('const words = tokenizeSearchWords(rawSearch)', "const words = String(rawSearch ?? '').split(/\\s+/).filter(Boolean)") }],
   ['whole number compared by containment', { phoneSearchGuard: replaceOnce('return `${digitsSql}=@${key}`', 'return `instr(${digitsSql},@${key})>0`') }],
-  ['picker whole number compared by containment', { salesCustomerSearch: replaceOnce('(phone_normalized=@${key} OR ${displayDigits}=@${key})', '(phone_normalized=@${key} OR instr(${displayDigits},@${key})>0)') }],
+  ['digit run dropped', { contactSearch: replaceOnce('if (forms) {', 'if (false) {') }],
+  ['digit run ignores the cache column', { contactSearch: replaceOnce("table === 'customers' ? 'phone_normalized' : undefined", 'undefined') }],
+  ['digit run matches every row with a primary phone (containment test always true)', { phoneSearchGuard: replaceOnce('primary.push(`instr(${primaryDigits},@${key})>0`)', 'primary.push(`instr(${primaryDigits},@${key})>-1`)') }],
+  ['whole number compared to a Contact Option phone by containment', { phoneSearchGuard: replaceOnce('return `${optionDigits}=@${key}`', 'return `instr(${optionDigits},@${key})>0`') }],
   ['non-ASCII digits are not folded', { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false') }],
   ['Reports > Sales search treats everyone as a holder', { phoneSearchGuard: replaceOnce('if (access.fullPhone) return (row) =>', 'if (true) return (row) =>') }],
-  ['Reports > Sales search reads a numeric customer name', { phoneSearchGuard: replaceOnce('restrictedTextOf(key, row[key] || \'\').toLowerCase().includes(search)', 'text(row, key).includes(search)') }],
+  ['Reports > Sales search reads a cashier saved as a number', { phoneSearchGuard: replaceOnce('restrictedTextOf(key, row[key] || \'\').toLowerCase().includes(search)', 'text(row, key).includes(search)') }],
   ['Reports > Sales search compares the whole number by containment', { phoneSearchGuard: replaceOnce('probe.forms.includes(typed) || probe.forms.includes(phoneDigitsOf(text))', 'probe.forms.some((form) => typed.includes(form))') }],
   ['audit word guard ignores punctuation around digits', { phoneSearchGuard: replaceOnce('return !/\\p{L}/u.test(ascii) || /["{}[\\]:,\\\\]/.test(ascii)', 'return !/\\p{L}/u.test(ascii) && /^[+\\d().-]+$/.test(ascii)') }],
-  ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (false && hasDigit(word))') }],
-  ['only an all-digit word is restricted (a mark or a letter glued to the digits escapes)', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))') }],
-  ['trigram table kept for digit words', { contactSearch: replaceOnce('&& !(digitWordsAvoidPhones && words.some(hasDigit))', '') }],
-  ['whole-number branch without the digit comparison', { contactSearch: replaceOnce('(${open.sql} AND ${exact.sql})', '(${open.sql})') }],
   ['whole number threshold 8 -> 3 digits', { phoneSearchGuard: replaceOnce('export const FULL_NUMBER_MIN_DIGITS = 8', 'export const FULL_NUMBER_MIN_DIGITS = 3') }],
   ['mixed text and digits counts as a whole number', { phoneSearchGuard: (source) => replaceOnce("const digits = toAsciiDigits(words.join(''))", "const digits = toAsciiDigits(words.join('')).replace(/\\D/g, '')")(replaceOnce('if (!words.every(isDigitWord)) return PARTIAL_PROBE', '')(source)) }],
   ['digit comparison drops the Contact Option phones', { phoneSearchGuard: replaceOnce('return { sql: `(${primary.sql} OR ${options})`', 'return { sql: `(${primary.sql})`') }],
-  ['a number saved as a name is readable through a digit word', { contactSearch: replaceOnce("`(${wordMatch} AND ${PERSON_COLUMNS[table].map((column) => `NOT ${phoneShapedSql(column)}`).join(' AND ')})`", 'wordMatch') }],
-  ['a supplier contact person saved as a number is readable through a digit word', { contactSearch: replaceOnce("suppliers: ['name', 'contact_person'],", "suppliers: ['name'],") }],
-  ['picker keeps the fragment alternatives', { salesCustomerSearch: replaceOnce('if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original', '') }],
+  ['picker no longer shares the directory matcher', { salesCustomerSearch: replaceOnce("return buildContactMatchClause('customers', rawSearch, 'picker')", 'return undefined') }],
+  ['a fragment of fewer than eight digits finds nobody (fragments closed again)', { contactSearch: replaceOnce('if (forms) {', 'if (forms && forms[0].length >= 8) {') }],
+  ['the digit run reads the primary phone only', { phoneSearchGuard: replaceOnce("return { sql: `(${primary.join(' OR ')} OR ${optionExists})`, params }", "return { sql: `(${primary.join(' OR ')})`, params }") }],
+  ['Reports > Sales search drops the customer name and phone', { phoneSearchGuard: replaceOnce('SALES_REPORT_CUSTOMER_KEYS.some((key) => text(row, key).includes(search))', 'false') }],
   ['audit log keeps matching phone text', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", '') }],
   ['audit log blocks money figures too', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", "if (figureOnly) return '0'") }],
   ['audit log money figure matches inside a longer number', { auditLogQuery: replaceOnce('...(figureOnly ? [wholeFigure(column, `@searchFigure${index}`)] : []),', '') }],

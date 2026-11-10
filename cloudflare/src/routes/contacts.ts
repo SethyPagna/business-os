@@ -44,13 +44,12 @@ import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
-import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
+import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT, SALES_PICKER_RANK_PARAM, salesPickerRankKey } from '../lib/contactPicker'
 import { deleteDeliveryContactUnlessUsed } from '../lib/contactDeleteGuard'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
-import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { bodyHasMaskedPhone, isMaskedPhoneInputError, MASKED_PHONE_CODE, MASKED_PHONE_MESSAGE, resolveAddressInput, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 import { isMaskedPhone } from '../lib/phoneMask'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
@@ -1086,7 +1085,7 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
       const predicates: string[] = []
       const params: Record<string, unknown> = { limit }
-      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '', phoneSearchAccessOf(c.get('user')))
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
       if (contactMatch) {
         predicates.push(contactMatch.sql)
         Object.assign(params, contactMatch.params)
@@ -1095,7 +1094,9 @@ function registerContactRoutes(config: ContactConfig) {
       if (idFilter.tooMany) return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
       const idClause = buildContactIdClause(idFilter)
       if (idClause) predicates.push(idClause)
-      const items = await db.prepare(buildSalesCustomerPickerSql(predicates)).all<Record<string, unknown>>(params)
+      const rankKey = contactMatch ? salesPickerRankKey(query.search || query.q || '') : ''
+      if (rankKey) params[SALES_PICKER_RANK_PARAM] = rankKey
+      const items = await db.prepare(buildSalesCustomerPickerSql(predicates, !!rankKey)).all<Record<string, unknown>>(params)
       return c.json({ items, limit })
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
@@ -1117,7 +1118,7 @@ function registerContactRoutes(config: ContactConfig) {
     // lib/contactSearch.ts for why this is a plain MATCH combine rather
     // than the products-side per-group hybrid (contacts search has never
     // had a comma-groups AND/OR UI, just one free-text phrase).
-    const contactMatch = buildContactMatchClause(config.table, search, 'search', phoneSearchAccessOf(c.get('user')))
+    const contactMatch = buildContactMatchClause(config.table, search, 'search')
     if (contactMatch) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
@@ -1218,6 +1219,23 @@ function registerContactRoutes(config: ContactConfig) {
     const offset = (page - 1) * pageSize
     const version = await getContactReadCacheVersion(c.env, config.table)
     const payload = await cachedPhoneJson(c.req.raw, c.executionCtx, c.get('user'), version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      if (contactMatch?.scansRows) {
+        // A digit search reads every row of the table whichever way it is asked, so it asks once: the matching ids in list order with
+        // their year and whether they pass the date filter. The count, the year facet and the page all come from that one scan, and
+        // only the page's own rows are read afterwards.
+        const dateFilter = where.slice(baseWhere.length)
+        const matches = await db.prepare(`SELECT id, substr(${localDateExpr('created_at')}, 1, 4) AS year, ${dateFilter.length ? `CASE WHEN ${dateFilter.join(' AND ')} THEN 1 ELSE 0 END` : '1'} AS in_range FROM ${config.table} ${facetWhereSql} ${orderSql}`).all<{ id: number; year: string | null; in_range: number }>(params)
+        const listed = (matches || []).filter((row) => Number(row.in_range) === 1)
+        const pageIds = listed.slice(offset, offset + pageSize).map((row) => Number(row.id))
+        const rows = pageIds.length
+          ? await db.prepare(`SELECT * FROM ${config.table} WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids))`).all<Record<string, unknown>>({ ids: JSON.stringify(pageIds) })
+          : []
+        const byId = new Map((rows || []).map((row) => [Number(row.id), row]))
+        const pageItems = pageIds.map((id) => byId.get(id)).filter((row): row is Record<string, unknown> => !!row)
+        const availableYears = [...new Set((matches || []).map((row) => String(row.year || '')).filter((value) => /^\d{4}$/.test(value)))].sort((left, right) => Number(right) - Number(left))
+        const total = listed.length
+        return { items: (await withPoints(pageItems)), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
+      }
       const [totalRow, items, yearRows] = await Promise.all([
         db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params),
         db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset }),
@@ -3469,7 +3487,7 @@ app.get('/customers/points-summary', async (c) => {
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
   // old LIKE scan now that customers_fts/customers_fts_phone exist anyway.
-  const contactMatch = buildContactMatchClause('customers', search, 'search', phoneSearchAccessOf(c.get('user')))
+  const contactMatch = buildContactMatchClause('customers', search, 'search')
   if (contactMatch) {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)

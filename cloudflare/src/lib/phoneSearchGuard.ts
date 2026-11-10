@@ -1,11 +1,11 @@
-// Search must not become a way to read a hidden phone number (P2.8, 6.0.1046).
+// An account without `contacts_full_phone` sees `012 *** 678`, and the owner decided (10 Nov 2026, "Allow partial") that it may still
+// find a customer or contact by typing PART of the number (the last four digits, the first digits). The contact lists, the POS picker,
+// the sales list's customer and the reports' customer therefore search a phone as stored for every account (lib/contactSearch.ts);
+// only the response masks it. This reverses the closed-fragment rule of 6.0.1046 for those customer lookups.
 //
-// An account without `contacts_full_phone` sees `012 *** 678`. If its search box still matched any digit fragment against the
-// stored number, typing 0123, 0124, ... and watching which rows come back would spell the hidden digits out one at a time.
-// So for that account a digit-only search word never matches a column that holds a phone number. The one exception is a
-// complete number typed on its own (8 to 15 digits, any common format): it finds the customer, as the owner asked, and is
-// compared as ONE digit string (equality, never containment), so repeating a short word ("345 345 345") cannot turn it back
-// into a 3-digit probe. Everything else (names, receipts, barcodes, membership numbers, e-mail) searches as before.
+// What stays closed (P2.8): a number saved in a column that is NOT a customer's own name or phone (a sale's note, cashier or branch,
+// a return's supplier or note, a shift or audit text). The response masks it, and a digit-only word for an account without the grant
+// reads such a column through the projection's rule (restrictedColumnSql), so typing 0123, 0124, ... cannot spell it out.
 //
 // What counts as a digit word is decided on the words the MATCHER searches (tokenizeSearchWords: accents folded, a letter o
 // beside a digit read as zero, punctuation dropped), never on the raw text: "654" followed by a combining accent and "o8765"
@@ -99,6 +99,18 @@ export function phoneDigitsSql(value: string): string {
   return `replace(replace(replace(${digits},char(9),''),char(10),''),char(13),'')`
 }
 
+const KHMER_DIGITS = Array.from({ length: 10 }, (_, digit) => String.fromCharCode(0x17e0 + digit))
+
+/**
+ * phoneDigitsSql for the contact tables, which also reads a number saved with no-break spaces or in Khmer digits as the digits it is
+ * (canonicalizePhone leaves such a phone out of phone_normalized, so nothing else finds it by number).
+ */
+export function contactPhoneDigitsSql(value: string): string {
+  let digits = phoneDigitsSql(value)
+  for (const [digit, khmer] of KHMER_DIGITS.entries()) digits = `replace(${digits},'${khmer}','${digit}')`
+  return `replace(${digits},char(160),'')`
+}
+
 // D1 refuses a LIKE or GLOB pattern over 50 bytes, so the decimal digits of the scripts a phone may be written in are tested in four
 // patterns of at most five families each (with ASCII): Arabic-Indic, Persian, N'Ko, Devanagari, Bengali; Gurmukhi, Gujarati, Oriya, Tamil,
 // Telugu; Kannada, Malayalam, Thai, Lao, Tibetan; Myanmar, Khmer, Mongolian, full-width, mathematical. A number written in a script not listed
@@ -175,6 +187,24 @@ export function restrictedHaystackParts(columns: readonly SearchColumn[]): strin
   return columns.map(restrictedColumnSql)
 }
 
+/**
+ * A customer's own name and phone, as a search reads them: as stored. Looking a customer up by part of their number is what the owner
+ * allowed an account without the grant to do (10 Nov 2026); the response still shows both masked (phoneAccess.ts).
+ */
+export function customerLookupColumnSql(columnSql: string): string {
+  return `COALESCE(${columnSql},'')`
+}
+
+/** A customer's phone as a search reads it: as stored and again as its bare digits, so the last four digits find "087 654 321". */
+export function customerPhoneLookupSql(columnSql: string): string {
+  return `${customerLookupColumnSql(columnSql)} || ' ' || ${phoneDigitsSql(customerLookupColumnSql(columnSql))}`
+}
+
+/** A customer's name as a search reads it: as stored, and a name that is itself a phone number again as its bare digits. */
+export function customerNameLookupSql(columnSql: string): string {
+  return `${customerLookupColumnSql(columnSql)} || ' ' || CASE WHEN ${phoneShapedSql(columnSql)} THEN ${phoneDigitsSql(customerLookupColumnSql(columnSql))} ELSE '' END`
+}
+
 /** The name the restricted haystack carries inside restrictedSearchScope. */
 export const RESTRICTED_HAYSTACK = 'rh'
 
@@ -204,9 +234,9 @@ export interface PhoneClause {
 }
 
 /** `column` IS this whole number (its digits equal one form of it; a number that merely contains the digits does not match). */
-export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string): PhoneClause {
+export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, digitsOf: (value: string) => string = phoneDigitsSql): PhoneClause {
   const params: Record<string, string> = {}
-  const digitsSql = phoneDigitsSql(columnSql)
+  const digitsSql = digitsOf(columnSql)
   const sql = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_${index}`
     params[key] = form
@@ -215,26 +245,82 @@ export function fullPhoneColumnClause(columnSql: string, probe: Extract<PhonePro
   return { sql: `(${sql.join(' OR ')})`, params }
 }
 
+/**
+ * A cheap necessary condition for a Contact Option phone to hold one of these digit strings: the stripped text of the whole `address` column
+ * holds it. It is checked before the json_each probe so that probe runs only on the few rows that can match, never on every customer.
+ * The JSON escapes of a tab, line feed and carriage return are stripped as well, because the stored value is stripped of those characters.
+ */
+function addressRunPrefilterSql(keys: readonly string[]): string {
+  const text = `replace(replace(replace(${contactPhoneDigitsSql("COALESCE(address,'')")},'\\t',''),'\\n',''),'\\r','')`
+  return holdsAnyRunSql(text, keys)
+}
+
+/** True when the text holds any of the digit strings. The text is computed once per row, in a one-row subquery, however many strings are tried. */
+function holdsAnyRunSql(textSql: string, keys: readonly string[]): string {
+  return `(SELECT ${keys.map((key) => `instr(stripped,@${key})>0`).join(' OR ')} FROM (SELECT ${textSql} AS stripped))`
+}
+
 /** A contact whose primary phone or any Contact Option phone (JSON in `address`) holds this whole number. */
-export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, optionLimit: number): PhoneClause {
-  const primary = fullPhoneColumnClause("COALESCE(phone,'')", probe, paramPrefix)
+export function fullContactPhoneClause(narrow: Extract<PhoneProbe, { kind: 'full' }>, paramPrefix: string, optionLimit: number): PhoneClause {
+  // A primary phone saved as 00855 12 345 678 is the same number as 012 345 678.
+  const probe = { ...narrow, forms: [...narrow.forms, ...narrow.forms.filter((form) => form.startsWith('855')).map((form) => `00${form}`)] }
+  const primary = fullPhoneColumnClause("COALESCE(phone,'')", probe, paramPrefix, contactPhoneDigitsSql)
   const optionObject = "CASE WHEN phone_option.type='object' THEN phone_option.value ELSE '{}' END"
   const optionPhone = `CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`
-  const optionDigits = phoneDigitsSql(optionPhone)
+  const optionDigits = contactPhoneDigitsSql(optionPhone)
   const optionParams: Record<string, string> = {}
   const optionMatches = probe.forms.map((form, index) => {
     const key = `${paramPrefix}_o${index}`
     optionParams[key] = form
     return `${optionDigits}=@${key}`
   })
-  const options = `EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
+  const options = `(${addressRunPrefilterSql(probe.forms.map((_, index) => `${paramPrefix}_o${index}`))} AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
     THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
     WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
-      AND (${optionMatches.join(' OR ')}))`
+      AND (${optionMatches.join(' OR ')})))`
   return { sql: `(${primary.sql} OR ${options})`, params: { ...primary.params, ...optionParams } }
 }
 
-const SALES_REPORT_TEXT_KEYS = ['receipt_number', 'customer', 'cashier', 'branch', 'payment_method'] as const
+/**
+ * A contact whose primary phone or any Contact Option phone holds these digits as a run, whatever separators the stored number has
+ * ("012 345 678" holds 5678, which no token or trigram of the formatted text does). `normalizedColumn` also compares a cache column
+ * (customers.phone_normalized) by equality.
+ */
+export function contactPhoneContainsClause(forms: readonly string[], paramPrefix: string, optionLimit: number, normalizedColumn?: string): PhoneClause {
+  const params: Record<string, string> = {}
+  const primaryDigits = contactPhoneDigitsSql("COALESCE(phone,'')")
+  const optionObject = "CASE WHEN phone_option.type='object' THEN phone_option.value ELSE '{}' END"
+  const optionDigits = contactPhoneDigitsSql(`CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`)
+  const primary: string[] = []
+  const options: string[] = []
+  forms.forEach((form, index) => {
+    const key = `${paramPrefix}_${index}`
+    params[key] = form
+    if (normalizedColumn) primary.push(`${normalizedColumn}=@${key}`)
+    primary.push(`instr(${primaryDigits},@${key})>0`)
+    options.push(`instr(${optionDigits},@${key})>0`)
+  })
+  const optionExists = `(${addressRunPrefilterSql(forms.map((_, index) => `${paramPrefix}_${index}`))} AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
+    THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
+    WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
+      AND (${options.join(' OR ')})))`
+  return { sql: `(${primary.join(' OR ')} OR ${optionExists})`, params }
+}
+
+/** The digit strings a typed number may be stored as (as typed, local 0-form, 855-form), or null when the text is not a bare number of 3 to 15 digits. */
+export function typedPhoneDigitForms(rawSearch: unknown): string[] | null {
+  const raw = toAsciiDigits(String(rawSearch ?? '')).trim()
+  if (!/^[+\d\s().-]+$/.test(raw)) return null
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 3 || digits.length > FULL_NUMBER_MAX_DIGITS) return null
+  const canonical = phoneDigitsOf(digits)
+  const forms = new Set<string>([digits, canonical])
+  if (/^0\d{8,9}$/.test(canonical)) forms.add(`855${canonical.slice(1)}`)
+  return [...forms]
+}
+
+const SALES_REPORT_TEXT_KEYS = ['receipt_number', 'cashier', 'branch', 'payment_method'] as const
+const SALES_REPORT_CUSTOMER_KEYS = ['customer', 'customer_phone'] as const
 
 function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'full' }>): boolean {
   const text = String(value ?? '')
@@ -245,16 +331,16 @@ function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'fu
 
 /**
  * Reports > Sales search (routes/reports.ts), a filter over the report's rows in JS (the matcher is built once per request). `search` is trimmed and lower-cased. A holder
- * matches any text field or the phone by substring, as before (and a whole number in any format). Without the permission the phone
- * is never matched by substring and a customer name that is itself a number counts as empty: only a whole number, equal to the
- * phone (or to that numeric name), matches.
+ * matches any text field or the phone by substring, as before (and a whole number in any format). Without the permission the customer's name and
+ * phone are searched as stored too; a receipt, cashier, branch or payment text that is itself a number counts as empty.
  */
 export function salesReportSearchMatcher(search: string, access: PhoneSearchAccess): (row: Record<string, unknown>) => boolean {
   if (!search) return () => true
   const probe = phoneProbeOf(search)
   const text = (row: Record<string, unknown>, key: string): string => String(row[key] || '').toLowerCase()
   const whole = (row: Record<string, unknown>): boolean => probe.kind === 'full' && (digitsEqualProbe(row.customer_phone, probe) || digitsEqualProbe(row.customer, probe))
-  if (access.fullPhone) return (row) => whole(row) || [...SALES_REPORT_TEXT_KEYS, 'customer_phone'].some((key) => text(row, key).includes(search))
-  // Each key is read through the projection's rule for that key (restrictedTextOf): a customer that is a number reads as empty.
-  return (row) => whole(row) || SALES_REPORT_TEXT_KEYS.some((key) => restrictedTextOf(key, row[key] || '').toLowerCase().includes(search))
+  const customer = (row: Record<string, unknown>): boolean => SALES_REPORT_CUSTOMER_KEYS.some((key) => text(row, key).includes(search))
+  if (access.fullPhone) return (row) => whole(row) || customer(row) || SALES_REPORT_TEXT_KEYS.some((key) => text(row, key).includes(search))
+  // Each other key is read through the projection's rule for that key (restrictedTextOf): a cashier that is a number reads as empty.
+  return (row) => whole(row) || customer(row) || SALES_REPORT_TEXT_KEYS.some((key) => restrictedTextOf(key, row[key] || '').toLowerCase().includes(search))
 }

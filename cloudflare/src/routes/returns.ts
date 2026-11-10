@@ -1,5 +1,5 @@
 import { phoneSearchAccessOf } from '../lib/phoneAccess'
-import { hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
+import { customerNameLookupSql, hasDigit, RESTRICTED_HAYSTACK, restrictedHaystackParts, restrictedSearchScope, restrictedWordHaystacks, type PhoneSearchAccess } from '../lib/phoneSearchGuard'
 import { loyaltyAccrualSql } from '../lib/loyaltyEligibility'
 import { productStockGuardError } from '../lib/productStockGuard'
 import { Hono, type Context } from 'hono'
@@ -712,14 +712,14 @@ function returnsFilter(query: Record<string, string>, range: { sql: string; para
       COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
     )`
     // A return carries no phone column, but a customer, a supplier, a cashier or a note can be a phone number (saved by it), and the
-    // projection masks that. Without the full-phone permission a digit word reads those columns through the projection's own rule
-    // (restrictedColumnSql) and never the folded copy (lib/phoneSearchGuard.ts); the haystack is computed once per row
-    // (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
+    // projection masks that. Without the full-phone permission a digit word reads the customer as stored (a customer is found by part of
+    // their number) and the other columns through the projection's own rule (restrictedColumnSql), never the folded copy
+    // (lib/phoneSearchGuard.ts); the haystack is computed once per row (restrictedSearchScope) and the words read it as RESTRICTED_HAYSTACK.
     const guardDigitWords = !access.fullPhone
     const digitWordHaystack = `(${restrictedHaystackParts([
-      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name', 'r.customer_name',
+      'r.return_number', { sql: 'CAST(r.id AS TEXT)', key: 'id' }, 'r.receipt_number', 'r.cashier_name',
       'r.supplier_name', 'r.reason', 'r.notes', 'r.return_type', 'r.supplier_settlement',
-    ]).join(" || ' ' || ")})`
+    ]).concat(customerNameLookupSql('r.customer_name')).join(" || ' ' || ")})`
     let usesRestrictedHaystack = false
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
