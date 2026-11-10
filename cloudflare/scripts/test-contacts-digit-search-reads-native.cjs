@@ -100,7 +100,7 @@ async function main() {
     new Function('module', 'exports', 'require', buildSync({ entryPoints: [path.join(root, 'src', 'lib', 'contactPicker.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' }).outputFiles[0].text)(pickerModule, pickerModule.exports, require)
     // The picker's own SQL without the rank, run straight on D1: the plain order, and what it reads.
     const direct = async (search) => {
-      const match = clauseModule.exports.buildSalesCustomerMatchClause(search, { fullPhone: true })
+      const match = clauseModule.exports.buildSalesCustomerMatchClause(search)
       const order = []
       const sql = pickerModule.exports.buildSalesCustomerPickerSql([match.sql]).replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (_, name) => { let i = order.indexOf(name); if (i < 0) { order.push(name); i = order.length - 1 } return '?' + (i + 1) })
       const result = await db.prepare(sql).bind(...order.map((name) => (name === 'limit' ? 50 : match.params[name]))).all()
@@ -112,9 +112,12 @@ async function main() {
     record('contacts digit, holder (012345678)', await list('012345678', HOLDER))
     record('contacts digit, holder (345678, a fragment)', await list('345678', HOLDER))
     record('contacts digit, no grant (whole number 012345678)', await list('012345678', NO_GRANT))
+    record('contacts digit, no grant (345678, a fragment)', await list('345678', NO_GRANT))
+    record('contacts digit, no grant (5678, the last four)', await list('5678', NO_GRANT))
     record('contacts name (dara)', await list('dara', HOLDER))
     record('picker digit, holder (012345678)', await picker('012345678', HOLDER))
     record('picker digit, no grant (012345678)', await picker('012345678', NO_GRANT))
+    record('picker digit, no grant (5678, the last four)', await picker('5678', NO_GRANT))
     record('picker name (dara)', await picker('dara', HOLDER))
     record('picker name, ten people share the word (lee)', await picker('lee', HOLDER))
     if (reportOnly) return
@@ -135,12 +138,15 @@ async function main() {
       assert.deepEqual(ids(await list('345679', HOLDER)), [6])
       assert.deepEqual(ids(await list('345678', HOLDER)), [5])
       assert.deepEqual(ids(await list('012345678', NO_GRANT)), [5])
-      assert.deepEqual(ids(await list('345678', NO_GRANT)), [])
+      assert.deepEqual(ids(await list('345678', NO_GRANT)), [5], 'owner decision 10 Nov 2026: a fragment finds the customer without the grant')
+      assert.deepEqual(ids(await list('5678', NO_GRANT)), ids(await list('5678', HOLDER)))
       assert.deepEqual(ids(await list('012333444', HOLDER)), [7], 'JSON escapes of a tab in a stored Contact Option phone do not hide it from the prefilter')
       assert.deepEqual(ids(await list('012333444', NO_GRANT)), [7])
       assert.ok(whole.rows <= scanOnce, `a digit list read ${whole.rows} rows for a ${CUSTOMERS}-row table`)
       assert.ok(measured['contacts digit, holder (345678, a fragment)'].rows <= scanOnce)
       assert.ok(measured['contacts digit, no grant (whole number 012345678)'].rows <= scanOnce)
+      for (const key of ['contacts digit, no grant (345678, a fragment)', 'contacts digit, no grant (5678, the last four)']) assert.ok(measured[key].rows <= scanOnce, `${key} read ${measured[key].rows} rows`)
+      assert.ok(measured['contacts digit, no grant (345678, a fragment)'].rows <= measured['contacts digit, holder (345678, a fragment)'].rows, 'no grant reads no more than the holder')
     })
 
     await check('a number saved with no-break spaces, in Khmer digits or as 00855 is found by the number typed in Latin digits', async () => {
@@ -153,8 +159,8 @@ async function main() {
         assert.deepEqual(ids(await picker('012333666', access)), [9], 'the picker agrees')
       }
       assert.deepEqual(ids(await list('333555', HOLDER)), [8])
-      assert.deepEqual(ids(await list('333555', NO_GRANT)), [], 'a fragment still finds nothing without the grant')
-      assert.deepEqual(ids(await list('333666', NO_GRANT)), [])
+      assert.deepEqual(ids(await list('333555', NO_GRANT)), [8], 'a fragment finds the customer without the grant too')
+      assert.deepEqual(ids(await list('333666', NO_GRANT)), [9])
     })
 
     await check('Contacts list: a digit search costs two statements (scan + the page rows) beside the points reads, within the query ceiling', async () => {
@@ -181,7 +187,7 @@ async function main() {
     })
 
     await check('Sales/POS picker: a digit search scans the table once', async () => {
-      for (const key of ['picker digit, holder (012345678)', 'picker digit, no grant (012345678)']) {
+      for (const key of ['picker digit, holder (012345678)', 'picker digit, no grant (012345678)', 'picker digit, no grant (5678, the last four)']) {
         assert.ok(measured[key].rows <= CUSTOMERS + PAGE_SIZE, `${key} read ${measured[key].rows} rows`)
         assert.equal(measured[key].statements <= measured['picker name (dara)'].statements + 1, true)
       }

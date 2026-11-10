@@ -1,11 +1,11 @@
-// Search must not become a way to read a hidden phone number (P2.8, 6.0.1046).
+// An account without `contacts_full_phone` sees `012 *** 678`, and the owner decided (10 Nov 2026, "Allow partial") that it may still
+// find a customer or contact by typing PART of the number (the last four digits, the first digits). The contact lists, the POS picker,
+// the sales list's customer and the reports' customer therefore search a phone as stored for every account (lib/contactSearch.ts);
+// only the response masks it. This reverses the closed-fragment rule of 6.0.1046 for those customer lookups.
 //
-// An account without `contacts_full_phone` sees `012 *** 678`. If its search box still matched any digit fragment against the
-// stored number, typing 0123, 0124, ... and watching which rows come back would spell the hidden digits out one at a time.
-// So for that account a digit-only search word never matches a column that holds a phone number. The one exception is a
-// complete number typed on its own (8 to 15 digits, any common format): it finds the customer, as the owner asked, and is
-// compared as ONE digit string (equality, never containment), so repeating a short word ("345 345 345") cannot turn it back
-// into a 3-digit probe. Everything else (names, receipts, barcodes, membership numbers, e-mail) searches as before.
+// What stays closed (P2.8): a number saved in a column that is NOT a customer's own name or phone (a sale's note, cashier or branch,
+// a return's supplier or note, a shift or audit text). The response masks it, and a digit-only word for an account without the grant
+// reads such a column through the projection's rule (restrictedColumnSql), so typing 0123, 0124, ... cannot spell it out.
 //
 // What counts as a digit word is decided on the words the MATCHER searches (tokenizeSearchWords: accents folded, a letter o
 // beside a digit read as zero, punctuation dropped), never on the raw text: "654" followed by a combining accent and "o8765"
@@ -187,6 +187,24 @@ export function restrictedHaystackParts(columns: readonly SearchColumn[]): strin
   return columns.map(restrictedColumnSql)
 }
 
+/**
+ * A customer's own name and phone, as a search reads them: as stored. Looking a customer up by part of their number is what the owner
+ * allowed an account without the grant to do (10 Nov 2026); the response still shows both masked (phoneAccess.ts).
+ */
+export function customerLookupColumnSql(columnSql: string): string {
+  return `COALESCE(${columnSql},'')`
+}
+
+/** A customer's phone as a search reads it: as stored and again as its bare digits, so the last four digits find "087 654 321". */
+export function customerPhoneLookupSql(columnSql: string): string {
+  return `${customerLookupColumnSql(columnSql)} || ' ' || ${phoneDigitsSql(customerLookupColumnSql(columnSql))}`
+}
+
+/** A customer's name as a search reads it: as stored, and a name that is itself a phone number again as its bare digits. */
+export function customerNameLookupSql(columnSql: string): string {
+  return `${customerLookupColumnSql(columnSql)} || ' ' || CASE WHEN ${phoneShapedSql(columnSql)} THEN ${phoneDigitsSql(customerLookupColumnSql(columnSql))} ELSE '' END`
+}
+
 /** The name the restricted haystack carries inside restrictedSearchScope. */
 export const RESTRICTED_HAYSTACK = 'rh'
 
@@ -266,7 +284,7 @@ export function fullContactPhoneClause(narrow: Extract<PhoneProbe, { kind: 'full
 /**
  * A contact whose primary phone or any Contact Option phone holds these digits as a run, whatever separators the stored number has
  * ("012 345 678" holds 5678, which no token or trigram of the formatted text does). `normalizedColumn` also compares a cache column
- * (customers.phone_normalized) by equality. Containment: for an account with the full-phone grant only.
+ * (customers.phone_normalized) by equality.
  */
 export function contactPhoneContainsClause(forms: readonly string[], paramPrefix: string, optionLimit: number, normalizedColumn?: string): PhoneClause {
   const params: Record<string, string> = {}
@@ -301,7 +319,8 @@ export function typedPhoneDigitForms(rawSearch: unknown): string[] | null {
   return [...forms]
 }
 
-const SALES_REPORT_TEXT_KEYS =['receipt_number', 'customer', 'cashier', 'branch', 'payment_method'] as const
+const SALES_REPORT_TEXT_KEYS = ['receipt_number', 'cashier', 'branch', 'payment_method'] as const
+const SALES_REPORT_CUSTOMER_KEYS = ['customer', 'customer_phone'] as const
 
 function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'full' }>): boolean {
   const text = String(value ?? '')
@@ -312,16 +331,16 @@ function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'fu
 
 /**
  * Reports > Sales search (routes/reports.ts), a filter over the report's rows in JS (the matcher is built once per request). `search` is trimmed and lower-cased. A holder
- * matches any text field or the phone by substring, as before (and a whole number in any format). Without the permission the phone
- * is never matched by substring and a customer name that is itself a number counts as empty: only a whole number, equal to the
- * phone (or to that numeric name), matches.
+ * matches any text field or the phone by substring, as before (and a whole number in any format). Without the permission the customer's name and
+ * phone are searched as stored too; a receipt, cashier, branch or payment text that is itself a number counts as empty.
  */
 export function salesReportSearchMatcher(search: string, access: PhoneSearchAccess): (row: Record<string, unknown>) => boolean {
   if (!search) return () => true
   const probe = phoneProbeOf(search)
   const text = (row: Record<string, unknown>, key: string): string => String(row[key] || '').toLowerCase()
   const whole = (row: Record<string, unknown>): boolean => probe.kind === 'full' && (digitsEqualProbe(row.customer_phone, probe) || digitsEqualProbe(row.customer, probe))
-  if (access.fullPhone) return (row) => whole(row) || [...SALES_REPORT_TEXT_KEYS, 'customer_phone'].some((key) => text(row, key).includes(search))
-  // Each key is read through the projection's rule for that key (restrictedTextOf): a customer that is a number reads as empty.
-  return (row) => whole(row) || SALES_REPORT_TEXT_KEYS.some((key) => restrictedTextOf(key, row[key] || '').toLowerCase().includes(search))
+  const customer = (row: Record<string, unknown>): boolean => SALES_REPORT_CUSTOMER_KEYS.some((key) => text(row, key).includes(search))
+  if (access.fullPhone) return (row) => whole(row) || customer(row) || SALES_REPORT_TEXT_KEYS.some((key) => text(row, key).includes(search))
+  // Each other key is read through the projection's rule for that key (restrictedTextOf): a cashier that is a number reads as empty.
+  return (row) => whole(row) || customer(row) || SALES_REPORT_TEXT_KEYS.some((key) => restrictedTextOf(key, row[key] || '').toLowerCase().includes(search))
 }

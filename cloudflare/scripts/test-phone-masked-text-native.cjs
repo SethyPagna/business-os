@@ -34,7 +34,6 @@ const MUTANTS = {
   'people: contact_person and cashier are not names': ['lib/phoneAccess.ts', sub('summary|person|cashier', 'summary|xperson|xcashier')],
   'people: username is not a name': ['lib/phoneAccess.ts', sub('|cashier|username|user|', '|cashier|xusername|user|')],
   'people: the cashiers list key is shown': ['lib/phoneAccess.ts', sub("if (key === 'key' && typeof value === 'string' && typeof source.name === 'string'", "if (false && typeof value === 'string' && typeof source.name === 'string'")],
-  'search: a supplier contact person is readable through a digit word': ['lib/contactSearch.ts', sub("suppliers: ['name', 'contact_person'],", "suppliers: ['name'],")],
   'search: the legacy deleted reason is read raw': ['routes/compat.ts', sub("lower(COALESCE(${searchableColumnSql('d.deletion_reason', phoneAccess)}, '')) LIKE @search", "lower(COALESCE(d.deletion_reason, '')) LIKE @search")],
   'search: the legacy deleted cashier filter reads the number': ['routes/compat.ts', sub("lower(trim(${searchableColumnSql({ sql: \"COALESCE(d.cashier_name, d.deleted_by, '')\", key: 'cashier_name' }, phoneAccess)})) = lower(trim(@cashier))", "lower(trim(COALESCE(d.cashier_name, d.deleted_by, ''))) = lower(trim(@cashier))")],
 }
@@ -192,10 +191,11 @@ async function main() {
     t.ok('an account still reads its own display name and username in full', own.status === 200 && own.text.includes('"username":"cashier"'), own.text.slice(0, 200))
   })
 
-  await check('B3 a supplier whose contact person is a number cannot be found by a fragment of it (masking it opens no oracle)', async (t) => {
-    for (const fragment of ['252', '812', '097 252', '0972528']) {
-      const found = itemsOf(await get(`/api/suppliers?search=${enc(fragment)}&page=1&pageSize=50&cb=${++reads}`, 'manager')).some((row) => Number(row.id) === ids.notedSupplier)
-      t.eq(`manager searching "${fragment}"`, found, false)
+  await check('B3 a supplier whose contact person is a number is found by a fragment of it (owner decision of 10 Nov 2026), and the reply shows it masked', async (t) => {
+    for (const fragment of ['252', '812', '097 252']) {
+      const response = await get(`/api/suppliers?search=${enc(fragment)}&page=1&pageSize=50&cb=${++reads}`, 'manager')
+      t.eq(`manager searching "${fragment}"`, itemsOf(response).some((row) => Number(row.id) === ids.notedSupplier), true)
+      t.ok(`manager searching "${fragment}": the number is not in the reply`, !response.text.includes(PHONES.contactPerson))
     }
     t.eq('positive control: the administrator finds it by "252"', itemsOf(await get(`/api/suppliers?search=${enc('252')}&page=1&pageSize=50&cb=${++reads}`, 'admin')).some((row) => Number(row.id) === ids.notedSupplier), true)
   })

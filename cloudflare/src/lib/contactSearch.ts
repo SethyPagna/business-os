@@ -23,7 +23,7 @@
 import { tokenizeSearchWords, expandAliasCandidatesForFts } from './searchMatch'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
 import { formatMembershipNumber, MEMBERSHIP_PREFIX } from './membershipNumber'
-import { contactPhoneContainsClause, fullContactPhoneClause, hasDigit, phoneProbeOf, phoneShapedSql, typedPhoneDigitForms, type PhoneSearchAccess } from './phoneSearchGuard'
+import { contactPhoneContainsClause, fullContactPhoneClause, phoneProbeOf, typedPhoneDigitForms } from './phoneSearchGuard'
 
 export type ContactSearchTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -32,23 +32,6 @@ const FTS_TABLES: Record<ContactSearchTable, { word: string; phone: string }> = 
   customers: { word: 'customers_fts', phone: 'customers_fts_phone' },
   suppliers: { word: 'suppliers_fts', phone: 'suppliers_fts_phone' },
   delivery_contacts: { word: 'delivery_contacts_fts', phone: 'delivery_contacts_fts_phone' },
-}
-
-// The FTS columns that never hold a phone number. A digit-only word of an account without the full-phone permission
-// is matched against these only (lib/phoneSearchGuard.ts), so a membership number still finds its customer.
-const NON_PHONE_COLUMNS: Record<ContactSearchTable, string> = {
-  customers: '{name email company membership_number}',
-  suppliers: '{name email company contact_person}',
-  delivery_contacts: '{name area}',
-}
-
-// The columns that name a person and so can hold a number (a contact saved under its number, a supplier's contact person that is one):
-// the response masks them, so a digit word of an account without the grant may not read a row whose value in one of them is wholly a
-// number. Listing a column here is what lets the response mask it without opening a search oracle (review B3).
-const PERSON_COLUMNS: Record<ContactSearchTable, readonly string[]> = {
-  customers: ['name'],
-  suppliers: ['name', 'contact_person'],
-  delivery_contacts: ['name'],
 }
 
 export interface ContactMatchClause {
@@ -68,9 +51,8 @@ export function buildContactMatchClause(
   table: ContactSearchTable,
   rawSearch: unknown,
   paramPrefix: string,
-  access: PhoneSearchAccess,
 ): ContactMatchClause | undefined {
-  const clause = buildTextOrPhoneMatchClause(table, rawSearch, paramPrefix, access)
+  const clause = buildTextOrPhoneMatchClause(table, rawSearch, paramPrefix)
   const member = table === 'customers' ? membershipLookupOf(rawSearch, paramPrefix) : null
   if (!member) return clause
   return { sql: clause ? `(${clause.sql} OR ${member.sql})` : member.sql, params: { ...clause?.params, ...member.params }, ...(clause?.scansRows ? { scansRows: true } : {}) }
@@ -90,51 +72,31 @@ function membershipLookupOf(rawSearch: unknown, paramPrefix: string): ContactMat
   return { sql: `lower(trim(membership_number)) IN (${marks.join(',')})`, params }
 }
 
+// The same match for every account: what the response shows of a phone (masked or whole) is decided on the way out (lib/phoneAccess.ts),
+// never here. A number is stored with the separators it was saved with ("012 345 678"), which neither the word index (tokens 012, 345,
+// 678) nor the trigram index (no run across a space) can find by its contiguous digits, so a typed number is also compared as digits.
 function buildTextOrPhoneMatchClause(
   table: ContactSearchTable,
   rawSearch: unknown,
   paramPrefix: string,
-  access: PhoneSearchAccess,
 ): ContactMatchClause | undefined {
-  const open = buildOpenContactMatchClause(table, rawSearch, paramPrefix, false)
+  const open = buildOpenContactMatchClause(table, rawSearch, paramPrefix)
+  const forms = typedPhoneDigitForms(rawSearch)
+  if (forms) {
+    const normalizedColumn = table === 'customers' ? 'phone_normalized' : undefined
+    const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT, normalizedColumn)
+    return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params }, scansRows: true } : { ...contains, scansRows: true }
+  }
   const probe = phoneProbeOf(rawSearch)
   const exact = probe.kind === 'full' ? fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT) : null
-  const normalizedColumn = table === 'customers' ? 'phone_normalized' : undefined
-  if (access.fullPhone) {
-    // A number is stored with the separators it was saved with ("012 345 678"), which neither the word index (tokens 012, 345, 678)
-    // nor the trigram index (no run across a space) can find by its contiguous digits, so a typed number is also compared as digits.
-    const forms = typedPhoneDigitForms(rawSearch)
-    if (forms) {
-      const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT, normalizedColumn)
-      return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params }, scansRows: true } : { ...contains, scansRows: true }
-    }
-    if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params, scansRows: true } : undefined)
-    return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params }, scansRows: true }
-  }
-  // The account cannot see numbers. The restriction is decided on the words the matcher searches, for every search, so no
-  // spelling of a digit fragment (accent, letter o, punctuation) reaches a phone column: a digit-only word searches the
-  // non-phone columns only. A whole number also finds the contact whose phone IS that number (equality of the digits, however
-  // the stored number is separated). Its own parameter names: the matches carry different MATCH texts.
-  const restricted = buildOpenContactMatchClause(table, rawSearch, `${paramPrefix}_restricted`, true)
-  if (!exact || probe.kind !== 'full') return restricted
-  const exactParams: Record<string, string> = { ...exact.params }
-  let whole = exact.sql
-  if (normalizedColumn) {
-    const marks = probe.forms.map((form, index) => {
-      exactParams[`${paramPrefix}_pn${index}`] = form
-      return `@${paramPrefix}_pn${index}`
-    })
-    whole = `(${exact.sql} OR ${normalizedColumn} IN (${marks.join(',')}))`
-  }
-  if (!restricted) return { sql: whole, params: exactParams, scansRows: true }
-  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...exactParams, ...restricted.params }, scansRows: true }
+  if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params, scansRows: true } : undefined)
+  return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params }, scansRows: true }
 }
 
 function buildOpenContactMatchClause(
   table: ContactSearchTable,
   rawSearch: unknown,
   paramPrefix: string,
-  digitWordsAvoidPhones: boolean,
 ): ContactMatchClause | undefined {
   const words = tokenizeSearchWords(rawSearch)
   if (!words.length) return undefined
@@ -150,7 +112,6 @@ function buildOpenContactMatchClause(
       // expandAliasCandidates call here would silently reintroduce the
       // exact same never-matches-a-multi-word-target bug the moment any
       // multi-word alias ever does apply to a contact field.
-      if (digitWordsAvoidPhones && hasDigit(word)) return `${NON_PHONE_COLUMNS[table]} : ${word}*`
       const candidateForms = expandAliasCandidatesForFts(word)
       const candidateExprs = candidateForms.map((formWords) =>
         formWords.length > 1 ? `(${formWords.map((w) => `${w}*`).join(' AND ')})` : `${formWords[0]}*`,
@@ -164,14 +125,13 @@ function buildOpenContactMatchClause(
   // query at all, same "drop the whole group" rule
   // buildTrigramMatchExpression already uses rather than silently loosening
   // AND semantics by checking only the long words.
-  const trigramEligible = words.every((word) => word.length >= 3) && !(digitWordsAvoidPhones && words.some(hasDigit))
+  const trigramEligible = words.every((word) => word.length >= 3)
 
   const params: Record<string, string> = {}
   const wordParam = `${paramPrefix}_word`
   params[wordParam] = wordExpr
   const wordMatch = `id IN (SELECT rowid FROM ${wordTable} WHERE ${wordTable} MATCH @${wordParam})`
-  // A contact saved by its number has that number as its name (a supplier's contact person too), so a digit word may not read such a name either.
-  const clauses = [digitWordsAvoidPhones && words.some(hasDigit) ? `(${wordMatch} AND ${PERSON_COLUMNS[table].map((column) => `NOT ${phoneShapedSql(column)}`).join(' AND ')})` : wordMatch]
+  const clauses = [wordMatch]
 
   if (trigramEligible) {
     const phoneParam = `${paramPrefix}_phone`

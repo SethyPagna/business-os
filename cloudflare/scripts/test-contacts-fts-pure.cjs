@@ -90,7 +90,7 @@ function insertDelivery(db, row) {
 }
 
 function searchIds(db, table, rawSearch) {
-  const clause = buildContactMatchClause(table, rawSearch, 'search', { fullPhone: true })
+  const clause = buildContactMatchClause(table, rawSearch, 'search')
   if (!clause) return null
   const rows = db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params)
   return rows.map((r) => r.id)

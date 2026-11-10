@@ -49,7 +49,6 @@ import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type 
 import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
 import { cachedPhoneJson } from '../lib/phoneCache'
-import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { bodyHasMaskedPhone, isMaskedPhoneInputError, MASKED_PHONE_CODE, MASKED_PHONE_MESSAGE, resolveAddressInput, resolvePhoneInput, storedPhonesOf } from '../lib/phoneWriteGuard'
 import { isMaskedPhone } from '../lib/phoneMask'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
@@ -1085,7 +1084,7 @@ function registerContactRoutes(config: ContactConfig) {
       const limit = clampInt(query.pageSize ?? query.limit, 50, 1, 100)
       const predicates: string[] = []
       const params: Record<string, unknown> = { limit }
-      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '', phoneSearchAccessOf(c.get('user')))
+      const contactMatch = buildSalesCustomerMatchClause(query.search || query.q || '')
       if (contactMatch) {
         predicates.push(contactMatch.sql)
         Object.assign(params, contactMatch.params)
@@ -1118,7 +1117,7 @@ function registerContactRoutes(config: ContactConfig) {
     // lib/contactSearch.ts for why this is a plain MATCH combine rather
     // than the products-side per-group hybrid (contacts search has never
     // had a comma-groups AND/OR UI, just one free-text phrase).
-    const contactMatch = buildContactMatchClause(config.table, search, 'search', phoneSearchAccessOf(c.get('user')))
+    const contactMatch = buildContactMatchClause(config.table, search, 'search')
     if (contactMatch) {
       baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
@@ -3476,7 +3475,7 @@ app.get('/customers/points-summary', async (c) => {
   // This endpoint is currently unreachable from the frontend (see the
   // comment above this handler), but kept correct rather than left on the
   // old LIKE scan now that customers_fts/customers_fts_phone exist anyway.
-  const contactMatch = buildContactMatchClause('customers', search, 'search', phoneSearchAccessOf(c.get('user')))
+  const contactMatch = buildContactMatchClause('customers', search, 'search')
   if (contactMatch) {
     where.push(contactMatch.sql)
     Object.assign(params, contactMatch.params)

@@ -25,61 +25,53 @@ insert.run(402, 'Past width', '', 'LC-100000')
 insert.run(403, 'Spaced', '', '  LC-00030 ')
 insert.run(404, 'Vanity', '', 'LCMN-77')
 
-const HOLDER = { fullPhone: true }
-const NO_GRANT = { fullPhone: false }
 const where = (clause) => `SELECT id FROM customers WHERE COALESCE(is_anonymous, 0) = 0 AND ${clause.sql} ORDER BY id`
-const idsOf = (search, access) => {
-  const clause = buildContactMatchClause('customers', search, 'search', access)
+const idsOf = (search) => {
+  const clause = buildContactMatchClause('customers', search, 'search')
   return db.prepare(where(clause)).all(clause.params).map((row) => row.id)
 }
-const planOf = (search, access) => {
-  const clause = buildContactMatchClause('customers', search, 'search', access)
+const planOf = (search) => {
+  const clause = buildContactMatchClause('customers', search, 'search')
   return db.prepare('EXPLAIN QUERY PLAN ' + where(clause)).all(clause.params).map((row) => row.detail).join(' / ')
 }
 
 let failed = 0
 const check = (name, fn) => { try { fn(); console.log('PASS ' + name) } catch (error) { failed += 1; console.log('FAIL ' + name + '\n' + (error && error.stack || error)) } }
 
-check('lc20, lc00020, LC-00020 and lc-20 find that member, for a holder and an account without the phone grant', () => {
-  for (const access of [HOLDER, NO_GRANT]) {
-    for (const search of ['lc20', 'lc00020', 'LC-00020', 'lc-20', 'LC20', ' lc 20'.trim().replace(' ', ''), 'lc-00020']) assert.deepEqual(idsOf(search, access), [20], `${search} ${JSON.stringify(access)}`)
-  }
+check('lc20, lc00020, LC-00020 and lc-20 find that member', () => {
+  for (const search of ['lc20', 'lc00020', 'LC-00020', 'lc-20', 'LC20', 'lc-00020']) assert.deepEqual(idsOf(search), [20], search)
 })
 
 check('a hand-typed unpadded or past-width number is found; a padded stored value with spaces is found', () => {
-  assert.deepEqual(idsOf('lc21', HOLDER), [401])
-  assert.deepEqual(idsOf('lc-21', NO_GRANT), [401])
-  assert.deepEqual(idsOf('lc100000', HOLDER), [402])
-  assert.deepEqual(idsOf('lc30', HOLDER), [403])
+  assert.deepEqual(idsOf('lc21'), [401])
+  assert.deepEqual(idsOf('lc-21'), [401])
+  assert.deepEqual(idsOf('lc100000'), [402])
+  assert.deepEqual(idsOf('lc30'), [403])
 })
 
 check('it is an exact match on the number: lc2 does not find LC-00020 or LC-00200, and no number is no match', () => {
-  assert.deepEqual(idsOf('lc2', HOLDER), [2])
-  assert.deepEqual(idsOf('lc999', HOLDER), [])
-  assert.deepEqual(idsOf('lc0', HOLDER), [])
-  assert.deepEqual(idsOf('lc20 dara', HOLDER), [], 'a number with another word is a plain text search')
+  assert.deepEqual(idsOf('lc2'), [2])
+  assert.deepEqual(idsOf('lc999'), [])
+  assert.deepEqual(idsOf('lc0'), [])
+  assert.deepEqual(idsOf('lc20 dara'), [], 'a number with another word is a plain text search')
 })
 
 check('every other search keeps its SQL: names, the bare prefix and a bare number get no membership term', () => {
   for (const search of ['dara', 'Dara Twenty', 'lc', 'lc-', '00020', '020', 'lcmn', 'lc20a', 'filler person']) {
-    for (const access of [HOLDER, NO_GRANT]) {
-      const clause = buildContactMatchClause('customers', search, 'search', access)
-      assert.ok(!clause || !/membership_number\)/.test(clause.sql), `${search}: ${clause && clause.sql}`)
-    }
+    const clause = buildContactMatchClause('customers', search, 'search')
+    assert.ok(!clause || !/membership_number\)/.test(clause.sql), `${search}: ${clause && clause.sql}`)
   }
-  assert.equal(buildContactMatchClause('suppliers', 'lc20', 'search', HOLDER).sql.includes('membership_number)'), false)
-  assert.equal(buildContactMatchClause('delivery_contacts', 'lc20', 'search', HOLDER).sql.includes('membership_number)'), false)
+  assert.equal(buildContactMatchClause('suppliers', 'lc20', 'search').sql.includes('membership_number)'), false)
+  assert.equal(buildContactMatchClause('delivery_contacts', 'lc20', 'search').sql.includes('membership_number)'), false)
 })
 
 check('the lookup is an index seek on idx_customers_membership_normalized, alone and inside the whole search clause', () => {
   const alone = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM customers WHERE lower(trim(membership_number)) IN (@a, @b)").all({ a: 'lc-00020', b: 'lc-20' }).map((row) => row.detail).join(' / ')
   assert.match(alone, /SEARCH customers USING (COVERING )?INDEX idx_customers_membership_normalized/)
-  for (const access of [HOLDER, NO_GRANT]) {
-    const plan = planOf('lc20', access)
-    assert.match(plan, /idx_customers_membership_normalized/, plan)
-    assert.ok(!/SCAN customers(?!\w)/.test(plan), `a membership search must not scan the table: ${plan}`)
-    assert.match(plan, /MULTI-INDEX OR/)
-  }
+  const plan = planOf('lc20')
+  assert.match(plan, /idx_customers_membership_normalized/, plan)
+  assert.ok(!/SCAN customers(?!\w)/.test(plan), `a membership search must not scan the table: ${plan}`)
+  assert.match(plan, /MULTI-INDEX OR/)
 })
 
 if (failed) { console.error(`${failed} check(s) failed`); process.exitCode = 1 } else console.log('PASS contacts membership search')

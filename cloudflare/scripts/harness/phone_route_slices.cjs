@@ -91,8 +91,8 @@ function freshDb(normalize, seed) {
   const saleInsert = db.prepare(`INSERT INTO sales (id, receipt_number, cashier_name, customer_name, customer_phone, branch_name, payment_method, notes, search_normalized)
     VALUES (?, ?, ?, ?, ?, ?, 'Cash', ?, ?)`)
   const item = db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, sku) VALUES (?, 1, ?, ?)')
-  const addSale = (id, receipt, { cashier = 'Admin', name = 'Walk-in', phone = '', branch = 'Main', notes = null } = {}) => {
-    saleInsert.run(id, receipt, cashier, name, phone, branch, notes, normalize([receipt, cashier, name, phone.replace(/\s+/g, ''), branch, notes].filter(Boolean).join(' ')))
+  const addSale = (id, receipt, { cashier = 'Admin', name = 'Walk-in', phone = '', branch = 'Main', notes = null, folded } = {}) => {
+    saleInsert.run(id, receipt, cashier, name, phone, branch, notes, folded ?? normalize([receipt, cashier, name, phone.replace(/\s+/g, ''), branch, notes].filter(Boolean).join(' ')))
     item.run(id, 'Fixture Soap', 'P28-SKU-1')
   }
   const returnInsert = db.prepare(`INSERT INTO returns (id, return_number, receipt_number, cashier_name, customer_name, supplier_name, reason, notes, search_normalized, return_scope, created_at)
