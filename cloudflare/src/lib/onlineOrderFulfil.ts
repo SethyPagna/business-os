@@ -67,6 +67,13 @@ export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) 
 /** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
 export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
 
+/** onlineMethodRefusalActive with the switch read from D1 now, not from the memo: for an error path that must name the real reason (a refusal that lost to a write inside the memo window would otherwise read as a conflict). */
+export async function onlineMethodRefusalActiveFresh(db: D1Compat, storedSetting: unknown): Promise<boolean> {
+  if (String(storedSetting ?? '').trim() !== '') return true
+  const row = await db.prepare(`SELECT ${ONLINE_ORDERS_SWITCH_ON_SQL} AS on_now`).get<{ on_now: number | null }>()
+  return Number(row?.on_now) === 1
+}
+
 /**
  * onlineMethodRefusalActive as a predicate over the stored rows, for a batch that must refuse without a read of its own: true when `@reservedMethodKey` (lower-cased, trimmed) is the
  * method a Fulfil rings and the refusal is in force (a method is stored, or the online_orders switch is ON).
