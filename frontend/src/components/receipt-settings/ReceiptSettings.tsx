@@ -31,7 +31,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
 import { normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
-import { settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
+import { manualSaveNotice, settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
 
@@ -350,6 +350,7 @@ export default function ReceiptSettings() {
   const aliveRef         = useRef(true)
   const previewTargetRef = useRef<HTMLDivElement | null>(null)
   const persistedTemplateRef = useRef('')
+  const savedSilentlyRef = useRef(false)
   const suppressNextAutoSaveRef = useRef(false)
   const persistedFooterRef = useRef('')
   const suppressNextFooterAutoSaveRef = useRef(false)
@@ -407,7 +408,7 @@ export default function ReceiptSettings() {
       const templateToPersist = latestTemplateRef.current
       const serializedTemplate = serializeReceiptTemplate(templateToPersist)
       const saveOptions = {
-        silentToast: !options.showToast,
+        silentToast: true,
         refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
         reason: 'receipt-template-saved',
         source: options.showToast ? 'receipt-settings:manual-save' : 'receipt-settings:auto-save',
@@ -453,6 +454,14 @@ export default function ReceiptSettings() {
       // The saved template is already in the app's settings (saveSettings
       // merged the Worker's answer), so nothing is re-read from the server.
       persistedTemplateRef.current = serializedTemplate
+      const outcome = settingsSaveOutcome(result)
+      if (options.showToast) {
+        const notice = manualSaveNotice(outcome, savedSilentlyRef.current)
+        savedSilentlyRef.current = false
+        notify(notice === 'saved' ? t('settings_saved') : t('settings_no_changes'), notice === 'saved' ? 'success' : 'info')
+      } else if (outcome === 'saved') {
+        savedSilentlyRef.current = true
+      }
     } catch (error) {
       if (options.showToast) {
         notify(getErrorMessage(error, 'Save failed - check server connection'), 'error')
