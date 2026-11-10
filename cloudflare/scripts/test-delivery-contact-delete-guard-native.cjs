@@ -128,6 +128,16 @@ check('D7c bulk across chunks: last_error keeps the whole kept list, not only th
   assert.equal(job.last_error, 'contact_has_sales: [2001,2127]')
   assert.equal(w.one('SELECT COUNT(*) n FROM delivery_contacts WHERE id >= 2000').n, 2)
 })
+check('D7d bulk: a driver kept at the first check AND another kept in the race: last_error lists both', async () => {
+  const w = world()
+  const { jobId } = await w.engine.createBulkDeleteJob(w.env, 'delivery_contacts', [1, 3, 5], 'cleanup', w.actor)
+  oneShot(w, "INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES (105,3,'Free driver')")
+  await drain(w)
+  assert.deepEqual(live(w).filter((id) => [1, 3, 5].includes(id)), [1, 3], 'only the free id 5 is deleted')
+  const job = w.one('SELECT status, failed_count, failed_ids_json, last_error FROM bulk_delete_jobs WHERE id=?', jobId)
+  assert.equal(job.failed_count, 2); assert.deepEqual(JSON.parse(job.failed_ids_json).sort(), [1, 3])
+  assert.equal(job.last_error, 'contact_has_sales: [1,3]', 'the kept list is complete (first check + race)')
+})
 check('D8 bulk chunk stays a fixed handful of D1 calls (one usage read per chunk, not per id)', async () => {
   const w = world()
   for (let i = 0; i < 100; i += 1) w.exec(`INSERT INTO delivery_contacts(id,name) VALUES (${1000 + i},'bulk ${i}')`)
@@ -155,6 +165,7 @@ const MUTANTS = [
   { name: 'bulk race: no retry, the whole chunk is recorded failed', file: B, from: 'if (named.size) { keepNamed(named); continue }', to: '', catches: ['D7'] },
   { name: 'bulk race: unbounded retry', file: B, from: '&& !racedOnce) {', to: ') {', catches: ['D7b'] },
   { name: 'bulk: earlier chunks kept ids dropped', file: B, from: 'if (earlier) keptIds = (JSON.parse(earlier[1]) as number[]).map(Number)', to: '', catches: ['D7c'] },
+  { name: 'bulk race: kept note not rewritten on the retry', file: B, from: 'keptNote = `${CONTACT_HAS_SALES_CODE}: ${JSON.stringify(keptIds)}`', to: 'keptNote ??= `${CONTACT_HAS_SALES_CODE}: ${JSON.stringify(keptIds)}`', catches: ['D7d'] },
   { name: 'bulk refusal not reported on the job', file: B, from: 'progress(failedIds, keptNote)', to: 'progress(failedIds, null)', catches: ['D5'] },
 ]
 runSuite(tests, MUTANTS).catch((e) => { console.error(e); process.exit(1) })

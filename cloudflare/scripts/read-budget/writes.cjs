@@ -79,6 +79,17 @@ const sale = (n, offset, { paid = true } = {}) => ({
   run: async (world, send, body) => send('POST', '/api/sales', body),
 })
 
+// A delivery sale: the same sale naming a delivery person, which adds the in-batch driver check (a primary-key probe on delivery_contacts).
+const deliverySale = (n, offset) => ({
+  id: `w-sale-delivery-${n}-lines`, label: `POST /api/sales ${n} line, delivery person named`, method: 'POST', url: '/api/sales',
+  prepare: async (world) => {
+    const body = await saleRequest(world, `dsale${n}`, await lots(world, n, offset))
+    const driver = (await world.all('SELECT id FROM delivery_contacts ORDER BY id LIMIT 1'))[0]
+    return { ...body, is_delivery: true, delivery_contact_id: driver.id }
+  },
+  run: async (world, send, body) => send('POST', '/api/sales', body),
+})
+
 const status = (id, body) => ({ method: 'PATCH', url: `/api/sales/${id}/status`, body })
 
 function stockSession(n, offset) {
@@ -137,7 +148,7 @@ function writeShapes() {
     { id: 'w-login-cold', label: 'POST /api/auth/login (cold isolate)', method: 'POST', url: '/api/auth/login', anon: true,
       prepare: (world) => ({ username: require('./seed.cjs').ADMIN.username, password: require('./seed.cjs').ADMIN.password, organizationId: world.orgId }),
       run: async (world, send, body) => send('POST', '/api/auth/login', body) },
-    sale(1, 0), sale(3, 20), sale(10, 40), sale(30, 80), sale(86, 140), sale(3, 240, { paid: false }),
+    deliverySale(1, 700), sale(1, 0), sale(3, 20), sale(10, 40), sale(30, 80), sale(86, 140), sale(3, 240, { paid: false }),
     { id: 'w-pay-not-paid', label: 'PATCH /api/sales/:id/status Not Paid -> Completed (take payment)', method: 'PATCH', url: '/api/sales/:id/status',
       prepare: async (world) => createSale(world, 'unpaid', await lots(world, 3, 260), { paid: false }),
       run: async (world, send, id) => send('PATCH', `/api/sales/${id}/status`, { sale_status: 'completed', client_request_id: key('pay'), expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 400, amount_khr: 0 }] }) },

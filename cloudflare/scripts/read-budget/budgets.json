@@ -620,6 +620,7 @@
     {"id":"products-stock-ledger-all-time-deep-page-400-ledger-keyset-on","method":"GET","route":"/api/products/stock-ledger","params":"page=400&pageSize=25&cursor={{ledgerCursor}}","status":200,"cold_calls_max":7,"rows_max":1560,"rows_max_analyze":1570,"rows_written_max":8,"class":"N","expect":"ok"},
     {"id":"w-login-cold","method":"POST","route":"/api/auth/login","params":"","status":200,"cold_calls_max":17,"rows_max":112,"rows_max_analyze":112,"rows_written_max":16,"class":"P","expect":"ok"},
     {"id":"w-sale-1-lines","method":"POST","route":"/api/sales","params":"","status":200,"cold_calls_max":28,"rows_max":297,"rows_max_analyze":297,"rows_written_max":68,"class":"P","expect":"ok"},
+    {"id":"w-sale-delivery-1-lines","method":"POST","route":"/api/sales","params":"","status":200,"cold_calls_max":29,"rows_max":302,"rows_max_analyze":302,"rows_written_max":68,"class":"P","expect":"ok"},
     {"id":"w-sale-3-lines","method":"POST","route":"/api/sales","params":"","status":200,"cold_calls_max":28,"rows_max":10145,"rows_max_analyze":10145,"rows_written_max":137,"class":"P","expect":"ok"},
     {"id":"w-sale-10-lines","method":"POST","route":"/api/sales","params":"","status":200,"cold_calls_max":28,"rows_max":11362,"rows_max_analyze":11362,"rows_written_max":383,"class":"P","expect":"ok"},
     {"id":"w-sale-30-lines","method":"POST","route":"/api/sales","params":"","status":200,"cold_calls_max":28,"rows_max":14700,"rows_max_analyze":14700,"rows_written_max":1087,"class":"P","expect":"ok"},
