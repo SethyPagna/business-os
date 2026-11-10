@@ -1114,6 +1114,8 @@ app.put('/:id', async (c) => {
   }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
+  // The edit re-stamps the branch name on the branch's sales (branchNameSnapshotStatements), which the Expenses list shows on its courier rows.
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
   if (!committedBranch) throw new Error('The committed branch response is unavailable.')
   return c.json({ success: true, branch: { ...committedBranch, edit_etag: await branchEditEtag(committedBranch) } })
 })

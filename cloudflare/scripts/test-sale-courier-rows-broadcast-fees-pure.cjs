@@ -60,6 +60,13 @@ test('a sales import broadcasts fees (it inserts sales with courier costs)', () 
   assert.ok(read('lib/salesImportCommit.ts').includes('delivery_actual_cost_usd'), 'control: the import really writes courier costs')
 })
 
+test('a driver rename or merge and a branch edit broadcast fees (their names are on the Expenses courier rows)', () => {
+  const contacts = read('routes/contacts.ts')
+  assert.ok(contacts.includes("if (config.table === 'delivery_contacts' && nameChanged && snapshotCarry) c.executionCtx.waitUntil(broadcast(c.env, 'fees'"), 'driver rename')
+  assert.ok(contacts.includes("if (config.table === 'delivery_contacts') c.executionCtx.waitUntil(broadcast(c.env, 'fees'"), 'driver merge')
+  assert.ok(read('routes/branches.ts').includes("broadcast(c.env, 'fees', { action: 'update' })"), 'branch edit')
+})
+
 // notifySaleBulkUpdate and notifyBulkStatus, run for real with the broadcast hub recorded.
 function load(rel, sent) {
   const mod = { exports: {} }
