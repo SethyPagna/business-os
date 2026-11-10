@@ -18,7 +18,7 @@ import ReceiptQrCodes, { ReceiptPaymentQr, normalizeQrSocialLinksForReceipt, typ
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
-import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import {
   RECEIPT_ITEM_COLUMN_GAP_EM,
   RECEIPT_ITEM_NUMERIC_FONT_EM,
@@ -553,7 +553,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // customer block onto the paper.
   const customerAddress = contactDisplayAddress(sale.customer_address)
   const hasCustomer = customerDisplayName || sale.customer_phone || customerAddress || (!customerIsAnonymous && showMembershipId && sale.customer_membership_number)
-  const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
+  const deliveryAddress = deliveryDisplayAddress(sale.delivery_contact_address)
+  const showDeliveryAddress = tpl.delivery_show_address !== false && !!deliveryAddress
+  const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || deliveryAddress)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
   const showDeliveryDriverPhone = showDeliveryContactSection && tpl.delivery_show_driver_phone !== false
@@ -564,7 +566,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const hasDeliveryContactRows = Boolean(
     (showDeliveryDriverName && sale.delivery_contact_name)
     || (showDeliveryDriverPhone && sale.delivery_contact_phone)
-    || (showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false),
+    || (showDeliveryContactSection && showDeliveryAddress),
   )
 
   const sectionMap: Record<string, ReactNode> = {
@@ -630,7 +632,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       <div key="delivery" className="mt-2 border-t border-dashed border-gray-300 pt-2">
         {showDeliveryDriverName && sale.delivery_contact_name ? <Row label={labelFor(lang, 'driver') || 'Delivery:'} value={sale.delivery_contact_name} /> : null}
         {showDeliveryDriverPhone && sale.delivery_contact_phone ? <Row label={labelFor(lang, 'phone')} value={sale.delivery_contact_phone} /> : null}
-        {showDeliveryContactSection && sale.delivery_contact_address && tpl.delivery_show_address !== false ? <Row label={labelFor(lang, 'address')} value={sale.delivery_contact_address} /> : null}
+        {showDeliveryContactSection && showDeliveryAddress ? <Row label={labelFor(lang, 'address')} value={deliveryAddress} /> : null}
       </div>
     ) : null,
     items: (
@@ -775,7 +777,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       && [lineSavingsUsd, displayedDiscountUsd, membershipDiscountUsd].filter((v) => v > 0).length > 1 ? (
       <Row key="total_discount" label={labelFor(lang, 'totalDiscount')} value={`-${fmtUSD(totalDiscountUsd)}`} tone="text-red-600" bold />
     ) : null,
-    discount: tpl.show_discount && displayedDiscountUsd > 0 ? (
+    discount: tpl.show_discount !== false && displayedDiscountUsd > 0 ? (
       <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(displayedDiscountUsd)}`} subValue={tpl.show_discount_khr !== false && displayedDiscountKhr > 0 ? `-${fmtKHR(displayedDiscountKhr)}` : ''} tone="text-red-600" />
     ) : null,
     membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (

@@ -4,7 +4,7 @@ import { fmtBusinessIsoDateTime } from './formatters.ts'
 // customers.address stores, so the export resolves it the same way every
 // on-screen reader does -- a CSV cell full of machine text is the same defect
 // in a different container.
-import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 import { isAnonymousCustomerIdentity } from './customerIdentity.ts'
 
 export const SALES_IMPORT_COLUMNS = [
@@ -77,7 +77,7 @@ function headerFields(sale: DataRow): DataRow {
     is_delivery: value(sale, 'is_delivery', 0),
     delivery_contact_name: value(sale, 'delivery_contact_name'),
     delivery_contact_phone: value(sale, 'delivery_contact_phone'),
-    delivery_contact_address: value(sale, 'delivery_contact_address'),
+    delivery_contact_address: deliveryDisplayAddress(value(sale, 'delivery_contact_address')),
     delivery_fee_usd: value(sale, 'delivery_fee_usd', 0),
     delivery_fee_khr: value(sale, 'delivery_fee_khr', 0),
     delivery_fee_paid_by: value(sale, 'delivery_fee_paid_by', 'customer'),

@@ -108,7 +108,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
-import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, assertActorSessionDispatchAllowed } from '../../api/actorReadScope.ts'
@@ -3601,7 +3601,7 @@ export default function POS() {
       delivery_contact_id:       active.selectedDelivery?.id      || null,
       delivery_contact_name:     active.selectedDelivery?.name    || null,
       delivery_contact_phone:    active.selectedDelivery?.phone   || null,
-      delivery_contact_address:  active.selectedDelivery?.address || null,
+      delivery_contact_address:  deliveryDisplayAddress(active.selectedDelivery?.address) || null,
       delivery_fee_usd:          feeUsd,
       delivery_fee_khr:          feeKhr,
       delivery_fee_paid_by:      active.isDelivery ? active.deliveryFeePaidBy : DELIVERY_FEE_PAYER.CUSTOMER,

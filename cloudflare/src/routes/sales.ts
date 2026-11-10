@@ -169,7 +169,7 @@ import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAf
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { recordStockCrossings, type StockSaleLine } from '../lib/stockCrossingAlert'
-import { CONTACT_OPTION_LIMIT, contactDisplayAddress } from '../lib/contactOptions'
+import { CONTACT_OPTION_LIMIT, contactDisplayAddress, deliveryDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
 import { COURIER_COST_KEYS, costViewProfit } from '../lib/reportProfitView'
@@ -1523,7 +1523,7 @@ app.post('/', async (c) => {
       delivery_contact_id: deliveryContact?.id || null,
       delivery_contact_name: deliveryContact?.name || null,
       delivery_contact_phone: deliveryContact?.phone || null,
-      delivery_contact_address: deliveryContact?.address || deliveryContact?.area || null,
+      delivery_contact_address: deliveryDisplayAddress(deliveryContact?.address) || deliveryDisplayAddress(deliveryContact?.area) || null,
       delivery_fee_usd: isDelivery ? deliveryFeeUsd : 0,
       delivery_fee_khr: isDelivery ? deliveryFeeKhr : 0,
       // Same resolved value the total was computed from -- re-deriving it
@@ -4538,10 +4538,11 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: 'Choose a delivery driver for this sale.' }, 400)
     }
     const contactRow = await db.prepare(`
-      SELECT id,name,phone,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
+      SELECT id,name,phone,address,area,COALESCE(NULLIF(TRIM(address),''),area) AS delivery_address
       FROM delivery_contacts WHERE id=?
-    `).get<{ id: number; name: string | null; phone: string | null; delivery_address: string | null }>([contactId])
+    `).get<{ id: number; name: string | null; phone: string | null; address: string | null; area: string | null; delivery_address: string | null }>([contactId])
     if (!contactRow) return c.json({ error: 'That delivery driver no longer exists. Choose another driver.', code: DELIVERY_CONTACT_MISSING_CODE }, 409)
+    const snapshotAddress = deliveryDisplayAddress(contactRow.address) || deliveryDisplayAddress(contactRow.area) || null
 
     const feeRaw = body.delivery_fee_usd
     if (typeof feeRaw !== 'number' && typeof feeRaw !== 'string') {
@@ -4566,7 +4567,7 @@ app.post('/:id/amendments', async (c) => {
         id: Number(contactRow.id),
         name: contactRow.name ?? null,
         phone: contactRow.phone ?? null,
-        address: contactRow.delivery_address ?? null,
+        address: snapshotAddress,
       },
       feeUsd: feeParsed.usd,
       actualCostUsd,
@@ -4612,7 +4613,7 @@ app.post('/:id/amendments', async (c) => {
       deliveryContactId: contactRow.id,
       deliveryContactName: contactRow.name ?? null,
       deliveryContactPhone: contactRow.phone ?? null,
-      deliveryContactAddress: contactRow.delivery_address ?? null,
+      deliveryContactAddress: snapshotAddress,
       deliveryFeeUsd: feeParsed.usd,
       deliveryFeeKhr: receiptKhrFromUsd(feeParsed.usd, exchangeRate),
       deliveryFeePaidBy: 'customer',
@@ -6976,7 +6977,7 @@ app.get('/export', async (c) => {
       membership_discount_usd: index === 0 ? sale.membership_discount_usd : '', membership_discount_khr: index === 0 ? sale.membership_discount_khr : '',
       membership_points_redeemed: index === 0 ? sale.membership_points_redeemed : '',
       is_delivery: index === 0 ? sale.is_delivery : '', delivery_contact_name: index === 0 ? sale.delivery_contact_name : '',
-      delivery_contact_phone: index === 0 ? sale.delivery_contact_phone : '', delivery_contact_address: index === 0 ? sale.delivery_contact_address : '',
+      delivery_contact_phone: index === 0 ? sale.delivery_contact_phone : '', delivery_contact_address: index === 0 ? deliveryDisplayAddress(sale.delivery_contact_address) : '',
       delivery_fee_usd: index === 0 ? sale.delivery_fee_usd : '', delivery_fee_khr: index === 0 ? sale.delivery_fee_khr : '',
       delivery_fee_paid_by: index === 0 ? sale.delivery_fee_paid_by : '', notes: index === 0 ? sale.notes : '',
     }))

@@ -27,13 +27,10 @@ import PrintSettings     from './PrintSettings'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
-import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
 import { normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
-import { settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
-
-const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
+import { createReceiptSettingsSaver, type ReceiptSettingsSaver, type ReceiptSettingsSaverDeps } from '../../utils/receiptSettingsSaver.ts'
 
 type Translate = (key: string, fallback?: string) => string
 type AppSettings = Record<string, unknown> & {
@@ -70,10 +67,6 @@ type SectionConfig = {
   label: string
   icon: LucideIcon
 }
-type PersistOptions = {
-  silent?: boolean
-  showToast?: boolean
-}
 type SectionProps = {
   title: string
   children: ReactNode
@@ -83,10 +76,6 @@ type ToggleProps = {
   desc?: string
   value: boolean
   onChange: (value: boolean) => void
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
 }
 
 // ----- Shared primitives (defined locally to avoid circular imports) ----------
@@ -341,198 +330,72 @@ export default function ReceiptSettings() {
   const [previewOpen, setPreviewOpen]     = useState(false)
   const [saving, setSaving]               = useState(false)
 
-  // Refs for stable references inside effects (avoids stale closures)
-  const latestTemplateRef = useRef<ReceiptTemplate>(DEFAULT_TEMPLATE)
-  const saveTimerRef     = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const isMountedRef     = useRef(false)   // guard: skip auto-save on first render
-  const saveInFlightRef  = useRef(false)
-  const queuedSaveRef    = useRef<PersistOptions | null>(null)
-  const aliveRef         = useRef(true)
   const previewTargetRef = useRef<HTMLDivElement | null>(null)
-  const persistedTemplateRef = useRef('')
-  const suppressNextAutoSaveRef = useRef(false)
-  const persistedFooterRef = useRef('')
-  const suppressNextFooterAutoSaveRef = useRef(false)
-  const footerSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const isMountedRef = useRef(false)
+  const aliveRef = useRef(true)
+  const latestTemplateRef = useRef<ReceiptTemplate>(DEFAULT_TEMPLATE)
+  const latestFooterRef = useRef('')
   latestTemplateRef.current = tpl
+  latestFooterRef.current = defaultFooter
 
-  useEffect(() => () => {
-    aliveRef.current = false
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    if (footerSaveTimerRef.current) clearTimeout(footerSaveTimerRef.current)
-  }, [])
+  const saverDepsRef = useRef<ReceiptSettingsSaverDeps<ReceiptTemplate>>(null as unknown as ReceiptSettingsSaverDeps<ReceiptTemplate>)
+  saverDepsRef.current = {
+    saveSettings,
+    notify,
+    t,
+    getTemplate: () => latestTemplateRef.current,
+    getFooter: () => latestFooterRef.current,
+    serializeTemplate: serializeReceiptTemplate,
+    parseTemplate: parseReceiptTemplate,
+    setSaving: (value) => { if (aliveRef.current) setSaving(value) },
+  }
+  const saverRef = useRef<ReceiptSettingsSaver<ReceiptTemplate> | null>(null)
+  if (!saverRef.current) saverRef.current = createReceiptSettingsSaver(() => saverDepsRef.current)
+  const saver = saverRef.current
 
-  // Initialise the default (fallback) footer once persisted settings arrive.
-  // This mirrors the receipt_template hydrate effect just below, but is its
-  // own independent field on the flat `settings` object rather than part of
-  // the per-template `tpl` blob, since it moved here from the generic
-  // Settings page (Part 188) and is saved separately from the template.
+  // Leaving the page saves what is still waiting for its debounce.
   useEffect(() => {
-    const incoming = String(settings.receipt_footer || '')
-    persistedFooterRef.current = incoming
-    suppressNextFooterAutoSaveRef.current = true
-    setDefaultFooter(incoming)
-  }, [settings.receipt_footer])
-
-  // Initialise tpl once persisted settings arrive from the server
-  useEffect(() => {
-    if (settings.receipt_template) {
-      const parsed = parseReceiptTemplate(settings.receipt_template)
-      persistedTemplateRef.current = serializeReceiptTemplate(parsed)
-      suppressNextAutoSaveRef.current = true
-      setTpl(parsed)
+    aliveRef.current = true
+    saver.activate()
+    return () => {
+      aliveRef.current = false
+      saver.dispose()
     }
-  }, [settings.receipt_template])
+  }, [saver])
 
-  // Shallow field updater
+  // The default footer is its own settings key, saved apart from the template.
+  useEffect(() => {
+    const incoming = saver.hydrateFooter(String(settings.receipt_footer || ''))
+    if (incoming !== null) setDefaultFooter(incoming)
+  }, [saver, settings.receipt_footer])
+
+  useEffect(() => {
+    const incoming = saver.hydrateTemplate(settings.receipt_template)
+    if (incoming) setTpl(incoming)
+  }, [saver, settings.receipt_template])
+
   const setT = useCallback((key: string, val: unknown) => {
     setTpl((prev) => ({ ...prev, [key]: val }) as ReceiptTemplate)
   }, [])
 
-  const persistTemplate = useCallback(async ({ silent = false, showToast = false }: PersistOptions = {}) => {
-    const options = { silent: !!silent, showToast: !!showToast }
-    if (saveInFlightRef.current) {
-      queuedSaveRef.current = {
-        silent: Boolean(queuedSaveRef.current?.silent && options.silent),
-        showToast: Boolean(queuedSaveRef.current?.showToast || options.showToast),
-      }
-      if (!options.silent && aliveRef.current) setSaving(true)
-      return
-    }
-
-    saveInFlightRef.current = true
-    if (!options.silent && aliveRef.current) setSaving(true)
-
-    try {
-      const templateToPersist = latestTemplateRef.current
-      const serializedTemplate = serializeReceiptTemplate(templateToPersist)
-      const saveOptions = {
-        silentToast: !options.showToast,
-        refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
-        reason: 'receipt-template-saved',
-        source: options.showToast ? 'receipt-settings:manual-save' : 'receipt-settings:auto-save',
-      }
-      let result = await withLoaderTimeout(
-        () => saveSettings(
-          { receipt_template: serializedTemplate },
-          saveOptions,
-        ),
-        'Receipt settings save',
-        RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
-      )
-      for (let attempt = 0; result?.conflict && result?.actualUpdatedAt && attempt < 3; attempt += 1) {
-        result = await withLoaderTimeout(
-          () => saveSettings(
-            { receipt_template: serializedTemplate, expectedUpdatedAt: result?.actualUpdatedAt },
-            saveOptions,
-          ),
-          'Receipt settings conflict retry',
-          RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
-        )
-      }
-      if (result?.conflict) {
-        result = await withLoaderTimeout(
-          () => saveSettings(
-            { receipt_template: serializedTemplate },
-            { ...saveOptions, skipExpectedUpdatedAt: true },
-          ),
-          'Receipt settings conflict fallback',
-          RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
-        )
-      }
-      if (result?.conflict) {
-        throw new Error(t('settings_conflict') || 'Settings changed on another device. Reload and try again.')
-      }
-      if (settingsSaveOutcome(result) === 'failed') {
-        // saveSettings answers a failed write instead of throwing. The template
-        // stays marked unsaved so the next edit tries again; a manual save has
-        // already been told why, an autosave has not.
-        if (!options.showToast) notify(t('settings_save_failed_kept'), 'error')
-        return
-      }
-      // The saved template is already in the app's settings (saveSettings
-      // merged the Worker's answer), so nothing is re-read from the server.
-      persistedTemplateRef.current = serializedTemplate
-    } catch (error) {
-      if (options.showToast) {
-        notify(getErrorMessage(error, 'Save failed - check server connection'), 'error')
-      }
-    } finally {
-      saveInFlightRef.current = false
-      if (!options.silent && aliveRef.current) setSaving(false)
-
-      const queued = queuedSaveRef.current
-      queuedSaveRef.current = null
-      if (queued && aliveRef.current) {
-        window.setTimeout(() => {
-          if (aliveRef.current) persistTemplate(queued)
-        }, 0)
-      }
-    }
-  }, [notify, saveSettings, t])
-
-  // ?€?€ Auto-save (debounced 900 ms, completely silent) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-  // KEY FIX: The `isMountedRef` guard prevents this effect from firing on the
-  // initial render when `tpl` is still DEFAULT_TEMPLATE. Without the guard the
-  // auto-save would POST DEFAULT_TEMPLATE to the server ~900 ms after opening
-  // the page, OVERWRITING whatever the user had previously configured.
-  //
-  // KEY FIX: The try/catch prevents unhandled promise rejections when the server
-  // is temporarily unreachable. In minified React builds, unhandled rejections
-  // that bubble into the scheduler's async work loop cause "TypeError: r is not
-  // a function" crashes with opaque stack traces. Swallowing the error here is
-  // intentional ??the WS connection and health-check will recover automatically.
+  // Not on the first render: tpl is still DEFAULT_TEMPLATE there and saving it
+  // would overwrite what the owner configured before settings arrived.
   useEffect(() => {
     if (!isMountedRef.current) {
       isMountedRef.current = true
       return
     }
-    const serialized = serializeReceiptTemplate(tpl)
-    if (suppressNextAutoSaveRef.current || serialized === persistedTemplateRef.current) {
-      suppressNextAutoSaveRef.current = false
-      return
-    }
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      persistTemplate({ silent: true, showToast: false })
-    }, 900)
-    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [persistTemplate, tpl])
+    saver.templateEdited()
+  }, [saver, tpl])
 
-  // Independent debounced autosave for the default footer, same 900ms/silent
-  // pattern as the template effect above, kept separate so an in-progress
-  // footer edit never gets bundled into (or blocked by) a template save.
   useEffect(() => {
-    if (suppressNextFooterAutoSaveRef.current || defaultFooter === persistedFooterRef.current) {
-      suppressNextFooterAutoSaveRef.current = false
-      return
-    }
-    if (footerSaveTimerRef.current) clearTimeout(footerSaveTimerRef.current)
-    footerSaveTimerRef.current = setTimeout(() => {
-      const valueToPersist = defaultFooter
-      withLoaderTimeout(
-        () => saveSettings(
-          { receipt_footer: valueToPersist },
-          { silentToast: true, refreshChannels: ['settings', 'sales', 'pos', 'dashboard'], reason: 'receipt-default-footer-saved', source: 'receipt-settings:auto-save' },
-        ),
-        'Receipt default footer save',
-        RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
-      ).then((result) => {
-        if (!aliveRef.current) return
-        if (settingsSaveSucceeded(result)) persistedFooterRef.current = valueToPersist
-      }).catch(() => {})
-    }, 900)
-    return () => { if (footerSaveTimerRef.current) clearTimeout(footerSaveTimerRef.current) }
-  }, [defaultFooter, saveSettings])
+    saver.footerEdited()
+  }, [saver, defaultFooter])
 
-  // ?€?€ Manual save with user feedback ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-  // Calls window.api.saveSettings directly (not AppContext.saveSettings) to avoid
-  // the double-notification bug: AppContext.saveSettings calls notify() internally,
-  // and the old code called notify() again after it returned, producing two toasts.
   const handleSave = async (): Promise<void> => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    await persistTemplate({ silent: false, showToast: true })
+    await saver.manualSave()
   }
+
 
   const SECTIONS: SectionConfig[] = [
     { id: 'fields', label: t('receipt_fields') || 'All Fields', icon: LayoutList },
@@ -618,8 +481,8 @@ export default function ReceiptSettings() {
                 <Toggle label={t('show_delivery_contact') || 'Enable Delivery Contact Section'} desc={t('rfd_delivery_show_contact') || 'Master switch for delivery contact information'} value={tpl.delivery_show_contact !== false} onChange={v => setT('delivery_show_contact', v)} />
                 <Toggle label={t('show_delivery_driver_name') || 'Show Driver Name'} desc={t('rfd_delivery_driver_name') || 'Display driver/rider name'} value={tpl.delivery_show_driver_name !== false} onChange={v => setT('delivery_show_driver_name', v)} />
                 <Toggle label={t('show_delivery_driver_phone') || 'Show Driver Phone'} desc={t('rfd_delivery_driver_phone') || 'Display driver/rider phone number'} value={tpl.delivery_show_driver_phone !== false} onChange={v => setT('delivery_show_driver_phone', v)} />
-                <Toggle label={t('show_delivery_address') || 'Show Delivery Address'} desc={t('rfd_delivery_show_address') || 'Destination address on receipt'} value={!!tpl.delivery_show_address} onChange={v => setT('delivery_show_address', v)} />
-                <Toggle label={t('show_delivery_fee') || 'Show Delivery Fee'} desc={t('rfd_delivery_show_fee') || 'Delivery fee line in totals'} value={!!tpl.delivery_show_fee} onChange={v => setT('delivery_show_fee', v)} />
+                <Toggle label={t('show_delivery_address') || 'Show Delivery Address'} desc={t('rfd_delivery_show_address') || 'Destination address on receipt'} value={tpl.delivery_show_address !== false} onChange={v => setT('delivery_show_address', v)} />
+                <Toggle label={t('show_delivery_fee') || 'Show Delivery Fee'} desc={t('rfd_delivery_show_fee') || 'Delivery fee line in totals'} value={tpl.delivery_show_fee !== false} onChange={v => setT('delivery_show_fee', v)} />
               </Section>
 
               <Section title={t('delivery_fee_position') || 'Delivery Fee Position'}>
@@ -638,7 +501,7 @@ export default function ReceiptSettings() {
               </Section>
 
               <Section title={t('discount_settings') || 'Discount Settings'}>
-                <Toggle label={t('show_discount_receipt') || 'Show Discount on Receipt'} desc={t('rfd_show_discount') || 'Display discount line when a discount was applied'} value={!!tpl.show_discount} onChange={v => setT('show_discount', v)} />
+                <Toggle label={t('show_discount_receipt') || 'Show Discount on Receipt'} desc={t('rfd_show_discount') || 'Display discount line when a discount was applied'} value={tpl.show_discount !== false} onChange={v => setT('show_discount', v)} />
                 <div className="mt-4">
                   <div className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">{t('discount_position') || 'Discount Position'}</div>
                   <div className="space-y-2">
@@ -758,7 +621,7 @@ export default function ReceiptSettings() {
             <ReceiptQrSettingsTab tpl={tpl} setT={setT} t={t} />
           )}
 
-          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={typedPreviewTargetRef} settings={settings} saveSettings={saveSettings} notify={notify} />}
+          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={typedPreviewTargetRef} settings={settings} saveSettings={saveSettings} notify={notify} saveRegistry={saver} />}
 
         </div>
       </div>

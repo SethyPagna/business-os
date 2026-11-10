@@ -149,6 +149,10 @@ test('money, KHR, quantity and composite fields use friendly render contracts', 
   const khr = (n: number | string) => `${Number(n).toLocaleString('en-US')}៛`
   const tr = (_key: string, fallback: string) => fallback
   assert.deepEqual(formatSaleRecordValueLinesLocalized('driver', { id: 9, name: 'Dara', phone: '0123', address: 'Zone A' }, usd, khr, tr), ['Dara · #9 · 0123 · Zone A'])
+  const optionsJson = JSON.stringify([{ label: 'Default', name: 'ta', phone: '', email: '', address: '', area: '' }, { address: 'St 271', area: '' }])
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('driver', { id: 9, name: 'ta', phone: null, address: optionsJson }, usd, khr, tr), ['ta · #9 · St 271'], 'a driver entry written before the fix heals at display time')
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('driver', { id: 9, name: 'ta', phone: null, address: JSON.stringify([{ label: 'Default', address: '', area: '' }]) }, usd, khr, tr), ['ta · #9'], 'an all-empty Contact Options JSON prints no address')
+  assert.deepEqual(formatSaleRecordValueLinesLocalized('driver', { id: 9, name: 'ta', phone: null, address: { x: 1 } }, usd, khr, tr), ['ta · #9'], 'a non-string address never prints as [object Object]')
   assert.deepEqual(formatSaleRecordValueLinesLocalized('items', [{ name: 'Primer', quantity: 2, line_total_usd: 20 }], usd, khr, tr), ['Primer × 2 · $20.00'])
   assert.deepEqual(formatSaleRecordValueLinesLocalized('membership', { number: 'M-1', discount_usd: 2, discount_khr: null, points_redeemed: 5 }, usd, khr, tr), ['M-1', 'Membership discount: $2.00', 'Points redeemed: 5'])
   const payment = formatSaleRecordValueLinesLocalized('payment', { method: 'ABA', details: [{ method: 'ABA', amount_usd: 10, amount_khr: 0 }], amount_paid_usd: 10, amount_paid_khr: 0, change_usd: 0, change_khr: 0 }, usd, khr, tr)

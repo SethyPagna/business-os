@@ -88,7 +88,7 @@ import {
   type SettlementRow,
 } from './saleSettlement.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
+import { contactDisplayAddress, deliveryOptionHint } from '../contacts/contactOptionUtils.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { saleRecordsCount } from '../../utils/saleRecords.ts'
 import { parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
@@ -1607,7 +1607,7 @@ export default function SaleDetailModal({
               className={`flex w-full items-start justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs ${deliveryContact?.id === option.id ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
             >
               <span className="font-medium text-gray-800 dark:text-gray-100">{option.name || `#${option.id}`}</span>
-              <span className="text-gray-400">{option.phone || option.address || option.area || ''}</span>
+              <span className="text-gray-400">{deliveryOptionHint(option)}</span>
             </button>
           ))}
           {deliveryOptions.length === 0 ? <div className="text-[11px] text-gray-400">{t('no_data')}</div> : null}
