@@ -93,14 +93,40 @@ check('D6 bulk delete of only unreferenced people deletes all and records no fai
   const job = w.one('SELECT failed_count, last_error FROM bulk_delete_jobs WHERE id=?', jobId)
   assert.equal(job.failed_count, 0); assert.equal(job.last_error, null)
 })
-check('D7 bulk: a sale saved after the chunk read fails the chunk atomically (no delete, no audit)', async () => {
+const oneShot = (w, sql) => { let fired = false; w.counter.state.beforeBatch = () => { if (!fired) { fired = true; w.exec(sql) } } }
+check('D7 bulk: a sale saved after the chunk read trips the guard; the chunk is retried once without it, the free id still deletes, the code is contact_has_sales', async () => {
   const w = world()
   const { jobId } = await w.engine.createBulkDeleteJob(w.env, 'delivery_contacts', [3, 5], 'cleanup', w.actor)
-  w.counter.state.beforeBatch = () => { w.exec(`INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES (104,3,'Free driver')`) }
+  oneShot(w, "INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES (104,3,'Free driver')")
+  await drain(w)
+  assert.deepEqual(live(w).filter((id) => id === 3 || id === 5), [3], 'id 5 deleted, id 3 kept')
+  assert.deepEqual(w.rows(`SELECT entity_id FROM audit_logs WHERE entity='delivery_contact' AND action='delete'`).map((r) => r.entity_id), ['5'], 'audit only for the deleted id')
+  const job = w.one('SELECT status, failed_count, failed_ids_json, last_error FROM bulk_delete_jobs WHERE id=?', jobId)
+  assert.equal(job.status, 'completed'); assert.equal(job.failed_count, 1); assert.deepEqual(JSON.parse(job.failed_ids_json), [3])
+  assert.equal(job.last_error, 'contact_has_sales: [3]', 'the code, not the raw database message')
+})
+check('D7b bulk: a second trip in the retry records the chunk as kept under contact_has_sales (bounded: one retry only)', async () => {
+  const w = world()
+  const { jobId } = await w.engine.createBulkDeleteJob(w.env, 'delivery_contacts', [3, 5], 'cleanup', w.actor)
+  let n = 0
+  w.counter.state.beforeBatch = () => { n += 1; w.exec(`INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES (${900 + n},${n === 1 ? 3 : 5},'x')`) }
   await drain(w)
   assert.ok(live(w).includes(3) && live(w).includes(5), 'nothing deleted')
-  assert.equal(w.one(`SELECT COUNT(*) n FROM audit_logs WHERE entity='delivery_contact' AND action='delete'`).n, 0)
-  assert.equal(w.one('SELECT failed_count FROM bulk_delete_jobs WHERE id=?', jobId).failed_count, 2)
+  assert.equal(n, 2, 'exactly one retry')
+  const job = w.one('SELECT status, failed_count, last_error FROM bulk_delete_jobs WHERE id=?', jobId)
+  assert.equal(job.status, 'completed'); assert.equal(job.failed_count, 2)
+  assert.equal(job.last_error, 'contact_has_sales: [3,5]')
+})
+check('D7c bulk across chunks: last_error keeps the whole kept list, not only the last chunk', async () => {
+  const w = world(); w.useFree = true
+  for (let i = 0; i < 130; i += 1) w.exec(`INSERT INTO delivery_contacts(id,name) VALUES (${2000 + i},'bulk ${i}')`)
+  w.exec("INSERT INTO sales(id,delivery_contact_id,delivery_contact_name) VALUES (801,2001,'x'),(802,2127,'x')")
+  const { jobId } = await w.engine.createBulkDeleteJob(w.env, 'delivery_contacts', Array.from({ length: 130 }, (_, i) => 2000 + i), 'cleanup', w.actor)
+  await drain(w)
+  const job = w.one('SELECT status, failed_count, last_error FROM bulk_delete_jobs WHERE id=?', jobId)
+  assert.equal(job.status, 'completed'); assert.equal(job.failed_count, 2)
+  assert.equal(job.last_error, 'contact_has_sales: [2001,2127]')
+  assert.equal(w.one('SELECT COUNT(*) n FROM delivery_contacts WHERE id >= 2000').n, 2)
 })
 check('D8 bulk chunk stays a fixed handful of D1 calls (one usage read per chunk, not per id)', async () => {
   const w = world()
@@ -124,8 +150,11 @@ const MUTANTS = [
   { name: 'refusal loses its contact_has_sales code', file: G, from: 'code: CONTACT_HAS_SALES_CODE,', to: "code: 'conflict',", catches: ['D1', 'D4'] },
   { name: 'in-batch guard ignores fees', file: G, from: ' OR EXISTS (SELECT 1 FROM fees WHERE ${named})', to: '', catches: ['D4b'] },
   { name: 'in-batch guard removed from the single delete', file: G, from: 'await db.batch([buildDeliveryContactUsageGuard([id]), { sql', to: 'await db.batch([{ sql', catches: ['D4'] },
-  { name: 'bulk engine deletes referenced people too', file: B, from: `deleteChunk = chunk.filter((id) => !named.has(id))`, to: ``, catches: ['D5'] },
-  { name: 'bulk in-batch guard removed', file: B, from: `...(job.entity_type === 'delivery_contacts' && deleteChunk.length ? [buildDeliveryContactUsageGuard(deleteChunk)] : []),`, to: '', catches: ['D7'] },
+  { name: 'bulk engine deletes referenced people too', file: B, from: `deleteChunk = deleteChunk.filter((id) => !named.has(id))`, to: ``, catches: ['D5'] },
+  { name: 'bulk in-batch guard removed', file: B, from: `...(job.entity_type === 'delivery_contacts' && deleteChunk.length ? [buildDeliveryContactUsageGuard(deleteChunk)] : []),`, to: '', catches: ['D7', 'D7b'] },
+  { name: 'bulk race: no retry, the whole chunk is recorded failed', file: B, from: 'if (named.size) { keepNamed(named); continue }', to: '', catches: ['D7'] },
+  { name: 'bulk race: unbounded retry', file: B, from: '&& !racedOnce) {', to: ') {', catches: ['D7b'] },
+  { name: 'bulk: earlier chunks kept ids dropped', file: B, from: 'if (earlier) keptIds = (JSON.parse(earlier[1]) as number[]).map(Number)', to: '', catches: ['D7c'] },
   { name: 'bulk refusal not reported on the job', file: B, from: 'progress(failedIds, keptNote)', to: 'progress(failedIds, null)', catches: ['D5'] },
 ]
 runSuite(tests, MUTANTS).catch((e) => { console.error(e); process.exit(1) })
