@@ -16,3 +16,16 @@ for (const [name, pack] of [['en', en], ['km', km]] as const) {
 }
 assert.ok(/\p{Script=Khmer}/u.test(km.delivery_contact_has_sales), 'km is real Khmer')
 console.log('deliveryContactHasSalesCopy: ok')
+
+// The reset confirmation must not promise a full wipe: drivers a sale or fee names stay.
+const resetSource = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
+for (const [name, pack] of [['en', en], ['km', km]] as const) {
+  assert.ok(!/\ball\b/i.test(pack.reset_delivery_contacts_desc) || name === 'km', 'en: the description does not say "all"')
+  assert.ok(!/^All delivery contacts$/.test(pack.reset_delivery_contacts_deleted), `${name}: not the old "All delivery contacts" line`)
+}
+assert.ok(/no sale or fee names/.test(en.reset_delivery_contacts_desc) && /stay/.test(en.reset_delivery_contacts_desc), 'en desc says named drivers stay')
+assert.ok(!/ទាំងអស់/.test(km.reset_delivery_contacts_desc) && !/ទាំងអស់/.test(km.reset_delivery_contacts_deleted), 'km does not say "all"')
+assert.ok(resetSource.includes(`T('reset_delivery_contacts_desc', '${en.reset_delivery_contacts_desc}')`), 'the fallback matches en desc')
+assert.ok(resetSource.includes(`T('reset_delivery_contacts_deleted', '${en.reset_delivery_contacts_deleted}')`), 'the fallback matches en deleted line')
+assert.ok(!resetSource.includes('Deletes all delivery contacts'), 'no stale fallback')
+console.log('deliveryContactHasSalesCopy reset copy: ok')

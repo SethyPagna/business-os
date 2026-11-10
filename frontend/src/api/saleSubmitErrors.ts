@@ -15,6 +15,7 @@
 //    other cash writer refused it. The till marks the field before it asks; this restates the refusal if a stale till still sent it.
 //  * sale_payment_rows_mismatch - payment rows that do not add up to the paid total the request states (MONEY-1 review, 4 Nov 2026): the
 //    till builds both from one set of rows, so this only answers a stale or foreign client; nothing was recorded.
+//  * delivery_contact_missing - the delivery person picked for the sale was deleted before it was saved (409): nothing was recorded; pick another.
 // sale_created_at_too_old is the one code with a different key: a queued sale older than the Worker's window (B1-R) is refused and kept on
 // the device for the owner (server_sale_kept_on_device).
 const SALE_SUBMIT_REFUSAL_OWN_KEY: readonly string[] = [
@@ -24,6 +25,7 @@ const SALE_SUBMIT_REFUSAL_OWN_KEY: readonly string[] = [
   'sale_stock_changed',
   'riel_cash_not_hundreds',
   'sale_payment_rows_mismatch',
+  'delivery_contact_missing',
 ]
 
 /**
