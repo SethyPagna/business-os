@@ -62,6 +62,22 @@ test('a stale epoch (409) reloads the list and says so; the maintenance refusal 
   assert.deepEqual(failed.log, ['ask', 'notify:error'])
 })
 
+test('turning online orders on with no online payment method says so, in both languages, and points at the Settings field (not "changed elsewhere")', async () => {
+  const refused = harness({ set: async () => { throw Object.assign(new Error('x'), { status: 409, code: 'online_method_required' }) } })
+  assert.equal(await changeReadSwitch(refused.deps, listing, offRow), 'method_required')
+  assert.deepEqual(refused.log, ['ask', 'notify:warning'], 'no reload: nothing changed elsewhere')
+  for (const pack of [en, km]) {
+    assert.ok(pack.read_switch_online_method_required, 'the sentence exists')
+    assert.notEqual(pack.read_switch_online_method_required, pack.read_switch_stale)
+  }
+  assert.match(en.read_switch_online_method_required, new RegExp(en.online_payment_method_label, 'i'))
+  assert.match(km.read_switch_online_method_required, new RegExp(km.online_payment_method_label.slice(0, 8)))
+  assert.match(en.read_switch_online_method_required, new RegExp(en.manage_payment_methods))
+  const shown: string[] = []
+  await changeReadSwitch(harness({ set: refused.deps.set, notify: (message) => { shown.push(message) } }).deps, listing, offRow)
+  assert.equal(shown[0], en.read_switch_online_method_required)
+})
+
 test('the listing reads only a well formed answer: an unknown state or a missing epoch is dropped, not guessed', () => {
   assert.equal(normalizeReadSwitches(null), null)
   assert.equal(normalizeReadSwitches({ switches: [] }), null)

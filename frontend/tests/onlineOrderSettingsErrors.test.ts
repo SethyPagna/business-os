@@ -16,6 +16,8 @@ const km = pack('km')
 const CODES = [
   ['invalid_online_order_payment_minutes', 'write_rejected_online_order_payment_minutes', /from 3 to 60/, /3 ដល់ 60/],
   ['invalid_online_order_request_days', 'write_rejected_online_order_request_days', /from 1 to 30/, /1 ដល់ 30/],
+  ['invalid_online_order_payment_method', 'write_rejected_online_order_payment_method', /configured payment methods/, /វិធីបង់ប្រាក់/],
+  ['online_method_required', 'write_rejected_online_method_required', /Turn them off before clearing/, /បិទវាសិន/],
 ] as const
 
 test('each settings refusal shows its own sentence in both languages, not the generic one', () => {
@@ -43,4 +45,18 @@ test('the sentences quote the bounds the Worker enforces', () => {
   if (!Number.isFinite(bound('PAYMENT_MINUTES_MAX'))) return
   assert.match(en.write_rejected_online_order_payment_minutes, new RegExp(`from ${bound('PAYMENT_MINUTES_MIN')} to ${bound('PAYMENT_MINUTES_MAX')}`))
   assert.match(en.write_rejected_online_order_request_days, new RegExp(`from 1 to ${bound('REQUEST_WINDOW_DAYS_MAX')}`))
+})
+
+test('Settings has an admin-only field that sets the online payment method through the normal settings save', () => {
+  // CATCHES: online ordering that cannot be switched on because nothing in the app can store the method; a second write path around the Settings save; English-only labels.
+  const source = fs.readFileSync(path.join(here, '..', 'src', 'components', 'utils-settings', 'Settings.tsx'), 'utf8').split('\r\n').join('\n')
+  const sectionAt = source.indexOf("{isAdmin && showSettingsSection('business') ? (")
+  const fieldAt = source.indexOf('id="settings-online-payment-method"')
+  assert.ok(sectionAt > -1 && fieldAt > sectionAt, 'the field sits in the admin-only payment section')
+  assert.ok(source.includes('saveSettings(\n        { online_order_payment_method: method }'), 'the field saves through saveSettings')
+  assert.ok(source.includes("title={t('online_payment_method_clear')"), 'the clear button is icon-only with a translated tooltip')
+  for (const key of ['online_payment_method_label', 'online_payment_method_hint', 'online_payment_method_not_set', 'online_payment_method_saved', 'online_payment_method_clear']) {
+    assert.ok(en[key], `en ${key}`)
+    assert.match(km[key], /[ក-៿]/, `km ${key}`)
+  }
 })

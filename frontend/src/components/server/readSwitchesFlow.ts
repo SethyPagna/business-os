@@ -1,7 +1,7 @@
 export type ReadSwitchState = 'off' | 'on' | 'shadow'
 export type ReadSwitchRow = { name: string; state: ReadSwitchState; rate: number }
 export type ReadSwitchListing = { epoch: number; switches: ReadSwitchRow[]; memoSeconds: number }
-export type ReadSwitchOutcome = 'cancelled' | 'changed' | 'stale' | 'maintenance' | 'failed'
+export type ReadSwitchOutcome = 'cancelled' | 'changed' | 'stale' | 'maintenance' | 'method_required' | 'failed'
 
 type Translate = (key: string) => string | undefined
 
@@ -13,6 +13,7 @@ export type ReadSwitchFlowDeps = {
   notify: (message: string, type?: string) => void
 }
 
+const ONLINE_METHOD_REQUIRED_CODE = 'online_method_required'
 const STATES = new Set<string>(['off', 'on', 'shadow'])
 
 export function normalizeReadSwitches(value: unknown): ReadSwitchListing | null {
@@ -49,6 +50,10 @@ export async function changeReadSwitch(deps: ReadSwitchFlowDeps, listing: ReadSw
     return 'changed'
   } catch (error) {
     const failure = error as { status?: number; code?: string } | null
+    if (failure?.code === ONLINE_METHOD_REQUIRED_CODE) {
+      deps.notify(word(t, 'read_switch_online_method_required', 'Online orders need an online payment method first. Open Settings, Manage Payment Methods, choose it under Online payment method, then turn this on.'), 'warning')
+      return 'method_required'
+    }
     if (failure?.status === 409 || failure?.code === 'read_switch_epoch_stale') {
       deps.notify(word(t, 'read_switch_stale', 'The switches changed elsewhere. Showing the current ones.'), 'warning')
       await deps.reload()

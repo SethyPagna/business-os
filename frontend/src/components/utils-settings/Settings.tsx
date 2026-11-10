@@ -552,6 +552,9 @@ export default function Settings() {
   const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
+  const savedOnlineMethod = toStringValue(settings.online_order_payment_method).trim()
+  const [onlineMethodDraft, setOnlineMethodDraft] = useState(savedOnlineMethod)
+  useEffect(() => { setOnlineMethodDraft(savedOnlineMethod) }, [savedOnlineMethod])
   const [renameDraft, setRenameDraft] = useState<{ from: string; to: string } | null>(null)
   // Methods the shop has taken money through that are not in the list above.
   // Held as state rather than derived, because only the server can know it --
@@ -849,6 +852,19 @@ export default function Settings() {
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Failed to save payment methods', 'error')
       return false
+    }
+  }
+
+  const saveOnlineMethod = async (method: string) => {
+    try {
+      const result = await saveSettings(
+        { online_order_payment_method: method },
+        { refreshChannels: ['settings', 'sales', 'pos'], reason: 'online-payment-method-saved', source: 'settings:online-payment-method' },
+      )
+      if (!settingsSaveSucceeded(result)) return
+      notify(t('online_payment_method_saved') || 'Online payment method saved.', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to save the online payment method', 'error')
     }
   }
 
@@ -2130,6 +2146,48 @@ export default function Settings() {
             >
               + {t('add')}
             </button>
+          </div>
+
+          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+            <label htmlFor="settings-online-payment-method" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {t('online_payment_method_label') || 'Online payment method'}
+            </label>
+            <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('online_payment_method_hint') || 'The method a paid online order is rung on its sale. Choose it from the list above; it is kept for online orders only.'}
+            </p>
+            <div className="flex items-center gap-2">
+              <select
+                id="settings-online-payment-method"
+                name="online_order_payment_method"
+                className="input flex-1 text-sm"
+                value={onlineMethodDraft}
+                onChange={(event) => setOnlineMethodDraft(event.target.value)}
+              >
+                <option value="">{t('online_payment_method_not_set') || 'Not set'}</option>
+                {(pmList.includes(savedOnlineMethod) || !savedOnlineMethod ? pmList : [savedOnlineMethod, ...pmList]).map((paymentMethod) => (
+                  <option key={paymentMethod} value={paymentMethod}>{paymentMethod}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-primary inline-flex items-center gap-1 text-sm"
+                disabled={onlineMethodDraft === savedOnlineMethod}
+                onClick={() => void saveOnlineMethod(onlineMethodDraft)}
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {t('save') || 'Save'}
+              </button>
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-red-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-900/20"
+                disabled={!savedOnlineMethod}
+                title={t('online_payment_method_clear') || 'Clear the online payment method'}
+                aria-label={t('online_payment_method_clear') || 'Clear the online payment method'}
+                onClick={() => void saveOnlineMethod('')}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </SettingsSection>
         ) : null}

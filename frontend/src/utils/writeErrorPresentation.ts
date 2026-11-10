@@ -24,6 +24,8 @@ const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, 
   // KHQR: online order timing is refused with its reason, never clamped (cloudflare/src/lib/onlineOrders.ts validateOnlineOrderSettingsWrite).
   ['invalid_online_order_payment_minutes', ['write_rejected_online_order_payment_minutes', 'The payment time for online orders must be a whole number of minutes from 3 to 60.']],
   ['invalid_online_order_request_days', ['write_rejected_online_order_request_days', 'The change window for online orders must be a whole number of days from 1 to 30.']],
+  ['invalid_online_order_payment_method', ['write_rejected_online_order_payment_method', 'The online payment method must be one of the configured payment methods.']],
+  ['online_method_required', ['write_rejected_online_method_required', 'Online orders are on. Turn them off before clearing the online payment method.']],
 ])
 
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {
