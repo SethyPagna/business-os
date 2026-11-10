@@ -32,6 +32,11 @@ export const MAX_SHADOW_RATE = 0.1
 export const MAX_INPUT_CHARS = 128
 const DECLARATION = 'export const KNOWN_READ_SWITCHES = ['
 const ROW_KEY = 'read_switches'
+export const ONLINE_ORDERS_SWITCH = 'online_orders'
+export const ONLINE_METHOD_KEY = 'online_order_payment_method'
+export const METHOD_READ_SQL = `SELECT value FROM settings WHERE key = '${ONLINE_METHOD_KEY}'`
+// The Worker's route refuses online_orders ON while no online payment method is stored; the ops write holds the same rule inside its own statement, so it cannot race a settings save.
+export const METHOD_STORED_GUARD = `EXISTS (SELECT 1 FROM settings WHERE key = '${ONLINE_METHOD_KEY}' AND TRIM(COALESCE(value, '')) <> '')`
 
 // Pure: readSwitches.ts text -> KNOWN_READ_SWITCHES. Any other shape of the declaration is refused whole.
 export function switchNamesFromSource(source) {
@@ -126,7 +131,8 @@ export function buildBatch({ stored, value, name, from, to, epochBefore, epochAf
   const changed = JSON.stringify({ state: to, epoch: epochAfter })
   const off = to === 'off'
   const maintenance = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance')"
-  const guardMaintenance = off ? '1' : maintenance
+  const needsMethod = name === ONLINE_ORDERS_SWITCH && to === 'on'
+  const guardMaintenance = off ? '1' : needsMethod ? `${maintenance} AND ${METHOD_STORED_GUARD}` : maintenance
   const statements = [
     `INSERT INTO system_flags (key, value, updated_at) SELECT '${ROW_KEY}', ${sqlText(value)}, CURRENT_TIMESTAMP WHERE ${guardMaintenance} ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP WHERE system_flags.value = ${stored === null ? 'NULL' : sqlText(stored)} AND ${guardMaintenance}`,
     `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz) SELECT NULL, ${sqlText(ACTOR)}, 'read_switch_set', 'read_switch', ${sqlText(name)}, ${sqlText(details)}, 'read_switch', ${sqlText(name)}, ${sqlText(change)}, ${sqlText(changed)}, NULL, NULL WHERE changes() = 1`,
@@ -155,6 +161,15 @@ export function readSwitchInput(eventPath) {
   const value = event && typeof event === 'object' && event.inputs && typeof event.inputs === 'object' ? event.inputs.switch : undefined
   if (typeof value !== 'string') throw new OpsError('switch-input-missing', 'The event payload carries no switch input.')
   return value
+}
+
+async function readMethod(d1) {
+  const r = await d1(canonicalRead(METHOD_READ_SQL))
+  if (r.code !== 0 || r.timedOut) return { ok: false, problems: [r.timedOut ? 'd1-read-timed-out' : 'd1-read-exit-nonzero'], stored: false, errorCodes: cloudflareErrorCodes(`${r.stdout}
+${r.stderr}`) }
+  const v = interpretD1Output(r.stdout, { minRows: 0, maxRows: 1, expectZero: null })
+  if (!v.ok) return { ok: false, problems: v.problems, stored: false, errorCodes: v.errorCodes || [] }
+  return { ok: true, problems: [], stored: String(v.rows[0]?.value ?? '').trim() !== '', errorCodes: [] }
 }
 
 async function readRow(d1) {
@@ -209,6 +224,11 @@ export async function runTask({ apply, rawInput, allowList, d1, context, now = (
   report.before = { stored: before.stored, state: from, epoch: epochBefore }
   lines.push(['state: {name} is {state} at epoch {epoch}', { name: word(request.name), state: word(from), epoch: epochBefore }])
   const changes = from !== request.token
+  if (changes && request.name === ONLINE_ORDERS_SWITCH && request.token === 'on') {
+    const method = await readMethod(d1)
+    if (!method.ok) { const v = method; problems.push(...v.problems); errorCodes.push(...method.errorCodes); lines.push(['method read: {result}', { result: 'FAIL' }]); return finish() }
+    if (!method.stored) { problems.push('online-method-not-stored'); lines.push(['online payment method: {result}', { result: 'FAIL' }]); return finish() }
+  }
   report.action = !changes ? 'nothing-to-change' : apply === true ? 'write' : 'dry-run'
   if (!changes || apply !== true) {
     if (changes) {

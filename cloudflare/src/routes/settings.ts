@@ -31,6 +31,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
 import { ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { readSwitch } from '../lib/readSwitches'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -1285,6 +1286,13 @@ app.post('/', async (c) => {
 
   // The online (KHQR) payment method must be one of the configured methods, and a configured method that is the online one cannot be removed from the list:
   // either would leave Fulfil naming a method the till cannot ring. A rename goes through /payment-methods/replace, which carries the setting along.
+  if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(body[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()) {
+    const storedMethod = (await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value
+    if (String(storedMethod ?? '').trim() && await readSwitch(c.env, 'online_orders')) {
+      return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)
+    }
+  }
+
   if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes('pos_payment_methods')) {
     const listed = attemptedKeys.includes('pos_payment_methods')
       ? (JSON.parse(String(body.pos_payment_methods)) as string[])

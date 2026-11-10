@@ -94,6 +94,7 @@ async function main() {
   const refused = (fn) => { let err; try { fn() } catch (e) { err = e } assert.ok(err instanceof common.OpsError, 'accepted'); return err }
   const run = (input, apply, fake, now) => mod.runTask({ apply, rawInput: input, allowList: ALLOW, d1: fake.d1, context: CONTEXT, now })
   const NOW = () => '2026-11-02T01:00:00.000Z'
+  const tokenOfStored = (name) => JSON.parse(stored()).switches[name]
 
   await check('the allow-list is the Worker\'s KNOWN_READ_SWITCHES, read from the source and frozen', () => {
     assert.deepStrictEqual([...mod.loadSwitchNames()], ALLOW)
@@ -204,6 +205,53 @@ async function main() {
     assert.strictEqual(result.report.action, 'nothing-to-change')
     assert.strictEqual(fake.calls.length, 1)
     assert.deepStrictEqual(audits(), [])
+  })
+
+  const setMethod = (value) => {
+    db.db.exec("DELETE FROM settings WHERE key = 'online_order_payment_method'")
+    if (value !== undefined) db.db.prepare("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', ?)").run(value)
+  }
+
+  await check('R3-3a: online_orders cannot go ON without a stored online payment method: refused up front on a dry run and on apply, with nothing written', async () => {
+    assert.ok(ALLOW.includes('online_orders'))
+    for (const value of [undefined, '', '   ']) {
+      setMethod(value)
+      reset(JSON.stringify({ epoch: 2, set_at: 'x', set_by: 1, switches: { online_orders: 'off' } }))
+      const before = stored()
+      for (const apply of [false, true]) {
+        const fake = fakeD1(guard, db)
+        const result = await run('online_orders=on', apply, fake, NOW)
+        assert.strictEqual(result.ok, false)
+        assert.ok(result.report.problems.includes('online-method-not-stored'), result.report.problems.join(','))
+        assert.ok(fake.calls.every((sql) => /^SELECT/.test(sql)), 'only reads were sent')
+      }
+      assert.strictEqual(stored(), before); assert.deepStrictEqual(audits(), [])
+    }
+    setMethod('ABA')
+    reset(JSON.stringify({ epoch: 2, set_at: 'x', set_by: 1, switches: { online_orders: 'off' } }))
+    const ok = await run('online_orders=on', true, fakeD1(guard, db), NOW)
+    assert.strictEqual(ok.ok, true, ok.report.problems.join(','))
+    assert.strictEqual(tokenOfStored('online_orders'), 'on')
+  })
+
+  await check('R3-3a: the guard is in the write statement itself: a settings change between the check and the write still leaves the switch OFF, with no audit row', async () => {
+    reset(JSON.stringify({ epoch: 2, set_at: 'x', set_by: 1, switches: { online_orders: 'off' } }))
+    setMethod(undefined)
+    const previous = stored()
+    const value = mod.nextValue(previous, ALLOW, { name: 'online_orders', token: 'on' }, NOW())
+    const build = mod.buildBatch({ stored: previous, value, name: 'online_orders', from: 'off', to: 'on', epochBefore: 2, epochAfter: 3, context: CONTEXT })
+    const fake = fakeD1(guard, db)
+    const written = await fake.d1(build.sql)
+    assert.notStrictEqual(written.code, 0, 'the batch aborts')
+    assert.strictEqual(stored(), previous); assert.deepStrictEqual(audits(), [])
+    setMethod('ABA')
+    const accepted = await fakeD1(guard, db).d1(build.sql)
+    assert.strictEqual(accepted.code, 0, 'control: the same batch with a stored method is written')
+    assert.strictEqual(stored(), value); assert.strictEqual(audits().length, 1)
+    const off = mod.buildBatch({ stored: value, value: mod.nextValue(value, ALLOW, { name: 'online_orders', token: 'off' }, NOW()), name: 'online_orders', from: 'on', to: 'off', epochBefore: 3, epochAfter: 4, context: CONTEXT })
+    setMethod(undefined)
+    assert.strictEqual((await fakeD1(guard, db).d1(off.sql)).code, 0, 'OFF never needs the method')
+    setMethod(undefined)
   })
 
   await check('bad input is refused before D1 is touched', async () => {
