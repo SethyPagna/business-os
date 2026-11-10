@@ -30,7 +30,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -851,7 +851,7 @@ app.post('/payment-methods/replace', async (c) => {
     // The online (KHQR) method follows its own rename, in the same batch, so Fulfil never names a method that no longer exists.
     {
       sql: `UPDATE settings SET value=@to,updated_at=@stamp WHERE key='online_order_payment_method' AND lower(trim(value))=@fromKey`,
-      params: { to, stamp, fromKey: paymentMethodKey(from) },
+      params: { to, stamp, fromKey: methodFold(from) },
     },
   ]
   if (scope === 'linked') {
@@ -1285,6 +1285,8 @@ app.post('/', async (c) => {
 
   // The online (KHQR) payment method must be one of the configured methods, and a configured method that is the online one cannot be removed from the list:
   // either would leave Fulfil naming a method the till cannot ring. A rename goes through /payment-methods/replace, which carries the setting along.
+  if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)) body[ONLINE_PAYMENT_METHOD_KEY] = String(body[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
+
   if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes('pos_payment_methods')) {
     const listed = attemptedKeys.includes('pos_payment_methods')
       ? (JSON.parse(String(body.pos_payment_methods)) as string[])
@@ -1347,6 +1349,10 @@ app.post('/', async (c) => {
   if (changedKeys.length === 0) {
     // Nothing to write, audit, cache-bump or broadcast.
     return c.json({ updatedAt: await scopedUpdatedAt(c.env, stored), keys: [], unchanged: attemptedKeys })
+  }
+
+  if (changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !isAdminControlUser(user)) {
+    return c.json({ error: 'Only an administrator can change the online payment method.', code: 'online_method_admin_only' }, 403)
   }
 
   const db = getDb(c.env)

@@ -73,6 +73,32 @@ async function main() {
       await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     })
 
+    await check('R5-3: the online method is set by an administrator through the ordinary settings save, trimmed; a manager may resend it unchanged but not change it', async (t) => {
+      await world.run("INSERT INTO settings (key, value) VALUES ('pos_payment_methods', '[\"Cash\",\"ABA KHQR\",\"Bakong\"]') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      await world.run("DELETE FROM settings WHERE key = 'online_order_payment_method'")
+      await world.account('settings_manager', { roleCode: 'settings_manager_role', permissions: { settings: true, sales_policy: true } })
+      const storedMethod = async () => (await world.first("SELECT value FROM settings WHERE key = 'online_order_payment_method'"))?.value ?? null
+      const refused = await world.api('POST', '/api/settings', { online_order_payment_method: 'Bakong' }, { as: 'settings_manager' })
+      t.eq('a manager cannot set it', [refused.status, refused.json && refused.json.code], [403, 'online_method_admin_only'])
+      t.eq('nothing stored', await storedMethod(), null)
+      const set = await world.api('POST', '/api/settings', { online_order_payment_method: '  Bakong  ' })
+      t.eq('the administrator sets it', set.status, 200)
+      t.eq('stored trimmed', await storedMethod(), 'Bakong')
+      const unlisted = await world.api('POST', '/api/settings', { online_order_payment_method: 'Nowhere' })
+      t.eq('a method that is not in the payment list is refused', [unlisted.status, unlisted.json && unlisted.json.code], [400, 'invalid_online_order_payment_method'])
+      const resent = await world.api('POST', '/api/settings', { online_order_payment_method: 'Bakong' }, { as: 'settings_manager' })
+      t.eq('a manager resending the stored value is not refused', resent.status, 200)
+    })
+
+    await check('R5-7: renaming a payment method carries the online method along even when its name holds a non-ASCII capital (the SQL match folds A-Z only)', async (t) => {
+      await world.run("INSERT INTO settings (key, value) VALUES ('pos_payment_methods', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", JSON.stringify(['Cash', 'Éclair QR']))
+      await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", 'Éclair QR')
+      const renamed = await world.api('POST', '/api/settings/payment-methods/replace', { from: 'Éclair QR', to: 'Eclair Pay', scope: 'settings_only' })
+      t.eq('renamed', renamed.status, 200)
+      t.eq('the online method followed', (await world.first("SELECT value FROM settings WHERE key = 'online_order_payment_method'"))?.value, 'Eclair Pay')
+      await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'Bakong') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    })
+
     await check('the bootstrap carries the same key, and a save that echoes it stores nothing', async (t) => {
       await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       const boot = await world.api('GET', '/api/auth/bootstrap')
