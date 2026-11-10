@@ -24,3 +24,14 @@ export async function planAbaRefund(db: D1Compat, input: { saleId: number | null
   }
   return { ok: true, orderId: Number(row.id) }
 }
+
+/**
+ * Review F7: the same cap as planAbaRefund, as a SQL predicate for the return's own write batch (it joins the precondition guard, ahead of the INSERT, so two concurrent
+ * ABA returns on one order cannot both pass the preflight and together exceed what was paid online). Binds `@abaSaleId` and `@abaCashUsd`. The order's sale must exist (an
+ * unlinked sale is refused by the preflight and fails here too). The tolerance matches planAbaRefund.
+ */
+export const ABA_REFUND_CAP_PREDICATE = `EXISTS (SELECT 1 FROM online_orders o WHERE o.sale_id = @abaSaleId AND
+    ROUND(
+      (SELECT COALESCE(SUM(COALESCE(p.paid_amount, p.amount)), 0) FROM online_order_payments p WHERE p.order_id = o.id AND p.state = 'paid')
+      - (SELECT COALESCE(SUM(r.total_refund_usd - COALESCE(r.owed_reduction_usd, 0)), 0) FROM returns r WHERE r.sale_id = o.sale_id AND r.refund_channel = 'aba' AND COALESCE(r.status, 'completed') <> 'cancelled')
+      - (SELECT COALESCE(SUM(e.amount_usd), 0) FROM online_order_events e WHERE e.order_id = o.id AND e.event = 'refund_noted'), 4) + 0.00005 >= @abaCashUsd)`

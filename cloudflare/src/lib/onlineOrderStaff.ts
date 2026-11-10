@@ -321,6 +321,15 @@ export async function resolveReview(deps: OrderDeps, actor: Actor, id: unknown, 
  * written), so a second note for the same money is refused. The insert re-checks, inside the same statement, that no other note landed since this
  * one was priced (two staff pressing at once cannot both pass).
  */
+/**
+ * The refund note INSERT. Beyond the notes already written (@noted cents) it asserts that no ABA return of the sale landed since the note was priced (@abaCount, the number
+ * of the sale's ABA returns the pricing read): a return and a note racing for the same money cannot both pass (review F7; the return side holds the same cap in its own batch).
+ */
+export const REFUND_NOTE_INSERT_SQL = `INSERT INTO online_order_events (order_id, event, source, actor_id, actor_name, internal_note, amount_usd, reference, sale_id, created_at)
+          SELECT @oid, 'refund_noted', 'staff', @aid, @aname, @note, @amount, @ref, @sale, @at
+          WHERE (SELECT COALESCE(SUM(CAST(ROUND(amount_usd * 100) AS INTEGER)), 0) FROM online_order_events WHERE order_id = @oid AND event = 'refund_noted') = @noted
+            AND (SELECT COUNT(*) FROM returns WHERE sale_id = @sale AND refund_channel = 'aba') = @abaCount`
+
 export async function noteRefund(deps: OrderDeps, actor: Actor, id: unknown, body: Record<string, unknown>): Promise<{ due_after_usd: number }> {
   const amount = Number(body.amount_usd)
   const reference = text(body.reference, 60, 'reference_invalid', 'The ABA reference')
@@ -333,10 +342,8 @@ export async function noteRefund(deps: OrderDeps, actor: Actor, id: unknown, bod
   const cents = Math.round(amount * 100)
   const noted = bundle.events.filter((e) => e.event === 'refund_noted').reduce((sum, e) => sum + Math.round(Number(e.amount_usd ?? 0) * 100), 0)
   const [result] = await deps.db.batch([{
-    sql: `INSERT INTO online_order_events (order_id, event, source, actor_id, actor_name, internal_note, amount_usd, reference, sale_id, created_at)
-          SELECT @oid, 'refund_noted', 'staff', @aid, @aname, @note, @amount, @ref, @sale, @at
-          WHERE (SELECT COALESCE(SUM(CAST(ROUND(amount_usd * 100) AS INTEGER)), 0) FROM online_order_events WHERE order_id = @oid AND event = 'refund_noted') = @noted`,
-    params: { oid: order.id, aid: actor.id, aname: actor.name, note, amount: cents / 100, ref: reference, sale: order.sale_id, at: sqlTime(deps.now()), noted },
+    sql: REFUND_NOTE_INSERT_SQL,
+    params: { oid: order.id, aid: actor.id, aname: actor.name, note, amount: cents / 100, ref: reference, sale: order.sale_id, at: sqlTime(deps.now()), noted, abaCount: returns.filter((r) => r.refund_channel === 'aba').length },
   }])
   if (Number(result.meta?.changes ?? 0) !== 1) return changed()
   await announceOrderEvent(deps, { kind: 'refund', orderId: order.id, amountUsd: cents / 100 })

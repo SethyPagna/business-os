@@ -81,6 +81,19 @@ async function main() {
     assert.equal((await h.one("SELECT COUNT(*) c FROM returns WHERE refund_channel = 'aba'")).c, 1, 'every refusal wrote nothing')
     console.log('PASS guards: a sale with no online order, more than is left online, riel, an unknown channel and a user without the refund action are all refused with nothing written')
 
+    // ---- security review F7: the cap is re-proved INSIDE the return's batch. A staff refund note lands between the return's preflight read and its batch (a trigger on the
+    // batch's first guard row stands in for the second staff member); the preflight said yes, the batch must say no, and nothing is written.
+    const raced = await linkedSale()
+    await h.db.prepare(`CREATE TRIGGER f7_race AFTER INSERT ON system_flags WHEN NEW.key = 'stock_transaction_permit' AND NOT EXISTS (SELECT 1 FROM online_order_events WHERE reference = 'F7-RACE')
+      BEGIN INSERT INTO online_order_events (order_id, event, source, amount_usd, reference, sale_id) VALUES (${raced.orderId}, 'refund_noted', 'staff', 20, 'F7-RACE', ${raced.saleId}); END`).run()
+    const returnsBefore = (await h.one('SELECT COUNT(*) c FROM returns')).c
+    const lost = await ret(raced, 'aba-ret-f7', { refund_channel: 'aba' })
+    await h.db.prepare('DROP TRIGGER f7_race').run()
+    // (the competing note is rolled back with the refused batch, so the 409 itself is the proof that the race happened: without the trigger the same return succeeds, as the guards above show)
+    assert.equal(lost.created.status, 409, JSON.stringify(lost.created.body)); assert.ok(['aba_refund_over_online', 'write_conflict'].includes(lost.created.body.code), 'a real competitor commits first, so the route re-plans and says aba_refund_over_online; here the trigger note rolls back with the batch and it says write_conflict')
+    assert.equal((await h.one('SELECT COUNT(*) c FROM returns')).c, returnsBefore, 'the refused return left nothing behind')
+    console.log('PASS (F7) an ABA return that lost the race with a refund note is refused inside its own batch (409), nothing written')
+
     // ---- amendment down: lowering a line of a Fulfilled sale leaves the customer a refund due through ABA, and the staff Orders screens refresh
     const kv = await h.mf.getKVNamespace('CACHE')
     const version = async () => await kv.get('v2:online_orders')

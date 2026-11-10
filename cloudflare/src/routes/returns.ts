@@ -37,7 +37,7 @@ import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEve
 import { loadReturnRecords } from '../lib/returnRecords'
 import { returnExportWindow } from '../lib/returnExportWindow'
 import { unexpectedFailureBody } from '../lib/failureText'
-import { planAbaRefund } from '../lib/onlineReturnChannel'
+import { ABA_REFUND_CAP_PREDICATE, planAbaRefund } from '../lib/onlineReturnChannel'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
@@ -2234,14 +2234,16 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     ...(effectGuards.length ? { effectsJson: JSON.stringify(effectGuards) } : {}),
     ...(customerReturnV1Plan?.lineage.params ?? {}),
   }
-  const precondition = returnCreatePreconditionSql({
+  const basePrecondition = returnCreatePreconditionSql({
     authorityPredicate: customerReturnAuthorityPredicate(),
     lineageCondition: customerReturnV1Plan?.lineage.condition ?? '1=1',
     effectGuardPredicate: effectGuards.length ? branchEffectGuardPredicate('@effectsJson') : null,
   })
+  // Review F7: the ABA cap is re-proved inside the commit, so a concurrent ABA return or refund note cannot slip past the preflight above.
+  const precondition = refundChannel ? `${basePrecondition} AND ${ABA_REFUND_CAP_PREDICATE}` : basePrecondition
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
     ...(customerReturnV1Plan ? customerReturnSnapshotGuardStatements(operationId, Number(customerReturnV1Plan.authority.sale.id), customerReturnV1Plan.snapshot_rows) : []),
-    returnCreateGuardStatement(operationId, 'precondition', precondition, commonGuardParams),
+    returnCreateGuardStatement(operationId, 'precondition', precondition, refundChannel ? { ...commonGuardParams, abaSaleId: requestedSaleId, abaCashUsd: cashRefundUsd } : commonGuardParams),
   ]
   const returnIdExpression = returnCreateIdSql()
   const replacementSaleExpression = replacementSaleIdSql()
@@ -2649,6 +2651,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
       }
       const transactionRefusal = stockTransactionRefusal(error)
       if (transactionRefusal) return c.json(transactionRefusal, 503)
+      // Review F7: the in-batch ABA cap refused it (a concurrent return or note used the money): answer as the preflight would have.
+      if (refundChannel) {
+        const again = await planAbaRefund(db, { saleId: requestedSaleId, cashRefundUsd })
+        if (!again.ok) return c.json({ error: again.error, code: again.code }, again.status)
+      }
       return c.json({ error: 'The sale or stock changed while this return was being recorded. Reload and try again.', code: 'write_conflict', action: 'reload_required' }, 409)
     } catch (_) {
       return c.json({

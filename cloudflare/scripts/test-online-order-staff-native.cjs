@@ -146,6 +146,27 @@ async function main() {
     assert.ok(!JSON.stringify(list).includes('345 678') && !JSON.stringify(list).includes('345678'))
   })
 
+  await check('F7: a refund note priced before an ABA return of the same sale landed is refused (409 order_changed), so a return and a note cannot both spend the same money', async () => {
+    const h = world(); await paidOrder(h)
+    h.run("INSERT INTO sales (id, receipt_number, total_usd, calculated_total_usd, amount_paid_usd, sale_status, created_at, exchange_rate, money_precision_version) VALUES (50, 'R50', 25, 25, 25, 'cancelled', '2026-11-09 05:00:00', 4000, 1)")
+    h.run("UPDATE online_orders SET state = 'fulfilled', sale_id = 50 WHERE id = 1")
+    // The ABA return lands between the note's pricing read and its write.
+    h.hooks.beforeBatch = (items) => {
+      if (!items.some((item) => /'refund_noted'/.test(item.sql))) return
+      h.hooks.beforeBatch = null
+      h.run("INSERT INTO returns (return_number, sale_id, return_scope, status, total_refund_usd, total_refund_khr, refund_channel, created_at) VALUES ('RX1', 50, 'customer', 'completed', 25, 0, 'aba', '2026-11-09 05:30:00')")
+    }
+    const raced = await ask(h, REFUNDER, '/1/refund-note', 'POST', { amount_usd: 10, reference: 'ABA-RACE' })
+    assert.equal(raced.status, 409, JSON.stringify(raced.body)); assert.equal(raced.body.code, 'order_changed')
+    assert.equal(names(h).filter((e) => e === 'refund_noted').length, 0, 'nothing was noted')
+    // Control: the same note with no competing return is accepted.
+    const c = world(); await paidOrder(c)
+    c.run("INSERT INTO sales (id, receipt_number, total_usd, calculated_total_usd, amount_paid_usd, sale_status, created_at, exchange_rate, money_precision_version) VALUES (50, 'R50', 25, 25, 25, 'cancelled', '2026-11-09 05:00:00', 4000, 1)")
+    c.run("UPDATE online_orders SET state = 'fulfilled', sale_id = 50 WHERE id = 1")
+    const ok = await ask(c, REFUNDER, '/1/refund-note', 'POST', { amount_usd: 10, reference: 'ABA-OK' })
+    assert.equal(ok.status, 201, JSON.stringify(ok.body))
+  })
+
   await check('F6: a phone typed into a social field inside a change request is masked in before_json and after_json without the full-phone permission, and whole with it', async () => {
     const h = world(); const res = await paidOrder(h, { phone: PHONE, contacts: { whatsapp: '+855 12 345 678', instagram: 'dara.shop' } })
     const out = await h.request(`/${res.body.token}/requests`, 'POST', { kind: 'contact', phone: h.one('SELECT customer_phone p FROM online_orders WHERE id = 1').p, after: { name: 'Dara K', contacts: { whatsapp: '098 765 432', instagram: 'dara_k' } } })
