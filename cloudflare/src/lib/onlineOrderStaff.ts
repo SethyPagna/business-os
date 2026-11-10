@@ -8,7 +8,7 @@
 // After the sale the till's own writers take over (S6): these refuse an order that already has a sale.
 
 import type { D1Compat } from './db'
-import { isPhoneShaped, maskPhone } from './phoneMask'
+import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
 import { checkTransaction, makeTranId, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
 import { adminPageRows, onlineOrderView, orderMoney, orderMoneyWire, refundNoteAllowed, requestStates, type RequestKind } from './onlineOrders'
 import {
@@ -183,7 +183,7 @@ function maskPhonesInJson(raw: string | null | undefined): string | null {
   let value: unknown
   try { value = JSON.parse(raw) } catch { return '{}' }
   const walk = (node: unknown): unknown => {
-    if (typeof node === 'string') return isPhoneShaped(node) ? maskPhone(node) : node
+    if (typeof node === 'string') return isPhoneShaped(node) ? maskPhone(node) : maskPhonesInText(node)
     if (Array.isArray(node)) return node.map(walk)
     if (node && typeof node === 'object') return Object.fromEntries(Object.entries(node as Record<string, unknown>).map(([key, child]) => [key, walk(child)]))
     return node
@@ -205,7 +205,7 @@ export async function staffDetail(db: D1Compat, id: unknown, now: Date, requestW
   // The response mask hides `customer_phone` by its key; a social handle can be a phone number under any key (contact_whatsapp, contact_telegram...), so those are masked here
   // unless the caller may see full phone numbers.
   const shown: Record<string, unknown> = { ...safeOrder }
-  if (!options.fullPhones) for (const field of CONTACT_FIELDS) { const key = `contact_${field}`; const value = shown[key]; if (typeof value === 'string' && isPhoneShaped(value)) shown[key] = maskPhone(value) }
+  if (!options.fullPhones) for (const field of CONTACT_FIELDS) { const key = `contact_${field}`; const value = shown[key]; if (typeof value === 'string') shown[key] = isPhoneShaped(value) ? maskPhone(value) : maskPhonesInText(value) }
   return {
     order: shown,
     payments: payments.map(({ qr_string: _qr, deeplink: _link, ...rest }) => { void _qr; void _link; return rest }),

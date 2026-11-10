@@ -179,6 +179,19 @@ async function main() {
     assert.ok(/345\s?678/.test(full.before_json) && /765\s?432/.test(full.after_json), 'with the permission the numbers are there')
   })
 
+  await check('N9: a phone number inside longer contact text (a wa.me link, "call 012...") is masked in the order and in request JSON without the full-phone permission, and whole with it (a wrong build masks only a value that is wholly a number)', async () => {
+    const h = world(); const res = await paidOrder(h, { phone: PHONE, contacts: { whatsapp: 'https://wa.me/85512345678', telegram: 't.me/+85598765432', other: 'call me 077 111 222 after 5pm', instagram: 'dara.shop' } })
+    const as = (permissions) => user(9, 'U', { online_orders: true, ...permissions })
+    const out = await h.request(`/${res.body.token}/requests`, 'POST', { kind: 'contact', phone: h.one('SELECT customer_phone p FROM online_orders WHERE id = 1').p, after: { contacts: { whatsapp: 'wa.me/85587654321', instagram: 'dara_k' } } })
+    assert.equal(out.status, 201, JSON.stringify(out.body))
+    const masked = (await ask(h, as({}), '/1')).body
+    const shown = JSON.stringify([masked.order.contact_whatsapp, masked.order.contact_telegram, masked.order.contact_other, masked.requests[0].before_json, masked.requests[0].after_json])
+    for (const digits of ['12345678', '98765432', '077 111 222', '87654321']) assert.ok(!shown.includes(digits), `${digits} is hidden: ${shown}`)
+    assert.match(masked.order.contact_whatsapp, /wa\.me\//, 'the link around the number stays readable'); assert.equal(masked.order.contact_instagram, 'dara.shop')
+    const full = (await ask(h, as({ contacts_full_phone: true }), '/1')).body
+    assert.ok(full.order.contact_whatsapp.includes('85512345678') && full.requests[0].after_json.includes('87654321'), 'with the permission the text is whole')
+  })
+
   // --------------------------------------------------------------------------------------------------------------- cancel
   await check('cancel a paid order: cancelled by staff with the actor and reason, live QRs cancelled and closed at ABA, the money stays and reads as refund due; a stale revision, a sale, an unpaid order and a second cancel are refused', async () => {
     const h = world(); await paidOrder(h)
