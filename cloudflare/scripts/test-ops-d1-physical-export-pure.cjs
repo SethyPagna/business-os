@@ -237,11 +237,11 @@ async function main() {
     assert.deepEqual(classified.issues, [], 'a new WITHOUT ROWID or generated-column table would need engine support')
     const physical = db.prepare("SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table' AND substr(name, 1, 7) <> 'sqlite_'").all().map((r) => r.name)
     const virtual = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'").all().map((r) => r.name)
-    assert.equal(virtual.length, 9)
+    assert.equal(virtual.length, 10)
     const exportedNames = classified.tables.map((t) => t.name)
     const expected = physical.filter((n) => !virtual.some((v) => n === v || ['_data', '_idx', '_content', '_docsize', '_config'].some((s) => n === v + s)))
     assert.deepEqual(exportedNames, [...expected].sort(), 'exactly the physical tables that are not FTS or FTS shadows')
-    assert.equal(classified.excluded.filter((e) => e.reason === 'fts-virtual').length, 9)
+    assert.equal(classified.excluded.filter((e) => e.reason === 'fts-virtual').length, 10)
     assert.ok(classified.excluded.filter((e) => e.reason === 'fts-shadow').length >= 36)
     assert.equal(classified.sequence, true)
     for (const t of classified.tables) {
@@ -253,7 +253,7 @@ async function main() {
       assert.ok(!BANNED.test(sql), `${t.name}: banned construct`)
     }
     assert.ok(!classified.schema.some((e) => classified.excluded.some((x) => x.reason !== 'fts-virtual' && (x.name === e.tbl_name || x.name === e.name))), 'no schema entry is an excluded table or hangs off one')
-    assert.equal(classified.schema.filter((e) => /CREATE VIRTUAL TABLE/i.test(e.sql)).length, 9, 'the virtual tables keep their DDL for the loader')
+    assert.equal(classified.schema.filter((e) => /CREATE VIRTUAL TABLE/i.test(e.sql)).length, 10, 'the virtual tables keep their DDL for the loader')
     db.close()
   })
 
