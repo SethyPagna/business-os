@@ -80,7 +80,8 @@ runTest('the Stock Change section lists an unsaved failed attempt', () => {
   assert.match(stockChange, /readFailedStockAttempts\(/)
   assert.match(stockChange, /FAILED_ATTEMPTS_EVENT/, 'the list refreshes when a failure is recorded')
   assert.match(stockChange, /unsaved_not_applied/, 'the entry is explicitly marked unsaved')
-  assert.match(stockChange, /row\.failure\?\.message/, 'the reason is shown on the entry')
+  // The reason is shown on the entry in the person's language (inv-s6, 6.0.1405): the failure CODE picks the translation (a held Set says so), the server's message stays the fallback.
+  assert.match(stockChange, /stockFailureText\(\{ code: row\.failure\.code, message: row\.failure\.message \}, \(key, fallback\) => tr\(t, key, fallback\), row\.failure\.message\)/, 'the reason is shown on the entry')
   assert.match(stockChange, /fix_and_retry/)
   assert.match(stockChange, /discardFailedAttempt\(/)
 })
