@@ -36,4 +36,17 @@ for (const [file, patterns] of Object.entries(writers)) {
 }
 assert.doesNotMatch(read('routes/sales.ts'), /delivery_contact_address: deliveryContact\?\.address \|\|/, 'the raw column copy is gone')
 
+const Database = require('better-sqlite3')
+const censusSql = fs.readFileSync(path.join(__dirname, '..', '..', 'ops', 'queries', 'report-sale-delivery-address-json.sql'), 'utf8')
+assert.ok(censusSql.replaceAll('\r', '').startsWith('-- ops:min-rows 1\n-- ops:max-rows 1\n-- ops:max-rows-read 200000\n'), 'the census declares its read budget right after max-rows')
+const db = new Database(':memory:')
+db.exec('CREATE TABLE sales (id INTEGER PRIMARY KEY, delivery_contact_address TEXT)')
+const insert = db.prepare('INSERT INTO sales (delivery_contact_address) VALUES (?)')
+for (const value of [EMPTY, '["St 9"]', '[{"address":"St 1"}]', '[Bldg A] St 9', '[{"address":', 'St 5', '{"a":1}', null]) insert.run(value)
+assert.deepEqual(
+  { ...db.prepare(censusSql).get() },
+  { sales_with_delivery_address: 7, sales_with_json_address: 6, json_addresses_with_nothing_to_print: 2 },
+  'the census neither throws on a legacy string array or invalid JSON nor counts a printable legacy entry as empty',
+)
+
 console.log('test-delivery-address-snapshot-pure.cjs OK')
