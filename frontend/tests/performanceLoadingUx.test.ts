@@ -80,6 +80,7 @@ const mediaUploadState = fs.readFileSync(new URL('../src/utils/mediaUploadState.
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const legacyQueueNotice = fs.readFileSync(new URL('../src/components/server/LegacyQueueNotice.tsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
+const receiptSettingsSaver = fs.readFileSync(new URL('../src/utils/receiptSettingsSaver.ts', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
 const receipt = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
 const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.tsx', import.meta.url), 'utf8')
@@ -2283,13 +2284,13 @@ assert.doesNotMatch(
   'catalog membership transient lookup failures should not clear previous membership data',
 )
 assert.match(
-  receiptSettingsPage,
+  receiptSettingsSaver,
   /const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000/,
   'receipt settings save should use an explicit timeout constant',
 )
 assert.match(
-  receiptSettingsPage,
-  /'Receipt settings save',\s*RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,/,
+  receiptSettingsSaver,
+  /saveTimeoutMs: number = RECEIPT_SETTINGS_SAVE_TIMEOUT_MS[\s\S]*withLoaderTimeout\(run, label, saveTimeoutMs\)[\s\S]*'Receipt settings save'/,
   'receipt settings save should timeout slow settings writes with the explicit constant',
 )
 // SETTINGS-DIFF-SAVE: a receipt save no longer re-reads the whole settings table;
