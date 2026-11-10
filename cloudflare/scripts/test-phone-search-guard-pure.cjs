@@ -50,6 +50,7 @@ function freshDb() {
   db.exec(`CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, email TEXT, address TEXT, company TEXT, contact_person TEXT, notes TEXT, created_at TEXT, updated_at TEXT)`)
   db.exec(`CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, area TEXT, address TEXT, notes TEXT, created_at TEXT, updated_at TEXT)`)
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0020_contacts_fts.sql'), 'utf8'))
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0302_customers_phone_digits_fts.sql'), 'utf8'))
   const option = (label, phone, address) => JSON.stringify([{ label, name: label, phone, email: null, address, area: null }])
   const customer = db.prepare('INSERT INTO customers (id, name, phone, email, address, company, membership_number, phone_normalized) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
   customer.run(1, 'Fixture Dara', '087 654 321', 'dara@example.test', option('Work', '098 111 222', 'Street 9'), null, 'LC-P28-1', '087654321')
@@ -326,7 +327,7 @@ const mutants = [
   ['whole number classified from the raw words, not the matcher words', { phoneSearchGuard: replaceOnce('const words = tokenizeSearchWords(rawSearch)', "const words = String(rawSearch ?? '').split(/\\s+/).filter(Boolean)") }],
   ['whole number compared by containment', { phoneSearchGuard: replaceOnce('return `${digitsSql}=@${key}`', 'return `instr(${digitsSql},@${key})>0`') }],
   ['digit run dropped', { contactSearch: replaceOnce('if (forms) {', 'if (false) {') }],
-  ['digit run ignores the cache column', { contactSearch: replaceOnce("table === 'customers' ? 'phone_normalized' : undefined", 'undefined') }],
+  ['digit run ignores the cache column', { contactSearch: replaceOnce('withKey ? `${runs} OR ${keys}` : runs', 'runs') }],
   ['digit run matches every row with a primary phone (containment test always true)', { phoneSearchGuard: replaceOnce('primary.push(`instr(${primaryDigits},@${key})>0`)', 'primary.push(`instr(${primaryDigits},@${key})>-1`)') }],
   ['whole number compared to a Contact Option phone by containment', { phoneSearchGuard: replaceOnce('return `${optionDigits}=@${key}`', 'return `instr(${optionDigits},@${key})>0`') }],
   ['non-ASCII digits are not folded', { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false') }],

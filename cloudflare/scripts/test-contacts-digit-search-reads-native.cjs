@@ -1,7 +1,7 @@
 'use strict'
-// A typed number is compared to stored phones as digits, which no index serves, so it reads every customer row once. This pins how
-// often: the Contacts list (count, year facet and page) and the Sales/POS picker each scan the table ONCE per request, the Contact
-// Option JSON is opened only on rows whose address text can hold the digits, and a name search reads the same rows it always did.
+// A typed number is found through customers_phone_digits_fts (migration 0302), so its reads follow the matches and not the table. This pins
+// it: the Contacts list (count, year facet and page) and the Sales/POS picker read about as much as a name search, a miss reads next to
+// nothing, and the same search on a table twice the size reads the same rows. A name search reads what it always did.
 // Real mounted Contacts route on Miniflare D1 with every migration applied; rows are D1's own meta.rows_read.
 //
 // Run (from cloudflare/): node scripts/test-contacts-digit-search-reads-native.cjs
@@ -107,6 +107,7 @@ async function main() {
       return { names: result.results.map((row) => row.name), rows: result.meta.rows_read }
     }
 
+    await list('warm-up', HOLDER)
     const measured = {}
     const record = (key, r) => { measured[key] = r; console.log(`     ${key}: ${r.rows} rows, ${r.statements} statements`) }
     record('contacts digit, holder (012345678)', await list('012345678', HOLDER))
@@ -125,11 +126,12 @@ async function main() {
     const ids = (r) => (r.body.items || []).map((row) => row.id)
     let failed = 0
     const check = async (name, fn) => { try { await fn(); console.log('PASS ' + name) } catch (error) { failed += 1; console.log('FAIL ' + name + '\n' + (error && error.stack || error)) } }
-    // The scan floor is the customer table; the Contact Option JSON adds rows only where the prefilter lets it open (here: one per matching
-    // row), and the page's own rows are read afterwards. No literal row count: every bound is built from the fixture and the page size.
-    const scanOnce = CUSTOMERS + 3 * PAGE_SIZE
+    // No literal row count: every bound is built from the name search on the same fixture and the page size.
+    const nameRows = measured['contacts name (dara)'].rows
+    const indexed = nameRows + 2 * PAGE_SIZE
+    assert.ok(indexed < CUSTOMERS / 4, 'the fixture is large enough for the bound to mean something')
 
-    await check('Contacts list: a typed number finds the same customers as before and scans the table once', async () => {
+    await check('Contacts list: a typed number finds the same customers as before and reads near its matches', async () => {
       const whole = await list('012345678', HOLDER)
       assert.equal(whole.status, 200, JSON.stringify(whole.body))
       assert.deepEqual(ids(whole), [5])
@@ -140,12 +142,9 @@ async function main() {
       assert.deepEqual(ids(await list('012345678', NO_GRANT)), [5])
       assert.deepEqual(ids(await list('345678', NO_GRANT)), [5], 'owner decision 10 Nov 2026: a fragment finds the customer without the grant')
       assert.deepEqual(ids(await list('5678', NO_GRANT)), ids(await list('5678', HOLDER)))
-      assert.deepEqual(ids(await list('012333444', HOLDER)), [7], 'JSON escapes of a tab in a stored Contact Option phone do not hide it from the prefilter')
+      assert.deepEqual(ids(await list('012333444', HOLDER)), [7], 'JSON escapes of a tab in a stored Contact Option phone are not part of the digits')
       assert.deepEqual(ids(await list('012333444', NO_GRANT)), [7])
-      assert.ok(whole.rows <= scanOnce, `a digit list read ${whole.rows} rows for a ${CUSTOMERS}-row table`)
-      assert.ok(measured['contacts digit, holder (345678, a fragment)'].rows <= scanOnce)
-      assert.ok(measured['contacts digit, no grant (whole number 012345678)'].rows <= scanOnce)
-      for (const key of ['contacts digit, no grant (345678, a fragment)', 'contacts digit, no grant (5678, the last four)']) assert.ok(measured[key].rows <= scanOnce, `${key} read ${measured[key].rows} rows`)
+      for (const key of Object.keys(measured).filter((name) => name.startsWith('contacts digit'))) assert.ok(measured[key].rows <= indexed, `${key} read ${measured[key].rows} rows (a name search reads ${nameRows})`)
       assert.ok(measured['contacts digit, no grant (345678, a fragment)'].rows <= measured['contacts digit, holder (345678, a fragment)'].rows, 'no grant reads no more than the holder')
     })
 
@@ -163,14 +162,14 @@ async function main() {
       assert.deepEqual(ids(await list('333666', NO_GRANT)), [9])
     })
 
-    await check('Contacts list: a digit search costs two statements (scan + the page rows) beside the points reads, within the query ceiling', async () => {
-      const whole = measured['contacts digit, holder (012345678)']
-      const name = measured['contacts name (dara)']
-      assert.ok(whole.statements <= name.statements, `digit list ${whole.statements} statements, name list ${name.statements}`)
-      assert.ok(whole.statements <= whole.ceiling, `${whole.statements} statements beside a ceiling of ${whole.ceiling}`)
+    await check('Contacts list: a digit search costs the statements a name search costs, within the query ceiling', async () => {
+      for (const key of Object.keys(measured).filter((name) => name.startsWith('contacts digit'))) {
+        assert.ok(measured[key].statements <= measured['contacts name (dara)'].statements, `${key}: ${measured[key].statements} statements, name list ${measured['contacts name (dara)'].statements}`)
+        assert.ok(measured[key].statements <= measured[key].ceiling, `${measured[key].statements} statements beside a ceiling of ${measured[key].ceiling}`)
+      }
     })
 
-    await check('Contacts list: a year filter and paging come out of the same scan', async () => {
+    await check('Contacts list: a year filter and paging still work on a digit search', async () => {
       const all = await list('097', HOLDER)
       assert.equal(all.status, 200)
       const years = all.body.availableYears
@@ -186,10 +185,11 @@ async function main() {
       assert.deepEqual(names, [...names].sort(), 'name order')
     })
 
-    await check('Sales/POS picker: a digit search scans the table once', async () => {
+    await check('Sales/POS picker: a digit search reads near its matches', async () => {
+      const pickerName = measured['picker name (dara)']
       for (const key of ['picker digit, holder (012345678)', 'picker digit, no grant (012345678)', 'picker digit, no grant (5678, the last four)']) {
-        assert.ok(measured[key].rows <= CUSTOMERS + PAGE_SIZE, `${key} read ${measured[key].rows} rows`)
-        assert.equal(measured[key].statements <= measured['picker name (dara)'].statements + 1, true)
+        assert.ok(measured[key].rows <= pickerName.rows + PAGE_SIZE, `${key} read ${measured[key].rows} rows (a name search reads ${pickerName.rows})`)
+        assert.equal(measured[key].statements <= pickerName.statements, true)
       }
       assert.deepEqual((await picker('012345678', HOLDER)).body.items.map((r) => r.id), [5])
     })
@@ -214,10 +214,17 @@ async function main() {
       assert.ok(measured['picker name (dara)'].rows < CUSTOMERS / 2)
     })
 
-    await check('the prefilter drops the Contact Option scan: a number held by nobody opens no JSON', async () => {
+    await check('a number held by nobody reads next to nothing, and a table twice the size reads the same rows', async () => {
       const miss = await picker('099999999', HOLDER)
       assert.deepEqual(miss.body.items, [])
-      assert.ok(miss.rows <= CUSTOMERS + 1, `a miss read ${miss.rows} rows for ${CUSTOMERS} customers`)
+      assert.ok(miss.rows <= PAGE_SIZE, `a miss read ${miss.rows} rows for ${CUSTOMERS} customers`)
+      const before = { whole: (await picker('012345678', HOLDER)).rows, fragment: (await picker('345678', NO_GRANT)).rows, miss: miss.rows }
+      const more = []
+      for (let i = 1; i <= CUSTOMERS; i++) more.push(db.prepare('INSERT INTO customers (id,name,phone,phone_normalized,address,is_anonymous) VALUES (?,?,?,?,?,0)').bind(1000 + i, `Extra ${i}`, `098 ${pad(i * 53, 3)} ${pad(i * 7, 3)}`, `098${pad(i * 53, 3)}${pad(i * 7, 3)}`, i % 3 === 0 ? JSON.stringify([{ label: 'Main', phone: '096111333' }]) : null))
+      await db.batch(more)
+      const after = { whole: (await picker('012345678', HOLDER)).rows, fragment: (await picker('345678', NO_GRANT)).rows, miss: (await picker('099999999', HOLDER)).rows }
+      assert.deepEqual(after, before, 'the rows read do not grow with the table')
+      assert.deepEqual((await picker('098 053 007', HOLDER)).body.items.map((r) => r.id), [1001], 'a customer added after the index exists is found at once')
     })
 
     if (failed) { console.error(`${failed} check(s) failed`); process.exitCode = 1 } else console.log('PASS contacts digit-search read pins')

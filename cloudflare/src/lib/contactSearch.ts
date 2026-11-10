@@ -25,6 +25,8 @@ import { CONTACT_OPTION_LIMIT } from './contactOptions'
 import { formatMembershipNumber, MEMBERSHIP_PREFIX } from './membershipNumber'
 import { contactPhoneContainsClause, fullContactPhoneClause, phoneProbeOf, typedPhoneDigitForms } from './phoneSearchGuard'
 
+const CUSTOMER_DIGITS_FTS = 'customers_phone_digits_fts'
+
 export type ContactSearchTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
 // Table name -> its two FTS5 virtual tables, per migrations/0020_contacts_fts.sql.
@@ -74,7 +76,9 @@ function membershipLookupOf(rawSearch: unknown, paramPrefix: string): ContactMat
 
 // The same match for every account: what the response shows of a phone (masked or whole) is decided on the way out (lib/phoneAccess.ts),
 // never here. A number is stored with the separators it was saved with ("012 345 678"), which neither the word index (tokens 012, 345,
-// 678) nor the trigram index (no run across a space) can find by its contiguous digits, so a typed number is also compared as digits.
+// 678) nor the trigram index (no run across a space) can find by its contiguous digits, so a typed number is also compared as digits:
+// for customers through customers_phone_digits_fts (migration 0302, the stripped digits of every phone), so it reads the matches and
+// not the table; the small supplier and delivery-contact tables compare the stored text row by row.
 function buildTextOrPhoneMatchClause(
   table: ContactSearchTable,
   rawSearch: unknown,
@@ -83,14 +87,41 @@ function buildTextOrPhoneMatchClause(
   const open = buildOpenContactMatchClause(table, rawSearch, paramPrefix)
   const forms = typedPhoneDigitForms(rawSearch)
   if (forms) {
-    const normalizedColumn = table === 'customers' ? 'phone_normalized' : undefined
-    const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT, normalizedColumn)
+    if (table === 'customers') {
+      const digits = customerDigitsIndexClause(forms, `${paramPrefix}_run`)
+      return open ? { sql: `(${open.sql} OR ${digits.sql})`, params: { ...open.params, ...digits.params } } : digits
+    }
+    const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT)
     return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params }, scansRows: true } : { ...contains, scansRows: true }
   }
   const probe = phoneProbeOf(rawSearch)
   const exact = probe.kind === 'full' ? fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT) : null
-  if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params, scansRows: true } : undefined)
+  if (!exact || probe.kind !== 'full' || probe.plain || !open) {
+    if (open || !exact || probe.kind !== 'full') return open
+    return table === 'customers' ? customerWholeNumberClause(probe.forms, exact, `${paramPrefix}_whole`) : { sql: exact.sql, params: exact.params, scansRows: true }
+  }
+  if (table === 'customers') {
+    const whole = customerWholeNumberClause(probe.forms, exact, `${paramPrefix}_whole`)
+    return { sql: `(${open.sql} OR ${whole.sql})`, params: { ...open.params, ...whole.params } }
+  }
   return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params }, scansRows: true }
+}
+
+// A fragment is read in the phone digits only; the cached canonical key (phone_normalized) is matched whole, as it always was.
+function customerDigitsIndexClause(forms: readonly string[], param: string, withKey = true): ContactMatchClause {
+  const runs = `{digits} : (${forms.map((form) => `"${form}"`).join(' OR ')})`
+  const keys = `{key} : (${forms.map((form) => `"=${form}="`).join(' OR ')})`
+  return {
+    sql: `id IN (SELECT rowid FROM ${CUSTOMER_DIGITS_FTS} WHERE ${CUSTOMER_DIGITS_FTS} MATCH @${param})`,
+    params: { [param]: withKey ? `${runs} OR ${keys}` : runs },
+  }
+}
+
+// A whole number typed with separators the digit scan above does not accept (012,345,678): the index narrows to the customers whose digits
+// hold it, and the exact comparison (the digits ARE the number, not merely hold it) runs only on those.
+function customerWholeNumberClause(forms: readonly string[], exact: { sql: string; params: Record<string, string> }, param: string): ContactMatchClause {
+  const narrowed = customerDigitsIndexClause([...new Set([...forms, ...forms.filter((form) => form.startsWith('855')).map((form) => `00${form}`)])], param, false)
+  return { sql: `(${narrowed.sql} AND ${exact.sql})`, params: { ...narrowed.params, ...exact.params } }
 }
 
 function buildOpenContactMatchClause(

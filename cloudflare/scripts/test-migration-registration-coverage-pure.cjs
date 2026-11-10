@@ -67,6 +67,8 @@ const NAMED_COMPANIONS = {
   294: 'test-migration-0294-inventory-check-lot-lines-native.cjs',
   // 0300 is the partial index on sales(delivery_contact_id) behind the delivery-person delete guard; its companion applies the real chain and pins the plan, PRE/POST and LF.
   300: 'test-migration-0300-sales-delivery-contact-index-native.cjs',
+  // 0302 indexes the digits of every customer's phones (customers_phone_digits_fts) so a typed number is an index search; its companion applies the real chain, pins the drift triggers and measures the writes.
+  302: 'test-migration-0302-customers-phone-digits-fts-native.cjs',
   // 0250 stores the multi-lot Revert watermark; its companion applies the real chain and pins the stored value.
   250: 'test-migration-0250-multilot-watermark-sqlite.cjs',
   251: 'test-loyalty-reset-watermark-native.cjs',

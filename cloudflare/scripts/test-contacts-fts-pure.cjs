@@ -62,6 +62,7 @@ function freshDb() {
   )`)
   const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0020_contacts_fts.sql'), 'utf8')
   db.exec(migration)
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0302_customers_phone_digits_fts.sql'), 'utf8'))
   return db
 }
 
