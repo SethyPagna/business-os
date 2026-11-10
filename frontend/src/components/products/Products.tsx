@@ -875,6 +875,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     const rowLongPressState = getLongPressState(Number(productId))
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
+      reportControlTaps: true,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
       onClick: (target) => {
         if (dupInfo) return
@@ -883,6 +884,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
           return
         }
+        if ((target as Element | null)?.closest?.('button, a[href], input, select, textarea, label, summary')) return
         setDetailProduct(p)
       },
     })
@@ -1062,7 +1064,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
             <button
                 type="button"
                 className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
-                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : productName}
                 aria-disabled={!thumbnailState.hasImage}
                 onMouseDown={(event) => event.stopPropagation()}
                 onMouseUp={(event) => event.stopPropagation()}
@@ -1213,6 +1215,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     const rowLongPressState = getLongPressState(Number(productId))
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
+      reportControlTaps: true,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
       onClick: (target) => {
         if (dupInfo) return
@@ -1221,6 +1224,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
           deferCopySurfaceAction(copyTarget, () => setDetailProduct(p))
           return
         }
+        if ((target as Element | null)?.closest?.('button, a[href], input, select, textarea, label, summary')) return
         setDetailProduct(p)
       },
     })
@@ -1289,7 +1293,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
             <button
               type="button"
               className="relative flex-shrink-0 self-stretch rounded-xl text-left"
-              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : productName}
               aria-disabled={!thumbnailState.hasImage}
               onMouseDown={(event) => event.stopPropagation()}
               onMouseUp={(event) => event.stopPropagation()}

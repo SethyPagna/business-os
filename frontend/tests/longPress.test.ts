@@ -159,6 +159,48 @@ await runTest('consumeLongPressClick stays false for a plain tap/click that neve
   assert.equal(consumeLongPressClick(state), false)
 })
 
+const fakeSurface = { contains: (node: unknown) => node === fakeButton || node === fakeSurface } as unknown as Element
+const fakeButton = { closest: (selector: string) => (selector.includes('button') ? fakeButton : null) } as unknown as Element
+const surfaceEvent = (target: Element) => ({ clientX: 0, clientY: 0, target, currentTarget: fakeSurface, touches: [{ clientX: 0, clientY: 0 }] }) as unknown as React.MouseEvent & React.TouchEvent
+
+await runTest('a mouse press that ends on a button inside the surface does not fire the surface tap', async () => {
+  const state = createLongPressState()
+  let clicked = 0
+  const handlers = createLongPressHandlers(state, { onLongPress: () => {}, onClick: () => { clicked += 1 }, thresholdMs: 200 })
+  handlers.onMouseDown(surfaceEvent(fakeButton))
+  handlers.onMouseUp(surfaceEvent(fakeButton))
+  assert.equal(clicked, 0)
+})
+
+await runTest('a touch that ends on a button inside the surface does not fire the surface tap', async () => {
+  const state = createLongPressState()
+  let clicked = 0
+  const handlers = createLongPressHandlers(state, { onLongPress: () => {}, onClick: () => { clicked += 1 }, thresholdMs: 200 })
+  handlers.onTouchStart(surfaceEvent(fakeButton))
+  handlers.onTouchEnd(surfaceEvent(fakeButton))
+  assert.equal(clicked, 0)
+})
+
+await runTest('reportControlTaps hands a control tap to the surface callback', async () => {
+  const state = createLongPressState()
+  let clicked = 0
+  const handlers = createLongPressHandlers(state, { onLongPress: () => {}, onClick: () => { clicked += 1 }, thresholdMs: 200, reportControlTaps: true })
+  handlers.onMouseDown(surfaceEvent(fakeButton))
+  handlers.onMouseUp(surfaceEvent(fakeButton))
+  assert.equal(clicked, 1)
+})
+
+await runTest('a tap on a copy field still fires the surface tap, because the field is plain text', async () => {
+  const state = createLongPressState()
+  let clicked = 0
+  const copyField = { closest: (selector: string) => (selector.includes('data-copy-value') || selector.includes('button') ? copyField : null) } as unknown as Element
+  const surface = { contains: () => true } as unknown as Element
+  const handlers = createLongPressHandlers(state, { onLongPress: () => {}, onClick: () => { clicked += 1 }, thresholdMs: 200 })
+  handlers.onMouseDown({ clientX: 0, clientY: 0, target: copyField } as unknown as React.MouseEvent)
+  handlers.onMouseUp({ currentTarget: surface } as unknown as React.MouseEvent)
+  assert.equal(clicked, 1)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exitCode = 1

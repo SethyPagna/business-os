@@ -188,6 +188,7 @@ function ProductCardComponent({
           className={CARD_IMAGE_FRAME}
           onClick={(event) => { event.stopPropagation(); onOpenImage() }}
           aria-label={copy('Preview product images', 'មើលរូបភាពទំនិញ')}
+          title={copy('Preview product images', 'មើលរូបភាពទំនិញ')}
         >
           {imageContent}
         </button>
