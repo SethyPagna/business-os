@@ -87,3 +87,21 @@ export function withOnlineTender<T extends TenderRow>(details: readonly T[], met
 /** What a sale sends to be linked to the order. */
 export const fulfilSaleFields = (handoff: Pick<FulfilHandoff, 'online_order_id'> | null | undefined): { online_order_id?: number } =>
   handoff ? { online_order_id: handoff.online_order_id } : {}
+
+/**
+ * The question asked before the till lets go of an order ("Sell without this order", security review N4). Letting go changes nothing on the order: it stays paid and can be handed over
+ * again, so the cashier is told what the sale was, what it becomes, and that the order is still to be handed over or refunded from Orders. Plain strings, for the shared compact confirm dialog.
+ */
+export function detachConfirmCopy(handoff: Pick<FulfilHandoff, 'order_no' | 'paid_usd'>, tt: (key: string, fallback: string) => string, fmtUSD: (value: number) => string) {
+  const order = handoff.order_no
+  return {
+    title: tt('oo_till_detach_title', 'Sell without this order?'),
+    message: order,
+    items: [
+      { label: tt('oo_till_detach_sale', 'This sale'), value: tt('oo_till_detach_sale_value', 'For the order → a plain sale') },
+      { label: tt('oo_till_detach_order', 'The order'), value: tt('oo_till_detach_order_value', 'Paid {amount} → still paid, not handed over').split('{amount}').join(fmtUSD(handoff.paid_usd)) },
+    ],
+    note: tt('oo_till_detach_note', 'The order stays paid. Hand it over or refund it from Orders, or the customer pays twice.'),
+    confirmLabel: tt('oo_till_detach_go', 'Sell without order'),
+  }
+}

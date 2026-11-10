@@ -108,7 +108,8 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
-import { clearFulfilHandoff, fulfilMoney, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
 import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
@@ -3307,8 +3308,12 @@ export default function POS() {
     if (wanted !== active.paymentDetails) updatePaymentDetails(() => [...wanted])
   }, [onlineOrder, active.paymentDetails, active.checkoutRequestId, onlineMethod, totalUsd, updatePaymentDetails])
 
-  const detachOnlineOrder = () => {
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const detachOnlineOrder = async () => {
     if (!onlineOrder || active.checkoutRequestId) return
+    // Review N4: letting go of a paid order is not one tap. The order stays paid and can still be handed over, so the cashier confirms what changes first (shared compact dialog, never native confirm()).
+    const tt = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
+    if (!(await askToConfirm(detachConfirmCopy(onlineOrder, tt, fmtUSD)))) return
     updatePaymentDetails((details) => [...withOnlineTender(details, onlineMethod, 0)])
     patchActive({ onlineOrder: undefined })
   }
@@ -4142,7 +4147,7 @@ export default function POS() {
                   fmtUSD={fmtUSD}
                   methodMissing={posPaymentMethods.some((method) => method.trim().toLowerCase() === onlineMethod.trim().toLowerCase()) ? null : onlineMethod}
                   onAddLine={(productId) => { const product = productsById.get(productId); if (product) openProductCard(product, { inStock: false }) }}
-                  onDetach={detachOnlineOrder}
+                  onDetach={() => { void detachOnlineOrder() }}
                 />
               </Suspense>
             ) : null}
@@ -4869,7 +4874,7 @@ export default function POS() {
           ) : null}
         </Suspense>
       ) : null}
-
+      {confirmDialog}
     </div>
   )
 }
