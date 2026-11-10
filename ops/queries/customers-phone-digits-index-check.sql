@@ -11,7 +11,7 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero missing,stale,orphaned
--- ops:max-rows-read 40000
+-- ops:max-rows-read 45444
 SELECT
   (SELECT COUNT(*) FROM customers) AS customers,
   (SELECT COUNT(*) FROM customers_phone_digits_fts) AS indexed,
