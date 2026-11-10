@@ -14,6 +14,7 @@ import {
 import type { PromotionRule } from './promotionRules'
 import { NOT_PAID_STATUS, recordedSaleOutstandingUsd, saleStoredState, sumRefundsUsd, type RecordedSaleMoney } from './saleStatusResolution'
 import { getPlanLimits } from './planTier'
+import { isCashPaymentMethod, type PaymentMethodKindMap } from './paymentMethodRegistry'
 import type { Env } from '../index'
 
 // ---- vocabulary: the same lists as migration 0293's CHECKs (a test pins them equal) ------------------------------------------
@@ -154,13 +155,16 @@ export const REQUEST_WINDOW_DAYS_DEFAULT = 7
 export const REQUEST_WINDOW_DAYS_MAX = 30
 
 /**
- * The online (KHQR) payment method: empty clears it (the default 'ABA KHQR' applies); otherwise it must be a name in the configured method list. Used for a write of the
- * setting itself and for a write of the list that would remove the method the setting names.
+ * The online (KHQR) payment method: empty clears it (the default 'ABA KHQR' applies); otherwise it must be a name in the configured method list, and a dedicated method,
+ * never a cash one: once stored the method is reserved (ordinary sales with it are refused and the till hides it), so a cash method would stop the till taking cash.
+ * Used for a write of the setting itself and for a write of the list that would remove the method the setting names. `kinds` is the pos_payment_method_kinds map: pass it on
+ * a write of the setting itself; leave it out when only the list is checked, so a method that was stored earlier never traps a list save.
  */
-export function validateOnlineOrderMethod(value: string, configured: readonly string[]): 'invalid_online_order_payment_method' | null {
+export function validateOnlineOrderMethod(value: string, configured: readonly string[], kinds?: PaymentMethodKindMap): 'invalid_online_order_payment_method' | 'online_order_method_is_cash' | null {
   const key = value.trim().toLowerCase()
   if (!key) return null
-  return configured.some((method) => String(method).trim().toLowerCase() === key) ? null : 'invalid_online_order_payment_method'
+  if (!configured.some((method) => String(method).trim().toLowerCase() === key)) return 'invalid_online_order_payment_method'
+  return kinds && isCashPaymentMethod(value, kinds) ? 'online_order_method_is_cash' : null
 }
 
 export type OnlineOrderSettingsWriteError = 'invalid_online_order_payment_minutes' | 'invalid_online_order_request_days'

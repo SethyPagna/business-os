@@ -21,6 +21,8 @@ import {
   mergePaymentMethods,
   parseConfiguredMethods,
   parseConfiguredMethodsStrict,
+  PAYMENT_METHOD_KINDS_SETTING,
+  parsePaymentMethodKinds,
   paymentMethodKey,
   saleMethodsUsed,
 } from '../lib/paymentMethodRegistry'
@@ -1297,11 +1299,18 @@ app.post('/', async (c) => {
     // A list-only save is refused only when it REMOVES the online method that is in the list today, so an already stale setting never traps the list.
     const before = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) ? null : (await loadPaymentMethodSetting(c.env))?.methods ?? []
     const removing = before !== null && validateOnlineOrderMethod(currentOnline, before) === null && Boolean(currentOnline)
-    const methodError = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || removing ? validateOnlineOrderMethod(currentOnline, listed) : null
+    const kinds = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
+      ? parsePaymentMethodKinds(attemptedKeys.includes(PAYMENT_METHOD_KINDS_SETTING)
+        ? body[PAYMENT_METHOD_KINDS_SETTING]
+        : (await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: PAYMENT_METHOD_KINDS_SETTING }))?.value)
+      : undefined
+    const methodError = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || removing ? validateOnlineOrderMethod(currentOnline, listed, kinds) : null
     if (methodError) {
       return c.json({
         error: attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY)
-          ? 'The online payment method must be one of the configured payment methods.'
+          ? methodError === 'online_order_method_is_cash'
+            ? 'The online payment method cannot be a cash method: it becomes online-only and the till hides it. Add a separate method such as "ABA KHQR" and choose that.'
+            : 'The online payment method must be one of the configured payment methods.'
           : 'This payment method is the online (KHQR) one. Choose another online method first, or rename it instead of removing it.',
         code: methodError,
       }, 400)
