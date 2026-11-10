@@ -298,18 +298,39 @@ export function itemsJson(facts: PricingFacts): string {
 
 // ---- caps through indexed reads -----------------------------------------------------------------------------------------------------
 
-/** Orders waiting for money, shop-wide: the count of live payments (the partial index on expires_at), never a scan of orders. */
-export async function countOpenPayments(db: D1Compat): Promise<number> {
-  const row = await db.prepare(`SELECT COUNT(*) AS n FROM online_order_payments INDEXED BY idx_online_order_payments_open WHERE state = 'awaiting'`).get<{ n: number }>()
+/**
+ * What "live" means for a payment waiting for money (review F5): its QR has not run out, or (no QR yet) it was created within the issue grace. A payment past either is a
+ * stale row the cron sweep has not reached yet: it holds nobody's money and must not make the shop look busy or block a real customer's next order.
+ */
+export type LiveCutoffs = { now: string; fresh: string }
+export function liveCutoffs(env: Pick<Env, 'PLAN_TIER'>, now: Date): LiveCutoffs {
+  return { now: sqlTime(now), fresh: sqlTime(new Date(now.getTime() - getPlanLimits(env as Env).onlineOrderQrIssueGraceSeconds * 1000)) }
+}
+const LIVE_PAYMENT = `p.state = 'awaiting' AND (p.expires_at > @now OR (p.expires_at IS NULL AND p.created_at > @fresh))`
+
+/** Orders waiting for money, shop-wide: the count of LIVE payments (the partial index on expires_at, once for the unexpired and once for the not-yet-issued), never a scan of orders. */
+export async function countOpenPayments(db: D1Compat, cut: LiveCutoffs): Promise<number> {
+  const row = await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM online_order_payments p INDEXED BY idx_online_order_payments_open WHERE p.state = 'awaiting' AND p.expires_at > @now)
+      + (SELECT COUNT(*) FROM online_order_payments p INDEXED BY idx_online_order_payments_open WHERE p.state = 'awaiting' AND p.expires_at IS NULL AND p.created_at > @fresh) AS n`).get<{ n: number }>(cut)
   return Number(row?.n ?? 0)
 }
-/** The same set, narrowed to one phone. It walks the open payments (bounded by the shop-wide cap) and probes each order by primary key. */
-export async function countOpenPaymentsForPhone(db: D1Compat, phone: string): Promise<number> {
+/** The same set, narrowed to one phone. It walks the live open payments (bounded by the shop-wide cap) and probes each order by primary key. */
+export async function countOpenPaymentsForPhone(db: D1Compat, phone: string, cut: LiveCutoffs): Promise<number> {
   const row = await db.prepare(`
     SELECT COUNT(DISTINCT o.id) AS n
     FROM online_order_payments p INDEXED BY idx_online_order_payments_open CROSS JOIN online_orders o ON o.id = p.order_id
-    WHERE p.state = 'awaiting' AND o.customer_phone = @phone
-  `).get<{ n: number }>({ phone })
+    WHERE ${LIVE_PAYMENT} AND o.customer_phone = @phone
+  `).get<{ n: number }>({ phone, ...cut })
+  return Number(row?.n ?? 0)
+}
+/** The same set, narrowed to one NETWORK (online_orders.network_key, the keyed hash): migration 0301's partial index, then each order's payments by their own index. */
+export async function countOpenOrdersForNetwork(db: D1Compat, networkKey: string, cut: LiveCutoffs): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS n FROM online_orders o INDEXED BY idx_online_orders_open_network
+    WHERE o.state = 'awaiting_payment' AND o.network_key = @network
+      AND EXISTS (SELECT 1 FROM online_order_payments p WHERE p.order_id = o.id AND ${LIVE_PAYMENT})
+  `).get<{ n: number }>({ network: networkKey, ...cut })
   return Number(row?.n ?? 0)
 }
 
@@ -702,9 +723,11 @@ export async function createOrder(
   if (extras.clientRequestId && await db.prepare('SELECT 1 AS found FROM online_orders WHERE client_request_id = @id').get({ id: extras.clientRequestId })) {
     return refuse(409, 'duplicate_request', 'This order was already placed. Open it from the link you were given, or start a new list.')
   }
-  const [settings, open, openForPhone] = await Promise.all([loadOrderSettings(db), countOpenPayments(db), countOpenPaymentsForPhone(db, input.phone)])
+  const cut = liveCutoffs(env, deps.now())
+  const [settings, open, openForPhone, openForNetwork] = await Promise.all([loadOrderSettings(db), countOpenPayments(db, cut), countOpenPaymentsForPhone(db, input.phone, cut), countOpenOrdersForNetwork(db, extras.networkKey, cut)])
   if (!openUnpaidAllowed(open, env)) return refuse(503, 'busy', 'We are busy right now. Please try again in a few minutes.')
-  if (openForPhone >= getPlanLimits(env).onlineOrderOpenPerPhoneMax) {
+  // One person, or one address typed with many phone numbers, cannot hold the shop's open slots (review F5): the same answer as the per-phone cap.
+  if (openForPhone >= getPlanLimits(env).onlineOrderOpenPerPhoneMax || openForNetwork >= getPlanLimits(env).onlineOrderOpenPerNetworkMax) {
     return refuse(429, 'too_many_open_orders', 'You already have orders waiting for payment. Please pay or cancel them first.')
   }
   const facts = await priceAndCheckStock(deps, input.lines, settings)

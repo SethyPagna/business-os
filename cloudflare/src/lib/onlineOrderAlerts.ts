@@ -30,6 +30,7 @@ import { deferRequestWork } from './requestDefer'
 import { bumpVersions } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { runBackground } from './requestMetrics'
+import { getPlanLimits } from './planTier'
 import type { OrderAlertEvent, OrderRecord, PaymentRecord, RequestRecord } from './onlineOrderStore'
 import type { Env } from '../index'
 
@@ -71,6 +72,14 @@ export function composeCreatedAlert(order: OrderRecord): Composed {
     heading: '🛒 Online order',
     lines: [...orderRows(order), `Status: Waiting for payment`, ...(count ? [`Items: ${count}`] : []), `Total: ${money(order.goods_total_usd)}`],
   }
+}
+
+/**
+ * Review F5: when orders arrive faster than the plan's per-window allowance (planTier onlineOrderCreatedAlertsPerWindow), the NEXT one sends this single line and the rest of
+ * the window stays quiet, so a flood of orders (real or not) cannot fill the staff chat. Counts only: no name, phone or address.
+ */
+export function composeCreatedDigest(count: number, windowMinutes: number): Composed {
+  return { heading: '🛒 Online orders arriving fast', lines: [`Orders in the last ${windowMinutes} minutes: ${count}`, `Further new-order notices wait until it quiets down`] }
 }
 
 export function composePaidAlert(order: OrderRecord, payment: PaymentRecord): Composed {
@@ -159,7 +168,19 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
     const withOrder = (sub: TelegramOnlineOrderSub, orderId: number, build: (order: OrderRecord) => Composed) =>
       send(sub, async () => { const order = await loadOrder(db, orderId); return order ? build(order) : null })
     switch (event.kind) {
-      case 'created': return await withOrder('new', event.orderId, composeCreatedAlert)
+      case 'created':
+        return await send('new', async () => {
+          const order = await loadOrder(db, event.orderId)
+          if (!order) return null
+          // Where this order stands among the orders of its window (by id, from committed rows only, so racing creates each reach the same answer): within the allowance
+          // it is announced as before, the first one past it is ONE digest, the rest are quiet.
+          const limits = getPlanLimits(env)
+          const placed = Date.parse(`${String(order.created_at).replace(' ', 'T')}Z`)
+          const since = new Date((Number.isFinite(placed) ? placed : Date.now()) - limits.onlineOrderCreatedAlertWindowMinutes * 60_000).toISOString().slice(0, 19).replace('T', ' ')
+          const rank = Number((await db.prepare('SELECT COUNT(*) AS n FROM online_orders WHERE created_at >= @since AND id <= @id').get<{ n: number }>({ since, id: order.id }))?.n ?? 0)
+          if (rank <= limits.onlineOrderCreatedAlertsPerWindow) return composeCreatedAlert(order)
+          return rank === limits.onlineOrderCreatedAlertsPerWindow + 1 ? composeCreatedDigest(rank, limits.onlineOrderCreatedAlertWindowMinutes) : null
+        })
       case 'qr_failed': return await withOrder('new', event.orderId, composeQrFailedAlert)
       case 'failed': return await withOrder('new', event.orderId, composeDeclinedAlert)
       case 'edited': return await withOrder('requests', event.orderId, composeEditedAlert)

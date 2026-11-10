@@ -29,7 +29,7 @@ global.fetch = async (url, init) => {
 
 function world(settings = {}) {
   const h = createOrdersHarness({
-    switchOn: true, nowMs: T0, env: { TELEGRAM_BOT_TOKEN: '123456:test-token' },
+    switchOn: true, spreadNetworks: true, nowMs: T0, env: { TELEGRAM_BOT_TOKEN: '123456:test-token' },
     settings: { telegram_chat_id: '-1001', telegram_topic_sales: '77', ...settings },
   })
   h.run("INSERT INTO branches (name, role, is_active, is_default) VALUES ('Shop','shop',1,1)")
@@ -42,7 +42,8 @@ function world(settings = {}) {
 }
 let phoneSeq = 0
 const place = async (h, over = {}) => {
-  const res = await h.request('/', 'POST', { lines: [{ product_id: 1, quantity: 2 }], name: 'Dara', phone: over.phone || `0${12000000 + (phoneSeq += 1)}`, fulfilment: 'pickup', ...over })
+  const { ip, ...fields } = over // `ip`: which network the order comes from (one network may hold only a few open orders)
+  const res = await h.request('/', 'POST', { lines: [{ product_id: 1, quantity: 2 }], name: 'Dara', phone: fields.phone || `0${12000000 + (phoneSeq += 1)}`, fulfilment: 'pickup', ...fields }, ip ? { ip } : undefined)
   assert.equal(res.status, 201, JSON.stringify(res.body))
   return res
 }
@@ -98,7 +99,7 @@ async function main() {
 
   await check('the sweep sends ONE digest for every order that ran out in a tick, capped, never one message each', async () => {
     const h = world()
-    for (let i = 0; i < 11; i += 1) await place(h)
+    for (let i = 0; i < 11; i += 1) await place(h, { ip: `10.4.0.${i + 1}` })
     sent.length = 0
     h.advance(20 * MIN); h.script.check = () => h.pending()
     const s = await h.sweep(); assert.equal(s.expired.length, 11, 'the paid plan checks 25 per tick')
@@ -212,6 +213,24 @@ async function main() {
     assert.deepEqual(h.one('SELECT (SELECT COUNT(*) FROM online_orders) o, (SELECT COUNT(*) FROM online_order_payments) p, (SELECT COUNT(*) FROM online_order_events) e'), before, 'no order write')
     h.advance(24 * 60 * MIN); await h.callback(tran, { token })
     assert.equal(sent.length, 2, 'the next day is a new alert')
+  })
+
+  await check('F5: new-order notices are a digest under a flood: the allowance goes one by one, the next order sends ONE digest line with counts only, the rest are quiet, and the next window starts fresh', async () => {
+    const h = world()
+    const allowance = h.load('lib/planTier.ts').getPlanLimits({ PLAN_TIER: 'paid' }).onlineOrderCreatedAlertsPerWindow
+    const flood = async (i) => h.request('/', 'POST', { lines: [{ product_id: 1, quantity: 1 }], name: `Spam ${i}`, phone: `0${13000000 + i}`, fulfilment: 'pickup' }, { ip: `10.3.0.${i + 1}` })
+    for (let i = 0; i < allowance; i += 1) assert.equal((await flood(i)).status, 201)
+    assert.equal(sent.length, allowance, 'within the allowance every order is announced')
+    assert.ok(sent.every((m) => /Online order\b/.test(m.text) && !/arriving fast/.test(m.text)))
+    assert.equal((await flood(allowance)).status, 201)
+    assert.equal(sent.length, allowance + 1, 'the first order past the allowance sends one digest')
+    const digest = sent.at(-1).text
+    assert.match(digest, /arriving fast/); assert.match(digest, new RegExp(`${allowance + 1}`)); assert.ok(!/Spam|\b0\d{8}\b/.test(digest), 'a digest names nobody: ' + digest)
+    for (let i = allowance + 1; i < allowance + 6; i += 1) assert.equal((await flood(i)).status, 201)
+    assert.equal(sent.length, allowance + 1, 'the rest of the window is quiet however many more arrive')
+    h.advance(11 * MIN)
+    assert.equal((await flood(allowance + 6)).status, 201)
+    assert.equal(sent.length, allowance + 2); assert.match(sent.at(-1).text, /Online order\b/); assert.ok(!/arriving fast/.test(sent.at(-1).text), 'a new window announces orders one by one again')
   })
 
   global.fetch = realFetch

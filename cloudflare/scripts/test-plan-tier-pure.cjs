@@ -159,6 +159,10 @@ const PAID = {
   onlineOrderLateCheckHours: 72,
   onlineOrderLateCheckEveryMinutes: 10,
   onlineOrderPaywayTimeoutMs: 8000,
+  onlineOrderOpenPerNetworkMax: 5,
+  onlineOrderQrIssueGraceSeconds: 120,
+  onlineOrderCreatedAlertsPerWindow: 10,
+  onlineOrderCreatedAlertWindowMinutes: 10,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -210,6 +214,10 @@ const FREE = {
   onlineOrderLateCheckHours: 24,
   onlineOrderLateCheckEveryMinutes: 30,
   onlineOrderPaywayTimeoutMs: 8000,
+  onlineOrderOpenPerNetworkMax: 3,
+  onlineOrderQrIssueGraceSeconds: 120,
+  onlineOrderCreatedAlertsPerWindow: 5,
+  onlineOrderCreatedAlertWindowMinutes: 10,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,
@@ -261,7 +269,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
 // dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'onlineOrderPaywayTimeoutMs', 'onlineOrderOpenPerPhoneMax', 'onlineOrderNudgeAfterSeconds', 'onlineOrderScrubAfterDays']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'onlineOrderPaywayTimeoutMs', 'onlineOrderOpenPerPhoneMax', 'onlineOrderNudgeAfterSeconds', 'onlineOrderScrubAfterDays', 'onlineOrderQrIssueGraceSeconds', 'onlineOrderCreatedAlertWindowMinutes']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

@@ -286,6 +286,13 @@ export type PlanLimits = {
   //                                 LARGER number): Paid 10, Free 30.
   //   onlineOrderPaywayTimeoutMs    how long one PayWay call may take before the Worker gives up on it (paywayCredentialsFor -> fetchPaywayTransport). The
   //                                 callback, a customer's request and the cron tick all wait on it, so it is the same on both tiers: 8000.
+  //   onlineOrderOpenPerNetworkMax  unpaid orders (QR still live) one network may hold at once (createOrder refuses the next with too_many_open_orders), so one
+  //                                 address cannot fill the shop-wide cap (security review F5, over online_orders.network_key). Paid 5, Free 3.
+  //   onlineOrderQrIssueGraceSeconds  a payment row with no QR yet counts as open for this long after it was created (the QR is issued in the same request):
+  //                                 past it the row is a failed start, not an order waiting for money. 120 on both plans.
+  //   onlineOrderCreatedAlertsPerWindow  "new online order" Telegram notices one window may send one by one; the next order sends ONE digest line and the rest
+  //                                 stay quiet until the window moves on (a flood cannot spam the chat). Paid 10, Free 5.
+  //   onlineOrderCreatedAlertWindowMinutes  that window. 10 on both plans.
   // The request WINDOW (7 days) is the owner's policy, not a plan size: the setting online_order_request_days (resolveRequestWindowDays).
   onlineOrderMaxLines: number
   onlineOrderOpenUnpaidMax: number
@@ -300,6 +307,10 @@ export type PlanLimits = {
   onlineOrderLateCheckHours: number
   onlineOrderLateCheckEveryMinutes: number
   onlineOrderPaywayTimeoutMs: number
+  onlineOrderOpenPerNetworkMax: number
+  onlineOrderQrIssueGraceSeconds: number
+  onlineOrderCreatedAlertsPerWindow: number
+  onlineOrderCreatedAlertWindowMinutes: number
 
   // lib/buildShare.ts: how a request that finds costly shared work already being done by another request waits for it instead of doing
   // it again (storefront builds, the Dashboard overview, the core-data check, the stock-session column probe). The first request sets a
@@ -444,6 +455,10 @@ const PAID_LIMITS: PlanLimits = {
   onlineOrderLateCheckHours: 72,
   onlineOrderLateCheckEveryMinutes: 10,
   onlineOrderPaywayTimeoutMs: 8000,
+  onlineOrderOpenPerNetworkMax: 5,
+  onlineOrderQrIssueGraceSeconds: 120,
+  onlineOrderCreatedAlertsPerWindow: 10,
+  onlineOrderCreatedAlertWindowMinutes: 10,
   buildSharePollMs: 50,
   buildShareWaitMs: 1000,
   buildShareStaleMs: 3000,
@@ -496,6 +511,10 @@ const FREE_LIMITS: PlanLimits = {
   onlineOrderLateCheckHours: 24,
   onlineOrderLateCheckEveryMinutes: 30,
   onlineOrderPaywayTimeoutMs: 8000,
+  onlineOrderOpenPerNetworkMax: 3,
+  onlineOrderQrIssueGraceSeconds: 120,
+  onlineOrderCreatedAlertsPerWindow: 5,
+  onlineOrderCreatedAlertWindowMinutes: 10,
   buildSharePollMs: 100,
   buildShareWaitMs: 2000,
   buildShareStaleMs: 5000,

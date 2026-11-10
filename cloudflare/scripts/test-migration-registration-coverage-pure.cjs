@@ -72,6 +72,8 @@ const NAMED_COMPANIONS = {
   298: 'test-migration-0298-sales-uncancel-online-refund-native.cjs',
   // 0299 adds the index behind the staff Orders search by phone prefix; schema only, the companion pins its plan.
   299: 'test-migration-0299-online-orders-phone-index-native.cjs',
+  // 0301 adds the partial index behind the per-network open-order cap (security review F5); schema only, the companion pins its plan.
+  301: 'test-migration-0301-online-orders-open-network-index-native.cjs',
   // 0285 is the index the simplified Inventory Check (ic_simple) reads each product's latest observation through; schema only.
   285: 'test-migration-0285-inventory-check-items-latest-native.cjs',
   // 0286 is the approval row a submitted Inventory Check count waits for (ic_fix_stock); a new table, no existing row changes.

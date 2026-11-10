@@ -360,17 +360,42 @@ async function main() {
 
   await check('caps: shop-wide open unpaid orders stop at the plan limit (Free 20): "we are busy", nothing written; the count reads the open-payments index, not the orders', async () => {
     const h = world({ env: { PLAN_TIER: 'free' } })
-    for (let i = 0; i < 20; i += 1) assert.equal((await create(h, { phone: `0${70000000 + i}` })).status, 201, `order ${i + 1}`)
+    const from = (i) => ({ ip: `10.1.${Math.floor(i / 200)}.${(i % 200) + 1}` }) // one network holds at most 3 open orders on Free, so the shop fills from many
+    for (let i = 0; i < 20; i += 1) assert.equal((await create(h, { phone: `0${70000000 + i}` }, from(i))).status, 201, `order ${i + 1}`)
     h.clearStatements()
-    const busy = await create(h, { phone: '010 999 999' })
+    const busy = await create(h, { phone: '010 999 999' }, from(99))
     assert.equal(busy.status, 503); assert.equal(busy.body.code, 'busy'); assert.match(busy.body.error, /try again in a few minutes/i)
     assert.equal(counts(h).orders, 20); assert.equal(h.calls.filter((c) => c.op === 'generate-qr').length, 20, 'no QR for the refused one')
-    const countSql = h.statements.find((s) => /COUNT\(\*\) AS n FROM online_order_payments/.test(s))
+    const countSql = h.statements.find((s) => s.includes("INDEXED BY idx_online_order_payments_open WHERE p.state = 'awaiting' AND p.expires_at >"))
     assert.ok(countSql && /INDEXED BY idx_online_order_payments_open/.test(countSql), countSql)
-    const plan = h.all(`EXPLAIN QUERY PLAN SELECT COUNT(*) AS n FROM online_order_payments INDEXED BY idx_online_order_payments_open WHERE state = 'awaiting'`).map((r) => r.detail).join(' | ')
+    const plan = h.all(`EXPLAIN QUERY PLAN SELECT COUNT(*) AS n FROM online_order_payments INDEXED BY idx_online_order_payments_open WHERE state = 'awaiting' AND expires_at > '2026-01-01'`).map((r) => r.detail).join(' | ')
     assert.match(plan, /idx_online_order_payments_open/); assert.doesNotMatch(plan, /SCAN online_orders/)
-    const phonePlan = h.all(`EXPLAIN QUERY PLAN SELECT COUNT(DISTINCT o.id) AS n FROM online_order_payments p INDEXED BY idx_online_order_payments_open CROSS JOIN online_orders o ON o.id = p.order_id WHERE p.state = 'awaiting' AND o.customer_phone = '1'`).map((r) => r.detail).join(' | ')
+    const phonePlan = h.all(`EXPLAIN QUERY PLAN SELECT COUNT(DISTINCT o.id) AS n FROM online_order_payments p INDEXED BY idx_online_order_payments_open CROSS JOIN online_orders o ON o.id = p.order_id WHERE p.state = 'awaiting' AND p.expires_at > '2026-01-01' AND o.customer_phone = '1'`).map((r) => r.detail).join(' | ')
     assert.match(phonePlan, /idx_online_order_payments_open/); assert.doesNotMatch(phonePlan, /SCAN o\b|SCAN online_orders/)
+  })
+
+  await check('F5: stale QRs the sweep has not reached do not make the shop busy or block a phone; the Nth open order from one network is refused (429), another network is not', async () => {
+    const h = world({ env: { PLAN_TIER: 'free' } })
+    const from = (i) => ({ ip: `10.2.${Math.floor(i / 200)}.${(i % 200) + 1}` })
+    for (let i = 0; i < 20; i += 1) assert.equal((await create(h, { phone: `0${71000000 + i}` }, from(i))).status, 201, `order ${i + 1}`)
+    assert.equal((await create(h, { phone: '010 888 888' }, from(50))).status, 503, 'control: with 20 live QRs the shop is busy')
+    h.advance(3 * 60 * 60 * 1000) // every QR is long past its expiry; the cron sweep has not run, so the 20 payments are still state = awaiting
+    assert.equal(h.one("SELECT COUNT(*) n FROM online_order_payments WHERE state = 'awaiting'").n, 20)
+    const fresh = await create(h, { phone: '010 888 888' }, from(51))
+    assert.equal(fresh.status, 201, 'a real customer is not turned away by stale rows: ' + JSON.stringify(fresh.body))
+    assert.equal((await create(h, { phone: '0 71 000 000' }, from(52))).status, 201, 'the per-phone count ignores a payment whose QR ran out')
+    // One network: Free allows 3 live open orders (planTier onlineOrderOpenPerNetworkMax); different phones do not get around it.
+    const h2 = world({ env: { PLAN_TIER: 'free' } })
+    const here = { ip: '198.51.100.7' }
+    for (let i = 0; i < 3; i += 1) assert.equal((await create(h2, { phone: `0${72000000 + i}` }, here)).status, 201, `from one network, order ${i + 1}`)
+    const fourth = await create(h2, { phone: '0 72 000 009' }, here)
+    assert.equal(fourth.status, 429, JSON.stringify(fourth.body)); assert.equal(fourth.body.code, 'too_many_open_orders')
+    assert.equal(counts(h2).orders, 3, 'the refused one wrote nothing'); assert.equal(h2.calls.filter((c) => c.op === 'generate-qr').length, 3, 'and spent no PayWay call')
+    assert.equal((await create(h2, { phone: '0 72 000 009' }, { ip: '198.51.100.8' })).status, 201, 'another network is unaffected')
+    h2.advance(3 * 60 * 60 * 1000)
+    assert.equal((await create(h2, { phone: '0 72 000 010' }, here)).status, 201, 'once those QRs ran out the network may order again')
+    const plan = h2.all("EXPLAIN QUERY PLAN SELECT COUNT(*) AS n FROM online_orders o INDEXED BY idx_online_orders_open_network WHERE o.state = 'awaiting_payment' AND o.network_key = 'x'").map((r) => r.detail).join(' | ')
+    assert.match(plan, /idx_online_orders_open_network/)
   })
 
   // ---------------------------------------------------------------------------------------------------------------------------- reads, the nudge, paid

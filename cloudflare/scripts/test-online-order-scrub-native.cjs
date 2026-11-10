@@ -17,7 +17,7 @@ const DAY = 86_400_000
 const at = (daysAgo) => new Date(T0 - daysAgo * DAY).toISOString().replace('T', ' ').replace('Z', '')
 
 function world() {
-  const h = createOrdersHarness({ switchOn: true, nowMs: T0 })
+  const h = createOrdersHarness({ switchOn: true, spreadNetworks: true, nowMs: T0 })
   h.run("INSERT INTO branches (name, role, is_active, is_default) VALUES ('Shop','shop',1,1)")
   seedStockFixture(h.raw.db, () => {
     const id = Number(h.run('INSERT INTO products (name, selling_price_usd, selling_price_khr, is_active, stock_quantity) VALUES (?, ?, ?, 1, 50)', 'Serum', 12.5, 50000).lastInsertRowid)

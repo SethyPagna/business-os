@@ -119,7 +119,11 @@ function createOrdersHarness(options = {}) {
   const limits = []
   if (options.limiter) env.ORDER_LIMITER = { limit: async ({ key }) => { limits.push(key); return { success: options.limiter(key, limits.length) } } }
 
-  async function request(pathname, method = 'POST', body, { ip = '203.0.113.9', headers = {}, rawBody, envOverride } = {}) {
+  // spreadNetworks: a test about the order lifecycle, not about networks, places many orders; each create then comes from its own network, so the per-network open-order cap
+  // (planTier onlineOrderOpenPerNetworkMax) is not what it trips over. A test that names an `ip` is unaffected.
+  let spread = 0
+  async function request(pathname, method = 'POST', body, { ip: given, headers = {}, rawBody, envOverride } = {}) {
+    const ip = given ?? (options.spreadNetworks && method === 'POST' && pathname === '/' ? `10.8.${Math.floor(spread / 250) % 250}.${(spread++ % 250) + 1}` : '203.0.113.9')
     planTier.__resetPlanTierCacheForTests?.()
     store.resetNudgeThrottleForTests?.()
     const allHeaders = {

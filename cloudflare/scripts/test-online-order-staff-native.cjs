@@ -27,7 +27,7 @@ const NOBODY = user(6, 'Nobody', { pos: true })
 const DECIDE_ONLY = user(7, 'DecideOnly', { 'online_orders:decide': true })
 
 function world(options = {}) {
-  const h = createOrdersHarness({ switchOn: true, nowMs: T0, ...options })
+  const h = createOrdersHarness({ switchOn: true, spreadNetworks: true, nowMs: T0, ...options })
   h.run("INSERT INTO branches (name, role, is_active, is_default) VALUES ('Shop','shop',1,1)")
   seedStockFixture(h.raw.db, () => {
     for (const [name, price, stock] of [['Serum', 12.5, 50], ['Toner', 8, 3]]) {
