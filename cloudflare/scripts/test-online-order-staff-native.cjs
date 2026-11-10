@@ -146,6 +146,18 @@ async function main() {
     assert.ok(!JSON.stringify(list).includes('345 678') && !JSON.stringify(list).includes('345678'))
   })
 
+  await check('F6: a phone typed into a social field inside a change request is masked in before_json and after_json without the full-phone permission, and whole with it', async () => {
+    const h = world(); const res = await paidOrder(h, { phone: PHONE, contacts: { whatsapp: '+855 12 345 678', instagram: 'dara.shop' } })
+    const out = await h.request(`/${res.body.token}/requests`, 'POST', { kind: 'contact', phone: h.one('SELECT customer_phone p FROM online_orders WHERE id = 1').p, after: { name: 'Dara K', contacts: { whatsapp: '098 765 432', instagram: 'dara_k' } } })
+    assert.equal(out.status, 201, JSON.stringify(out.body))
+    const as = (permissions) => user(9, 'U', { online_orders: true, ...permissions })
+    const masked = (await ask(h, as({}), '/1')).body.requests[0]
+    for (const text of [masked.before_json, masked.after_json]) assert.ok(!/345\s?678|765\s?432/.test(text), 'no full number: ' + text)
+    assert.equal(JSON.parse(masked.after_json).contacts.instagram, 'dara_k', 'a handle that is not a phone stays readable'); assert.equal(JSON.parse(masked.after_json).name, 'Dara K')
+    const full = (await ask(h, as({ contacts_full_phone: true }), '/1')).body.requests[0]
+    assert.ok(/345\s?678/.test(full.before_json) && /765\s?432/.test(full.after_json), 'with the permission the numbers are there')
+  })
+
   // --------------------------------------------------------------------------------------------------------------- cancel
   await check('cancel a paid order: cancelled by staff with the actor and reason, live QRs cancelled and closed at ABA, the money stays and reads as refund due; a stale revision, a sale, an unpaid order and a second cancel are refused', async () => {
     const h = world(); await paidOrder(h)

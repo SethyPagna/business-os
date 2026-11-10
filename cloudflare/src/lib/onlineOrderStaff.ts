@@ -174,6 +174,23 @@ export async function listOrders(db: D1Compat, env: OrderDeps['env'], input: { f
   return { rows: page, next_cursor: next, page_size: limit }
 }
 
+/**
+ * Review F6: a change request stores what the customer proposed (and the order held) as JSON, and a social handle can be a phone number under any key, so every
+ * phone-shaped text inside it is masked for staff without the full-phone permission. Text that cannot be parsed is not shown at all.
+ */
+function maskPhonesInJson(raw: string | null | undefined): string | null {
+  if (raw == null) return null
+  let value: unknown
+  try { value = JSON.parse(raw) } catch { return '{}' }
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'string') return isPhoneShaped(node) ? maskPhone(node) : node
+    if (Array.isArray(node)) return node.map(walk)
+    if (node && typeof node === 'object') return Object.fromEntries(Object.entries(node as Record<string, unknown>).map(([key, child]) => [key, walk(child)]))
+    return node
+  }
+  return JSON.stringify(walk(value))
+}
+
 // ---- the detail -------------------------------------------------------------------------------------------------------------------
 
 /** The staff view of one order: the row (the response mask hides the phone without the permission), payments, Records, requests and the money read. */
@@ -192,7 +209,7 @@ export async function staffDetail(db: D1Compat, id: unknown, now: Date, requestW
   return {
     order: shown,
     payments: payments.map(({ qr_string: _qr, deeplink: _link, ...rest }) => { void _qr; void _link; return rest }),
-    requests: requests.map((request) => ({ ...request, state: requestStates([request], bundle.events).find((s) => s.id === request.id)?.status ?? 'pending' })),
+    requests: requests.map((request) => ({ ...request, ...(options.fullPhones ? {} : { before_json: maskPhonesInJson(request.before_json), after_json: maskPhonesInJson(request.after_json) }), state: requestStates([request], bundle.events).find((s) => s.id === request.id)?.status ?? 'pending' })),
     events: events || [],
     status: view.status, chips: view.chips, money: view.money,
   }
