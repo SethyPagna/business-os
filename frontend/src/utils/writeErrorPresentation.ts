@@ -29,6 +29,7 @@ const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, 
   ['online_method_admin_only', ['write_rejected_online_method_admin_only', 'Only an administrator can change the online payment method.']],
   ['online_order_method_is_cash', ['write_rejected_online_order_method_is_cash', 'The online payment method cannot be a cash method. Add a separate method such as "ABA KHQR" and choose that.']],
   ['online_method_merge_refused', ['write_rejected_online_method_merge_refused', 'The online payment method cannot be merged into another method. Choose a different online method first.']],
+  ['online_method_in_use_by_sales', ['write_rejected_online_method_in_use_by_sales', 'That payment method is already used by recent sales. Choose a method that only online orders will use, such as a separate "ABA KHQR".']],
 ])
 
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {

@@ -21,6 +21,7 @@ const CODES = [
   ['online_method_admin_only', 'write_rejected_online_method_admin_only', /Only an administrator/, /អ្នកគ្រប់គ្រង/],
   ['online_order_method_is_cash', 'write_rejected_online_order_method_is_cash', /cannot be a cash method/, /សាច់ប្រាក់/],
   ['online_method_merge_refused', 'write_rejected_online_method_merge_refused', /cannot be merged/, /បញ្ចូល/],
+  ['online_method_in_use_by_sales', 'write_rejected_online_method_in_use_by_sales', /already used by recent sales/, /ការលក់/],
 ] as const
 
 test('each settings refusal shows its own sentence in both languages, not the generic one', () => {

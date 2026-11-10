@@ -87,7 +87,7 @@ test('KHQR round 6 N1: the field uses the filter and explains, in both languages
   assert.match(en.online_payment_method_hint, /ABA KHQR/)
   assert.match(km.online_payment_method_hint, /[ក-៿]/)
   assert.match(km.online_payment_method_hint, /ABA KHQR/)
-  for (const key of ['write_rejected_online_order_method_is_cash', 'write_rejected_online_method_merge_refused']) {
+  for (const key of ['write_rejected_online_order_method_is_cash', 'write_rejected_online_method_merge_refused', 'write_rejected_online_method_in_use_by_sales']) {
     assert.ok(en[key] && !/[ក-៿]/.test(en[key]), `en ${key}`)
     assert.match(km[key], /[ក-៿]/, `km ${key}`)
   }
