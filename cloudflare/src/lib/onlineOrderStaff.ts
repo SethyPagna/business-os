@@ -12,6 +12,7 @@ import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
 import { FULL_NUMBER_MIN_DIGITS, type PhoneSearchAccess } from './phoneSearchGuard'
 import { canonicalizePhone } from './phone'
 import { normalizeContactName } from './contactDuplicates'
+import { customerIsProfileSql } from './anonymousCustomer'
 import { checkTransaction, makeTranId, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
 import { adminPageRows, onlineOrderView, orderMoney, orderMoneyWire, refundNoteAllowed, requestStates, type RequestKind } from './onlineOrders'
 import {
@@ -199,19 +200,25 @@ function maskPhonesInJson(raw: string | null | undefined): string | null {
 }
 
 /**
- * Review N5: the till sale that fulfils an order is made for the order's customer. The stored phone is full here (the response mask hides it later), so the match is made on the
- * Worker: the existing customer rule is phone AND name (a number shared by a different name is a conflict a person must look at, never a silent link), against the primary
- * phone key. Exactly one match links; none or several link nothing. Only an order the till can still fulfil is looked up (paid, no sale), one indexed read.
+ * Review N5 and the owner's 10 Nov 2026 ruling "suggest, the cashier confirms". The till sale that fulfils an order is made for the order's customer. `auto: true` only when the
+ * buyer was signed in: the order's portal account points at the customer (portal_accounts.contact_id), so the till may link it. Otherwise the typed phone AND name (the existing
+ * customer rule; a number shared by a different name is a conflict a person must look at) can only SUGGEST a customer (`auto: false`) that the cashier taps to confirm. Exactly
+ * one qualifying customer is named; none, or several (six rows are read, ordered by id), name nobody. Only an order the till can still fulfil is looked up (paid, no sale).
  */
-export async function matchOrderCustomer(db: D1Compat, order: { state?: unknown; sale_id?: unknown; customer_phone?: unknown; customer_name?: unknown }): Promise<{ id: number; name: string } | null> {
+export async function matchOrderCustomer(db: D1Compat, order: { state?: unknown; sale_id?: unknown; customer_phone?: unknown; customer_name?: unknown; portal_account_id?: unknown }): Promise<{ id: number; name: string; auto: boolean } | null> {
   if (order.sale_id != null || order.state !== 'paid') return null
+  if (order.portal_account_id != null) {
+    const signedIn = await db.prepare(`SELECT c.id, c.name FROM portal_accounts a JOIN customers c ON c.id = a.contact_id WHERE a.id = @account AND ${customerIsProfileSql('c')}`)
+      .get<{ id: number; name: string | null }>({ account: order.portal_account_id })
+    if (signedIn) return { id: Number(signedIn.id), name: String(signedIn.name ?? ''), auto: true }
+  }
   const phone = canonicalizePhone(order.customer_phone)
   const name = normalizeContactName(order.customer_name)
   if (!phone || !name) return null
-  const rows = await db.prepare('SELECT id, name FROM customers WHERE phone_normalized = @phone AND COALESCE(is_anonymous, 0) = 0 LIMIT 5')
+  const rows = await db.prepare('SELECT id, name FROM customers WHERE phone_normalized = @phone AND COALESCE(is_anonymous, 0) = 0 ORDER BY id LIMIT 6')
     .all<{ id: number; name: string | null }>({ phone }) || []
   const same = rows.filter((row) => normalizeContactName(row.name) === name)
-  return same.length === 1 ? { id: Number(same[0].id), name: String(same[0].name) } : null
+  return rows.length < 6 && same.length === 1 ? { id: Number(same[0].id), name: String(same[0].name), auto: false } : null
 }
 
 // ---- the detail -------------------------------------------------------------------------------------------------------------------

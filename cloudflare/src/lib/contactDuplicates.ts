@@ -179,7 +179,7 @@ function canonicalPhoneSql(column: string): string {
 }
 
 export function normalizeContactName(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  return String(value ?? '').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 // Phone identity uses the account system's canonical key. Besides ignoring
