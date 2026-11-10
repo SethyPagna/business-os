@@ -110,7 +110,7 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { withoutOnlineMethod } from '../online-orders/onlineMethodVisibility.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
-import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilTillFields, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
+import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilTillFields, fulfilSaleFields, lineStatus, readFulfilHandoff, suggestedCustomerFields, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
 import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
@@ -4149,6 +4149,8 @@ export default function POS() {
                   saleTotalUsd={totalUsd}
                   names={new Map(onlineOrder.lines.concat(fulfilCart.map((entry) => ({ product_id: entry.productId, quantity: entry.quantity }))).map((line) => [line.product_id, String(productsById.get(line.product_id)?.name || '')] as [number, string]))}
                   fmtUSD={fmtUSD}
+                  tillCustomerId={active.customer?.id}
+                  onUseSuggestion={() => { const fields = suggestedCustomerFields(onlineOrder); if (fields) patchActive(fields) }}
                   methodMissing={configuredPosPaymentMethods.some((method) => method.trim().toLowerCase() === onlineMethod.trim().toLowerCase()) ? null : onlineMethod}
                   onAddLine={(productId) => { const product = productsById.get(productId); if (product) openProductCard(product, { inStock: false }) }}
                   onDetach={() => { void detachOnlineOrder() }}

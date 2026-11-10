@@ -1,5 +1,5 @@
-import { AlertTriangle, PackageCheck, Plus, X } from 'lucide-react'
-import { extraLines, fulfilMoney, lineStatus, needsCustomerForBalance, type CartCount, type FulfilHandoff } from './fulfilOrder.ts'
+import { AlertTriangle, Check, PackageCheck, Plus, X } from 'lucide-react'
+import { extraLines, fulfilMoney, lineStatus, needsCustomerForBalance, suggestionOpen, type CartCount, type FulfilHandoff } from './fulfilOrder.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 // The strip at the top of the till's cart while it is ringing up an online order (KHQR S6a). It always shows what the order asked for next to what the sale holds (before -> after, line by
@@ -16,11 +16,14 @@ type Props = {
   fmtUSD: (value: number) => string
   /** The online payment method is not one of the till's configured methods: the Worker would refuse the sale, so say so before Complete. */
   methodMissing?: string | null
+  /** The customer on the till right now (any way it got there); the pick-a-customer note and the suggestion both read it. */
+  tillCustomerId?: string | number | null
+  onUseSuggestion: () => void
   onAddLine: (productId: number) => void
   onDetach: () => void
 }
 
-export default function FulfilBanner({ tt, handoff, cart, saleTotalUsd, names, fmtUSD, methodMissing, onAddLine, onDetach }: Props) {
+export default function FulfilBanner({ tt, handoff, cart, saleTotalUsd, names, fmtUSD, methodMissing, tillCustomerId, onUseSuggestion, onAddLine, onDetach }: Props) {
   const lines = lineStatus(handoff.lines, cart)
   const extras = extraLines(handoff.lines, cart)
   const money = fulfilMoney(handoff.paid_usd, saleTotalUsd)
@@ -77,10 +80,18 @@ export default function FulfilBanner({ tt, handoff, cart, saleTotalUsd, names, f
         <dt className="text-emerald-900/80 dark:text-emerald-100/80">{tt('oo_till_sale_total', 'This sale')}</dt><dd className="text-right font-semibold" translate="no">{fmtUSD(saleTotalUsd)}</dd>
       </dl>
       <p data-fulfil-money={money.kind} className={`leading-6 ${money.kind === 'same' ? 'text-emerald-900 dark:text-emerald-100' : 'font-semibold text-amber-900 dark:text-amber-100'}`}>{sentence}</p>
-      {needsCustomerForBalance(handoff, money) ? (
+      {suggestionOpen(handoff, tillCustomerId) ? (
+        <p data-fulfil-suggestion={handoff.customer_suggestion?.id} className="flex items-center gap-1.5 leading-6 text-emerald-900 dark:text-emerald-100">
+          <span className="min-w-0 flex-1">{tt('oo_till_suggest', 'This looks like customer {name}. Use them for this sale?').split('{name}').join(handoff.customer_suggestion?.name ?? '')}</span>
+          <button type="button" onClick={onUseSuggestion} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-emerald-700 px-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-300 dark:text-emerald-200 dark:hover:bg-emerald-400/20">
+            <Check className="h-4 w-4" aria-hidden="true" />{tt('oo_till_use_customer', 'Use')}
+          </button>
+        </p>
+      ) : null}
+      {needsCustomerForBalance(tillCustomerId, money) ? (
         <p data-fulfil-no-customer role="note" className="flex items-start gap-1.5 leading-6 text-amber-900 dark:text-amber-100">
           <AlertTriangle className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{tt('oo_till_no_customer', 'This customer is not in your customer list. Pick or add them in the cart, so the unpaid amount has a name behind it.')}</span>
+          <span>{tt('oo_till_no_customer', 'No matching customer was found. Pick or add one in the cart, so the unpaid amount has a name behind it.')}</span>
         </p>
       ) : null}
       {methodMissing ? (

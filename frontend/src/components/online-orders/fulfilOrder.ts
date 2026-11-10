@@ -22,6 +22,8 @@ export function readFulfilHandoff(storage?: Pick<Storage, 'getItem'> | null): Fu
       customer_name: String(value.customer_name ?? ''), customer_phone: String(value.customer_phone ?? ''), fulfilment: String(value.fulfilment ?? ''),
       address: value.address == null ? null : String(value.address), lines, paid_usd: round2(Number(value.paid_usd) || 0),
       customer_id: Number.isSafeInteger(Number(value.customer_id)) && Number(value.customer_id) > 0 ? Number(value.customer_id) : null,
+      customer_suggestion: Number.isSafeInteger(Number(value.customer_suggestion?.id)) && Number(value.customer_suggestion?.id) > 0
+        ? { id: Number(value.customer_suggestion?.id), name: String(value.customer_suggestion?.name ?? '') } : null,
     }
   } catch { return null }
 }
@@ -120,5 +122,17 @@ export function fulfilTillFields(handoff: Pick<FulfilHandoff, 'customer_id' | 'c
   }
 }
 
-/** The unpaid part of a Fulfil sale becomes a Not Paid debt: with no linked customer it has no name behind it, and the cashier is told to pick one. */
-export const needsCustomerForBalance = (handoff: Pick<FulfilHandoff, 'customer_id'>, money: Pick<FulfilMoney, 'kind'>): boolean => money.kind === 'owe_more' && !handoff.customer_id
+const hasCustomer = (tillCustomerId: unknown): boolean => tillCustomerId != null && tillCustomerId !== '' && Number(tillCustomerId) !== 0
+
+/** The cashier tapped "Use": the suggested customer becomes the till's customer, in the same shape fulfilTillFields gives a signed-in buyer's. */
+export function suggestedCustomerFields(handoff: Pick<FulfilHandoff, 'customer_suggestion' | 'address'>) {
+  const suggestion = handoff.customer_suggestion
+  if (!suggestion) return null
+  return { customer: { id: suggestion.id, name: suggestion.name, phone: '', email: '', membership_number: '', address: handoff.address ?? '' }, customerSearch: suggestion.name }
+}
+
+/** The suggestion is shown until the till has any customer: picking one (the suggested or another) closes it. */
+export const suggestionOpen = (handoff: Pick<FulfilHandoff, 'customer_suggestion'>, tillCustomerId: unknown): boolean => !!handoff.customer_suggestion && !hasCustomer(tillCustomerId)
+
+/** The unpaid part of a Fulfil sale becomes a Not Paid debt: with no customer on the till it has no name behind it, and the cashier is told to pick one. Reads the till's CURRENT customer, so the note clears once one is picked. */
+export const needsCustomerForBalance = (tillCustomerId: unknown, money: Pick<FulfilMoney, 'kind'>): boolean => money.kind === 'owe_more' && !hasCustomer(tillCustomerId)

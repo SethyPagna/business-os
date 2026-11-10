@@ -100,7 +100,7 @@ export type StaffRequest = {
 export type StaffPayment = { id: number; purpose: string; amount: number; currency: string; state: string; paid_amount: number | null; paid_at: string | null; created_at: string; expires_at: string | null }
 export type StaffEvent = { id: number; event: string; source: string; actor_name: string | null; public_comment: string | null; internal_note: string | null; amount_usd: number | null; reference: string | null; created_at: string }
 /** The money object of the Worker's staff detail: the customer view's snake_case names (the Worker also sends camelCase for its own tests; nothing here reads those). Pinned by onlineOrdersWorkerContract.test.ts. */
-export type StaffMoney = { paid_usd?: number; refunded_usd?: number; refund_due_usd?: number; balance_due_usd?: number; held_in_review_usd?: number }
+export type StaffMoney = { paid_usd?: number; available_usd?: number; refunded_usd?: number; refund_due_usd?: number; balance_due_usd?: number; held_in_review_usd?: number }
 export type StaffOrderDetail = {
   order: Record<string, unknown> & { id: number; order_no: string; state: string; revision: number; sale_id: number | null; goods_total_usd: number; currency: string }
   payments: StaffPayment[]
@@ -109,8 +109,8 @@ export type StaffOrderDetail = {
   status: string
   chips: string[]
   money: StaffMoney
-  /** The customer the till sale should be made for: the one customer whose phone AND name match the order (the Worker decides; it holds the full phone). */
-  customer_match?: { id: number; name: string } | null
+  /** The customer for the till sale (the Worker decides; it holds the full phone). `auto`: the buyer was signed in, so the till links it. Otherwise it is only a SUGGESTION the cashier confirms (owner, 10 Nov 2026). */
+  customer_match?: { id: number; name: string; auto?: boolean } | null
 }
 
 export function parseJson<T>(text: unknown, fallback: T): T {
@@ -242,20 +242,25 @@ export type FulfilHandoff = {
   fulfilment: string
   address: string | null
   lines: Array<{ product_id: number; quantity: number }>
+  /** What the sale may take as online money: the Worker's figure (paid minus refund notes written before the sale). */
   paid_usd: number
-  /** The matched customer's id (Worker), or none. */
+  /** The signed-in buyer's own customer (Worker): linked at once. */
   customer_id?: number | null
+  /** A customer the typed phone and name point to: only offered, the cashier confirms. */
+  customer_suggestion?: { id: number; name: string } | null
 }
 export function fulfilHandoff(detail: Pick<StaffOrderDetail, 'order' | 'money' | 'customer_match'>): FulfilHandoff {
   const { order } = detail
+  const matchedId = Number.isSafeInteger(Number(detail.customer_match?.id)) && Number(detail.customer_match?.id) > 0 ? Number(detail.customer_match?.id) : null
   const lines = parseItems(order.items_json).filter((item) => Number.isSafeInteger(Number(item.product_id)) && Number(item.quantity) > 0)
     .map((item) => ({ product_id: Number(item.product_id), quantity: Number(item.quantity) }))
   return {
     online_order_id: Number(order.id), order_no: String(order.order_no), revision: Number(order.revision),
     branch_id: Number.isSafeInteger(Number(order.branch_id)) ? Number(order.branch_id) : null,
     customer_name: text(order.customer_name), customer_phone: text(order.customer_phone), fulfilment: text(order.fulfilment),
-    address: order.customer_address == null ? null : text(order.customer_address), lines, paid_usd: round2(Number(detail.money.paid_usd ?? 0)),
-    customer_id: Number.isSafeInteger(Number(detail.customer_match?.id)) && Number(detail.customer_match?.id) > 0 ? Number(detail.customer_match?.id) : null,
+    address: order.customer_address == null ? null : text(order.customer_address), lines, paid_usd: round2(Number(detail.money.available_usd ?? detail.money.paid_usd ?? 0)),
+    customer_id: matchedId && detail.customer_match?.auto === true ? matchedId : null,
+    customer_suggestion: matchedId && detail.customer_match?.auto !== true ? { id: matchedId, name: text(detail.customer_match?.name) } : null,
   }
 }
 
