@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { presentWriteError } from '../src/utils/writeErrorPresentation.ts'
+import { codedRejectionText, presentWriteError } from '../src/utils/writeErrorPresentation.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const pack = (name: string) => JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', `${name}.json`), 'utf8')) as Record<string, string>
@@ -89,4 +89,19 @@ test('KHQR round 6 N4: Save and clear on the online method field ask through the
     assert.ok(en[key], `en ${key}`)
     assert.match(km[key], /[ក-៿]/, `km ${key}`)
   }
+})
+
+test('KHQR round 7 D4: a refused payment-method rename or merge shows the pack sentence, not the Worker English', () => {
+  // CATCHES: Settings.tsx showing error.message (English) on a Khmer screen for the codes the rename route answers.
+  const workerEnglish = 'Another payment method cannot be merged into the online payment method.'
+  for (const code of ['online_method_admin_only', 'online_method_merge_refused', 'online_order_method_is_cash']) {
+    const error = Object.assign(new Error(workerEnglish), { code })
+    const khmer = codedRejectionText(error, (k) => km[k])
+    assert.ok(khmer && /[ក-៿]/.test(khmer) && khmer !== workerEnglish, `${code} reads Khmer`)
+    assert.equal(codedRejectionText(error, (k) => en[k]), en[`write_rejected_${code}`])
+  }
+  assert.equal(codedRejectionText(Object.assign(new Error('x'), { code: 'write_conflict' }), (k) => en[k]), null)
+  assert.equal(codedRejectionText(new Error('plain'), (k) => en[k]), null)
+  const source = fs.readFileSync(path.join(here, '..', 'src', 'components', 'utils-settings', 'Settings.tsx'), 'utf8').split('\r\n').join('\n')
+  assert.ok(source.includes('stepUpRefusalText(error, t) || codedRejectionText(error, t) ||'), 'the rename catch uses the pack text')
 })

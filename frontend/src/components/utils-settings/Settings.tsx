@@ -65,6 +65,7 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUploadState.ts'
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
+import { codedRejectionText } from '../../utils/writeErrorPresentation.ts'
 import { backfillPaymentMethods, getPaymentMethodImpact, getUnregisteredPaymentMethods, replacePaymentMethod, type PaymentMethodRenameScope } from '../../api/settingsTransport.ts'
 import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
 
@@ -975,7 +976,7 @@ export default function Settings() {
       await loadSettings({ force: true })
       notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
     } catch (error) {
-      notify(stepUpRefusalText(error, t) || (error instanceof Error ? error.message : 'Failed to rename payment method'), 'error')
+      notify(stepUpRefusalText(error, t) || codedRejectionText(error, t) || (error instanceof Error ? error.message : 'Failed to rename payment method'), 'error')
     }
   }
 
