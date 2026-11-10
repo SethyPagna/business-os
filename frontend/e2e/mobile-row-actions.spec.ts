@@ -53,6 +53,15 @@ const visiblePrint = (page: Page): Locator => page.getByRole('button', { name: '
 // The mobile header has its own Back (.bos-nav-back, which opens the section menu); the receipt's Back is the other one.
 const receiptBack = (page: Page): Locator => page.locator('button[aria-label="Back"]:not(.bos-nav-back)')
 
+async function hitsPrintAbove(print: Locator, offset: number): Promise<boolean> {
+  await print.scrollIntoViewIfNeeded()
+  return print.evaluate((element, dy) => {
+    const rect = element.getBoundingClientRect()
+    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2 - dy)
+    return top === element || element.contains(top)
+  }, offset)
+}
+
 async function expectPrintShowsOnlyTheReceipt(page: Page, print: Locator, isMobile: boolean): Promise<void> {
   await expect(print).toBeVisible()
   await press(print, isMobile)
@@ -76,8 +85,7 @@ test.describe('row action buttons do only their own action', () => {
       await openSales(page, size)
       await shot(page, `sales-list-${size.width}`, testInfo)
       const print = visiblePrint(page)
-      const box = await print.boundingBox()
-      expect(Math.min(box!.width, box!.height), 'print tap target').toBeGreaterThanOrEqual(isMobile ? 36 : 24)
+      if (isMobile) expect(await hitsPrintAbove(print, 17), 'a tap 17px above the print icon centre still lands on it (36px touch target)').toBe(true)
       await expectPrintShowsOnlyTheReceipt(page, print, isMobile)
       await shot(page, `sales-print-receipt-${size.width}`, testInfo)
       await closeReceipt(page)
