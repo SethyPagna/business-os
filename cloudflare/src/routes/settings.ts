@@ -775,6 +775,10 @@ app.post('/payment-methods/replace', async (c) => {
     if (touchesOnline && !isAdminControlUser(user)) {
       return c.json({ error: 'Only an administrator can rename or merge the online payment method.', code: 'online_method_admin_only' }, 403)
     }
+    // Merging ANOTHER method into the online one would take that method off the till and, linked, rewrite ordinary sales onto the online-only method.
+    if (sameMethod(storedOnline, to) && !sameMethod(storedOnline, from)) {
+      return c.json({ error: 'Another payment method cannot be merged into the online payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
+    }
     if (sameMethod(storedOnline, from)) {
       const kinds = parsePaymentMethodKinds((await settingDb.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: PAYMENT_METHOD_KINDS_SETTING }))?.value)
       if (setting.methods.some((method) => paymentMethodKey(method) === toKey && toKey !== fromKey)) {

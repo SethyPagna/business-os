@@ -8,7 +8,8 @@ const { randomBytes } = require('node:crypto')
 const { bootWorld, createReporter } = require('./harness/real_worker_world.cjs')
 
 async function main() {
-  const world = await bootWorld({ adminPassword: randomBytes(12).toString('base64url') })
+  const adminPassword = randomBytes(12).toString('base64url')
+  const world = await bootWorld({ adminPassword })
   const { check, finish } = createReporter()
   const setting = async (key) => (await world.first('SELECT value FROM settings WHERE key = ?', key))?.value ?? null
   const put = (key, value) => world.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value)
@@ -38,6 +39,21 @@ async function main() {
       t.eq('rename to a new cash-named method', [toCash.status, toCash.json && toCash.json.code], [409, 'online_order_method_is_cash'])
       t.eq('online method kept', await setting('online_order_payment_method'), 'ABA KHQR')
       t.eq('list kept', await setting('pos_payment_methods'), JSON.stringify(['Cash', 'ABA KHQR', 'Bakong']))
+    })
+
+    await check('D1 (round 7): even an administrator cannot merge ANOTHER method INTO the online method, settings-only or linked, and no sale is rewritten', async (t) => {
+      await put('pos_payment_methods', JSON.stringify(['Cash', 'ABA KHQR', 'Bakong']))
+      await put('online_order_payment_method', 'ABA KHQR')
+      await world.run("DELETE FROM sales WHERE receipt_number = 'R-D1'")
+      await world.run("INSERT INTO sales (receipt_number, total_usd, payment_method, payment_details, created_at) VALUES ('R-D1', 5, 'Cash', '[{\"method\":\"Cash\",\"amount_usd\":5,\"amount_khr\":0}]', datetime('now'))")
+      const before = JSON.stringify(await world.first("SELECT payment_method, payment_details FROM sales WHERE receipt_number = 'R-D1'"))
+      for (const [from, to, scope] of [['Cash', 'ABA KHQR', 'linked'], ['Cash', 'ABA KHQR', 'settings_only'], ['Bakong', 'ABA KHQR', 'settings_only'], ['Bakong', ' aba khqr ', 'linked']]) {
+        const refused = await world.api('POST', '/api/settings/payment-methods/replace', { from, to, scope, currentPassword: adminPassword })
+        t.eq(`${from} -> ${to} (${scope}): refused`, [refused.status, refused.json && refused.json.code], [409, 'online_method_merge_refused'])
+      }
+      t.eq('the online method kept', await setting('online_order_payment_method'), 'ABA KHQR')
+      t.eq('the list kept', await setting('pos_payment_methods'), JSON.stringify(['Cash', 'ABA KHQR', 'Bakong']))
+      t.eq('the ordinary Cash sale untouched', JSON.stringify(await world.first("SELECT payment_method, payment_details FROM sales WHERE receipt_number = 'R-D1'")), before)
     })
 
     await check('N2 control: the administrator renames it to a new dedicated name and the setting follows; a manager still renames an unrelated method', async (t) => {
