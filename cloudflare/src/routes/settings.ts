@@ -30,7 +30,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { ONLINE_PAYMENT_METHOD_KEY } from '../lib/onlineOrderFulfil'
+import { ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -133,7 +133,7 @@ app.get('/', async (c) => {
   // every logged-in cashier gets this map. Rows only the Settings screen reads
   // (Telegram routing, Drive sync, audit retention) go to accounts with
   // Settings access alone -- see lib/settingsVisibility.ts.
-  return c.json({ ...settingsVisibleTo(user, map), updatedAt })
+  return c.json({ ...await withOnlineMethodInForce(c.env, settingsVisibleTo(user, map)), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
@@ -171,7 +171,7 @@ app.get('/meta', async (c) => {
 // this port invented and which the real frontend never calls). Any key in
 // the body except expectedUpdatedAt/expected_updated_at/updatedAt is
 // treated as a setting to write.
-const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys'])
+const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys', ONLINE_METHOD_IN_FORCE_KEY])
 const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
 const AUDIT_LOG_RETENTION_KEY = 'audit_log_retention_days'
 

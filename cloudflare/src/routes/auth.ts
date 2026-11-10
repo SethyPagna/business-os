@@ -15,6 +15,7 @@ import { checkRateLimit, clientNetworkKey, getClientIp, peekRateLimit, recordRat
 import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { settingsVisibleTo } from '../lib/settingsVisibility'
+import { withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
@@ -568,10 +569,10 @@ app.get('/bootstrap', async (c) => {
   // payload reaches every logged-in account, so Drive OAuth tokens and system
   // rows are stripped, and the Settings-only rows (Telegram routing, Drive sync,
   // audit retention) go to accounts with Settings access alone.
-  const settings = settingsVisibleTo(
+  const settings = await withOnlineMethodInForce(c.env, settingsVisibleTo(
     user,
     Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value])),
-  )
+  ))
 
   const dataEpoch = await epochTag(await epochRead)
   return c.json({

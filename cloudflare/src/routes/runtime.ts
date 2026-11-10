@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { buildAuditStatement, changedFields } from '../lib/audit'
 import { getMaintenance } from '../lib/maintenance'
+import { ONLINE_PAYMENT_METHOD_KEY } from '../lib/onlineOrderFulfil'
 import {
   KNOWN_READ_SWITCHES, buildFlipStatements, formatSwitchToken, isKnownReadSwitch, parseFlipState,
   parseReadSwitches, primeReadSwitches, serializeReadSwitches, splitSwitchRows, SWITCH_ROWS_PARAMS, SWITCH_ROWS_SQL, type ReadSwitches,
@@ -271,6 +272,11 @@ app.put('/read-switches', async (c) => {
   if (from === to) {
     primeReadSwitches(c.env, current)
     return c.json({ success: true, changed: false, ...switchListing(c.env, current) })
+  }
+
+  if (name === 'online_orders' && target.state === 'on') {
+    const method = await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY })
+    if (!String(method?.value ?? '').trim()) return c.json({ success: false, error: 'Choose the online payment method in Settings before turning online orders on.', code: 'online_method_required' }, 409)
   }
 
   const epoch = current.epoch + 1

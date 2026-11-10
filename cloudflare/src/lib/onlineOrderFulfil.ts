@@ -55,6 +55,15 @@ export async function onlineMethodRefusalActive(env: Env, storedSetting: unknown
   return readSwitch(env, 'online_orders')
 }
 
+/** Settings key the Worker publishes (never stores): the method name the till must not offer on an ordinary sale, '' while the refusal is not in force. */
+export const ONLINE_METHOD_IN_FORCE_KEY = 'online_order_method_in_force'
+
+/** The ONE rule for which method is reserved: the refusal's own test (onlineMethodRefusalActive) decides, the name is the one a Fulfil rings (configuredOnlineMethod). */
+export async function withOnlineMethodInForce<T extends Record<string, string | null>>(env: Env, settings: T): Promise<T & Record<typeof ONLINE_METHOD_IN_FORCE_KEY, string>> {
+  const stored = settings[ONLINE_PAYMENT_METHOD_KEY]
+  return { ...settings, [ONLINE_METHOD_IN_FORCE_KEY]: (await onlineMethodRefusalActive(env, stored)) ? configuredOnlineMethod(stored) : '' }
+}
+
 /** The dollars of a tender that name `method`, and whether any row does. */
 export function onlineTender(details: ReadonlyArray<{ method: string; amount_usd: number; amount_khr: number }>, method: string): { usd: number; khr: number; present: boolean } {
   const rows = details.filter((detail) => sameMethod(detail.method, method))

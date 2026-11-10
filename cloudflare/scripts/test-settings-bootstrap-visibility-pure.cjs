@@ -82,6 +82,7 @@ function bootstrapRoute(rewrite) {
     '../lib/auth': authLib,
     '../lib/settingsSensitive': settingsSensitive,
     '../lib/settingsVisibility': settingsVisibility,
+    '../lib/onlineOrderFulfil': { ONLINE_METHOD_IN_FORCE_KEY: 'online_order_method_in_force', ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method', withOnlineMethodInForce: async (_env, settings) => settings },
     '../lib/planTier': { resolvePlanTier: () => 'paid' },
   }, rewrite).default
   return async (user) => {

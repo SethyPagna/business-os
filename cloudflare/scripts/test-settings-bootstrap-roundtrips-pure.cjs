@@ -113,6 +113,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/db': { getDb: () => fakeDb },
   '../lib/auth': authLib,
   '../lib/settingsVisibility': settingsVisibility,
+  '../lib/onlineOrderFulfil': { ONLINE_METHOD_IN_FORCE_KEY: 'online_order_method_in_force', ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method', withOnlineMethodInForce: async (_env, settings) => settings },
   '../lib/planTier': { resolvePlanTier: () => 'paid' },
 }).default
 
@@ -121,6 +122,7 @@ const settingsRoute = load('routes/settings.ts', {
   '../lib/auth': authLib,
   '../lib/settingsSensitive': settingsSensitive,
   '../lib/settingsVisibility': settingsVisibility,
+  '../lib/onlineOrderFulfil': { ONLINE_METHOD_IN_FORCE_KEY: 'online_order_method_in_force', ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method', withOnlineMethodInForce: async (_env, settings) => settings },
   '../lib/telegram': { TELEGRAM_TOPIC_KEYS: [] },
   '../lib/lowStockSettings': { MAX_LOW_STOCK_THRESHOLD: 1000, validateLowStockSettingsWrite: () => null },
   '../lib/addressPresets': { POS_ADDRESS_PRESETS_KEY: 'pos_address_presets' },
