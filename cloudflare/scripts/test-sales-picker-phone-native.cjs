@@ -14,8 +14,8 @@ async function main(){
   try{
     const db=await mf.getD1Database('DB')
     await db.prepare(schema.prepare("SELECT sql FROM sqlite_master WHERE name='customers'").get().sql).run()
-    for(const name of ['customers_fts','customers_fts_phone'])await db.prepare(schema.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql).run()
-    for(const row of schema.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='customers' AND sql LIKE '%customers_fts%'").all())await db.prepare(row.sql).run()
+    for(const name of ['customers_fts','customers_fts_phone','customers_phone_digits_fts','customers_phone_digits_v'])await db.prepare(schema.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(name).sql).run()
+    for(const row of schema.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='customers' AND (sql LIKE '%customers_fts%' OR sql LIKE '%customers_phone_digits_fts%')").all())await db.prepare(row.sql).run()
     const fixtures=[
       [1,'Dara','012 345 678','012345678',0],
       [2,'Sok','+855 (12) 345-679',null,0],
