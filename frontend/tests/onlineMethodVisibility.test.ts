@@ -44,6 +44,14 @@ test('the Fulfil sale still gets its online row: the till adds it itself, not fr
   assert.deepEqual(rows.map((row) => [row.method, row.usd]), [['ABA KHQR', '25.00']])
 })
 
+test('the till memos that filter the method list refresh when the method in force changes', () => {
+  // CATCHES: a till tab that keeps offering (or hiding) the online method after the owner turns online orders on or off, because the memo only watched the stored setting.
+  const pos = read('src', 'components', 'pos', 'POS.tsx')
+  const dependencies = [...pos.matchAll(/\}, \[([^\]]*online_order_payment_method[^\]]*)\]/g)].map((match) => match[1])
+  assert.equal(dependencies.length, 2, 'the offered-methods memo and the default-method effect both watch the stored method')
+  for (const list of dependencies) assert.ok(list.includes('settings.online_order_method_in_force'), 'and the method in force: ' + list)
+})
+
 test('every picker of payment methods goes through the filter', () => {
   // CATCHES: one list (the till, the settlement editor, the returns exchange payment, the bulk relabel) still offering the method.
   const pos = read('src', 'components', 'pos', 'POS.tsx')

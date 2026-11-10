@@ -985,7 +985,7 @@ export default function POS() {
           : o
       ))
     } catch {}
-  }, [settings.pos_payment_methods, settings.online_order_payment_method]) // eslint-disable-line
+  }, [settings.pos_payment_methods, settings.online_order_payment_method, settings.online_order_method_in_force]) // eslint-disable-line
 
   // Persist whenever orders or activeId change. The state above was loaded
   // for ONE storage scope; when the scope changes (the till mounted before
@@ -2393,7 +2393,7 @@ export default function POS() {
     }
   }, [settings.pos_payment_methods])
   // What the payment pickers offer: the configured online method is left out (it is the Fulfil sale's locked row, not a tender to choose). The full list still answers "is it set up".
-  const posPaymentMethods = useMemo(() => { const offered = withoutOnlineMethod(configuredPosPaymentMethods, settings); return offered.length ? offered : ['Cash'] }, [configuredPosPaymentMethods, settings.online_order_payment_method]) // eslint-disable-line
+  const posPaymentMethods = useMemo(() => { const offered = withoutOnlineMethod(configuredPosPaymentMethods, settings); return offered.length ? offered : ['Cash'] }, [configuredPosPaymentMethods, settings.online_order_payment_method, settings.online_order_method_in_force]) // eslint-disable-line
 
   const updatePaymentDetails = useCallback((updater: (details: PaymentDetail[]) => PaymentDetail[]) => {
     setOrders((previous) => previous.map((order) => {
