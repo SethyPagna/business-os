@@ -99,7 +99,7 @@ async function main() {
     assert.deepEqual(run(db, sql(SUMMARY)).map((r) => [r.taken_month, r.events]), [['ALL', 0]])
     for (const name of [DETAIL, SUMMARY]) {
       const file = fs.readFileSync(path.join(ROOT, 'ops', 'queries', `${name}.sql`), 'utf8')
-      assert.ok(!file.includes('\r'), `${name}: LF only`)
+      assert.ok(!/\r(?!\n)/.test(file), `${name}: no bare CR (a CRLF checkout is fine; the stored blob is LF)`)
     }
   })
 
