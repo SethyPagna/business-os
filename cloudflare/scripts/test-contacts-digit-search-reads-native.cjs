@@ -9,7 +9,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { build } = require('esbuild')
+const { build, buildSync } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 
@@ -75,6 +75,9 @@ async function main() {
 
     await db.prepare(`UPDATE customers SET name='Tabbed', phone='', phone_normalized=NULL, address=? WHERE id=7`).bind(JSON.stringify([{ label: 'Work', phone: '012\t333\t444' }])).run()
 
+    const crowd = ['Aaron Lee', 'Amy Lee', 'Anna Lee', 'Bora Lee', 'Chan Lee', 'Eang Lee', 'Fern Lee', 'Gina Lee', 'Lee', 'Leesa']
+    for (const [index, name] of crowd.entries()) await db.prepare('UPDATE customers SET name=? WHERE id=?').bind(name, 301 + index).run()
+
     const HOLDER = { all: true }
     const NO_GRANT = { contacts: true }
     const call = async (url, permissions) => {
@@ -83,6 +86,19 @@ async function main() {
     }
     const list = (search, permissions, suffix = '') => call(`/customers?search=${encodeURIComponent(search)}&page=1&pageSize=${PAGE_SIZE}${suffix}`, permissions)
     const picker = (search, permissions) => call(`/customers?fields=sales_picker&search=${encodeURIComponent(search)}`, permissions)
+
+    const clauseModule = { exports: {} }
+    new Function('module', 'exports', 'require', buildSync({ entryPoints: [path.join(root, 'src', 'lib', 'salesCustomerSearch.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' }).outputFiles[0].text)(clauseModule, clauseModule.exports, require)
+    const pickerModule = { exports: {} }
+    new Function('module', 'exports', 'require', buildSync({ entryPoints: [path.join(root, 'src', 'lib', 'contactPicker.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'error' }).outputFiles[0].text)(pickerModule, pickerModule.exports, require)
+    // The picker's own SQL without the rank, run straight on D1: the plain order, and what it reads.
+    const direct = async (search) => {
+      const match = clauseModule.exports.buildSalesCustomerMatchClause(search, { fullPhone: true })
+      const order = []
+      const sql = pickerModule.exports.buildSalesCustomerPickerSql([match.sql]).replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (_, name) => { let i = order.indexOf(name); if (i < 0) { order.push(name); i = order.length - 1 } return '?' + (i + 1) })
+      const result = await db.prepare(sql).bind(...order.map((name) => (name === 'limit' ? 50 : match.params[name]))).all()
+      return { names: result.results.map((row) => row.name), rows: result.meta.rows_read }
+    }
 
     const measured = {}
     const record = (key, r) => { measured[key] = r; console.log(`     ${key}: ${r.rows} rows, ${r.statements} statements`) }
@@ -93,6 +109,7 @@ async function main() {
     record('picker digit, holder (012345678)', await picker('012345678', HOLDER))
     record('picker digit, no grant (012345678)', await picker('012345678', NO_GRANT))
     record('picker name (dara)', await picker('dara', HOLDER))
+    record('picker name, ten people share the word (lee)', await picker('lee', HOLDER))
     if (reportOnly) return
 
     const ids = (r) => (r.body.items || []).map((row) => row.id)
@@ -148,6 +165,21 @@ async function main() {
         assert.equal(measured[key].statements <= measured['picker name (dara)'].statements + 1, true)
       }
       assert.deepEqual((await picker('012345678', HOLDER)).body.items.map((r) => r.id), [5])
+    })
+
+    await check('Sales/POS picker: the name typed in full ranks first, then names that start with it, whatever the alphabet says, at no extra read', async () => {
+      const names = (r) => r.body.items.map((row) => row.name)
+      const alphabetical = ['Aaron Lee', 'Amy Lee', 'Anna Lee', 'Bora Lee', 'Chan Lee', 'Eang Lee', 'Fern Lee', 'Gina Lee', 'Lee', 'Leesa']
+      const ranked = await picker('lee', HOLDER)
+      assert.deepEqual(names(ranked), ['Lee', 'Leesa', ...alphabetical.slice(0, 8)])
+      const topSix = await call('/customers?fields=sales_picker&limit=6&search=lee', HOLDER)
+      assert.deepEqual(names(topSix), ['Lee', 'Leesa', 'Aaron Lee', 'Amy Lee', 'Anna Lee', 'Bora Lee'], 'the POS shows six: the typed name is among them')
+      assert.deepEqual(names(await picker(' LEE ', NO_GRANT)), ['Lee', 'Leesa', ...alphabetical.slice(0, 8)], 'case and spaces around the search do not matter')
+      assert.deepEqual(names(await picker('amy lee', HOLDER)), ['Amy Lee'])
+      assert.deepEqual(names(await picker('lee', HOLDER)).length, 10)
+      const unranked = await direct('lee')
+      assert.deepEqual(unranked.names, alphabetical, 'the unranked order is the alphabetical one the picker had')
+      assert.ok(ranked.rows <= unranked.rows, `ranking read ${ranked.rows} rows, the plain order read ${unranked.rows}`)
     })
 
     await check('a name search reads what it read before (index only, far below a table scan)', async () => {

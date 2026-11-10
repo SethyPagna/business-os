@@ -44,7 +44,7 @@ import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
-import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
+import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT, SALES_PICKER_RANK_PARAM, salesPickerRankKey } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
@@ -1094,7 +1094,9 @@ function registerContactRoutes(config: ContactConfig) {
       if (idFilter.tooMany) return c.json({ error: `ids: at most ${CONTACT_ID_FILTER_MAX} ids per request` }, 400)
       const idClause = buildContactIdClause(idFilter)
       if (idClause) predicates.push(idClause)
-      const items = await db.prepare(buildSalesCustomerPickerSql(predicates)).all<Record<string, unknown>>(params)
+      const rankKey = contactMatch ? salesPickerRankKey(query.search || query.q || '') : ''
+      if (rankKey) params[SALES_PICKER_RANK_PARAM] = rankKey
+      const items = await db.prepare(buildSalesCustomerPickerSql(predicates, !!rankKey)).all<Record<string, unknown>>(params)
       return c.json({ items, limit })
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')

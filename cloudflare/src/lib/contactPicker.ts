@@ -45,9 +45,23 @@ export const SALES_CUSTOMER_PICKER_COLUMNS = [
   'id', 'name', 'phone', 'email', 'address', 'membership_number', 'updated_at', 'is_anonymous',
 ] as const
 
-export function buildSalesCustomerPickerSql(extraPredicates: string[] = []): string {
+export const SALES_PICKER_RANK_PARAM = 'picker_rank'
+
+/** The typed search as the picker ranks names by it: trimmed and lower-cased the way SQLite's lower() does (ASCII only), or '' when nothing was typed. */
+export function salesPickerRankKey(rawSearch: unknown): string {
+  return String(rawSearch ?? '').trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
+/**
+ * With `ranked`, a customer named exactly what was typed comes first, then names that start with it, then the alphabetical order the picker always had.
+ * The POS shows only the first few rows of a search that matches many people (every Lee), so alphabetical order alone could hide the one typed in full.
+ * The rank is computed on the rows that already matched, so it reads no extra row.
+ */
+export function buildSalesCustomerPickerSql(extraPredicates: string[] = [], ranked = false): string {
   const where = ['COALESCE(is_anonymous, 0) = 0', ...extraPredicates]
-  return `SELECT ${SALES_CUSTOMER_PICKER_COLUMNS.join(', ')} FROM customers WHERE ${where.join(' AND ')} ORDER BY lower(name) ASC, id ASC LIMIT @limit`
+  const key = `@${SALES_PICKER_RANK_PARAM}`
+  const rank = ranked ? `CASE WHEN lower(trim(name)) = ${key} THEN 0 WHEN substr(lower(trim(name)), 1, length(${key})) = ${key} THEN 1 ELSE 2 END ASC, ` : ''
+  return `SELECT ${SALES_CUSTOMER_PICKER_COLUMNS.join(', ')} FROM customers WHERE ${where.join(' AND ')} ORDER BY ${rank}lower(name) ASC, id ASC LIMIT @limit`
 }
 
 /**
