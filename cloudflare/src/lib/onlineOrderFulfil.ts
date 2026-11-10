@@ -67,6 +67,19 @@ export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) 
 /** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
 export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
 
+/**
+ * Guard statement for storing a NEW online method (KHQR round 7, N1): aborts the batch when one of the most recent `@windowRows` sales (idx_sales_created_pg, no scan) is an ORDINARY
+ * sale (not linked from online_orders.sale_id, idx_online_orders_sale) that used `@methodKey` (lower(trim)) as its payment_method or in a payment_details row. Such a method would
+ * be hidden and refused at the till the moment it is stored. Older sales are deliberately not read: the bound is plan-tier `onlineMethodSalesWindow`.
+ */
+export const ONLINE_METHOD_IN_USE_CODE = 'online_method_in_use_by_sales'
+export const ONLINE_METHOD_IN_USE_GUARD_SQL = `SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM (SELECT id, payment_method, payment_details FROM sales ORDER BY created_at DESC, id DESC LIMIT @windowRows) recent
+  WHERE (lower(trim(COALESCE(recent.payment_method, ''))) = @methodKey
+      OR (json_valid(recent.payment_details) AND EXISTS (SELECT 1 FROM json_each(recent.payment_details) d WHERE lower(trim(COALESCE(json_extract(d.value, '$.method'), ''))) = @methodKey)))
+    AND NOT EXISTS (SELECT 1 FROM online_orders o WHERE o.sale_id = recent.id)
+) THEN json_extract('[1]', '$[${ONLINE_METHOD_IN_USE_CODE}]') ELSE 1 END`
+
 /** onlineMethodRefusalActive with the switch read from D1 now, not from the memo: for an error path that must name the real reason (a refusal that lost to a write inside the memo window would otherwise read as a conflict). */
 export async function onlineMethodRefusalActiveFresh(db: D1Compat, storedSetting: unknown): Promise<boolean> {
   if (String(storedSetting ?? '').trim() !== '') return true

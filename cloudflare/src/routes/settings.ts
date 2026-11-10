@@ -33,7 +33,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -1392,6 +1392,11 @@ app.post('/', async (c) => {
   }))
   const clearsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(settingsAfter[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
   if (clearsOnlineMethod) statements.unshift({ sql: CLEAR_ONLINE_METHOD_GUARD_SQL, params: {} })
+  // A NEW online method must not be one ordinary sales already use (the till would hide and refuse it). Bounded: only the latest plan-limit window of sales, inside this batch.
+  const setsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !clearsOnlineMethod
+  if (setsOnlineMethod) {
+    statements.unshift({ sql: ONLINE_METHOD_IN_USE_GUARD_SQL, params: { windowRows: getPlanLimits(c.env).onlineMethodSalesWindow, methodKey: methodFold(settingsAfter[ONLINE_PAYMENT_METHOD_KEY]) } })
+  }
   if (paymentMethodsRawBefore !== undefined && changedKeys.includes('pos_payment_methods')) {
     statements.unshift(
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
@@ -1412,6 +1417,9 @@ app.post('/', async (c) => {
   try {
     await db.batch(statements)
   } catch (error) {
+    if (setsOnlineMethod && String(error).includes(ONLINE_METHOD_IN_USE_CODE)) {
+      return c.json({ error: 'That payment method is already used by recent sales. Choose a method that only online orders will use, such as a separate "ABA KHQR".', code: ONLINE_METHOD_IN_USE_CODE }, 409)
+    }
     if (clearsOnlineMethod && /online_method_required/.test(String(error))) {
       return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)
     }

@@ -416,6 +416,10 @@ export type PlanLimits = {
   // both tiers (routes/portal.ts portalAiDailyBudget).
   portalAiDailyMax: number
   portalAiVisitorDailyMax: number
+
+  // routes/settings.ts POST /settings, setting online_order_payment_method to a new value: how many of the MOST RECENT sales (idx_sales_created_pg) the
+  // "method already used by ordinary sales" check looks at. It is a bound, not a scan: older sales are not read. Same on both tiers (one admin action).
+  onlineMethodSalesWindow: number
 }
 
 const PAID_LIMITS: PlanLimits = {
@@ -472,6 +476,7 @@ const PAID_LIMITS: PlanLimits = {
   d1QueriesPerInvocation: 1000,
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
+  onlineMethodSalesWindow: 5000,
 }
 
 const FREE_LIMITS: PlanLimits = {
@@ -528,6 +533,7 @@ const FREE_LIMITS: PlanLimits = {
   d1QueriesPerInvocation: 50,
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
+  onlineMethodSalesWindow: 5000,
 }
 
 /**

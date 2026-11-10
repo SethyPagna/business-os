@@ -176,6 +176,7 @@ const PAID = {
   d1QueriesPerInvocation: 1000,
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
+  onlineMethodSalesWindow: 5000,
 }
 const FREE = {
   tier: 'free',
@@ -231,6 +232,7 @@ const FREE = {
   d1QueriesPerInvocation: 50,
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
+  onlineMethodSalesWindow: 5000,
 }
 
 check('the paid table is exactly the numbers production runs today', async () => {
@@ -269,7 +271,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
 // dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'onlineOrderPaywayTimeoutMs', 'onlineOrderOpenPerPhoneMax', 'onlineOrderNudgeAfterSeconds', 'onlineOrderScrubAfterDays', 'onlineOrderQrIssueGraceSeconds', 'onlineOrderCreatedAlertWindowMinutes']
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'onlineOrderPaywayTimeoutMs', 'onlineOrderOpenPerPhoneMax', 'onlineOrderNudgeAfterSeconds', 'onlineOrderScrubAfterDays', 'onlineOrderQrIssueGraceSeconds', 'onlineOrderCreatedAlertWindowMinutes', 'onlineMethodSalesWindow']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
