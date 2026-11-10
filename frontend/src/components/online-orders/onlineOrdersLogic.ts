@@ -109,6 +109,8 @@ export type StaffOrderDetail = {
   status: string
   chips: string[]
   money: StaffMoney
+  /** The customer the till sale should be made for: the one customer whose phone AND name match the order (the Worker decides; it holds the full phone). */
+  customer_match?: { id: number; name: string } | null
 }
 
 export function parseJson<T>(text: unknown, fallback: T): T {
@@ -241,8 +243,10 @@ export type FulfilHandoff = {
   address: string | null
   lines: Array<{ product_id: number; quantity: number }>
   paid_usd: number
+  /** The matched customer's id (Worker), or none. */
+  customer_id?: number | null
 }
-export function fulfilHandoff(detail: Pick<StaffOrderDetail, 'order' | 'money'>): FulfilHandoff {
+export function fulfilHandoff(detail: Pick<StaffOrderDetail, 'order' | 'money' | 'customer_match'>): FulfilHandoff {
   const { order } = detail
   const lines = parseItems(order.items_json).filter((item) => Number.isSafeInteger(Number(item.product_id)) && Number(item.quantity) > 0)
     .map((item) => ({ product_id: Number(item.product_id), quantity: Number(item.quantity) }))
@@ -251,6 +255,7 @@ export function fulfilHandoff(detail: Pick<StaffOrderDetail, 'order' | 'money'>)
     branch_id: Number.isSafeInteger(Number(order.branch_id)) ? Number(order.branch_id) : null,
     customer_name: text(order.customer_name), customer_phone: text(order.customer_phone), fulfilment: text(order.fulfilment),
     address: order.customer_address == null ? null : text(order.customer_address), lines, paid_usd: round2(Number(detail.money.paid_usd ?? 0)),
+    customer_id: Number.isSafeInteger(Number(detail.customer_match?.id)) && Number(detail.customer_match?.id) > 0 ? Number(detail.customer_match?.id) : null,
   }
 }
 

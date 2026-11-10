@@ -21,6 +21,7 @@ export function readFulfilHandoff(storage?: Pick<Storage, 'getItem'> | null): Fu
       branch_id: Number.isSafeInteger(Number(value.branch_id)) ? Number(value.branch_id) : null,
       customer_name: String(value.customer_name ?? ''), customer_phone: String(value.customer_phone ?? ''), fulfilment: String(value.fulfilment ?? ''),
       address: value.address == null ? null : String(value.address), lines, paid_usd: round2(Number(value.paid_usd) || 0),
+      customer_id: Number.isSafeInteger(Number(value.customer_id)) && Number(value.customer_id) > 0 ? Number(value.customer_id) : null,
     }
   } catch { return null }
 }
@@ -105,3 +106,19 @@ export function detachConfirmCopy(handoff: Pick<FulfilHandoff, 'order_no' | 'pai
     confirmLabel: tt('oo_till_detach_go', 'Sell without order'),
   }
 }
+
+/**
+ * Review N5: what the till sale takes from the order besides its lines. The customer is the one the Worker matched (phone AND name); without a match the sale carries the order's name only
+ * (the phone in the hand-off is masked and must never be saved as the customer's number), so it still reads as theirs on the receipt. A delivery order switches delivery on and carries its
+ * address; the order has no fee or driver of its own, so those stay for the cashier. Applied when the hand-off is taken, so every field stays editable in the till.
+ */
+export function fulfilTillFields(handoff: Pick<FulfilHandoff, 'customer_id' | 'customer_name' | 'address' | 'fulfilment'>) {
+  return {
+    customer: { id: handoff.customer_id ?? null, name: handoff.customer_name, phone: '', email: '', membership_number: '', address: handoff.address ?? '' },
+    customerSearch: handoff.customer_name,
+    isDelivery: handoff.fulfilment === 'delivery',
+  }
+}
+
+/** The unpaid part of a Fulfil sale becomes a Not Paid debt: with no linked customer it has no name behind it, and the cashier is told to pick one. */
+export const needsCustomerForBalance = (handoff: Pick<FulfilHandoff, 'customer_id'>, money: Pick<FulfilMoney, 'kind'>): boolean => money.kind === 'owe_more' && !handoff.customer_id

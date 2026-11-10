@@ -152,7 +152,7 @@ test('each action sends exactly what the Worker reads: trimmed text, nothing emp
 test('the hand-off to the till carries the lines, the order link id, the revision and what was paid', () => {
   // CATCHES: a till opened with the order's price text instead of product ids, a missing online_order_id (the sale would not close the order), and a deleted line sent.
   const handoff = fulfilHandoff(detail({ customer_address: '12 Street 271', fulfilment: 'delivery', items_json: JSON.stringify([{ product_id: 1000, quantity: 2 }, { product_id: 'x', quantity: 1 }, { product_id: 1001, quantity: 0 }]) }))
-  assert.deepEqual(handoff, { online_order_id: 7, order_no: 'W261109K7Q2', revision: 4, branch_id: 2, customer_name: 'Sample Buyer', customer_phone: '*** 678', fulfilment: 'delivery', address: '12 Street 271', lines: [{ product_id: 1000, quantity: 2 }], paid_usd: 25 })
+  assert.deepEqual(handoff, { online_order_id: 7, order_no: 'W261109K7Q2', revision: 4, branch_id: 2, customer_name: 'Sample Buyer', customer_phone: '*** 678', fulfilment: 'delivery', address: '12 Street 271', lines: [{ product_id: 1000, quantity: 2 }], paid_usd: 25, customer_id: null })
 })
 
 test('every refusal code the Worker staff routes can answer has a sentence key, and every key has its English', () => {

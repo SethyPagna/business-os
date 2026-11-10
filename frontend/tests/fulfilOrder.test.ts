@@ -8,7 +8,7 @@ import { abaRefundOffer, DEFAULT_ONLINE_METHOD, onlineMethodName, onlineTenderUs
 
 const store = (value: string | null) => ({ getItem: (key: string) => (key === FULFIL_HANDOFF_KEY ? value : null), removeItem: () => {} })
 const handoff = { online_order_id: 7, order_no: 'W261109K7Q2', revision: 4, branch_id: 2, customer_name: 'Sample Buyer', customer_phone: '*** 678', fulfilment: 'pickup', address: null,
-  lines: [{ product_id: 1000, quantity: 2 }, { product_id: 1001, quantity: 1 }], paid_usd: 25 }
+  lines: [{ product_id: 1000, quantity: 2 }, { product_id: 1001, quantity: 1 }], paid_usd: 25, customer_id: null }
 
 test('the hand-off is read back whole, and anything else is no hand-off', () => {
   // CATCHES: a till that opens an order from a half-written or foreign value, that throws when storage is blocked, and one that keeps a line with no quantity.

@@ -109,7 +109,7 @@ import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
-import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
+import { clearFulfilHandoff, detachConfirmCopy, fulfilMoney, fulfilTillFields, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
 import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
@@ -3276,10 +3276,10 @@ export default function POS() {
     const bound = open.find((order) => (order.onlineOrder as FulfilHandoff | undefined)?.online_order_id === handoff.online_order_id)
     if (bound) { clearFulfilHandoff(); setActiveId(bound.id); setMobileView('cart'); return }
     const current = open.find((order) => order.id === resolvedActiveId)
-    if (current && current.cart.length === 0 && !current.checkoutRequestId && !current.onlineOrder) { clearFulfilHandoff(); patchActive({ onlineOrder: handoff }); setMobileView('cart'); return }
+    if (current && current.cart.length === 0 && !current.checkoutRequestId && !current.onlineOrder) { clearFulfilHandoff(); patchActive({ onlineOrder: handoff, ...fulfilTillFields(handoff) }); setMobileView('cart'); return }
     if (open.length >= LAYOUT.MAX_CONCURRENT_ORDERS) { notify(t('pos_max_open_orders').replace('{count}', String(LAYOUT.MAX_CONCURRENT_ORDERS)), 'info'); return }
     const nextNum = open.length + 1
-    const fresh = normalizeOrder({ ...(createEmptyOrder(nextNum) as Partial<PosOrder>), onlineOrder: handoff }, nextNum)
+    const fresh = normalizeOrder({ ...(createEmptyOrder(nextNum) as Partial<PosOrder>), onlineOrder: handoff, ...fulfilTillFields(handoff) }, nextNum)
     clearFulfilHandoff()
     setOrders((previous) => [...previous, fresh])
     setActiveId(fresh.id)

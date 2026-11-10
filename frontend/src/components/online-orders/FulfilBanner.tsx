@@ -1,5 +1,5 @@
 import { AlertTriangle, PackageCheck, Plus, X } from 'lucide-react'
-import { extraLines, fulfilMoney, lineStatus, type CartCount, type FulfilHandoff } from './fulfilOrder.ts'
+import { extraLines, fulfilMoney, lineStatus, needsCustomerForBalance, type CartCount, type FulfilHandoff } from './fulfilOrder.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
 // The strip at the top of the till's cart while it is ringing up an online order (KHQR S6a). It always shows what the order asked for next to what the sale holds (before -> after, line by
@@ -77,6 +77,12 @@ export default function FulfilBanner({ tt, handoff, cart, saleTotalUsd, names, f
         <dt className="text-emerald-900/80 dark:text-emerald-100/80">{tt('oo_till_sale_total', 'This sale')}</dt><dd className="text-right font-semibold" translate="no">{fmtUSD(saleTotalUsd)}</dd>
       </dl>
       <p data-fulfil-money={money.kind} className={`leading-6 ${money.kind === 'same' ? 'text-emerald-900 dark:text-emerald-100' : 'font-semibold text-amber-900 dark:text-amber-100'}`}>{sentence}</p>
+      {needsCustomerForBalance(handoff, money) ? (
+        <p data-fulfil-no-customer role="note" className="flex items-start gap-1.5 leading-6 text-amber-900 dark:text-amber-100">
+          <AlertTriangle className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{tt('oo_till_no_customer', 'This customer is not in your customer list. Pick or add them in the cart, so the unpaid amount has a name behind it.')}</span>
+        </p>
+      ) : null}
       {methodMissing ? (
         <p role="alert" className="flex items-start gap-1.5 font-semibold leading-6 text-red-700 dark:text-red-300">
           <AlertTriangle className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />

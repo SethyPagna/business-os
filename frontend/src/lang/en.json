@@ -4703,6 +4703,7 @@
   "oo_till_detach_order_value": "Paid {amount} → still paid, not handed over",
   "oo_till_detach_note": "The order stays paid. Hand it over or refund it from Orders, or the customer pays twice.",
   "oo_till_detach_go": "Sell without order",
+  "oo_till_no_customer": "This customer is not in your customer list. Pick or add them in the cart, so the unpaid amount has a name behind it.",
   "oo_till_lines": "Ordered, and in this sale",
   "oo_till_add_line": "Add to the sale",
   "oo_till_paid_online": "Paid online",
