@@ -1917,7 +1917,7 @@
   "delivery_contact": "Delivery Contact",
   "delivery_contact_added": "Delivery contact added",
   "delivery_contact_deleted": "Delivery contact deleted",
-  "delivery_contact_has_sales": "This delivery person is on sales or delivery fees, so it cannot be deleted and its history stays. To retire a duplicate, merge it into the right delivery person from Possible Duplicates; otherwise keep it.",
+  "delivery_contact_has_sales": "This delivery person is on sales or delivery fees, so it can't be deleted. If it's a duplicate, merge it in Conflicts.",
   "delivery_contact_updated": "Delivery contact updated",
   "delivery_contacts_load_slow": "Delivery contacts are taking longer than expected. Tap Retry or revisit the page in a moment.",
   "delivery_contacts_refresh_failed": "Unable to refresh delivery contacts right now. Showing the latest loaded data.",

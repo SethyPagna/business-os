@@ -55,7 +55,7 @@ export function deliveryContactInUseBody(name: unknown, usage: DeliveryContactUs
   const fees = usage?.fees ?? 0
   const label = String(name || '').trim() || 'This delivery person'
   return {
-    error: `${label} is on ${sales} sale(s) and ${fees} delivery fee(s), so it cannot be deleted and the history stays. To retire a duplicate, merge it into the right delivery person from Possible Duplicates; otherwise keep it.`,
+    error: `${label} is on ${sales} sale(s) and ${fees} delivery fee(s), so it can't be deleted. If it's a duplicate, merge it in Conflicts.`,
     code: CONTACT_HAS_SALES_CODE,
     sales,
     fees,

@@ -43,7 +43,8 @@ check('D1 single delete of a person on a sale is refused with contact_has_sales 
   const w = world()
   const r = await w.guard.deleteDeliveryContactUnlessUsed(w.env.DB, 1, 'On a sale')
   assert.equal(r.deleted, false); assert.equal(r.body.code, 'contact_has_sales'); assert.equal(r.body.sales, 1); assert.equal(r.body.fees, 0)
-  assert.match(r.body.error, /merge/i, 'a refusal says what to do instead')
+  assert.match(r.body.error, /merge it in Conflicts/, 'a refusal says what to do instead, naming the real tab')
+  assert.doesNotMatch(r.body.error, /Possible Duplicates/)
   assert.deepEqual(live(w), [1, 2, 3, 4, 5])
 })
 check('D2 single delete of a person on a delivery fee only is refused', async () => {
@@ -63,6 +64,13 @@ check('D4 a sale saved between the read and the delete aborts the delete (in-bat
   const r = await w.guard.deleteDeliveryContactUnlessUsed(w.env.DB, 3, 'Free driver')
   assert.equal(r.deleted, false); assert.equal(r.body.code, 'contact_has_sales')
   assert.ok(live(w).includes(3), 'the row survives')
+})
+check('D4b the fees half of the in-batch guard: a delivery fee saved between the read and the delete still blocks it', async () => {
+  const w = world()
+  w.counter.state.beforeBatch = () => { w.exec(`INSERT INTO fees(fee_type,amount_usd,amount_khr,fee_date,delivery_contact_id) VALUES ('delivery',2,8200,'2026-11-02',3)`) }
+  const r = await w.guard.deleteDeliveryContactUnlessUsed(w.env.DB, 3, 'Free driver')
+  assert.equal(r.deleted, false); assert.equal(r.body.code, 'contact_has_sales'); assert.equal(r.body.fees, 1)
+  assert.ok(live(w).includes(3))
 })
 check('D5 bulk delete of a mixed selection deletes the free ones, keeps the referenced ones, reports them, audits only deletions', async () => {
   const w = world()
@@ -112,6 +120,7 @@ const MUTANTS = [
   { name: 'usage read ignores sales', file: G, from: `SELECT delivery_contact_id AS contact_id, 'sales' AS kind FROM sales`, to: `SELECT delivery_contact_id AS contact_id, 'sales' AS kind FROM sales WHERE 0`, catches: ['D1', 'D5'] },
   { name: 'usage read ignores fees', file: G, from: `SELECT delivery_contact_id AS contact_id, 'fees' AS kind FROM fees`, to: `SELECT delivery_contact_id AS contact_id, 'fees' AS kind FROM fees WHERE 0`, catches: ['D2', 'D5'] },
   { name: 'refusal loses its contact_has_sales code', file: G, from: 'code: CONTACT_HAS_SALES_CODE,', to: "code: 'conflict',", catches: ['D1', 'D4'] },
+  { name: 'in-batch guard ignores fees', file: G, from: ' OR EXISTS (SELECT 1 FROM fees WHERE ${named})', to: '', catches: ['D4b'] },
   { name: 'in-batch guard removed from the single delete', file: G, from: 'await db.batch([buildDeliveryContactUsageGuard([id]), { sql', to: 'await db.batch([{ sql', catches: ['D4'] },
   { name: 'bulk engine deletes referenced people too', file: B, from: `deleteChunk = chunk.filter((id) => !named.has(id))`, to: ``, catches: ['D5'] },
   { name: 'bulk in-batch guard removed', file: B, from: `...(job.entity_type === 'delivery_contacts' && deleteChunk.length ? [buildDeliveryContactUsageGuard(deleteChunk)] : []),`, to: '', catches: ['D7'] },
