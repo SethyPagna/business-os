@@ -58,7 +58,7 @@ check('a CANCELLED linked sale: everything paid online is refundable, a paid top
 // ---- before a sale ------------------------------------------------------------------------------------------------------------
 check('awaiting payment: nothing in, nothing due; a QR that is only awaiting is not money', () => {
   const m = money(order({ state: 'awaiting_payment' }), [{ id: 1, state: 'awaiting', amount: 24.5 }], [], null)
-  assert.deepEqual(m, { onlineInUsd: 0, heldInReviewUsd: 0, recordedOnSaleUsd: 0, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
+  assert.deepEqual(m, { onlineInUsd: 0, heldInReviewUsd: 0, recordedOnSaleUsd: 0, toRecordUsd: 0, notedUsd: 0, refundedUsd: 0, availableUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
 })
 
 check('paid, not fulfilled: refund due only for what exceeds the goods (an order lowered after payment); notes reduce it', () => {
@@ -93,7 +93,7 @@ check('fulfilled and covered: Completed, nothing owed, nothing to record, no chi
   assert.equal(view.phase, 'after_sale')
   assert.equal(view.status, 'completed')
   assert.deepEqual(view.chips, [])
-  assert.deepEqual(view.money, { onlineInUsd: 24.5, heldInReviewUsd: 0, recordedOnSaleUsd: 24.5, toRecordUsd: 0, notedUsd: 0, refundDueUsd: 0, balanceDueUsd: 0 })
+  assert.deepEqual(view.money, { onlineInUsd: 24.5, heldInReviewUsd: 0, recordedOnSaleUsd: 24.5, toRecordUsd: 0, notedUsd: 0, refundedUsd: 0, availableUsd: 24.5, refundDueUsd: 0, balanceDueUsd: 0 })
 })
 
 check('a delivery fee agreed at fulfilment makes the sale Not Paid for the fee only: Balance due, and the online money stays recorded', () => {
@@ -130,7 +130,7 @@ check('a sale amended DOWN after payment is an overpayment: Refund due, reduced 
   assert.deepEqual(view.chips, ['refund_due'])
   assert.equal(money(fulfilled(), [orderPay()], [recorded(1), noted(4.5, { sale_id: 9 })], s).refundDueUsd, 0)
   assert.equal(money(fulfilled(), [orderPay()], [recorded(1), noted(1.5, { sale_id: 9 })], s).refundDueUsd, 3)
-  assert.equal(money(fulfilled(), [orderPay()], [recorded(1), noted(4.5)], s).refundDueUsd, 4.5, 'a note made BEFORE the sale was settled against the order, not this overpayment')
+  assert.equal(money(fulfilled(), [orderPay()], [recorded(1), noted(4.5)], s).refundDueUsd, 0, 'a note made BEFORE the sale is money already sent back: it is subtracted, so the same dollars are never refunded twice (round 2, D1)')
 })
 
 check('change handed back is not an overpayment', () => {
