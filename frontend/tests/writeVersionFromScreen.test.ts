@@ -128,12 +128,13 @@ pin('src/components/users/Users.tsx',
 for (const [file, single, bulk] of [
   ['src/components/contacts/CustomersTab.tsx', /deleteCustomer\(customer\.id, customer\.updated_at\)/, /deleteCustomer\(id, snapshotById\.get\(Number\(id\)\)\?\.updated_at/],
   ['src/components/contacts/SuppliersTab.tsx', /deleteSupplier\(supplier\.id, supplier\.updated_at\)/, /deleteSupplier\(id, snapshotById\.get\(Number\(id\)\)\?\.updated_at/],
-  ['src/components/contacts/DeliveryTab.tsx', /deleteDeliveryContact\(c\.id, c\.updated_at\)/, /deleteDeliveryContact\(id, snapshotById\.get\(Number\(id\)\)\?\.updated_at/],
+  ['src/components/contacts/DeliveryTab.tsx', /removeDeliveryContact\(c\.id, c\.updated_at, /, /removeDeliveryContact\(id, snapshotById\.get\(Number\(id\)\)\?\.updated_at/],
 ] as const) {
   pin(file, single, `${path.basename(file)}: the single delete passes the row's version`)
   pin(file, bulk, `${path.basename(file)}: the bulk delete passes each selected row's version`)
   ok(/const snapshotById = new Map\(snapshots\.map\(\(row\) => \[Number\(row\.id\), row\]\)\)/.test(read(file)), `${path.basename(file)}: bulk versions come from the pre-delete snapshots`)
 }
+ok(/getDeliveryApi\(\)\.deleteDeliveryContact\(id, expectedUpdatedAt\)/.test(read('src/components/contacts/DeliveryTab.tsx')), 'DeliveryTab.tsx: removeDeliveryContact forwards the row version to the API')
 const products = read('src/components/products/Products.tsx')
 // RET-B F2: the field-only restore lives in productWriteHelpers; Products.tsx wires it.
 ok(/payload\.expectedUpdatedAt = current\.updated_at \|\| undefined\s*\n\s*await deps\.updateProduct\(productId, payload\)/.test(read('src/components/products/helpers/productWriteHelpers.ts')),
