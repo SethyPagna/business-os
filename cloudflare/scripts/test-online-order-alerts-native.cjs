@@ -233,6 +233,28 @@ async function main() {
     assert.equal(sent.length, allowance + 2); assert.match(sent.at(-1).text, /Online order\b/); assert.ok(!/arriving fast/.test(sent.at(-1).text), 'a new window announces orders one by one again')
   })
 
+  await check('the exchange-rate fallback is never silent: a missing exchange_rate setting is logged once, named in the new-order notice and flagged on the created Record; a configured rate says nothing', async () => {
+    const logged = []
+    const realError = console.error
+    console.error = (...args) => { logged.push(args.map(String).join(' ')); }
+    try {
+      const h = world()
+      h.store.resetRateFallbackLogForTests()
+      // control first: the configured rate (the migration chain seeds one) is silent
+      h.run("INSERT INTO settings (key, value) VALUES ('exchange_rate', '4000') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      await place(h, { ip: '10.5.0.1' })
+      assert.ok(!/Rate:/.test(sent.at(-1).text), 'a configured rate adds no line'); assert.equal(logged.filter((l) => /exchange_rate/.test(l)).length, 0)
+      h.run("DELETE FROM settings WHERE key = 'exchange_rate'")
+      await place(h, { ip: '10.5.0.2' })
+      assert.match(sent.at(-1).text, /Rate: default/, 'the notice says the default rate was used: ' + sent.at(-1).text)
+      assert.equal(h.one('SELECT exchange_rate FROM online_orders WHERE id = 2').exchange_rate, h.load('lib/planTier.ts').ONLINE_ORDER_FALLBACK_EXCHANGE_RATE)
+      assert.equal(JSON.parse(h.one("SELECT detail_json FROM online_order_events WHERE order_id = 2 AND event = 'created'").detail_json).rate_fallback, true)
+      assert.equal(JSON.parse(h.one("SELECT detail_json FROM online_order_events WHERE order_id = 1 AND event = 'created'").detail_json).rate_fallback, undefined)
+      await place(h, { ip: '10.5.0.3' })
+      assert.equal(logged.filter((l) => /exchange_rate/.test(l)).length, 1, 'logged once per isolate, not once per order')
+    } finally { console.error = realError }
+  })
+
   global.fetch = realFetch
   console.log(`online order alerts: ${passed} checks passed`)
 }

@@ -66,11 +66,12 @@ function orderRows(order: OrderRecord): string[] {
   return rows
 }
 
-export function composeCreatedAlert(order: OrderRecord): Composed {
+export function composeCreatedAlert(order: OrderRecord, rateFallback = false): Composed {
   const count = itemCount(order)
   return {
     heading: '🛒 Online order',
-    lines: [...orderRows(order), `Status: Waiting for payment`, ...(count ? [`Items: ${count}`] : []), `Total: ${money(order.goods_total_usd)}`],
+    // Review (open item): an order priced at the fallback rate says so, so the shop sets the exchange rate in Settings.
+    lines: [...orderRows(order), `Status: Waiting for payment`, ...(count ? [`Items: ${count}`] : []), `Total: ${money(order.goods_total_usd)}`, ...(rateFallback ? [`Rate: default, set the exchange rate in Settings`] : [])],
   }
 }
 
@@ -178,7 +179,7 @@ export async function sendOrderAlert(env: Env, event: OrderAlertEvent): Promise<
           const placed = Date.parse(`${String(order.created_at).replace(' ', 'T')}Z`)
           const since = new Date((Number.isFinite(placed) ? placed : Date.now()) - limits.onlineOrderCreatedAlertWindowMinutes * 60_000).toISOString().slice(0, 19).replace('T', ' ')
           const rank = Number((await db.prepare('SELECT COUNT(*) AS n FROM online_orders WHERE created_at >= @since AND id <= @id').get<{ n: number }>({ since, id: order.id }))?.n ?? 0)
-          if (rank <= limits.onlineOrderCreatedAlertsPerWindow) return composeCreatedAlert(order)
+          if (rank <= limits.onlineOrderCreatedAlertsPerWindow) return composeCreatedAlert(order, event.rateFallback === true)
           return rank === limits.onlineOrderCreatedAlertsPerWindow + 1 ? composeCreatedDigest(rank, limits.onlineOrderCreatedAlertWindowMinutes) : null
         })
       case 'qr_failed': return await withOrder('new', event.orderId, composeQrFailedAlert)

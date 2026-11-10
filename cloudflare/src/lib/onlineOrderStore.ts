@@ -81,7 +81,8 @@ export type OrderDeps = {
  * an order the customer's payment already moved.
  */
 export type OrderAlertEvent =
-  | { kind: 'created' | 'qr_failed' | 'edited' | 'cancelled' | 'changed'; orderId: number }
+  | { kind: 'qr_failed' | 'edited' | 'cancelled' | 'changed'; orderId: number }
+  | { kind: 'created'; orderId: number; rateFallback?: boolean }
   | { kind: 'paid' | 'review' | 'failed'; orderId: number; paymentId: number }
   | { kind: 'request'; orderId: number; requestId: number; requestKind: string }
   | { kind: 'withdrawn'; orderId: number; requestId: number; requestKind: string }
@@ -133,7 +134,7 @@ export type OrderBundle = {
 // ---- settings --------------------------------------------------------------------------------------------------------------------
 
 export { PAYMENT_MINUTES_KEY, PAYMENT_MINUTES_DEFAULT }
-export type OrderSettings = { exchangeRate: number; taxPercent: number; showPrices: boolean; paymentMinutes: number; requestWindowDays: number }
+export type OrderSettings = { exchangeRate: number; rateIsFallback: boolean; taxPercent: number; showPrices: boolean; paymentMinutes: number; requestWindowDays: number }
 const SETTING_KEYS = ['exchange_rate', 'tax_enabled', 'tax_rate', 'customer_portal_show_prices', PAYMENT_MINUTES_KEY, REQUEST_WINDOW_DAYS_KEY] as const
 
 /** Payment minutes: a whole number 3..60 (ABA's own floor is 3); anything else is the default of 15. */
@@ -144,6 +145,18 @@ export function resolvePaymentMinutes(raw: unknown): number {
   return minutes >= PAYMENT_MINUTES_MIN && minutes <= PAYMENT_MINUTES_MAX ? minutes : PAYMENT_MINUTES_DEFAULT
 }
 
+let rateFallbackLogged = false
+/**
+ * The configured exchange rate is read on every order. When it is missing or unusable the order is priced at the plan's fallback rate (planTier ONLINE_ORDER_FALLBACK_EXCHANGE_RATE):
+ * that is never silent. The Worker logs it (once per isolate, so a busy shop does not flood the log) and the new-order notice and the order's created Record say so.
+ */
+function noteRateFallback(settings: OrderSettings): void {
+  if (!settings.rateIsFallback || rateFallbackLogged) return
+  rateFallbackLogged = true
+  console.error('[online-orders] the exchange_rate setting is missing or invalid: orders are priced at the fallback rate until it is set')
+}
+export function resetRateFallbackLogForTests(): void { rateFallbackLogged = false }
+
 /** One keyed read: never loadSettingsMap, which reads every settings row. */
 export async function loadOrderSettings(db: D1Compat): Promise<OrderSettings> {
   const rows = await db.prepare(`SELECT key, value FROM settings WHERE key IN (${SETTING_KEYS.map((_, i) => `@k${i}`).join(',')})`)
@@ -152,13 +165,16 @@ export async function loadOrderSettings(db: D1Compat): Promise<OrderSettings> {
   const rate = Number(map.exchange_rate)
   const tax = resolveTaxSettings(map.tax_enabled, map.tax_rate, 1)
   const shows = String(map.customer_portal_show_prices ?? '').trim().toLowerCase()
-  return {
+  const loaded: OrderSettings = {
     exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : ONLINE_ORDER_FALLBACK_EXCHANGE_RATE,
+    rateIsFallback: !(Number.isFinite(rate) && rate > 0),
     taxPercent: tax.enabled ? (tax.percent ?? 0) : 0,
     showPrices: shows === '' ? true : ['1', 'true', 'yes', 'on'].includes(shows),
     paymentMinutes: resolvePaymentMinutes(map[PAYMENT_MINUTES_KEY]),
     requestWindowDays: resolveRequestWindowDays(map[REQUEST_WINDOW_DAYS_KEY]),
   }
+  noteRateFallback(loaded)
+  return loaded
 }
 
 // ---- what the customer typed -----------------------------------------------------------------------------------------------------
@@ -764,7 +780,7 @@ export async function createOrder(
         {
           sql: `INSERT INTO online_order_events (order_id, payment_id, event, to_state, source, amount_usd, detail_json, created_at)
                 VALUES ((SELECT id FROM online_orders WHERE order_no = @order_no), (SELECT id FROM online_order_payments WHERE tran_id = @tran), 'created', 'awaiting_payment', 'customer', @total, @detail, @at)`,
-          params: { order_no: orderNo, tran: tranId, total: facts.priced.goodsTotalUsd, at, detail: JSON.stringify({ lines: input.lines.length, fulfilment: input.fulfilment }) },
+          params: { order_no: orderNo, tran: tranId, total: facts.priced.goodsTotalUsd, at, detail: JSON.stringify({ lines: input.lines.length, fulfilment: input.fulfilment, ...(settings.rateIsFallback ? { rate_fallback: true } : {}) }) },
         },
       ])
       break
@@ -779,7 +795,7 @@ export async function createOrder(
   const issued = await issueQr(deps, credentials, order, { tran_id: tranId, amount: facts.priced.goodsTotalUsd, currency: 'USD', purpose: 'order' }, settings, 'awaiting_payment')
   if (!issued.ok) { await announce(deps, { kind: 'qr_failed', orderId: order.id }); return qrFailure(issued.reason, token, orderNo) }
   const bundle = (await loadBundle(db, hash))!
-  await announce(deps, { kind: 'created', orderId: bundle.order.id })
+  await announce(deps, { kind: 'created', orderId: bundle.order.id, ...(settings.rateIsFallback ? { rateFallback: true } : {}) })
   return { token, bundle }
 }
 
