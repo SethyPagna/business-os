@@ -23,6 +23,7 @@ import {
   parseConfiguredMethodsStrict,
   PAYMENT_METHOD_KINDS_SETTING,
   parsePaymentMethodKinds,
+  isCashPaymentMethod,
   paymentMethodKey,
   saleMethodsUsed,
 } from '../lib/paymentMethodRegistry'
@@ -32,7 +33,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -764,6 +765,25 @@ app.post('/payment-methods/replace', async (c) => {
       conflict: true,
       current: { updated_at: setting.updatedAt, configured_methods: setting.methods },
     }, 409)
+  }
+  // The online (KHQR) method is an administrator's setting (the settings save says so), so the rename route that carries it along answers the same way, and it
+  // never turns the online method into another configured method or into a cash one: both would hand the till's other payments to the online-only method.
+  const settingDb = getDb(c.env)
+  const storedOnline = String((await settingDb.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value ?? '').trim()
+  if (storedOnline) {
+    const touchesOnline = sameMethod(storedOnline, from) || sameMethod(storedOnline, to)
+    if (touchesOnline && !isAdminControlUser(user)) {
+      return c.json({ error: 'Only an administrator can rename or merge the online payment method.', code: 'online_method_admin_only' }, 403)
+    }
+    if (sameMethod(storedOnline, from)) {
+      const kinds = parsePaymentMethodKinds((await settingDb.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: PAYMENT_METHOD_KINDS_SETTING }))?.value)
+      if (setting.methods.some((method) => paymentMethodKey(method) === toKey && toKey !== fromKey)) {
+        return c.json({ error: 'The online payment method cannot be merged into another payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
+      }
+      if (isCashPaymentMethod(to, kinds)) {
+        return c.json({ error: 'The online payment method cannot be renamed to a cash method.', code: 'online_order_method_is_cash' }, 409)
+      }
+    }
   }
   const next: string[] = []
   const seen = new Set<string>()
