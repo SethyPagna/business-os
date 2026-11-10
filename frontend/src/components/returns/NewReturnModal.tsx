@@ -46,7 +46,7 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
-import { abaRefundOffer, onlineMethodName } from './helpers/abaRefund.ts'
+import { abaRefundOffer, onlineMethodName, refundChannelFields } from './helpers/abaRefund.ts'
 import AbaRefundChoice from './AbaRefundChoice.tsx'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
@@ -930,6 +930,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           reason:           finalReason,
           return_type:      returnType,
           notes:            notes || null,
+          ...abaChannel,
           total_refund_usd: totalRefund,
           total_refund_khr: totalRefundKhr,
           exchange_rate:    toNumber(foundSale?.exchange_rate) || 4100,
@@ -1068,9 +1069,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
 
   const abaOffer = abaRefundOffer({
     paymentDetails: foundSale?.payment_details, method: onlineMethodName(settings), canRefund: typeof can === 'function' && can('online_orders', 'refund'),
-    creditUsd: quote?.total_refund_usd ?? 0, exchangeActive, returnType,
+    creditUsd: totalRefund, exchangeActive, returnType,
   })
-  const sendViaAba = abaOffer.offered && abaRefund && !abaOffer.overCap
+  // Chosen = sent, over the shown cap or not: the Worker answers aba_refund_over_online, never a silent cash refund (review N3). Both return paths send it.
+  const abaChannel = refundChannelFields(abaOffer, abaRefund)
 
   const submitNetReturn = async () => {
     if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
@@ -1091,7 +1093,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         pending = await transport.prepareReturnCreateV1(user?.id, {
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
-          ...(sendViaAba ? { refund_channel: 'aba' } : {}),
+          ...abaChannel,
           items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
             stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
             ...(it.stock_action === 'damaged' ? {

@@ -41,3 +41,12 @@ export function abaRefundOffer(input: {
   const offered = input.canRefund && capUsd > 0 && !input.exchangeActive && input.returnType !== 'writeoff' && amountUsd > 0
   return { offered, capUsd, amountUsd, overCap: amountUsd > capUsd + 0.005 }
 }
+
+/**
+ * What the return body carries for the cashier's choice. Choosing "Through ABA" ALWAYS sends refund_channel 'aba', also when the screen's own cap says the amount is too high:
+ * the cap shown is only what this sale's rows took online, the Worker knows the real figure (earlier ABA returns, notes, money paid beyond the sale) and refuses with
+ * aba_refund_over_online, which the cashier then reads. Quietly turning the choice into a drawer refund (review N3) paid the customer twice when the ABA transfer was sent as well.
+ * The same body goes out on both return paths (net returns and the older request path).
+ */
+export const refundChannelFields = (offer: Pick<AbaRefundOffer, 'offered'>, chosen: boolean): { refund_channel?: 'aba' } =>
+  offer.offered && chosen ? { refund_channel: 'aba' } : {}
