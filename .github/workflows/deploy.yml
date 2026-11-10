@@ -52,7 +52,6 @@ jobs:
     name: Release to production
     runs-on: windows-latest
     environment: production
-    # The release re-runs every test file (no release certificate) before the production step: B3 finished its Safety tests at 3h55m of 240 and was close to the limit. GitHub-hosted jobs stop at 360.
     timeout-minutes: 330
     defaults:
       run:
