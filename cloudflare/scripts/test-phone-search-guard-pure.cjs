@@ -123,7 +123,7 @@ function run(load, { baseLoad }) {
     const sameOrMore = (label, table, q, lane, base) => {
       if (JSON.stringify(lane) === JSON.stringify(base)) return
       const probe = guard.phoneProbeOf(q)
-      assert.ok((probe.kind === 'full' && !probe.plain) || /[^\x00-\x7f]/.test(q), `${label}: only a whole number in another form, or digits of another script, may differ from the base`)
+      assert.ok((probe.kind === 'full' && !probe.plain) || guard.typedPhoneDigitForms(q) !== null || /[^\x00-\x7f]/.test(q), `${label}: only a typed number (whatever separators the stored phone has), or digits of another script, may differ from the base`)
       const run = (clause) => (clause ? db.prepare(`SELECT id FROM ${table} WHERE ${clause.sql} ORDER BY id`).all(clause.params).map((row) => row.id) : [])
       const laneIds = run(lane)
       assert.ok(run(base).every((id) => laneIds.includes(id)), `${label}: a holder loses nothing (${laneIds} vs ${run(base)})`)
@@ -141,6 +141,23 @@ function run(load, { baseLoad }) {
     assert.deepEqual(ids('delivery_contacts', '666', OPEN), [1])
     assert.deepEqual(pickerIds('0876', OPEN), [1])
     assert.deepEqual(pickerIds('876', OPEN), [1])
+  })
+
+  check('a typed number finds the contact whatever separators the stored phone has', () => {
+    // 087 654 321 holds the run 7654 across its space, and +855 12 777 888 holds 012777888 only as digits: neither the word nor the trigram index can read them.
+    for (const [q, expected] of [['7654', [1]], ['765432', [1]], ['0876 5432', [1]], ['12777', [4]], ['012 777 888', [4]], ['012777888', [4]]]) {
+      assert.deepEqual(ids('customers', q, OPEN), expected, `holder: customers ${q}`)
+      assert.deepEqual(pickerIds(q, OPEN), expected, `holder: picker ${q}`)
+    }
+    assert.deepEqual(ids('suppliers', '8444', OPEN), [1], 'holder: a run across the separators of a Contact Option phone')
+    assert.deepEqual(ids('delivery_contacts', '5666', OPEN), [1], 'holder: a delivery contact')
+    for (const q of ['087654321', '087-654-321']) assert.deepEqual(ids('customers', q, CLOSED), [1], `no grant: the whole compact number ${q} finds the customer`)
+    for (const q of ['012777888', '+855 12 777 888', '85512777888']) assert.deepEqual(ids('customers', q, CLOSED), [4], `no grant: the whole number ${q} finds the +855 customer`)
+    for (const q of ['7654', '765432', '12777']) assert.deepEqual(ids('customers', q, CLOSED), [], `no grant: the fragment ${q} still finds nobody`)
+    db.prepare("INSERT INTO customers (id, name, phone, phone_normalized) VALUES (90, 'Cache Only', 'ask at the shop', '011222333')").run()
+    assert.deepEqual(ids('customers', '011222333', OPEN), [90], 'holder: the cache column finds a customer whose phone text holds no digits')
+    assert.deepEqual(ids('customers', '011222333', CLOSED), [90], 'no grant: the whole number finds it through the cache column')
+    db.prepare('DELETE FROM customers WHERE id = 90').run()
   })
 
   // ---- 3. an account without the grant: no oracle, still finds the customer by the whole number -----------------------
@@ -345,12 +362,14 @@ console.log('PASS phone search guard: classification, holder parity, no-oracle, 
 
 // ---- 4. mutants ------------------------------------------------------------------------------------------------------
 const mutants = [
-  ['the two matches share parameter names', { contactSearch: replaceOnce('`${paramPrefix}_restricted`', 'paramPrefix') }],
   ['guard ignored (every account searches open)', { contactSearch: replaceOnce('if (access.fullPhone) {', 'if (true) {') }],
   ['digit words restricted only when the raw text is all digits (the disguised-search bypass)', { contactSearch: replaceOnce('`${paramPrefix}_restricted`, true)', "`${paramPrefix}_restricted`, /^[\\d\\s+().-]+$/.test(String(rawSearch ?? '')))") }],
   ['whole number classified from the raw words, not the matcher words', { phoneSearchGuard: replaceOnce('const words = tokenizeSearchWords(rawSearch)', "const words = String(rawSearch ?? '').split(/\\s+/).filter(Boolean)") }],
   ['whole number compared by containment', { phoneSearchGuard: replaceOnce('return `${digitsSql}=@${key}`', 'return `instr(${digitsSql},@${key})>0`') }],
-  ['picker whole number compared by containment', { salesCustomerSearch: replaceOnce('(phone_normalized=@${key} OR ${displayDigits}=@${key})', '(phone_normalized=@${key} OR instr(${displayDigits},@${key})>0)') }],
+  ['holder digit run dropped', { contactSearch: replaceOnce('if (forms) {', 'if (false) {') }],
+  ['holder digit run read by the no-grant account too', { contactSearch: replaceOnce('if (access.fullPhone) {', 'if (true || access.fullPhone) {') }],
+  ['holder digit run ignores the cache column', { contactSearch: replaceOnce("table === 'customers' ? 'phone_normalized' : undefined", 'undefined') }],
+  ['no-grant whole number compared by containment', { phoneSearchGuard: replaceOnce('primary.push(`instr(${primaryDigits},@${key})>0`)', 'primary.push(`instr(${primaryDigits},@${key})>-1`)') }],
   ['non-ASCII digits are not folded', { phoneMask: replaceOnce('code > 0x7f && DECIMAL_DIGIT.test(char)', 'false') }],
   ['Reports > Sales search treats everyone as a holder', { phoneSearchGuard: replaceOnce('if (access.fullPhone) return (row) =>', 'if (true) return (row) =>') }],
   ['Reports > Sales search reads a numeric customer name', { phoneSearchGuard: replaceOnce('restrictedTextOf(key, row[key] || \'\').toLowerCase().includes(search)', 'text(row, key).includes(search)') }],
@@ -359,13 +378,13 @@ const mutants = [
   ['digit words search phone columns', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (false && hasDigit(word))') }],
   ['only an all-digit word is restricted (a mark or a letter glued to the digits escapes)', { contactSearch: replaceOnce('if (digitWordsAvoidPhones && hasDigit(word))', 'if (digitWordsAvoidPhones && /^[0-9]+$/.test(word))') }],
   ['trigram table kept for digit words', { contactSearch: replaceOnce('&& !(digitWordsAvoidPhones && words.some(hasDigit))', '') }],
-  ['whole-number branch without the digit comparison', { contactSearch: replaceOnce('(${open.sql} AND ${exact.sql})', '(${open.sql})') }],
+  ['no-grant whole number narrowed by the separator-sensitive word match again', { contactSearch: replaceOnce('let whole = exact.sql', 'let whole = open ? `(${open.sql} AND ${exact.sql})` : exact.sql') }],
   ['whole number threshold 8 -> 3 digits', { phoneSearchGuard: replaceOnce('export const FULL_NUMBER_MIN_DIGITS = 8', 'export const FULL_NUMBER_MIN_DIGITS = 3') }],
   ['mixed text and digits counts as a whole number', { phoneSearchGuard: (source) => replaceOnce("const digits = toAsciiDigits(words.join(''))", "const digits = toAsciiDigits(words.join('')).replace(/\\D/g, '')")(replaceOnce('if (!words.every(isDigitWord)) return PARTIAL_PROBE', '')(source)) }],
   ['digit comparison drops the Contact Option phones', { phoneSearchGuard: replaceOnce('return { sql: `(${primary.sql} OR ${options})`', 'return { sql: `(${primary.sql})`') }],
   ['a number saved as a name is readable through a digit word', { contactSearch: replaceOnce("`(${wordMatch} AND ${PERSON_COLUMNS[table].map((column) => `NOT ${phoneShapedSql(column)}`).join(' AND ')})`", 'wordMatch') }],
   ['a supplier contact person saved as a number is readable through a digit word', { contactSearch: replaceOnce("suppliers: ['name', 'contact_person'],", "suppliers: ['name'],") }],
-  ['picker keeps the fragment alternatives', { salesCustomerSearch: replaceOnce('if (!access.fullPhone && digits.length < FULL_NUMBER_MIN_DIGITS) return original', '') }],
+  ['picker no longer shares the directory matcher', { salesCustomerSearch: replaceOnce("'picker', access)", "'picker', { fullPhone: true })") }],
   ['audit log keeps matching phone text', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", '') }],
   ['audit log blocks money figures too', { auditLogQuery: replaceOnce("if (figureOnly && !isMoneyShapedWord(word)) return '0'", "if (figureOnly) return '0'") }],
   ['audit log money figure matches inside a longer number', { auditLogQuery: replaceOnce('...(figureOnly ? [wholeFigure(column, `@searchFigure${index}`)] : []),', '') }],

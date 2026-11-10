@@ -234,7 +234,45 @@ export function fullContactPhoneClause(probe: Extract<PhoneProbe, { kind: 'full'
   return { sql: `(${primary.sql} OR ${options})`, params: { ...primary.params, ...optionParams } }
 }
 
-const SALES_REPORT_TEXT_KEYS = ['receipt_number', 'customer', 'cashier', 'branch', 'payment_method'] as const
+/**
+ * A contact whose primary phone or any Contact Option phone holds these digits as a run, whatever separators the stored number has
+ * ("012 345 678" holds 5678, which no token or trigram of the formatted text does). `normalizedColumn` also compares a cache column
+ * (customers.phone_normalized) by equality. Containment: for an account with the full-phone grant only.
+ */
+export function contactPhoneContainsClause(forms: readonly string[], paramPrefix: string, optionLimit: number, normalizedColumn?: string): PhoneClause {
+  const params: Record<string, string> = {}
+  const primaryDigits = phoneDigitsSql("COALESCE(phone,'')")
+  const optionObject = "CASE WHEN phone_option.type='object' THEN phone_option.value ELSE '{}' END"
+  const optionDigits = phoneDigitsSql(`CASE WHEN json_type(${optionObject},'$.phone')='text' THEN json_extract(${optionObject},'$.phone') ELSE '' END`)
+  const primary: string[] = []
+  const options: string[] = []
+  forms.forEach((form, index) => {
+    const key = `${paramPrefix}_${index}`
+    params[key] = form
+    if (normalizedColumn) primary.push(`${normalizedColumn}=@${key}`)
+    primary.push(`instr(${primaryDigits},@${key})>0`)
+    options.push(`instr(${optionDigits},@${key})>0`)
+  })
+  const optionExists = `EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(address)
+    THEN CASE WHEN json_type(address)='array' THEN address ELSE '[]' END ELSE '[]' END) phone_option
+    WHERE CAST(phone_option.key AS INTEGER) BETWEEN 0 AND ${optionLimit - 1}
+      AND (${options.join(' OR ')}))`
+  return { sql: `(${primary.join(' OR ')} OR ${optionExists})`, params }
+}
+
+/** The digit strings a typed number may be stored as (as typed, local 0-form, 855-form), or null when the text is not a bare number of 3 to 15 digits. */
+export function typedPhoneDigitForms(rawSearch: unknown): string[] | null {
+  const raw = toAsciiDigits(String(rawSearch ?? '')).trim()
+  if (!/^[+\d\s().-]+$/.test(raw)) return null
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 3 || digits.length > FULL_NUMBER_MAX_DIGITS) return null
+  const canonical = phoneDigitsOf(digits)
+  const forms = new Set<string>([digits, canonical])
+  if (/^0\d{8,9}$/.test(canonical)) forms.add(`855${canonical.slice(1)}`)
+  return [...forms]
+}
+
+const SALES_REPORT_TEXT_KEYS =['receipt_number', 'customer', 'cashier', 'branch', 'payment_method'] as const
 
 function digitsEqualProbe(value: unknown, probe: Extract<PhoneProbe, { kind: 'full' }>): boolean {
   const text = String(value ?? '')

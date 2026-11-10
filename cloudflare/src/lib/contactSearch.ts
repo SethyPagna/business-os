@@ -22,7 +22,7 @@
 // searchMatch.ts instead of duplicating it here.
 import { tokenizeSearchWords, expandAliasCandidatesForFts } from './searchMatch'
 import { CONTACT_OPTION_LIMIT } from './contactOptions'
-import { fullContactPhoneClause, hasDigit, phoneProbeOf, phoneShapedSql, type PhoneSearchAccess } from './phoneSearchGuard'
+import { contactPhoneContainsClause, fullContactPhoneClause, hasDigit, phoneProbeOf, phoneShapedSql, typedPhoneDigitForms, type PhoneSearchAccess } from './phoneSearchGuard'
 
 export type ContactSearchTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -70,21 +70,35 @@ export function buildContactMatchClause(
   const open = buildOpenContactMatchClause(table, rawSearch, paramPrefix, false)
   const probe = phoneProbeOf(rawSearch)
   const exact = probe.kind === 'full' ? fullContactPhoneClause(probe, `${paramPrefix}_digits`, CONTACT_OPTION_LIMIT) : null
+  const normalizedColumn = table === 'customers' ? 'phone_normalized' : undefined
   if (access.fullPhone) {
-    // A holder searches as before; a whole number written in a form the word match cannot find (+855, 00855, another script)
-    // also finds the contact whose phone IS that number.
+    // A number is stored with the separators it was saved with ("012 345 678"), which neither the word index (tokens 012, 345, 678)
+    // nor the trigram index (no run across a space) can find by its contiguous digits, so a typed number is also compared as digits.
+    const forms = typedPhoneDigitForms(rawSearch)
+    if (forms) {
+      const contains = contactPhoneContainsClause(forms, `${paramPrefix}_run`, CONTACT_OPTION_LIMIT, normalizedColumn)
+      return open ? { sql: `(${open.sql} OR ${contains.sql})`, params: { ...open.params, ...contains.params } } : contains
+    }
     if (!exact || probe.kind !== 'full' || probe.plain || !open) return open ?? (exact ? { sql: exact.sql, params: exact.params } : undefined)
     return { sql: `(${open.sql} OR ${exact.sql})`, params: { ...open.params, ...exact.params } }
   }
   // The account cannot see numbers. The restriction is decided on the words the matcher searches, for every search, so no
   // spelling of a digit fragment (accent, letter o, punctuation) reaches a phone column: a digit-only word searches the
-  // non-phone columns only. A whole number also finds the contact whose phone IS that number (equality of the digits; for a
-  // plain local number the open match narrows the rows first). Its own parameter names: the matches carry different MATCH texts.
+  // non-phone columns only. A whole number also finds the contact whose phone IS that number (equality of the digits, however
+  // the stored number is separated). Its own parameter names: the matches carry different MATCH texts.
   const restricted = buildOpenContactMatchClause(table, rawSearch, `${paramPrefix}_restricted`, true)
   if (!exact || probe.kind !== 'full') return restricted
-  const whole = probe.plain && open ? `(${open.sql} AND ${exact.sql})` : exact.sql
-  if (!restricted) return { sql: whole, params: { ...(probe.plain && open ? open.params : {}), ...exact.params } }
-  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...(probe.plain && open ? open.params : {}), ...exact.params, ...restricted.params } }
+  const exactParams: Record<string, string> = { ...exact.params }
+  let whole = exact.sql
+  if (normalizedColumn) {
+    const marks = probe.forms.map((form, index) => {
+      exactParams[`${paramPrefix}_pn${index}`] = form
+      return `@${paramPrefix}_pn${index}`
+    })
+    whole = `(${exact.sql} OR ${normalizedColumn} IN (${marks.join(',')}))`
+  }
+  if (!restricted) return { sql: whole, params: exactParams }
+  return { sql: `(${whole} OR ${restricted.sql})`, params: { ...exactParams, ...restricted.params } }
 }
 
 function buildOpenContactMatchClause(

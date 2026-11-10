@@ -49,7 +49,7 @@ function freshDb() {
   const db = new Database(':memory:')
   db.exec(`CREATE TABLE customers (
     id INTEGER PRIMARY KEY, name TEXT, phone TEXT, email TEXT, address TEXT,
-    company TEXT, notes TEXT, membership_number TEXT, gender TEXT,
+    company TEXT, notes TEXT, membership_number TEXT, gender TEXT, phone_normalized TEXT,
     created_at TEXT, updated_at TEXT
   )`)
   db.exec(`CREATE TABLE suppliers (
