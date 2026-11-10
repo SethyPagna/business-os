@@ -858,7 +858,7 @@ app.get('/summary', async (c) => {
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  // Online orders: a queue someone must act on (money in review, paid goods to hand over), so like the portal approvals it has no mute switch; with the online_orders switch off (as this request's switch read saw it) the section is not asked for and costs no call. Staff with the
+  // Online orders: a queue someone must act on (money in review, paid goods to hand over), so like the portal approvals it has no mute switch; the section is asked for only while this isolate's last-seen online_orders switch (peekReadSwitch: a memo, never a read made by this request) is ON; with it OFF the section costs no call. A cold isolate, or one that last saw OFF, omits the section until another read refreshes the memo; one that last saw ON keeps asking after an OFF flip until then. Display only: it never decides a write. Staff with the
   // online_orders:view action only (Admin passes): the same rule as the /api/online-orders staff API.
   if (getOnlineOrderAccess(user as never).canView && peekReadSwitch('online_orders')) tasks.push(cachedSection('online_orders', ['online_orders'], 'queue', () => buildOnlineOrdersSection(c.env)))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
