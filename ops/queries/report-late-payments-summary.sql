@@ -50,7 +50,7 @@ z AS MATERIALIZED (
     (y.taking_shift_id IS NULL AND y.sale_shift_id IS NOT NULL) AS f_no_shift_at_time,
     (strftime('%Y-%m-%d', y.sale_at, '+7 hours') IS NOT strftime('%Y-%m-%d', y.taken_at, '+7 hours')) AS f_different_day,
     (y.taking_shift_id IS NOT NULL AND y.sale_shift_id IS NOT y.taking_shift_id) AS f_different_shift,
-    (y.sale_cashier_id IS NOT y.actor_id) AS f_different_cashier
+    (y.sale_cashier_id IS NOT y.actor_id AND 'per_account' IN (COALESCE((SELECT sh.scope_mode FROM sh WHERE sh.id = y.sale_shift_id), ''), COALESCE((SELECT sh.scope_mode FROM sh WHERE sh.id = y.taking_shift_id), ''))) AS f_different_cashier
   FROM y
 ),
 w AS MATERIALIZED (

@@ -137,7 +137,7 @@ async function main() {
       sale(108, 10, '2026-10-07 20:00:00'),                         // 03:00 Oct 8 Cambodia; settled 17:00 Oct 8: CONTROL (UTC days differ, Cambodia days equal)
       sale(109, 10, '2026-10-01 03:00:00', { payments_version: 1 }), // version 1: events are already dated by the taking
       sale(110, 10, '2026-10-01 05:00:00'),                         // payment CORRECTION on a later day
-      sale(111, 31, '2026-10-01 02:00:00', { branch_id: 2 }),       // shop-wide shift: same shift, other cashier
+      sale(111, 31, '2026-10-01 02:00:00', { branch_id: 2 }),       // shop-wide shift, same shift and day, other collector: NOT a violation (111 must be absent)
       sale(112, 10, '2026-10-01 03:00:00'),                         // only a status event, no money
       sale(113, 10, '2026-10-09 02:00:00'),                         // open-ended shift; settled days later in the same shift, same cashier
       sale(114, 10, '2026-10-01 03:00:00'),                         // a bulk relabel is a different source, not a settlement
@@ -149,7 +149,7 @@ async function main() {
       settlement(101, { via: 'redo', generation: 2, actor: 10, username: 'cashier10', at: '2026-10-03T05:00:00.000Z', op: 'op-101', changes: D(50) }),
       settlement(102, { actor: 40, username: 'cashier40', at: '2026-10-01T08:00:00.000Z', changes: D(50), op: 'op-102' }),
       settlement(104, { actor: 10, username: 'cashier10', at: '2026-10-01T04:00:00.000Z', changes: D(50), op: 'op-104' }),
-      settlement(106, { actor: 10, username: 'cashier10', at: '2026-10-01T12:00:00.000Z', changes: D(50), op: 'op-106' }),
+      settlement(106, { actor: 10, username: 'cashier10', at: '2026-10-01T12:00:00.000Z', changes: [...D(50), change('amount_paid_khr', 0, 20500)], op: 'op-106' }),
       settlement(107, { actor: 10, username: 'cashier10', at: '2026-10-05T18:00:00.000Z', changes: D(50), op: 'op-107' }),
       settlement(108, { actor: 10, username: 'cashier10', at: '2026-10-08T10:00:00.000Z', changes: D(50), op: 'op-108' }),
       settlement(109, { actor: 20, username: 'cashier20', at: '2026-10-02T03:00:00.000Z', changes: D(50), op: 'op-109' }),
@@ -169,10 +169,9 @@ async function main() {
     '101:undo:1': { flag_kind: 'different_day', sale_business_date: '2026-10-01', taken_business_date: '2026-10-03', sale_shift_id: 1, taking_shift_id: 3, sale_cashier_id: 10, taking_actor_id: 10, delta_usd: -40, methods_added: null, methods_removed: 'ABA', f: [1, 1, 0, 0] },
     '101:redo:2': { flag_kind: 'different_day', taking_shift_id: 3, delta_usd: 40, methods_added: 'ABA', f: [1, 1, 0, 0] },
     '102:apply:0': { flag_kind: 'different_shift', sale_business_date: '2026-10-01', taken_business_date: '2026-10-01', sale_shift_id: 1, taking_shift_id: 7, sale_cashier_id: 10, taking_actor_id: 40, delta_usd: 40, f: [0, 1, 1, 0] },
-    '106:apply:0': { flag_kind: 'no_shift_at_time', sale_shift_id: 1, taking_shift_id: null, taking_actor_id: 10, delta_usd: 40, f: [0, 0, 0, 1] },
+    '106:apply:0': { flag_kind: 'no_shift_at_time', sale_shift_id: 1, taking_shift_id: null, taking_actor_id: 10, delta_usd: 40, delta_khr: 20500, f: [0, 0, 0, 1] },
     '107:apply:0': { flag_kind: 'different_day', sale_business_date: '2026-10-05', taken_business_date: '2026-10-06', sale_shift_id: 9, taking_shift_id: 9, delta_usd: 40, f: [1, 0, 0, 0] },
     '110:apply:0': { flag_kind: 'different_day', is_correction: 1, delta_usd: 0, delta_khr: 0, methods_added: 'ABA', methods_removed: 'Cash', sale_shift_id: 1, taking_shift_id: 2, f: [1, 1, 1, 0] },
-    '111:apply:0': { flag_kind: 'different_cashier', sale_shift_id: 5, taking_shift_id: 5, sale_cashier_id: 31, taking_actor_id: 32, delta_usd: 50, delta_khr: 20500, f: [0, 0, 1, 0] },
     '113:apply:0': { flag_kind: 'different_day', sale_shift_id: 11, taking_shift_id: 11, taken_business_date: '2026-10-10', f: [1, 0, 0, 0] },
   }
 
@@ -191,7 +190,7 @@ async function main() {
     const r101 = rows.find((r) => key(r) === '101:apply:0')
     assert.deepEqual([r101.paid_usd_before, r101.paid_usd_after, r101.branch_id], [10, 50, 1])
     // 102's created_at is an ISO text; the controls are absent
-    for (const absent of [104, 108, 109, 112, 114]) assert.ok(!rows.some((r) => r.sale_id === absent), `sale ${absent} must not be listed`)
+    for (const absent of [104, 108, 109, 111, 112, 114]) assert.ok(!rows.some((r) => r.sale_id === absent), `sale ${absent} must not be listed`)
     assert.equal(rows.find((r) => r.sale_id === 101 && r.via === 'apply').taking_actor_username, 'cashier20')
   })
 
@@ -213,6 +212,7 @@ async function main() {
     assert.equal(all.settles, rows.length - 3)
     assert.equal(all.net_usd, rows.reduce((s, r) => s + r.delta_usd, 0))
     assert.equal(all.net_khr, 20500)
+    assert.equal(all.different_cashier, rows.filter((r) => r.f_different_cashier).length)
     const month = summary.find((r) => r.taken_month === '2026-10')
     assert.equal(month.events, all.events)
   })
@@ -230,6 +230,9 @@ async function main() {
     const utc = text.split(", '+7 hours')").join(')')
     assert.notEqual(utc, text)
     assert.notDeepEqual(run(db, utc).map(key).sort(), good, 'UTC dates mis-date the midnight cases')
+    const anyScope = text.replace(/ AND 'per_account' IN (.*?)) AS f_different_cashier/, ') AS f_different_cashier')
+    assert.notEqual(anyScope, text, 'the scope mutation applied')
+    assert.ok(run(db, anyScope).some((r) => r.sale_id === 111), 'without the per-account rule a shop-wide collector is listed')
     const noVersion = text.replace(' WHERE s.payments_version = 0', '')
     assert.ok(run(db, noVersion).some((r) => r.sale_id === 109), 'without the version filter the version 1 sale leaks in')
   })

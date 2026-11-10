@@ -1,22 +1,7 @@
--- report-late-payments: the owner's list of past later payments that were counted in the wrong shift, day or cashier.
--- Owner ruling 10 Nov 2026: past payments are NOT moved; this is the read-only list (Records/Design/2026-11-10/LATER-PAYMENT-SHIFT-PLAN.md).
--- Cause: a settle / payment correction / settlement undo or redo rewrote the sale row's tender, which the shift and daily
--- readers date by sales.created_at and credit to sales.cashier_id, not to the moment and the person that took the money.
--- One row per settlement record event (sale_record_events: source_kind 'sale_settlement', kind payment_settled or
--- payment_changed, via apply, undo or redo) on a payments_version 0 sale whose taking differs from the sale in at least one way.
---   amounts       delta_usd / delta_khr = amount_paid after minus before, read from the event's changes_json (negative on an
---                 undo; a correction can be 0 while the method moved). paid_*_before / _after are the two tenders. Change
---                 given back is not netted. The columns are the sale's amount_paid_usd / amount_paid_khr.
---   methods       methods_added / methods_removed = payment_details methods present only after / only before; when the
---                 details did not change, methods_added falls back to the payment_method written.
---   dates         Cambodia business dates (UTC+7) of sales.created_at and of the event's occurred_at.
---   shifts        sale_shift_id = the shift whose window held sales.created_at, taking_shift_id = the shift whose window held
---                 occurred_at, both on the sale's branch and (per_account) for the sale's cashier / the acting user. A window
---                 is [opened_at, closed_at or cancelled_at or open-ended), as health-shift-coverage reads it. NULL = none.
---   flags         flag_kind is the first that applies: no_shift_at_time (the taker had no shift while the sale had one),
---                 different_day, different_shift, different_cashier. The f_* columns show every one that applies.
--- Records exist only since migration 0140 (never backfilled); bulk payment relabels (sale_bulk_update) are not settlements.
--- Staff ids and usernames only; no customer data, no phone numbers. Capped by LIMIT 5001 against max-rows 5000.
+-- report-late-payments: past later payments (settle, payment correction, undo/redo) counted in a different shift, day or cashier than took them.
+-- Owner ruling 10 Nov 2026: past payments are not moved; read-only list. One row per sale_record_events settlement on a payments_version 0 sale.
+-- delta_usd / delta_khr = amount_paid after minus before (change not netted). Days are Cambodia (UTC+7). A shift is [opened_at, closed_at/cancelled_at/open) on the
+-- sale's branch, per-account by user. flag_kind: no_shift_at_time, different_day, different_shift, different_cashier (per-account shifts only). Records start at migration 0140.
 -- ops:min-rows 0
 -- ops:max-rows 5000
 -- ops:max-rows-read 200000
@@ -64,7 +49,7 @@ z AS MATERIALIZED (
     (y.taking_shift_id IS NULL AND y.sale_shift_id IS NOT NULL) AS f_no_shift_at_time,
     (strftime('%Y-%m-%d', y.sale_at, '+7 hours') IS NOT strftime('%Y-%m-%d', y.taken_at, '+7 hours')) AS f_different_day,
     (y.taking_shift_id IS NOT NULL AND y.sale_shift_id IS NOT y.taking_shift_id) AS f_different_shift,
-    (y.sale_cashier_id IS NOT y.actor_id) AS f_different_cashier
+    (y.sale_cashier_id IS NOT y.actor_id AND 'per_account' IN (COALESCE((SELECT sh.scope_mode FROM sh WHERE sh.id = y.sale_shift_id), ''), COALESCE((SELECT sh.scope_mode FROM sh WHERE sh.id = y.taking_shift_id), ''))) AS f_different_cashier
   FROM y
 ),
 w AS MATERIALIZED (
