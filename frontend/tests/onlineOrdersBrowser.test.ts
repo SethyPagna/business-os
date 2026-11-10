@@ -26,7 +26,7 @@ const fixtureSource = String.raw`
   document.body.className = lang === 'km' ? 'lang-km' : ''
   const t = (key) => pack[key] || key
   const grants = perm === 'all' ? ['view', 'decide', 'refund'] : perm === 'view' ? ['view'] : []
-  const can = (key, action) => key === 'online_orders' && grants.includes(action)
+  const can = (key, action) => (key === 'online_orders' && grants.includes(action)) || (key === 'pos' && action === 'view' && perm === 'all')
   const log = window.__log = { calls: [], nav: [] }
 
   const item = (id, name, quantity, price) => ({ product_id: id, name, quantity, unit_price_usd: price, line_total_usd: price * quantity })
@@ -200,10 +200,14 @@ async function paidOrderScenario() {
   for (const label of ['Fulfil', 'Check', 'Note', 'Cancel']) assert.ok(await hasButton(label, `document.querySelector('[data-online-order-detail]')`), `${label} is offered on a paid order`)
   assert.equal(await hasButton('Refund'), false, 'no refund button without a refund due')
   assert.equal(await hasButton('Accept payment'), false)
-  // Fulfil does not pretend to open the till yet
+  // Fulfil opens the till: the order goes to the till through session storage (its lines, the online money, the revision it saw) and the app navigates to the POS
   await clickButton('Fulfil', `document.querySelector('[data-online-order-detail]')`)
-  assert.match(await dialogText(), /Ring this order up at the till/)
-  await clickButton('Got it', dialog)
+  assert.match(await dialogText(), /The till opens with this order's items and its online payment filled in/)
+  await clickButton('Open the till', dialog)
+  await pause(150)
+  assert.deepEqual(await evaluate(`__log.nav`), [['pos', null]])
+  const handoff = JSON.parse(await evaluate<string>(`sessionStorage.getItem('bos:online-order-fulfil')`))
+  assert.deepEqual({ id: handoff.online_order_id, rev: handoff.revision, lines: handoff.lines, paid: handoff.paid_usd }, { id: 7, rev: 4, lines: [{ product_id: 1000, quantity: 2 }, { product_id: 1001, quantity: 1 }], paid: 25 })
   // accept the request: before/after dialog, a message to the customer, the body the Worker reads
   await clickButton('Accept', `document.querySelector('[data-online-order-detail] section[aria-label="Customer requests"]')`)
   assert.match(await dialogText(), /Accept this request\?[\s\S]*Waiting for you → Accepted/)
@@ -270,6 +274,7 @@ async function accessScenario() {
   await openOrder(7)
   const scope = `document.querySelector('[data-online-order-detail]')`
   assert.ok(await hasButton('Check', scope) && await hasButton('Note', scope), 'view alone may check a payment and add a note')
+  assert.equal(await hasButton('Fulfil', scope), false, 'Fulfil is a sale: it needs the till grant as well')
   for (const label of ['Cancel', 'Accept', 'Reject', 'Apply', 'Refund']) assert.equal(await hasButton(label, scope), false, `${label} needs more than view`)
   await open(420, 'lang=en&perm=none', `Boolean(document.body.dataset.fixtureError) || document.body.innerText.includes('You do not have access')`)
   assert.equal(await evaluate<number>(`document.querySelectorAll('[data-online-order-row]').length`), 0)

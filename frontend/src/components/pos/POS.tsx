@@ -108,6 +108,9 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { clearFulfilHandoff, fulfilMoney, fulfilSaleFields, lineStatus, readFulfilHandoff, withOnlineTender, type FulfilHandoff } from '../online-orders/fulfilOrder.ts'
+import { onlineRefusalText } from '../online-orders/onlineOrdersLogic.ts'
+import { onlineMethodName } from '../returns/helpers/abaRefund.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -120,6 +123,8 @@ import { divideMoney4, multiplyMoney4, nativeChangeAmounts, roundMoney2, roundMo
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
 const FilterPanel = lazyRetry(() => import('./FilterPanel'), 'pos-filter-panel')
+// The strip shown while the till rings up an online order (KHQR Fulfil); loaded only then.
+const FulfilBanner = lazyRetry(() => import('../online-orders/FulfilBanner.tsx'), 'pos-online-order-banner')
 const ProductDetailSheet = lazyRetry(() => import('./ProductDetailSheet'), 'pos-product-detail-sheet')
 const POSQuickAddModals = lazyRetry(() => import('./POSQuickAddModals'), 'pos-quick-add-modals')
 const CustomerSourceModal = lazyRetry(() => import('../contacts/CustomerSourceModal'), 'pos-customer-source-modal')
@@ -387,6 +392,8 @@ type PosOrder = Record<string, unknown> & {
   checkoutPayload?: Record<string, unknown>
   checkoutReviewRequestId?: string
   customPayment?: boolean
+  // KHQR Fulfil: the online order this basket is ringing up (handed over by the Orders screen). It rides with the order tab, so a reload keeps it and closing the tab drops it.
+  onlineOrder?: FulfilHandoff
   customer: CustomerRecord & {
     _baseCustomer?: CustomerRecord
     _optionLabel?: string
@@ -1024,6 +1031,10 @@ export default function POS() {
       membershipRedeemUnits: '',
     })
   }, [active.customer, patchActive])
+
+  // A refusal of a sale about an online order reads in the staff language; any other coded refusal reads as it did.
+  const saleRefusal = (error: unknown): string | null =>
+    onlineRefusalText(error, (key, fallback) => { const value = t(key); return value && value !== key ? value : fallback }) ?? saleSubmitRefusalText(error, t)
 
   const addNewOrder = () => {
     if (orders.length >= LAYOUT.MAX_CONCURRENT_ORDERS) {
@@ -3248,6 +3259,57 @@ export default function POS() {
   const totalUsd     = basketRounding?.payableTotal2 ?? calculatedTotalUsd
   const totalKhr     = moneyVersion === 1 ? v1Basket.totals?.totalKhr ?? 0 : Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
 
+  // ---- KHQR Fulfil: ring up an online order ------------------------------------------------------------------------------------------
+  const onlineOrder = active.onlineOrder
+  const onlineMethod = onlineMethodName(settings)
+  const fulfilAttempts = useRef(new Set<string>())
+  const fulfilCart = active.cart.map((item) => ({ productId: Number(item.id), quantity: Number(item.quantity) || 0 }))
+
+  // 1. Take the hand-off the Orders screen left: into this tab when it is empty, else into a new one. It is cleared only once an order tab holds it.
+  useEffect(() => {
+    if (!isActive || !authReady || !user || !can('online_orders', 'view')) return
+    const handoff = readFulfilHandoff()
+    if (!handoff) return
+    const open = ordersRef.current
+    const bound = open.find((order) => (order.onlineOrder as FulfilHandoff | undefined)?.online_order_id === handoff.online_order_id)
+    if (bound) { clearFulfilHandoff(); setActiveId(bound.id); return }
+    const current = open.find((order) => order.id === resolvedActiveId)
+    if (current && current.cart.length === 0 && !current.checkoutRequestId && !current.onlineOrder) { clearFulfilHandoff(); patchActive({ onlineOrder: handoff }); return }
+    if (open.length >= LAYOUT.MAX_CONCURRENT_ORDERS) { notify(t('pos_max_open_orders').replace('{count}', String(LAYOUT.MAX_CONCURRENT_ORDERS)), 'info'); return }
+    const nextNum = open.length + 1
+    const fresh = normalizeOrder({ ...(createEmptyOrder(nextNum) as Partial<PosOrder>), onlineOrder: handoff }, nextNum)
+    clearFulfilHandoff()
+    setOrders((previous) => [...previous, fresh])
+    setActiveId(fresh.id)
+    setOrderCounter(nextNum + 1)
+  }, [isActive, authReady, user, can, resolvedActiveId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 2. Put the ordered lines in the basket through the till's own add (stock, lots, wholesale and promotions are its rules, not ours). One try per line and count, so a line that cannot be
+  // added by tap (out of stock, a lot to pick) waits for the cashier's "+" instead of looping.
+  useEffect(() => {
+    if (!onlineOrder || !isActive || !authReady || !user || active.checkoutRequestId || detailProduct || loading || products.length === 0) return
+    const next = lineStatus(onlineOrder.lines, fulfilCart).find((line) => line.missing > 0)
+    if (!next) return
+    const key = `${active.id}:${next.product_id}:${next.inSale}`
+    if (fulfilAttempts.current.has(key)) return
+    fulfilAttempts.current.add(key)
+    const product = productsById.get(next.product_id)
+    if (product) openProductCard(product, { inStock: true })
+  }) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 3. The online money is one payment row, exactly the part of it this sale covers (the Worker refuses any other figure); it follows the basket as the cashier changes lines.
+  useEffect(() => {
+    if (!onlineOrder || active.checkoutRequestId) return
+    const wanted = withOnlineTender(active.paymentDetails, onlineMethod, fulfilMoney(onlineOrder.paid_usd, totalUsd).coverUsd)
+    if (wanted !== active.paymentDetails) updatePaymentDetails(() => [...wanted])
+  }, [onlineOrder, active.paymentDetails, active.checkoutRequestId, onlineMethod, totalUsd, updatePaymentDetails])
+
+  const detachOnlineOrder = () => {
+    if (!onlineOrder || active.checkoutRequestId) return
+    updatePaymentDetails((details) => [...withOnlineTender(details, onlineMethod, 0)])
+    patchActive({ onlineOrder: undefined })
+  }
+
   const activePaymentDetails = active.paymentDetails.length
     ? active.paymentDetails
     : [{ id: 'legacy-payment', method: active.paymentMethod || 'Cash', usd: active.paidUsd, khr: active.paidKhr }]
@@ -3418,11 +3480,11 @@ export default function POS() {
         const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
         if (!isActorReadScopeCurrent(checkoutScope)) return
         if (isSaleRecorded(result)) finishRecorded(result)
-        else notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        else notify(saleRefusal(result) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
-          notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
+          notify(saleRefusal(error) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
       return
@@ -3608,6 +3670,7 @@ export default function POS() {
       // P6: only sent when the cashier typed one -- absent stays NULL on
       // the sale so stats can tell "not recorded" from "cost 0".
       delivery_actual_cost_usd:  active.isDelivery && String(active.deliveryActualCostUsd || '').trim() !== '' ? (parseFloat(active.deliveryActualCostUsd) || 0) : undefined,
+      ...fulfilSaleFields(active.onlineOrder),
       sale_status: recordedSaleStatus,
       client_time: device.clientTime,
       device_tz: device.deviceTz || '',
@@ -3644,7 +3707,7 @@ export default function POS() {
         // A warehouse line refused by the Worker reads back as the pack
         // sentence the sheet's greyed pill shows, not as the server's
         // English -- this is the path a stale tab actually arrives on.
-        notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        notify(saleRefusal(result) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
@@ -3659,7 +3722,7 @@ export default function POS() {
           'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
         ), 'error')
       } else {
-        notify(saleSubmitRefusalText(e, t) ?? localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
+        notify(saleRefusal(e) ?? localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
     } finally {
       checkoutInFlightRef.current = false
@@ -4065,6 +4128,21 @@ export default function POS() {
               list scrolls on its own and the summary section below never
               shifts because of it. */}
           <div className={`min-h-0 overflow-y-auto ${cartViewMode === 'details' ? 'hidden' : 'flex-1'}`}>
+            {onlineOrder ? (
+              <Suspense fallback={null}>
+                <FulfilBanner
+                  tt={(key, fallback) => { const value = t(key); return value && value !== key ? value : fallback }}
+                  handoff={onlineOrder}
+                  cart={fulfilCart}
+                  saleTotalUsd={totalUsd}
+                  names={new Map(onlineOrder.lines.concat(fulfilCart.map((entry) => ({ product_id: entry.productId, quantity: entry.quantity }))).map((line) => [line.product_id, String(productsById.get(line.product_id)?.name || '')] as [number, string]))}
+                  fmtUSD={fmtUSD}
+                  methodMissing={posPaymentMethods.some((method) => method.trim().toLowerCase() === onlineMethod.trim().toLowerCase()) ? null : onlineMethod}
+                  onAddLine={(productId) => { const product = productsById.get(productId); if (product) openProductCard(product, { inStock: false }) }}
+                  onDetach={detachOnlineOrder}
+                />
+              </Suspense>
+            ) : null}
             <div>
               {active.cart.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 gap-2">

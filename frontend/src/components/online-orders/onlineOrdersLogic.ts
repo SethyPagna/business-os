@@ -224,8 +224,7 @@ export const refundBody = (amountText: string, reference: string, note: string) 
 
 // ---- the Fulfil hand-off to the till (S6a) -------------------------------------------------------------------------------------------
 
-/** Flip when S6a's POS reads the hand-off below and posts the sale with `online_order_id`. Until then the screen says to ring the order up at the till. */
-export const FULFIL_OPENS_POS = false
+/** Fulfil hands the order to the till through session storage (fulfilOrder.ts reads it); the till posts the sale with `online_order_id`. */
 export const FULFIL_HANDOFF_KEY = 'bos:online-order-fulfil'
 export type FulfilHandoff = {
   online_order_id: number

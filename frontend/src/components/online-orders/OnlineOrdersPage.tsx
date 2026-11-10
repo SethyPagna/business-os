@@ -19,7 +19,7 @@ import {
   applyOnlineOrderRequest, cancelOnlineOrder, decideOnlineOrderRequest, getOnlineOrder, listOnlineOrders, noteOnlineOrder, noteOnlineOrderRefund, recheckOnlineOrder, resolveOnlineOrder,
 } from './onlineOrdersApi.ts'
 import {
-  DEFAULT_ORDER_FILTER, FIRST_PAGE, FULFIL_HANDOFF_KEY, FULFIL_OPENS_POS, ORDER_FILTERS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, itemLine, SEARCH_MAX, searchState,
+  DEFAULT_ORDER_FILTER, FIRST_PAGE, FULFIL_HANDOFF_KEY, ORDER_FILTERS, applyBody, availableActions, cancelBody, currentCursor, decideBody, fulfilHandoff, itemLine, SEARCH_MAX, searchState,
   nextTrail, noteBody, orderAccess, pageNumber, parseItems, previousTrail, refundBody, refundProblem, requestChanges, requestCanBeApplied, requestIsPending, resolveBody, rowChips,
   stateChip, staffMessage, type OrderAccess, type OrderChip, type OrderFilter, type PageTrail, type RequestChange, type StaffOrderDetail, type StaffOrderPage, type StaffOrderRow, type StaffRequest,
 } from './onlineOrdersLogic.ts'
@@ -304,7 +304,8 @@ function OrderDetail({ id, tt, access, onBack, onChanged }: { id: number; tt: Tx
   if (!detail) return <Skeleton rows={6} />
 
   const { order, money, payments, requests, events } = detail
-  const actions = availableActions(detail, access)
+  // Fulfil is a sale, so it needs the till as well as the order (the Worker refuses online_order_id without the sales grant).
+  const actions = availableActions(detail, access).filter((action) => action !== 'fulfil' || can('pos', 'view'))
   const items = parseItems(order.items_json)
   const refundDue = Number(money.refund_due_usd ?? 0)
   const heldPayments = payments.filter((p) => p.state === 'review')
@@ -341,7 +342,7 @@ function OrderDetail({ id, tt, access, onBack, onChanged }: { id: number; tt: Tx
       {actions.length ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label={tt('oo_actions', 'What you can do')}>
           {actions.includes('fulfil') ? (
-            <Button variant="primary" icon={<PackageCheck className="h-4 w-4" aria-hidden="true" />} onClick={() => (FULFIL_OPENS_POS ? open({ kind: 'fulfil' }) : setDialog({ kind: 'fulfil' }))}>{tt('oo_act_fulfil', 'Fulfil')}</Button>
+            <Button variant="primary" icon={<PackageCheck className="h-4 w-4" aria-hidden="true" />} onClick={() => open({ kind: 'fulfil' })}>{tt('oo_act_fulfil', 'Fulfil')}</Button>
           ) : null}
           {actions.includes('resolve') ? <Button variant="primary" icon={<Check className="h-4 w-4" aria-hidden="true" />} onClick={() => open({ kind: 'resolve' })}>{tt('oo_act_accept', 'Accept')}</Button> : null}
           {actions.includes('refund') ? <Button variant="secondary" icon={<HandCoins className="h-4 w-4" aria-hidden="true" />} onClick={() => open({ kind: 'refund' }, { amount: refundDue.toFixed(2) })}>{tt('oo_act_refund', 'Refund')}</Button> : null}
@@ -463,11 +464,9 @@ function OrderDetail({ id, tt, access, onBack, onChanged }: { id: number; tt: Tx
             else if (dialog.kind === 'decide') void run(() => decideOnlineOrderRequest(id, dialog.request.id, decideBody(dialog.decision, textA, textB) as { decision: 'accept' | 'reject' }), dialog.decision === 'accept' ? tt('oo_done_accept', 'Request accepted. Apply it to the order next.') : tt('oo_done_reject', 'Request rejected.'))
             else if (dialog.kind === 'apply') void run(() => applyOnlineOrderRequest(id, dialog.request.id, applyBody(revision)), (result: { top_up_usd: number }) => (Number(result.top_up_usd) > 0 ? tt('oo_done_apply_topup', 'Applied. The customer pays {amount} more.').replace('{amount}', usd(result.top_up_usd)) : tt('oo_done_apply', 'Applied to the order.')))
             else if (dialog.kind === 'fulfil') {
-              if (FULFIL_OPENS_POS && can('pos', 'view')) {
-                try { window.sessionStorage.setItem(FULFIL_HANDOFF_KEY, JSON.stringify(fulfilHandoff(detail))) } catch { /* the till then opens empty */ }
-                close()
-                navigateTo('pos')
-              } else close()
+              try { window.sessionStorage.setItem(FULFIL_HANDOFF_KEY, JSON.stringify(fulfilHandoff(detail))) } catch { /* the till then opens empty */ }
+              close()
+              navigateTo('pos')
             }
           }}
         />
@@ -738,8 +737,8 @@ function ActionDialog(props: DialogProps) {
       title={tt('oo_fulfil_title', 'Hand this order over')}
       message={<span translate="no">{String(order.order_no)}</span>}
       cancelLabel={tt('oo_close', 'Close')}
-      confirmLabel={FULFIL_OPENS_POS ? tt('oo_open_till', 'Open the till') : tt('oo_got_it', 'Got it')}
-      note={FULFIL_OPENS_POS ? tt('oo_fulfil_open_note', 'The till opens with this order filled in. The sale closes the order.') : tt('oo_fulfil_manual_note', 'Ring this order up at the till, then it is handed over. Opening the till from here comes with the next update.')}
+      confirmLabel={tt('oo_open_till', 'Open the till')}
+      note={tt('oo_fulfil_open_note', "The till opens with this order's items and its online payment filled in. You can change lines there and it shows what changes. Pressing Complete there hands the order over.")}
     />
   )
 }
