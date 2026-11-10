@@ -230,7 +230,7 @@ async function main() {
     const utc = text.split(", '+7 hours')").join(')')
     assert.notEqual(utc, text)
     assert.notDeepEqual(run(db, utc).map(key).sort(), good, 'UTC dates mis-date the midnight cases')
-    const anyScope = text.replace(/ AND 'per_account' IN (.*?)) AS f_different_cashier/, ') AS f_different_cashier')
+    const anyScope = text.replace(/ AND 'per_account' IN \(.*\)\) AS f_different_cashier/, ') AS f_different_cashier')
     assert.notEqual(anyScope, text, 'the scope mutation applied')
     assert.ok(run(db, anyScope).some((r) => r.sale_id === 111), 'without the per-account rule a shop-wide collector is listed')
     const noVersion = text.replace(' WHERE s.payments_version = 0', '')
