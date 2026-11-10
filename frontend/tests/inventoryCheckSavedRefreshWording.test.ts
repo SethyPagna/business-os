@@ -35,4 +35,14 @@ assert.equal(hasLocalSyncProblemPresentation({ ...banner, errorId: 'e-2' }, '7')
 assert.equal(hasLocalSyncProblemPresentation(banner, '8'), false, 'another user is still shown it')
 release()
 assert.equal(hasLocalSyncProblemPresentation(banner, '7'), false, 'released when the page closes')
+
+// The claim ends when the page's own message clears (retry succeeded, new write, dismissal), not only on close: a later unknown-outcome write then shows the global banner.
+const norm = page.split(String.fromCharCode(13)).join('')
+assert.ok(norm.includes('if (writeError === message || Object.values(rowErrors).includes(message)) return\n    savedRefreshClaims.current.forEach(release => release())'), 'claims are released once neither error slot shows the saved-refresh message')
+const first = claimSyncProblemPresentation({ actorId: '7', requestId: 'e-1', problem: banner })
+assert.equal(hasLocalSyncProblemPresentation(banner, '7'), true)
+first() // the message cleared
+const later = { errorId: 'e-3', channel: banner.channel, code: 'write_outcome_unknown' }
+assert.equal(hasLocalSyncProblemPresentation(later, '7'), false, 'a later unknown-outcome write is shown by the global banner')
+assert.equal(hasLocalSyncProblemPresentation(banner, '7'), false, 'and the cleared one is no longer hidden')
 console.log('PASS inventoryCheckSavedRefreshWording')

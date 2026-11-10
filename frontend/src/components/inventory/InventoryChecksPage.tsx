@@ -297,6 +297,13 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const [sessionError, setSessionError] = useState('')
   const [writeError, setWriteError] = useState('')
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
+  // The claim lasts only while this page still shows its saved-refresh message (a retry that succeeds, a new write or a dismissal clears it): after that a later unknown-outcome write is the app-wide banner's again.
+  useEffect(() => {
+    if (!savedRefreshClaims.current.length) return
+    const message = tr('inventory_check_saved_refresh', 'Saved. Retry to finish, or refresh the page.')
+    if (writeError === message || Object.values(rowErrors).includes(message)) return
+    savedRefreshClaims.current.forEach(release => release()); savedRefreshClaims.current = []
+  }, [writeError, rowErrors])
   const [busy, setBusy] = useState(false)
   const [savingId, setSavingId] = useState<number | null>(null)
   const [editingRows, setEditingRows] = useState<Record<string, boolean>>({})
