@@ -109,6 +109,7 @@
         "created_at": "<volatile>"
       }
     ],
+    "customer_match": null,
     "status": "paid",
     "chips": [],
     "money": {
@@ -253,6 +254,7 @@
         "created_at": "<volatile>"
       }
     ],
+    "customer_match": null,
     "status": "cancelled",
     "chips": [
       "refund_due"
@@ -416,6 +418,7 @@
         "created_at": "<volatile>"
       }
     ],
+    "customer_match": null,
     "status": "cancelled",
     "chips": [
       "refund_due"

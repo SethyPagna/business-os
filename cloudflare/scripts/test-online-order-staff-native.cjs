@@ -192,6 +192,24 @@ async function main() {
     assert.ok(full.order.contact_whatsapp.includes('85512345678') && full.requests[0].after_json.includes('87654321'), 'with the permission the text is whole')
   })
 
+  await check('N5: the detail names the customer the till sale should be made for: phone AND name match exactly one customer; a shared number with another name, two matches, a sold order or no customer link nothing', async () => {
+    const h = world(); await paidOrder(h, { phone: '+855 12 777 888', name: 'Dara' })
+    const as = (id) => ask(h, FULL, `/${id}`).then((res) => res.body.customer_match)
+    assert.equal(await as(1), null, 'no customer yet')
+    h.run("INSERT INTO customers (name, phone, phone_normalized) VALUES ('Sok', '012 777 888', '012777888')")
+    assert.equal(await as(1), null, 'the number belongs to someone else: a conflict for a person, never a silent link')
+    h.run("INSERT INTO customers (name, phone, phone_normalized) VALUES (' dara ', '012 777 888', '012777888')")
+    assert.deepEqual(await as(1), { id: 2, name: ' dara ' }, 'phone (855 folded to 0) and name (case and spacing ignored) match one customer')
+    h.run("INSERT INTO customers (name, phone, phone_normalized) VALUES ('Dara', '012777888', '012777888')")
+    assert.equal(await as(1), null, 'two customers match: nothing is guessed')
+    h.run("DELETE FROM customers WHERE id = 3")
+    h.run("INSERT INTO customers (name, phone, phone_normalized, is_anonymous) VALUES ('Dara', '012777888', '012777888', 1)")
+    assert.deepEqual(await as(1), { id: 2, name: ' dara ' }, 'the anonymous General customer never counts')
+    h.run("INSERT INTO sales (id, receipt_number, total_usd, calculated_total_usd, amount_paid_usd, sale_status, created_at, exchange_rate, money_precision_version) VALUES (50, 'R50', 25, 25, 25, 'completed', '2026-11-09 05:00:00', 4000, 1)")
+    h.run("UPDATE online_orders SET state = 'fulfilled', sale_id = 50 WHERE id = 1")
+    assert.equal(await as(1), null, 'an order that already has a sale has nothing to fulfil')
+  })
+
   // --------------------------------------------------------------------------------------------------------------- cancel
   await check('cancel a paid order: cancelled by staff with the actor and reason, live QRs cancelled and closed at ABA, the money stays and reads as refund due; a stale revision, a sale, an unpaid order and a second cancel are refused', async () => {
     const h = world(); await paidOrder(h)

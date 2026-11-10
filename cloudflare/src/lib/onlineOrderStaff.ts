@@ -9,6 +9,8 @@
 
 import type { D1Compat } from './db'
 import { isPhoneShaped, maskPhone, maskPhonesInText } from './phoneMask'
+import { canonicalizePhone } from './phone'
+import { normalizeContactName } from './contactDuplicates'
 import { checkTransaction, makeTranId, PaywayError, type ParsedCheck, type PaywayCredentials } from './payway'
 import { adminPageRows, onlineOrderView, orderMoney, orderMoneyWire, refundNoteAllowed, requestStates, type RequestKind } from './onlineOrders'
 import {
@@ -191,6 +193,22 @@ function maskPhonesInJson(raw: string | null | undefined): string | null {
   return JSON.stringify(walk(value))
 }
 
+/**
+ * Review N5: the till sale that fulfils an order is made for the order's customer. The stored phone is full here (the response mask hides it later), so the match is made on the
+ * Worker: the existing customer rule is phone AND name (a number shared by a different name is a conflict a person must look at, never a silent link), against the primary
+ * phone key. Exactly one match links; none or several link nothing. Only an order the till can still fulfil is looked up (paid, no sale), one indexed read.
+ */
+export async function matchOrderCustomer(db: D1Compat, order: { state?: unknown; sale_id?: unknown; customer_phone?: unknown; customer_name?: unknown }): Promise<{ id: number; name: string } | null> {
+  if (order.sale_id != null || order.state !== 'paid') return null
+  const phone = canonicalizePhone(order.customer_phone)
+  const name = normalizeContactName(order.customer_name)
+  if (!phone || !name) return null
+  const rows = await db.prepare('SELECT id, name FROM customers WHERE phone_normalized = @phone AND COALESCE(is_anonymous, 0) = 0 LIMIT 5')
+    .all<{ id: number; name: string | null }>({ phone }) || []
+  const same = rows.filter((row) => normalizeContactName(row.name) === name)
+  return same.length === 1 ? { id: Number(same[0].id), name: String(same[0].name) } : null
+}
+
 // ---- the detail -------------------------------------------------------------------------------------------------------------------
 
 /** The staff view of one order: the row (the response mask hides the phone without the permission), payments, Records, requests and the money read. */
@@ -211,6 +229,7 @@ export async function staffDetail(db: D1Compat, id: unknown, now: Date, requestW
     payments: payments.map(({ qr_string: _qr, deeplink: _link, ...rest }) => { void _qr; void _link; return rest }),
     requests: requests.map((request) => ({ ...request, ...(options.fullPhones ? {} : { before_json: maskPhonesInJson(request.before_json), after_json: maskPhonesInJson(request.after_json) }), state: requestStates([request], bundle.events).find((s) => s.id === request.id)?.status ?? 'pending' })),
     events: events || [],
+    customer_match: await matchOrderCustomer(db, order),
     status: view.status, chips: view.chips, money: { ...view.money, ...orderMoneyWire(view.money, bundle.events) },
   }
 }
