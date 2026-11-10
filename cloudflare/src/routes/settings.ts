@@ -30,8 +30,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
-import { readSwitch } from '../lib/readSwitches'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -1286,13 +1285,6 @@ app.post('/', async (c) => {
 
   // The online (KHQR) payment method must be one of the configured methods, and a configured method that is the online one cannot be removed from the list:
   // either would leave Fulfil naming a method the till cannot ring. A rename goes through /payment-methods/replace, which carries the setting along.
-  if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(body[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()) {
-    const storedMethod = (await getDb(c.env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value
-    if (String(storedMethod ?? '').trim() && await readSwitch(c.env, 'online_orders')) {
-      return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)
-    }
-  }
-
   if (attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes('pos_payment_methods')) {
     const listed = attemptedKeys.includes('pos_payment_methods')
       ? (JSON.parse(String(body.pos_payment_methods)) as string[])
@@ -1363,6 +1355,8 @@ app.post('/', async (c) => {
           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
     params: { key, value: settingsAfter[key] },
   }))
+  const clearsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(settingsAfter[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
+  if (clearsOnlineMethod) statements.unshift({ sql: CLEAR_ONLINE_METHOD_GUARD_SQL, params: {} })
   if (paymentMethodsRawBefore !== undefined && changedKeys.includes('pos_payment_methods')) {
     statements.unshift(
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
@@ -1383,6 +1377,9 @@ app.post('/', async (c) => {
   try {
     await db.batch(statements)
   } catch (error) {
+    if (clearsOnlineMethod && /online_method_required/.test(String(error))) {
+      return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)
+    }
     if (/guard_value/i.test(String(error))) {
       return c.json({ error: 'Payment methods changed while this save was being prepared. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
     }

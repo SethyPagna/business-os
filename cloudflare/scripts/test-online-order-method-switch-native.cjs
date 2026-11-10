@@ -58,6 +58,21 @@ async function main() {
       t.eq('method gone', (await storedMethod()) || null, null)
     })
 
+    await check('R5-2: the switch flipped directly in D1 while this isolate still remembers OFF: clearing the method at once is still refused (409), because the guard reads D1 inside the write', async (t) => {
+      await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      const listed = await world.api('GET', SWITCHES)
+      const primed = await world.api('PUT', SWITCHES, { name: 'online_orders', state: 'off', expectedEpoch: listed.json.epoch })
+      t.eq('memo primed with OFF', [primed.status, primed.json && primed.json.changed], [200, false])
+      await world.run("UPDATE system_flags SET value = json_set(value, '$.switches.online_orders', 'on') WHERE key = 'read_switches'")
+      const cleared = await world.api('POST', '/api/settings', { online_order_payment_method: '' })
+      t.eq('refused', [cleared.status, cleared.json && cleared.json.code], [409, 'online_method_required'])
+      t.eq('method kept', (await world.first("SELECT value FROM settings WHERE key = 'online_order_payment_method'"))?.value, 'ABA KHQR')
+      await world.run("UPDATE system_flags SET value = json_set(value, '$.switches.online_orders', 'off') WHERE key = 'read_switches'")
+      const afterOff = await world.api('POST', '/api/settings', { online_order_payment_method: '' })
+      t.eq('control: with the switch OFF in D1 the same save clears it', afterOff.status, 200)
+      await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    })
+
     await check('the bootstrap carries the same key, and a save that echoes it stores nothing', async (t) => {
       await world.run("INSERT INTO settings (key, value) VALUES ('online_order_payment_method', 'ABA KHQR') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       const boot = await world.api('GET', '/api/auth/bootstrap')

@@ -55,13 +55,19 @@ export async function onlineMethodRefusalActive(env: Env, storedSetting: unknown
   return readSwitch(env, 'online_orders')
 }
 
+/** The online_orders switch read from D1 inside the statement that uses it: never the memo. */
+export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.switches.online_orders') END FROM system_flags WHERE key = 'read_switches') = 'on'`
+
+/** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
+export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
+
 /**
  * onlineMethodRefusalActive as a predicate over the stored rows, for a batch that must refuse without a read of its own: true when `@reservedMethodKey` (lower-cased, trimmed) is the
  * method a Fulfil rings and the refusal is in force (a method is stored, or the online_orders switch is ON).
  */
 export const ONLINE_METHOD_RESERVED_PREDICATE = `(lower(trim(COALESCE(NULLIF(trim((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}')), ''), '${ONLINE_PAYMENT_METHOD_DEFAULT}'))) = @reservedMethodKey
     AND (trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> ''
-      OR (SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.switches.online_orders') END FROM system_flags WHERE key = 'read_switches') = 'on'))`
+      OR ${ONLINE_ORDERS_SWITCH_ON_SQL}))`
 
 /** Settings key the Worker publishes (never stores): the method name the till must not offer on an ordinary sale, '' while the refusal is not in force. */
 export const ONLINE_METHOD_IN_FORCE_KEY = 'online_order_method_in_force'
