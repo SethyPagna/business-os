@@ -592,6 +592,72 @@ check('invocation budgets include raw, failed, attached background and late atte
   assert.equal(isolated.invocation.attemptedStatements, 0, 'a fresh request gets no earlier attempts')
 })
 
+check('request shape: products/search splits into default, filter, text, barcode, ids and ranked hydrates by parameter names and id count only', () => {
+  const ids = (n) => Array.from({ length: n }, (_, i) => i + 1).join(',')
+  const POS = { page: '1', pageSize: '30', sort: 'name_asc', include: 'branch_stock,images,family', metadata: '0', surface: 'pos', branchId: '1' }
+  const cases = [
+    [POS, 'default'],
+    [{ ...POS, page: '7', sort: 'created_desc' }, 'default'],
+    [{ ...POS, category: 'all' }, 'default'],
+    [{ ...POS, category: 'Skincare' }, 'filter'],
+    [{ ...POS, stockState: 'low' }, 'filter'],
+    [{ ...POS, brand: ' ' }, 'default'],
+    [{ ...POS, query: 'cream' }, 'text'],
+    [{ ...POS, q: 'cream', searchMode: 'OR', searchFields: 'name' }, 'text'],
+    [{ ...POS, search: '8851234567890' }, 'barcode'],
+    [{ ...POS, query: '12345' }, 'text'],
+    [{ ...POS, query: 'AB8851234567890' }, 'text'],
+    [{ ...POS, ids: '4,5,6' }, 'ids'],
+    [{ ...POS, rankIds: ids(1), rankTiers: '1' }, 'rank_le20'],
+    [{ ...POS, rankIds: ids(20) }, 'rank_le20'],
+    [{ ...POS, rankIds: ids(21) }, 'rank_lt300'],
+    [{ ...POS, rankIds: ids(299) }, 'rank_lt300'],
+    [{ ...POS, rankIds: ids(300) }, 'rank_le1500'],
+    [{ ...POS, rankIds: ids(1500) }, 'rank_le1500'],
+    [{ ...POS, rankIds: ids(1501) }, 'rank_gt1500'],
+    [{ ...POS, query: 'cream', rankIds: ids(40) }, 'rank_lt300'],
+    [{}, 'default'],
+  ]
+  for (const [query, expected] of cases) assert.equal(metrics.productsSearchShape(query), expected, JSON.stringify(query).slice(0, 120))
+  assert.deepEqual(Object.keys(metrics.SHAPED_ROUTES).sort(), ['GET /api/customers', 'GET /api/products/search', 'GET /api/sales/stats'])
+  assert.equal(metrics.salesStatsShape({}), 'all')
+  assert.equal(metrics.salesStatsShape({ startDate: '2026-11-10', endDate: '2026-11-10' }), 'day')
+  assert.equal(metrics.salesStatsShape({ startDate: '2026-11-04', endDate: '2026-11-10' }), 'range')
+  assert.equal(metrics.salesStatsShape({ startDate: '2026-11-04', search: 'Customer 12' }), 'search')
+  assert.equal(metrics.customersShape({ fields: 'sales_picker' }), 'picker_empty')
+  assert.equal(metrics.customersShape({ fields: 'sales_picker', search: 'a' }), 'picker_text')
+  assert.equal(metrics.customersShape({ search: 'a' }), 'search')
+  assert.equal(metrics.customersShape({ page: '1' }), 'list')
+  assert.equal(metrics.flagsWithShape('', 'a=on'), 'a=on')
+  assert.equal(metrics.flagsWithShape('text', ''), 'shape=text')
+  assert.equal(metrics.flagsWithShape('text', 'a=on;b=off'), 'shape=text;a=on;b=off')
+  assert.equal(metrics.flagsWithShape('text', 'x'.repeat(300)).length, 200)
+  assert.ok(metrics.flagsWithShape('text', 'x'.repeat(300)).startsWith('shape=text;'), 'the cut never takes the shape')
+  assert.equal(metrics.requestShapeOf('GET', '/api/products', () => POS), '', 'a route without a shape')
+  assert.equal(metrics.requestShapeOf('POST', '/api/products/search', () => POS), '', 'the method is part of the key')
+  assert.equal(metrics.requestShapeOf('GET', '/api/products/search', () => { throw new Error('unreadable') }), '', 'an unreadable query is no shape, not an error')
+  assert.equal(metrics.requestShapeOf('GET', '/api/products/search', undefined), '')
+})
+
+check('request shape: blob6 leads with shape=, keeps the flags, and no request value reaches the datapoint', async () => {
+  const dataset = sink()
+  const hook = () => globalThis[Symbol.for(metrics.REQUEST_METRICS_HOOK_KEY)]
+  const app = appWith((a) => {
+    a.get('/api/products/search', (c) => { hook().flag('ic_simple', 'on'); return c.json({}) })
+    a.get('/api/products/filters', (c) => c.json({}))
+  }, { random: () => 0 })
+  const env = { Business_OS_Analytics: dataset }
+  await app.request('/api/products/search?page=1&pageSize=30&surface=pos&branchId=1', {}, env, executionCtx())
+  await app.request('/api/products/search?query=Sok%20Dara%20012345678&surface=pos', {}, env, executionCtx())
+  await app.request('/api/products/search?query=8851234567890', {}, env, executionCtx())
+  await app.request('/api/products/search?rankIds=' + Array.from({ length: 150 }, (_, i) => 900000 + i).join(','), {}, env, executionCtx())
+  await app.request('/api/products/filters?category=Skincare', {}, env, executionCtx())
+  assert.deepEqual(dataset.points.map((p) => p.blobs[5]), ['shape=default;ic_simple=on', 'shape=text;ic_simple=on', 'shape=barcode;ic_simple=on', 'shape=rank_lt300;ic_simple=on', ''])
+  const serialized = JSON.stringify(dataset.points)
+  for (const secret of ['Sok', 'Dara', '012345678', '8851234567890', '900000', '900149', 'Skincare', 'rankIds', 'query']) assert.ok(!serialized.includes(secret), `datapoint must not contain ${secret}`)
+  for (const p of dataset.points) assert.equal(p.blobs.length, 8, 'the layout keeps its eight blobs')
+})
+
 ;(async () => {
   let failed = 0
   for (const { name, fn } of tests) {
