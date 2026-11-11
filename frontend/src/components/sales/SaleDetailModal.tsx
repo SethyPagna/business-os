@@ -9,6 +9,7 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import UserX from 'lucide-react/dist/esm/icons/user-x.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { searchProducts } from '../../api/methods.ts'
+import { canSearchProductText } from '../../api/productSearchIndex.ts'
 import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { getSyncServerUrl } from '../../api/httpState.ts'
@@ -855,7 +856,7 @@ export default function SaleDetailModal({
 
   const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
     const query = text.trim()
-    if (!canLoadSaleProducts || query.length < 2) return
+    if (!canLoadSaleProducts || !canSearchProductText(query)) return
     const seq = ++addSearchSeqRef.current
     const requestScope = detailScope
     if (append) setAddLoadingMore(true)
@@ -898,7 +899,7 @@ export default function SaleDetailModal({
     setAddSearchError('')
     setAddSearchFailedPage(1)
     setAddSearchPage({ page: 1, pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE, total: 0, totalPages: 1 })
-    if (!canLoadSaleProducts || text.length < 2) {
+    if (!canLoadSaleProducts || !canSearchProductText(text)) {
       setAddCandidates([])
       setAddSearching(false)
       setAddLoadingMore(false)
@@ -1672,12 +1673,12 @@ export default function SaleDetailModal({
     && !hasRecordedReturns
   const retryAddProductSearch = (): void => {
     const text = addQuery.trim()
-    if (text.length < 2) return
+    if (!canSearchProductText(text)) return
     void loadAddProductSearchPage(text, addSearchFailedPage, addSearchFailedPage > 1)
   }
   const loadMoreAddProducts = (): void => {
     const text = addQuery.trim()
-    if (text.length < 2 || !addSearchCanLoadMore || addSearching || addLoadingMore) return
+    if (!canSearchProductText(text) || !addSearchCanLoadMore || addSearching || addLoadingMore) return
     void loadAddProductSearchPage(text, addSearchPage.page + 1, true)
   }
   const searchProgressLabel = `${t('showing') || 'Showing'} ${addSearchVisible} ${t('of') || 'of'} ${addSearchTotal} ${t('products') || 'products'}`
@@ -2425,7 +2426,7 @@ export default function SaleDetailModal({
                                       />
                                     ))}
                                   </div>
-                                ) : !addSearching && !addSearchError && addQuery.trim().length >= 2 ? (
+                                ) : !addSearching && !addSearchError && canSearchProductText(addQuery) ? (
                                   <div className="mt-1 text-[11px] text-gray-400">{translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}</div>
                                 ) : null}
                                 {addCandidates.length ? <div data-sale-product-search-progress="" className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
@@ -2748,7 +2749,7 @@ export default function SaleDetailModal({
                   <button type="button" disabled={addSearching || addLoadingMore} onClick={retryAddProductSearch} className="min-h-8 shrink-0 rounded px-2 font-semibold underline underline-offset-2">{t('retry') || 'Retry'}</button>
                 </div>
               ) : null}
-              {!addSearching && !addSearchError && addQuery.trim().length >= 2 && addCandidates.length === 0 ? (
+              {!addSearching && !addSearchError && canSearchProductText(addQuery) && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">
                   {translateOr('add_items_no_matches', 'No products matched.', 'រកមិនឃើញផលិតផលទេ។')}
                 </p>

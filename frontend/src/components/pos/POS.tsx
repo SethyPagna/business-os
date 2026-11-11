@@ -98,7 +98,7 @@ import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
 import { classifyScanMiss } from '../../utils/scanMiss.ts'
-import { catalogHasBarcode, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
+import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
@@ -1398,8 +1398,15 @@ export default function POS() {
   // G37: the typed text is matched on this device by the shared search core
   // and sent as ranked ids; the server text search stays the fallback.
   const searchIndexGeneration = useProductSearchIndex(isActive)
+  const searchTooShort = isProductSearchTooShort(debouncedProductSearch)
+  const lastSearchParamsKeyRef = useRef('{}')
   const productSearchParamsKey = useMemo(
-    () => JSON.stringify(productSearchRequest(debouncedProductSearch, { mode: searchMode }).params),
+    () => {
+      if (isProductSearchTooShort(debouncedProductSearch)) return lastSearchParamsKeyRef.current
+      const key = JSON.stringify(productSearchRequest(debouncedProductSearch, { mode: searchMode }).params)
+      lastSearchParamsKeyRef.current = key
+      return key
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [debouncedProductSearch, searchMode, searchIndexGeneration],
   )
@@ -2273,7 +2280,7 @@ export default function POS() {
   // only show once all results are in", same fix applied to Products.tsx's
   // equivalent). Tying both to the same debounced value means the grid now
   // updates once, atomically, per settled query.
-  const searchTerms = useMemo(() => buildProductSearchTerms(debouncedProductSearch), [debouncedProductSearch])
+  const searchTerms = useMemo(() => (searchTooShort ? [] : buildProductSearchTerms(debouncedProductSearch)), [debouncedProductSearch, searchTooShort])
   // Selected branch ids for the (possibly multi-select) branch filter.
   const branchFilterIds = useMemo(
     () => parseMultiValues(branchFilter).map((v) => parseInt(v, 10)).filter((n) => Number.isFinite(n)),
@@ -3860,6 +3867,9 @@ export default function POS() {
                 message shown inside the empty-grid state further down --
                 same on-screen duplication as Products.tsx. Removed; the
                 grid's own empty/refreshing state (below) is enough. */}
+            {searchTooShort ? (
+              <p className="mb-3 text-center text-sm text-gray-500" role="status">{t('search_type_one_more')}</p>
+            ) : (
             <div className="mb-3 flex justify-center">
               <PaginationControls
                 page={productPage}
@@ -3876,7 +3886,8 @@ export default function POS() {
                 }}
               />
             </div>
-            <div className="pos-product-grid">
+            )}
+            <div className={searchTooShort ? 'pos-product-grid opacity-50' : 'pos-product-grid'}>
               {pagedProductCards.map(p => {
                 const handlers = getProductCardHandlers(p)
                 return (
@@ -3939,7 +3950,7 @@ export default function POS() {
                 can go next/prev or change the page / per-page size without
                 scrolling back up to the top pager. Only shown when there is
                 more than one page so it never clutters a short grid. */}
-            {productTotal > productPageSize ? (
+            {productTotal > productPageSize && !searchTooShort ? (
               <div className="mt-3 flex justify-center">
                 <PaginationControls
                   page={productPage}
