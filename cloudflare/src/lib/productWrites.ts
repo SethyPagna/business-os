@@ -396,19 +396,19 @@ export async function createProductWithInitialStock(
     planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, is_active: 1, stock_quantity: quantity, client_request_id: key }),
     { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
       SELECT p.id,b.id,CASE WHEN b.id=@branchId THEN @quantity ELSE 0 END
-      FROM products p CROSS JOIN branches b WHERE p.client_request_id=@key AND b.is_active=1`, params },
+      FROM products p CROSS JOIN branches b WHERE p.client_request_id=@key AND p.client_request_id<>'' AND b.is_active=1`, params },
     { sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number)
       SELECT id,'initial:'||id,@lotCode,datetime('now'),1,'Default received date created with product',1
-      FROM products WHERE client_request_id=@key`, params },
+      FROM products WHERE client_request_id=@key AND client_request_id<>''`, params },
   ]
   if (branchId != null) statements.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
     SELECT pb.id,@branchId,@quantity FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id
-    WHERE p.client_request_id=@key AND pb.batch_key='initial:'||p.id AND pb.is_active=1`, params })
+    WHERE p.client_request_id=@key AND p.client_request_id<>'' AND pb.batch_key='initial:'||p.id AND pb.is_active=1`, params })
   if (quantity > 0 && branchId != null) {
     // Opening stock is a stock-in like any other: it leaves the movement and audit row a receipt leaves (Stock
     // received, the 'add' movement, batch_receive), in the batch that creates the stock, not after it.
     const stockActor = approval ? { id: approval.reviewer.reviewedBy ?? null, name: approval.reviewer.reviewedByName ?? null } : (actor ?? { id: null, name: null })
-    const initialBatchSql = "(SELECT pb.id FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE p.client_request_id=@key AND pb.batch_key='initial:'||p.id)"
+    const initialBatchSql = "(SELECT pb.id FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id WHERE p.client_request_id=@key AND p.client_request_id<>'' AND pb.batch_key='initial:'||p.id)"
     statements.push({
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,
           total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
@@ -417,7 +417,7 @@ export async function createProductWithInitialStock(
           CASE WHEN p.cost_price_usd IS NULL THEN NULL ELSE ROUND(p.cost_price_usd*@quantity,4) END,
           CASE WHEN p.cost_price_usd=0 THEN 0 END,
           'Stock received ('||@lotCode||')',NULL,@userId,@userName,CURRENT_TIMESTAMP,${initialBatchSql}
-        FROM products p WHERE p.client_request_id=@key`,
+        FROM products p WHERE p.client_request_id=@key AND p.client_request_id<>''`,
       params: { ...params, userId: stockActor.id, userName: stockActor.name },
     })
     const receive = buildAuditStatement(stockActor.id, stockActor.name, 'batch_receive', 'product_batch', null,
@@ -425,22 +425,22 @@ export async function createProductWithInitialStock(
     statements.push({ sql: receive.sql.replace(/@entity_id\b/g, initialBatchSql), params: { ...receive.params, key } })
   }
   for (const [order, path] of (gallery ?? []).entries()) statements.push({
-    sql: `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,@path,@order FROM products WHERE client_request_id=@key`,
+    sql: `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,@path,@order FROM products WHERE client_request_id=@key AND client_request_id<>''`,
     params: { key, path, order },
   })
   const startingReceipt = receipt && quantity > 0
     ? completedStockMutationReceiptStatement(receipt.actorId, receipt.fingerprint,
-      "json_object('success',json('true'),'id',(SELECT id FROM products WHERE client_request_id=@key))", { key })
+      "json_object('success',json('true'),'id',(SELECT id FROM products WHERE client_request_id=@key AND client_request_id<>''))", { key })
     : null
   if (startingReceipt) statements.push(startingReceipt)
   if (approval) {
     statements.push(...pendingActionApprovalStatements(approval.row, approval.reviewer))
     const audit = buildAuditStatement(approval.reviewer.reviewedBy ?? null, approval.reviewer.reviewedByName ?? null, 'create', 'product', null)
-    statements.push({ sql: audit.sql.replace(/@entity_id\b/g, '(SELECT id FROM products WHERE client_request_id=@createdProductKey)'),
+    statements.push({ sql: audit.sql.replace(/@entity_id\b/g, "(SELECT id FROM products WHERE client_request_id=@createdProductKey AND client_request_id<>'')"),
       params: { ...audit.params, createdProductKey: key } })
   }
   if (branchId != null) statements.push(receivingBranchAssertion(branchId))
-  statements.push({ sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
+  statements.push({ sql: "SELECT * FROM products WHERE client_request_id=@key AND client_request_id<>''", params: { key } })
   let results
   try { results = await executeStockTransaction(db, addressedStatements(landing, statements), 'once') } catch (error) {
     if (error instanceof StockTransactionUnavailableError || error instanceof StockTransactionOutcomeUnknownError) throw error

@@ -2811,7 +2811,7 @@ app.post('/supplier', async (c) => {
   // A server key also covers legacy callers without an idempotency key, so
   // every child can resolve the header within one atomic D1 batch.
   const supplierWriteKey = clientRequestId || `supplier-return:${crypto.randomUUID()}`
-  const returnIdExpression = '(SELECT id FROM returns WHERE client_request_id=@supplier_write_key)'
+  const returnIdExpression = "(SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>'')"
   const returnHeaderStatement = { sql: `
     INSERT INTO returns (
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
@@ -3013,7 +3013,7 @@ app.post('/supplier', async (c) => {
     }
     if (touchedProductIds.size) await executeStockTransaction(db, statements, 'retry')
     else await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
-    const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
+    const committed = await db.prepare("SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>''")
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
     returnId = Number(committed.id)
