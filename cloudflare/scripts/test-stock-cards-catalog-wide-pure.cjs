@@ -120,14 +120,17 @@ for (const [file, calls] of Object.entries(byFile)) {
     /^p\.is_active = 1 AND /.test(expiryWhere) && !RANGE_SCOPE.test(expiryWhere))
 
   const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export async function getFamilyStockOverview'))
-  const overviewSql = overviewFn.slice(0, overviewFn.indexOf('.all<'))
+  // The statement text lives in familyStockOverviewSql (the one-pass builder); getFamilyStockOverview runs it.
+  const builderStart = familyStockStats.indexOf('export function familyStockOverviewSql')
+  const overviewSql = familyStockStats.slice(builderStart, familyStockStats.indexOf('export async function getFamilyStockOverview'))
+  check('getFamilyStockOverview runs the one-pass builder', builderStart > 0 && /db\.prepare\(familyStockOverviewSql\(lowThresholdSql\)\)/.test(overviewFn))
   check('getFamilyStockOverview starts from the plain active catalog',
-    /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+\)/.test(overviewSql))
+    /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+GROUP BY 1/.test(overviewSql))
   check('getFamilyStockOverview carries no date/sales range scope and takes no where/join/params from its caller',
     !RANGE_SCOPE.test(overviewSql)
     && /opts: \{\s*db: D1Compat\s*lowStock: LowStockConfig\s*previewSize: number\s*\}/.test(overviewFn))
   check('getFamilyStockOverview shares the configured low-stock threshold expression',
-    /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(overviewSql))
+    /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(overviewFn))
 }
 check('branches.ts hub stock stats are the plain active catalog',
   /whereSql: `WHERE \$\{stockVisibleProductSql\(\)\}`,/.test(branches))

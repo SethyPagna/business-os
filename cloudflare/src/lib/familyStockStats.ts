@@ -33,7 +33,7 @@
 // if a family somehow has no other members, so a family is never dropped
 // from the count entirely.
 import type { D1Compat } from './db'
-import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
+import { FAMILY_ROOT_KEY_SQL, pageCandidatesSql } from './familyPagination'
 import { lowStockThresholdSql, type LowStockConfig } from './lowStockSettings'
 import { stockVisibleProductSql } from './productStockGuard'
 
@@ -311,6 +311,131 @@ export interface FamilyStockOverview {
 }
 
 /**
+ * The overview statement (see getFamilyStockOverview), ONE scan of the stock-visible catalogue.
+ *
+ * Every family aggregate is computed twice in the one grouped scan, over the NON-header rows (CASE WHEN NOT header THEN x END) and over ALL rows, plus the count of non-header rows
+ * (nh_count); a family takes the non-header figures when nh_count > 0, else the all-rows figures. That is exactly the "members" rule of the earlier statement (a header row counts only in a
+ * family that has no other row) without a second pass over the catalogue for NOT IN (non_header_families), and SUM / MIN / MAX skip the non-member NULLs, so a value SUM with no costed
+ * member stays NULL in both forms. The previewed families' rows (the representatives) are then found by key, through the same four index seeks the Products page reads a page's rows by
+ * (familyPagination.pageCandidatesSql), filtered by the same stock-visible predicate, joined on the exact family key, with the header rule applied per family; the candidate set is only a
+ * superset, so a stray candidate (a product literally named 'id:5') never reaches a family it does not belong to. Requires idx_products_parent_pg (a database without it fails loudly,
+ * it does not miscount). The float sums add the same values in the same scan order as before; the test compares exact rows and money sums to 1e-9.
+ */
+export function familyStockOverviewSql(lowThresholdSql: string): string {
+  const header = '(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)'
+  const both = (agg: string, expr: string, name: string) => `${agg}(CASE WHEN NOT ${header} THEN ${expr} END) AS nh_${name}, ${agg}(${expr}) AS all_${name}`
+  const qty = 'COALESCE(p.stock_quantity, 0)'
+  return `
+    WITH agg AS MATERIALIZED (
+      SELECT
+        ${FAMILY_ROOT_KEY_SQL} AS family_root_id,
+        SUM(CASE WHEN NOT ${header} THEN 1 ELSE 0 END) AS nh_count,
+        COUNT(*) AS all_count,
+        ${both('MIN', "lower(trim(COALESCE(p.name, '')))", 'family_name')},
+        ${both('MIN', qty, 'minimum_qty')},
+        ${both('SUM', qty, 'total_qty')},
+        ${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} > ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_healthy')},
+        ${both('MAX', `CASE WHEN ${qty} > COALESCE(p.out_of_stock_threshold, 0) AND ${qty} <= ${lowThresholdSql} THEN 1 ELSE 0 END`, 'has_low')},
+        ${both('SUM', `CASE WHEN p.cost_price_usd IS NOT NULL THEN MAX(${qty}, 0) * p.cost_price_usd END`, 'value_usd')},
+        ${both('SUM', `CASE WHEN p.cost_price_khr IS NOT NULL THEN MAX(${qty}, 0) * p.cost_price_khr END`, 'value_khr')},
+        ${both('SUM', `CASE WHEN p.cost_price_usd IS NULL AND ${qty} > 0 THEN 1 ELSE 0 END`, 'unknown_products')},
+        ${both('SUM', `CASE WHEN p.cost_price_usd IS NULL AND ${qty} > 0 THEN ${qty} ELSE 0 END`, 'unknown_quantity')}
+      FROM products p
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      WHERE ${stockVisibleProductSql()}
+      GROUP BY 1
+    ),
+    family_agg AS (
+      SELECT family_root_id, nh_count,
+        CASE WHEN nh_count > 0 THEN nh_family_name ELSE all_family_name END AS family_name,
+        CASE WHEN nh_count > 0 THEN nh_minimum_qty ELSE all_minimum_qty END AS minimum_qty,
+        CASE WHEN nh_count > 0 THEN nh_total_qty ELSE all_total_qty END AS total_qty,
+        CASE WHEN nh_count > 0 THEN nh_count ELSE all_count END AS family_size,
+        CASE WHEN nh_count > 0 THEN nh_has_healthy ELSE all_has_healthy END AS has_healthy,
+        CASE WHEN nh_count > 0 THEN nh_has_low ELSE all_has_low END AS has_low,
+        CASE WHEN nh_count > 0 THEN nh_value_usd ELSE all_value_usd END AS value_usd,
+        CASE WHEN nh_count > 0 THEN nh_value_khr ELSE all_value_khr END AS value_khr,
+        CASE WHEN nh_count > 0 THEN nh_unknown_products ELSE all_unknown_products END AS unknown_products,
+        CASE WHEN nh_count > 0 THEN nh_unknown_quantity ELSE all_unknown_quantity END AS unknown_quantity
+      FROM agg
+    ),
+    eligible AS (
+      SELECT family_agg.*, CASE WHEN has_low = 1 THEN 'low' ELSE 'out' END AS alert_state
+      FROM family_agg
+      WHERE has_healthy = 0
+    ),
+    ranked AS (
+      SELECT family_root_id, alert_state, nh_count, total_qty AS e_total_qty, family_size AS e_family_size,
+             ROW_NUMBER() OVER (PARTITION BY alert_state ORDER BY minimum_qty ASC, family_name ASC, family_root_id ASC) AS family_rank
+      FROM eligible
+    ),
+    previewed AS MATERIALIZED (
+      SELECT * FROM ranked WHERE family_rank <= @previewSize
+    ),
+    candidates AS MATERIALIZED (
+      ${pageCandidatesSql(true, 'previewed')}
+    ),
+    members AS (
+      SELECT
+        ${FAMILY_ROOT_KEY_SQL} AS family_root_id,
+        p.id, p.name, p.category, p.unit,
+        ${qty} AS qty,
+        p.low_stock_threshold,
+        p.out_of_stock_threshold,
+        COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
+        ${lowThresholdSql} AS low_threshold,
+        COALESCE(p.is_group, 0) AS is_group,
+        COALESCE(p.parent_id, 0) AS parent_id
+      FROM candidates cand
+      CROSS JOIN products p ON p.id = cand.id
+      LEFT JOIN products parent ON parent.id = p.parent_id
+      WHERE ${stockVisibleProductSql()}
+    ),
+    representatives AS (
+      SELECT m.*, v.alert_state, v.family_rank, v.e_total_qty, v.e_family_size,
+             ROW_NUMBER() OVER (
+               PARTITION BY m.family_root_id
+               ORDER BY
+                 CASE
+                   WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0
+                   WHEN v.alert_state = 'out' AND m.qty <= m.out_threshold THEN 0
+                   ELSE 1
+                 END ASC,
+                 m.qty ASC, lower(trim(COALESCE(m.name, ''))) ASC, m.id ASC
+             ) AS representative_rank
+      FROM members m
+      JOIN previewed v ON v.family_root_id = m.family_root_id
+      WHERE NOT (m.is_group = 1 AND m.parent_id = 0) OR v.nh_count = 0
+    )
+    SELECT
+      'stats' AS row_kind, NULL AS alert_state, NULL AS family_rank,
+      NULL AS id, NULL AS name, NULL AS category, NULL AS unit,
+      NULL AS stock_quantity, NULL AS low_stock_threshold, NULL AS out_of_stock_threshold,
+      NULL AS family_stock_quantity, NULL AS family_size,
+      COUNT(*) AS total_products,
+      COALESCE(SUM(CASE WHEN has_healthy = 1 OR has_low = 1 THEN 1 ELSE 0 END), 0) AS in_stock,
+      COALESCE(SUM(CASE WHEN has_healthy = 1 THEN 1 ELSE 0 END), 0) AS healthy,
+      COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 1 THEN 1 ELSE 0 END), 0) AS low_stock,
+      COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
+      COALESCE(SUM(total_qty), 0) AS total_stock_quantity,
+      COALESCE(SUM(value_usd), 0) AS stock_value_usd,
+      COALESCE(SUM(value_khr), 0) AS stock_value_khr,
+      COALESCE(SUM(unknown_products), 0) AS stock_value_unknown_products,
+      COALESCE(SUM(unknown_quantity), 0) AS stock_value_unknown_quantity
+    FROM family_agg
+    UNION ALL
+    SELECT
+      'alert', r.alert_state, r.family_rank,
+      r.id, r.name, r.category, r.unit,
+      r.qty, r.low_stock_threshold, r.out_of_stock_threshold,
+      r.e_total_qty, r.e_family_size,
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    FROM representatives r
+    WHERE r.representative_rank = 1
+  `
+}
+
+/**
  * The Dashboard's whole stock block in ONE statement and ONE pass over the
  * active catalog (G39 efficiency item 1).
  *
@@ -339,103 +464,7 @@ export async function getFamilyStockOverview(opts: {
   const { db, lowStock } = opts
   const pageSize = Math.max(1, Math.trunc(opts.previewSize) || 1)
   const lowThresholdSql = lowStockThresholdSql(lowStock, 'p.low_stock_threshold')
-  const rows = await db.prepare(`
-    WITH matched AS (
-      SELECT
-        ${FAMILY_ROOT_KEY_SQL} AS family_root_id,
-        p.id, p.name, p.category, p.unit,
-        COALESCE(p.stock_quantity, 0) AS qty,
-        p.low_stock_threshold,
-        p.out_of_stock_threshold,
-        COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
-        ${lowThresholdSql} AS low_threshold,
-        COALESCE(p.is_group, 0) AS is_group,
-        COALESCE(p.parent_id, 0) AS parent_id,
-        p.cost_price_usd AS unit_cost_usd,
-        p.cost_price_khr AS unit_cost_khr
-      FROM products p
-      LEFT JOIN products parent ON parent.id = p.parent_id
-      WHERE ${stockVisibleProductSql()}
-    ),
-    non_header_families AS (
-      SELECT DISTINCT family_root_id FROM matched WHERE NOT (is_group = 1 AND parent_id = 0)
-    ),
-    members AS (
-      SELECT m.* FROM matched m
-      WHERE NOT (m.is_group = 1 AND m.parent_id = 0)
-         OR m.family_root_id NOT IN (SELECT family_root_id FROM non_header_families)
-    ),
-    family_agg AS (
-      SELECT
-        family_root_id,
-        MIN(lower(trim(COALESCE(name, '')))) AS family_name,
-        MIN(qty) AS minimum_qty,
-        SUM(qty) AS total_qty,
-        COUNT(*) AS family_size,
-        MAX(CASE WHEN qty > out_threshold AND qty > low_threshold THEN 1 ELSE 0 END) AS has_healthy,
-        MAX(CASE WHEN qty > out_threshold AND qty <= low_threshold THEN 1 ELSE 0 END) AS has_low,
-        SUM(CASE WHEN unit_cost_usd IS NOT NULL THEN MAX(qty, 0) * unit_cost_usd END) AS value_usd,
-        SUM(CASE WHEN unit_cost_khr IS NOT NULL THEN MAX(qty, 0) * unit_cost_khr END) AS value_khr,
-        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN 1 ELSE 0 END) AS unknown_products,
-        SUM(CASE WHEN unit_cost_usd IS NULL AND qty > 0 THEN qty ELSE 0 END) AS unknown_quantity
-      FROM members
-      GROUP BY family_root_id
-    ),
-    eligible AS (
-      SELECT family_agg.*, CASE WHEN has_low = 1 THEN 'low' ELSE 'out' END AS alert_state
-      FROM family_agg
-      WHERE has_healthy = 0
-    ),
-    ranked AS (
-      SELECT family_root_id, alert_state,
-             ROW_NUMBER() OVER (PARTITION BY alert_state ORDER BY minimum_qty ASC, family_name ASC, family_root_id ASC) AS family_rank
-      FROM eligible
-    ),
-    previewed AS (
-      SELECT * FROM ranked WHERE family_rank <= @previewSize
-    ),
-    representatives AS (
-      SELECT m.*, v.alert_state, v.family_rank,
-             ROW_NUMBER() OVER (
-               PARTITION BY m.family_root_id
-               ORDER BY
-                 CASE
-                   WHEN v.alert_state = 'low' AND m.qty > m.out_threshold AND m.qty <= m.low_threshold THEN 0
-                   WHEN v.alert_state = 'out' AND m.qty <= m.out_threshold THEN 0
-                   ELSE 1
-                 END ASC,
-                 m.qty ASC, lower(trim(COALESCE(m.name, ''))) ASC, m.id ASC
-             ) AS representative_rank
-      FROM members m
-      JOIN previewed v ON v.family_root_id = m.family_root_id
-    )
-    SELECT
-      'stats' AS row_kind, NULL AS alert_state, NULL AS family_rank,
-      NULL AS id, NULL AS name, NULL AS category, NULL AS unit,
-      NULL AS stock_quantity, NULL AS low_stock_threshold, NULL AS out_of_stock_threshold,
-      NULL AS family_stock_quantity, NULL AS family_size,
-      COUNT(*) AS total_products,
-      COALESCE(SUM(CASE WHEN has_healthy = 1 OR has_low = 1 THEN 1 ELSE 0 END), 0) AS in_stock,
-      COALESCE(SUM(CASE WHEN has_healthy = 1 THEN 1 ELSE 0 END), 0) AS healthy,
-      COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 1 THEN 1 ELSE 0 END), 0) AS low_stock,
-      COALESCE(SUM(CASE WHEN has_healthy = 0 AND has_low = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
-      COALESCE(SUM(total_qty), 0) AS total_stock_quantity,
-      COALESCE(SUM(value_usd), 0) AS stock_value_usd,
-      COALESCE(SUM(value_khr), 0) AS stock_value_khr,
-      COALESCE(SUM(unknown_products), 0) AS stock_value_unknown_products,
-      COALESCE(SUM(unknown_quantity), 0) AS stock_value_unknown_quantity
-    FROM family_agg
-    UNION ALL
-    SELECT
-      'alert', r.alert_state, r.family_rank,
-      r.id, r.name, r.category, r.unit,
-      r.qty, r.low_stock_threshold, r.out_of_stock_threshold,
-      e.total_qty, e.family_size,
-      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-    FROM representatives r
-    JOIN eligible e ON e.family_root_id = r.family_root_id
-    WHERE r.representative_rank = 1
-  `).all<Record<string, unknown>>({ previewSize: pageSize })
+  const rows = await db.prepare(familyStockOverviewSql(lowThresholdSql)).all<Record<string, unknown>>({ previewSize: pageSize })
 
   const list = Array.isArray(rows) ? rows : []
   const statsRow = list.find((row) => row.row_kind === 'stats') || {}

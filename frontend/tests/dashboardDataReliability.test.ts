@@ -67,8 +67,9 @@ assert.doesNotMatch(compat, /productInRangeClause/, 'inventory alert cards must 
 assert.match(compat, /loadDashboardStockOverview\(env, overviewCtx\)/, 'dashboard stock block must come from the shared catalog-wide overview with no range argument')
 const stockOverview = fs.readFileSync(new URL('../../cloudflare/src/lib/dashboardStockOverview.ts', import.meta.url), 'utf8')
 const familyStockStats = fs.readFileSync(new URL('../../cloudflare/src/lib/familyStockStats.ts', import.meta.url), 'utf8')
-const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export async function getFamilyStockOverview'))
-assert.match(overviewFn, /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+\)/, 'dashboard stock stats must stay catalog-wide so the card badges match their lists')
+// the one-pass statement text is in familyStockOverviewSql, which precedes getFamilyStockOverview
+const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export function familyStockOverviewSql'))
+assert.match(overviewFn, /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE \$\{stockVisibleProductSql\(\)\}\s+GROUP BY 1/, 'dashboard stock stats must stay catalog-wide so the card badges match their lists')
 assert.doesNotMatch(overviewFn, /@startDate|@endDate|@branchId|sale_items/, 'dashboard stock stats must not be scoped by the selected range, branch or sales')
 assert.match(stockOverview, /DASHBOARD_EXPIRY_WHERE_SQL = `p\.is_active = 1 AND /, 'dashboard expiry alerts must stay catalog-wide')
 assert.match(dashboard, /getDashboardSaleItemCount/, 'dashboard sale details should expose a total item count')
