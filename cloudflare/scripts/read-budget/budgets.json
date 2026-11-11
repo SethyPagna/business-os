@@ -3,7 +3,20 @@
   "base": "05ef61b73",
   "rule": "MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs \"raised\": { field, from, reason } (an array when several fields rose).",
   "programme": {"rows_ceiling":100000,"by":"2026-11-30"},
-  "switches": {"report_atomic":"on","report_atomic_long":"on","expense_reads":"on","dash_overview_5m":"on"},
+  "passes": {
+    "free": {"tier":"free","switches":{"report_atomic":"on","report_atomic_long":"on","expense_reads":"on","dash_overview_5m":"on"}},
+    "live": {"tier":"paid","seedTier":"free","switches":{"ic_simple":"on"},"cold_calls_max":45,"known_failures":[
+      {"id":"dashboard-startup-today","cold_calls":65,"reason":"The landing page reads the stock overview and the sales report call by call: report_atomic and report_atomic_long are OFF live (ops run 42681892423), dash_overview_5m too. The free pass measures this shape at 40 to 45. Fixed by flipping the three switches live, then remove this entry."},
+      {"id":"dashboard-startup-7d","cold_calls":65,"reason":"Same as dashboard-startup-today (report_atomic and report_atomic_long are OFF live (ops run 42681892423)); fixed by the same flip, then remove this entry."},
+      {"id":"dashboard-startup-30d","cold_calls":69,"reason":"Same as dashboard-startup-today (report_atomic and report_atomic_long are OFF live (ops run 42681892423)); fixed by the same flip, then remove this entry."},
+      {"id":"dashboard-startup-365d","cold_calls":113,"reason":"Same as dashboard-startup-today with the longest window; report_atomic and report_atomic_long are OFF live (ops run 42681892423). The free pass measures 45. Fixed by the flip, then remove this entry."},
+      {"id":"sales-stats-all-time","cold_calls":81,"reason":"The all-time sales report reads in many small calls while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 22. Fixed by flipping report_atomic and report_atomic_long live, then remove this entry."},
+      {"id":"sales-daily-report","cold_calls":76,"reason":"The daily report reads call by call while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 18. Fixed by flipping report_atomic and report_atomic_long live, then remove this entry."},
+      {"id":"analytics","cold_calls":60,"reason":"Analytics runs the sales-report reads call by call while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 36. Fixed by flipping report_atomic and report_atomic_long live, then remove this entry."},
+      {"id":"reports-grouped-by-product-365d","cold_calls":81,"reason":"The grouped report of a year reads in many calls while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 21. Fixed by flipping report_atomic and report_atomic_long live, then remove this entry."},
+      {"id":"settings-payment-methods-impact","cold_calls":85,"reason":"The payment-method impact count walks the sales report call by call while report_atomic and report_atomic_long are OFF live (ops run 42681892423); the free pass measures 17. Fixed by the same flip (confirmed by that measurement only), then remove this entry."}
+    ]}
+  },
   "reasons": {"static-or-document":"served assets or documents; no D1 read","write-not-measured":"a write route with no measured shape yet; the slice that changes it adds one","get-not-in-shapes":"a GET with no shape yet: OAuth callback, job poll, download, duplicate check"},
   "exemptions": [
     {"method":"GET","route":"/admin/*","class":"N","reason":"static-or-document"},

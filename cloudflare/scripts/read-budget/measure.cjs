@@ -32,14 +32,19 @@ const ROUTE_NOTES = {
     '/api/settings/payment-methods/impact': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
     '/api/sales/:id/status': { cold_calls_max: 45, slice: 'P1.2', by: '2026-11-11' },
   },
-  // The GET shapes are measured with these read switches stored (the state the Free plan is meant to run in; the old paths are covered by the slices' own
-  // OFF-versus-ON tests); the write shapes are measured with none.
-  switches: { report_atomic: 'on', report_atomic_long: 'on', expense_reads: 'on' },
   // Routes whose statements change with a switch. Their fingerprints pin the old path, so they are captured on a second world with no switch stored.
   switchSensitive: ['/api/fees', '/api/fees/report', '/api/dashboard/startup', '/api/sales/stats', '/api/analytics', '/api/sales/daily-report', '/api/reports/grouped', '/api/reports/periods',
     '/api/reports/business-summary/sales', '/api/dashboard/insight-list'],
   reason: (r) => (r.method === 'GET' ? (r.route.startsWith('/api') ? 'get-not-in-shapes' : 'static-or-document') : 'write-not-measured'),
 }
+
+// The GET passes are data in budgets.json "passes" (budgets.cjs passOf); a re-measure keeps the ones already there, so a switch flip is never undone by --init.
+// The free pass is what the shapes' ceilings are measured with; the live pass is only carried over (it measures calls, runner.cjs runLivePass).
+const DEFAULT_PASSES = {
+  free: { tier: 'free', switches: { report_atomic: 'on', report_atomic_long: 'on', expense_reads: 'on', dash_overview_5m: 'on' } },
+  live: { tier: 'paid', seedTier: 'free', switches: { ic_simple: 'on' }, cold_calls_max: 45, known_failures: [] },
+}
+const PASSES = (fs.existsSync(BUDGETS_FILE) && JSON.parse(fs.readFileSync(BUDGETS_FILE, 'utf8')).passes) || DEFAULT_PASSES
 
 const EXEMPTION_REASONS = {
   'static-or-document': 'served assets or documents; no D1 read',
@@ -103,7 +108,7 @@ async function main() {
   const writeShapeList = writeShapes(require('./seed.cjs').seedContext()).filter((s) => s.variant === 'base')
 
   if (getShapeList.some((s) => !done.has(`get:${s.id}`))) {
-    const world = await bootWorld({ tier: 'free', switches: ROUTE_NOTES.switches })
+    const world = await bootWorld({ tier: PASSES.free.tier, switches: PASSES.free.switches })
     try {
       await prepareWorld(world)
       for (const shape of getShapeList.filter((s) => !done.has(`get:${s.id}`))) {
@@ -136,7 +141,7 @@ async function main() {
     } finally { await world.dispose() }
   }
   if (getShapeList.some((s) => !done.has(`analyze:${s.id}`))) {
-    const world = await bootWorld({ tier: 'free', switches: ROUTE_NOTES.switches })
+    const world = await bootWorld({ tier: PASSES.free.tier, switches: PASSES.free.switches })
     try {
       await prepareWorld(world)
       await world.analyze()
@@ -182,7 +187,7 @@ async function main() {
   const exemptions = routes.filter((r) => r.method !== 'HEAD' && !covered(r))
     .map((r) => ({ method: r.method, route: r.route, class: ROUTE_NOTES.protected.includes(`${r.method} ${r.route}`) ? 'P' : 'N', reason: ROUTE_NOTES.reason(r) }))
   const file = { version: 1, base: '05ef61b73', rule: 'MEASURED at the base x 1.10, rounded up; +8 rows under 80 rows. Ratchet only: a raise needs "raised": { from, reason }.',
-    programme: { rows_ceiling: 100000, by: '2026-11-30' }, switches: ROUTE_NOTES.switches, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }
+    programme: { rows_ceiling: 100000, by: '2026-11-30' }, passes: PASSES, reasons: EXEMPTION_REASONS, exemptions, shapes: entries }
   fs.writeFileSync(BUDGETS_FILE, serialize(file))
   fs.rmSync(FINGERPRINTS, { recursive: true, force: true })
   fs.mkdirSync(FINGERPRINTS)
@@ -190,10 +195,12 @@ async function main() {
   console.log(`budgets.json: ${entries.length} shapes, ${exemptions.length} exemptions; ${Object.keys(prints).length} fingerprint files`)
 }
 
-// One line per shape or exemption keeps a raised ceiling a one-line diff.
+// One line per shape, exemption or known failure keeps a raised ceiling a one-line diff.
 function serialize(file) {
   const line = (x) => '    ' + JSON.stringify(x)
-  return `{\n  "version": ${file.version},\n  "base": ${JSON.stringify(file.base)},\n  "rule": ${JSON.stringify(file.rule)},\n  "programme": ${JSON.stringify(file.programme)},\n  "switches": ${JSON.stringify(file.switches)},\n  "reasons": ${JSON.stringify(file.reasons)},\n`
+  const { known_failures: known, ...live } = file.passes.live
+  const passes = `  "passes": {\n    "free": ${JSON.stringify(file.passes.free)},\n    "live": ${JSON.stringify(live).slice(0, -1)},"known_failures":[\n${known.map((k) => '      ' + JSON.stringify(k)).join(',\n')}\n    ]}\n  },\n`
+  return `{\n  "version": ${file.version},\n  "base": ${JSON.stringify(file.base)},\n  "rule": ${JSON.stringify(file.rule)},\n  "programme": ${JSON.stringify(file.programme)},\n${passes}  "reasons": ${JSON.stringify(file.reasons)},\n`
     + `  "exemptions": [\n${file.exemptions.map(line).join(',\n')}\n  ],\n  "shapes": [\n${file.shapes.map(line).join(',\n')}\n  ]\n}\n`
 }
 
