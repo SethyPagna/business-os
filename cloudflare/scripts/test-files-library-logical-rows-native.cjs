@@ -68,7 +68,7 @@ gallery(4, '')                    // an empty gallery path
 // bulk: enough active products for the planner to prefer a bad is_active seek when the unary + is missing
 seedStockFixture(db, () => { for (let i = 0; i < 400; i += 1) db.prepare('INSERT INTO products (id, name, image_path, is_active) VALUES (?,?,?,1)').run(1000 + i, `Bulk ${i % 300}`, i % 2 ? `/uploads/bulk${i}.png` : null) })
 for (let i = 0; i < 400; i += 1) asset(1000 + i, `Bulk file ${i}`, `/uploads/bulk${i}.png`)
-db.exec('ANALYZE')
+// (ANALYZE runs after the first EXPLAIN check below: without statistics the planner shows the is_active trap the unary + prevents, with them it may not)
 // f11..f14 and F1 (case-different) stay unreferenced; f6 is inactive-only; f10 is inactive-gallery-only
 
 const ORDER = 'ORDER BY id DESC, reference_product_name COLLATE NOCASE ASC, reference_product_id ASC'
@@ -119,20 +119,31 @@ check('every column of the library row is identical, not only the key columns', 
   assert.deepEqual(all(NEW_CTE), all(OLD_CTE))
 })
 
-check('EXPLAIN: references are seeks on the image_path indexes and no is_active seek drives the library', () => {
+const TRAP = /idx_products_active_grouped_pg \(is_active=\?\)/
+check('EXPLAIN before ANALYZE: references are seeks on the image_path indexes, no is_active seek drives the library, and the mutant without the unary + goes red', () => {
   const p = plan(NEW_CTE, '')
   assert.match(p, /idx_products_image_path/)
   assert.match(p, /idx_product_images_image_path/)
-  assert.doesNotMatch(p, /idx_products_active_grouped_pg \(is_active=\?\)/, p)
+  assert.doesNotMatch(p, TRAP, p)
+  const mutantPlan = plan(NEW_CTE.split('+p.is_active').join('p.is_active'), '')
+  assert.match(mutantPlan, TRAP, 'control: with no statistics the planner takes the is_active seek once the + is gone, so this check discriminates')
 })
 
-check('the unary + on every p.is_active is pinned in the text (the planner trap needs production statistics, which a fixture cannot reproduce)', () => {
+db.exec('ANALYZE')
+check('EXPLAIN after ANALYZE: the same seeks and still no is_active seek', () => {
+  const p = plan(NEW_CTE, '')
+  assert.match(p, /idx_products_image_path/)
+  assert.match(p, /idx_product_images_image_path/)
+  assert.doesNotMatch(p, TRAP, p)
+})
+
+check('the unary + on every p.is_active is pinned in the text (the plan check above catches it on an unanalysed fixture; the production plan under real statistics is the refuter measurement)', () => {
   const uses = NEW_CTE.split('p.is_active').length - 1
   const guarded = NEW_CTE.split('+p.is_active').length - 1
   assert.equal(uses, 4)
   assert.equal(guarded, uses, 'a bare p.is_active lets the planner seek (is_active = ?) once per asset: 15M rows a page on production')
   const mutant = NEW_CTE.split('+p.is_active').join('p.is_active')
-  assert.deepEqual(rows(mutant, '', [], 10000, 0), rows(OLD_CTE, '', [], 10000, 0), 'the mutant keeps the rows: only the text pin and the production plan can catch it')
+  assert.deepEqual(rows(mutant, '', [], 10000, 0), rows(OLD_CTE, '', [], 10000, 0), 'the mutant keeps the rows: only the text pin and the plan check can catch it')
 })
 
 check('MUTANT: an unreferenced arm that forgets the gallery references returns extra rows', () => {
