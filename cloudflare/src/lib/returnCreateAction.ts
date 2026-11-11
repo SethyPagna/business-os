@@ -490,7 +490,7 @@ export function returnCreatePreconditionSql(input: {
     NOT EXISTS(SELECT 1 FROM return_create_receipts WHERE actor_id=@actorId AND request_id=@requestId)
     AND NOT EXISTS(SELECT 1 FROM returns WHERE client_request_id=@requestId OR return_number=@returnNumber)
     AND (@replacementReceiptNumber IS NULL OR NOT EXISTS(
-      SELECT 1 FROM sales WHERE client_request_id=@replacementClientRequestId OR receipt_number=@replacementReceiptNumber
+      SELECT 1 FROM sales WHERE (client_request_id=@replacementClientRequestId AND client_request_id<>'') OR receipt_number=@replacementReceiptNumber
     ))
     AND (json_type(@guardJson,'$.sale')='null' OR EXISTS(
       SELECT 1 FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id
