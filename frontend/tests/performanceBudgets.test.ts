@@ -129,6 +129,8 @@ const CATALOG_PRODUCTS_B4_GROWTH_BYTES = 1_198
 // pre-write number. The other 69 B are two chunks that re-bind to the changed api-http-core export names (+36 shared-ui, +36 shared-portal-menu, -3 app-shared). Same
 // pattern as 6.0.1048 and B4: the baseline above stays, and the ceiling is the old one plus what this client code really weighs (about 240 B of headroom, as B5 had).
 const CATALOG_PRODUCTS_D1_GROWTH_BYTES = 1_422
+// d1-bell: bellFreshness hooked in apiFetch (own-write fresh read); must stay synchronous
+const CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES = 520
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -150,7 +152,7 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
     'no chunk of the catalog-products closure carries the Expenses report endpoint',
   )
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES + CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES,
     `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048, the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4 and the ${CATALOG_PRODUCTS_D1_GROWTH_BYTES} bytes of the D1 audit: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(
