@@ -535,14 +535,18 @@ test.describe('Website Editor bar (ED-1a)', () => {
         }
         inside('the bar', (await page.locator('#portal-editor-bar').boundingBox())!)
         inside('the status line', (await statusLine(page).boundingBox())!)
+        // Measured again after the edit: filling the tagline scrolls the page and the sticky bar with it, so the row box read before
+        // the edit is not where the controls are now. The row and its controls are compared at the same moment.
+        const rowNow = (await row.boundingBox())!
+        expect(rowNow.height, `row height after the edit at ${width} px`).toBeLessThanOrEqual(56)
         const buttons = row.locator('button')
         for (let index = 0; index < await buttons.count(); index += 1) {
           const control = (await buttons.nth(index).boundingBox())!
           inside(`control ${index}`, control)
           expect(control.height, `control ${index} height at ${width} px`).toBeGreaterThanOrEqual(43.5)
           expect(control.width, `control ${index} width at ${width} px`).toBeGreaterThanOrEqual(43.5)
-          expect(control.y, `control ${index} sits inside the one row`).toBeGreaterThanOrEqual(box.y - 0.5)
-          expect(control.y + control.height, `control ${index} sits inside the one row`).toBeLessThanOrEqual(box.y + box.height + 0.5)
+          expect(control.y, `control ${index} sits inside the one row`).toBeGreaterThanOrEqual(rowNow.y - 0.5)
+          expect(control.y + control.height, `control ${index} sits inside the one row`).toBeLessThanOrEqual(rowNow.y + rowNow.height + 0.5)
         }
         // The bar is full-bleed on a phone (-mx-4), so the aside's own scrollWidth is 16 px wider than its box by design and the
         // aside clips it; what must hold is that neither the document nor the page's scroller moves sideways and the bar stays on screen.
