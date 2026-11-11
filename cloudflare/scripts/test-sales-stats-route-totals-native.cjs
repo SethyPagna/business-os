@@ -34,6 +34,7 @@ globalThis.__stats1022={
     if(!active)return
     if(kind==='snapshot'){active.semantic.fullReads++;active.semantic.counts={sale_count:value.sales.length,cancelled_count:value.voidSales.length,precision_mode:value.precision_mode,row_count:value.row_count}}
     else if(kind==='reduced'){active.semantic.totalsReads++;active.semantic.counts={sale_count:value.sale_count,cancelled_count:value.cancelled_count,precision_mode:value.precision_mode,row_count:value.row_count};active.semantic.diagnostic=lib.reportMoneyDiagnostic(value.totals)}
+    else if(kind==='header'){active.semantic.totalsReads++;active.semantic.counts={sale_count:value.sale_count,cancelled_count:value.cancelled_count}}
     else active.semantic.diagnostic=lib.reportMoneyDiagnostic(value)
   },
 }
@@ -49,6 +50,7 @@ function harness(routeSource){
 overrides['../lib/salesAnalytics']={...analytics,
  readSalesReportSnapshot:async(...args)=>{const value=await analytics.readSalesReportSnapshot(...args);globalThis.__stats1022.semantic('snapshot',value,analytics);return value},
  readSalesReportTotals:async(...args)=>{const value=await analytics.readSalesReportTotals(...args);globalThis.__stats1022.semantic('reduced',value,analytics);return value},
+ readSalesHeaderTotals:async(...args)=>{const value=await analytics.readSalesHeaderTotals(...args);globalThis.__stats1022.semantic('header',value,analytics);return value},
  salesTotalsFromSnapshot:(...args)=>{const value=analytics.salesTotalsFromSnapshot(...args);globalThis.__stats1022.semantic('totals',value,analytics);return value}}
 const app = load('routes/sales.ts').default`)
   const proxyFs={...fs,readFileSync(filename,encoding){
@@ -113,7 +115,8 @@ function meter(db,raw,config={}){
         raw.exec('COMMIT')
       }catch(error){raw.exec('ROLLBACK');throw error}
       finally{raw.exec('PRAGMA query_only='+(queryOnly?1:0))}
-      const names=['sales','voidSales','items','returns','returnItems','deliveryFees']
+      // A header-only plan has no items statement: name the groups from the statements that are there, not by fixed position.
+      const names=['sales','voidSales','items','returns','returnItems','deliveryFees'].filter(name=>!(name==='items'&&!statements.slice(2).some(item=>/FROM sale_items si/.test(item.sql))))
       results.forEach((result,index)=>{const group=main&&index>=2?names[index-2]||'other':'other';result.results=record(group,result.results)})
       if(main)log.dataImage=Object.fromEntries(names.slice(0,results.length-2).map((name,index)=>[name,results[index+2].results]))
       config.afterBatch?.({statements,main,results})
@@ -135,7 +138,8 @@ async function call(h,f,url='/stats',user=ADMIN,config={},cache=state()){
 }
 function same(a,b){
   assert.equal(b.status,a.status);assert.deepEqual(b.body,a.body)
-  if(a.status===200){assert.deepEqual(b.semantic.counts,a.semantic.counts);assert.deepEqual(b.semantic.diagnostic,a.semantic.diagnostic)}
+  // The header reader reads no sale lines (H2 Cut B): the counts still agree; the cost diagnostic and the row total belong to the lines it no longer reads.
+  if(a.status===200){const pick=r=>({sale_count:r.semantic.counts.sale_count,cancelled_count:r.semantic.counts.cancelled_count});assert.deepEqual(pick(b),pick(a))}
   else{for(const result of [a,b]){assert.equal(result.cache.writes,0);assert.equal(result.cache.values.size,0)}}
 }
 const before=harness(baseline),after=harness(candidateSource)
@@ -178,7 +182,7 @@ async function main(){
       const a=await call(before,f),b=await call(after,f);same(a,b);assert.equal(a.status,200,JSON.stringify(a.body))
       assert.deepEqual(Object.keys(b.body).sort(),FIELDS);assert.equal(b.body.total_count,103);assert.equal(b.body.truncated_in_list,true)
       assert.equal(a.semantic.fullReads,1);assert.equal(b.semantic.totalsReads,1);assert.equal(b.semantic.fullReads,0)
-      assert.equal(Object.keys(b.log.groups.sales[0]).length,20);assert.equal(Object.keys(b.log.groups.items[0]).length,7)
+      assert.equal(Object.keys(b.log.groups.sales[0]).length,20);assert.equal(b.log.groups.items.length,0,'The header reader reads no sale lines')
       assert.deepEqual(Object.keys(b.log.groups.voidSales[0]),['id'])
       assert.ok(b.log.groups.returnItems.some(row=>typeof row.refund_snapshot_json==='string'&&row.refund_snapshot_json.length>200),'Actual V1 proof is read')
       assert.ok(b.log.resultUtf8Proxy<a.log.resultUtf8Proxy,'Dropping display-only columns must reduce actual SQL-result serialization')
@@ -218,18 +222,21 @@ async function main(){
       }
     })
     for(const [label,map,code] of [
-      ['malformed canonical cost',(group,rows)=>group==='items'?rows.map(row=>row.id===sale.items[0].id?{...row,cost_price_usd:'bad-cost'}:row):rows,'invalid_saved_money4'],
       ['missing V1 refund proof',(group,rows)=>group==='returnItems'?rows.map(row=>({...row,refund_snapshot_json:null})):rows,'unsupported_row'],
     ])await test('paired financial refusal '+label,async()=>{
       const caches=[state(),state()];caches.forEach(cache=>{cache.enabled=true})
       const a=await call(before,f,'/stats',VIEW,{map},caches[0]),b=await call(after,f,'/stats',VIEW,{map},caches[1])
       same(a,b);assert.equal(a.status,422);assert.equal(a.body.code,code)
     })
-    await test('unknown canonical cost preserves completeness diagnostic without exposing fields',async()=>{
+    await test('a malformed stored line cost no longer stops the header (H2 Cut B: the report still refuses it elsewhere)',async()=>{
+      const map=(group,rows)=>group==='items'?rows.map(row=>row.id===sale.items[0].id?{...row,cost_price_usd:'bad-cost'}:row):rows
+      const clean=await call(after,f,'/stats',VIEW),b=await call(after,f,'/stats',VIEW,{map})
+      assert.equal(b.status,200);assert.deepEqual(b.body,clean.body);assert.equal(b.log.groups.items.length,0)
+    })
+    await test('unknown canonical cost leaves the header unchanged and exposes no fields',async()=>{
       const map=(group,rows)=>group==='items'?rows.map(row=>row.id===sale.items[0].id?{...row,cost_price_usd:null}:row):rows
       const a=await call(before,f,'/stats',VIEW,{map}),b=await call(after,f,'/stats',VIEW,{map});same(a,b)
-      assert.equal(b.status,200);assert.ok(b.semantic.diagnostic&&typeof b.semantic.diagnostic.complete==='boolean','Actual report diagnostic exposes completeness')
-      assert.equal(b.semantic.diagnostic.complete,false);assert.equal(b.semantic.diagnostic.unknown_cost_lines,1);assert.deepEqual(Object.keys(b.body).sort(),FIELDS)
+      assert.equal(b.status,200);assert.deepEqual(Object.keys(b.body).sort(),FIELDS)
     })
     for(const [label,url,sql,included,excluded,restore] of [
       ['customer search','/stats?search=COHORT-MOVE','UPDATE sales SET customer_name=? WHERE id=1001','COHORT-MOVE','COHORT-GONE','COHORT-MOVE'],
@@ -266,12 +273,16 @@ async function main(){
             if(rows.some(row=>Object.hasOwn(row,'cost_price_usd'))){swaps++;swap()}
             else if(rows.some(row=>Object.hasOwn(row,'lo')&&Object.hasOwn(row,'hi')))bandReads++
           }})
-          assert.equal(r.status,409,`${h===before?'old-full':'dated-totals'} ${url}: ${JSON.stringify(r.body)}`);assert.equal(r.body.code,'snapshot_changed');assert.ok(swaps>=4)
-          if(h===after)assert.ok(bandReads>=4,'Dated fallback band reads must not trigger retained-money swaps')
-          else assert.equal(bandReads,0,'Unfiltered full reader has no date band')
+          if(h===after){
+            // H2 Cut B: the header reader reads no sale lines, so a line-cost swap is invisible to it (it is exact without lines) and no band read happens.
+            assert.equal(r.status,200,`dated-totals ${url}: ${JSON.stringify(r.body)}`);assert.equal(swaps,0,'The header reader must not read line costs');assert.equal(bandReads,0,'The header reader has no item band')
+            continue
+          }
+          assert.equal(r.status,409,`old-full ${url}: ${JSON.stringify(r.body)}`);assert.equal(r.body.code,'snapshot_changed');assert.ok(swaps>=4)
+          assert.equal(bandReads,0,'Unfiltered full reader has no date band')
         }
         seed();const a=await call(after,f);swap();const b=await call(after,f)
-        assert.equal(a.status,200);assert.equal(b.status,200);assert.deepEqual(a.body,b.body);assert.notDeepEqual(a.log.dataImage,b.log.dataImage)
+        assert.equal(a.status,200);assert.equal(b.status,200);assert.deepEqual(a.body,b.body)
         seed();let writes=0
         const coherent=await call(after,f,'/stats',ADMIN,{afterBatch({main}){if(main){writes++;swap()}}})
         assert.equal(writes,1);assert.equal(coherent.status,200);assert.deepEqual(coherent.body,a.body);assert.deepEqual(coherent.log.dataImage,a.log.dataImage)

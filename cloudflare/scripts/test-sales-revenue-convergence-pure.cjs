@@ -303,10 +303,11 @@ check('the totals-purpose projection counts five active, one cancelled and six t
   && statsReport.sale_count + statsReport.cancelled_count === 6
   && statsReport.sale_count === statsTotals.tx_count && statsReport.cancelled_count === statsTotals.cancelled_tx_count)
 check('the /stats route delegates to the totals-purpose helper with its complete list scope',
-  /readSalesReportTotals\(c\.env,\s*windowFilter,\s*false,\s*salesListFilterReportScope\(where,\s*params\)\)/.test(statsBlock)
-  && /const totals\s*=\s*report\.totals\b/.test(statsBlock)
-  && /revenue_count:\s*report\.sale_count\b/.test(statsBlock)
-  && /const totalCount\s*=\s*report\.sale_count\s*\+\s*report\.cancelled_count\b/.test(statsBlock)
+  /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/.test(statsBlock)
+  && /salesListFilterReportScope\(where,\s*params\)/.test(statsBlock)
+  && /const totals\s*=\s*await readSalesHeaderTotals\b/.test(statsBlock)
+  && /revenue_count:\s*totals\.sale_count\b/.test(statsBlock)
+  && /const totalCount\s*=\s*totals\.sale_count\s*\+\s*totals\.cancelled_count\b/.test(statsBlock)
   && /total_count:\s*totalCount\b/.test(statsBlock)
   && /revenue_usd:\s*totals\.revenue_usd\b/.test(statsBlock)
   && /pending_revenue_usd:\s*totals\.pending_revenue_usd\b/.test(statsBlock))

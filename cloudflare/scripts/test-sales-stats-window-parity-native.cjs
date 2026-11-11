@@ -169,7 +169,8 @@ const cases = {
     const src = fs.readFileSync(path.join(root, 'src/routes/sales.ts'), 'utf8')
     const block = src.match(/app\.get\('\/stats'[\s\S]*?\n\}\)/)?.[0] || ''
     assert.match(block, /const windowFilter=\{startDate:query\.startDate\|\|null,endDate:query\.endDate\|\|null,startTime:query\.startTime\|\|null,endTime:query\.endTime\|\|null\}/)
-    assert.match(block, /readSalesReportTotals\(c\.env,windowFilter,false,salesListFilterReportScope\(where,params\)\)/)
+    assert.match(block, /readSalesHeaderTotals\(c\.env,\s*windowFilter,\s*scope\)/)
+    assert.match(block, /salesListFilterReportScope\(where,\s*params\)/)
   })
 
   console.log(`\n${passed} passed, ${failures.length} failed`)

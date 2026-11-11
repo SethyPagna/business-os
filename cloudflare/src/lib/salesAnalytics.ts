@@ -897,7 +897,16 @@ export class SalesReportExportTooLargeError extends RangeError {
 
 /** Only full-export callers opt into this receipt ceiling. The shared scalar
  * row ceiling still bounds every reader, including all child records. */
-export interface SalesReportReadOptions { maxReceipts?: number }
+export interface SalesReportReadOptions {
+  maxReceipts?: number
+  /** INTERNAL to readSalesHeaderTotals: read no sale-line rows. Every public reader refuses it (a snapshot without lines would
+   * show cost 0 and a plausible but WRONG profit). */
+  headerOnly?: true
+}
+
+function refuseHeaderOnly(options: SalesReportReadOptions): void {
+  if (options.headerOnly !== undefined) throw new ReportMoneyPrecisionError('unsupported_row')
+}
 
 export type SalesReportScalarScopeValue = string | number | null
 export type SalesReportScalarScope = (saleAlias: string) => {
@@ -1359,7 +1368,7 @@ async function buildSalesReportReadPlan(
     FROM sales s WHERE ${voids.sql}`, idExpr: 's.id', params: voids.params, columns: voidSelect.columns })
   const itemFrom = datedDashboard ? 'sales s CROSS JOIN sale_items si ON si.sale_id=s.id'
     : 'sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id'
-  groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
+  if (!options.headerOnly) groups.push({ kind: 'items', sql: `SELECT ${itemSelect.sql}
     FROM ${itemFrom} WHERE ${primary.sql}`,
     idExpr: 'si.id', params: primary.params, columns: itemSelect.columns })
   // The debt half of a refund (0260); absent columns read as a pre-0260 row.
@@ -1871,7 +1880,7 @@ async function readSalesReportPassLegacy(
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
-  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
+  const items = options.headerOnly ? [] : await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   // The debt half of a refund (0260); absent columns read as a pre-0260 row.
@@ -1995,6 +2004,7 @@ export async function readSalesReportSnapshot(
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
 ): Promise<SalesReportSnapshot> {
+  refuseHeaderOnly(options)
   return routeReportRead(env, 'snapshot',
     () => readSalesReportSnapshotLegacy(env, f, includeDeliveryFees, scalarScope, options),
     () => readSalesReportSnapshotAtomic(env, f, includeDeliveryFees, scalarScope, options),
@@ -2015,6 +2025,44 @@ export async function readSalesReportTotals(
   includeDeliveryFees = false,
   scalarScope?: SalesReportScalarScope,
   options: SalesReportReadOptions = {},
+): Promise<SalesReportTotalsResult> {
+  refuseHeaderOnly(options)
+  return readSalesReportTotalsRouted(env, f, includeDeliveryFees, scalarScope, options)
+}
+
+/** The six numbers GET /api/sales/stats shows, read from sale HEADERS and returns only (no sale-line rows).
+ * Deliberately NOT a SalesTotals: there is no cost or profit here to leak, because without lines they would be wrong. */
+export interface SalesHeaderTotals {
+  revenue_usd: number
+  pending_revenue_usd: number
+  revenue_without_not_paid_usd: number
+  not_paid_owed_usd: number
+  sale_count: number
+  cancelled_count: number
+}
+
+export async function readSalesHeaderTotals(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  scalarScope?: SalesReportScalarScope,
+): Promise<SalesHeaderTotals> {
+  const report = await readSalesReportTotalsRouted(env, f, false, scalarScope, { headerOnly: true })
+  return {
+    revenue_usd: report.totals.revenue_usd,
+    pending_revenue_usd: report.totals.pending_revenue_usd,
+    revenue_without_not_paid_usd: report.totals.revenue_without_not_paid_usd,
+    not_paid_owed_usd: report.totals.not_paid_owed_usd,
+    sale_count: report.sale_count,
+    cancelled_count: report.cancelled_count,
+  }
+}
+
+async function readSalesReportTotalsRouted(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+  includeDeliveryFees: boolean,
+  scalarScope: SalesReportScalarScope | undefined,
+  options: SalesReportReadOptions,
 ): Promise<SalesReportTotalsResult> {
   return routeReportRead(env, 'totals',
     async () => {
