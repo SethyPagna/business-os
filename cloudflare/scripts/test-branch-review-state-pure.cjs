@@ -478,7 +478,7 @@ function world(old = false) {
 const writes = lib('branchWrites')
 const permissions = lib('permissions')
 const broadcast = load('cloudflare/src/durable-objects/broadcastHub').broadcast
-const branchDeps = { ...lib('db'), ...writes, ...permissions, ...lib('conflictControl'), ...lib('canonicalBranchIdentity'), ...lib('reviewGate'), ...lib('businessMaintenanceGuard'), ...lib('actorSnapshot'), ...lib('audit'), broadcast }
+const branchDeps = { bumpVersion: async () => {}, ...lib('db'), ...writes, ...permissions, ...lib('conflictControl'), ...lib('canonicalBranchIdentity'), ...lib('reviewGate'), ...lib('businessMaintenanceGuard'), ...lib('actorSnapshot'), ...lib('audit'), broadcast }
 function branchRoute(method, route, overrides = {}) {
   return evaluate(`const handler=${selectRoute('cloudflare/src/routes/branches.ts', method, route)}`, { ...branchDeps, ...overrides }, 'handler')
 }
