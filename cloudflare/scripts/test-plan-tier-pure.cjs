@@ -161,6 +161,7 @@ const PAID = {
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
   productListCacheSeconds: 60,
+  possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
@@ -208,6 +209,7 @@ const FREE = {
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
   productListCacheSeconds: 3600,
+  possibleDuplicatesCacheSeconds: 3600,
   catalogListWindowPages: 3,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
@@ -240,7 +242,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
 // inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
 // approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
-const FREE_IS_LONGER = ['productListCacheSeconds', 'coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
+const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSeconds', 'coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the

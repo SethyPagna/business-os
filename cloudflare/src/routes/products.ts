@@ -39,6 +39,7 @@ import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { countProductDataGaps, findOpenConflictMarkRequest, listProductDataGaps, parseProductConflictMarkInput, parseProductDataGapKind, preflightProductConflictMark, ProductConflictMarkError, readConfirmedValue, setProductConflictMark } from '../lib/productDataGaps'
+import type { PossiblySameProductCluster, PossiblySameProductEntry } from '../lib/productIdentity'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, findSameIdentityProduct, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeProductClusterKey, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -6514,13 +6515,47 @@ app.post('/merge-duplicates', async (c) => {
 // items"), and a one-pair merge where the REVIEWER picks the keeper.
 // Same permission as the auto-merge -- it is the same kind of action.
 // ---------------------------------------------------------------------------
+// The cached groups with every member's displayed values read live by primary key. Null when a member no longer is what the group was built from (renamed,
+// re-barcoded, deactivated, now a group parent): the caller recomputes, so a write that never announced itself cannot keep a stale group on screen.
+async function withLiveClusterMembers(env: Env, clusters: PossiblySameProductCluster[]): Promise<PossiblySameProductCluster[] | null> {
+  const ids = [...new Set(clusters.flatMap((cluster) => cluster.products.map((member) => Number(member.id))))]
+  if (!ids.length) return clusters
+  const db = getDb(env)
+  // One statement whatever the number of members, seeking by primary key: the unary + keeps the planner off the is_active index (a walk of every active product).
+  const rows = await db.prepare(`SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr, p.selling_price_usd, p.image_path,
+      COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = p.id), 0) AS stock_quantity
+    FROM products p WHERE p.id IN (SELECT value FROM json_each(@ids)) AND ${catalogProductSql('p', false)} AND COALESCE(p.is_group, 0) = 0`).all<PossiblySameProductEntry>({ ids: JSON.stringify(ids) })
+  const live = new Map(rows.map((row) => [Number(row.id), row]))
+  for (const cluster of clusters) {
+    for (const member of cluster.products) {
+      const row = live.get(Number(member.id))
+      if (!row || row.name !== member.name || row.barcode !== member.barcode) return null
+    }
+  }
+  return clusters.map((cluster) => ({
+    ...cluster,
+    products: cluster.products.map((member) => {
+      const row = live.get(Number(member.id))!
+      return { ...member, cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr, selling_price_usd: row.selling_price_usd, stock_quantity: row.stock_quantity, image_path: row.image_path }
+    }),
+  }))
+}
+
 app.get('/possible-duplicates', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const clusters = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
-    await catalogReadVersion(c.env, ['products', 'stock']), 300, () => findPossiblySameProductClusters(getDb(c.env)), cacheIdentity(c))
+  // Which products look the same depends on products rows and the dismissals, never on stock, so the groups are keyed on the products version alone and live for
+  // possibleDuplicatesCacheSeconds. A hit re-reads what a group shows (stock, cost, price, image) live, and a group whose member changed identity or left the
+  // catalogue without announcing it is recomputed instead of served.
+  let produced = false
+  const cached = await cachedJsonResponse(new Request(c.req.url, { method: 'GET' }), c.executionCtx,
+    await catalogReadVersion(c.env, ['products']), getPlanLimits(c.env).possibleDuplicatesCacheSeconds, async () => {
+      produced = true
+      return findPossiblySameProductClusters(getDb(c.env))
+    }, cacheIdentity(c))
+  const clusters = produced ? cached : (await withLiveClusterMembers(c.env, cached)) ?? await findPossiblySameProductClusters(getDb(c.env))
   return c.json({ success: true, clusters })
 })
 
