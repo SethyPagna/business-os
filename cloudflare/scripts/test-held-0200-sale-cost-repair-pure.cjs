@@ -373,6 +373,26 @@ const indexWithAssertionsOnly = (text) => {
     && statements.every((statement) => /^CREATE (UNIQUE )?INDEX /i.test(statement) || isAssertion(statement))
 }
 
+// 0303 (11 Nov D1 audit): partial indexes plus the DROP of ONE duplicate index, with read-only assertions. An index changes no row or column, so creating
+// one cannot change what the repair writes, in either order (the repair inserts audit_logs rows, which only maintain the new partial index; its predicate
+// is a total expression, so no insert can fail on it). A DROP INDEX is different, because a unique index enforces a rule: it is independent only when the
+// dropped index sits on a table the repair neither names nor writes, and an earlier chain file created it. Anything else in the file (a row change, a
+// DROP of an index on a table the repair touches, an index created nowhere earlier) is still a dependency.
+const indexChangesOnly = (text, repairText, earlierText) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const isAssertion = (statement) => /^SELECT CASE WHEN /i.test(statement)
+    && /THEN 1 ELSE json_extract\('\[\]', ?'\$\[\w+\]'\) END$/i.test(statement)
+    && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement.replace(/pragma_index_list|pragma_index_xinfo/gi, ''))
+  const droppedIsSafe = (name) => {
+    const created = new RegExp('CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?' + name + ' ON (\\w+)', 'i').exec(sqlCode(earlierText))
+    return !!created && !namedIn(repairText)(name) && !namedIn(repairText)(created[1]) && !repairWrites(repairText).includes(created[1].toLowerCase())
+  }
+  const create = /^CREATE (UNIQUE )?INDEX /i
+  const drop = /^DROP INDEX (\w+)$/i
+  return statements.some((statement) => create.test(statement) || drop.test(statement))
+    && statements.every((statement) => create.test(statement) || isAssertion(statement) || (drop.test(statement) && droppedIsSafe(drop.exec(statement)[1])))
+}
+
 // A file made only of ALTER TABLE ... ADD COLUMN statements, none of whose new
 // columns the repair names, adds a value the repair never reads or writes, so it
 // cannot interact with it in either order (0208 free_quantity). A column the
@@ -954,7 +974,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
       || (/^SELECT CASE WHEN /i.test(statement) && /THEN 1 ELSE json_extract\('\[\]','\$\[\w+\]'\) END$/.test(statement)
         && !/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|PRAGMA)\b/i.test(statement)))
   }
-  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !costReviewDdl.includes(f) && !(f === '0273_conflict_marks_and_indexes.sql' && conflictMarksFile(chainText(f))) && !admissionGuards.includes(f) && !indexOnly(chainText(f)) && !indexWithAssertionsOnly(chainText(f)) && !indexChangesOnly(chainText(f), migrationText, chain.filter((g) => g < f).map(chainText).join('\n')) && !additiveUnread(chainText(f), migrationText) && !schemaOnlyUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !backfills.includes(f) && !revisionTriggers.includes(f) && !systemMark.includes(f) && !loyaltyResets.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -1017,6 +1037,19 @@ ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;`])
     assert.equal(conflictMarksFile(marks.replace('CURRENT_TIMESTAMP FROM products;', 'CURRENT_TIMESTAMP FROM sale_items;')), false, 'control: a mark read from a table the repair writes is a dependency')
     // A PRE/POST assertion that reads a table the repair writes is a dependency too (this one is only caught by the word-boundary match).
     assert.equal(conflictMarksFile(marks + '\nSELECT CASE WHEN (SELECT COUNT(*) FROM sale_items) >= 0 THEN 1 ELSE json_extract(\'[]\',\'$[conflict_marks_x]\') END;'), false, 'control: an assertion reading sale_items is a dependency')
+  }
+  const queryIndexes = '0303_d1_query_indexes.sql'
+  if (chain.includes(queryIndexes)) {
+    const before = chain.filter((g) => g < queryIndexes).map(chainText).join('\n')
+    const text = chainText(queryIndexes)
+    assert.ok(indexChangesOnly(text, migrationText, before), 'control: the index-only 0303 (two partial indexes, one duplicate dropped) is independent')
+    assert.ok(!indexWithAssertionsOnly(text), 'control: the existing rule alone rejects it (the DROP), so the new rule is what admits it')
+    for (const wrong of [`${text}\nUPDATE sale_items SET cost_price_usd = 0;`, `${text}\nDELETE FROM settings;`, `${text}\nALTER TABLE settings ADD COLUMN z INTEGER;`,
+      `${text}\nDROP INDEX idx_sale_items_sale_id;`, `${text}\nDROP INDEX idx_never_created_anywhere;`, 'CREATE INDEX i ON sale_items(id); UPDATE sale_items SET cost_price_usd = 0;'])
+      assert.equal(indexChangesOnly(wrong, migrationText, before), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+    // A unique index on a table the repair writes is not droppable under this rule, however it is named.
+    assert.equal(indexChangesOnly('DROP INDEX zz_sale_items_unique', migrationText, 'CREATE UNIQUE INDEX zz_sale_items_unique ON sale_items (id);'), false, 'control: dropping an index on a table the repair writes is a dependency')
+    assert.ok(indexChangesOnly('DROP INDEX zz_settings_unique', migrationText, 'CREATE UNIQUE INDEX zz_settings_unique ON settings (key);'), 'control: dropping an index on a table the repair never names is independent')
   }
   const feeIndexes = '0267_fees_created_dt_and_credit_due_indexes.sql'
   if (chain.includes(feeIndexes)) {

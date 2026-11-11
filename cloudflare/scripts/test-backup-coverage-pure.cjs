@@ -163,7 +163,10 @@ check('migrationNumber orders migration names by their leading number', () => {
 
 check('source lock: backups stamp summary.schemaMigration', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'backup.ts'), 'utf8')
-  assert.ok(/schemaMigration: await latestAppliedMigration\(env\)/.test(src), 'the writer must stamp the schema into the summary')
+  // Pins the behaviour, not the call shape: since d1-probes (6.0.1641) the writer passes the table set it already scanned, so the stamp costs no second
+  // sqlite_master read. What must hold is that the summary is stamped, and that the set it passes was scanned WITH d1_migrations (else the stamp is silently null).
+  assert.ok(/schemaMigration: await latestAppliedMigration\(env(, existing)?\)/.test(src), 'the writer must stamp the schema into the summary')
+  assert.ok(/const existing = await presentTableNames\(env, \[\.\.\.tables, 'd1_migrations'\]\)/.test(src), 'the scan whose result the stamp reuses must include d1_migrations')
 })
 
 check('source lock: the restore refuses a newer-schema backup BEFORE any delete, and reports absent tables', () => {

@@ -21,6 +21,7 @@ const count = (source, needle) => code(source).split(needle).length - 1
 // file -> { cachedJsonResponse, put, why } : producers judged to carry NO phone number. A count that grows is a new producer.
 const PHONE_FREE = {
   'routes/batches.ts': { cachedJsonResponse: 1, why: 'tracked product ids' },
+  'routes/lookups.ts': { cachedJsonResponse: 1, why: 'category and unit lists (d1-queries S10): SELECT * from categories/units (name, color, updated_at; no contact column) merged with the distinct category/unit strings products carry' },
   'routes/notifications.ts': { cachedJsonResponse: 1, why: 'inventory / expiry / inventory-full / supplier_credit sections: products and totals (the loyalty section takes the contacts option, below)' },
   'routes/products.ts': { cachedJsonResponse: 6, put: 1, why: 'product search, bootstrap, filters, facets, clusters, counts' },
   'routes/sales.ts': { cachedJsonResponse: 2, why: '/stats and /stats-strip: counts and totals' },

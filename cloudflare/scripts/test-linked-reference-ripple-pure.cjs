@@ -21,10 +21,14 @@ function check(name, fn) {
 
 check('category and unit carry invalidate the product cache and signal product readers', () => {
   const source = readWorker('src/routes/lookups.ts')
-  assert.match(source, /bumpVersion\(c\.env, 'products'\)/)
+  // d1-queries S10 (6.0.1640s) moved the lookups writers from bumpVersion('products') to one bumpVersions(['products', 'lookups']) so the cached category/unit list
+  // invalidates with the rows. The products bump must still happen on BOTH carrying writers (rename/merge and delete), and 'lookups' must ride with it.
+  const carrying = source.match(/await bumpVersions\(c\.env, \['products', LOOKUP_CACHE_NAMESPACE\]\)/g) || []
+  assert.strictEqual(carrying.length, 2, 'rename/merge and delete each bump products together with the lookups version')
   assert.match(source, /broadcast\(c\.env, 'products', \{ action: `\$\{kind\}_ripple`/)
   assert.match(source, /await db\.batch\(\[\.\.\.lookupStatements, \.\.\.carry\.statements\]\)/)
-  assert.ok(source.indexOf("await bumpVersion(c.env, 'products')") < source.indexOf("broadcast(c.env, table, { action: duplicate"), 'cache version must advance before the live rename signal')
+  const bumpAt = source.indexOf("await bumpVersions(c.env, ['products', LOOKUP_CACHE_NAMESPACE])")
+  assert.ok(bumpAt > -1 && bumpAt < source.indexOf("broadcast(c.env, table, { action: duplicate"), 'cache version must advance before the live rename signal')
 })
 
 check('contact rename and merge advance every dependent version namespace', () => {
@@ -59,7 +63,11 @@ check('open pages subscribe to every reference channel they render', () => {
   const review = readFrontend('src/components/review/ReviewQueue.tsx')
   const supplierPicker = readFrontend('src/components/shared/SupplierPickerField.tsx')
   const productForm = readFrontend('src/components/products/forms/ProductForm.tsx')
-  for (const channel of ['customers', 'deliveryContacts', 'users', 'products', 'settings']) assert.ok(sales.includes(`'${channel}'`), `Sales misses ${channel}`)
+  // d1-client C3 (6.0.1623) moved the Sales channel list out of the component into salesReloadCoalescer.ts (one trailing reload per burst). The page must still
+  // react to every one of the eight reference channels, so pin the list where it now lives and that Sales.tsx feeds each sync event into the coalescer.
+  const salesChannels = readFrontend('src/components/sales/salesReloadCoalescer.ts')
+  for (const channel of ['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings']) assert.ok(salesChannels.includes(`'${channel}'`), `Sales reload list misses ${channel}`)
+  assert.ok(sales.includes('salesReloadRef.current?.note({ channel: syncChannel.channel, source: syncChannel.source })'), 'Sales must hand every sync event to the coalescer')
   for (const channel of ['customers', 'suppliers', 'users']) assert.ok(returns.includes(`'${channel}'`), `Returns misses ${channel}`)
   assert.match(sales, /setDetailSale\(refreshOpen\)/, 'open sale detail must rebind to the refreshed stable id')
   assert.match(sales, /setSelectedSale\(refreshOpen\)/, 'open receipt/print must rebind to the refreshed stable id')
@@ -69,7 +77,9 @@ check('open pages subscribe to every reference channel they render', () => {
   assert.match(branches, /channel === 'users'/)
   assert.match(files, /channel === 'files' \|\| channel === 'users'/)
   assert.match(review, /syncChannel\.channel === 'pendingActions' \|\| syncChannel\.channel === 'users'/)
-  assert.match(sales, /syncChannel\.channel === 'users'\) setUserOptionsLoaded\(false\)/, 'cashier filter options must be invalidated')
+  // d1-client C3 (6.0.1623): the users channel now sets plan.userOptions in the coalescer, which the page turns into setUserOptionsLoaded(false) when the burst runs.
+  assert.ok(salesChannels.includes("if (event.channel === 'users') plan.userOptions = true"), 'cashier filter options must be invalidated')
+  assert.ok(sales.includes('if (plan.userOptions) setUserOptionsLoaded(false)'), 'the coalesced plan must reload the cashier options')
   // p9/perf-2: the supplier-name cache moved into the shared picker option
   // cache (frontend/src/api/pickerOptionsCache.ts); the invalidation
   // subscription lives there once per channel, and the picker goes through it.
