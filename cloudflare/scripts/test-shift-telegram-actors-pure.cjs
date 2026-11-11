@@ -169,7 +169,7 @@ async function main() {
   }
   const lang = loadReal('lib/telegramLang.ts')
   const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': dbModule })
-  const telegram = loadReal('lib/telegram.ts', {
+  const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
     './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
     './salesAnalytics': kernelAnalytics, './nativeSaleChange': nativeSaleChange,

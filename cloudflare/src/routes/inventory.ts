@@ -10,16 +10,17 @@ import { executeStockTransaction, stockTransactionRefusal } from '../lib/stockTr
 
 // Positive answers only: a missing schema is re-probed on the next call, a
 // present one stays present for the isolate (migrations only add).
+const OPERATION_WRITE_SCHEMA: readonly SchemaObject[] = [
+  { kind: 'table', name: 'fee_operation_receipts' },
+  { kind: 'trigger', name: 'transfer_receipts_require_provenance_insert' },
+]
 let operationWritesAvailable = false
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
   if (operationWritesAvailable) return true
   try {
-    const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
-      WHERE (type='table' AND name='fee_operation_receipts')
-         OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    operationWritesAvailable = row?.ready === 2
+    operationWritesAvailable = await schemaObjectsPresent(db, OPERATION_WRITE_SCHEMA)
     return operationWritesAvailable
   } catch {
     return false
@@ -82,6 +83,7 @@ import {
 } from '../lib/damagedLotActions'
 import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
 import { addressedStatements, directoryBranchEffect, readBranchDirectory, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
+import { schemaObjectsPresent, type SchemaObject } from '../lib/schemaObjectProbe'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //

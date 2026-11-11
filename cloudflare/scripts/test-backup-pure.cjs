@@ -138,7 +138,7 @@ for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudfla
 
 // ---------------------------------------------------------------------
 // Fake D1 -- covers exactly the four query shapes backup.ts issues:
-//   SELECT name FROM sqlite_master WHERE type = ? AND name = ?  (tableExists)
+//   SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (json_each(?))  (presentTableNames)
 //   PRAGMA table_info("table")                                  (tableColumns)
 //   SELECT * FROM "table"                                       (read all rows)
 //   SELECT * FROM "table" ORDER BY rowid LIMIT ? OFFSET ?       (paged read)
@@ -151,9 +151,9 @@ function makeFakeD1(schema) {
     if (sql.includes('FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name)')) {
       return { all: () => ({ results: Object.keys(schema).map(table_name => ({ table_name, parent_table: null, fk_id: null, fk_seq: null })) }) }
     }
-    if ((m = sql.match(/^SELECT name FROM sqlite_master WHERE type = \? AND name = \?$/))) {
-      const [, tableName] = values
-      return { first: () => (schema[tableName] ? { name: tableName } : null) }
+    if (sql === "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (SELECT value FROM json_each(?))") {
+      const wanted = JSON.parse(values[0])
+      return { all: () => ({ results: wanted.filter((name) => schema[name]).map((name) => ({ name })) }) }
     }
     if ((m = sql.match(/^PRAGMA table_info\("([^"]+)"\)$/))) {
       const table = schema[m[1]]

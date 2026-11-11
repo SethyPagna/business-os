@@ -52,7 +52,7 @@ const dbLib = loadTs('lib/db.ts', { './importMaintenanceFence': {
     ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
   } })
 const realProductWrites = loadTs('lib/productWrites.ts', {
-  './stockMutationReceipt': loadTs('lib/stockMutationReceipt.ts'),
+  './stockMutationReceipt': loadTs('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs') }),
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,
   './receivingBranch': loadTs('lib/receivingBranch.ts'),

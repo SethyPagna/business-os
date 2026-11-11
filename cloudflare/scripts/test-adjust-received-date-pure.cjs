@@ -101,7 +101,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const stockTransaction = loadReal('lib/stockTransaction.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts',{'./stockTransaction':stockTransaction})
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),'./stockTransaction':stockTransaction})
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const receivingBranch = loadReal('lib/receivingBranch.ts')
@@ -191,7 +191,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   // require resolves against scripts/ and the whole loader dies.
   './sqlBinding': sqlBinding,
 })
-const inventoryRoute = loadReal('routes/inventory.ts', {
+const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,

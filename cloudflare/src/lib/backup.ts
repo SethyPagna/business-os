@@ -312,7 +312,7 @@ type BackupPayload = {
 // schema comparison simply doesn't run.
 async function latestAppliedMigration(env: Env, knownTables?: ReadonlySet<string>): Promise<string | null> {
   try {
-    if (knownTables ? !knownTables.has('d1_migrations') : !(await tableExists(env, 'd1_migrations'))) return null
+    if (knownTables ? !knownTables.has('d1_migrations') : !(await presentTableNames(env, ['d1_migrations'])).has('d1_migrations')) return null
     const row = await env.DB.prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1').first<{ name: string }>()
     return row?.name || null
   } catch (_) {
@@ -446,9 +446,11 @@ function qid(id: string): string {
   return `"${id}"`
 }
 
-async function tableExists(env: Env, table: string): Promise<boolean> {
-  const row = await env.DB.prepare('SELECT name FROM sqlite_master WHERE type = ? AND name = ?').bind('table', table).first()
-  return !!row
+// One exact scan of the schema for every wanted table; the caller keeps its own order.
+async function presentTableNames(env: Env, tables: readonly string[]): Promise<Set<string>> {
+  if (!tables.length) return new Set()
+  const result = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (SELECT value FROM json_each(?))").bind(JSON.stringify(tables)).all<{ name: string }>()
+  return new Set((result.results || []).map((row) => row.name))
 }
 
 async function tableColumns(env: Env, table: string): Promise<string[]> {
@@ -765,8 +767,8 @@ async function writeBackupDocument(
     await writer.write(`"source":${JSON.stringify(source)},`)
     await writer.write('"runtime":"cloudflare-workers","tables":{')
 
-    const presentTables: string[] = []
-    for (const table of tables) if (await tableExists(env, table)) presentTables.push(table)
+    const existing = await presentTableNames(env, [...tables, 'd1_migrations'])
+    const presentTables = tables.filter((table) => existing.has(table))
     const upperBounds = await captureRowidUpperBounds(env, presentTables)
 
     for (const table of presentTables) {
@@ -812,7 +814,7 @@ async function writeBackupDocument(
       assetCount: assets.length,
       assetsBackedUp: copiedKeys.length,
       assetsSkipped: Math.max(0, assets.length - copiedKeys.length),
-      schemaMigration: await latestAppliedMigration(env),
+      schemaMigration: await latestAppliedMigration(env, existing),
     }))
     await writer.write('}')
     await writer.finish()
@@ -1684,7 +1686,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     const deletes: D1PreparedStatement[] = []
     // Not a backup table, so the schema discovery above does not list it: ask for it directly (older databases lack it).
     const hasCrossingLog = orderedTables.includes('inventory_movements')
-      && !!(await env.DB.prepare("SELECT 1 AS hit FROM sqlite_master WHERE type = 'table' AND name = ?").bind(STOCK_CROSSING_ALERTS_TABLE).first())
+      && (await presentTableNames(env, [STOCK_CROSSING_ALERTS_TABLE])).has(STOCK_CROSSING_ALERTS_TABLE)
     for (const table of clearedOptionalTables) deletes.push(env.DB.prepare(`DELETE FROM ${qid(table)}`))
     // 0272: the crossing log is not backed up, but its claim keys embed movement and sale ids that this restore rolls back;
     // leaving its rows would let an old key swallow the first crossing after the restore. Cleared whenever the movements are.

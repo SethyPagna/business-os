@@ -117,7 +117,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs') })
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
@@ -222,7 +222,7 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
   './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
 })
 
-const inventoryRoute = loadReal('routes/inventory.ts', {
+const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),

@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
 import type { StockWriteStatement } from './productBatches'
+import { forgetSchemaNames, schemaObjectPresent, type SchemaObject } from './schemaObjectProbe'
 import { executeStockTransaction, stockTransactionStatementCount, StockTransactionUnavailableError, stockTransactionRefusal } from './stockTransaction'
 
 // Per-line idempotency for the two single-line stock write kernels --
@@ -267,20 +268,19 @@ function canonicalStockMutationRequest(body: Record<string, unknown>): string {
 // with no signal anywhere that it was doing so. A miss costs one cheap
 // sqlite_master count on the next request and buys a guard that starts working
 // the moment the table exists.
+const RECEIPTS_TABLE: SchemaObject = { kind: 'table', name: 'stock_mutation_receipts' }
 let schemaReady = false
 
 /** Test-only: forget the memoised probe so one process can exercise both paths. */
 export function resetStockMutationReceiptSchemaProbe(): void {
   schemaReady = false
+  forgetSchemaNames([RECEIPTS_TABLE.name])
 }
 
 async function receiptsAvailable(db: D1Compat): Promise<boolean> {
   if (schemaReady) return true
   try {
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_mutation_receipts'",
-    ).get<{ ready: number }>()
-    if (Number(row?.ready ?? 0) > 0) {
+    if (await schemaObjectPresent(db, RECEIPTS_TABLE)) {
       schemaReady = true
       return true
     }

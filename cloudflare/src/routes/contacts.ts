@@ -2,6 +2,7 @@ import { LOYALTY_DISABLED_CODE, LOYALTY_DISABLED_MESSAGE } from '../lib/loyaltyE
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { schemaObjectPresent } from '../lib/schemaObjectProbe'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
@@ -585,11 +586,9 @@ function conflictResult(error: unknown) {
 const tablesPresent = new Set<string>()
 async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
   if (tablesPresent.has(name)) return true
-  const row = await db
-    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
-    .get<{ ok: number }>({ name })
-  if (row) tablesPresent.add(name)
-  return Boolean(row)
+  const present = await schemaObjectPresent(db, { kind: 'table', name })
+  if (present) tablesPresent.add(name)
+  return present
 }
 
 const CONTACT_MERGE_STALE_ERROR = 'One of these contacts changed while the merge was being saved. Refresh the review and try again.'

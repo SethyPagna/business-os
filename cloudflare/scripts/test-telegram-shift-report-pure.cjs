@@ -107,7 +107,7 @@ const shiftReconciliation = loadReal('lib/shiftReconciliation.ts', {
   './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange,
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
@@ -835,7 +835,7 @@ check(`every section title, in all three modes and both families, keeps to one r
 // from 1 to 40 can: the same sectionHeader, over a language table that names
 // a probe key after itself, so an odd spare character, a name exactly the
 // row's width and a name longer than it are all judged too.
-const probeTelegram = loadReal('lib/telegram.ts', {
+const probeTelegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
   './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
   './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
