@@ -98,6 +98,7 @@ import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { findScanHit } from '../../utils/scanExactHit.ts'
 import { classifyScanMiss } from '../../utils/scanMiss.ts'
+import { posCustomerSearchRequest } from './posCustomerSearch.ts'
 import { catalogHasBarcode, isProductSearchTooShort, productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
@@ -1348,11 +1349,11 @@ export default function POS() {
   const filterMetaRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
-  const customerOptionsLoadedRef = useRef(false)
   // The customer term the picker is currently showing results for, kept in
   // a ref so the sync-push effect can re-run that search without listing
   // customerSearch among its dependencies (see its comment).
   const customerSearchRef = useRef('')
+  const customerPickerOpenRef = useRef(false)
   const deliveryOptionsLoadedRef = useRef(false)
   const membershipRequestRef = useRef(0)
   const savingCustomerRef = useRef(false)
@@ -1643,7 +1644,6 @@ export default function POS() {
       const nextCustomers = Array.isArray(rows) ? rows : []
       setCustomers(nextCustomers)
       setCustomerResultsQuery(search.trim())
-      customerOptionsLoadedRef.current = true
       return nextCustomers
     } catch (error) {
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
@@ -1827,25 +1827,25 @@ export default function POS() {
     if (tasks.length) void Promise.allSettled(tasks)
   }, [active?.isDelivery, contactOptionsReady, isActive, loadDeliveryContacts, showAddDelivery, showDelivery])
 
+  customerSearchRef.current = String(active?.customerSearch || '').trim()
+  customerPickerOpenRef.current = showCustomer && showCustomerDrop
   // Customer typeahead: one debounced, bounded server read per search term
-  // while the customer section (or its create dialog) is open. This replaced
+  // while the picker is open and two characters are typed. This replaced
   // a single "load every customer once, then filter in memory" read -- fine
   // at a few hundred contacts, ruinous at thousands, and the reason an
   // unfiltered /api/customers showed up in the production logs.
   useEffect(() => {
     if (!isActive || !contactOptionsReady) return undefined
-    if (!showCustomer && !showAddCustomer) return undefined
-    const search = String(active?.customerSearch || '').trim()
-    customerSearchRef.current = search
-    // The first open has nothing typed yet and no rows to show: fetch that
-    // first page immediately rather than making the person wait out a
-    // debounce for a term they have not entered.
-    const delay = !customerOptionsLoadedRef.current && !search ? 0 : POS_CUSTOMER_SEARCH_DEBOUNCE_MS
+    // Asks only while the person is in the box: picking a customer closes the
+    // drop and writes the name into the box, which must not search that name;
+    // clicking back into the box opens it again and searches then.
+    const search = posCustomerSearchRequest(active?.customerSearch || '', showCustomer && showCustomerDrop)
+    if (search === null) return undefined
     const timer = window.setTimeout(() => {
       void loadCustomers('POS customer search', search)
-    }, delay)
+    }, POS_CUSTOMER_SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
-  }, [active?.customerSearch, contactOptionsReady, isActive, loadCustomers, showAddCustomer, showCustomer])
+  }, [active?.customerSearch, contactOptionsReady, isActive, loadCustomers, showCustomer, showCustomerDrop])
 
   useEffect(() => {
     if (!isActive) {
@@ -1933,9 +1933,8 @@ export default function POS() {
             )))
           }
         }
-        if (customerOptionsLoadedRef.current) {
-          await loadCustomers('POS sync customers', customerSearchRef.current)
-        }
+        const openSearch = posCustomerSearchRequest(customerSearchRef.current, customerPickerOpenRef.current)
+        if (openSearch !== null) await loadCustomers('POS sync customers', openSearch)
       })()
     }
     if (channel === 'deliveryContacts' && deliveryOptionsLoadedRef.current) {
