@@ -154,8 +154,12 @@ await runTest('apply posts the held request verbatim with a long timeout contrac
     cacheSet('sales:rows', { stale: true })
     cacheSet('dashboard:summary', { stale: true })
     cacheSet('analytics:summary', { stale: true })
-    cacheSet('products:rows', { keep: true })
-    cacheSet('inventory:rows', { keep: true })
+    // 6.0.1630 (d1-stale): the repair mirrors the normal sales-write invalidation, and a sales write now also drops the stock readers (a sale moves stock,
+    // so that is right for every sale writer). A read of an unrelated family must still survive, so settings and users stand in for "not touched".
+    cacheSet('products:search:x', { stale: true })
+    cacheSet('inventory:rows', { stale: true })
+    cacheSet('settings:rows', { keep: true })
+    cacheSet('users:rows', { keep: true })
     const first = await applyLegacySubtotalRepair(heldRequest)
     const second = await applyLegacySubtotalRepair(heldRequest)
     assert.equal(first.outcome, 'already_applied')
@@ -165,8 +169,10 @@ await runTest('apply posts the held request verbatim with a long timeout contrac
     assert.equal(cacheGet('sales:rows'), null)
     assert.equal(cacheGet('dashboard:summary'), null)
     assert.equal(cacheGet('analytics:summary'), null)
-    assert.deepEqual(cacheGet('products:rows'), { keep: true })
-    assert.deepEqual(cacheGet('inventory:rows'), { keep: true })
+    assert.equal(cacheGet('products:search:x'), null)
+    assert.equal(cacheGet('inventory:rows'), null)
+    assert.deepEqual(cacheGet('settings:rows'), { keep: true })
+    assert.deepEqual(cacheGet('users:rows'), { keep: true })
     for (const [url, init] of calls) {
       assert.equal(String(url), 'https://sync.example.test/api/system/finalize-migration')
       assert.equal(init?.method, 'POST')

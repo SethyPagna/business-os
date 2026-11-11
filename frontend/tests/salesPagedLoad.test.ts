@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import { transformSync } from 'esbuild'
 import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../src/utils/loaders.ts'
+import { createSalesReloadCoalescer } from '../src/components/sales/salesReloadCoalescer.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 let failed = 0
@@ -32,7 +33,9 @@ function effectBody(closingDeps: string): string {
   return `(() => {${sales.slice(start + 'useEffect(() => {'.length, end)}})`
 }
 const activationSource = effectBody('  }, [clearLoadWatchdog, isActive, loadSales])')
-const syncSource = effectBody('  }, [isActive, loadSales, loadSalesStats, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])')
+// d1-client C3 (6.0.1623): the sync effect no longer reads. It only hands the event to the Sales reload coalescer (one trailing reload per burst), and its
+// dependencies no longer include loadSales, so a filter change cannot replay it. The harness below runs the REAL coalescer on a fake clock.
+const syncSource = effectBody('  }, [isActive, syncChannel?.channel, syncChannel?.ts, syncChannel?.source])')
 
 type Row = { id: number; date: string; status: string; total: number }
 type Call = { date: string; page: number; limit: number; sortBy: string; sortDir: string; status?: string; signal: AbortSignal }
@@ -68,6 +71,21 @@ function harness(api: ReturnType<typeof server>) {
     loadWatchdogRef: { current: undefined }, handledSyncRef: { current: '' },
   }
   const view = { sales: [] as Row[], published: [] as Row[][], errors: [] as unknown[], loading: [] as boolean[], stats: 0 }
+  // The real coalescer on a manual clock: flush() fires the pending trailing reload, the way the quiet window elapsing does.
+  const timers = new Map<number, () => void>()
+  let nextTimer = 1
+  let pageActive = true
+  const salesReloadRef = {
+    current: createSalesReloadCoalescer(
+      { setTimeout: (callback, _ms) => { const id = nextTimer++; timers.set(id, callback); return id }, clearTimeout: (id) => { timers.delete(id) }, now: () => 0 },
+      // The same body as Sales.tsx runSalesReloadRef: nothing while hidden; rows and totals together; the strip on its own.
+      (plan) => {
+        if (!pageActive) return
+        if (plan.rowsAndTotals) { void refs.latestLoadRef.current(true); view.stats += 1 }
+      },
+    ),
+  }
+  const flush = () => { for (const [id, callback] of [...timers]) { timers.delete(id); callback() } }
   const render = (props: Props) => compile(loadSalesSource, {
     ...refs, useCallback: (callback: unknown) => callback, statusSecurityScope: 's1', authReady: true, canViewSales: true,
     salesPageRowsRef: { current: null },
@@ -91,20 +109,22 @@ function harness(api: ReturnType<typeof server>) {
   const filterKey = (p: Props) => JSON.stringify([p.date, p.status, p.sortBy, p.sortDir, p.page])
   const commit = (props: Props) => {
     const isActive = props.isActive ?? true
+    pageActive = isActive
     const load = last && filterKey(last.props) === filterKey(props) ? last.load : render(props)
     refs.latestLoadRef.current = load
     const env = {
-      ...refs, isActive, loadSales: load, syncChannel: props.sync ?? null,
-      setHistoryReady: () => {}, clearLoadWatchdog: () => {}, invalidateTrackedRequest, salesStatsRequestRef: { current: 0 }, setLoading: () => {},
+      ...refs, isActive, loadSales: load, syncChannel: props.sync ?? null, salesReloadRef,
+      setHistoryReady: () => {}, clearLoadWatchdog: () => {}, invalidateTrackedRequest, salesStatsRequestRef: { current: 0 }, salesStatsAbortRef: { current: null }, setLoading: () => {},
       setUserOptionsLoaded: () => {}, loadSalesStats: async () => { view.stats += 1 }, loadStatsStrip: async () => {},
     }
     if (!last || last.isActive !== isActive || last.load !== load) (compile(`const run = ${activationSource}`, env, 'run') as () => void)()
     const syncKey = props.sync ? `${props.sync.channel}:${props.sync.ts}` : ''
-    if (!last || last.isActive !== isActive || last.load !== load || last.syncKey !== syncKey) (compile(`const run = ${syncSource}`, env, 'run') as () => void)()
+    // React re-runs the sync effect only when isActive or the event changed (loadSales is not a dependency any more).
+    if (!last || last.isActive !== isActive || last.syncKey !== syncKey) (compile(`const run = ${syncSource}`, env, 'run') as () => void)()
     last = { props, load, isActive, syncKey }
     return load
   }
-  return { refs, view, render, commit }
+  return { refs, view, render, commit, flush }
 }
 const ids = (rows: Row[]) => rows.map((row) => row.id)
 const fresh = async (rows: Row[], props: Props) => { const api = server(rows); const h = harness(api); h.commit(props); await settle(); return ids(h.view.sales) }
@@ -163,30 +183,37 @@ await test('a refresh equals a fresh load of the page: a sale that left the filt
     h.commit({ date: 'T', status: 'completed', ...sort }); await settle()
     api.rows.find((row) => row.id === 3)!.status = 'cancelled'
     api.rows.push({ id: 4, date: 'T', status: 'completed', total: 3 })
-    h.commit({ date: 'T', status: 'completed', ...sort, sync: { channel: 'sales', ts: 1 } }); await settle()
+    h.commit({ date: 'T', status: 'completed', ...sort, sync: { channel: 'sales', ts: 1 } }); h.flush(); await settle()
     assert.deepEqual(ids(h.view.sales), await fresh(api.rows, { date: 'T', status: 'completed', ...sort }), `${sort.sortBy} ${sort.sortDir}`)
     assert.ok(!ids(h.view.sales).includes(3))
   }
 })
 
-await test('the sync guard: two events read twice; an event with a filter change reads once; a hidden page reads on return', async () => {
+await test('the sync guard: two bursts read twice, one burst once; an event with a filter change reads once; a hidden page reads on return', async () => {
   const api = server(day('T', 30)); const h = harness(api)
   h.commit({ date: 'T' }); await settle(); assert.equal(api.calls.length, 1)
-  h.commit({ date: 'T', sync: { channel: 'sales', ts: 1 } }); await settle()
-  h.commit({ date: 'T', sync: { channel: 'sales', ts: 2 } }); await settle()
-  assert.equal(api.calls.length, 3, 'two events, two reads')
+  h.commit({ date: 'T', sync: { channel: 'sales', ts: 1 } }); h.flush(); await settle()
+  h.commit({ date: 'T', sync: { channel: 'sales', ts: 2 } }); h.flush(); await settle()
+  assert.equal(api.calls.length, 3, 'two events a quiet window apart, two reads')
   // A filter change after the last event: the effect re-runs (loadSales changed) but the event was handled already.
   h.commit({ date: 'T', status: 'completed', sync: { channel: 'sales', ts: 2 } }); await settle()
   assert.equal(api.calls.length, 4, 'a filter change is one read, not one plus a replayed event')
   // An event and a filter change in the same commit: the foreground read, and the event coalesces behind it.
-  h.commit({ date: 'T', status: 'all', sync: { channel: 'sales', ts: 3 } }); await settle()
+  h.commit({ date: 'T', status: 'all', sync: { channel: 'sales', ts: 3 } }); h.flush(); await settle()
   assert.equal(api.calls.length, 6, 'the new query, then the one queued refresh for the event')
+  // d1-client C3: a burst of events inside one quiet window is ONE reload (it was one per event), whatever the channels.
+  h.commit({ date: 'T', status: 'all', sync: { channel: 'sales', ts: 4 } })
+  h.commit({ date: 'T', status: 'all', sync: { channel: 'returns', ts: 5 } })
+  h.commit({ date: 'T', status: 'all', sync: { channel: 'customers', ts: 6 } })
+  assert.equal(api.calls.length, 6, 'nothing reads until the quiet window ends')
+  h.flush(); await settle()
+  assert.equal(api.calls.length, 7, 'three events in one burst read once')
   // Hidden: an event reads nothing; coming back reads once.
-  h.commit({ date: 'T', status: 'all', isActive: false, sync: { channel: 'sales', ts: 3 } }); await settle()
-  h.commit({ date: 'T', status: 'all', isActive: false, sync: { channel: 'sales', ts: 4 } }); await settle()
-  assert.equal(api.calls.length, 6, 'an event while Sales is hidden reads nothing')
-  h.commit({ date: 'T', status: 'all', isActive: true, sync: { channel: 'sales', ts: 4 } }); await settle()
-  assert.equal(api.calls.length, 7, 'showing Sales again reads once, covering that event')
+  h.commit({ date: 'T', status: 'all', isActive: false, sync: { channel: 'sales', ts: 6 } }); h.flush(); await settle()
+  h.commit({ date: 'T', status: 'all', isActive: false, sync: { channel: 'sales', ts: 7 } }); h.flush(); await settle()
+  assert.equal(api.calls.length, 7, 'an event while Sales is hidden reads nothing')
+  h.commit({ date: 'T', status: 'all', isActive: true, sync: { channel: 'sales', ts: 7 } }); h.flush(); await settle()
+  assert.equal(api.calls.length, 8, 'showing Sales again reads once, covering that event')
   assert.ok(h.view.stats >= 3, 'each handled event also refreshes the summary')
 })
 
