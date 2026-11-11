@@ -8,6 +8,10 @@ function store(): Storage {
   return { get length() { return m.size }, clear() { m.clear() }, key: (i: number) => [...m.keys()][i] ?? null, getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, String(v)) }, removeItem: (k: string) => { m.delete(k) } }
 }
 Object.assign(globalThis as any, { localStorage: store(), sessionStorage: store() })
+// Signed in (B9): a window stub plus a businessos_user puts apiFetch/route() in the privateRead mode the till actually runs in;
+// without a window the test ran signed out and passed on a build that failed signed in.
+const __st=new Map([['businessos_user', JSON.stringify({id:1, role:'admin'})]]);
+Object.assign(globalThis, { window: { location: { origin: 'https://admin.fixture.test', hostname: 'admin.fixture.test' }, localStorage: { getItem:(k: string)=>__st.get(k)??null, setItem:(k,v)=>{__st.set(k,String(v))}, removeItem:(k: string)=>{__st.delete(k)} }, sessionStorage: { getItem: () => null, setItem(){}, removeItem(){} }, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout, dispatchEvent: () => true, addEventListener: () => {}, removeEventListener: () => {} } })
 const http = await import('../src/api/http.ts')
 const { getNotificationSummary, getNotificationSectionItems } = await import('../src/api/notificationSummary.ts')
 const bell = await import('../src/api/bellFreshness.ts')
