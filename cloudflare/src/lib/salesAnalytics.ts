@@ -135,7 +135,7 @@
 // reports the reversal the COGS floor could not absorb, which is the missing
 // cost snapshot the floor used to swallow silently.
 import { getDb } from './db'
-import { tableColumnSet } from './schemaProbe'
+import { prefetchTableColumns, tableColumnSet } from './schemaProbe'
 import type { Env } from '../index'
 import {
   localRangeClockError,
@@ -813,11 +813,16 @@ function whereRemovalMovements(f: SalesFilters): { sql: string; params: Record<s
   // scoped to -- so a removal made during someone else's shift stays on theirs.
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
+    // The plain widened bounds beside the exact datetime() terms (the same pair shiftWindowWhere emits for sales, returns and fees): without them no index on
+    // created_at can narrow this read and a shift close walked every removal the cashier ever made. -1 day below, +2 days above: a row stored with an offset has a
+    // text date a day either side of its UTC date (+1 day above drops +07:00 rows). Pinned by test-shift-removal-window-bounds-native.cjs.
+    clauses.push("m.created_at >= date(@createdFrom, '-1 day')")
     clauses.push('datetime(m.created_at) >= @createdFrom')
     params.createdFrom = createdFrom
   }
   const createdTo = shiftWindowBound(f.createdTo)
   if (createdTo) {
+    clauses.push("m.created_at < date(@createdTo, '+2 day')")
     clauses.push('datetime(m.created_at) < @createdTo')
     params.createdTo = createdTo
   }
@@ -1114,7 +1119,14 @@ function applySalesReportScalarScope<T extends { sql: string; params: Record<str
 // getSalesDayReport/getSalesPeriodSeries call sites below); each column set
 // is memoized per isolate by schemaProbe.ts's shared helper instead of
 // firing a fresh PRAGMA table_info() every time.
+// The tables every report read probes (the legacy and the planned pass, the restore check). A cold isolate asks for all eight in ONE statement instead of
+// eight PRAGMAs; a table the combined probe does not return falls back to its own PRAGMA (schemaProbe.prefetchTableColumns).
+const REPORT_COLUMN_TABLES = ['system_flags', 'sales', 'sale_items', 'returns', 'return_items', 'fees', 'customers', 'delivery_contacts'] as const
+export async function prefetchReportColumns(env: Env): Promise<void> {
+  await prefetchTableColumns(getDb(env), REPORT_COLUMN_TABLES)
+}
 async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
+  if ((REPORT_COLUMN_TABLES as readonly string[]).includes(table)) await prefetchTableColumns(db, REPORT_COLUMN_TABLES)
   return tableColumnSet(db, table)
 }
 
@@ -2843,9 +2855,23 @@ export async function getSalesTotalsWithoutLosses(env: Env, f: SalesFilters): Pr
     })
 }
 
-export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
+/**
+ * One PHASE's report snapshot, shared. getSalesTotals and getPaymentMethodBreakdown both read `readSalesReportSnapshot(env, f)` (no delivery fees, no scope), so two
+ * readers of the SAME window in the SAME phase -- the Telegram shift report prints both -- may pass one memo and run the two-pass reader once. The memo holds the
+ * promise, is made per phase by the caller and dropped with it (lib/shiftReconciliation.ts ShiftReadMemo is the same Map); nothing is kept across requests.
+ */
+export type ReportReadMemo = Map<string, Promise<unknown>>
+function readWindowSnapshot(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesReportSnapshot> {
+  if (!memo) return readSalesReportSnapshot(env, f)
+  const key = `report-snapshot|${JSON.stringify(f)}`
+  let hit = memo.get(key) as Promise<SalesReportSnapshot> | undefined
+  if (!hit) { hit = readSalesReportSnapshot(env, f); memo.set(key, hit) }
+  return hit
+}
+
+export async function getSalesTotals(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<SalesTotals> {
   const [snapshot, loss] = await Promise.all([
-    readSalesReportSnapshot(env, f),
+    readWindowSnapshot(env, f, memo),
     removalLossesFor(env, f),
   ])
   return withRemovalLosses(salesTotalsFromSnapshot(snapshot), loss)
@@ -3228,8 +3254,8 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
   })).sort((a, b) => b.collected_usd - a.collected_usd)
 }
 
-export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Promise<PaymentMethodBreakdownRow[]> {
-  const snapshot = await readSalesReportSnapshot(env, f)
+export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters, memo?: ReportReadMemo): Promise<PaymentMethodBreakdownRow[]> {
+  const snapshot = await readWindowSnapshot(env, f, memo)
   if (snapshot) return paymentMethodBreakdownFromSnapshot(snapshot)
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)

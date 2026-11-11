@@ -12,7 +12,7 @@ import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
   applyShiftTimeReview, readShiftCloseInputsDigest, readShiftTimeReview, shiftCloseInputsDigestSql, shiftLastActivityMs, SHIFT_REVIEW,
-  type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
+  type ShiftReadMemo, type ShiftTimeReview, type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from '../lib/saleStatusResolution'
@@ -64,7 +64,7 @@ app.use('*', async (c, next) => {
   // allows (N7 -- close and cancel yes, amend and reopen no).
   const replay = async () => {
     const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
-      WHERE user_id=@actor AND action=@action AND json_valid(details)
+      WHERE +user_id=@actor AND action=@action AND json_valid(details)
         AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1`)
       .get<{ entity_id: string; details: string }>({ actor: user.id, action: `shift.${action}`, requestId: body.client_request_id })
     if (!receipt) return null
@@ -885,11 +885,11 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
  * committed by the time this runs, and losing the receipt-side arithmetic
  * must not turn a successful close into a 500 the cashier will retry.
  */
-async function reconciliationFor(env: Env, user: SessionUser, shift: ShiftRow): Promise<ShiftReconciliation | null> {
+async function reconciliationFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: ShiftReadMemo): Promise<ShiftReconciliation | null> {
   // Registered counts remain operational records; derived business comparisons
   // belong to the same admin reviewer as figures, including replay responses.
   if (!canManageShifts(user)) return null
-  try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
+  try { return await loadShiftReconciliation(env, shift, Date.now(), { memo }) } catch { return null }
 }
 /**
  * ---- A closed shift's drawer is the one it closed on (N4) ----------------
@@ -923,20 +923,20 @@ async function storedCloseFigures(env: Env, shiftId: number): Promise<ShiftClose
     return row ? parseShiftCloseFigures(row.figures_json) : null
   } catch { return null }
 }
-async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean }): Promise<ShiftDrawer> {
+async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean }, memo?: ShiftReadMemo): Promise<ShiftDrawer> {
   const none: ShiftDrawer = { reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null }
   if (!canManageShifts(user)) return none
   const nowMs = Date.now()
   const [computed, stored] = await Promise.all([
-    reconciliationFor(env, user, shift),
+    reconciliationFor(env, user, shift, memo),
     shift.closed_at ? storedCloseFigures(env, shift.id) : Promise.resolve(null),
   ])
   if (!stored) return { ...none, reconciliation: computed, reconciliation_source: computed ? 'computed' : null }
   let drift: ShiftCloseDrift | null = null
   if (options.drift && computed) {
-    try { drift = await loadShiftCloseDrift(env, shift, stored, computed, nowMs) } catch { drift = null }
+    try { drift = await loadShiftCloseDrift(env, shift, stored, computed, nowMs, memo) } catch { drift = null }
   }
-  const standing = await readShiftTimeReview(env, shift.id)
+  const standing = await readShiftTimeReview(env, shift.id, memo)
   return { reconciliation: applyShiftTimeReview(stored.reconciliation, standing), reconciliation_source: 'stored',
     close_figures_taken_at: stored.taken_at || null, close_drift: drift }
 }
@@ -982,18 +982,21 @@ function isCloseInputsChangedError(error: unknown): boolean {
  * Null on failure, for the same reason as the reconciliation: the close has
  * already committed, and losing the report half must never fail the request.
  */
-async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow): Promise<ShiftFigures | null> {
+async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow, memo?: ShiftReadMemo): Promise<ShiftFigures | null> {
   if (!canManageShifts(user)) return null
-  try { return await loadShiftFigures(env, shift, Date.now()) } catch { return null }
+  try { return await loadShiftFigures(env, shift, Date.now(), memo) } catch { return null }
 }
 type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
   figures?: ShiftFigures | null
 }
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
   const shift = await presentShift(getDb(env), user, row)
+  // The presentation after the commit is ONE phase: the drawer and the figures read the same expenses, courier payouts, cash config and time review side by
+  // side, so they share one statement each (lib/shiftReconciliation.ts ShiftReadMemo). Made here, after the commit, so it can never reach the digest.
+  const memo: ShiftReadMemo = new Map()
   const [drawer, figures] = await Promise.all([
-    drawerFor(env, user, shift, { drift: true }),
-    figuresFor(env, user, shift),
+    drawerFor(env, user, shift, { drift: true }, memo),
+    figuresFor(env, user, shift, memo),
   ])
   return { ...shift, ...drawer, figures }
 }
