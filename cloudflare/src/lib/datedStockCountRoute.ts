@@ -338,11 +338,14 @@ export async function buildDatedStockCountPlan(
   const supersededMovements = existingCountMovements.filter((m) => countedDates.has(`${m.productId}:${m.branchId}:${m.date}`))
   const strayLotActions = await resolveLotsToCountedProduct(db, supersededMovements)
 
+  // `+branch_id` keeps the planner on the (product_id, branch_id) unique index instead of reading the whole branch through the covering branch index; the unary +
+  // drops the column's integer affinity, so each bound branch id is cast back (a TEXT-bound id would otherwise match no row).
+  const bCastIn = bIn.split(', ').map((name) => `CAST(${name} AS INTEGER)`).join(', ')
   const stockRows: Array<{ productId: number; branchId: number; quantity: number }> = []
   for (const chunk of productChunks) {
     const { sql: pIn, params: pParams } = buildInClause('p', chunk)
     const rows = await db.prepare(
-      `SELECT product_id AS productId, branch_id AS branchId, quantity FROM branch_stock WHERE product_id IN (${pIn}) AND branch_id IN (${bIn})`,
+      `SELECT product_id AS productId, branch_id AS branchId, quantity FROM branch_stock WHERE product_id IN (${pIn}) AND +branch_id IN (${bCastIn})`,
     ).all<{ productId: number; branchId: number; quantity: number }>({ ...pParams, ...bParams })
     stockRows.push(...rows)
   }

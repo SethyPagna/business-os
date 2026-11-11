@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { auditChangeColumns, requestDeviceColumnSql, requestDeviceParams, type AuditFieldChange } from './audit'
+import { auditChangeColumns, requestDeviceIsActor, type AuditFieldChange } from './audit'
 
 // Idempotency for a configuration write with NO new table. Used today by the promotions
 // routes, whose audit entities are 'promotion' (announcement cards) and 'promotion_rule': the
@@ -104,22 +104,23 @@ export function receiptAuditStatement(args: {
   const idSql = args.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entityId'
   const details = JSON.stringify({ ...args.details, request: { id: args.key.requestId, canonical: args.canonical } })
   const columns = auditChangeColumns(args.change)
+  const ownDevice = requestDeviceIsActor(args.key.actorId)
   return {
     sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
       SELECT @receiptActor, COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@actorName), '')),
         @receiptAction, @receiptEntity, ${idSql}, @details, @receiptEntity, ${idSql}, @oldValue, @newValue,
-        ${requestDeviceColumnSql('@receiptActor', 'device_name', 's.device_name')}, ${requestDeviceColumnSql('@receiptActor', 'device_tz', 's.device_tz')}
+        ${ownDevice ? '@req_dev_name' : 's.device_name'}, ${ownDevice ? '@req_dev_tz' : 's.device_tz'}
       FROM (SELECT 1 AS one) AS _receipt
       LEFT JOIN users u ON u.id = @receiptActor
-      LEFT JOIN (
+      ${ownDevice ? '' : `LEFT JOIN (
         SELECT device_name, device_tz FROM user_sessions
         WHERE user_id = @receiptActor AND revoked_at IS NULL
         ORDER BY last_seen_at DESC, id DESC LIMIT 1
-      ) AS s ON 1 = 1
+      ) AS s ON 1 = 1`}
       WHERE changes() = 1`,
     params: {
       ...receiptParams(args.key),
-      ...requestDeviceParams(),
+      ...(ownDevice ? { req_dev_name: ownDevice.deviceName, req_dev_tz: ownDevice.deviceTz } : {}),
       actorName: args.actorName,
       ...(args.entityIdFromLastInsert ? {} : { entityId: args.entityId ?? null }),
       details,

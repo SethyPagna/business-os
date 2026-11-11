@@ -17,28 +17,24 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "485944539586",
-   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+   "f75d32afc326",
+   "SELECT type, name FROM sqlite_master WHERE name IN (SELECT value FROM json_each(?1))"
   ],
   [
    "73cc5956f4a0",
    "SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipts W"
   ],
   [
-   "99d544d9f96b",
+   "19d6cbfdd983",
    "SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr FROM pr"
   ],
   [
-   "8ad7fdb79b38",
-   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ?1 AND product_id IN (?2, ?3, ?4, ?5, ?6)"
+   "362bb46ee5c9",
+   "SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(?1 AS INTEGER) AND product_id IN (SELECT"
   ],
   [
-   "dd399bbd5e78",
-   "SELECT id, name, role FROM branches WHERE id = ?1"
-  ],
-  [
-   "dd399bbd5e78",
-   "SELECT id, name, role FROM branches WHERE id = ?1"
+   "55c488a957b2",
+   "SELECT id, name, role FROM branches WHERE id IN (?1, ?2)"
   ],
   [
    "e92f77fc884f",
@@ -63,28 +59,24 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "485944539586",
-   "SELECT COUNT(*) AS ready FROM sqlite_master WHERE (type='table' AND name='fee_operation_receipts') OR (type='t"
+   "f75d32afc326",
+   "SELECT type, name FROM sqlite_master WHERE name IN (SELECT value FROM json_each(?1))"
   ],
   [
    "73cc5956f4a0",
    "SELECT actor_id,request_id,request_digest,request_json,response_json,status FROM transfer_operation_receipts W"
   ],
   [
-   "1b3ad890ae1b",
+   "19d6cbfdd983",
    "SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr FROM pr"
   ],
   [
-   "1a54aae230dc",
-   "SELECT product_id, quantity FROM branch_stock WHERE branch_id = ?1 AND product_id IN (?2, ?3, ?4, ?5, ?6, ?7, "
+   "362bb46ee5c9",
+   "SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(?1 AS INTEGER) AND product_id IN (SELECT"
   ],
   [
-   "dd399bbd5e78",
-   "SELECT id, name, role FROM branches WHERE id = ?1"
-  ],
-  [
-   "dd399bbd5e78",
-   "SELECT id, name, role FROM branches WHERE id = ?1"
+   "55c488a957b2",
+   "SELECT id, name, role FROM branches WHERE id IN (?1, ?2)"
   ],
   [
    "e92f77fc884f",

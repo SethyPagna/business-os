@@ -648,7 +648,7 @@ app.post('/transfer-bulk', async (c) => {
       SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
       FROM products WHERE id IN (SELECT value FROM json_each(@ids))
     `).all<ProductIdentityRow>({ ids: productIdsJson }),
-    db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (SELECT value FROM json_each(@ids))`)
+    db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(@branchId AS INTEGER) AND product_id IN (SELECT value FROM json_each(@ids))`)
       .all<{ product_id: number; quantity: number }>({ ids: productIdsJson, branchId: fromBranchId }),
     db.prepare('SELECT id, name, role FROM branches WHERE id IN (@from, @to)').all<{ id: number; name: string; role: string | null }>({ from: fromBranchId, to: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
@@ -1116,6 +1116,8 @@ app.put('/:id', async (c) => {
   }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
+  // Every product row lists the branches (name, is_active) beside its stock, so a branch edit turns the product lists over.
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // The edit re-stamps the branch name on the branch's sales (branchNameSnapshotStatements), which the Expenses list shows on its courier rows.
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
   if (!committedBranch) throw new Error('The committed branch response is unavailable.')

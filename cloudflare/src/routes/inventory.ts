@@ -2747,6 +2747,8 @@ app.post('/dated-stock-count/resolve', async (c) => {
   if (branchesCreated.length) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_branch_create', 'inventory', null, { branchesCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update' }))
+    // A new branch adds a column to every product row's branch_stock list, so the product lists turn over (branches.ts does the same).
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   }
 
   return c.json({ success: true, resolved, unresolved, branchesCreated })
@@ -2781,6 +2783,8 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_resolve_products_created', 'inventory', null, { productsCreated: result.productsCreated })
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   }
+  // New products, and a price decision on an existing one, both change product rows: the product lists turn over now, not at their TTL.
+  if (result.productsCreated.length || decisionsIn.length) c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({ success: true, ...result })
 })

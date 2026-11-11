@@ -67,6 +67,12 @@ check('outside a request the freshest live session is the fallback, as before', 
 check('a request session with no device records none, never another session\'s', () => {
   assert.deepEqual(receipt(5, { userId: 5, deviceName: null, deviceTz: null }), { device_name: null, device_tz: null })
 })
+check('the receipt statement joins user_sessions only for an actor who is not the request user', () => {
+  const sqlFor = (actorId, device) => { globalThis[hookKey] = { current: () => device }; return receiptAuditStatement({ key: { actorId, action: 'update', entity: 'promotion', requestId: 'req-shape-xxxxxxxx' }, actorName: 'x', entityId: 1, details: {}, canonical: '{}' }).sql }
+  assert.doesNotMatch(sqlFor(5, tablet), /user_sessions/)
+  assert.match(sqlFor(6, tablet), /user_sessions/)
+  assert.match(sqlFor(5, undefined), /user_sessions/)
+})
 delete globalThis[hookKey]
 
 const FRESHEST = /ORDER BY last_seen_at DESC, ?id DESC/g
@@ -102,7 +108,8 @@ check('contacts: the award-points INSERT and the merge both prefer the request d
 check('auditWriteReceipt: no bare freshest-session device', () => {
   const text = read('lib/auditWriteReceipt.ts')
   assert.doesNotMatch(text, /\n\s*s\.device_name, s\.device_tz\n/)
-  assert.match(text, /requestDeviceColumnSql\('@receiptActor', 'device_name', 's\.device_name'\)/)
+  assert.match(text, /const ownDevice = requestDeviceIsActor\(args\.key\.actorId\)/)
+  assert.match(text, /\$\{ownDevice \? '@req_dev_name' : 's\.device_name'\}/)
 })
 
 check('the touch interval is the plan\'s, in code and in the SQL guard; no literal 5 minutes remains', () => {

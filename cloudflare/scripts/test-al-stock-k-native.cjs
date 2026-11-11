@@ -420,10 +420,8 @@ const PATCHES = {
   // The audit row takes the user's most recently seen session again (the pre-fix device). Must turn K8a RED.
   'freshest-session-device': [
     { name: 'freshest-session-device', file: 'src/lib/audit.ts',
-      from: [
-        '        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_name ELSE s.device_name END,',
-        '        CASE WHEN @request_user_id IS NOT NULL AND @request_user_id = @user_id THEN @request_device_tz ELSE s.device_tz END'].join('\n'),
-      to: '        s.device_name,\n        s.device_tz' },
+      from: 'const ownDevice = requestDeviceIsActor(userId)',
+      to: 'const ownDevice = null' },
   ],
   // A legacy Undo flips the status whatever it was (the pre-fix flip). Must turn K9a RED.
   'undo-unconditional': [
