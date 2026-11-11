@@ -48,7 +48,7 @@ function fakeAnalytics(answers) {
   const calls = []
   const fetchImpl = async (url, init) => {
     calls.push({ url, init })
-    const name = /blob8 AS revision/.test(init.body) ? 'build-revisions' : /blob4 AS status/.test(init.body) ? 'route-errors' : 'route-latency'
+    const name = /blob8 AS revision/.test(init.body) ? 'build-revisions' : /AS shape\b/.test(init.body) ? 'request-shapes' : /blob1 = 'bg'/.test(init.body) ? 'background-runs' : /blob4 AS status/.test(init.body) ? 'route-errors' : 'route-latency'
     const answer = answers[name] || { status: 200, data: [] }
     const body = answer.raw !== undefined ? answer.raw : JSON.stringify({ meta: [], data: answer.data, rows: answer.data.length })
     return { ok: answer.status >= 200 && answer.status < 300, status: answer.status, text: async () => body }
@@ -141,6 +141,49 @@ function fakeAnalytics(answers) {
     assert.ok(!metrics.buildQuery(templates['build-revisions'], { windows }).includes('blob1'), 'the builds list counts every kind')
   })
 
+  await check('request shapes and background runs: registered, read the layout lib/requestMetrics.ts writes, same template rules, and the datapoint they read exists', () => {
+    assert.deepStrictEqual([...metrics.QUERY_NAMES], ['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs'])
+    const rm = requestMetricsModule()
+    const shapes = metrics.buildQuery(templates['request-shapes'], { windows })
+    const labels = [...shapes.matchAll(/blob6 LIKE 'shape=([a-z0-9_]+)%', '([a-z0-9_]+)'/g)]
+    assert.ok(labels.length >= 15 && labels.every((m) => m[1] === m[2]), 'every shape constant maps to itself')
+    const emitted = [...new Set(['default', 'filter', 'text', 'barcode', 'ids', 'rank_le20', 'rank_lt300', 'rank_le1500', 'rank_gt1500',
+      rm.salesStatsShape({}), rm.salesStatsShape({ startDate: 'a', endDate: 'a' }), rm.salesStatsShape({ startDate: 'a', endDate: 'b' }), rm.salesStatsShape({ q: 'x' }),
+      rm.customersShape({ fields: 'sales_picker' }), rm.customersShape({ fields: 'sales_picker', q: 'x' }), rm.customersShape({}), rm.customersShape({ q: 'x' })])]
+    for (const label of emitted) assert.ok(labels.some((m) => m[1] === label), `request-shapes.sql names the shape ${label}`)
+    for (const query of [{}, { category: 'x' }, { query: 'x' }, { query: '123456' }, { ids: '1' }, { rankIds: '1' }, { rankIds: Array(21).fill(1).join(',') }, { rankIds: Array(300).fill(1).join(',') }, { rankIds: Array(1501).fill(1).join(',') }]) {
+      assert.ok(labels.some((m) => m[1] === rm.productsSearchShape(query)), `products/search shape ${rm.productsSearchShape(query)} is named in the SQL`)
+    }
+    assert.ok(shapes.includes("blob1 = 'api'") && shapes.includes("blob6 LIKE 'shape=%'") && shapes.includes('GROUP BY route, method, shape, cache'), 'api rows with a shape, one cache state per group')
+    assert.ok(shapes.includes('SUM(_sample_interval * double6 * double3) AS rows_read_total'), 'rows read, both samplings')
+    const point = { kind: 'api', template: '/api/products/search', method: 'GET', status: '200', cache: 'miss', flags: rm.flagsWithShape('default', 'ic_simple=on'), wallMs: 1, weight: 1, acc: rm.createRequestMetrics('api', '', 0) }
+    assert.ok(rm.datapointLabels(point)[5].startsWith('shape=default;'), 'blob6 leads with the shape')
+    const background = metrics.buildQuery(templates['background-runs'], { windows })
+    for (const part of ["blob1 = 'bg'", 'blob2 AS label', 'blob4 AS status', 'SUM(_sample_interval * double6) AS runs', 'SUM(_sample_interval * double6 * double9) AS d1_calls',
+      'SUM(_sample_interval * double6 * double3) AS rows_read', 'SUM(_sample_interval * double6 * double4) AS rows_written', 'SUM(_sample_interval * double6 * double5) AS statements',
+      'GROUP BY day, label, status', "toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day"]) assert.ok(background.includes(part), part)
+    assert.ok(!/blob4 >= /.test(background), 'every status counts: a failed background run still spent its rows')
+    const bg = rm.createRequestMetrics('bg', 'cron:backup', 0)
+    assert.strictEqual(rm.datapointLabels({ kind: 'bg', template: 'bg:cron:backup', method: 'BG', status: 'ok', cache: 'bypass', flags: '', wallMs: 1, weight: 1, acc: bg })[0], 'bg')
+  })
+
+  await check('request-shape and background rows reach the result as numbers and strings; the public log counts them and names nothing', async () => {
+    const fake = fakeAnalytics({
+      'request-shapes': { status: 200, data: [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: '12', rows_read_total: '540000', rows_read_avg: '45000', d1_calls_avg: '11', wall_p95_ms: 'x' }] },
+      'background-runs': { status: 200, data: [{ day: '2026-09-29 00:00:00', label: 'bg:cron:backup', status: 'ok', runs: '2', d1_calls: '40', rows_read: '800000', rows_written: '10' }, { day: '2026-09-29 00:00:00', label: 'bg:telegram-drain', status: 'ok', runs: '5', rows_read: '50' }] },
+      'build-revisions': { status: 200, data: [{ revision: 'dev' }] },
+    })
+    const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1 })
+    assert.strictEqual(result.ok, true)
+    assert.deepStrictEqual(result.shapes, [{ route: '/api/products/search', method: 'GET', shape: 'default', cache: 'miss', requests: 12, rows_read_total: 540000, rows_read_avg: 45000, d1_calls_avg: 11, wall_p95_ms: null }])
+    assert.deepStrictEqual(result.background.map((r) => [r.label, r.runs, r.rows_read]), [['bg:cron:backup', 2, 800000], ['bg:telegram-drain', 5, 50]])
+    const text = metrics.publicLines({ result }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
+    assert.ok(text.includes('request shape groups: 1; background labels: 2'), text)
+    for (const secret of ['backup', 'telegram', '540000', '800000', '/api/']) assert.ok(!text.includes(secret), `public log carries ${secret}`)
+    const failed = await metrics.readMetrics({ fetchImpl: fakeAnalytics({ 'background-runs': { status: 500, raw: 'boom' }, 'build-revisions': { status: 200, data: [{ revision: 'dev' }] } }).fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1 })
+    assert.deepStrictEqual(failed.problems, ['metrics-background-runs-failed'])
+  })
+
   await check('latency rows: flows attached, numbers normalised, p95 withheld below 100 stored rows', () => {
     const [search, sale, other] = metrics.summarizeLatency([
       { route: '/api/products/search', method: 'GET', cache: 'hit', requests: '4000', stored_rows: '400', wall_p50_ms: 20, wall_p95_ms: 80.5, d1_wall_p95_ms: 30, d1_calls_avg: 2, statements_avg: 3, rows_read_avg: 50 },
@@ -159,7 +202,7 @@ function fakeAnalytics(answers) {
     const fake = fakeAnalytics({ 'build-revisions': { status: 200, data: [{ revision: 'c0ffee12ab34', requests: 10, stored_rows: 10 }] } })
     const result = await metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: '1', revision: 'c0ffee12ab34' })
     assert.strictEqual(result.ok, true, JSON.stringify(result.problems))
-    assert.strictEqual(fake.calls.length, 3)
+    assert.strictEqual(fake.calls.length, metrics.QUERY_NAMES.length)
     for (const { url, init } of fake.calls) {
       assert.strictEqual(url, `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/analytics_engine/sql`)
       assert.strictEqual(init.method, 'POST')
@@ -168,7 +211,7 @@ function fakeAnalytics(answers) {
       assert.ok(/^SELECT /.test(init.body), 'the body is the SQL itself, not JSON')
     }
     const bodies = fake.calls.map((c) => c.init.body)
-    assert.deepStrictEqual(bodies.map((b) => b.includes("blob8 = 'c0ffee12ab34'")), [true, true, false], 'the build filter narrows latency and errors, never the builds list')
+    assert.deepStrictEqual(metrics.QUERY_NAMES.map((name, i) => [name, bodies[i].includes("blob8 = 'c0ffee12ab34'")]), [['route-latency', true], ['route-errors', true], ['build-revisions', false], ['request-shapes', true], ['background-runs', true]], 'the build filter narrows every query but the builds list')
     await assert.rejects(metrics.readMetrics({ fetchImpl: fake.fetchImpl, accountId: 'not-an-account', token: TOKEN, from: '2026-09-29', days: 1 }), (e) => e.code === 'bad-account-id')
   })
 

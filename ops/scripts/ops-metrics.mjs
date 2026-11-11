@@ -11,11 +11,11 @@ import {
 } from './ops-common.mjs'
 
 export const METRICS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'metrics')
-export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions'])
+export const QUERY_NAMES = Object.freeze(['route-latency', 'route-errors', 'build-revisions', 'request-shapes', 'background-runs'])
 export const MIN_ROWS_FOR_P95 = 100
 export const MAX_DAYS = 7
 // The shop trades 08:00-20:00 in Cambodia (UTC+7); deploys fall outside. The cron runs every 5 and every 15 minutes
-// all day, so its runs fall inside as blob1 'bg' rows: the latency and error queries read 'api' only, and just the builds list counts them.
+// all day, so its runs fall inside as blob1 'bg' rows: the latency and error queries read 'api' only; the builds list counts every kind and background-runs reports them per label.
 export const TRADING_HOURS_UTC = Object.freeze({ start: 1, end: 13 })
 const REVISION = /^[A-Za-z0-9._-]{1,64}$/
 const ACCOUNT_ID = /^[0-9a-f]{32}$/
@@ -93,6 +93,8 @@ const number = (value) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : null
 }
+
+const rowsOf = (list) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^(route|method|shape|cache|label|status|day)$/.test(key) ? String(value) : number(value)])))
 
 const normalizeRoute = (route) => (String(route).length > 1 ? String(route).replace(/\/+$/, '') : String(route))
 
@@ -175,6 +177,8 @@ export async function readMetrics({ fetchImpl, accountId, token, from, days, rev
     latency: summarizeLatency(rows['route-latency']),
     errors: rows['route-errors'],
     builds,
+    shapes: rowsOf(rows['request-shapes']),
+    background: rowsOf(rows['background-runs']),
     queries,
   }
 }
@@ -183,6 +187,7 @@ export function publicLines({ result, bytes }) {
   const lines = [['metrics: Analytics Engine request metrics, counts only (the numbers are in the encrypted file)', {}]]
   lines.push(['window: {days} trading days, one build only: {filtered}', { days: result.windows.length, filtered: Boolean(result.revision) }])
   lines.push(['route groups: {groups}', { groups: result.latency.length }])
+  lines.push(['request shape groups: {groups}; background labels: {labels}', { groups: result.shapes.length, labels: new Set(result.background.map((row) => row.label)).size }])
   for (const name of QUERY_NAMES) {
     const q = result.queries[name]
     if (q && !q.ok) lines.push(['query {name}: HTTP {status}', { name: publicToken(name), status: q.status }])

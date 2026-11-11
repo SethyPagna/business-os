@@ -66,7 +66,7 @@
 // Datapoint layout (index1 = 'req_metrics'):
 //   blob1 kind ('api' | 'bg')   blob2 route template or background label
 //   blob3 method ('BG' for bg)  blob4 status ('200' / 'ok' / 'error')
-//   blob5 cache state           blob6 flags ('name=state;...', sorted)
+//   blob5 cache state           blob6 flags ('name=state;...', sorted), led by 'shape=<label>;' on the routes in SHAPED_ROUTES
 //   double1 wall ms             double2 D1 ms (sum of meta.duration)
 //   double3 rows_read           double4 rows_written
 //   double5 statements          double6 sample weight (1 / sample rate)
@@ -75,6 +75,11 @@
 //   double7 failed D1 calls     double8 late D1 calls (after seal)
 //   double9 D1 calls            double10 D1 wall ms (sum around each call)
 //   double11 D1 calls served by the primary
+//
+// REQUEST SHAPE (blob6 prefix): one request shape per datapoint on the few routes whose cost depends on how they are called (GET /api/products/search: a
+// default page, a filtered page, a typed search, a barcode lookup, an id list, a ranked hydrate of n ids). The label is chosen from the NAMES of the query
+// parameters and the SIZE of an id list, never from a value, and is one constant of a fixed set per route: no search text, id, name or number from the request
+// is ever stored (test-request-metrics-pure.cjs feeds hostile values and checks the output is still one of the constants).
 //
 // Sampling: every miss and bypass, one hit in ten (weight 10), every
 // background run. Aggregate with SUM(_sample_interval * double6).
@@ -196,6 +201,68 @@ export function flagsLabel(flags: Record<string, FlagState>): string {
   return Object.keys(flags).sort().map((name) => `${name}=${flags[name]}`).join(';').slice(0, 200)
 }
 
+export type RequestQuery = Record<string, string | undefined>
+
+const present = (value: string | undefined): boolean => typeof value === 'string' && value.trim() !== '' && value.trim().toLowerCase() !== 'all'
+const idCount = (value: string | undefined): number => (value ? value.split(',').filter((part) => part.trim() !== '').length : 0)
+
+// Query parameters that page, sort, shape the payload or ride along with a search: they never make a request a filtered one.
+const STRUCTURAL_QUERY_NAMES = new Set(['page', 'pagesize', 'page_size', 'limit', 'offset', 'cursor', 'sort', 'sortby', 'order', 'include', 'metadata', 'surface', 'branchid',
+  'branch_id', 'fields', 'v', '_', 'ranktiers', 'searchmode', 'search_mode', 'searchfields', 'search_fields'])
+const SEARCH_TEXT_NAMES = ['query', 'q', 'search']
+const BARCODE_TEXT = /^[0-9]{6,}$/
+
+const searchTextOf = (query: RequestQuery): string => SEARCH_TEXT_NAMES.map((name) => query[name]).find((value) => present(value))?.trim() ?? ''
+
+// rank_le20 | rank_lt300 | rank_le1500 | rank_gt1500: the buckets the Products list reader changes its statement at (routes/products.ts SEEK_PAGE_MIN_RANKED_IDS) and its id cap.
+function rankedShape(count: number): string {
+  if (count <= 20) return 'rank_le20'
+  if (count < 300) return 'rank_lt300'
+  return count <= 1500 ? 'rank_le1500' : 'rank_gt1500'
+}
+
+export function productsSearchShape(query: RequestQuery): string {
+  if (present(query.rankIds)) return rankedShape(idCount(query.rankIds))
+  if (present(query.ids) || present(query.id)) return 'ids'
+  const text = searchTextOf(query)
+  if (text) return BARCODE_TEXT.test(text) ? 'barcode' : 'text'
+  const filtered = Object.keys(query).some((name) => !STRUCTURAL_QUERY_NAMES.has(name.toLowerCase()) && present(query[name]))
+  return filtered ? 'filter' : 'default'
+}
+
+export function salesStatsShape(query: RequestQuery): string {
+  if (searchTextOf(query)) return 'search'
+  if (!present(query.startDate)) return 'all'
+  return present(query.endDate) && query.endDate === query.startDate ? 'day' : 'range'
+}
+
+export function customersShape(query: RequestQuery): string {
+  const picker = present(query.fields) && ['sales_picker', 'picker'].includes(String(query.fields))
+  const text = Boolean(searchTextOf(query))
+  if (picker) return text ? 'picker_text' : 'picker_empty'
+  return text ? 'search' : 'list'
+}
+
+// Routes that carry a shape label, keyed by 'METHOD template'. Adding a route is one line here and a case in test-request-metrics-pure.cjs.
+export const SHAPED_ROUTES: Readonly<Record<string, (query: RequestQuery) => string>> = Object.freeze({
+  'GET /api/products/search': productsSearchShape,
+  'GET /api/sales/stats': salesStatsShape,
+  'GET /api/customers': customersShape,
+})
+
+/** The shape label of one request, '' for a route without one or when the query could not be read. */
+export function requestShapeOf(method: string, template: string, readQuery: (() => RequestQuery) | undefined): string {
+  const shape = SHAPED_ROUTES[`${method} ${template}`]
+  if (!shape || !readQuery) return ''
+  try { return shape(readQuery()) } catch { return '' }
+}
+
+/** blob6: 'shape=<label>' first (so the 200-character cut never takes it), then the flags. */
+export function flagsWithShape(shape: string, flags: string): string {
+  if (!shape) return flags
+  return `shape=${shape}${flags ? `;${flags}` : ''}`.slice(0, 200)
+}
+
 function formatMs(ms: number): string {
   return String(Math.round(ms * 10) / 10)
 }
@@ -299,7 +366,7 @@ export function requestMetricsOf(c: Context): RequestMetrics | undefined {
 
 type MetricsContext = {
   env: Env
-  req: { method: string; routePath: string }
+  req: { method: string; routePath: string; query?: () => RequestQuery }
   res: Response
   get(key: string): unknown
   set(key: string, value: unknown): void
@@ -331,13 +398,15 @@ export function createRequestMetricsMiddleware(options: RequestMetricsOptions = 
       // The public storefront API and anonymous calls carry no timing header.
       if (c.get('user')) c.header('Server-Timing', serverTimingHeader(acc), { append: true })
       if (shouldSample(state, random())) {
+        const template = sanitizeTemplate(c.req.routePath)
+        const method = String(c.req.method || '').toUpperCase().slice(0, 8)
         writeDatapoint(c.env, {
           kind: 'api',
-          template: sanitizeTemplate(c.req.routePath),
-          method: String(c.req.method || '').toUpperCase().slice(0, 8),
+          template,
+          method,
           status: String(c.res?.status ?? 0),
           cache: state,
-          flags: flagsLabel(acc.flags),
+          flags: flagsWithShape(requestShapeOf(method, template, c.req.query ? () => c.req.query!() : undefined), flagsLabel(acc.flags)),
           wallMs: Math.max(0, now() - acc.startedAt),
           weight: 1 / sampleRate(state),
           acc,
