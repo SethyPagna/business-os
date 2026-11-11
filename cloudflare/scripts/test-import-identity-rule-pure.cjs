@@ -33,6 +33,8 @@ const REAL = new Set([
   'importImageMatch', 'searchMatch',
   // importEngine scrubs masked request values with phoneAccess.scrubMaskedInput (P2.8): a stub without it breaks classifySales.
   'phoneAccess',
+  // KHQR round 9: classifySales reads the online method in force (one settings row) and judges rows with the real identity.
+  'onlineMethodInvariant', 'paymentMethodRegistry',
 ])
 const asyncNoop = async () => {}
 const STUBS = {
@@ -97,6 +99,8 @@ function makeDb() {
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, role TEXT, canonical_key TEXT, successor_branch_id INTEGER);
     CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, phone_normalized TEXT, is_anonymous INTEGER DEFAULT 0);
     CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,

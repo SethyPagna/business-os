@@ -454,6 +454,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './productDiscountGate') return productDiscountGateModule
   if (request === './media') return mediaModule
   if (request === './productImagePermission') return productImagePermissionModule
+  // KHQR round 9 (F4): the sales classifier reads the online method in force; the pure test hands it the real fold; the fake database reports the switch as OFF.
+  if (request === './onlineMethodInvariant') return require('./harness/load_ts_lib.cjs').loadTsLib('onlineMethodInvariant')
   if (request === './salesImportCommit') {
     return { MAX_HISTORICAL_SALE_LINES: 100, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
   }
@@ -2172,6 +2174,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
           if (sql.includes('FROM user_aliases')) return userAliases
           if (sql.includes('FROM users')) return users
           if (sql.includes('FROM delivery_contacts')) return deliveryContacts
+          if (sql.includes('FROM settings')) return [{ method: overrides.onlineMethod ?? null, on_now: 0 }]
           return []
         },
       }),
@@ -2198,6 +2201,24 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(data.items[0].applied_price_usd, 10, 'defaults to the product selling price when unit_price_usd is blank')
     assert.strictEqual(data.subtotal_usd, 20 + 20, '2x$10 + 1x$20')
     assert.ok(data.items.every((item) => (item.returned_quantity || 0) === 0), 'a completed order never carries a nonzero returned_quantity')
+  }
+
+  // 1b) KHQR round 9 (F4): a historical row that carries the online (KHQR) payment method is FLAGGED (action 'error', never applied), in every spelling the till refuses
+  // (trailing TAB / NBSP / ideographic space, a leading newline, a non-ASCII case twin, one part of a split 'Cash + ABA'); a row with another method imports as before.
+  {
+    const U = (...codes) => String.fromCharCode(...codes)
+    const classify = async (onlineMethod, payment_method) => (await classifySales(makeFakeDb({ onlineMethod }), [row({ receipt_number: 'R-ONL', sku: 'SKU-1', quantity: 1, payment_method }, 1)], null))[0]
+    for (const [label, stored, sent] of [
+      ['exact', 'ABA KHQR', 'ABA KHQR'], ['case', 'ABA KHQR', 'aba khqr'], ['TAB', 'ABA', 'ABA' + U(9)], ['NBSP', 'ABA', 'ABA' + U(0xa0)], ['LF first', 'ABA', U(10) + 'ABA'],
+      ['ideographic space', 'ABA', 'ABA' + U(0x3000)], ['non-ASCII case twin', U(0xc9) + 'Pay', U(0xe9) + 'pay'], ['split tender', 'ABA', 'Cash + ABA'],
+    ]) {
+      const result = await classify(stored, sent)
+      assert.strictEqual(result.action, 'error', 'online method row flagged: ' + label)
+      assert.match(result.message, /only for fulfilling an online order/, label)
+    }
+    assert.strictEqual((await classify('ABA KHQR', 'Cash')).action, 'create', 'control: another method imports')
+    assert.strictEqual((await classify('ABA KHQR', 'ABA KHQR Plus')).action, 'create', 'control: a different name that merely starts with the online method imports')
+    assert.strictEqual((await classify(null, 'ABA KHQR')).action, 'create', 'control: no method stored and the switch OFF: nothing is reserved yet')
   }
 
   // 2) barcode fallback when sku is blank.

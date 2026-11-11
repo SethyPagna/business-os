@@ -5,6 +5,7 @@ import type { D1Compat } from './db'
 import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, saleStoredState } from './saleStatusResolution'
 import { isCashPaymentMethod } from './paymentMethodRegistry'
+import { ONLINE_METHOD_REQUIRES_ORDER_CODE, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
 import { branchCanSell } from './branchRoles'
 import { actorSnapshot, type ActorLike } from './actorSnapshot'
 import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branchRoleGuards'
@@ -568,6 +569,9 @@ export async function applyHistoricalSaleImport(
     })
   }
 
+  // KHQR round 9 (F4): the online method is never imported onto an ordinary sale; this statement aborts the batch (read-free, ahead of every write) when a row names it.
+  const onlineMethodGuard = onlineMethodSaleGuard(importMethods, null)
+  if (onlineMethodGuard) statements.unshift(onlineMethodGuard)
   statements.push({
     sql: `UPDATE import_sales_commits SET status = 'applied', applied_at = CURRENT_TIMESTAMP
           WHERE job_id = @job_id AND group_key = @group_key AND status = 'pending'
@@ -586,6 +590,9 @@ export async function applyHistoricalSaleImport(
     } catch (batchError) {
       const activeGuard = productStockGuardError(batchError)
       if (activeGuard) throw activeGuard
+      if (onlineMethodSaleGuardOutcome(batchError) === 'requires_order') {
+        throw Object.assign(new Error(`Sale on row ${rowNumber}: the online payment method is only for fulfilling an online order, so this sale cannot be imported with it. Nothing was written for this row.`), { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
+      }
       const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
         WHERE client_request_id = @client_request_id AND client_request_id <> '' LIMIT 1`)
         .get({ client_request_id: clientRequestId })

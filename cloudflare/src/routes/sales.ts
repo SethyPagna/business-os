@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange, announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import {
-  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, onlineMethodRefusalActive, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, reservedOnlineMethod, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -43,7 +43,7 @@ import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../l
 // sale can introduce a method Settings has never heard of. See
 // lib/paymentMethodRegistry.ts for why the merge is server-side and shared by
 // every sale writer rather than done in the POS component.
-import { isCashPaymentMethod, mergePaymentMethods, parseConfiguredMethods, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, saleMethodsUsed } from '../lib/paymentMethodRegistry'
+import { appendPaymentMethods, isCashPaymentMethod, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
@@ -262,15 +262,15 @@ async function registerUsedPaymentMethods(env: Env, sale: { payment_method?: unk
   try {
     const db = getDb(env)
     const row = await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
-    const configured = parseConfiguredMethods(row?.value)
-    const merged = mergePaymentMethods(configured, used)
+    // Append-only (round 9, F2): the stored entries are kept as they are, only new names are added at the end.
+    const merged = appendPaymentMethods(row?.value, used)
     if (!merged.changed) return []
     // A compare-and-set on the list read above (KHQR round 8): a concurrent rename or merge, which the online method follows, is never written over by this stale copy; the
     // append is what is lost, as the comment above says.
     const written = await runOrdinaryBusinessWrite(db,
       `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP WHERE settings.value = @expectedRaw`,
-      { value: JSON.stringify(merged.methods), expectedRaw: row?.value ?? '' })
+      { value: merged.raw, expectedRaw: row?.value ?? '' })
     return written.changes ? merged.added : []
   } catch (error) {
     const stockGuard = productStockGuardError(error)
@@ -1334,8 +1334,10 @@ app.post('/', async (c) => {
   // sale covers. One preflight read; everything it decides is re-asserted inside the batch by the guard statement.
   const onlineMethod = configuredOnlineMethod(rateSettings[ONLINE_PAYMENT_METHOD_KEY])
   const wantsOrder = body.online_order_id !== undefined && body.online_order_id !== null && body.online_order_id !== ''
-  if (!wantsOrder && onlineTender(effectivePaymentDetails, onlineMethod).present && await onlineMethodRefusalActive(c.env, rateSettings[ONLINE_PAYMENT_METHOD_KEY])) {
-    return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: 'online_method_requires_order' }, 400)
+  // The reserved method is the EFFECTIVE one (the stored method, or the default while online ordering is ON), compared by the identity a settlement stores a row under (round 9).
+  const reservedOnline = !wantsOrder && onlineTender(effectivePaymentDetails, onlineMethod).present ? await reservedOnlineMethod(c.env, rateSettings[ONLINE_PAYMENT_METHOD_KEY]) : ''
+  if (reservedOnline) {
+    return c.json({ error: `The ${reservedOnline} payment method is only for fulfilling an online order.`, code: 'online_method_requires_order' }, 400)
   }
   if (wantsOrder) {
     if (!getOnlineOrderAccess(user as never).canView) return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -1936,6 +1938,11 @@ app.post('/', async (c) => {
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
     }, saleCreationAuditStatement)
+    // KHQR round 9 (F5): an ordinary sale cannot commit carrying the online method even when it was stored after the read above: ONE statement of this batch, no extra call.
+    if (!wantsOrder) {
+      const saleOnlineGuard = onlineMethodSaleGuard(effectivePaymentDetails.map((detail) => detail.method), String(rateSettings[ONLINE_PAYMENT_METHOD_KEY] ?? ''))
+      if (saleOnlineGuard) statements.push(saleOnlineGuard)
+    }
     // Fulfil: link the order to this sale and write its Records, in the same batch as the sale itself.
     if (fulfilPlan) {
       statements.push(...fulfilStatements(fulfilPlan, { saleWriteKey, userId: actorId(user) ?? null, userName: actorSnapshot(user), at: new Date().toISOString().replace('T', ' ').slice(0, 19) }))
@@ -1993,6 +2000,10 @@ app.post('/', async (c) => {
           code: 'sale_incomplete',
         }, 409)
       }
+      // The online-method guard of this batch (F5): another request stored the method after this sale was priced. Nothing was recorded.
+      const onlineGuardOutcome = onlineMethodSaleGuardOutcome(error)
+      if (onlineGuardOutcome === 'requires_order') return c.json({ error: 'The online payment method is only for fulfilling an online order.', code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
+      if (onlineGuardOutcome === 'changed') return c.json({ error: 'The online payment method changed while this sale was being saved. Nothing was recorded. Try the sale again.', code: 'write_conflict', conflict: true }, 409)
       // Checked BEFORE the generic guesses below: the receipt guard fails
       // with the same "malformed JSON" text as the pricing/loyalty guards, and
       // a UNIQUE failure on the column (should an index ever exist) matches
@@ -2737,8 +2748,10 @@ app.patch('/:id/status', async (c) => {
       try { recordedDetails = paymentCorrection || !sale.payment_details ? [] : JSON.parse(String(sale.payment_details)) } catch { recordedDetails = [] }
       const sentOnline = onlineTender(asDetails(body.payment_details), onlineMethod)
       const recordedOnline = onlineTender(asDetails(recordedDetails), onlineMethod)
-      if ((sentOnline.usd > recordedOnline.usd + 0.00005 || sentOnline.khr > recordedOnline.khr) && await onlineMethodRefusalActive(c.env, settingMap[ONLINE_PAYMENT_METHOD_KEY])) {
-        return c.json({ error: `The ${onlineMethod} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
+      // onlineTender matches a row by the settlement planner's own identity (round 9, F3): a tab, no-break space, newline or ideographic space at either end, or a non-ASCII case twin, all count.
+      if (sentOnline.usd > recordedOnline.usd + 0.00005 || sentOnline.khr > recordedOnline.khr) {
+        const reservedOnline = await reservedOnlineMethod(c.env, settingMap[ONLINE_PAYMENT_METHOD_KEY])
+        if (reservedOnline) return c.json({ error: `The ${reservedOnline} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
       }
       if (paymentCorrection && (await linkedOnlineSaleIds(db, [Number(id)])).size) {
         return c.json({ error: 'This sale fulfilled an online order, so its recorded payment cannot be replaced. Settle only what is still owed.', code: LINKED_SALE_MONEY_LOCKED_CODE }, 409)

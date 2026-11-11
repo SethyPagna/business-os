@@ -4,7 +4,8 @@
 'use strict'
 const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
-const PINNED = { first: { calls: 15, statements: 15 }, next: { calls: 20, statements: 36 } }
+// KHQR round 9 (F5): the online-method guard is ONE statement inside the create batch, so statements go 36 -> 37 and the CALLS stay exactly at the lane base (15 / 20).
+const PINNED = { first: { calls: 15, statements: 15 }, next: { calls: 20, statements: 37 } }
 async function main() {
   const h = await H.startWorker()
   try {

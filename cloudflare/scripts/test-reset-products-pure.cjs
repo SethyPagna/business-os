@@ -141,6 +141,7 @@ const systemRoute = withStepUp(loadReal, 'routes/system.ts', {
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.
   '../lib/planTier': planTier,
+  '../lib/onlineMethodInvariant': loadReal('lib/onlineMethodInvariant.ts', { './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/imageVariantStore': imageVariantStore,
   '../lib/db': { getDb: () => db },

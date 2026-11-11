@@ -161,6 +161,53 @@ export function mergePaymentMethods(configured: string[], used: unknown[]): Merg
   return { methods, added, changed: added.length > 0 }
 }
 
+export interface AppendPaymentMethodsResult {
+  /** The list to store: every entry of the stored list exactly as stored, then the appended names. */
+  raw: string
+  /** The stored entries (strings only), untouched. */
+  existing: string[]
+  /** The full list after the append (existing + added). */
+  methods: string[]
+  added: string[]
+  changed: boolean
+}
+
+/**
+ * KHQR round 9 (F2): the TRULY append-only twin of mergePaymentMethods, for the two writers that fold used names into the stored list from a stale read (the sale fold in
+ * routes/sales.ts and POST /payment-methods/backfill). It never re-normalises: every stored entry is kept byte for byte, in its place, duplicates and stray white space included
+ * (a restore or a direct write can leave them, and the online-method invariant matches them as stored), and only new names are added at the end. A name is new when no stored entry
+ * has its paymentMethodKey; a name that is retired, empty or past the list cap is skipped, as in mergePaymentMethods. Appending can therefore never remove, rename or re-spell
+ * an entry, so it cannot break the online-method invariant (a: M listed, b: not cash, c: no duplicate: a new name never shares a key with a stored entry, and methodFold-equal
+ * implies key-equal).
+ * An unreadable or non-array stored value reads as the empty list, as parseConfiguredMethods does (there is nothing to keep).
+ */
+export function appendPaymentMethods(storedRaw: unknown, used: unknown[]): AppendPaymentMethodsResult {
+  let entries: unknown[] = []
+  if (Array.isArray(storedRaw)) entries = storedRaw
+  else {
+    const text = String(storedRaw ?? '').trim()
+    if (text) {
+      try {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed)) entries = parsed
+      } catch { /* unreadable: nothing to keep */ }
+    }
+  }
+  const existing = entries.filter((entry): entry is string => typeof entry === 'string')
+  const seen = new Set(existing.map(paymentMethodKey))
+  const added: string[] = []
+  for (const value of used) {
+    const method = String(value ?? '').trim().slice(0, MAX_METHOD_LENGTH)
+    const key = paymentMethodKey(method)
+    if (!key || seen.has(key)) continue
+    if (RETIRED_PAYMENT_METHODS.has(key)) continue
+    if (entries.length + added.length >= MAX_CONFIGURED_METHODS) break
+    seen.add(key)
+    added.push(method)
+  }
+  return { raw: JSON.stringify([...entries, ...added]), existing, methods: [...existing, ...added], added, changed: added.length > 0 }
+}
+
 /**
  * The methods one sale actually used. Reads the itemised tender list first
  * (that is the authoritative record and is what settings.ts's rename walks),

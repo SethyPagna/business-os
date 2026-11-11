@@ -32,7 +32,7 @@ const MUTANTS = {
   no_replace_inuse: ['routes/settings.ts', 'if (onlineVerdict.identityChanged) {', 'if (false) {'],
   ascii_only_identity: ['lib/onlineMethodInvariant.ts', 'return methodFold(a) === methodFold(b) || paymentMethodKey(a) === paymentMethodKey(b)', 'return methodFold(a) === methodFold(b)'],
   no_judge: ['lib/onlineMethodInvariant.ts', 'refused: post.find((violation) => !already.has(violation)) ?? null,', 'refused: null,'],
-  no_backfill_cas: ['routes/settings.ts', 'WHERE settings.value = @expectedRaw`,\r\n  ).run({ value: JSON.stringify(merged.methods)', '`,\r\n  ).run({ value: JSON.stringify(merged.methods)'],
+  no_backfill_cas: ['routes/settings.ts', 'WHERE settings.value = @expectedRaw`,\r\n  ).run({ value: merged.raw', '`,\r\n  ).run({ value: merged.raw'],
   no_kind_admin: ['routes/settings.ts', 'if (onlineKindChanged(before, after) && !isAdminControlUser(user)) {', 'if (false) {'],
   sql_pin_off: ['lib/onlineMethodInvariant.ts', "WHEN NOT (${ONLINE_METHOD_RAW_SQL} = @expectedMethod", "WHEN 0 AND (${ONLINE_METHOD_RAW_SQL} = @expectedMethod"],
   raw_pin_trimmed: ['lib/onlineMethodInvariant.ts', "WHEN NOT (${ONLINE_METHOD_RAW_SQL} = @expectedMethod", "WHEN NOT (${ONLINE_METHOD_NORMALIZED_SQL} = @expectedMethod"],

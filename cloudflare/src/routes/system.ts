@@ -20,6 +20,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { denyUnlessCurrentPassword, denyUnlessDefaultAdmin, denyUnlessRepairPermission } from '../lib/destructiveStepUp'
 import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
+import type { OnlineMethodViolation } from '../lib/onlineMethodInvariant'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -1340,6 +1341,24 @@ app.post('/factory-reset', async (c) => {
 
     const invariants = await ensureCoreDataInvariants(c.env)
 
+    // The online-method invariant after a wholesale settings write (KHQR round 9, F1): the same judgement restore makes (lib/onlineMethodInvariant.ts onlineMethodAfterRestore) on the
+    // rows the reset leaves behind. The reset deletes all three keys, so a sound state is the normal outcome and nothing is cleared; a method the re-seed brought back unsound is removed.
+    let onlineMethodCleared: OnlineMethodViolation[] | undefined
+    try {
+      // Loaded here, on the one route that needs it (like denyUnlessCurrentPassword above), so the other modules that mount this router keep their import surface.
+      const { onlineMethodAfterRestore, ONLINE_METHOD_INVARIANT_KEYS, ONLINE_METHOD_SETTING_KEY, PAYMENT_METHOD_KINDS_SETTING_KEY, PAYMENT_METHOD_LIST_SETTING_KEY, rawSettingValue } = await import('../lib/onlineMethodInvariant')
+      const rows = await db.prepare('SELECT key, value FROM settings WHERE key IN (SELECT value FROM json_each(@keys))').all<{ key: string; value: string | null }>({ keys: JSON.stringify([...ONLINE_METHOD_INVARIANT_KEYS]) })
+      const method = rawSettingValue(rows, ONLINE_METHOD_SETTING_KEY)
+      const verdict = onlineMethodAfterRestore({ method, listRaw: rawSettingValue(rows, PAYMENT_METHOD_LIST_SETTING_KEY), kindsRaw: rawSettingValue(rows, PAYMENT_METHOD_KINDS_SETTING_KEY) })
+      if (verdict.clear) {
+        await db.prepare('DELETE FROM settings WHERE key = @key AND value = @value').run({ key: ONLINE_METHOD_SETTING_KEY, value: method })
+        onlineMethodCleared = verdict.violations
+      }
+    } catch (error) {
+      // The wipe and the re-seed are done and committed: a failed read here must not report the whole reset as failed. The settings were just deleted, so there is nothing unsound to leave.
+      console.error('[factory-reset] could not judge the online-method settings after the reset', error)
+    }
+
     // Best-effort R2 cleanup, same non-fatal spirit as reset-data above --
     // R2 has no transactional link to D1, so a partial failure here is
     // logged in the response but never blocks the reset from reporting
@@ -1382,6 +1401,7 @@ app.post('/factory-reset', async (c) => {
       // already holds it, so returning it only put it in a response body.
       admin: { username: 'admin', password: null, created: invariants.adminUserCreated },
       r2CleanupErrors: r2Errors.length ? r2Errors : undefined,
+      onlineMethodCleared,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Factory reset failed' }, 500)

@@ -14,10 +14,10 @@ import type { D1Compat } from './db'
 import { roundMoney4, sumMoney4 } from './moneyPrecision'
 import { peekReadSwitch, readSwitch } from './readSwitches'
 import type { Env } from '../index'
-import { methodFold, ONLINE_METHOD_SETTING_KEY } from './onlineMethodInvariant'
+import { effectiveOnlineMethod, methodFold, namesOnlineMethod, ONLINE_METHOD_DEFAULT, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_METHOD_SETTING_KEY, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
 
 export const ONLINE_PAYMENT_METHOD_KEY = ONLINE_METHOD_SETTING_KEY
-export const ONLINE_PAYMENT_METHOD_DEFAULT = 'ABA KHQR'
+export const ONLINE_PAYMENT_METHOD_DEFAULT = ONLINE_METHOD_DEFAULT
 
 export type FulfilRefusal = { status: 403 | 404 | 409 | 400; code: string; error: string }
 export type FulfilPaid = { id: number; amount: number }
@@ -40,9 +40,18 @@ export type FulfilPlan = {
 }
 
 // The fold itself lives in lib/onlineMethodInvariant.ts, the one module of the online-method invariant; re-exported here for the callers that always imported it from this file.
-export { methodFold }
+export { methodFold, namesOnlineMethod, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome }
 
 export const sameMethod = (a: unknown, b: unknown): boolean => methodFold(a) === methodFold(b)
+
+/**
+ * KHQR round 9 (F1): the method that is RESERVED right now (effectiveOnlineMethod): the stored one, or the default while online_orders is ON and nothing is stored; '' when no
+ * refusal is in force. The switch is read only when nothing is stored (the same read onlineMethodRefusalActive makes), so a sale with a stored method costs no extra call.
+ */
+export async function reservedOnlineMethod(env: Env, storedSetting: unknown): Promise<string> {
+  const stored = String(storedSetting ?? '').trim()
+  return stored ? effectiveOnlineMethod(stored, false) : effectiveOnlineMethod('', await readSwitch(env, 'online_orders'))
+}
 
 export function configuredOnlineMethod(settingValue: unknown): string {
   const text = String(settingValue ?? '').trim()
@@ -62,8 +71,6 @@ export async function onlineMethodRefusalActive(env: Env, storedSetting: unknown
 /** True when a non-empty online method is stored: the precondition of turning online_orders ON, written inside the flip's own statement. */
 export const ONLINE_METHOD_STORED_SQL = `EXISTS (SELECT 1 FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}' AND trim(COALESCE(value, '')) <> '')`
 
-/** The online_orders switch read from D1 inside the statement that uses it: never the memo. */
-export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.switches.online_orders') END FROM system_flags WHERE key = 'read_switches') = 'on'`
 
 /** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
 export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
@@ -112,7 +119,8 @@ export function withOnlineMethodInForce<T extends Record<string, string | null>>
 
 /** The dollars of a tender that name `method`, and whether any row does. */
 export function onlineTender(details: ReadonlyArray<{ method: string; amount_usd: number; amount_khr: number }>, method: string): { usd: number; khr: number; present: boolean } {
-  const rows = details.filter((detail) => sameMethod(detail.method, method))
+  // The ONE identity (namesOnlineMethod): the fold the settlement planner stores a row under, so no spelling that settles as the online method passes as another.
+  const rows = details.filter((detail) => namesOnlineMethod(method, detail.method))
   return { usd: sumMoney4(rows.map((row) => row.amount_usd)), khr: rows.reduce((sum, row) => sum + row.amount_khr, 0), present: rows.length > 0 }
 }
 
@@ -221,5 +229,4 @@ export async function linkedOnlineSaleIds(db: D1Compat, saleIds: readonly number
   } catch { return new Set() }
 }
 
-export const ONLINE_METHOD_REQUIRES_ORDER_CODE = 'online_method_requires_order'
 export const LINKED_SALE_MONEY_LOCKED_CODE = 'linked_sale_money_locked'

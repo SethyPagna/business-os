@@ -44,7 +44,7 @@ const app = withStepUp(load, 'routes/system.ts', {
  '../lib/coreDataInvariants':{...core,dropAllCustomTables:async()=>[]},
  '../lib/backup':{createCloudflareBackup:backup,createSectionBackup:async(env,tables)=>{assert.ok(tables.includes('damaged_stock_lots'));await backup()}},
  '../durable-objects/broadcastHub':{broadcast:noop}, '../lib/cache':{bumpVersion:noop,bumpVersions:noop}, '../lib/errorReporting':{},
- '../lib/rateLimit':{}, '../lib/actorSnapshot':{actorSnapshot:u=>u.username}, '../lib/planTier':load('lib/planTier.ts'),
+ '../lib/rateLimit':{}, '../lib/actorSnapshot':{actorSnapshot:u=>u.username}, '../lib/planTier':load('lib/planTier.ts'), '../lib/onlineMethodInvariant':load('lib/onlineMethodInvariant.ts',{'./paymentMethodRegistry':load('lib/paymentMethodRegistry.ts')}),
  '../lib/currentPasswordGuard':{verifyCurrentPassword:async(c,ids,password)=>({ok:password==='current-secret'}),CURRENT_PASSWORD_RATE_LIMITED_ERROR:'rate limited'},
 }).default
 const env={DB:db,ASSETS:{},BUSINESS_OS_ADMIN_PASSWORD:'seed-secret',CACHE:{get:async()=>null,put:noop}}

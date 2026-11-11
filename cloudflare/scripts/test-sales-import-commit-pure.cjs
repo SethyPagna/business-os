@@ -29,6 +29,8 @@ function compileSubject() {
     if (request === './saleStatusResolution') return compileLib('saleStatusResolution', localRequire)
     // The riel cash rule asks which method is cash (owner, 27 Oct 2026): the real registry, a pure module.
     if (request === './paymentMethodRegistry') return compileLib('paymentMethodRegistry', localRequire)
+    // KHQR round 9 (F4): the commit carries the online-method guard statement; the real module is pure.
+    if (request === './onlineMethodInvariant') return compileLib('onlineMethodInvariant', localRequire)
     if (request === './financialPrecision') return compileLib('financialPrecision', localRequire)
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)

@@ -183,12 +183,36 @@ async function main() {
       assert.ok(await small.prepare('SELECT value FROM settings WHERE key = ?').bind(list).first(), 'list row present: ' + label + ' ' + JSON.stringify(out.result))
       assert.equal((await small.prepare('SELECT value FROM settings WHERE key = ?').bind(list).first()).value, rows.find(([key]) => key === list)[1], 'the list is restored as it was: ' + label)
     }
+    // KHQR round 9 (F6): the same restores with online_orders ON. The switch lives in system_flags, which a restore does not touch (it is not in BACKUP_TABLES), so ON stays ON while the
+    // restored settings decide whether a method exists: a sound backup keeps its method, an unsound one or one with no method leaves ON with NO stored method, and from then on the
+    // method in force is the default (effectiveOnlineMethod: every invariant check and refusal judge it). WHETHER a restore should also turn the switch OFF is an owner decision
+    // (LANE-KHQR.md round 9): this pins today's behaviour so a change to it is deliberate.
+    const invariant = require('./harness/load_ts_lib.cjs').loadTsLib('onlineMethodInvariant')
+    const switchRow = JSON.stringify({ epoch: 1, switches: { online_orders: 'on' } })
+    for (const [label, rows, expected] of [
+      ['switch ON, sound backup', [[online, 'ABA KHQR'], [list, '["Cash","ABA KHQR"]']], { kept: 'ABA KHQR', cleared: undefined, inForce: 'ABA KHQR' }],
+      ['switch ON, unlisted method in the backup', [[online, 'Nowhere'], [list, '["Cash","ABA KHQR"]']], { kept: null, cleared: ['not_listed'], inForce: 'ABA KHQR' }],
+      ['switch ON, cash-kind method in the backup', [[online, 'Cash'], [list, '["Cash","ABA KHQR"]']], { kept: null, cleared: ['cash_kind'], inForce: 'ABA KHQR' }],
+      ['switch ON, backup with no method', [[list, '["Cash"]']], { kept: null, cleared: undefined, inForce: 'ABA KHQR' }],
+    ]) {
+      for (const name of ['fees','custom_tables','settings','d1_migrations','ct_ignore']) await small.prepare('DROP TABLE IF EXISTS "' + name + '"').run()
+      await small.prepare('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)').run()
+      await small.prepare("INSERT OR REPLACE INTO system_flags(key, value) VALUES('read_switches', ?)").bind(switchRow).run()
+      const out = await request({ mode: 'settings', tables: { settings: { columns: ['key', 'value'], rows: rows.map(([key, value]) => ({ key, value })) } } })
+      assert.equal(out.error, null, label)
+      const kept = (await small.prepare('SELECT value FROM settings WHERE key = ?').bind(online).first())?.value ?? null
+      assert.equal(kept, expected.kept, 'online method after a restore: ' + label)
+      assert.deepEqual(out.result.onlineMethodCleared, expected.cleared, 'reported: ' + label)
+      assert.equal((await small.prepare("SELECT value FROM system_flags WHERE key = 'read_switches'").first()).value, switchRow, 'the restore leaves the switch as it was: ' + label)
+      assert.equal(invariant.effectiveOnlineMethod(kept, true), expected.inForce, 'the method in force afterwards: ' + label)
+    }
+    await small.prepare("DELETE FROM system_flags WHERE key = 'read_switches'").run()
     await small.prepare("INSERT OR REPLACE INTO settings VALUES('proof','LIVE')").run()
     const refused = await request({ mode:'wrong-token', restoreToken:'another-owner', tables:{settings:{columns:['key','value'],rows:[{key:'proof',value:'WRONG'}]}} })
     assert.match(refused.error, /restore is already in progress/)
     assert(!refused.calls.some(sql => /^(DELETE|INSERT)/.test(sql)))
     assert.equal((await small.prepare("SELECT value FROM settings WHERE key='proof'").first()).value, 'LIVE')
-    console.log('PASS native D1 full migrated graph equivalence (' + migrations.length + ' migrations, ' + names.length + ' tables, ' + oldRows.length + ' graph rows); 8 actual restore snapshot cases; 7 online-method invariant restore cases; bounded overflow refusal')
+    console.log('PASS native D1 full migrated graph equivalence (' + migrations.length + ' migrations, ' + names.length + ' tables, ' + oldRows.length + ' graph rows); 8 actual restore snapshot cases; 7 online-method invariant restore cases (+4 with online_orders ON); bounded overflow refusal')
   } finally { await mf.dispose() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

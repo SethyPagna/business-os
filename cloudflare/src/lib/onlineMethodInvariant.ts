@@ -45,7 +45,27 @@ export function sameOnlineIdentity(online: unknown, name: unknown): boolean {
   return methodFold(a) === methodFold(b) || paymentMethodKey(a) === paymentMethodKey(b)
 }
 
-export type OnlineMethodViolation = 'not_listed' | 'cash_kind' | 'duplicate'
+/** The method a Fulfil rings while no method is stored (online ordering ON). */
+export const ONLINE_METHOD_DEFAULT = 'ABA KHQR'
+
+/**
+ * KHQR round 9 (F1): the method actually IN FORCE as the online method, the single answer every check and refusal asks. The stored method, or the default while online ordering
+ * is ON and nothing is stored (Fulfil rings that default, the till hides it); '' when there is none (OFF and nothing stored). The identity tests above run on this, never on the
+ * stored row alone, so the reserved method is the one actually used.
+ */
+export function effectiveOnlineMethod(stored: unknown, onlineOrdersOn: boolean): string {
+  const text = String(stored ?? '').trim()
+  return text || (onlineOrdersOn ? ONLINE_METHOD_DEFAULT : '')
+}
+
+/**
+ * KHQR round 9 (F3): does this payment-method NAME (a sale row, a relabel target, a settlement row) name the online method? ONE answer for create, settle, amend, exchange,
+ * replacement and import: the same normalised identity the settlement planner resolves a typed name with (paymentMethodKey: JS trim of every Unicode white space + locale
+ * lower-casing, so a name with a tab, no-break space or ideographic space at either end, a leading newline, or a non-ASCII case twin ("épay" for "ÉPay") all name it) OR the SQL fold (sameOnlineIdentity). False for an empty side.
+ */
+export const namesOnlineMethod = (online: unknown, name: unknown): boolean => sameOnlineIdentity(online, name)
+
+export type OnlineMethodViolation ='not_listed' | 'cash_kind' | 'duplicate'
 export type OnlineMethodState = { method: unknown; listRaw: unknown; kindsRaw: unknown }
 
 /** The list entries as stored, strings only: no de-duplication, because clause (c) is about duplicates. Unreadable or non-array text reads as an empty list, as the SQL below does. */
@@ -134,6 +154,46 @@ export function onlineMethodFinalGuard(after: OnlineMethodState, tolerated: read
       toleratedDuplicate: tolerated.includes('duplicate') ? 1 : 0,
     },
   }
+}
+
+export const ONLINE_METHOD_REQUIRES_ORDER_CODE = 'online_method_requires_order'
+
+/** The online_orders switch read from D1 inside the statement that uses it: never the memo. */
+export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.switches.online_orders') END FROM system_flags WHERE key = 'read_switches') = 'on'`
+
+/**
+ * The in-batch twin of the create/import refusal (KHQR round 9, F5): ONE statement in the writer's own batch. A sale whose payment rows name the reserved method must not commit
+ * even when the method was stored (or the switch turned ON) after the route read it. `@saleMethodKeys` is a JSON array of the sale's method names folded with methodFold; the
+ * reserved name is the stored method, or the default, read inside the batch (SQL lower-cases ASCII only). `@pinMethod` = 1 also aborts (as ${ONLINE_METHOD_CHANGED_CODE}, a
+ * retryable conflict) when the stored method is no longer the raw value the route read (`@readMethod`): the only way a non-ASCII case twin could slip past the ASCII fold.
+ * No D1 call: a statement of the existing batch.
+ */
+export const ONLINE_METHOD_SALE_GUARD_SQL = `SELECT CASE
+  WHEN EXISTS (SELECT 1 FROM json_each(@saleMethodKeys) k WHERE k.value = lower(trim(COALESCE(NULLIF(trim((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), char(32, 9, 10, 11, 12, 13)), ''), '${ONLINE_METHOD_DEFAULT}')))
+      AND (trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '')) <> '' OR ${ONLINE_ORDERS_SWITCH_ON_SQL})) THEN json_extract('[1]', '$[${ONLINE_METHOD_REQUIRES_ORDER_CODE}]')
+  WHEN @pinMethod = 1 AND COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') <> @readMethod THEN json_extract('[1]', '$[${ONLINE_METHOD_CHANGED_CODE}]')
+  ELSE 1 END`
+
+/** The guard statement for a sale carrying `methods`; null when there is nothing to guard. `readMethodRaw` null = no read to pin (an import commit has none). */
+export function onlineMethodSaleGuard(methods: readonly string[], readMethodRaw: string | null): { sql: string; params: Record<string, unknown> } | null {
+  const names = methods.map((method) => String(method ?? '').trim()).filter(Boolean)
+  if (!names.length) return null
+  return {
+    sql: ONLINE_METHOD_SALE_GUARD_SQL,
+    params: {
+      saleMethodKeys: JSON.stringify(names.map(methodFold)),
+      pinMethod: readMethodRaw !== null && names.some((name) => [...name].some((ch) => ch.charCodeAt(0) > 127)) ? 1 : 0,
+      readMethod: readMethodRaw ?? '',
+    },
+  }
+}
+
+/** The abort of ONLINE_METHOD_SALE_GUARD_SQL from a failed batch's error text: 'requires_order', 'changed', or null for any other error. */
+export function onlineMethodSaleGuardOutcome(error: unknown): 'requires_order' | 'changed' | null {
+  const text = String(error)
+  if (text.includes(ONLINE_METHOD_REQUIRES_ORDER_CODE)) return 'requires_order'
+  if (text.includes(ONLINE_METHOD_CHANGED_CODE)) return 'changed'
+  return null
 }
 
 /** The abort of ONLINE_METHOD_FINAL_GUARD_SQL, from the error text a failed batch carries; null when it is another error. */

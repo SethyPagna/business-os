@@ -53,6 +53,7 @@ const SCHEMA = `
   CREATE TABLE sales (id INTEGER PRIMARY KEY, total REAL);
   CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
   INSERT INTO system_flags(key,value) VALUES('stock_schema_epoch','legacy-separate-pool-v1');
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
   CREATE TABLE import_job_rows (id INTEGER PRIMARY KEY);
   CREATE TABLE import_job_source_rows (id INTEGER PRIMARY KEY);
 `
@@ -64,6 +65,7 @@ let seedPassword
 let cache
 let actor
 let passwordLimited
+let reseedSettings = []
 
 const SEED_SECRET = 'seed-secret-Zq81'
 const ADMIN = { id: 1, username: 'admin', role_code: 'admin', permissions: '{}', role_permissions: '{}' }
@@ -78,6 +80,7 @@ const { withStepUp } = require('./harness/step_up_lib.cjs')
 const app = withStepUp(loadReal, 'routes/system.ts', {
   hono: require('hono'),
   '../lib/planTier': loadReal('lib/planTier.ts'),
+  '../lib/onlineMethodInvariant': loadReal('lib/onlineMethodInvariant.ts', { './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() } },
@@ -100,7 +103,7 @@ const app = withStepUp(loadReal, 'routes/system.ts', {
     PRODUCTS_RESET_TABLES: [],
     presentResetTables: async (_db, tables) => tables,
     dropAllCustomTables: async () => { log.push('drop-custom'); return [] },
-    ensureCoreDataInvariants: async () => { log.push('reseed'); return { adminUserCreated: true, adminPassword: seedPassword } },
+    ensureCoreDataInvariants: async () => { log.push('reseed'); for (const [key, value] of reseedSettings) db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run([key, value]); return { adminUserCreated: true, adminPassword: seedPassword } },
     resolveSeedAdminPassword: () => seedPassword,
   },
   '../lib/backup': {
@@ -127,6 +130,7 @@ function reset() {
   db.prepare(`INSERT INTO users(id, username, password,role_id) VALUES (1,'admin','hash:owner-pw',1), (2,'restorer','hash:restorer-pw',2), (3,'admin','hash:named-pw',2)`).run()
   db.prepare(`INSERT INTO sales(id, total) VALUES (1, 10), (2, 20)`).run()
   log = []
+  reseedSettings = []
   backupFails = false
   seedPassword = SEED_SECRET
   passwordLimited = false
@@ -244,6 +248,25 @@ async function check(name, fn) {
     assert.ok(backupAt < log.indexOf('reseed'))
     assert.equal(res.text.includes(SEED_SECRET), false, 'the seed admin password never leaves the Worker')
     assert.equal(res.json?.admin?.password ?? null, null)
+  })
+
+  // KHQR round 9 (F1): factory reset is a writer of the online-method settings and gives them restore's guard (lib/onlineMethodInvariant.ts onlineMethodAfterRestore) on the rows it leaves behind.
+  await check('factory reset: the settings it leaves are judged like a restore (a sound or absent method stays; an unsound one the re-seed brought back is removed and reported)', async () => {
+    db.prepare("INSERT INTO settings(key,value) VALUES('online_order_payment_method','ABA KHQR'),('pos_payment_methods','[\"Cash\",\"ABA KHQR\"]')").run()
+    const sound = await post(GOOD)
+    assert.equal(sound.status, 200, sound.text)
+    assert.equal(sound.json.onlineMethodCleared, undefined, 'nothing to clear')
+    reset()
+    reseedSettings = [['online_order_payment_method', 'Nowhere'], ['pos_payment_methods', '["Cash"]']]
+    const unsound = await post(GOOD)
+    assert.equal(unsound.status, 200, unsound.text)
+    assert.deepEqual(unsound.json.onlineMethodCleared, ['not_listed'])
+    assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'online_order_payment_method'").get(), undefined, 'the unsound method is gone')
+    assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get().value, '["Cash"]', 'the list is left alone')
+    reset()
+    const none = await post(GOOD)
+    assert.equal(none.status, 200, none.text)
+    assert.equal(none.json.onlineMethodCleared, undefined, 'no method stored is sound')
   })
 
   await check('the R2 wipe covers variants/ (thumbnails of the wiped uploads/ must not stay reachable)', async () => {

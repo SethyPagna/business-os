@@ -104,6 +104,7 @@ import { classifyUnifiedStockActions, type StockActionImportResult } from './sto
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, unifiedStockReceiptRefusal, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor, stockActionPlanChangesStock } from './stockActionResolver'
+import { effectiveOnlineMethod, namesOnlineMethod, ONLINE_METHOD_SETTING_KEY, ONLINE_ORDERS_SWITCH_ON_SQL } from './onlineMethodInvariant'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES, planHistoricalSaleReceiptNumbers } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import { branchCanSell, branchRole } from './branchRoles'
@@ -3969,6 +3970,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
   // only by ROLE -- so "LC Store" sells and an unrenamed Warehouse still cannot.
   const branches = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
   const salesBranchIndex = indexCanonicalImportBranches(branches)
+  // The online method in force (stored, or the default while online_orders is ON); '' while no refusal is in force. One read per classification, never per row.
+  const onlineMethodRow = (await db.prepare(`SELECT (SELECT value FROM settings WHERE key = @key) AS method, CASE WHEN ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN 1 ELSE 0 END AS on_now`)
+    .all<{ method: string | null; on_now: number | null }>({ key: ONLINE_METHOD_SETTING_KEY }))[0]
+  const reservedOnlineMethodName = effectiveOnlineMethod(onlineMethodRow?.method, Number(onlineMethodRow?.on_now) === 1)
   const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch))
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
@@ -4114,6 +4119,16 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
     }
     const status = saleStatus || 'completed'
     const isReturnGroup = RETURN_STATUSES.has(status)
+
+    // KHQR round 9 (F4): the online (KHQR) payment method exists on a sale ONLY through Fulfilling an online order, so a historical row that names it is flagged here, read-only, and
+    // never applied (same identity as the till refusal: namesOnlineMethod). applyHistoricalSaleImport repeats the refusal inside its own batch.
+    if (reservedOnlineMethodName) {
+      const named = String(first.payment_method ?? '').split('+').find((part) => namesOnlineMethod(reservedOnlineMethodName, part))
+      if (named !== undefined) {
+        results.push({ rowNumber: first._rowNumber, action: 'error', identifier, existingId: null, message: `The ${reservedOnlineMethodName} payment method is only for fulfilling an online order, so a historical sale cannot be imported with it. Change the payment method in the file.`, changes: {}, data: first })
+        continue
+      }
+    }
 
     let createdAt: string | null = null
     try {

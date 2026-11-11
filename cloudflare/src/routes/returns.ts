@@ -40,7 +40,7 @@ import { unexpectedFailureBody } from '../lib/failureText'
 import { ABA_REFUND_CAP_PREDICATE, planAbaRefund } from '../lib/onlineReturnChannel'
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrdersOfSales } from '../lib/onlineOrderAlerts'
-import { configuredOnlineMethod, onlineMethodRefusalActiveFresh, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_RESERVED_PREDICATE, ONLINE_PAYMENT_METHOD_KEY, methodFold, sameMethod } from '../lib/onlineOrderFulfil'
+import { configuredOnlineMethod, namesOnlineMethod, onlineMethodRefusalActiveFresh, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_RESERVED_PREDICATE, ONLINE_PAYMENT_METHOD_KEY, methodFold, sameMethod } from '../lib/onlineOrderFulfil'
 import { canSetSalePrice, firstDisallowedReplacementPrice, RETURN_EDIT_REPLACEMENT_FLOOR_REFUSAL, RETURN_REPLACEMENT_PRICE_REFUSAL } from '../lib/returnReplacementPrice'
 import {
   readSupplierReturnReceipt, supplierReturnReceiptStatement, supplierReturnRequest, SUPPLIER_RETURN_ID_MAX_BYTES, utf8ByteLength,
@@ -2093,8 +2093,14 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const reservedMethodKey = replacementLines.length && replacementPaymentMethod && !sameMethod(replacementPaymentMethod, DEFAULT_REPLACEMENT_PAYMENT_METHOD) ? methodFold(replacementPaymentMethod) : null
   const refuseReservedMethod = async () => {
     const stored = (await db.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value
-    return sameMethod(replacementPaymentMethod, configuredOnlineMethod(stored)) && await onlineMethodRefusalActiveFresh(db, stored)
+    return namesOnlineMethod(configuredOnlineMethod(stored), replacementPaymentMethod) && await onlineMethodRefusalActiveFresh(db, stored)
       ? c.json({ error: `The ${configuredOnlineMethod(stored)} payment method is only for fulfilling an online order.`, code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400) : null
+  }
+  // KHQR round 9 (F3): the in-batch predicate folds with SQL's ASCII-only lower(), so a name that matches the online method only by non-ASCII case ("épay" for "ÉPay") is judged
+  // here with the settlement identity instead, from one read made only for such a name (an ASCII or caseless name keeps the call-free path).
+  if (reservedMethodKey && [...String(replacementPaymentMethod)].some((ch) => ch.charCodeAt(0) > 127)) {
+    const refusedNonAscii = await refuseReservedMethod()
+    if (refusedNonAscii) return refusedNonAscii
   }
   const replacementStatus = replacementUnpaid ? 'awaiting_payment' : 'completed'
   if (replacementLines.length) {
