@@ -15,8 +15,15 @@ const native = new Function('require', '__dirname', fixture + `
 const fence = native.loadReal('importMaintenanceFence')
 const fenceAbs = path.join(__dirname,'..','src','lib','importMaintenanceFence.ts')
 function freshFenceIsolate() {
+  // A new isolate has new module memory for BOTH the fence and the schema probe (6.0.1641 moved the system_flags answer into lib/schemaObjectProbe,
+  // which remembers positive answers per isolate). Sharing the probe would let an earlier shape's positive answer hide the missing table.
+  const probeAbs = path.join(__dirname,'..','src','lib','schemaObjectProbe.ts')
+  const probe = {exports:{}}
+  new Function('exports','require','module',native.transpile(probeAbs))(probe.exports,native.makeRequire(path.dirname(probeAbs)),probe)
+  const baseRequire = native.makeRequire(path.dirname(fenceAbs))
+  const freshRequire = request => request === './schemaObjectProbe' ? probe.exports : baseRequire(request)
   const m = {exports:{}}
-  new Function('exports','require','module','__filename','__dirname',native.transpile(fenceAbs))(m.exports,native.makeRequire(path.dirname(fenceAbs)),m,fenceAbs,path.dirname(fenceAbs))
+  new Function('exports','require','module','__filename','__dirname',native.transpile(fenceAbs))(m.exports,freshRequire,m,fenceAbs,path.dirname(fenceAbs))
   assert.notStrictEqual(m.exports,fence)
   return m.exports
 }
