@@ -11,7 +11,7 @@ import { requestMetricsOf } from '../lib/requestMetrics'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { cacheIdentity } from '../lib/cache'
-import { cacheKeyRequest } from '../lib/cacheKey'
+import { cacheKeyRequest, isUnsafeVersion } from '../lib/cacheKey'
 import { cachedPhoneJson } from '../lib/phoneCache'
 import type { PhoneActor } from '../lib/phoneAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -180,8 +180,9 @@ async function loadPreferences(env: Env) {
 // the expiry window, the credit window) and live for getPlanLimits(env).notificationSectionCacheSeconds
 // whatever happens to the data meanwhile: a sale on another till no longer makes the next poll re-walk
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
-// own bell-relevant write (frontend/src/api/bellFreshness.ts): that request recomputes and overwrites the
-// entry for everyone. Every cached entry carries the time its data was computed and /summary reports the
+// own bell-relevant write (frontend/src/api/bellFreshness.ts) or on the refresh button: that request recomputes and overwrites the
+// entry for everyone, but only when a data version moved since the entry was computed (the entry stores them), so a button
+// pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its data was computed and /summary reports the
 // oldest of them as generatedAt, which is the "as of" the panel shows. The data epoch is part of the key
 // (lib/cacheKey.ts), so nothing from before a restore is served.
 //
@@ -207,7 +208,8 @@ export const INVENTORY_FULL_ITEMS = 5000
 type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
 
 // `contacts` marks a section whose body names customers or suppliers: it is cached per full-phone grant (lib/phoneCache.ts).
-// `ttlOnly` selects the plan-lifetime entry keyed by inputs alone (see above); `namespaces` is then ignored and no version is read.
+// `ttlOnly` selects the plan-lifetime entry keyed by inputs alone (see above); `namespaces` are then NOT part of the key: they are stored in the
+// entry and consulted only by `?fresh=1`, which recomputes only when one of them moved since the entry was computed.
 type SectionCache = (<T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>, options?: { contacts?: boolean; ttlOnly?: boolean }) => Promise<T>) & {
   /** When the oldest data served by this request was computed (ISO); null when no plan-lifetime section took part. */
   oldestComputedAt(): string | null
@@ -227,6 +229,13 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
     }
     return read
   }
+  // The data versions an entry was computed under, as one string; null when any is unreadable or unsafe (nothing then vouches for the entry).
+  const versionsNow = async (namespaces: string[]): Promise<string | null> => {
+    try {
+      const tokens = await Promise.all(namespaces.map(versionOf))
+      return tokens.some(isUnsafeVersion) ? null : tokens.join('|')
+    } catch { return null }
+  }
   const computedAt: number[] = []
   const fresh = new URL(c.req.url).searchParams.get('fresh') === '1'
   const cached = async <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>, options?: { contacts?: boolean; ttlOnly?: boolean }): Promise<T> => {
@@ -234,20 +243,30 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
       const ttlSeconds = getPlanLimits(c.env).notificationSectionCacheSeconds
       const store = typeof caches === 'undefined' ? null : caches.default
       const key = store ? await cacheKeyRequest(`${new URL(c.req.url).origin}/api/notifications/_section/${name}?k=${encodeURIComponent(inputs)}`, TTL_ONLY_KEY_VERSION, cacheIdentity(c)) : null
-      if (store && key && !fresh) {
+      if (store && key) {
         const hit = await store.match(key)
         if (hit) {
-          const entry = await hit.json<{ at?: number; value: T }>()
+          const entry = await hit.json<{ at?: number; v?: string | null; value: T }>()
           // The Cache API honours max-age too; the stamp is what the panel reports, so it is also the bound checked here.
           const age = Date.now() - Number(entry?.at)
-          if (Number.isFinite(age) && age >= 0 && age < ttlSeconds * 1000) { computedAt.push(Number(entry.at)); return entry.value }
+          if (Number.isFinite(age) && age >= 0 && age < ttlSeconds * 1000) {
+            // A plain read serves the entry. `?fresh=1` (the actor's own write, or the refresh button) serves it too unless the data
+            // versions it was computed under have moved: a refresh with no write in between costs a few KV reads, not a catalog
+            // walk, so fresh recomputes are capped by the number of real writes, not by taps or requests.
+            if (!fresh) { computedAt.push(Number(entry.at)); return entry.value }
+            const now = await versionsNow(namespaces)
+            if (now !== null && typeof entry.v === 'string' && entry.v === now) { computedAt.push(Number(entry.at)); return entry.value }
+          }
         }
       }
+      // Versions are read BEFORE the producer: a write that lands while it runs leaves the stored versions older than the data
+      // version, so the next fresh read recomputes instead of trusting a half-old entry.
+      const v = store && key ? await versionsNow(namespaces) : null
       const value = await producer()
       const at = Date.now()
       computedAt.push(at)
       if (store && key) {
-        c.executionCtx.waitUntil(store.put(key, new Response(JSON.stringify({ at, value }), {
+        c.executionCtx.waitUntil(store.put(key, new Response(JSON.stringify({ at, v, value }), {
           headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
         })))
       }
@@ -822,11 +841,11 @@ app.get('/summary', async (c) => {
   let loyaltyTask: (() => Promise<NotificationSection | null>) | undefined
   if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
     const lowStockConfig = await loadLowStockConfig(c.env)
-    tasks.push(cachedSection('inventory', [], lowStockCacheInput(lowStockConfig),
+    tasks.push(cachedSection('inventory', ['products', 'stock'], lowStockCacheInput(lowStockConfig),
       () => buildInventorySection(c.env, lowStockConfig, INVENTORY_PREVIEW_ITEMS), { ttlOnly: true }))
   }
   if (preferences.expiryEnabled && hasPermission(user, 'products')) {
-    tasks.push(cachedSection('expiry', [], String(preferences.expiryDays),
+    tasks.push(cachedSection('expiry', ['products'], String(preferences.expiryDays),
       () => buildExpirySection(c.env, preferences.expiryDays), { ttlOnly: true }))
   }
   // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
@@ -853,7 +872,7 @@ app.get('/summary', async (c) => {
   // who can act on it — admin-control users only (was: anyone with
   // inventory access; the user asked for "reminder for admin" and for the
   // supplier section to be hidden from employees).
-  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cachedSection('supplier_credit', [], String(preferences.supplierCreditDays),
+  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(cachedSection('supplier_credit', ['products', 'stock'], String(preferences.supplierCreditDays),
     () => buildSupplierCreditSection(c.env, preferences.supplierCreditDays), { ttlOnly: true }))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
@@ -905,7 +924,7 @@ app.get('/summary/items', async (c) => {
   if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
   const lowStockConfig = await loadLowStockConfig(c.env)
   const cachedSection = sectionCacheFor(c, user)
-  const section = await cachedSection('inventory-full', [], lowStockCacheInput(lowStockConfig),
+  const section = await cachedSection('inventory-full', ['products', 'stock'], lowStockCacheInput(lowStockConfig),
     () => buildInventorySection(c.env, lowStockConfig, INVENTORY_FULL_ITEMS), { ttlOnly: true })
   return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [], generatedAt: cachedSection.oldestComputedAt() ?? new Date().toISOString() })
 })

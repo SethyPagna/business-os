@@ -127,6 +127,9 @@ const CASHIER = { id: 2, username: 'cashier', name: 'Cashier', role_code: 'staff
 const STOCK_ONLY = { id: 3, username: 'stock', name: 'Stock', role_code: 'staff', permissions: JSON.stringify({ inventory: true }) }
 const summary = (user = ADMIN, query = '') => call('GET', `/summary${query}`, user)
 const freshSummary = (user = ADMIN) => summary(user, '?fresh=1')
+// What an actor's own write does before the bell asks again: the writer bumps its data versions (a stock move bumps 'stock' and/or 'products') and then ?fresh=1.
+// ?fresh=1 alone recomputes only when a version moved (see the B2 cases), so every case below that changed rows behind the cache goes through this.
+const ownWriteFresh = async (user = ADMIN) => { await cacheModule.bumpVersion(env, 'products'); await cacheModule.bumpVersion(env, 'stock'); return freshSummary(user) }
 const section = (body, id) => (body.json.sections || []).find((entry) => entry.id === id)
 
 // ---- fixtures ---------------------------------------------------------------------------------------
@@ -263,8 +266,51 @@ async function main() {
     assert.equal(other.json.generatedAt, fresh.json.generatedAt)
   })
 
+  await check('B2: ?fresh=1 is bounded by real writes: repeated fresh requests with no write in between compute once, a bump of a version the section reads recomputes, an unrelated bump does not', async () => {
+    const base = await freshSummary() // no write since the last fresh above: served from the entry
+    assert.equal(statements('inventory'), 0, 'fresh with no write: no catalog read')
+    assert.equal(statements('expiry'), 0)
+    for (let i = 0; i < 3; i += 1) {
+      const again = await freshSummary()
+      assert.equal(statements('inventory'), 0, 'repeated fresh ' + (i + 1) + ': still no catalog read')
+      assert.equal(statements('expiry'), 0)
+      assert.equal(again.json.generatedAt, base.json.generatedAt, 'the as-of time did not move: nothing was recomputed')
+      assert.deepEqual(again.json.sections, base.json.sections)
+    }
+    const items = (query) => call('GET', '/summary/items?section=inventory' + query, ADMIN)
+    await items('&fresh=1') // computes the full list once (first time it is asked for)
+    await items('&fresh=1')
+    assert.equal(statements('inventory'), 0, 'the expanded list is bounded the same way')
+    for (const unrelated of ['settings', 'sales', 'returns', 'customers']) {
+      await cacheModule.bumpVersion(env, unrelated)
+      await freshSummary()
+      assert.equal(statements('inventory'), 0, unrelated + ' bump: not a version the bell sections read')
+    }
+    // A real write: rows change, the writer bumps its version, the next fresh request recomputes (once) and shows it.
+    const healthyBefore = raw.db.prepare("SELECT stock_quantity AS q FROM products WHERE name = 'Healthy 1'").get().q
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 1'").run())
+    await cacheModule.bumpVersion(env, 'stock')
+    const moved = await freshSummary()
+    assert.equal(statements('inventory'), 1, 'a stock bump: recomputed')
+    assert.equal(section(moved, 'inventory').count, section(base, 'inventory').count + 1)
+    await freshSummary()
+    assert.equal(statements('inventory'), 0, 'and the request after that is served from the refreshed entry')
+    const listed = await items('&fresh=1')
+    assert.equal(statements('inventory'), 1, 'the expanded list read its own versions: one recompute after the bump')
+    assert.equal(listed.json.count, section(moved, 'inventory').count)
+    await items('&fresh=1')
+    assert.equal(statements('inventory'), 0)
+    // A product edit bumps 'products': expiry (which reads products) recomputes too.
+    await cacheModule.bumpVersion(env, 'products')
+    await freshSummary()
+    assert.equal(statements('expiry'), 1, 'a products bump re-runs expiry')
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = ? WHERE name = 'Healthy 1'").run(healthyBefore)) // leave the fixture as it was
+    await ownWriteFresh()
+    await items('&fresh=1') // the expanded list's own entry is refreshed too
+  })
+
   await check('the lifetime is the plan\'s, not a literal: just inside it is a hit, at it is a recompute, and the as-of time is the oldest section', async () => {
-    const t0 = Date.parse((await freshSummary()).json.generatedAt)
+    const t0 = Date.parse((await ownWriteFresh()).json.generatedAt)
     try {
       at(t0 + ttlSeconds * 1000 - 1000)
       const inside = await summary()
@@ -275,7 +321,7 @@ async function main() {
       assert.equal(statements('inventory'), 1, `past ${ttlSeconds} s: recomputed`)
       assert.equal(Date.parse(expired.json.generatedAt), t0 + ttlSeconds * 1000 + 1000)
     } finally { restoreClock() }
-    await freshSummary() // the entries written at the faked later time must not outlive the fake clock
+    await ownWriteFresh() // the entries written at the faked later time must not outlive the fake clock
     console.log(`  measured ${env.PLAN_TIER}: bell lifetime ${ttlSeconds} s`)
   })
 
@@ -292,7 +338,7 @@ async function main() {
       raw.db.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, supplier_name, payment_status, credit_due_date, unit_cost_usd, received_cost_usd, received_quantity)
         VALUES (?, 'sc1', 'SC1', '2026-09-01', 1, 'Bong Long', 'credit', date('now', '-3 day'), 5, 25, 5)`).run(productId)
     })
-    const cold = await freshSummary()
+    const cold = await ownWriteFresh()
     assert.equal(statements('supplier_credit'), 1, 'first call reads the lots once')
     assert.equal(section(cold, 'supplier_credit').count, 1)
     const warm = await summary()
@@ -306,7 +352,7 @@ async function main() {
     assert.equal(statements('supplier_credit'), 1, 'the fresh request re-read the lots')
     assert.equal(section(paid, 'supplier_credit'), undefined, 'marking the lot paid clears the reminder')
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'credit', credit_due_date = date('now', '-3 day') WHERE lot_code = 'SC1'").run())
-    assert.equal(section(await freshSummary(), 'supplier_credit').count, 1)
+    assert.equal(section(await ownWriteFresh(), 'supplier_credit').count, 1)
     assert.equal(section(await summary(CASHIER), 'supplier_credit'), undefined, 'the cache never serves it to a non-admin')
   })
 
@@ -396,7 +442,7 @@ async function main() {
 
   await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run())
-    const small = await freshSummary()
+    const small = await ownWriteFresh()
     const inventory = section(small, 'inventory')
     assert.equal(inventory.items.length, inventory.count)
     assert.equal(inventory.truncated, undefined)
@@ -454,10 +500,10 @@ async function main() {
     for (const days of [0, 7, 30, 90]) {
       seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('notifications_expiry_days', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(days)))
       await cacheModule.bumpVersion(env, 'settings')
-      const listed = (section(await freshSummary(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
+      const listed = (section(await ownWriteFresh(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
       assert.deepEqual(listed, removedFullScan(days), `days=${days}: same rows in the same order`)
     }
-    const names = (section(await freshSummary(), 'expiry')?.items || []).map((item) => item.label)
+    const names = (section(await ownWriteFresh(), 'expiry')?.items || []).map((item) => item.label)
     assert.ok(names.includes('Exp past') && names.includes('Exp legacy stocked') && names.includes('Exp legacy null stocked'), 'the legacy inactive rows with stock are listed: ' + names.join(','))
     for (const name of ['Exp legacy two', 'Exp legacy half', 'Exp legacy neg', 'Exp legacy text']) assert.ok(names.includes(name), `${name}: any is_active other than 1, holding stock, is visible exactly as the old rule said: ` + names.join(','))
     assert.ok(!names.includes('Exp empty two'), 'an empty product with is_active 2 is not')
