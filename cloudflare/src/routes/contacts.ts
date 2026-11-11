@@ -3394,6 +3394,21 @@ app.post('/customers/:id/points', async (c) => {
   // rename cascade rewrites it to the account USERNAME. Stamping the full name
   // here would make this row change shape the first time anyone is renamed.
   const ledgerParams = { customerId, points: awardedPoints, note, actorId: actor.id, actorName: actorSnapshot(actor), requestId }
+  // The freshest-session fallback is read only when the actor is not the user being served: the request's own device answers the same question with no
+  // read (requestDeviceColumnSql applies the same rule in SQL; here the branch is decided in JS so the unused join is never emitted).
+  const awardOwnDevice = currentRequestDevice()?.userId === Number(actor.id)
+  const awardDeviceSql = awardOwnDevice
+    ? { name: '@req_dev_name', tz: '@req_dev_tz', join: '' }
+    : {
+      name: requestDeviceColumnSql('@actorId', 'device_name', 's.device_name'),
+      tz: requestDeviceColumnSql('@actorId', 'device_tz', 's.device_tz'),
+      join: `
+          LEFT JOIN (
+            SELECT device_name, device_tz FROM user_sessions
+            WHERE user_id = @actorId AND revoked_at IS NULL
+            ORDER BY last_seen_at DESC, id DESC LIMIT 1
+          ) AS s ON 1 = 1`,
+    }
   let result
   try {
     const results = await db.batch(requestId ? [
@@ -3414,14 +3429,9 @@ app.post('/customers/:id/points', async (c) => {
             'award_points', 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()), 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()),
-            ${requestDeviceColumnSql('@actorId', 'device_name', 's.device_name')}, ${requestDeviceColumnSql('@actorId', 'device_tz', 's.device_tz')}
+            ${awardDeviceSql.name}, ${awardDeviceSql.tz}
           FROM (SELECT 1 AS one) AS _receipt
-          LEFT JOIN users u ON u.id = @actorId
-          LEFT JOIN (
-            SELECT device_name, device_tz FROM user_sessions
-            WHERE user_id = @actorId AND revoked_at IS NULL
-            ORDER BY last_seen_at DESC, id DESC LIMIT 1
-          ) AS s ON 1 = 1
+          LEFT JOIN users u ON u.id = @actorId${awardDeviceSql.join}
           WHERE changes() = 1`,
         params: { ...ledgerParams, ...requestDeviceParams(), details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
       },
