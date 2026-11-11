@@ -40,6 +40,7 @@ import { getProductBatches } from '../../api/batchesTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
@@ -211,6 +212,16 @@ export default function InventoryChecksPage() {
 
 function userIdentity(user: { id?: unknown } | null) { return String(user?.id ?? '') }
 
+/** The one active branch, read from the branch list (a few rows) -- or null when there are several, none, or this account may not read the list (then the page asks as before). */
+async function readSoleBranch(): Promise<Branch | null> {
+  try {
+    const { getBranches } = await import('../../api/branchTransport.ts')
+    const sole = soleActiveBranch(await getBranches() as Array<{ id?: unknown; name?: unknown; is_active?: unknown }>)
+    const id = Number(sole?.id)
+    return sole && Number.isSafeInteger(id) && id > 0 ? { id, name: String(sole.name ?? '') } : null
+  } catch { return null }
+}
+
 function InventorySelection({ access, isCurrent }: { access: InventoryCheckAccess; isCurrent: () => boolean }) {
   const [selection, setSelection] = useState<Selection>({ branchId: '', sessionId: '' })
   const selected = useRef(selection)
@@ -287,6 +298,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const wiredRaw = useRef<WiredRaw | null>(null)
   const wiredKnown = useRef<{ branches?: Branch[]; extras?: WiredExtras } | null>(bootstrapIntent?.wired ? { branches: bootstrapIntent.wired.branches, extras: bootstrapIntent.wired.extras } : null)
   const wiredSeed = useRef<WiredSeed | null>(bootstrapIntent?.wired ?? null)
+  // The branches are known once an answer (or the branch list) has said them: a page step or a tab change never asks for them again.
+  const branchesKnown = useRef(!!bootstrapIntent)
   const [changedIds, setChangedIds] = useState<number[]>([])
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
@@ -421,6 +434,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
               if (!publish()) return
               rememberWiredMode('old')
             }
+          }
+          // The sole-branch chip rule: with one active branch the branch is chosen BEFORE the first list read, so an open is ONE read (it used to read every branch, then read again with the sole one).
+          // This covers the older list, and the all-branches Issues view that the wired list cannot answer without a branch; a list that cannot say it (no branch access) is asked as before.
+          if (!branchId && !sessionId && !branchesKnown.current && !wiredKnown.current?.branches) {
+            branchesKnown.current = true
+            const sole = await readSoleBranch()
+            if (!publish()) return
+            if (sole) { onSelect({ branchId: String(sole.id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } }); return }
           }
           // The switch can move under an open tab (ic_simple turned on or off), and then the key this tab holds (a status filter, Issues, a skipped summary) belongs to the other list.
           // Two outcomes, both answered in the same load by asking once in the other list's words (never a third time; a second refusal is a real error):
