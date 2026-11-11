@@ -1166,10 +1166,10 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
         name: line.product?.name, is_active: line.product?.is_active ?? 1, stock_quantity: 0, client_request_id: productRequestId,
       }))
       if (line.quantity > 0) statements.push({ sql: `INSERT OR IGNORE INTO branch_stock(product_id,branch_id,quantity)
-        SELECT products.id,b.id,0 FROM products CROSS JOIN branches b WHERE products.client_request_id=@productRequestId AND b.is_active=1`, params: { productRequestId } })
+        SELECT products.id,b.id,0 FROM products CROSS JOIN branches b WHERE products.client_request_id=@productRequestId AND products.client_request_id<>'' AND b.is_active=1`, params: { productRequestId } })
       for (const [order, imagePath] of ((line.product?.image_gallery as string[] | undefined) || []).entries()) {
         statements.push({ sql: `INSERT INTO product_images(product_id,image_path,sort_order)
-          SELECT id,@path,@order FROM products WHERE client_request_id=@productRequestId`, params: { path: imagePath, order, productRequestId } })
+          SELECT id,@path,@order FROM products WHERE client_request_id=@productRequestId AND client_request_id<>''`, params: { path: imagePath, order, productRequestId } })
       }
     }
     if (line.quantity === 0) {
@@ -1179,7 +1179,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
         params: { operationId, lineId: line.line_id, kind: line.kind, productId: fold.id, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd } })
       } else {
         statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,branch_name,batch_id,movement_id,quantity,unit_cost_usd)
-          SELECT @operationId,@lineId,@kind,id,1,@branchId,(SELECT name FROM branches WHERE id=@branchId),NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
+          SELECT @operationId,@lineId,@kind,id,1,@branchId,(SELECT name FROM branches WHERE id=@branchId),NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId AND client_request_id<>''`,
         params: { operationId, lineId: line.line_id, kind: line.kind, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd, productRequestId } })
       }
       continue

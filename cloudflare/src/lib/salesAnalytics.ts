@@ -266,6 +266,9 @@ export function shiftWindowWhere(
   const params: Record<string, unknown> = {}
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
+    // Plain widened bounds beside the exact datetime() terms let the created_at index prune; the datetime() terms decide. A row stored with an offset has a text date
+    // a day either side of its UTC date: -1 day below, +2 days above (+1 drops +07:00 rows). Pinned by test-shift-window-created-bounds-native.cjs.
+    clauses.push(`${alias}.created_at >= date(@createdFrom, '-1 day')`)
     clauses.push(`datetime(${alias}.created_at) >= @createdFrom`)
     params.createdFrom = createdFrom
   }
@@ -274,6 +277,7 @@ export function shiftWindowWhere(
   // next one.
   const createdTo = shiftWindowBound(f.createdTo)
   if (createdTo) {
+    clauses.push(`${alias}.created_at < date(@createdTo, '+2 day')`)
     clauses.push(`datetime(${alias}.created_at) < @createdTo`)
     params.createdTo = createdTo
   }

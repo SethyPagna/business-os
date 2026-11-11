@@ -8,7 +8,8 @@ import { getActionTier } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
 import { mergeLookupSuggestionRows, usedLookupValuesSql, type UsedLookupValue } from '../lib/lookupSuggestions'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersions, cacheIdentity, cachedJsonResponse, getVersionsWithFallback, isUnsafeVersion } from '../lib/cache'
+import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -22,6 +23,12 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 // the catalog never points at a deleted category/unit.
 
 type LookupKind = 'category' | 'unit'
+
+// The cache version of the category and unit lists. Every writer of a lookup ROW (create, the rename "copy" path, rename or merge, delete) advances it.
+// The lists also carry the values products use, which only a product write can introduce or retire (create, edit, deactivate, import, merge, restore), and every
+// one of those already advances `products`; the cached list is keyed on both, so it is never older than the actor's own write.
+export const LOOKUP_CACHE_NAMESPACE = 'lookups'
+export const LOOKUP_LIST_VERSION_NAMESPACES = ['products', LOOKUP_CACHE_NAMESPACE] as const
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 // Scoped to the two path prefixes this router actually owns, NOT '*'.
@@ -114,14 +121,29 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
   // only, so a used-but-unmanaged name never becomes renameable/deletable.
   // See lib/lookupSuggestions.ts for the ordering rule and
   // scripts/test-lookup-suggestions-pure.cjs for the pins.
-  app.get(`/${table}`, async (c) => {
-    const db = getDb(c.env)
+  const readList = async (env: Env) => {
+    const db = getDb(env)
     const column = kind === 'category' ? 'category' : 'unit'
     const [rows, used] = await Promise.all([
       db.prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
       db.prepare(usedLookupValuesSql(column)).all<UsedLookupValue>(),
     ])
-    return c.json(mergeLookupSuggestionRows(rows || [], used || []))
+    return mergeLookupSuggestionRows(rows || [], used || [])
+  }
+
+  // The used-values half is a GROUP BY over every product row (about 17k reads), so the list is cached under the lookup and products versions for the plan's
+  // list lifetime. A version that cannot be read computes the list uncached rather than serving a body nothing can invalidate.
+  app.get(`/${table}`, async (c) => {
+    let version: string | null = null
+    try {
+      const tokens = await getVersionsWithFallback(c.env, LOOKUP_LIST_VERSION_NAMESPACES)
+      if (!tokens.some(isUnsafeVersion)) version = tokens.map((token, index) => `${LOOKUP_LIST_VERSION_NAMESPACES[index]}:${token}`).join('|')
+    } catch { /* unreadable: no safe key */ }
+    if (!version) return c.json(await readList(c.env))
+    const keyed = new URL(c.req.url)
+    keyed.search = ''
+    return c.json(await cachedJsonResponse(new Request(keyed.toString(), { method: 'GET' }), c.executionCtx, version, getPlanLimits(c.env).productListCacheSeconds,
+      () => readList(c.env), cacheIdentity(c)))
   })
 
   app.post(`/${table}`, async (c) => {
@@ -156,6 +178,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', kind, id, { name })
     const item = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
+    await bumpVersions(c.env, [LOOKUP_CACHE_NAMESPACE])
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id }))
     return c.json(item)
   })
@@ -202,6 +225,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
       const copyId = inserted.lastInsertRowid
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', kind, copyId, { name, copied_from_id: id })
       const copyRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id: copyId })
+      await bumpVersions(c.env, [LOOKUP_CACHE_NAMESPACE])
       c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id: copyId }))
       return c.json({ ...copyRow, copied: true, copied_from_id: id })
     }
@@ -246,7 +270,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
     // /api/products/search and every derived filter payload are keyed on the
     // products version, not the lookup-table broadcast, so advance it before
     // clients refetch or the Worker Cache API can return the old label.
-    await bumpVersion(c.env, 'products')
+    await bumpVersions(c.env, ['products', LOOKUP_CACHE_NAMESPACE])
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: duplicate ? 'merge' : 'update', id: mergedIntoId || id }))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: `${kind}_ripple`, id: mergedIntoId || id }))
     return c.json({ ...responseRow, merged: !!duplicate, merged_from_id: duplicate ? id : null })
@@ -285,7 +309,7 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
       { sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } },
     ])
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', kind, id, { name: current.name, cleared_products: cleared.products })
-    await bumpVersion(c.env, 'products')
+    await bumpVersions(c.env, ['products', LOOKUP_CACHE_NAMESPACE])
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'delete', id }))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: `${kind}_ripple`, id }))
     return c.json({})

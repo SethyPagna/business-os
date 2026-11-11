@@ -46,6 +46,30 @@ const { buildAuditLogRetentionDeleteSql } = moduleObj.exports
 assert.equal(typeof buildAuditLogRetentionDeleteSql, 'function')
 const shipped = buildAuditLogRetentionDeleteSql()
 
+/// ---- DRIFT: the partial index of the sweep (migrations/0303) carries the same text as the delete ------------------------------------------------------------
+// The planner only uses a partial index when the query repeats its WHERE terms exactly, so a kept-forever list edited in lib/audit.ts without a new migration
+// silently sends the sweep back to idx_audit_logs_created (cost, not correctness). This fails first.
+{
+  const { AUDIT_RETENTION_DELETABLE_SQL } = moduleObj.exports
+  assert.equal(typeof AUDIT_RETENTION_DELETABLE_SQL, 'string', 'lib/audit.ts exports the predicate the index is built from')
+  const migrationsDir = path.join(__dirname, '..', 'migrations')
+  const defining = fs.readdirSync(migrationsDir).filter((name) => name.endsWith('.sql')).sort()
+    .map((name) => ({ name, text: fs.readFileSync(path.join(migrationsDir, name), 'utf8') }))
+    .filter(({ text }) => /CREATE INDEX idx_audit_logs_retention_deletable ON audit_logs \(created_at\) WHERE/.test(text))
+  assert.ok(defining.length >= 1, 'a migration creates idx_audit_logs_retention_deletable')
+  const squash = (text) => text.replace(/\s+/g, ' ').trim()
+  const where = /CREATE INDEX idx_audit_logs_retention_deletable ON audit_logs \(created_at\) WHERE ([^\n]*);/.exec(defining[defining.length - 1].text)[1]
+  assert.equal(squash(where), squash(AUDIT_RETENTION_DELETABLE_SQL),
+    'the kept-forever lists in lib/audit.ts changed: add a migration that drops and recreates idx_audit_logs_retention_deletable with the new predicate')
+  assert.ok(squash(shipped).includes(squash(AUDIT_RETENTION_DELETABLE_SQL)), 'the delete uses the same predicate text')
+  const sqlite = new Database(':memory:')
+  sqlite.exec(`CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, action TEXT, entity TEXT, table_name TEXT, details TEXT, created_at TEXT);
+    CREATE INDEX idx_audit_logs_created ON audit_logs(created_at); CREATE INDEX idx_audit_logs_retention_deletable ON audit_logs (created_at) WHERE ${where};`)
+  const detail = sqlite.prepare('EXPLAIN QUERY PLAN ' + shipped.replace(/@cutoff/g, "'2026-09-01 00:00:00'")).all().map((row) => row.detail).join(' | ')
+  assert.match(detail, /idx_audit_logs_retention_deletable/, 'the sweep is planned through the partial index')
+  console.log('audit retention drift: the migration index predicate equals the delete predicate and the planner uses it')
+}
+
 const SCHEMA = `CREATE TABLE audit_logs (id INTEGER PRIMARY KEY, action TEXT, entity TEXT, table_name TEXT, details TEXT, entity_id TEXT,
   user_id INTEGER, old_value TEXT, new_value TEXT, created_at TEXT)`
 const OLD = '2026-01-01 00:00:00'

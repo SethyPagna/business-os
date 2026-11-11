@@ -110,14 +110,18 @@ ${Object.entries(AUDIT_RETENTION_KEPT_ENTITY_ACTIONS).map(([entity, actions]) =>
         OR (${AUDIT_ENTITY_KEY_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_UNDO_ENTITIES)})
           AND (${AUDIT_ACTION_SQL} LIKE '%\\_undo' ESCAPE '\\' OR ${AUDIT_ACTION_SQL} LIKE '%\\_redo' ESCAPE '\\'))`
 
+// The rows the sweep may delete, as one predicate. migrations/0303 indexes audit_logs(created_at) WHERE this exact text, which is the only way the
+// planner can answer the sweep without reading every kept-forever row older than the cutoff; test-audit-retention-pure.cjs fails when the two drift.
+export const AUDIT_RETENTION_DELETABLE_SQL = `NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
+      AND NOT (COALESCE(entity, '') = 'pending_action'
+        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
+          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))`
+
 export function buildAuditLogRetentionDeleteSql(): string {
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
-      AND NOT (${AUDIT_RETENTION_KEPT_FOREVER_SQL})
-      AND NOT (COALESCE(entity, '') = 'pending_action'
-        AND (${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_REVIEW_SECTIONS)})
-          OR (${AUDIT_ACTION_SQL} = 'approve' AND ${AUDIT_REVIEW_SECTION_SQL} IN (${sqlList(AUDIT_RETENTION_KEPT_APPROVED_REVIEW_SECTIONS)}))))
+      AND ${AUDIT_RETENTION_DELETABLE_SQL}
     LIMIT 5000
   )`
 }
