@@ -205,7 +205,7 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
-  './stockMutationReceipt': loadReal('lib/stockMutationReceipt.ts'),
+  './stockMutationReceipt': loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs') }),
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
   './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
@@ -252,7 +252,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   '../index': {},
 })
 
-const feesRoute = loadReal('routes/fees.ts', {
+const feesRoute = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   // CUTOVER-LR: fees.ts resolves a disabled-branch redirect through the real branchEffect module.
   '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),

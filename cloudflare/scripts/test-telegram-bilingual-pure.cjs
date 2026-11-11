@@ -395,7 +395,7 @@ const reconciliationFor = (getDb, analytics) => loadReal('lib/shiftReconciliatio
   './salesAnalytics': analytics,
   './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts'),
 })
-const telegram = loadReal('lib/telegram.ts', {
+const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -616,7 +616,7 @@ for (const [runtime, cut] of CUTS) {
     }
   }
 }
-const workerdTelegram = loadReal('lib/telegram.ts', {
+const workerdTelegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => { throw new Error('no DB in this test') } },
   './businessDateWindow': businessDateWindow,
@@ -767,7 +767,7 @@ const stubDb = {
   },
 }
 const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal, './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision })
-const wired = loadReal('lib/telegram.ts', {
+const wired = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
   './businessDateWindow': businessDateWindow,
@@ -852,7 +852,7 @@ const lastSent = () => sent[sent.length - 1].body.text
       }
     },
   }
-  const stocked = loadReal('lib/telegram.ts', {
+  const stocked = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => stockedDb },
     './businessDateWindow': businessDateWindow,

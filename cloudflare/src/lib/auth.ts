@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { getDb } from './db'
 import type { Env } from '../index'
+import { getPlanLimits } from './planTier'
 
 // K8a: the device an audit row names is the device the REQUEST arrived on.
 // lib/audit.ts used to take the user's most recently seen live session, and a
@@ -167,11 +168,12 @@ type SessionExpiryMetadata = {
 }
 
 // Persisting last_seen_at on every authenticated request turns a read-heavy
-// hot path into a D1 write hot path. Five minutes is fresh enough for the
-// session/admin surfaces while bounding routine touch writes to 12/hour per
-// actively used session. The UPDATE below repeats this cutoff so concurrent
-// requests cannot all write after making the same stale-read decision.
-const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+// hot path into a D1 write hot path. The interval (getPlanLimits, 15 minutes)
+// bounds routine touch writes to 4/hour per actively used session. The UPDATE
+// below binds the same interval so concurrent requests cannot all write after
+// making the same stale-read decision, and the code check and the SQL guard
+// cannot drift. Nothing reads last_seen_at to decide anything (expiry slides on
+// expires_at); records name the request's own device, not the freshest session.
 
 function asUtc(value: string): number {
   const text = String(value).trim()
@@ -181,10 +183,10 @@ function asUtc(value: string): number {
   return Date.parse(normalized)
 }
 
-function isSessionTouchDue(lastSeenAt: string | null, nowMs: number): boolean {
+function isSessionTouchDue(lastSeenAt: string | null, nowMs: number, intervalMs: number): boolean {
   if (!lastSeenAt) return true
   const lastSeenMs = asUtc(lastSeenAt)
-  return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - SESSION_TOUCH_INTERVAL_MS
+  return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - intervalMs
 }
 
 type NewSessionOptions = {
@@ -451,7 +453,8 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
   } = row
   sessionDevices.set(user, { deviceName: sessionDeviceName ?? null, deviceTz: sessionDeviceTz ?? null })
 
-  if (isSessionTouchDue(lastSeenAt, Date.parse(nowIso))) {
+  const touchSeconds = getPlanLimits(c.env).sessionTouchIntervalSeconds
+  if (isSessionTouchDue(lastSeenAt, Date.parse(nowIso), touchSeconds * 1000)) {
     c.executionCtx.waitUntil(
       db.prepare(`
         UPDATE user_sessions
@@ -461,9 +464,9 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
           AND expires_at > @observed_at
           AND (
             last_seen_at IS NULL
-            OR datetime(last_seen_at) < datetime(@observed_at, '-5 minutes')
+            OR datetime(last_seen_at) < datetime(@observed_at, @touch_window)
           )
-      `).run({ token_hash: tokenHash, observed_at: nowIso }),
+      `).run({ token_hash: tokenHash, observed_at: nowIso, touch_window: `-${touchSeconds} seconds` }),
     )
   }
 

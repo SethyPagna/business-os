@@ -119,7 +119,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   // the per-line receipt guard. REAL, not a stub: a body without a
   // client_request_id must hand straight through to the kernel, and that is
   // the property every fixture here depends on.
-  '../lib/stockMutationReceipt': loadReal('lib/stockMutationReceipt.ts'),
+  '../lib/stockMutationReceipt': loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs') }),
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),

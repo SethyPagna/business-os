@@ -116,7 +116,7 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 const realAudit = loadReal('lib/audit.ts', { './db': { getDb: dbCompat } })
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 const feeOperationReceipt = loadReal('lib/feeOperationReceipt.ts')
-const feeRoute = loadReal('routes/fees.ts', {
+const feeRoute = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   hono: require('hono'),
   '../lib/db': { getDb: dbCompat },
   '../lib/auth': {

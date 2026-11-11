@@ -360,7 +360,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   const closeAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': require('./harness/sale_status_resolution.cjs'), './schemaProbe': schemaProbeReal,
     './db': { getDb: () => settingsOnly }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
   })
-  const telegram = loadReal('lib/telegram.ts', {
+  const telegram = loadReal('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
     './lowStockSettings': lowStockStub,
     './db': { getDb: () => settingsOnly },
     './businessDateWindow': businessDateWindow,

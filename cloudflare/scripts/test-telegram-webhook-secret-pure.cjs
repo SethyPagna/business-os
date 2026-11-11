@@ -70,7 +70,7 @@ const analytics = load('lib/salesAnalytics.ts', { './saleStatusResolution': requ
 const reconciliation = load('lib/shiftReconciliation.ts', { './db': dbModule, './salesAnalytics': analytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': load('lib/paymentMethodRegistry.ts') })
 const lang = load('lib/telegramLang.ts')
 const lowStockRule = load('lib/lowStockSettings.ts', { './db': dbModule })
-const telegram = load('lib/telegram.ts', {
+const telegram = load('lib/telegram.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   './db': dbModule, './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './saleTotals': saleTotals, './businessDateWindow': businessDateWindow, './telegramLang': lang,
   './salesAnalytics': analytics, './shiftReconciliation': reconciliation, './nativeSaleChange': nativeSaleChange,

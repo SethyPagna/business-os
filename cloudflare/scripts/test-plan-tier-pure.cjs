@@ -142,7 +142,8 @@ const PAID = {
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 300,
-  coreInvariantsReverifySeconds: 21600,
+  coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -190,6 +191,7 @@ const FREE = {
   callCountingSwitchApplies: true,
   inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -240,7 +242,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // is not in the list. Every one differs between the tiers, so none needs an exemption.
 // inventoryCheckApprovalTakeoverSeconds (lib/inventoryCheckApprovals.ts) is a lease: how long a claimed Inventory Check approval may sit idle before another
 // approver takes it over. Free is the longer one (a Free request applies one line, a slow phone is normal there): Paid 5 min, Free 15 min.
-const FREE_IS_LONGER = ['productListCacheSeconds', 'coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
+const FREE_IS_LONGER = ['productListCacheSeconds', 'dashboardStockOverviewCacheSeconds', 'readSwitchMemoSeconds', 'buildSharePollMs', 'buildShareWaitMs', 'buildShareStaleMs', 'inventoryCheckApprovalTakeoverSeconds']
 
 // PAGE SIZES (planTier.ts): a page is one D1 call and calls are what Free rations (50 per invocation), so on these Free is
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
@@ -253,7 +255,9 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
 // dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds']
+// coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
+// 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

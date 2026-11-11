@@ -9,7 +9,7 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const compile = file => ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib', file), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText.replace("from './permissions'", "from './permissions.js'").replace("from './importMaintenanceFence'", "from './importMaintenanceFence.js'").replace("from './db'", "from './db.js'")
+}).outputText.replace("from './permissions'", "from './permissions.js'").replace("from './importMaintenanceFence'", "from './importMaintenanceFence.js'").replace("from './db'", "from './db.js'").replace("from './schemaObjectProbe'", "from './schemaObjectProbe.js'")
 const worker = `
 import { D1Compat } from './db.js';
 import { registerTransferRunStatements,sealTransferRunChunkStatements,commitTransferRunChunk,committedTransferRunChunk } from './store.js';
@@ -86,6 +86,7 @@ async function main() {
     {type:'ESModule',path:'entry.js',contents:worker},
     {type:'ESModule',path:'db.js',contents:compile('db.ts')},
     {type:'ESModule',path:'importMaintenanceFence.js',contents:compile('importMaintenanceFence.ts')},
+    {type:'ESModule',path:'schemaObjectProbe.js',contents:compile('schemaObjectProbe.ts')},
     {type:'ESModule',path:'store.js',contents:compile('transferRunStore.ts')},
     {type:'ESModule',path:'permissions.js',contents:compile('permissions.ts')},
   ], compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR) })

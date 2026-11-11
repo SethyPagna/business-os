@@ -90,7 +90,7 @@ const usersRoute = load('routes/users.ts', {
     requireAuth: async (c, next) => { c.set('user', currentActor); return next() },
     revokeUserSessions: async () => {},
   },
-  '../lib/audit': { changedFields: realAudit.changedFields, auditChangeColumns: realAudit.auditChangeColumns, isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
+  '../lib/audit': { requestDeviceColumnSql: realAudit.requestDeviceColumnSql, requestDeviceParams: realAudit.requestDeviceParams, changedFields: realAudit.changedFields, auditChangeColumns: realAudit.auditChangeColumns, isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
   '../lib/permissions': { isAdminControlUser: (actor) => actor?.isAdmin === true },
   '../lib/conflictControl': conflictControl,
   '../durable-objects/broadcastHub': {

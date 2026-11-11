@@ -19,7 +19,7 @@ const USER = { id: 91, username: 'payments', name: 'Payment Admin', permissions:
 const overrides = {
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
-  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
+  '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }), changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
   // isAdminControlUser: the P1-3 admin-only-key guard's question. This
   // payments user is not an administrator.
   '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },

@@ -23,6 +23,7 @@ import {
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
+import { forgetSchemaNames, schemaObjectPresent, type SchemaObject } from './schemaObjectProbe'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -1918,13 +1919,13 @@ const SHIFT_OVERVIEW_STALE_CLAIM_MS = 10 * 60_000
 
 // Memoises only a POSITIVE probe, as lib/stockMutationReceipt.ts does: the
 // migration may land after the Worker, and a miss costs one sqlite_master read.
+const SCHEDULED_SENDS_TABLE: SchemaObject = { kind: 'table', name: 'telegram_scheduled_sends' }
 let scheduledSendsReady = false
-export function __resetScheduledSendsProbeForTests(): void { scheduledSendsReady = false }
+export function __resetScheduledSendsProbeForTests(): void { scheduledSendsReady = false; forgetSchemaNames([SCHEDULED_SENDS_TABLE.name]) }
 async function scheduledSendsAvailable(env: Env): Promise<boolean> {
   if (scheduledSendsReady) return true
   try {
-    const row = await getDb(env).prepare("SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='telegram_scheduled_sends'").get<{ ready: number }>()
-    scheduledSendsReady = Number(row?.ready ?? 0) > 0
+    scheduledSendsReady = await schemaObjectPresent(getDb(env), SCHEDULED_SENDS_TABLE)
   } catch { /* a failed read is not evidence the table is missing */ }
   return scheduledSendsReady
 }

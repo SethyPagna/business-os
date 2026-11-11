@@ -49,7 +49,7 @@ const db = openDb(loadAll())
 const dbKernel = { getDb: () => db }
 const permissions = loadReal('lib/permissions.ts')
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
-const auth = loadReal('lib/auth.ts', { './db': dbKernel })
+const auth = loadReal('lib/auth.ts', { './planTier': loadReal('lib/planTier.ts'), './db': dbKernel })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 
 let cacheVersion = 10

@@ -85,7 +85,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
-const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts', { './schemaObjectProbe': require('./harness/schema_object_probe.cjs') })
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -163,7 +163,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   // require resolves against scripts/ and the whole loader dies.
   './sqlBinding': sqlBinding,
 })
-const inventoryRoute = loadReal('routes/inventory.ts', {
+const inventoryRoute = loadReal('routes/inventory.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),

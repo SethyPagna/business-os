@@ -111,7 +111,7 @@ const telegrams = []
 
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 const feeOperationReceipt = loadReal('lib/feeOperationReceipt.ts')
-const route = loadReal('routes/fees.ts', {
+const route = loadReal('routes/fees.ts', { '../lib/schemaObjectProbe': require('./harness/schema_object_probe.cjs'),
   hono: require('hono'),
   '../lib/db': { getDb: () => db },
   '../lib/auth': {

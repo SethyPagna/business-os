@@ -32,7 +32,7 @@ function paymentWorld() {
   const overrides = {
     '../lib/db': { getDb: (e) => e.DB },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
-    '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
+    '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }), changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
     '../lib/permissions': { hasPermission: () => true, getPermissionTier: () => 'full', isAdminControlUser: () => false },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     '../lib/cache': { bumpVersion: async () => {} },

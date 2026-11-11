@@ -291,6 +291,18 @@ export function currentRequestDevice(): RequestDevice | null {
   }
 }
 
+// For a raw INSERT ... SELECT that writes an audit row itself (not through buildAuditStatement): the device column is the request's own device
+// when the actor is the user being served, and only otherwise the actor's most recently seen session. The seen-session guess names the wrong
+// device for a person signed in on two (phone + till) whenever the other one touched last, and a longer touch interval widens that window.
+export function requestDeviceColumnSql(actorSql: string, column: 'device_name' | 'device_tz', fallbackSql: string): string {
+  const param = column === 'device_name' ? '@req_dev_name' : '@req_dev_tz'
+  return `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actorSql} THEN ${param} ELSE ${fallbackSql} END`
+}
+export function requestDeviceParams(): { req_dev_user_id: number | null; req_dev_name: string | null; req_dev_tz: string | null } {
+  const device = currentRequestDevice()
+  return { req_dev_user_id: device ? device.userId : null, req_dev_name: device ? device.deviceName : null, req_dev_tz: device ? device.deviceTz : null }
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be

@@ -177,6 +177,7 @@ import { canViewCourierCost, courierCostResponses, redactAmendmentEntries, redac
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 import { authoredFailureMessage, unexpectedFailureBody } from '../lib/failureText'
+import { schemaObjectPresent, type SchemaObject } from '../lib/schemaObjectProbe'
 
 // Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
 // when it has a non-blank one, else the live directory name. The SAME expression as
@@ -527,10 +528,11 @@ app.get('/money-precision-capability', async (c) => {
 })
 
 // Positive answer only (see operationWritesReady in routes/fees.ts).
+const HISTORICAL_EDIT_TRIGGER: SchemaObject = { kind: 'trigger', name: 'sales_money_precision_update_0161' }
 let historicalEditSchemaAvailable = false
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
   if (historicalEditSchemaAvailable) return true
-  historicalEditSchemaAvailable = !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  historicalEditSchemaAvailable = await schemaObjectPresent(db, HISTORICAL_EDIT_TRIGGER)
   return historicalEditSchemaAvailable
 }
 

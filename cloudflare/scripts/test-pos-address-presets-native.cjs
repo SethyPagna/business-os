@@ -37,6 +37,7 @@ const addressPresets = loadReal('lib/addressPresets.ts')
 let user = { id: 7, username: 'cashier', role_permissions: JSON.stringify({ pos: true }) }
 const route = loadReal('routes/pos.ts', {
   '../lib/addressPresets': addressPresets,
+  '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }) },
   '../lib/actorSnapshot': { actorSnapshot: (actor) => actor?.username || null },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); return next() } },
   '../lib/cache': { bumpVersion: async () => {} },
@@ -49,7 +50,7 @@ const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/addressPresets': addressPresets,
   '../lib/auditRetentionPolicy': loadReal('lib/auditRetentionPolicy.ts'),
   '../lib/actorSnapshot': { actorSnapshot: (actor) => actor?.username || null },
-  '../lib/audit': { audit: async () => {} },
+  '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }), audit: async () => {} },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); return next() } },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/conflictControl': {

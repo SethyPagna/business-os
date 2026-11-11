@@ -26,6 +26,7 @@ const OTHERS = 200
 const entry = `
 import { Hono } from 'hono'
 import { getDb, getImportFencedDb } from './src/lib/db.ts'
+import { resetSchemaObjectProbeForTests } from './src/lib/schemaObjectProbe.ts'
 import fees from './src/routes/fees.ts'
 import sales from './src/routes/sales.ts'
 import batches from './src/routes/batches.ts'
@@ -127,6 +128,7 @@ export default { async fetch(request, env) {
     })
     const trigger = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='transfer_receipts_require_provenance_insert'").first('sql')
     await env.DB.prepare('DROP TRIGGER transfer_receipts_require_provenance_insert').run()
+    resetSchemaObjectProbeForTests()
     out.notReady1 = await feePost()
     out.notReady2 = await feePost()
     await env.DB.prepare(trigger).run()
@@ -297,11 +299,11 @@ async function main() {
       for (const file of ['routes/fees.ts', 'routes/branches.ts', 'routes/inventory.ts']) {
         const src = read(file)
         assert.ok(src.includes('if (operationWritesAvailable) return true'), file)
-        assert.ok(src.includes('operationWritesAvailable = row?.ready === 2'), file)
+        assert.ok(src.includes('operationWritesAvailable = await schemaObjectsPresent(db, OPERATION_WRITE_SCHEMA)'), file)
         assert.ok(!/^\s+operationWritesAvailable = (true|false)/m.test(src), file + ': assigned only from the probe result')
       }
       const contacts = read('routes/contacts.ts')
-      assert.ok(contacts.includes('if (tablesPresent.has(name)) return true') && contacts.includes('if (row) tablesPresent.add(name)'))
+      assert.ok(contacts.includes('if (tablesPresent.has(name)) return true') && contacts.includes('if (present) tablesPresent.add(name)'))
       assert.ok(!contacts.includes("name='customer_receivables' LIMIT 1"), 'the ledger check goes through hasTable')
       assert.ok(read('lib/stockSession.ts').includes('if (!lotEditTableAvailable) lotEditTableAvailable = Boolean('))
     })

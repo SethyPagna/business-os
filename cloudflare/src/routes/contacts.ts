@@ -2,6 +2,7 @@ import { LOYALTY_DISABLED_CODE, LOYALTY_DISABLED_MESSAGE } from '../lib/loyaltyE
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { schemaObjectPresent } from '../lib/schemaObjectProbe'
 import { customerPointsReturnSql, loyaltySaleAccrualSql, loyaltySaleSinceSql, loyaltySubmissionSinceSql, loyaltyAdjustmentSinceSql } from '../lib/customerPointsReturn'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
@@ -10,7 +11,7 @@ import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { PRODUCT_SUPPLIER_REFUSAL, supplierContactChangeReachesProducts } from '../lib/productSupplierGate'
-import { audit, buildAuditStatement, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields, currentRequestDevice, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -585,11 +586,9 @@ function conflictResult(error: unknown) {
 const tablesPresent = new Set<string>()
 async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
   if (tablesPresent.has(name)) return true
-  const row = await db
-    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
-    .get<{ ok: number }>({ name })
-  if (row) tablesPresent.add(name)
-  return Boolean(row)
+  const present = await schemaObjectPresent(db, { kind: 'table', name })
+  if (present) tablesPresent.add(name)
+  return present
 }
 
 const CONTACT_MERGE_STALE_ERROR = 'One of these contacts changed while the merge was being saved. Refresh the review and try again.'
@@ -1511,7 +1510,10 @@ function registerContactRoutes(config: ContactConfig) {
       config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
     ])
     let auditDevice: { deviceName: string | null; deviceTz: string | null } = { deviceName: null, deviceTz: null }
-    if (user?.id) {
+    const requestDevice = currentRequestDevice()
+    if (user?.id && requestDevice && requestDevice.userId === Number(user.id)) {
+      auditDevice = { deviceName: requestDevice.deviceName, deviceTz: requestDevice.deviceTz }
+    } else if (user?.id) {
       try {
         const device = await db.prepare(`
           SELECT device_name, device_tz FROM user_sessions
@@ -3412,7 +3414,7 @@ app.post('/customers/:id/points', async (c) => {
             'award_points', 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()), 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()),
-            s.device_name, s.device_tz
+            ${requestDeviceColumnSql('@actorId', 'device_name', 's.device_name')}, ${requestDeviceColumnSql('@actorId', 'device_tz', 's.device_tz')}
           FROM (SELECT 1 AS one) AS _receipt
           LEFT JOIN users u ON u.id = @actorId
           LEFT JOIN (
@@ -3421,7 +3423,7 @@ app.post('/customers/:id/points', async (c) => {
             ORDER BY last_seen_at DESC, id DESC LIMIT 1
           ) AS s ON 1 = 1
           WHERE changes() = 1`,
-        params: { ...ledgerParams, details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
+        params: { ...ledgerParams, ...requestDeviceParams(), details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
       },
     ] : [
       anonymousCustomerGuardStatement(customerId),
