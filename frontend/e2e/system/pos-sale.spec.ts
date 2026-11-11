@@ -92,16 +92,21 @@ test.describe('system: a real sale through the real Worker', () => {
     // nothing would sail through a "the total is right" assertion on an empty
     // cart showing $0.00, and a sale of nothing would be recorded as a pass.
     //
-    // The tap is retried because the catalogue re-renders as its later loads
-    // land (measured: the identical tap added the item on one run and hit a
-    // re-rendering tile on the next, with the cart still reading "Cart is
-    // empty"). A cashier whose tap does nothing taps again.
-    await expect.poll(async () => {
-      if (!(await page.getByText('Cart is empty').count())) return 'holding the item'
-      await tile.click({ timeout: 30_000 }).catch(() => { /* mid-render */ })
-      await page.waitForTimeout(500)
-      return (await page.getByText('Cart is empty').count()) ? 'empty' : 'holding the item'
-    }, { message: 'the cart must actually hold the item', timeout: 60_000 }).toBe('holding the item')
+    // Owner ruling 11 Nov (lane d1-client, 6.0.1639): a product tap ALWAYS opens the lot sheet and the
+    // one-tap add is gone, so the tap alone leaves the cart empty. The seed gives this product stock but no
+    // lots, so the sheet offers 'Received date not recorded'; the cashier picks it, then taps Selling.
+    //
+    // The tap is retried until the sheet is open because the catalogue re-renders as its later loads
+    // land (measured: the identical tap hit a re-rendering tile and did nothing). A cashier whose tap
+    // did nothing taps again; once the sheet is open it must not be tapped through.
+    const noDate = page.getByRole('button', { name: /Received date not recorded/ })
+    await expect(async () => {
+      if (!(await noDate.isVisible())) await tile.click({ timeout: 10_000 })
+      await expect(noDate).toBeVisible({ timeout: 20_000 })
+    }, 'the product tap must open the lot sheet').toPass({ timeout: 60_000 })
+    await noDate.click()
+    await page.getByRole('button', { name: /^Selling/ }).click()
+    await expect(page.getByText('Cart is empty'), 'the cart must actually hold the item').toHaveCount(0)
 
     // The local database accumulates across runs, so identify the new sale by
     // IDENTITY, not by count or by "the first row" -- an ordering assumption

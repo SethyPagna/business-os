@@ -176,6 +176,12 @@ test.describe('same-device account handover', () => {
     const firstProduct = page.getByText('E2E Product 002 Belle Roux').first()
     await expect(firstProduct).toBeVisible({ timeout: 30_000 })
     await firstProduct.click()
+    // Owner ruling 11 Nov (lane d1-client, 6.0.1639): a product tap ALWAYS opens the lot sheet; the
+    // one-tap add is gone, so the tap alone leaves the cart empty. This fixture shop holds no lots
+    // (/api/batches/picker-lots answers []), so its stock is the 'Received date not recorded' option:
+    // the cashier picks it, then taps the Selling price button, exactly as the till does.
+    await page.getByRole('button', { name: /Received date not recorded/ }).click()
+    await page.getByRole('button', { name: /^Selling/ }).click()
     await expect(page.getByText('Cart is empty'), "A's cart must actually hold something").toHaveCount(0)
 
     await signOut(page)
