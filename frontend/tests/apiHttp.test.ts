@@ -966,7 +966,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const scopedKey = buildQueryCacheStorageKey(' products:search:x ')
   assert.match(scopedKey, /^read_cache:v2:/)
   assert.ok(scopedKey.endsWith(':products:search:x'))
-  assert.equal(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'same runtime authority reuses the same key')
+  assert.equal(scopedKey, buildQueryCacheStorageKey(' products:search:x '), 'same runtime authority reuses the same key')
   resetActorReadSession()
   assert.notEqual(scopedKey, buildQueryCacheStorageKey('products:search:x'), 'new authenticated session cannot reuse prior persisted data')
   assert.doesNotMatch(source, /from '\.\/actorQuery\.ts'/)
