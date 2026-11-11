@@ -19,7 +19,7 @@ const { startParityWorld, once, sha, lf } = require('./harness/report_atomic_par
 const MUTANTS = {
   'drop-void-group': text => once(text, "if (options.maxReceipts === undefined) groups.push({ kind: 'voidSales'", "if (false) groups.push({ kind: 'voidSales'"),
   // The full-report family reaches the atomic batch only for a bare request; a scoped one that did would read every sale.
-  'snapshot-ignores-scope': text => once(text, 'const bare = !includeDeliveryFees && capturedScope === null &&', 'const bare = !includeDeliveryFees &&'),
+  'snapshot-ignores-scope': text => once(text, 'const unscoped = capturedScope === null &&', 'const unscoped ='),
 }
 
 async function main() {
@@ -30,7 +30,7 @@ async function main() {
     matrix.push({ label: 'all/snapshot-full', mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'all'), null) })
     matrix.push({ label: 'month/snapshot-full', mode: 'snapshot', filter: filterOf(RANGES.find(r => r.id === 'month'), '1') })
     // The full report family (daily-report, grouped, overview, customer and day reports) reads through readSalesReportSnapshot: one atomic batch
-    // for an undated window or a plain dated one, the two scalar passes (twoPass) for a scope, courier fees, an export cap or any other filter key.
+    // for an undated window or a plain dated one, the two scalar passes (twoPass) for a scope, courier fees on a DATED window (the undated window takes the fee group in the batch since 6.0.1679), an export cap or any other filter key.
     for (const range of RANGES) for (const branch of BRANCHES) matrix.push({ label: `${range.id}/b${branch ?? '*'}/snapshot`, mode: 'snapshot', filter: filterOf(range, branch) })
     for (const range of RANGES.filter(r => ['today', 'month', 'year', 'all'].includes(r.id))) {
       matrix.push({ label: `${range.id}/series`, mode: 'series', filter: filterOf(range, null), granularity: 'day' }, { label: `${range.id}/product`, mode: 'product', filter: filterOf(range, null) })
@@ -41,7 +41,7 @@ async function main() {
       { label: 'undated/awaiting/product', mode: 'product', filter: undated({ status: 'awaiting_payment' }) },
       { label: 'undated/dated-status/snapshot', mode: 'snapshot', filter: undated({ startDate: monthRange.startDate, endDate: monthRange.endDate, status: 'awaiting_payment' }), twoPass: true },
       { label: 'undated/dated-clock/snapshot', mode: 'snapshot', filter: undated({ startDate: monthRange.startDate, endDate: monthRange.endDate, startTime: '08:00', endTime: '12:00' }), twoPass: true },
-      { label: 'undated/fees/snapshot', mode: 'snapshot', filter: undated(), fees: true, twoPass: true }, { label: 'undated/scope/snapshot', mode: 'snapshot', filter: undated(), stats: { search: 'Customer 1' }, twoPass: true },
+      { label: 'undated/fees/snapshot', mode: 'snapshot', filter: undated(), fees: true }, { label: 'dated/fees/snapshot', mode: 'snapshot', filter: undated({ startDate: monthRange.startDate, endDate: monthRange.endDate }), fees: true, twoPass: true }, { label: 'undated/scope/snapshot', mode: 'snapshot', filter: undated(), stats: { search: 'Customer 1' }, twoPass: true },
       { label: 'undated/export-cap/snapshot', mode: 'snapshot', filter: undated(), options: { maxReceipts: 5000 }, twoPass: true })
 
     // ---- 1. OFF versus ON over the whole matrix ----------------------------------------------------------------------------------

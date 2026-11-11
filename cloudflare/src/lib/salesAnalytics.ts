@@ -2003,8 +2003,11 @@ async function readSalesReportSnapshotAtomic(
 ): Promise<SalesReportSnapshot> {
   validateReportReadOptions(options)
   const capturedScope = captureSalesReportScalarScope(scalarScope)
-  const bare = !includeDeliveryFees && capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
-  if (bare && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full')
+  const unscoped = capturedScope === null && Object.getPrototypeOf(options) === Object.prototype && Reflect.ownKeys(options).length === 0
+  const bare = !includeDeliveryFees && unscoped
+  // The UNDATED window also takes the delivery-fee group: the plan builder already builds it (buildSalesReportReadPlan) and the batch counts it (rows_deliveryFees), so
+  // Reports overview (readSalesReportSnapshot(..., true)) no longer falls to the two-pass reader. Dated windows keep the passes: their fee window rules (fee_date vs created_at) differ.
+  if (unscoped && reportPlainFilters(f) && reportAtomicFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, includeDeliveryFees, null, {}, 'full')
   if (bare && reportDashboardDateFiltersEligible(f)) return readSalesReportAtomicTotalsSnapshot(env, f, false, null, {}, 'full', true)
   return readSalesReportCapturedSnapshot(env, f, includeDeliveryFees, capturedScope, options, 'full')
 }
