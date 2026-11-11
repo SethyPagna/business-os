@@ -14,7 +14,7 @@ import { contactDisplayAddress } from './contactOptions'
 import { customerReturnAuthorityPredicate, customerReturnQuotePlanFromRows, publicCustomerReturnQuote } from './customerReturnQuotePlan'
 import { loyaltyAccrualSql } from './loyaltyEligibility'
 import { multiplyMoney4 } from './moneyPrecision'
-import { configuredOnlineMethod, onlineMethodRefusalActive, onlineTender, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY } from './onlineOrderFulfil'
+import { configuredOnlineMethod, onlineMethodRefusalActive, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome, onlineTender, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY } from './onlineOrderFulfil'
 import { isCashPaymentMethod, paymentMethodKey, parseConfiguredMethods, parsePaymentMethodKinds } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashRowRefused } from './saleStatusResolution'
 import { productStockGuardError, PRODUCT_HAS_STOCK_CODE, PRODUCT_HAS_STOCK_MESSAGE } from './productStockGuard'
@@ -624,6 +624,9 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
     ...commonGuardParams, expectedJson: JSON.stringify(expected), saleId, returnClientRequestId: clientRequestId, movementIdFloor: args.movementIdFloor,
   }))
   statements.push({ sql: 'DELETE FROM return_create_guards WHERE operation_id=@operationId', params: { operationId } })
+  // KHQR round 10 (G5): the exchange's tender cannot name the online method stored after this request read it (one statement of this batch, no extra call).
+  const exchangeOnlineGuard = onlineMethodSaleGuard(intent.exchange_payment.details.map((row) => row.method), String(ctx.settings[ONLINE_PAYMENT_METHOD_KEY] ?? ''))
+  if (exchangeOnlineGuard) statements.push(exchangeOnlineGuard)
 
   // ---- admission: a plan this invocation cannot carry is refused before it writes anything -----------------------------------------
   const transactionStatementCount = args.callCounting ? 1 : stockTransactionStatementCount(statements.length)
@@ -648,6 +651,9 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   } catch (error) {
     const mapped = guardMapped(error)
     if (mapped) return mapped
+    const onlineOutcome = exchangeOnlineGuard ? onlineMethodSaleGuardOutcome(error) : null
+    if (onlineOutcome === 'requires_order') return reply(400, { error: 'The online payment method is only for fulfilling an online order.', code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
+    if (onlineOutcome === 'changed') return reply(409, { error: 'The online payment method changed while this return was being recorded. Nothing was recorded. Try again.', code: 'write_conflict', conflict: true })
     try {
       const receipt = await args.readReceipt()
       if (receipt) {

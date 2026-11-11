@@ -4123,8 +4123,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOp
     // KHQR round 9 (F4): the online (KHQR) payment method exists on a sale ONLY through Fulfilling an online order, so a historical row that names it is flagged here, read-only, and
     // never applied (same identity as the till refusal: namesOnlineMethod). applyHistoricalSaleImport repeats the refusal inside its own batch.
     if (reservedOnlineMethodName) {
-      const named = String(first.payment_method ?? '').split('+').find((part) => namesOnlineMethod(reservedOnlineMethodName, part))
-      if (named !== undefined) {
+      if (namesOnlineMethod(reservedOnlineMethodName, first.payment_method)) {
         results.push({ rowNumber: first._rowNumber, action: 'error', identifier, existingId: null, message: `The ${reservedOnlineMethodName} payment method is only for fulfilling an online order, so a historical sale cannot be imported with it. Change the payment method in the file.`, changes: {}, data: first })
         continue
       }

@@ -223,9 +223,18 @@ export function saleMethodsUsed(input: {
   payment_method?: unknown
   payment_details?: unknown
 }): string[] {
-  const details = parsePaymentDetailMethods(input.payment_details)
+  // A detail row whose method is itself a combined label ("Card + ABA") is split too (KHQR round 10, G1): the fold registers methods, never a summary.
+  const details = parsePaymentDetailMethods(input.payment_details).flatMap(paymentMethodComponents)
   if (details.length) return details
-  return String(input.payment_method ?? '')
+  return paymentMethodComponents(input.payment_method)
+}
+
+/**
+ * KHQR round 10 (G1): the ONE splitter of a method label into the methods it names. A label joined with '+' ("Cash + ABA", "Cash+ABA") is a summary of several methods; every
+ * reader that asks "which methods does this label name" (the online-method identity, the sale fold, the import refusal) uses THIS, never its own split. A plain name is one component.
+ */
+export function paymentMethodComponents(label: unknown): string[] {
+  return String(label ?? '')
     .split('+')
     .map((part) => part.trim())
     .filter(Boolean)

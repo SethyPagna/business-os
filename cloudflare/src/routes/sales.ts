@@ -20,7 +20,7 @@ import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/perm
 import { getOnlineOrderAccess } from '../lib/onlineOrdersAccess'
 import { announceOrderChange, announceOrdersOfSales } from '../lib/onlineOrderAlerts'
 import {
-  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, reservedOnlineMethod, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
+  LINKED_SALE_MONEY_LOCKED_CODE, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, configuredOnlineMethod, reservedOnlineMethod, onlineMethodRestateGuard, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome, fulfilStatements, linkedOnlineSaleIds, loadFulfilOrder, onlineTender, planFulfil, type FulfilPlan,
 } from '../lib/onlineOrderFulfil'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
@@ -2718,6 +2718,8 @@ app.patch('/:id/status', async (c) => {
   let directStatusResponse: Record<string, unknown> | null = null
   let settlementLineStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
   let paymentCorrection = false
+  // KHQR round 10 (G5): pins the online method this settle judged against, inside its own batch (null when the request settles nothing).
+  let settlementOnlineGuard: { sql: string; params: Record<string, unknown> } | null = null
   if (paymentFieldsSent) {
     const isDeferredPaymentSettle = paymentFromStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
@@ -2798,6 +2800,7 @@ app.patch('/:id/status', async (c) => {
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
     const after = buildSaleSettlementAfterState(before, sale, target, settlementPlan)
+    settlementOnlineGuard = onlineMethodRestateGuard([String(settlementPlan.paymentMethod ?? '')], String(settingMap[ONLINE_PAYMENT_METHOD_KEY] ?? ''), Number(id))
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2995,6 +2998,7 @@ app.patch('/:id/status', async (c) => {
     })
   }
   statements.push(...settlementLineStatements)
+  if (settlementOnlineGuard) statements.push(settlementOnlineGuard)
   const effectGuard = effectGuardStatement(branchResolver.guards())
   if (effectGuard) statements.push(effectGuard)
   statements.push(...plan.statements)
@@ -3138,6 +3142,12 @@ app.patch('/:id/status', async (c) => {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
     const message = (error as Error).message || ''
+    // The online method was stored after this settle read it (G5): nothing was written.
+    if (settlementOnlineGuard) {
+      const onlineOutcome = onlineMethodSaleGuardOutcome(error)
+      if (onlineOutcome === 'requires_order') return c.json({ error: 'The online payment method is only for fulfilling an online order.', code: ONLINE_METHOD_REQUIRES_ORDER_CODE }, 400)
+      if (onlineOutcome === 'changed') return c.json({ error: 'The online payment method changed while this payment was being saved. Nothing was recorded. Try again.', code: 'write_conflict', conflict: true }, 409)
+    }
     if (settlementRequestId && settlementDigest) {
       const retry = await db.prepare(`
         SELECT request_digest,response_json FROM sale_mutation_receipts

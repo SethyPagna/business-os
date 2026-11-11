@@ -11,6 +11,7 @@ import {
   isCashPaymentMethod,
   parseConfiguredMethodsStrict,
   parsePaymentMethodKinds,
+  paymentMethodComponents,
   paymentMethodKey,
 } from './paymentMethodRegistry'
 import { resolveChangeExchangeRate } from './saleTotals'
@@ -182,7 +183,7 @@ export function planSaleSettlement(input: {
     }
   }
   if (!existingRows.length) {
-    const tokens = String(input.existingPaymentMethodRaw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+    const tokens = paymentMethodComponents(input.existingPaymentMethodRaw)
     if ((existingUsdUnits !== 0n || existingKhrUnits !== 0n) && tokens.length !== 1) {
       fail('This partially paid sale does not identify how its split payment was allocated.', 'stored_payment_invalid')
     }
@@ -334,7 +335,7 @@ export type PaymentRenameResult =
   | { ok: false; relevant: boolean; error: 'malformed_payment_details' }
 
 function summaryTokens(raw: unknown): string[] {
-  return String(raw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+  return paymentMethodComponents(raw)
 }
 
 function renamedSummary(tokens: string[], fromKey: string, target: string): { value: string | null; changed: boolean; matches: number } {

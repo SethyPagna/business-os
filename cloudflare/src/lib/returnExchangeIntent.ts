@@ -115,8 +115,9 @@ export function canonicalExchangePayment(value: unknown): ExchangePaymentIntent 
   const details = rows.map((raw): ExchangeTenderRow => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('Each payment row must be an object.')
     const row = raw as Record<string, unknown>
+    // A '+' joins several methods into one summary label (paymentMethodComponents); a tender row names ONE method (KHQR round 10: "Cash+ABA" is refused as "Cash + ABA" is).
     const method = typeof row.method === 'string' ? row.method.trim() : ''
-    if (!method || method.length > METHOD_MAX || method.includes(' + ')) return bad('Each payment row needs a payment method.')
+    if (!method || method.length > METHOD_MAX || method.includes('+')) return bad('Each payment row needs a payment method.')
     const usd = row.amount_usd === undefined || row.amount_usd === null || row.amount_usd === '' ? 0 : Number(row.amount_usd)
     const khr = row.amount_khr === undefined || row.amount_khr === null || row.amount_khr === '' ? 0 : Number(row.amount_khr)
     if (!Number.isFinite(usd) || !Number.isFinite(khr) || usd < 0 || khr < 0) return bad('Payment amounts cannot be negative.')

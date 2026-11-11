@@ -14,7 +14,7 @@ import type { D1Compat } from './db'
 import { roundMoney4, sumMoney4 } from './moneyPrecision'
 import { peekReadSwitch, readSwitch } from './readSwitches'
 import type { Env } from '../index'
-import { effectiveOnlineMethod, methodFold, namesOnlineMethod, ONLINE_METHOD_DEFAULT, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_METHOD_SETTING_KEY, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
+import { effectiveOnlineMethod, methodFold, namesOnlineMethod, ONLINE_METHOD_DEFAULT, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_METHOD_SETTING_KEY, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodRestateGuard, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
 
 export const ONLINE_PAYMENT_METHOD_KEY = ONLINE_METHOD_SETTING_KEY
 export const ONLINE_PAYMENT_METHOD_DEFAULT = ONLINE_METHOD_DEFAULT
@@ -40,7 +40,7 @@ export type FulfilPlan = {
 }
 
 // The fold itself lives in lib/onlineMethodInvariant.ts, the one module of the online-method invariant; re-exported here for the callers that always imported it from this file.
-export { methodFold, namesOnlineMethod, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome }
+export { methodFold, namesOnlineMethod, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_METHOD_SALE_GUARD_SQL, ONLINE_ORDERS_SWITCH_ON_SQL, onlineMethodRestateGuard, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome }
 
 export const sameMethod = (a: unknown, b: unknown): boolean => methodFold(a) === methodFold(b)
 
@@ -87,6 +87,28 @@ export const ONLINE_METHOD_IN_USE_GUARD_SQL = `SELECT CASE WHEN EXISTS (
       OR (json_valid(recent.payment_details) AND EXISTS (SELECT 1 FROM json_each(recent.payment_details) d WHERE lower(trim(COALESCE(json_extract(d.value, '$.method'), ''))) = @methodKey)))
     AND NOT EXISTS (SELECT 1 FROM online_orders o WHERE o.sale_id = recent.id)
 ) THEN json_extract('[1]', '$[${ONLINE_METHOD_IN_USE_CODE}]') ELSE 1 END`
+
+/**
+ * KHQR round 10 (G4): the in-use check for the spellings the SQL guard above cannot decide (it folds ASCII only and compares a whole name): the rows of the same latest-`windowRows`
+ * window whose method text has a non-ASCII character, a backslash (an escaped tab or newline in the JSON), or a '+' (a combined label), judged with the shared identity
+ * (namesOnlineMethod: `ÉPay` finds `épay`, `Bakong` finds `Cash + Bakong`). One bounded read, made only when an administrator STORES or renames onto a new method; a plain ASCII
+ * name is decided by ONLINE_METHOD_IN_USE_GUARD_SQL inside the write's own batch (so this read is a read-time check for the other spellings: a sale written in the milliseconds between
+ * this read and the batch is the accepted gap, and the sale-side guards refuse such a sale anyway). Fulfilled online sales (linked from online_orders) are exempt, as in the SQL guard.
+ */
+export async function onlineMethodUsedByOrdinarySales(db: D1Compat, method: string, windowRows: number): Promise<boolean> {
+  const rows = await db.prepare(`
+    SELECT recent.payment_method, recent.payment_details
+    FROM (SELECT id, payment_method, payment_details FROM sales ORDER BY created_at DESC, id DESC LIMIT @windowRows) recent
+    WHERE (COALESCE(recent.payment_method, '') GLOB '*[^ -~]*' OR instr(COALESCE(recent.payment_method, ''), '+') > 0
+        OR COALESCE(recent.payment_details, '') GLOB '*[^ -~]*' OR instr(COALESCE(recent.payment_details, ''), '+') > 0 OR instr(COALESCE(recent.payment_details, ''), char(92)) > 0)
+      AND NOT EXISTS (SELECT 1 FROM online_orders o WHERE o.sale_id = recent.id)`).all<{ payment_method: string | null; payment_details: string | null }>({ windowRows })
+  return rows.some((row) => {
+    if (namesOnlineMethod(method, row.payment_method)) return true
+    let details: unknown = []
+    try { details = row.payment_details ? JSON.parse(row.payment_details) : [] } catch { details = [] }
+    return Array.isArray(details) && details.some((detail) => namesOnlineMethod(method, (detail as { method?: unknown } | null)?.method))
+  })
+}
 
 /** onlineMethodRefusalActive with the switch read from D1 now, not from the memo: for an error path that must name the real reason (a refusal that lost to a write inside the memo window would otherwise read as a conflict). */
 export async function onlineMethodRefusalActiveFresh(db: D1Compat, storedSetting: unknown): Promise<boolean> {

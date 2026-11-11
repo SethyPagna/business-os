@@ -169,7 +169,7 @@ async function main() {
         payment_currency: 'USD', exchange_rate: 4000, subtotal_usd: 12.5, total_usd: 12.5, amount_paid_usd: 12.5, amount_paid_khr: 0,
         items: [{ product_id: 12, product_name: 'Probe Serum', quantity: 1, applied_price_usd: 12.5, total_usd: 12.5, returned_quantity: 0, cost_price_usd: 1, branch_id: 1 }] } }, `import ${rowNumber}`)
     let row = 0
-    for (const [label, method] of [['exact', 'ABA KHQR'], ['case', 'aba khqr'], ['TAB', 'ABA KHQR' + U(9)], ['NBSP', 'ABA KHQR' + U(0xa0)], ['split tender', 'Cash + ABA KHQR']]) {
+    for (const [label, method] of [['exact', 'ABA KHQR'], ['case', 'aba khqr'], ['TAB', 'ABA KHQR' + U(9)], ['NBSP', 'ABA KHQR' + U(0xa0)], ['split tender', 'Cash + ABA KHQR'], ['split tender, no spaces (G1)', 'Cash+ABA KHQR'], ['split tender, case and white space (G1)', 'Cash +aba khqr' + U(0xa0)]]) {
       row += 1
       const r = await imported(row, method)
       assert.equal(r.status, 409, 'import ' + label + ': ' + JSON.stringify(r.body))

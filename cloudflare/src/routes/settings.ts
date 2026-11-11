@@ -24,6 +24,7 @@ import {
   PAYMENT_METHOD_KINDS_SETTING,
   parsePaymentMethodKinds,
   isCashPaymentMethod,
+  paymentMethodComponents,
   paymentMethodKey,
   saleMethodsUsed,
 } from '../lib/paymentMethodRegistry'
@@ -34,8 +35,8 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
 import { readSwitch } from '../lib/readSwitches'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, ONLINE_ORDERS_SWITCH_ON_SQL, methodFold, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
-import { effectiveOnlineMethod, judgeOnlineMethodWrite, normalizeOnlineMethod, ONLINE_METHOD_INVARIANT_KEYS, ONLINE_METHOD_SETTING_KEY, onlineKindChanged, onlineMethodFinalGuard, onlineMethodGuardCode, PAYMENT_METHOD_LIST_SETTING_KEY, rawSettingValue, sameOnlineIdentity } from '../lib/onlineMethodInvariant'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, ONLINE_ORDERS_SWITCH_ON_SQL, methodFold, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, onlineMethodUsedByOrdinarySales, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { addedListEntryCombiningOnlineMethod, carriesOnlineMethodInCombination, effectiveOnlineMethod, judgeOnlineMethodWrite, normalizeOnlineMethod, ONLINE_METHOD_INVARIANT_KEYS, ONLINE_METHOD_SETTING_KEY, onlineKindChanged, onlineMethodFinalGuard, onlineMethodGuardCode, PAYMENT_METHOD_LIST_SETTING_KEY, rawSettingValue, sameOnlineIdentity } from '../lib/onlineMethodInvariant'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -503,7 +504,7 @@ async function loadPaymentMethodSetting(env: Env): Promise<PaymentMethodSettingS
 }
 
 function paymentSummaryMatches(raw: unknown, source: string): { matches: number; split: boolean } {
-  const tokens = String(raw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+  const tokens = paymentMethodComponents(raw)
   return {
     matches: tokens.filter((token) => paymentMethodKey(token) === source).length,
     split: tokens.length > 1,
@@ -574,7 +575,7 @@ async function loadPaymentMethodCandidates(
     if (!rows.length) break
     for (const row of rows) {
       const malformed = malformedPaymentDetails(row.payment_details)
-      const labels = String(row.payment_method ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+      const labels = paymentMethodComponents(row.payment_method)
       if (!malformed && row.payment_details != null && String(row.payment_details).trim()) {
         const parsed = JSON.parse(String(row.payment_details)) as Array<Record<string, unknown>>
         for (const detail of parsed) labels.push(String(detail.method ?? '').trim())
@@ -806,6 +807,10 @@ app.post('/payment-methods/replace', async (c) => {
     if (toIsOnline && !fromIsOnline) {
       return c.json({ error: 'Another payment method cannot be merged into the online payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
     }
+    // KHQR round 10 (G1): nor into a COMBINED label that carries it ("Card + ABA"): linked, that would rewrite ordinary sales onto a label the system reads as the online method.
+    if (carriesOnlineMethodInCombination(effectiveOnline, to)) {
+      return c.json({ error: 'Another payment method cannot be merged into the online payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
+    }
     if (fromIsOnline) {
       if (setting.methods.some((method) => paymentMethodKey(method) === toKey && toKey !== fromKey)) {
         return c.json({ error: 'The online payment method cannot be merged into another payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
@@ -933,6 +938,10 @@ app.post('/payment-methods/replace', async (c) => {
     })
   }
   // Renaming the online method onto a name that recent ordinary sales carry would make its sales inseparable (the settings save refuses the same end state).
+  // The SQL guard below decides a plain ASCII name inside the batch; the other spellings (non-ASCII case twins, combined labels) are judged here with the shared identity (G4).
+  if (onlineVerdict.identityChanged && await onlineMethodUsedByOrdinarySales(db, to, getPlanLimits(c.env).onlineMethodSalesWindow)) {
+    return c.json({ error: ONLINE_METHOD_IN_USE_TEXT, code: ONLINE_METHOD_IN_USE_CODE }, 409)
+  }
   if (onlineVerdict.identityChanged) {
     statements.unshift({ sql: ONLINE_METHOD_IN_USE_GUARD_SQL, params: { windowRows: getPlanLimits(c.env).onlineMethodSalesWindow, methodKey: methodFold(to) } })
   }
@@ -1464,6 +1473,13 @@ app.post('/', async (c) => {
     if (verdict.refused === 'duplicate') {
       return c.json({ error: 'Another payment method in the list is spelled like the online payment method. Merge nothing into it.', code: 'online_method_merge_refused' }, 409)
     }
+    // KHQR round 10 (G1): a list save cannot ADD a combined label that carries the online method ("Card + ABA"); judged on the method in force (stored, or the default while ON).
+    if (changedKeys.includes(PAYMENT_METHOD_LIST_SETTING_KEY)) {
+      const inForce = normalizeOnlineMethod(after.method) || (defaultInForce ? effectiveOnlineMethod('', true) : '')
+      if (addedListEntryCombiningOnlineMethod(inForce, before.listRaw, after.listRaw) !== null) {
+        return c.json({ error: 'Another payment method in the list is spelled like the online payment method. Merge nothing into it.', code: 'online_method_merge_refused' }, 409)
+      }
+    }
     if (onlineKindChanged(before, after) && !isAdminControlUser(user)) {
       return c.json({ error: 'Only an administrator can change whether the online payment method is cash.', code: 'online_method_admin_only' }, 403)
     }
@@ -1482,6 +1498,10 @@ app.post('/', async (c) => {
   // A NEW online method must not be one ordinary sales already use (the till would hide and refuse it). Bounded: only the latest plan-limit window of sales, inside this batch.
   const setsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !clearsOnlineMethod
   if (setsOnlineMethod) {
+    // The SQL guard folds ASCII only and compares a whole name; the other spellings are judged in JS with the shared identity (G4, G1).
+    if (await onlineMethodUsedByOrdinarySales(db, String(settingsAfter[ONLINE_PAYMENT_METHOD_KEY]).trim(), getPlanLimits(c.env).onlineMethodSalesWindow)) {
+      return c.json({ error: ONLINE_METHOD_IN_USE_TEXT, code: ONLINE_METHOD_IN_USE_CODE }, 409)
+    }
     statements.unshift({ sql: ONLINE_METHOD_IN_USE_GUARD_SQL, params: { windowRows: getPlanLimits(c.env).onlineMethodSalesWindow, methodKey: methodFold(settingsAfter[ONLINE_PAYMENT_METHOD_KEY]) } })
   }
   if (paymentMethodsRawBefore !== undefined && changedKeys.includes('pos_payment_methods')) {

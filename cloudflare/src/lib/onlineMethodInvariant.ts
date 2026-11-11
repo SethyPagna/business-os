@@ -19,7 +19,7 @@
 //
 // Self-contained on purpose (only the payment-method registry): routes/settings.ts, routes/sales.ts and lib/backup.ts all import it.
 
-import { isCashPaymentMethod, parsePaymentMethodKinds, paymentMethodKey, PAYMENT_METHOD_KINDS_SETTING, resolvePaymentMethodKind } from './paymentMethodRegistry'
+import { isCashPaymentMethod, parsePaymentMethodKinds, paymentMethodComponents, paymentMethodKey, PAYMENT_METHOD_KINDS_SETTING, resolvePaymentMethodKind } from './paymentMethodRegistry'
 
 export const ONLINE_METHOD_SETTING_KEY = 'online_order_payment_method'
 export const PAYMENT_METHOD_LIST_SETTING_KEY = 'pos_payment_methods'
@@ -63,7 +63,25 @@ export function effectiveOnlineMethod(stored: unknown, onlineOrdersOn: boolean):
  * replacement and import: the same normalised identity the settlement planner resolves a typed name with (paymentMethodKey: JS trim of every Unicode white space + locale
  * lower-casing, so a name with a tab, no-break space or ideographic space at either end, a leading newline, or a non-ASCII case twin ("épay" for "ÉPay") all name it) OR the SQL fold (sameOnlineIdentity). False for an empty side.
  */
-export const namesOnlineMethod = (online: unknown, name: unknown): boolean => sameOnlineIdentity(online, name)
+export function namesOnlineMethod(online: unknown, name: unknown): boolean {
+  if (sameOnlineIdentity(online, name)) return true
+  // KHQR round 10 (G1): a label is judged by every COMPONENT the system itself splits it into (paymentMethodComponents: "Cash + ABA" and "Cash+ABA" both name ABA), with the same identity.
+  const parts = paymentMethodComponents(name)
+  return parts.length > 1 && parts.some((part) => sameOnlineIdentity(online, part))
+}
+
+/** The same judgement under the name the round-10 callers read best: does this label carry the online method as itself or as any component. */
+export const carriesOnlineMethod = namesOnlineMethod
+
+/** A label that carries the online method only as a COMPONENT of a combined label (never the method itself): the shape a list save or a rename target must refuse. */
+export const carriesOnlineMethodInCombination = (online: unknown, name: unknown): boolean => namesOnlineMethod(online, name) && !sameOnlineIdentity(online, name)
+
+/** Every name a sale-guard key list must hold for one label: the label itself and each component, folded with methodFold (the SQL fold). */
+export function methodGuardKeys(label: unknown): string[] {
+  const whole = String(label ?? '').trim()
+  if (!whole) return []
+  return [...new Set([methodFold(whole), ...paymentMethodComponents(whole).map(methodFold)])]
+}
 
 export type OnlineMethodViolation ='not_listed' | 'cash_kind' | 'duplicate'
 export type OnlineMethodState = { method: unknown; listRaw: unknown; kindsRaw: unknown }
@@ -79,6 +97,17 @@ function listEntries(raw: unknown): string[] {
   } catch {
     return []
   }
+}
+
+/**
+ * KHQR round 10 (G1): the first list entry a save ADDS that carries the online method only inside a combined label ("Card + ABA"), or null. Such an entry would be a method name the
+ * till could offer and a settlement store ("Cash + Card + ABA"), so the list save refuses it. An entry the stored list already holds is tolerated (a stale label never traps an unrelated
+ * edit, and renaming it away is the way out).
+ */
+export function addedListEntryCombiningOnlineMethod(online: unknown, beforeListRaw: unknown, afterListRaw: unknown): string | null {
+  if (!normalizeOnlineMethod(online)) return null
+  const before = new Set(listEntries(beforeListRaw))
+  return listEntries(afterListRaw).find((entry) => !before.has(entry) && carriesOnlineMethodInCombination(online, entry)) ?? null
 }
 
 /** The clauses (a)-(c) that a state breaks. No method stored means nothing to break. */
@@ -168,11 +197,58 @@ export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) 
  * retryable conflict) when the stored method is no longer the raw value the route read (`@readMethod`): the only way a non-ASCII case twin could slip past the ASCII fold.
  * No D1 call: a statement of the existing batch.
  */
+/**
+ * KHQR round 10 (G6): the stored method has a character outside printable ASCII. Only then can a NON-ASCII sale name be its case twin that the ASCII fold cannot see, so the pin
+ * (`@pinMethod`) aborts only for such a method; a change between two ASCII methods never makes a Khmer-named sale conflict.
+ */
+const STORED_METHOD_NON_ASCII_SQL = `COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') GLOB '*[^ -~]*'`
+
+/** True when one of the `@saleMethodKeys` is the method in force right now (stored, or the default while online ordering is ON), read inside the statement. */
+const SALE_KEY_NAMES_METHOD_SQL = `EXISTS (SELECT 1 FROM json_each(@saleMethodKeys) k WHERE k.value = lower(trim(COALESCE(NULLIF(trim((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), char(32, 9, 10, 11, 12, 13)), ''), '${ONLINE_METHOD_DEFAULT}')))
+      AND (trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), ''), char(32, 9, 10, 11, 12, 13)) <> '' OR ${ONLINE_ORDERS_SWITCH_ON_SQL}))`
+
 export const ONLINE_METHOD_SALE_GUARD_SQL = `SELECT CASE
-  WHEN EXISTS (SELECT 1 FROM json_each(@saleMethodKeys) k WHERE k.value = lower(trim(COALESCE(NULLIF(trim((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), char(32, 9, 10, 11, 12, 13)), ''), '${ONLINE_METHOD_DEFAULT}')))
-      AND (trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '')) <> '' OR ${ONLINE_ORDERS_SWITCH_ON_SQL})) THEN json_extract('[1]', '$[${ONLINE_METHOD_REQUIRES_ORDER_CODE}]')
-  WHEN @pinMethod = 1 AND COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') <> @readMethod THEN json_extract('[1]', '$[${ONLINE_METHOD_CHANGED_CODE}]')
+  WHEN ${SALE_KEY_NAMES_METHOD_SQL} THEN json_extract('[1]', '$[${ONLINE_METHOD_REQUIRES_ORDER_CODE}]')
+  WHEN @pinMethod = 1 AND COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') <> @readMethod AND ${STORED_METHOD_NON_ASCII_SQL} THEN json_extract('[1]', '$[${ONLINE_METHOD_CHANGED_CODE}]')
   ELSE 1 END`
+
+/**
+ * KHQR round 10 (G5): the in-batch twin for a writer that RESTATES or RELABELS the payment rows of an EXISTING sale (settle, correction, bulk relabel, settlement redo, return exchange
+ * onto an existing sale). It differs from ONLINE_METHOD_SALE_GUARD_SQL in the one way those writers need: it fires only when the stored online method is no longer the raw value the
+ * request read (`@readMethod`), i.e. when an administrator stored it AFTER the request judged the rows, and never for a sale linked from online_orders (a FULFILLED online sale legitimately
+ * carries the method and a settlement restates its recorded rows). Unchanged method: the read-time judgement stands, including a legacy ordinary sale restating a row recorded before the
+ * method was reserved. Changed method: the rows must not name it ('requires_order'), and a non-ASCII row name (the ASCII fold cannot decide) aborts as a retryable 'changed' (`@pinMethod`).
+ * No D1 call: a statement of the existing batch.
+ */
+export const ONLINE_METHOD_RESTATE_GUARD_SQL = `SELECT CASE
+  WHEN COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') = @readMethod THEN 1
+  WHEN EXISTS (SELECT 1 FROM online_orders o WHERE o.sale_id = @saleId) THEN 1
+  WHEN ${SALE_KEY_NAMES_METHOD_SQL} THEN json_extract('[1]', '$[${ONLINE_METHOD_REQUIRES_ORDER_CODE}]')
+  WHEN @pinMethod = 1 AND ${STORED_METHOD_NON_ASCII_SQL} THEN json_extract('[1]', '$[${ONLINE_METHOD_CHANGED_CODE}]')
+  ELSE 1 END`
+
+/** The same judgement as a boolean predicate (true = the write may proceed) for a writer whose guard table takes a predicate (the bulk relabel): no linked-sale exemption, because a relabel never targets the online method of a linked sale. Params: onlineMethodRestateParams. */
+export const ONLINE_METHOD_RESTATE_OK_SQL = `(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_METHOD_SETTING_KEY}'), '') = @readMethod OR NOT (${SALE_KEY_NAMES_METHOD_SQL} OR (@pinMethod = 1 AND ${STORED_METHOD_NON_ASCII_SQL})))`
+
+/** The bound parameters of ONLINE_METHOD_RESTATE_OK_SQL / ONLINE_METHOD_RESTATE_GUARD_SQL (saleId is added by the guard). */
+export function onlineMethodRestateParams(methods: readonly string[], readMethodRaw: string): { saleMethodKeys: string; pinMethod: number; readMethod: string } {
+  const names = methods.map((method) => String(method ?? '').trim()).filter(Boolean)
+  return {
+    saleMethodKeys: JSON.stringify([...new Set(names.flatMap(methodGuardKeys))]),
+    pinMethod: names.some((name) => [...name].some((ch) => ch.charCodeAt(0) > 127)) ? 1 : 0,
+    readMethod: readMethodRaw,
+  }
+}
+
+/** The restate guard for the rows `methods` of sale `saleId`; null when there is nothing to guard. `readMethodRaw` is the raw stored method the request judged against ('' when absent). */
+export function onlineMethodRestateGuard(methods: readonly string[], readMethodRaw: string, saleId: number): { sql: string; params: Record<string, unknown> } | null {
+  const names = methods.map((method) => String(method ?? '').trim()).filter(Boolean)
+  if (!names.length) return null
+  return {
+    sql: ONLINE_METHOD_RESTATE_GUARD_SQL,
+    params: { ...onlineMethodRestateParams(names, readMethodRaw), saleId },
+  }
+}
 
 /** The guard statement for a sale carrying `methods`; null when there is nothing to guard. `readMethodRaw` null = no read to pin (an import commit has none). */
 export function onlineMethodSaleGuard(methods: readonly string[], readMethodRaw: string | null): { sql: string; params: Record<string, unknown> } | null {
@@ -181,7 +257,7 @@ export function onlineMethodSaleGuard(methods: readonly string[], readMethodRaw:
   return {
     sql: ONLINE_METHOD_SALE_GUARD_SQL,
     params: {
-      saleMethodKeys: JSON.stringify(names.map(methodFold)),
+      saleMethodKeys: JSON.stringify([...new Set(names.flatMap(methodGuardKeys))]),
       pinMethod: readMethodRaw !== null && names.some((name) => [...name].some((ch) => ch.charCodeAt(0) > 127)) ? 1 : 0,
       readMethod: readMethodRaw ?? '',
     },

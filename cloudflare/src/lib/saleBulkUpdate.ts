@@ -9,6 +9,7 @@ import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKi
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
 import { configuredOnlineMethod, namesOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, onlineMethodRefusalActive } from './onlineOrderFulfil'
+import { ONLINE_METHOD_RESTATE_OK_SQL, onlineMethodRestateParams } from './onlineMethodInvariant'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
   BULK_STATUS_LIMIT,
@@ -453,6 +454,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
   // A relabel that makes non-cash riel cash must find whole 100-riel notes (owner, 27 Oct 2026); cash -> cash keeps what is stored.
   let relabelMakesCash: ((sourceMethod: unknown) => boolean) | null = null
   let onlineMethodKey: string | null = null
+  let onlineMethodGuardParams: ReturnType<typeof onlineMethodRestateParams> | null = null
   if (request.action.kind === 'payment_method') {
     const settingRows = await db.prepare(`SELECT key,value FROM settings WHERE key IN ('pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}','${ONLINE_PAYMENT_METHOD_KEY}')`).all<{ key: string; value: string }>()
     onlineMethodKey = paymentMethodKey(configuredOnlineMethod(settingRows.find((row) => row.key === ONLINE_PAYMENT_METHOD_KEY)?.value))
@@ -467,6 +469,8 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
     // The online (KHQR) method exists on a sale only through Fulfilling its order: a relabel cannot create online money.
     if (namesOnlineMethod(onlineMethodKey, targetKey) && await onlineMethodRefusalActive(env, settingRows.find((row) => row.key === ONLINE_PAYMENT_METHOD_KEY)?.value)) throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 400, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
     expectedPaymentMethodsRaw = setting.value
+    // KHQR round 10 (G5): the online method this relabel judged against is pinned inside the batch (below): stored after this read, it must not be the target.
+    onlineMethodGuardParams = onlineMethodRestateParams([target], String(settingRows.find((row) => row.key === ONLINE_PAYMENT_METHOD_KEY)?.value ?? ''))
     request.action = { ...request.action, target }
   }
 
@@ -565,6 +569,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, rawInput:
   if (expectedPaymentMethodsRaw !== null) {
     guards.push(bulkAssertion("EXISTS(SELECT 1 FROM settings WHERE key='pos_payment_methods' AND value=@expected)", { expected: expectedPaymentMethodsRaw }))
   }
+  if (onlineMethodGuardParams) guards.push(bulkAssertion(ONLINE_METHOD_RESTATE_OK_SQL, onlineMethodGuardParams))
   for (const expected of request.items) {
     const sale = sales.find((row) => Number(row.id) === expected.id)
     if (!sale) fail(`Sale ${expected.id} was not found.`)
@@ -797,6 +802,13 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const legacyDriverApplier = snapshot.action.kind === 'delivery_contact' && payload.applier === BULK_UPDATE_KIND
   if (payload.applier !== expectedApplier && !legacyCustomerApplier && !legacyDriverApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
+  // KHQR round 10 (G3): a REDO writes the recorded target label again, and that label may have become the online method after the relabel was made. Judged like the relabel itself.
+  if (snapshot.action.kind === 'payment_method' && direction === 'redo') {
+    const stored = (await db.prepare('SELECT value FROM settings WHERE key=?').get<{ value: string }>([ONLINE_PAYMENT_METHOD_KEY]))?.value
+    if (namesOnlineMethod(configuredOnlineMethod(stored), snapshot.action.target) && await onlineMethodRefusalActive(env, stored)) {
+      throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 409, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
+    }
+  }
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
   const next = direction === 'undo' ? 'redoable' : 'undoable'

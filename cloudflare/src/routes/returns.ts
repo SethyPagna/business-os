@@ -2098,7 +2098,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   }
   // KHQR round 9 (F3): the in-batch predicate folds with SQL's ASCII-only lower(), so a name that matches the online method only by non-ASCII case ("épay" for "ÉPay") is judged
   // here with the settlement identity instead, from one read made only for such a name (an ASCII or caseless name keeps the call-free path).
-  if (reservedMethodKey && [...String(replacementPaymentMethod)].some((ch) => ch.charCodeAt(0) > 127)) {
+  // KHQR round 10 (G1): a combined label ("Cash + ABA") takes the same read, because the predicate compares the whole name and the label is judged by its components.
+  if (reservedMethodKey && [...String(replacementPaymentMethod)].some((ch) => ch.charCodeAt(0) > 127 || ch === '+')) {
     const refusedNonAscii = await refuseReservedMethod()
     if (refusedNonAscii) return refusedNonAscii
   }

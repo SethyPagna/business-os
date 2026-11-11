@@ -4,6 +4,8 @@ import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import type { SettlementPlan } from './paymentSettlement'
+import { ONLINE_METHOD_SETTING_KEY, onlineMethodRestateGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
+import { onlineTender, reservedOnlineMethod } from './onlineOrderFulfil'
 import { normalizeSearchText } from './searchMatch'
 import { actorSnapshot } from './actorSnapshot'
 import {
@@ -334,6 +336,15 @@ class SaleSettlementReplayConflict extends Error {
   readonly statusCode = 409
 }
 
+const ONLINE_METHOD_REPLAY_REFUSAL = 'The online payment method is only for fulfilling an online order, so this payment cannot be put back on the sale. Nothing was reversed.'
+
+function stateOnlineTender(state: SaleSettlementState, method: string): { usd: number; khr: number } {
+  let rows: unknown = []
+  try { rows = state.payment_details ? JSON.parse(String(state.payment_details)) : [] } catch { rows = [] }
+  const details = (Array.isArray(rows) ? rows : []).map((row) => ({ method: String((row as { method?: unknown } | null)?.method ?? ''), amount_usd: Number((row as { amount_usd?: unknown } | null)?.amount_usd) || 0, amount_khr: Number((row as { amount_khr?: unknown } | null)?.amount_khr) || 0 }))
+  return onlineTender(details, method)
+}
+
 export async function replaySaleSettlementAction(
   env: Env,
   user: SessionUser,
@@ -368,6 +379,20 @@ export async function replaySaleSettlementAction(
   if (!current || !sameSettlementState(current, expected)) {
     throw new SaleSettlementReplayConflict('This sale was edited after the settlement. Refresh before reversing it.')
   }
+  // KHQR round 10 (G3): the recorded state may have been legal only before the online method was reserved (settle "Truemoney", undo, the administrator stores "Truemoney", redo). A replay
+  // may restate what the sale already carries but never ADD online money to an ordinary sale; a sale that fulfilled an online order is exempt, as in the settle route. One read
+  // for the method and the link; the same rows are pinned inside the batch below (the guard fires only if the method changed after this read).
+  const onlineRead = await db.prepare(`SELECT (SELECT value FROM settings WHERE key = @key) AS method, EXISTS(SELECT 1 FROM online_orders WHERE sale_id = @saleId) AS linked`).get<{ method: string | null; linked: number }>({ key: ONLINE_METHOD_SETTING_KEY, saleId })
+  const linkedToOrder = Number(onlineRead?.linked) === 1
+  if (!linkedToOrder) {
+    const reserved = await reservedOnlineMethod(env, onlineRead?.method)
+    if (reserved) {
+      const adds = stateOnlineTender(target, reserved)
+      const holds = stateOnlineTender(current, reserved)
+      if (adds.usd > holds.usd + 0.00005 || adds.khr > holds.khr) throw new SaleSettlementReplayConflict(ONLINE_METHOD_REPLAY_REFUSAL)
+    }
+  }
+  const replayOnlineGuard = onlineMethodRestateGuard([String(target.payment_method ?? '')], String(onlineRead?.method ?? ''), saleId)
   const expectedHistoryStatus = direction === 'undo' ? 'undoable' : 'redoable'
   const nextHistoryStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
@@ -394,6 +419,7 @@ export async function replaySaleSettlementAction(
         AND h.status=@historyStatus
     )`, { operation: operation.id, history: historyId, generation, historyStatus: expectedHistoryStatus }),
     ...saleSettlementStateStatements(saleId, target, stamp),
+    ...(replayOnlineGuard ? [replayOnlineGuard] : []),
     recordEvent.statement,
     {
       sql: `UPDATE sale_mutation_receipts SET generation=generation+1,
@@ -415,6 +441,7 @@ export async function replaySaleSettlementAction(
   try {
     await db.batch(statements)
   } catch (error) {
+    if (onlineMethodSaleGuardOutcome(error)) throw new SaleSettlementReplayConflict(ONLINE_METHOD_REPLAY_REFUSAL)
     if (/constraint|guard_value/i.test(String(error))) {
       throw new SaleSettlementReplayConflict('This sale or settlement changed. Nothing was reversed.')
     }

@@ -4,7 +4,7 @@ import { productStockGuardError, productStockGuardStatement } from './productSto
 import type { D1Compat } from './db'
 import { businessDateTimeId, normalizeClientReceiptNumber, planBusinessDateTimeNumbers, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid, saleStoredState } from './saleStatusResolution'
-import { isCashPaymentMethod } from './paymentMethodRegistry'
+import { isCashPaymentMethod, paymentMethodComponents } from './paymentMethodRegistry'
 import { ONLINE_METHOD_REQUIRES_ORDER_CODE, onlineMethodSaleGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
 import { branchCanSell } from './branchRoles'
 import { actorSnapshot, type ActorLike } from './actorSnapshot'
@@ -169,7 +169,7 @@ export async function applyHistoricalSaleImport(
   }
   // Riel paid by a cash method is whole 100-riel notes (owner, 27 Oct 2026). The sheet has one method column and one riel
   // column, so the riel is cash when every method it names is cash (a mixed 'Cash + ABA' cannot say which part is cash).
-  const importMethods = String(d.payment_method || 'Cash').split('+').map((method) => method.trim()).filter(Boolean)
+  const importMethods = paymentMethodComponents(d.payment_method || 'Cash')
   if (!rielCashAmountValid(d.amount_paid_khr) && importMethods.length && importMethods.every((method) => isCashPaymentMethod(method))) {
     throw Object.assign(new Error(`Sale on row ${rowNumber}: riel paid in cash must be whole 100 riel notes.`), { code: RIEL_CASH_NOT_HUNDREDS })
   }
