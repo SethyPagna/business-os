@@ -802,12 +802,30 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const legacyDriverApplier = snapshot.action.kind === 'delivery_contact' && payload.applier === BULK_UPDATE_KIND
   if (payload.applier !== expectedApplier && !legacyCustomerApplier && !legacyDriverApplier) fail('This group does not match its saved permission scope.')
   permission(user, snapshot.action, snapshot.members.length)
-  // KHQR round 10 (G3): a REDO writes the recorded target label again, and that label may have become the online method after the relabel was made. Judged like the relabel itself.
-  if (snapshot.action.kind === 'payment_method' && direction === 'redo') {
-    const stored = (await db.prepare('SELECT value FROM settings WHERE key=?').get<{ value: string }>([ONLINE_PAYMENT_METHOD_KEY]))?.value
-    if (namesOnlineMethod(configuredOnlineMethod(stored), snapshot.action.target) && await onlineMethodRefusalActive(env, stored)) {
+  // KHQR round 10 (G3) / round 11 (H2, H4): a replay writes recorded labels again (REDO: the target; UNDO: each sale's source label), and such a label may have become the online method
+  // since. Judged like the relabel itself, in BOTH directions, from ONE read (stored method + the changed sales linked from an online order, which legitimately carry it), and the
+  // method read is pinned inside the batch (below), so storing it between this read and the batch aborts the replay.
+  let replayOnlineGuard: StockStatement | null = null
+  if (snapshot.action.kind === 'payment_method') {
+    const rows = await db.prepare(`SELECT 'm' AS k, value AS v FROM settings WHERE key=@key
+      UNION ALL SELECT 'l', CAST(m.sale_id AS TEXT) FROM sale_bulk_members m JOIN online_orders o ON o.sale_id=m.sale_id WHERE m.operation_id=@op`).all<{ k: string; v: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY, op: op.id })
+    const stored = rows.find((row) => row.k === 'm')?.v ?? undefined
+    const linked = new Set(rows.filter((row) => row.k === 'l').map((row) => Number(row.v)))
+    const labels: string[] = direction === 'redo' ? [String(snapshot.action.target ?? '')] : []
+    for (const member of snapshot.members) {
+      if (!member.changed || linked.has(member.id)) continue
+      const state = direction === 'undo' ? member.before : member.after
+      labels.push(String(state.payment_method ?? ''))
+      try {
+        const details = state.payment_details ? JSON.parse(String(state.payment_details)) : []
+        if (Array.isArray(details)) for (const detail of details) labels.push(String((detail as { method?: unknown } | null)?.method ?? ''))
+      } catch { /* unreadable details: the summary label stands */ }
+    }
+    if (labels.some((label) => namesOnlineMethod(configuredOnlineMethod(stored), label)) && await onlineMethodRefusalActive(env, stored)) {
       throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 409, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
     }
+    const names = labels.map((label) => label.trim()).filter(Boolean)
+    if (names.length) replayOnlineGuard = bulkAssertion(ONLINE_METHOD_RESTATE_OK_SQL, onlineMethodRestateParams(names, String(stored ?? '')))
   }
   const sign: 1 | -1 = direction === 'undo' ? -1 : 1
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
@@ -823,6 +841,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   if (assignmentPlan) statements.push(assignmentPlan.pre)
   const changedIds = snapshot.members.filter((member) => member.changed).map((member) => member.id)
   statements.push(notCancelledGuard(changedIds))
+  if (replayOnlineGuard) statements.push(replayOnlineGuard)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: member.id }))
   }

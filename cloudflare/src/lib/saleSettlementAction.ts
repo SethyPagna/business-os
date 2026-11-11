@@ -342,6 +342,9 @@ function stateOnlineTender(state: SaleSettlementState, method: string): { usd: n
   let rows: unknown = []
   try { rows = state.payment_details ? JSON.parse(String(state.payment_details)) : [] } catch { rows = [] }
   const details = (Array.isArray(rows) ? rows : []).map((row) => ({ method: String((row as { method?: unknown } | null)?.method ?? ''), amount_usd: Number((row as { amount_usd?: unknown } | null)?.amount_usd) || 0, amount_khr: Number((row as { amount_khr?: unknown } | null)?.amount_khr) || 0 }))
+  // KHQR round 11 (H3): a state with NO readable payment rows (an imported sale: payment_details NULL) records its method only in the payment_method summary. The summary then stands as one
+  // row (judged by its components, a presence weight of 1 each side), so an undo can never put the online method back on such a sale.
+  if (!details.length && String(state.payment_method ?? '').trim()) return onlineTender([{ method: String(state.payment_method), amount_usd: 1, amount_khr: 0 }], method)
   return onlineTender(details, method)
 }
 
