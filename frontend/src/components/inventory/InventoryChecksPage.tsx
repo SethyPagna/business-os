@@ -40,6 +40,9 @@ import { getProductBatches } from '../../api/batchesTransport.ts'
 import { stockConflictFigures, type StockWriteAnswer } from './stockAnswerPatch.ts'
 import ChipRail, { RailChip } from '../shared/kit/ChipRail.tsx'
 import { oldListDropsStatus, productsServerOf, productsWireParams, type ProductsServer } from './inventoryCheckProductsRequest.ts'
+import { soleActiveBranch } from '../../utils/branchCollapse.ts'
+import { PRICE_KEYS } from './inventoryPriceFacts.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { loadWired, mergeWiredRows, NotWired, patchWiredRaw, readWiredRows, rememberWiredMode, wiredMode, wiredResult, type Branch, type WiredAccess, type WiredDeps, type WiredExtras, type WiredList, type WiredRaw } from './inventoryWired.ts'
 import { runApprovalFlow } from './inventoryCheckApprovalFlow.ts'
 import { productSalesFocus, queueReportsFocus } from '../sales/reports/reportsFocus.ts'
@@ -73,6 +76,8 @@ type ProductsResult = {
   summary?: CheckSummary & { pending?: number }
   facets?: { brands?: string[]; categories?: string[] }
   facetsLimited?: { brands: boolean; categories: boolean }
+  /** The rules behind the rows' promotion prices (wired answers to a viewer with the price grant). */
+  promotionRules?: PromotionRule[]
   /** What the server switches on for this answer (ic_fix_stock): Fix stock and the Sales link in the detail float. */
   capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean }
   /** The older list (ic_simple off) answers the all-sessions Issues view with the issues themselves: one per product and session, with the reason, the counted figure and the session. */
@@ -178,6 +183,7 @@ function projectProduct(product: InventoryCheckProduct, fields: InventoryCheckAc
   if (!fields.brand) delete visible.brand
   if (!fields.category) delete visible.category
   if (!fields.barcode) { delete visible.barcode; delete visible.sku }
+  if (!fields.price) for (const key of PRICE_KEYS) delete (visible as Record<string, unknown>)[key]
   return visible
 }
 
@@ -210,6 +216,16 @@ export default function InventoryChecksPage() {
 }
 
 function userIdentity(user: { id?: unknown } | null) { return String(user?.id ?? '') }
+
+/** The one active branch, read from the branch list (a few rows) -- or null when there are several, none, or this account may not read the list (then the page asks as before). */
+async function readSoleBranch(): Promise<Branch | null> {
+  try {
+    const { getBranches } = await import('../../api/branchTransport.ts')
+    const sole = soleActiveBranch(await getBranches() as Array<{ id?: unknown; name?: unknown; is_active?: unknown }>)
+    const id = Number(sole?.id)
+    return sole && Number.isSafeInteger(id) && id > 0 ? { id, name: String(sole.name ?? '') } : null
+  } catch { return null }
+}
 
 function InventorySelection({ access, isCurrent }: { access: InventoryCheckAccess; isCurrent: () => boolean }) {
   const [selection, setSelection] = useState<Selection>({ branchId: '', sessionId: '' })
@@ -244,6 +260,7 @@ function ListSkeleton({ loadingText }: { loadingText: string }) {
 
 function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access: InventoryCheckAccess; selection: Selection; onSelect: (selection: Selection) => void; isCurrent: () => boolean }) {
   const { t, user, canWriteToServer, navigateTo, notify } = useApp() as AppContextCoreValue
+  const { formatPrice, exchangeRate } = useApp() as AppContextCoreValue
   const { branchId, sessionId } = selection
   const bootstrapIntent = selection.bootstrapIntent
   const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
@@ -287,6 +304,8 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const wiredRaw = useRef<WiredRaw | null>(null)
   const wiredKnown = useRef<{ branches?: Branch[]; extras?: WiredExtras } | null>(bootstrapIntent?.wired ? { branches: bootstrapIntent.wired.branches, extras: bootstrapIntent.wired.extras } : null)
   const wiredSeed = useRef<WiredSeed | null>(bootstrapIntent?.wired ?? null)
+  // The branches are known once an answer (or the branch list) has said them: a page step or a tab change never asks for them again.
+  const branchesKnown = useRef(!!bootstrapIntent)
   const [changedIds, setChangedIds] = useState<number[]>([])
   const [session, setSession] = useState<InventoryCheckSession | null>(null)
   const [items, setItems] = useState<InventoryCheckSessionItem[]>([])
@@ -358,6 +377,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
   const canEdit = access.canCheck && !!session && session.can_edit !== false && (isAdminControlUser(user) || Number(session.created_by) === Number(user?.id))
   const canViewCounts = access.fields.stock || (!!session && Number(session.created_by) === Number(user?.id))
   const savedReasons = useSavedStockReasons('adjust')
+  const priceText = typeof formatPrice === 'function' ? formatPrice : (usd: unknown) => `$${(Math.round(Number(usd || 0) * 100) / 100).toFixed(2)}`
   const wiredAccess: WiredAccess = { stock: access.fields.stock, barcode: access.fields.barcode, received: access.fields.received }
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -421,6 +441,14 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
               if (!publish()) return
               rememberWiredMode('old')
             }
+          }
+          // The sole-branch chip rule: with one active branch the branch is chosen BEFORE the first list read, so an open is ONE read (it used to read every branch, then read again with the sole one).
+          // This covers the older list, and the all-branches Issues view that the wired list cannot answer without a branch; a list that cannot say it (no branch access) is asked as before.
+          if (!branchId && !sessionId && !branchesKnown.current && !wiredKnown.current?.branches) {
+            branchesKnown.current = true
+            const sole = await readSoleBranch()
+            if (!publish()) return
+            if (sole) { onSelect({ branchId: String(sole.id), sessionId: '', bootstrapIntent: { query, filters: { ...filters }, pagination: { ...pagination }, pageSize } }); return }
           }
           // The switch can move under an open tab (ic_simple turned on or off), and then the key this tab holds (a status filter, Issues, a skipped summary) belongs to the other list.
           // Two outcomes, both answered in the same load by asking once in the other list's words (never a third time; a second refusal is a real error):
@@ -1140,7 +1168,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             {issueRows.map(row => <InventoryCheckRows key={row.key} products={[row.product]} observations={{ [String(row.product.id)]: row.observation }} adornments={{ [String(row.product.id)]: row.chip }} canCheck={false} {...rowProps} onSave={() => { throw new Error('Open the session to change this check.') }} />)}
           </div>
           : listMode ? <InventoryCheckListRows products={visibleProducts} drafts={drafts} selecting={selecting} locked={busy || !!submitAttempt.current} canViewStock={access.fields.stock} canViewCounts={canViewCounts}
-            adornments={issueChips} focusRequest={focusRequest} onCountEntered={onCommitted} t={t} onOpenProduct={setDetail} {...draftHandlers}
+            {...(access.fields.price ? { priceText, promotionRules: data?.promotionRules, exchangeRate } : {})} adornments={issueChips} focusRequest={focusRequest} onCountEntered={onCommitted} t={t} onOpenProduct={setDetail} {...draftHandlers}
             {...(lotCountsOn ? { lotCounts: true, onMoreDates: moreDates, onLotSet: directSetOn ? setLotFromRow : undefined } : {})} />
           : <InventoryCheckRows key={scopeKey} products={visibleProducts} observations={observations} errors={rowErrors} adornments={{ ...adornments, ...issueChips }} frozen={frozen} pending={Object.fromEntries(visibleProducts.map(product => [String(product.id), savingId === Number(product.id)]))} locked={busy}
             canCheck={canCheckRows} inSession={!!sessionId} sheetHeader="external" reasonSuggestions={savedReasons.map(reason => reason.label)} focusRequest={focusRequest} onCommitted={onCommitted}
@@ -1155,7 +1183,7 @@ function InventoryWorkspace({ access, selection, onSelect, isCurrent }: { access
             : section === 'sessions' && access.canCheck ? <button type="button" className="btn-primary inline-flex min-h-10 items-center gap-1 px-3 text-xs" title={tr('inventory_check_count_tooltip', 'Count the products listed on this page')} onClick={() => setSection('products')}><Play className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_start_page', 'Count')}</button> : null}
         </div> : null}
         {fresh ? <fieldset disabled={controlsLocked} className="min-w-0" data-inventory-check-pager-lock><PaginationControls page={page} pageSize={pageSize} totalItems={(section === 'sessions' ? sessions?.total : data?.total) ?? 0} onPageChange={value => { if (!controlsLocked) { setPage(value); setScan(null) } }} onPageSizeChange={value => { if (!controlsLocked) { setPageSize(value); setPage(1); setScan(null) } }} t={t} compact /></fieldset> : null}
-        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} t={t} onClose={() => setDetail(null)}
+        {detail && fresh ? <InventoryCheckDetailFloat product={detail} observation={observations[String(detail.id)]} unavailable={unavailableIds.has(String(detail.id))} fields={access.fields} priceText={priceText} promotionRules={data?.promotionRules} exchangeRate={exchangeRate} t={t} onClose={() => setDetail(null)}
           onFixStock={fixOpening ? () => openFixStock(fixOpening) : undefined}
           onSales={offered && rights.can('sales', 'view') ? () => { queueReportsFocus(productSalesFocus(detail.name)); navigateTo('sales', hubAnchor('sales', 'reports')) } : undefined} /> : null}
         {historyPage !== null ? <InventoryCheckHistoryFloat page={historyPage} history={history} error={historyError} onPage={setHistoryPage} onRetry={() => setHistoryReload(value => value + 1)} onClose={() => setHistoryPage(null)} t={t} /> : null}

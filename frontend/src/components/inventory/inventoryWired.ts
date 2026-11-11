@@ -7,6 +7,8 @@
 // Both answer 404 while the switch is off; the page then keeps today's list (`not_wired`). Pure functions only, so the open sequence can be tested without a browser.
 import { buildQueryString, type QueryParams } from '../../api/query.ts'
 import type { InventoryCheckProduct } from '../../types/inventoryChecks.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
+import { PRICE_KEYS } from './inventoryPriceFacts.ts'
 import { patchProductFromStockAnswer, patchProductFromStockConflict, type StockConflictAnswer, type StockWriteAnswer } from './stockAnswerPatch.ts'
 
 export type Branch = { id: number; name: string }
@@ -22,7 +24,7 @@ export type OverlayEntry = {
 }
 export type WiredSummary = { ok?: number; issue?: number; pending?: number; not_checked?: number; total?: number }
 export type WiredExtras = { summary?: WiredSummary; capabilities?: { fixStock?: boolean; approveCounts?: boolean; lotCounts?: boolean; directSet?: boolean } }
-export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; wired?: boolean; projected?: boolean; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
+export type WiredList = { items: Row[]; total: number; page: number; pageSize: number; totalPages?: number; tagged_lots?: Tagged[]; /** The promotion rules behind the rows' prices (sent only to a viewer with the price grant). */ promotion_rules?: PromotionRule[]; wired?: boolean; projected?: boolean; /** The most ids one overlay read may carry (the plan's limit, echoed by the server). */ overlay_ids?: number } & WiredExtras
 export type OverlayAnswer = { items?: OverlayEntry[]; lots?: Array<{ product_id: number; lots?: Lot[]; lots_more?: boolean }> } & WiredExtras
 /** The dates of one row; `more` is set when the plan's limit cut them. */
 type RowLots = Lot[] & { more?: boolean }
@@ -105,6 +107,8 @@ function adaptRow(row: Row, raw: Pick<WiredRaw, 'branchId' | 'overlay' | 'lots'>
     ...(raw.damaged.has(`${id}:${branchId}`) || raw.damaged.has(`${id}:0`) ? { damaged_quantity: raw.damaged.get(`${id}:${branchId}`) ?? raw.damaged.get(`${id}:0`) } : {}),
     ...(received ? { latest_received_at: received } : {}), ...(expiry ? { next_expiry_date: expiry } : {}),
   }
+  // The prices the row already carries (the server cut them without the price grant); inventoryPriceFacts reads them.
+  for (const key of PRICE_KEYS) if (Object.hasOwn(row, key)) (product as Record<string, unknown>)[key] = row[key]
   if (branchId) {
     product.check_status = check ? (check.state === 'issue' ? 'issue' : 'ok') : 'not_checked'
     product.check_branch_id = branchId
@@ -154,7 +158,7 @@ export function wiredResult(raw: WiredRaw, previous?: { summary?: Record<string,
     ...(incoming?.pending !== undefined || last?.pending !== undefined ? { pending: incoming?.pending ?? last?.pending ?? 0 } : {}) } : undefined
   return {
     wired: true as const, simple: true as const, items: list.items.map(row => adaptRow(row, { ...raw, damaged })), total: list.total, page: list.page, pageSize: list.pageSize, totalPages: list.totalPages,
-    branches: raw.branches, ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
+    branches: raw.branches, promotionRules: Array.isArray(list.promotion_rules) ? list.promotion_rules : [], ...(summary ? { summary } : {}), ...(raw.extras.capabilities ? { capabilities: raw.extras.capabilities } : {}),
   }
 }
 
