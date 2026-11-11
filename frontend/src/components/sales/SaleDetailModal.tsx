@@ -69,7 +69,6 @@ import { useScannerWedge, type ScanOrigin } from '../shared/useScannerWedge.ts'
 import ProductCard from '../pos/ProductCard.tsx'
 import { branchStockQuantity } from '../pos/productSheetState.ts'
 import { useApp, useLowStockConfig } from '../../AppContext'
-import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SaleStatusWorkflow from './SaleStatusWorkflow.tsx'
 import { claimSyncProblemPresentation, type SyncProblemPresentationOwner } from '../../utils/syncProblemLifecycle.ts'
@@ -582,14 +581,6 @@ export default function SaleDetailModal({
   // stages the line directly, and quantity/price are edited on the staged row
   // the same way a POS cart line is edited.
   const [addSheetGroup, setAddSheetGroup] = useState<AddProductCandidate | null>(null)
-  // Which product ids carry active batch/lot tracking at this sale's branch
-  // -- the same lookup the POS runs (api/batchesTransport.ts). Without it the
-  // sheet's own received-date step can never engage, which is precisely why a
-  // second modal had to ask the lot question with a list of its own.
-  const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
-  const [trackedBatchLookupState, setTrackedBatchLookupState] = useState<'loading' | 'ready' | 'failed'>('loading')
-  const [trackedBatchLookupError, setTrackedBatchLookupError] = useState('')
-  const [trackedBatchReloadKey, setTrackedBatchReloadKey] = useState(0)
   // Replace used to be a flat list that committed the swap on the first tap,
   // with no branch quantity and no way to say WHICH option or received date.
   // It now opens the same option sheet every other picker opens.
@@ -834,25 +825,6 @@ export default function SaleDetailModal({
   // move stock with no lot recorded -- so the last known set is kept and the
   // failure is logged, exactly as POS.tsx and TransferModal.tsx do.
   const canLoadSaleProducts = !!onAddItems || !!onAmend
-  useEffect(() => {
-    if (!canLoadSaleProducts) return undefined
-    let cancelled = false
-    setTrackedBatchLookupState('loading')
-    setTrackedBatchLookupError('')
-    getTrackedBatchProductIds(stockBranchId)
-      .then((res) => {
-        if (cancelled) return
-        setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
-        setTrackedBatchLookupState('ready')
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        console.error('[SaleDetailModal] batch tracking lookup failed:', error)
-        setTrackedBatchLookupState('failed')
-        setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
-      })
-    return () => { cancelled = true }
-  }, [canLoadSaleProducts, detailScope, stockBranchId, trackedBatchReloadKey])
 
   const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
     const query = text.trim()
@@ -930,25 +902,6 @@ export default function SaleDetailModal({
     if (!addLines.length) addDraftRef.current = captureLineDraft()
     setAddLines((current) => mergeStagedAddLine(current, line))
   }
-  // If the tracking-index lookup is unavailable, treat every row currently in
-  // the picker as tracked. The sheet then asks for a concrete lot or explicit
-  // unrecorded stock instead of silently taking the no-lot path.
-  const trackedIdsForAddSheet = useMemo(() => {
-    if (trackedBatchLookupState === 'ready') return trackedBatchProductIds
-    const conservative = new Set(trackedBatchProductIds)
-    const rows = [
-      ...addCandidates,
-      ...(addSheetGroup?.__groupChoices || []),
-      ...(replacePicking?.__groupChoices || []),
-      ...(addSheetGroup ? [addSheetGroup] : []),
-      ...(replacePicking ? [replacePicking] : []),
-    ]
-    for (const row of rows) {
-      const id = Number(row?.id)
-      if (Number.isFinite(id) && id > 0) conservative.add(id)
-    }
-    return conservative
-  }, [trackedBatchLookupState, trackedBatchProductIds, addCandidates, addSheetGroup, replacePicking])
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = t(key)
@@ -2726,20 +2679,6 @@ export default function SaleDetailModal({
                   {translateOr('branch_redirect_to', 'Redirect to')}: <span className="font-semibold text-gray-700 dark:text-gray-200">{branchRows?.find((row) => Number(row.id) === stockRedirect)?.name || `#${stockRedirect}`}</span>
                 </p>
               ) : null}
-              {trackedBatchLookupState === 'loading' ? (
-                <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-                  {translateOr('loading', 'Checking received dates…', 'កំពុងពិនិត្យថ្ងៃចូល…')}
-                </p>
-              ) : trackedBatchLookupState === 'failed' ? (
-                <div role="alert" className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
-                  <span className="min-w-0 flex-1 truncate" title={trackedBatchLookupError}>
-                    {translateOr('received_dates_load_failed', 'Could not verify received dates. A stock source will be required.', 'មិនអាចពិនិត្យថ្ងៃចូលបានទេ។ ត្រូវជ្រើសប្រភពស្តុក។')}
-                  </span>
-                  <button type="button" className="shrink-0 rounded px-2 py-1 font-semibold underline underline-offset-2" onClick={() => setTrackedBatchReloadKey((key) => key + 1)}>
-                    {t('retry') || translateOr('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
-                  </button>
-                </div>
-              ) : null}
               {addSearching && addCandidates.length === 0 ? (
                 <p className="mt-2 text-xs text-gray-400">{t('loading') || 'Loading'}</p>
               ) : null}
@@ -2789,9 +2728,8 @@ export default function SaleDetailModal({
                   // and refuses the pick, exactly as it does in the POS.
                   intent="sell"
                   activeBranchId={stockBranchId}
-                  // The lot question belongs to THIS sheet -- the POS's own
-                  // received-date step -- not to a second modal of our own.
-                  trackedBatchProductIds={trackedIdsForAddSheet}
+                  // The lot question belongs to THIS sheet, which reads the picked
+                  // product's own lots; there is no tracked-products list here.
                   pickLabel={t('add') || 'Add'}
                   onClose={closeAddPicker}
                   onPick={(picked, selection) => {

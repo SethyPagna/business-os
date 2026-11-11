@@ -38,25 +38,6 @@ const addItemsStart = source.indexOf('{canOfferAddItems ? (')
 const addItemsEnd = source.indexOf('{/* THE AUDIT TRAIL', addItemsStart)
 assert.ok(addItemsStart >= 0 && addItemsEnd > addItemsStart, 'the add-items region remains present')
 const addItems = source.slice(addItemsStart, addItemsEnd)
-const trackedLoadingStart = addItems.indexOf("trackedBatchLookupState === 'loading'")
-const trackedLoadingEnd = addItems.indexOf(") : trackedBatchLookupState === 'failed'", trackedLoadingStart)
-assert.ok(trackedLoadingStart >= 0 && trackedLoadingEnd > trackedLoadingStart, 'the tracked-date pending branch remains present')
-const trackedLoading = addItems.slice(trackedLoadingStart, trackedLoadingEnd)
-
-assert.match(
-  trackedLoading,
-  /trackedBatchLookupState === 'loading'[\s\S]*?<p role="status" aria-live="polite" aria-atomic="true" className="sr-only">[\s\S]*?Checking received dates/,
-  'the received-date lookup remains announced without shifting the controls below it',
-)
-assert.doesNotMatch(
-  trackedLoading,
-  /<p[^>]*className="[^"]*(?:mt-|text-\[11px\])[^"]*"/,
-  'the pending tracked-date lookup must not insert a visible line into the add-items section',
-)
-assert.match(
-  addItems,
-  /trackedBatchLookupState === 'failed'[\s\S]*?<div role="alert"[\s\S]*?received_dates_load_failed[\s\S]*?setTrackedBatchReloadKey/,
-  'a failed lookup remains a visible safety error with its Retry action',
-)
+assert.doesNotMatch(addItems, /trackedBatchLookupState/, 'the receipt add flow no longer waits on a tracked-products lookup')
 
 console.log('saleDetailAmendmentLoadingLayout: both loaders are accessible and layout-neutral; errors and history remain visible PASS')
