@@ -5,7 +5,8 @@
 //   - a partial number never matches (the exact comparison stays): subject 12345678 against stored 012 345 678 returns nothing;
 //   - the two fallbacks (over 15 digits, fragment under 3 characters) run today's statement;
 //   - EXPLAIN: the narrowed statement is driven by the FTS index and a key seek, not a customers scan; the write guard's name subquery is the plain expression for customers.
-// The one shape the narrowing cannot see (a slashed field of 15 digits or fewer) is pinned as a KNOWN GAP so a change to it is noticed.
+//   - slashed fields of 15 digits or fewer (customer CSV import and the API write "023 216 666/7") are found through the adjacent-pair phrases, in an option, a primary with a NULL key and a foreign number;
+// The one shape the narrowing cannot see (an option phone stored as a JSON number) is pinned as a KNOWN GAP so a change to it is noticed.
 // Run (from cloudflare/): node scripts/test-contact-duplicates-digits-index-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -50,6 +51,12 @@ const rows = [
   ['Anonymous', '012 999 999', '012999999', null],
   ['Same phone other name', '012 345 678', '012345678', null],
   ['Blank', null, null, null],
+  ['Slash option', '', null, opt('023 216 666/7')],
+  ['Slash 855 option', '', null, opt('+855 12/888 999')],
+  ['Slash primary', '098 765/432', null, null],
+  ['Slash foreign', '+44 20/7946 0958', null, null],
+  ['Legacy fourth data option', '', null, JSON.stringify([{}, {}, {}, { label: 'P', phone: '010 200 200' }])],
+  ['Double slash option', '', null, opt('096 5//55 444')],
 ]
 rows.forEach(([name, phone, key, address], i) => db.prepare('INSERT INTO customers (id,name,phone,phone_normalized,address,is_anonymous) VALUES (?,?,?,?,?,?)').run(i + 1, name, phone, key, address, name === 'Anonymous' ? 1 : 0))
 
@@ -91,6 +98,7 @@ const check = async (name, body) => { await body(); passed += 1; console.log(`PA
   const probes = [...new Set([...everyValue].map((v) => lib.normalizePhone(v)).filter(Boolean))]
   // the glued 18-digit pair a customer field with a slash carries today
   probes.push('012345700098765432', '012345701098765433')
+  const slashRows = ['Slash option', 'Slash 855 option', 'Slash primary', 'Slash foreign', 'Double slash option']
 
   await check('differential: new phone rows == today\'s phone rows for every probe value, but the pinned gap', async () => {
     const lostBy = []
@@ -103,11 +111,22 @@ const check = async (name, body) => { await body(); passed += 1; console.log(`PA
       if (lost.length) lostBy.push([p, lost])
     }
     const at = (name) => rows.findIndex((r) => r[0] === name) + 1
-    // KNOWN GAPS (none present in production data): a slashed field of 15 digits or fewer, and an option phone stored as a JSON number (the view reads text only)
-    assert.deepEqual(lostBy, [['012345678', [at('Dual short')]], ['12555001', [at('Numeric option')]]], `known gaps only: ${JSON.stringify(lostBy)}`)
+    // KNOWN GAPS (no current writer stores either; ops/queries/customers-phone-digits-gaps-census.sql counts them): an option phone stored as a JSON number (the view reads text only), and a phone
+    // on a raw option at position 3 or later while an earlier raw option is empty (the classifier keeps the first 3 options that CARRY data, the view keeps raw positions 0-2). Slashed fields of 15 digits or fewer are NOT a gap any more.
+    assert.deepEqual(lostBy, [['12555001', [at('Numeric option')]], ['010200200', [at('Legacy fourth data option')]]], `known gaps only: ${JSON.stringify(lostBy)}`)
+    // control: each slashed fixture is returned by today's statement (so the check above could lose it) and by the new one
+    for (const name of slashRows) {
+      const hit = rows.findIndex((r) => r[0] === name) + 1
+      const owned = probes.filter((p) => run(oldSql([p]), params([p])).includes(hit))
+      assert.ok(owned.length > 0, `control: today's statement finds ${name}`)
+      for (const p of owned) {
+        const n = await newSql([p])
+        assert.ok(run(idsOnly(n.sql), n.p).includes(hit), `new statement finds ${name} through ${p}`)
+      }
+    }
   })
 
-  await check('beyond the classifier: a 4th-option phone is found by the SQL of today only, and the classifier drops it anyway', async () => {
+  await check('a 4th DATA-CARRYING option phone is found by the SQL of today only, and the classifier drops it too (a 4th option after an EMPTY one is a pinned gap above)', async () => {
     for (const p of ['010100103']) {
       const n = await newSql([p])
       const before = run(oldSql([p]), params([p]))
@@ -119,13 +138,18 @@ const check = async (name, body) => { await body(); passed += 1; console.log(`PA
   })
 
   await check('differential holds for two typed numbers and with an excluded id (the gap value left out)', async () => {
-    const list = probes.filter((p) => p !== '012345678' && p !== '12555001')
+    const list = probes.filter((p) => p !== '12555001' && p !== '010200200')
     for (let i = 0; i + 1 < list.length; i += 1) {
       const pair = [list[i], list[i + 1]]
       const n = await newSql(pair, 5)
       const before = run(oldSql(pair).replace('ORDER BY id', 'AND id != 5 ORDER BY id'), params(pair))
       assert.deepEqual(run(idsOnly(n.sql), n.p), before, `pair ${pair}`)
     }
+  })
+
+  await check('the gaps census counts exactly the two pinned shapes (ops/queries/customers-phone-digits-gaps-census.sql)', async () => {
+    const sql = fs.readFileSync(path.join(root, '..', 'ops', 'queries', 'customers-phone-digits-gaps-census.sql'), 'utf8').split(/\r?\n/).filter((l) => !l.startsWith('--')).join(' ')
+    assert.deepEqual({ ...db.prepare(sql).get() }, { numeric_option_phones: 1, options_beyond_first3: 1 })
   })
 
   await check('the 18-digit dual number and a 16-digit number take the fallback and are still found', async () => {
@@ -153,7 +177,7 @@ const check = async (name, body) => { await body(); passed += 1; console.log(`PA
       assert.deepEqual(run(idsOnly(n.sql), n.p), [], p)
     }
     const n = await newSql(['012345678'])
-    assert.deepEqual(run(idsOnly(n.sql), n.p), [1, rows.findIndex((r) => r[0] === 'Same phone other name') + 1], 'the whole number finds both owners')
+    assert.deepEqual(run(idsOnly(n.sql), n.p), [1, rows.findIndex((r) => r[0] === 'Dual short') + 1, rows.findIndex((r) => r[0] === 'Same phone other name') + 1], 'the whole number finds every owner, the slashed field included')
   })
 
   await check('EXPLAIN: the narrowed statement searches the FTS index and the key index, never scans customers', async () => {

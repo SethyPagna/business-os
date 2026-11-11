@@ -560,8 +560,13 @@ async function duplicateBlockAfterGuardFailure(
   const { matches, review } = await excludeAnonymousCustomerDuplicateState(
     db,
     config,
-    await findContactDuplicateState(db, config.table, subject, config.optionMode),
+    // This runs only after a write guard refused, so it reads today's FULL statement (no digits-index narrowing): a number the index cannot show
+    // must still name its owner here, or the refusal has no explanation and surfaces as a 500.
+    await findContactDuplicateState(db, config.table, subject, config.optionMode, { fullScan: true }),
   )
+  // A hard phone owner is the reason the guard refused: answer with it before the decision check, so a stale reviewed set can never hide it.
+  const phoneOwner = matches.find((match) => match.severity === 'phone_conflict')
+  if (phoneOwner) return duplicateErrorResponse(config.entity, phoneOwner, matches, review)
   if (decision && !contactDuplicateDecisionMatches(review, decision)) {
     const top = matches[0]
     return top

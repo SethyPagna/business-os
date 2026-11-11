@@ -297,7 +297,10 @@ const NARROWING_MIN_FRAGMENT = 3
 // never becomes a match: the narrowing only chooses which rows are looked at.
 // Falls back to null (today's full comparison) for a number the index cannot be proven to hold: longer than 15 digits, or whose fragment is under 3 characters.
 // The rule also strips "/", which the view does not, so two numbers saved in one field ("012 345 678 / 098 765 432", canonical 18 digits) are found only
-// through that fallback; a slashed field of 15 digits or fewer is the one shape this cannot see, and production holds none (two fields, both 18 digits).
+// through that fallback. A slashed field of 15 digits or fewer ("023 216 666/7", written by a customer CSV import and by the API create/update path) is found by
+// extra phrases: a stored value the rule accepts holds only digits and "/" (and separators the view strips), so a "/" inside the typed fragment sits between two
+// of its adjacent digits a,b and the view shows "a/b", or "a//" when the slashes repeat; every such pair is added to the digits OR (the exact comparison still decides).
+// One shape stays unseen and is pinned in the differential: an option phone stored as a JSON number (the view reads text only).
 export function customerPhoneNarrowing(phones: readonly string[]): ContactDuplicateGuardStatement | null {
   if (!phones.length) return null
   const fragments: string[] = []
@@ -307,8 +310,16 @@ export function customerPhoneNarrowing(phones: readonly string[]): ContactDuplic
     if (fragment.length < NARROWING_MIN_FRAGMENT) return null
     fragments.push(fragment)
   }
+  const phrases = new Set<string>()
+  for (const fragment of fragments) {
+    phrases.add(fragment)
+    for (let i = 0; i + 1 < fragment.length; i += 1) {
+      phrases.add(`${fragment[i]}/${fragment[i + 1]}`)
+      phrases.add(`${fragment[i]}//`)
+    }
+  }
   const params: Record<string, unknown> = {
-    phoneRuns: `{digits} : (${fragments.map((fragment) => `"${fragment}"`).join(' OR ')}) OR {key} : (${phones.map((phone) => `"=${phone}="`).join(' OR ')})`,
+    phoneRuns: `{digits} : (${[...phrases].map((phrase) => `"${phrase}"`).join(' OR ')}) OR {key} : (${phones.map((phone) => `"=${phone}="`).join(' OR ')})`,
   }
   // One IN is the only driver (an OR beside it makes SQLite scan customers); the key seek is its own UNION arm.
   const arms = [`SELECT rowid FROM customers_phone_digits_fts WHERE customers_phone_digits_fts MATCH @phoneRuns`]
@@ -325,6 +336,8 @@ export async function findContactDuplicateState(
   table: ContactDuplicateTable,
   subject: { id?: number | string | null; name: string; phones: string[] },
   mode: ContactOptionMode = 'address',
+  // fullScan: run today's complete phone statement (no digits-index narrowing). Used only after a write guard has refused, so a number the index cannot show still names its owner.
+  options: { fullScan?: boolean } = {},
 ): Promise<{ matches: ContactDuplicateMatch[]; review: ContactDuplicateReview; snapshots: ContactDuplicateCandidateSnapshot[] }> {
   const nameKey = normalizeContactName(subject.name)
   const phones = [...new Set(subject.phones.map(normalizePhone).filter((p): p is string => !!p))]
@@ -354,7 +367,7 @@ export async function findContactDuplicateState(
 
   // customers: the digits index (migration 0302) narrows the table to the rows that can hold a typed number, and the unchanged exact comparison above then runs only
   // on those, so the rows that leave the answer are exactly the rows today's statement returns (see customerPhoneNarrowing for the one place it falls back).
-  const narrowing = table === 'customers' ? customerPhoneNarrowing(phones) : null
+  const narrowing = table === 'customers' && !options.fullScan ? customerPhoneNarrowing(phones) : null
   if (narrowing) Object.assign(params, narrowing.params)
   const phoneRows = phoneConditions.length
     ? await db
