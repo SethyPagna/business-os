@@ -118,7 +118,7 @@ for (const unreadable of ['stale', 'null'] as const) {
     setSales: (next: typeof rows.current) => { rows.current = next },
     setDetailSale: (update: (row: typeof detail) => typeof detail) => { detail = update(detail) },
     loadSalesStats: async () => {}, actionHistory: { refreshServerItems: async () => {}, pushAction: () => { throw new Error('settlement must not add duplicate local history') } },
-    window: { setTimeout: (callback: () => void) => callback(), dispatchEvent: () => {} },
+    emitOwnSalesSync: () => {}, window: { setTimeout: (callback: () => void) => callback(), dispatchEvent: () => {} },
     notify: () => {}, t: (key: string) => key, translateOr: (_key: string, fallback: string) => fallback,
     getStatusLabel: (value: string) => value, getErrorMessage: (error: unknown) => String(error), isWriteConflict: () => false,
     saleStatusDisplay,

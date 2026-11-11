@@ -133,7 +133,7 @@ assert.match(pos, /import ProductCard(?:, \{ type ProductCardProduct \})? from '
 // The POS uses the extracted piece: exactly one <ProductCard, inside the
 // .pos-product-grid it always drew its cards in.
 assert.equal((pos.match(/<ProductCard\b/g) || []).length, 1, 'POS renders the shared card exactly once')
-assert.match(pos, /<div className="pos-product-grid">[\s\S]{0,200}<ProductCard/)
+assert.match(pos, /<div className=\{searchTooShort \? 'pos-product-grid opacity-50' : 'pos-product-grid'\}>[\s\S]{0,200}<ProductCard/)
 // Both product searches on the sale screen mount the same card in the same
 // grid class -- add-items and Replace answer identically.
 assert.equal((detail.match(/<ProductCard\b/g) || []).length, 2, 'add-items and Replace both mount the shared card')
@@ -206,9 +206,10 @@ for (const file of fs.readdirSync(salesDir)) {
 //    product ids so the sheet's OWN received-date step can engage. Without
 //    them that step could never appear -- which is exactly why a second modal
 //    had to ask the lot question.
-assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"[\s\S]{0,500}trackedBatchProductIds=\{trackedIdsForAddSheet\}/)
+assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"/)
+assert.doesNotMatch(detail, /trackedBatchProductIds=/, 'the sheet reads the picked product own lots; no tracked-products list is handed in')
 assert.equal((detail.match(/activeBranchId=\{stockBranchId\}/g) || []).length, 2, 'add and replace sheets both read the stock shelf')
-assert.match(detail, /getTrackedBatchProductIds\(stockBranchId\)/)
+assert.doesNotMatch(detail, /getTrackedBatchProductIds/)
 // A FAILED lookup must not collapse into "nothing is batch-tracked" -- that
 // would drop the step from an addition that needs one and move stock with no
 // lot recorded. Same rule POS.tsx and TransferModal.tsx follow.
