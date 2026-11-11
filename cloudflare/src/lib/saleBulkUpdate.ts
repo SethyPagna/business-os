@@ -8,7 +8,7 @@ import { AMENDMENT_WINDOW_SETTING_KEY, guardSaleAmendment, resolveAmendmentWindo
 import { isCashPaymentMethod, parseConfiguredMethodsStrict, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, paymentMethodKey, RETIRED_PAYMENT_METHODS } from './paymentMethodRegistry'
 import { RIEL_CASH_NOT_HUNDREDS, rielCashAmountValid } from './saleStatusResolution'
 import { normalizeSearchText } from './searchMatch'
-import { configuredOnlineMethod, namesOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, onlineMethodRefusalActive } from './onlineOrderFulfil'
+import { configuredOnlineMethod, namesOnlineMethod, LINKED_SALE_MONEY_LOCKED_CODE, linkedOnlineSaleIds, ONLINE_METHOD_REQUIRES_ORDER_CODE, ONLINE_PAYMENT_METHOD_KEY, onlineMethodRefusalActive, replayAddsOnlineTender } from './onlineOrderFulfil'
 import { ONLINE_METHOD_RESTATE_OK_SQL, onlineMethodRestateParams } from './onlineMethodInvariant'
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding'
 import {
@@ -819,22 +819,18 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
       } catch { /* unreadable details: the summary label stands */ }
       return out
     }
-    const namesM = (label: string): boolean => namesOnlineMethod(configuredOnlineMethod(stored), label)
-    // KHQR round 12 (J1): "never add". A member is refused only when the state being WRITTEN names M and the state it carries NOW (UNDO: its after; REDO: its before, pinned by the
-    // revision fingerprint below) does not, so a sale that already carried M can still be relabelled back. REDO also judges the action's target for members that carried no M.
+    // KHQR round 13 (K1): "never add" by AMOUNT, per member, in both directions, through the rule the settlement replay uses (replayAddsOnlineTender): a member is refused when the state being
+    // WRITTEN (UNDO: its before; REDO: its after) holds more online-method money, USD or KHR, than the state it carries NOW (UNDO: its after; REDO: its before, pinned by the revision
+    // fingerprint below). Presence alone is not the test, so a sale that already carried some M cannot have ordinary money turned into M, and a legacy combined label cannot restore M money.
+    const method = configuredOnlineMethod(stored)
     const labels: string[] = []
     let refused = false
     for (const member of snapshot.members) {
       if (!member.changed || linked.has(member.id)) continue
-      const written = labelsOf(direction === 'undo' ? member.before : member.after)
-      const carried = labelsOf(direction === 'undo' ? member.after : member.before)
-      labels.push(...written)
-      if (written.some(namesM) && !carried.some(namesM)) refused = true
-    }
-    if (direction === 'redo') {
-      const target = String(snapshot.action.target ?? '')
-      labels.push(target)
-      if (namesM(target) && snapshot.members.some((member) => member.changed && !linked.has(member.id) && !labelsOf(member.before).some(namesM))) refused = true
+      const written = (direction === 'undo' ? member.before : member.after)
+      const carried = (direction === 'undo' ? member.after : member.before)
+      labels.push(...labelsOf(written))
+      if (replayAddsOnlineTender(written, carried, method)) refused = true
     }
     if (refused && await onlineMethodRefusalActive(env, stored)) {
       throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 409, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })

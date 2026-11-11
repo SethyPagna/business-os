@@ -146,6 +146,26 @@ export function onlineTender(details: ReadonlyArray<{ method: string; amount_usd
   return { usd: sumMoney4(rows.map((row) => row.amount_usd)), khr: rows.reduce((sum, row) => sum + row.amount_khr, 0), present: rows.length > 0 }
 }
 
+/** The two payment fields a replay judges (a settlement state or a bulk-relabel member state both carry them). */
+export type PaymentStateLike = { payment_method?: unknown; payment_details?: unknown }
+
+export function stateOnlineTender(state: PaymentStateLike, method: string): { usd: number; khr: number } {
+  let rows: unknown = []
+  try { rows = state.payment_details ? JSON.parse(String(state.payment_details)) : [] } catch { rows = [] }
+  const details = (Array.isArray(rows) ? rows : []).map((row) => ({ method: String((row as { method?: unknown } | null)?.method ?? ''), amount_usd: Number((row as { amount_usd?: unknown } | null)?.amount_usd) || 0, amount_khr: Number((row as { amount_khr?: unknown } | null)?.amount_khr) || 0 }))
+  // KHQR round 11 (H3): a state with NO readable payment rows (an imported sale: payment_details NULL) records its method only in the payment_method summary. The summary then stands as one
+  // row (judged by its components, a presence weight of 1 each side), so an undo can never put the online method back on such a sale.
+  if (!details.length && String(state.payment_method ?? '').trim()) return onlineTender([{ method: String(state.payment_method), amount_usd: 1, amount_khr: 0 }], method)
+  return onlineTender(details, method)
+}
+
+/** KHQR round 13 (K1): the ONE "never add" amount rule shared by the settlement and bulk-relabel replays: writing the first over the second may not leave more online-method money (USD or KHR) than the sale holds now. */
+export function replayAddsOnlineTender(written: PaymentStateLike, carried: PaymentStateLike, method: string): boolean {
+  const adds = stateOnlineTender(written, method)
+  const holds = stateOnlineTender(carried, method)
+  return adds.usd > holds.usd + 0.00005 || adds.khr > holds.khr
+}
+
 type OrderForFulfil = { id: number; order_no: string; state: string; sale_id: number | null; revision: number; branch_id: number | null; paid_json: string | null; has_review?: number | null; refund_noted_usd?: number | null; branch_successor_id?: number | null }
 
 /** One statement: the order and its paid payments. The only read Fulfil adds to a sale create. */

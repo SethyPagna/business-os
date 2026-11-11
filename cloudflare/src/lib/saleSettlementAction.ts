@@ -5,7 +5,7 @@ import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
 import type { SettlementPlan } from './paymentSettlement'
 import { ONLINE_METHOD_SETTING_KEY, onlineMethodRestateGuard, onlineMethodSaleGuardOutcome } from './onlineMethodInvariant'
-import { onlineTender, reservedOnlineMethod } from './onlineOrderFulfil'
+import { replayAddsOnlineTender, reservedOnlineMethod } from './onlineOrderFulfil'
 import { normalizeSearchText } from './searchMatch'
 import { actorSnapshot } from './actorSnapshot'
 import {
@@ -338,16 +338,6 @@ class SaleSettlementReplayConflict extends Error {
 
 const ONLINE_METHOD_REPLAY_REFUSAL = 'The online payment method is only for fulfilling an online order, so this payment cannot be put back on the sale. Nothing was reversed.'
 
-function stateOnlineTender(state: SaleSettlementState, method: string): { usd: number; khr: number } {
-  let rows: unknown = []
-  try { rows = state.payment_details ? JSON.parse(String(state.payment_details)) : [] } catch { rows = [] }
-  const details = (Array.isArray(rows) ? rows : []).map((row) => ({ method: String((row as { method?: unknown } | null)?.method ?? ''), amount_usd: Number((row as { amount_usd?: unknown } | null)?.amount_usd) || 0, amount_khr: Number((row as { amount_khr?: unknown } | null)?.amount_khr) || 0 }))
-  // KHQR round 11 (H3): a state with NO readable payment rows (an imported sale: payment_details NULL) records its method only in the payment_method summary. The summary then stands as one
-  // row (judged by its components, a presence weight of 1 each side), so an undo can never put the online method back on such a sale.
-  if (!details.length && String(state.payment_method ?? '').trim()) return onlineTender([{ method: String(state.payment_method), amount_usd: 1, amount_khr: 0 }], method)
-  return onlineTender(details, method)
-}
-
 export async function replaySaleSettlementAction(
   env: Env,
   user: SessionUser,
@@ -390,9 +380,7 @@ export async function replaySaleSettlementAction(
   if (!linkedToOrder) {
     const reserved = await reservedOnlineMethod(env, onlineRead?.method)
     if (reserved) {
-      const adds = stateOnlineTender(target, reserved)
-      const holds = stateOnlineTender(current, reserved)
-      if (adds.usd > holds.usd + 0.00005 || adds.khr > holds.khr) throw new SaleSettlementReplayConflict(ONLINE_METHOD_REPLAY_REFUSAL)
+      if (replayAddsOnlineTender(target, current, reserved)) throw new SaleSettlementReplayConflict(ONLINE_METHOD_REPLAY_REFUSAL)
     }
   }
   const replayOnlineGuard = onlineMethodRestateGuard([String(target.payment_method ?? '')], String(onlineRead?.method ?? ''), saleId)
