@@ -14,8 +14,6 @@ export type InventoryCheckProduct = {
   brand?: string | null
   category?: string | null
   damaged_quantity?: number | null
-  stock_consistent?: boolean
-  stock_diagnostics?: string | null
   unit?: string | null
   /** ic_wired rows, only for a viewer with the price grant: the Products row prices and the product discount (see inventoryPriceFacts.ts). */
   selling_price_usd?: number | string | null

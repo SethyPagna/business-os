@@ -228,8 +228,8 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
 
   // ---- More of what a row knows: unit, stock records, expiry --------------------------------------------------------------
   assert.equal(await browser.evaluate(`document.querySelector('${row(3)}').textContent.includes('bottles')`), true, 'the unit follows Now')
-  assert.equal(await browser.evaluate(`!!document.querySelector('${row(3)} [data-cell="now"] button[aria-label="${packs.en.inventory_check_stock_inconsistent_hint}"]')`), true, 'disagreeing stock records are flagged')
-  assert.equal(await browser.evaluate(`!!document.querySelector('${row(1)} [data-cell="now"] button')`), false, 'and only then')
+  assert.equal(await browser.evaluate(`!!document.querySelector('${row(3)} [data-cell="now"] button[aria-label="${packs.en.inventory_check_stock_inconsistent_hint}"]')`), false, 'the retired stock-records hint is not drawn, even for a row the older list marks stock_consistent: false')
+  assert.equal(await browser.evaluate(`!!document.querySelector('${row(1)} [data-cell="now"] button')`), false, 'and no row has a button in its Now cell')
   assert.deepEqual(await browser.evaluate<string[]>(`Array.from(document.querySelectorAll('[data-expiry]'), node => node.dataset.expiry)`), ['expired', 'soon', 'ok'], 'expiry shows as a badge: past, within 30 days, later')
   assert.equal(await browser.evaluate(`document.querySelector('${row(4)} [data-expiry]').textContent`), `${packs.en.inventory_check_expired} 01/2001`)
 

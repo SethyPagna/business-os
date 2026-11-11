@@ -83,7 +83,7 @@ try {
       assert.ok(s.find(node => node.getAttribute('data-check-actions') !== null, 'actions').className.split(' ').includes('gap-1'), 'a 4px gap between ✓ and !')
       await s.unmount()
     }],
-    ['the unit follows Now; disagreeing stock records get a hint; an expiry date is a badge that says how close it is', async () => {
+    ['the unit follows Now; the retired stock-records hint is never drawn (owner, 4 Nov: no system verification); an expiry date is a badge that says how close it is', async () => {
       const soon = offsetDate(10), late = offsetDate(-3)
       const pack = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
       const s = await mount({ canCheck: false, t: (name: string) => pack[name] || name, products: [
@@ -96,8 +96,7 @@ try {
       assert.ok(metaOf(s, 401).startsWith('Now 3 btl'), 'unit after Now')
       assert.ok(!metaOf(s, 405).includes('btl'), 'a unit never hangs on an unknown stock')
       const hints = (id: number) => s.findAll(node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === pack.inventory_check_stock_inconsistent_hint && row(s, id).contains(node))
-      assert.equal(hints(402).length, 1, 'the hint is an InfoHint beside Now')
-      assert.equal(hints(401).length + hints(403).length, 0, 'and only on disagreement')
+      assert.equal(hints(402).length + hints(401).length + hints(403).length, 0, 'no row draws it, not even one the older list still marks stock_consistent: false')
       const badge = (id: number) => s.find(node => node.getAttribute('data-expiry') !== null && row(s, id).contains(node), `expiry of ${id}`)
       assert.deepEqual([402, 403, 404].map(id => badge(id).getAttribute('data-expiry')), ['expired', 'soon', 'ok'])
       assert.equal(badge(402).textContent, `${pack.inventory_check_expired} ${late.slice(5, 7)}/${late.slice(0, 4)}`)

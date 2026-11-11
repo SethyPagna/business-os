@@ -1,5 +1,4 @@
 import { useCallback, type ReactNode } from 'react'
-import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Wrench from 'lucide-react/dist/esm/icons/wrench.js'
 import ProductImage from '../pos/ProductImage.tsx'
@@ -99,8 +98,5 @@ export default function InventoryCheckDetailFloat({ product, observation, unavai
         className="btn-secondary inline-flex h-11 min-h-11 w-11 shrink-0 items-center justify-center rounded-lg p-0 lg:h-10 lg:min-h-10 lg:w-10"><BarChart3 className="h-5 w-5" aria-hidden="true" /></button> : null}
       {onFixStock ? <button type="button" data-check-fix-stock onClick={onFixStock} className="btn-primary inline-flex h-11 min-h-11 shrink-0 items-center gap-1 px-3 text-xs lg:h-10 lg:min-h-10"><Wrench className="h-4 w-4" aria-hidden="true" />{tr('inventory_check_fix_stock', 'Fix stock')}</button> : null}
     </div> : null}
-    {product.stock_consistent === false ? <p className={`mt-3 flex items-start gap-1.5 text-xs leading-relaxed ${amber}`} data-stock-inconsistent>
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{tr('inventory_check_stock_inconsistent_hint', 'Stock records for this product disagree. Check its stock before counting.')}
-    </p> : null}
   </Modal>
 }

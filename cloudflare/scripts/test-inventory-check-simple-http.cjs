@@ -195,6 +195,36 @@ async function main() {
     assert.equal((await sessions('GET', '/sessions/legacy/history?page=1&pageSize=20')).status, 200)
   })
 
+  await check('ON session view: the rows show the branch units plus the held units, read plainly; no stock-verification ledger is built and no verdict is sent (owner, 4 Nov)', async () => {
+    reset(); setSwitch(ON)
+    // Make the verification disagree for two products: a cache that does not match the branch rows, and held units. A session row must still show the plain figures.
+    db.prepare("UPDATE products SET stock_quantity=stock_quantity+5 WHERE id=910001").run()
+    db.prepare("INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(910002,1,3)").run()
+    const list = await products('branchId=1&pageSize=25')
+    const reference = new Map(list.body.items.filter(row => row.checkable).map(row => [row.id, row]))
+    assert.equal(reference.get(910001).stock_consistent, false, 'positive control: the verification flags the mismatched cache on the product list')
+    const PAGE_LEDGER = 'SELECT id,stock_quantity FROM products WHERE id IN (SELECT id FROM __page)'
+    assert.ok(list.queries.join('\n').includes(PAGE_LEDGER), 'positive control: the product list builds the verification ledger for its page rows')
+    const read = await products('sessionId=own&pageSize=100')
+    assert.equal(read.status, 200)
+    const rows = read.body.items.filter(row => row.checkable)
+    assert.deepEqual(rows.map(row => row.id), [910001, 910002, 910003])
+    for (const row of rows) {
+      assert.equal(row.quantity, reference.get(row.id).quantity, `the session row shows the same stock as the product list for ${row.id}`)
+      assert.equal(row.damaged_quantity ?? 0, reference.get(row.id).damaged_quantity ?? 0, `and the same held units for ${row.id}`)
+      assert.equal(Object.hasOwn(row, 'stock_consistent'), false, 'no verification verdict on a session row'); assert.equal(Object.hasOwn(row, 'stock_diagnostics'), false)
+    }
+    assert.equal(rows.find(row => row.id === 910002).damaged_quantity, 3, 'held units come from the held lots of the branch')
+    assert.equal(Object.hasOwn(read.body, 'stockDiagnostics'), false, 'the diagnostics array is not sent for a session')
+    const sql = read.queries.join('\n')
+    assert.equal(sql.includes(PAGE_LEDGER), false, 'the verification ledger is not built for the page rows of a session (only the empty-id schema guard remains)')
+    const PLAIN = 'FROM branch_stock s WHERE s.product_id=__page.id'
+    assert.ok(sql.includes(PLAIN) && sql.includes('FROM damaged_stock_lots d WHERE d.product_id=__page.id'), 'the page rows are read plainly from branch_stock and the held lots')
+    const blind = await products('sessionId=own&pageSize=100', BLIND)
+    assert.ok(blind.body.items.filter(row => row.checkable).every(row => !Object.hasOwn(row, 'quantity') && !Object.hasOwn(row, 'damaged_quantity')), 'a viewer without the stock field gets no figure')
+    assert.equal(blind.queries.join('\n').includes(PLAIN), false, 'and no stock is read for them at all')
+  })
+
   await check('ON: a role change during the read is refused, never answered with the old role\'s data', async () => {
     reset(); setSwitch(ON)
     readHook = { when: 'AS category_facets', run: () => db.prepare("UPDATE roles SET permissions=? WHERE id=900001").run(JSON.stringify({ inventory_checks: true })) }

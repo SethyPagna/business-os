@@ -174,8 +174,7 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   const facts: Array<[ListField, ReactNode]> = []
   if (wants('now')) {
     const unit = finiteQuantity(product.quantity) ? String(product.unit ?? '').trim() : ''
-    const hint = tr('inventory_check_stock_inconsistent_hint', 'Stock records for this product disagree. Check its stock before counting.')
-    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_held', 'Held')}: ${product.damaged_quantity}`}>{tr('inventory_check_held', 'Held')} {product.damaged_quantity}</span></> : null}{product.stock_consistent === false ? <InfoHint text={hint} label={hint} className="ml-0.5" triggerClassName="inline-flex h-4 w-4 items-center justify-center rounded-full text-amber-700 dark:text-amber-300" /> : null}</span>])
+    facts.push(['now', <span>{named('now')} {figure(product.quantity) ?? unknownStock}{unit ? <>{' '}<span className="text-gray-500 dark:text-gray-400">{unit}</span></> : null}{finiteQuantity(product.damaged_quantity) && product.damaged_quantity > 0 ? <>{' '}<span data-damaged className="inline-flex items-center rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" title={`${tr('inventory_check_held', 'Held')}: ${product.damaged_quantity}`}>{tr('inventory_check_held', 'Held')} {product.damaged_quantity}</span></> : null}</span>])
   }
   if (wants('status')) {
     const Icon = status ? LIST_STATUS[status].Icon : null
