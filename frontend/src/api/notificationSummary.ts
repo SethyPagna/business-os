@@ -5,7 +5,7 @@ import {
   markNotificationSummaryMissing,
   readNotificationSummaryMissingUntil,
 } from './cooldownFallbacks.ts'
-import { apiFetch, isTransientGatewayError, route } from './http.ts'
+import { apiFetch, cacheInvalidate, isTransientGatewayError, route } from './http.ts'
 import { bellPath, peekBellFresh, restoreBellFresh, takeBellFresh } from './bellFreshness.ts'
 
 let notificationSummaryRequestPromise: Promise<unknown> | null = null
@@ -23,6 +23,9 @@ function buildNotificationSummaryFallback(): unknown {
 // The summary carries only a preview of a long section (inventory: first 50 rows, exact count);
 // this is the explicit "load more" that fetches the whole list for one section.
 export async function getNotificationSectionItems(sectionId: string): Promise<unknown> {
+  // route() answers from its 20 s channel cache and joins a read in flight before the serverFn below ever runs, so a pending
+  // fresh read must retire both first, or ?fresh=1 is never sent.
+  if (peekBellFresh('items')) cacheInvalidate('notifications:section-items')
   return route('notifications:section-items', async () => {
     // The Worker serves this list from a cache up to 5 minutes old; this tab's own write asks for a fresh one.
     const fresh = takeBellFresh('items')
@@ -36,6 +39,8 @@ export async function getNotificationSectionItems(sectionId: string): Promise<un
 }
 
 export async function getNotificationSummary(): Promise<unknown> {
+  // Same reason as above: drop the client cache entry and any read begun before the write, so this read reaches the network with ?fresh=1.
+  if (peekBellFresh('summary')) cacheInvalidate('notifications:summary')
   return route('notifications:summary', async () => {
     const missingUntil = readNotificationSummaryMissingUntil()
     if (isCooldownActive(missingUntil)) {
