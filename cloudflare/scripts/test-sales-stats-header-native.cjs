@@ -33,6 +33,12 @@ const MUTANTS = {
     { name: 'm-window', file: SALES, from: WINDOW_NEW, to: 'const windowFilter={startDate:null,endDate:null,startTime:null,endTime:null}' }],
   // every request loses its scope, including a multi-status one ("window-only" decided wrongly)
   scopeDroppedForStatus: [{ name: 'm-scope-all', file: SALES, from: SCOPE_NEW, to: 'const scope = undefined' }],
+  // review M3: one list clause removed from the scope at a time. Each must change the body on a shape that NARROWS the cohort (the seed's sales are all branch 1,
+  // one cashier name, so branchId=1 / cashier=a narrow nothing and these mutants used to survive).
+  scopeLosesBranch: [{ name: 'm-no-branch', file: SALES, from: SCOPE_NEW, to: "const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where.filter((w) => !w.includes('@branchId')), params)" }],
+  scopeLosesCashier: [{ name: 'm-no-cashier', file: SALES, from: SCOPE_NEW, to: "const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where.filter((w) => !w.includes('@cashier')), params)" }],
+  scopeLosesUser: [{ name: 'm-no-user', file: SALES, from: SCOPE_NEW, to: "const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where.filter((w) => !w.includes('@userId')), params)" }],
+  scopeLosesSearch: [{ name: 'm-no-search', file: SALES, from: SCOPE_NEW, to: "const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(query.search || query.q ? where.slice(0, -1) : where, params)" }],
   dropsReturnsAtomic: [{ name: 'm-ret-a', file: KERNEL, from: "  groups.push({ kind: 'returns', sql:", to: "  if (!options.headerOnly) groups.push({ kind: 'returns', sql:" }],
   dropsReturnsLegacy: [{ name: 'm-ret-l', file: KERNEL, from: 'const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}', to: 'const returns = options.headerOnly ? [] : await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnDebt}${returnPrecision}' }],
 }
@@ -51,6 +57,12 @@ const SHAPES = {
   'status-cancelled': 'startDate=2026-10-04&endDate=2026-11-02&status=cancelled',
   'branch': 'startDate=2026-10-04&endDate=2026-11-02&branchId=1',
   'cashier': 'startDate=2026-10-04&endDate=2026-11-02&cashier=a',
+  // narrowing shapes (review M3): the cohort is a strict subset of the window
+  'branch-2': 'startDate=2026-10-04&endDate=2026-11-02&branchId=2',
+  'cashier-none': 'startDate=2026-10-04&endDate=2026-11-02&cashier=zzzz-nobody',
+  'user-none': 'startDate=2026-10-04&endDate=2026-11-02&userId=999999',
+  'search-subset': 'startDate=2026-10-04&endDate=2026-11-02&search=Customer 1',
+  'search-subset-all-time': 'search=Customer 1',
 }
 const ATOMIC = { report_atomic: 'on', report_atomic_long: 'on' }
 
@@ -118,6 +130,11 @@ const bodies = (res) => Object.fromEntries(Object.entries(res).map(([k, v]) => [
   }
   await caught('naive Cut A (scope kept, window dropped)', MUTANTS.naiveScopeWithoutWindow)
   await caught('scope dropped for a multi-status filter', MUTANTS.scopeDroppedForStatus)
+  // per-clause scope drops (review M3): required reds, on both switch states
+  for (const [label, key] of [['branch', 'scopeLosesBranch'], ['cashier', 'scopeLosesCashier'], ['user', 'scopeLosesUser'], ['search', 'scopeLosesSearch']]) {
+    await caught(`scope loses its ${label} clause`, MUTANTS[key])
+    await caught(`scope loses its ${label} clause (report_atomic ON)`, MUTANTS[key], ATOMIC)
+  }
   await caught('header reader without returns, atomic plan', MUTANTS.dropsReturnsAtomic, ATOMIC)
   await caught('header reader without returns, legacy pass', MUTANTS.dropsReturnsLegacy)
 
