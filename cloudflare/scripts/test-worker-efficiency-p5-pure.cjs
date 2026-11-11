@@ -235,7 +235,7 @@ async function main() {
     // Multi-namespace call sites must use bumpVersions, not one bumpVersion()
     // per namespace.
     for (const [relPath, pattern] of [
-      ['routes/returns.ts', /bumpVersions\(c\.env, \['products', 'returns', 'sales'\]\)/],
+      ['routes/returns.ts', /bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/],
       ['routes/system.ts', /bumpVersions\(c\.env, \['sales', 'products', 'audit_log'\]\)/],
       ['routes/sales.ts', /bumpVersions\(c\.env, \['sales', 'returns'\]\)/],
       ['routes/products.ts', /bumpVersions\(c\.env, \['products', 'settings'\]\)/],

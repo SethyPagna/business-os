@@ -22,6 +22,7 @@ import {
   getSyncToken,
 } from './httpState.ts'
 import { recordServerSignals } from './serverSignals.ts'
+import { invalidationsForChannelFamily, invalidationsForWritePath } from './writeInvalidation.ts'
 import { epochEchoCount } from './dataEpoch.ts'
 import {
   READ_BUDGET_PAUSED_KEY, READ_BUDGET_PAUSED_MESSAGE, isReadBudgetCode, noteReadBudgetShed, observeReadBudgetZone, readBudgetHold,
@@ -409,28 +410,17 @@ export function cacheInvalidate(prefix: string, options: { precaution?: boolean 
   }
 }
 
-// Y18: aggregation reads DERIVED from an entity must die with it. The
-// dashboard/analytics payloads are computed from sales/returns/products/
-// inventory, but their cache channels start with 'dashboard'/'analytics' --
-// so a sale write (or its sync:update) invalidated only 'sales*' and the
-// Dashboard's own refresh then re-served the pre-write numbers from a
-// still-fresh 20s cache (the reported "cancelled sale still shows
-// completed"). Declared ONCE here; both invalidation paths below apply it.
-const DERIVED_READ_PREFIXES: Record<string, string[]> = {
-  // A customer marker change affects the customer labels shown by already
-  // loaded Sales and Returns. Their readers have independent short caches.
-  customers: ['sales', 'returns'],
-  // The Expenses list carries each sale's courier rows (driver name, cost), so a sale edit makes its cached pages stale.
-  sales: ['dashboard', 'analytics', 'fees'],
-  returns: ['dashboard', 'analytics'],
-  // GET /api/categories and /api/units also list the values products carry.
-  products: ['dashboard', 'analytics', 'categories', 'units'],
-  inventory: ['dashboard', 'analytics'],
-}
-
+// Y18: reads DERIVED from an entity die with it. The map lives in api/writeInvalidation.ts (one declarative table, used by
+// this channel path, the sync:update listener and apiFetch's own after-write hook).
 export function cacheInvalidateWithDerived(prefix: string): void {
   cacheInvalidate(prefix)
-  for (const derived of DERIVED_READ_PREFIXES[prefix] || []) cacheInvalidate(derived)
+  for (const derived of invalidationsForChannelFamily(prefix)) cacheInvalidate(derived)
+}
+
+function invalidateAfterMutation(path: string): void {
+  const prefixes = invalidationsForWritePath(path)
+  if (prefixes === null) { cacheInvalidate(''); return }
+  for (const prefix of prefixes) cacheInvalidate(prefix)
 }
 export function cacheClearAll(): void {
   cacheInvalidate('')
@@ -1268,6 +1258,7 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
     // Any API answer proves D1 is serving again.
     if (_d1LimitActive && path.startsWith('/api/')) setD1DailyLimit(false)
     const result = await res.json()
+    if (isMutation) invalidateAfterMutation(path)
     if (establishesActor) {
       cookieUser = result?.user && typeof result.user === 'object' ? result.user : undefined
       ownerReconciliation = !!cookieUser
@@ -1291,12 +1282,13 @@ async function apiFetchOnce(method: unknown, path: string, body?: unknown, timeo
       const timeoutError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`) as ApiRuntimeError
       timeoutError.code = 'request_timeout'
       timeoutError.timeoutMs = timeoutMs
-      if (isMutation) timeoutError.outcome = 'unknown'
+      if (isMutation) { timeoutError.outcome = 'unknown'; invalidateAfterMutation(path) }
       throw timeoutError
     }
     // A missing response cannot prove a dispatched write was rolled back.
     // Preserve the error for callers that can reconcile their operation ID.
     if (isMutation && (isConnectivityError(e) || Number(e?.status) >= 500 || e instanceof SyntaxError)) {
+      invalidateAfterMutation(path)
       e.outcome = 'unknown'
       e.code = e.code || 'write_outcome_unknown'
     }

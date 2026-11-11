@@ -678,6 +678,7 @@ function manualChunks(id: string): string | undefined {
       normalized.endsWith('/src/api/http.ts')
       || normalized.endsWith('/src/api/query.ts')
       || normalized.endsWith('/src/api/actorQuery.ts')
+      || normalized.endsWith('/src/api/writeInvalidation.ts')
     ) {
       return 'api-http-core'
     }

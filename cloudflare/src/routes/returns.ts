@@ -20,6 +20,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, bumpVersions } from '../lib/cache'
+import { RETURN_WRITE_CACHE_NAMESPACES } from '../lib/returnCacheVersions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
@@ -2656,7 +2657,7 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // A replacement the customer takes away deducts stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   if (replacementLines.length) c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: replacementLines.map((line) => ({ productId: line.productId, branchId: line.branchId, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))
@@ -3040,7 +3041,7 @@ app.post('/supplier', async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // Telegram: supplier return = stock out with the settlement money.
   c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
     kind: 'supplier', returnNumber, party: body.supplier_name || null,
@@ -3916,7 +3917,7 @@ app.patch('/:id', async (c) => {
   }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))

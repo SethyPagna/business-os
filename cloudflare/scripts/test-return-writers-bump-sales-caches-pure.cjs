@@ -1,0 +1,33 @@
+// Every writer of a return must bump what the Sales list and stats are keyed on, so another device (and the manager who
+// just returned) does not read a cached list for the cache's lifetime. The Sales read key folds sales, returns,
+// customers, products and stock (sales.ts getSalesReadCacheVersion); a return moves refunds (returns, sales) and restocks
+// (stock, products), never customers. Writers: create, exchange, supplier return, edit, grouped action (and its undo/redo).
+'use strict'
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+
+const root = path.join(__dirname, '..', 'src')
+const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
+
+const shared = read('lib/returnCacheVersions.ts')
+const namespaces = [...shared.matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
+const salesKey = /const namespaces = \[([^\]]+)\] as const/.exec(read('routes/sales.ts').slice(read('routes/sales.ts').indexOf('async function getSalesReadCacheVersion')))
+assert(salesKey, 'the Sales read key namespaces are still declared in one list')
+const keyed = [...salesKey[1].matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
+for (const namespace of keyed.filter((name) => name !== 'customers')) {
+  assert(namespaces.includes(namespace), `a return writer must bump '${namespace}' (the Sales list is keyed on it)`)
+}
+for (const namespace of ['returns', 'sales', 'stock', 'products']) assert(namespaces.includes(namespace), namespace)
+
+const routes = read('routes/returns.ts')
+assert.equal((routes.match(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/g) || []).length, 3, 'create, supplier return and edit bump the shared list')
+assert(!/bumpVersions\(c\.env, \['products', 'returns', 'sales'\]\)/.test(routes), 'no return writer keeps its own shorter list')
+assert(/bumpVersions\(c\.env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(read('lib/returnExchangeCreate.ts')), 'the exchange writer bumps the shared list')
+
+const bulk = read('lib/returnBulkAction.ts')
+const notify = bulk.slice(bulk.indexOf('export async function notifyReturnBulkAction'))
+assert(/bumpVersions\(env, RETURN_WRITE_CACHE_NAMESPACES\)/.test(notify.slice(0, notify.indexOf('\n}\n'))), 'a grouped return action bumps the shared list')
+const history = read('routes/actionHistory.ts')
+assert(/RETURN_BULK_ACTION_KIND\s*\?\s*notifyReturnBulkAction\(c\.env\)/.test(history), 'undo and redo of a grouped return action use the same notifier')
+console.log('return writers bump the sales caches: ok')
