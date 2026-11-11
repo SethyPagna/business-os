@@ -83,6 +83,13 @@ check('a request session with no device records none, never another session\'s d
 check('a row with no actor names no device', () => {
   assert.deepEqual(write(null, tablet), { device_name: null, device_tz: null })
 })
+check('the freshest-session join is in the SQL only when the actor is not the request user (no user_sessions read for nothing)', () => {
+  const sqlFor = (userId, device) => { globalThis[hookKey] = { current: () => device }; return buildAuditStatement(userId, null, 'update', 'fee', 1, { k: 1 }).sql }
+  assert.doesNotMatch(sqlFor(5, tablet), /user_sessions/)
+  assert.match(sqlFor(6, tablet), /user_sessions/)
+  assert.match(sqlFor(5, undefined), /user_sessions/)
+  assert.match(sqlFor(null, tablet), /user_sessions/)
+})
 delete globalThis[hookKey]
 
 console.log('\n' + passed + ' request-device check(s) passed.')
