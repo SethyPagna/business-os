@@ -17,6 +17,20 @@ export type InventoryCheckProduct = {
   stock_consistent?: boolean
   stock_diagnostics?: string | null
   unit?: string | null
+  /** ic_wired rows, only for a viewer with the price grant: the Products row prices and the product discount (see inventoryPriceFacts.ts). */
+  selling_price_usd?: number | string | null
+  selling_price_khr?: number | string | null
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
+  discount_enabled?: number | boolean | null
+  discount_type?: string | null
+  discount_percent?: number | string | null
+  discount_amount_usd?: number | string | null
+  discount_amount_khr?: number | string | null
+  discount_label?: string | null
+  discount_badge_color?: string | null
+  discount_starts_at?: string | null
+  discount_ends_at?: string | null
   latest_received_at?: string | null
   /** Earliest expiry among lots still holding stock; sent only while received dates are visible. */
   next_expiry_date?: string | null

@@ -9,7 +9,9 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckAccess } from '../../utils/inventoryCheckAccess.ts'
 import type { InventoryCheckObservation, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { finiteQuantity, signedDelta } from './InventoryCheckCountEditor.tsx'
+import { priceFacts } from './inventoryPriceFacts.ts'
 
 type Props = {
   product: InventoryCheckProduct
@@ -18,6 +20,10 @@ type Props = {
   /** The original session product that no longer exists: only its saved snapshot and check remain. */
   unavailable: boolean
   fields: InventoryCheckAccess['fields']
+  /** Price rows (selling, wholesale, promotion) for a row that carries prices, in the display currency. Absent: none are drawn. */
+  priceText?: (usd: unknown, khr?: unknown) => string
+  promotionRules?: readonly PromotionRule[]
+  exchangeRate?: number
   t: InventoryCheckTranslator
   onClose: () => void
   /** Fix stock (ic_fix_stock): opens the Set session with the counted quantity. Absent when the viewer may not, or the product has no counted issue. */
@@ -38,7 +44,7 @@ function daysUntil(day: string): number {
 }
 
 /** Everything the count sheet cannot fit on a row: unit, received and expiry dates, check status, note and who checked last. */
-export default function InventoryCheckDetailFloat({ product, observation, unavailable, fields, t, onClose, onFixStock, onSales }: Props) {
+export default function InventoryCheckDetailFloat({ product, observation, unavailable, fields, priceText, promotionRules, exchangeRate = 4100, t, onClose, onFixStock, onSales }: Props) {
   const tr = useCallback((key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }, [t])
   const copy = useCopyFloat(tr)
   const barcode = fields.barcode ? product.barcode || product.sku : null
@@ -54,6 +60,8 @@ export default function InventoryCheckDetailFloat({ product, observation, unavai
   const listStatus = !observation ? product.check_status : undefined
   const listLabels = { not_checked: ['inventory_check_status_not_checked', 'Not checked'], in_check: ['inventory_check_status_in_check', 'In check'], ok: ['inventory_check_status_ok', 'Checked OK'], issue: ['inventory_check_issue', 'Issue'] } as const
   const lastBy = product.check_by ? `@${product.check_by}` : ''
+  const prices = fields.price && priceText ? priceFacts(product as unknown as Record<string, unknown>, promotionRules, exchangeRate) : null
+  const priceRow = (label: string, money: { usd: number; khr: number | null } | null | undefined): [string, ReactNode] | null => money && priceText ? [label, priceText(money.usd, money.khr ?? undefined)] : null
 
   const rows: Array<[string, ReactNode] | null> = [
     fields.stock ? [tr('inventory_check_current_stock', 'Current stock'), now !== null ? `${now}${unit ? ` ${unit}` : ''}` : '—'] : null,
@@ -64,6 +72,9 @@ export default function InventoryCheckDetailFloat({ product, observation, unavai
     state ? [tr('inventory_check_state', 'Check status'), <span key="state">{tr(STATE_LABELS[state][0], STATE_LABELS[state][1])}{state === 'issue' && observation?.reason ? <> · <span className={amber}>{observation.reason}</span></> : null}</span>] : null,
     listStatus ? [tr('inventory_check_state', 'Check status'), <span key="status">{tr(listLabels[listStatus][0], listLabels[listStatus][1])}{listStatus === 'issue' && product.check_note ? <> · <span className={amber}>{product.check_note}</span></> : null}</span>] : null,
     listStatus && product.check_at ? [tr('inventory_check_last_checked', 'Last checked'), [lastBy, fmtDateTime24(product.check_at)].filter(Boolean).join(' · ')] : null,
+    priceRow(tr('selling_price', 'Selling price'), prices?.selling),
+    priceRow(tr('wholesale_price', 'Wholesale price'), prices?.wholesale),
+    priceRow(tr('promotion', 'Promotion'), prices?.promotion),
     fields.brand ? [tr('brand', 'Brand'), product.brand ? <span key="brand" {...copy(product.brand)}>{product.brand}</span> : '—'] : null,
     fields.category ? [tr('category', 'Category'), product.category || '—'] : null,
     fields.received && received ? [tr('received_date', 'Received date'), fmtDateOnly(received)] : null,

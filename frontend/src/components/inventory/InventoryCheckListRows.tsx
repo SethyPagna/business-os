@@ -15,7 +15,9 @@ import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import type { InventoryCheckId, InventoryCheckListStatus, InventoryCheckLotRow, InventoryCheckProduct, InventoryCheckTranslator } from '../../types/inventoryChecks.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { lotCountOf, lotTotals, rowSetPlan, type LotDraft } from './inventoryCheckLots.ts'
+import { priceFacts, type PriceMoney } from './inventoryPriceFacts.ts'
 import { finiteQuantity, parseCount, signedDelta } from './InventoryCheckCountEditor.tsx'
 import type { InventoryCheckFocusRequest } from './InventoryCheckRows.tsx'
 
@@ -110,6 +112,10 @@ export type InventoryCheckListRowsProps = {
   locked?: boolean
   canViewStock: boolean
   canViewCounts: boolean
+  /** Price details (selling, wholesale, promotion) of rows that carry prices, in the viewer's display currency. Absent: no price is drawn. */
+  priceText?: (usd: unknown, khr?: unknown) => string
+  promotionRules?: readonly PromotionRule[]
+  exchangeRate?: number
   /** Small badges after the barcode line, by product id (the Issues tab's "Open session" chip). */
   adornments?: Readonly<Record<string, ReactNode | undefined>>
   /** Scroll one row to the middle, ring it for a moment and focus its Count input or its check button. Send it with the render that shows the row. */
@@ -143,7 +149,7 @@ type RowProps = Omit<InventoryCheckListRowsProps, 'products' | 'drafts' | 'focus
   onAdvance: (id: InventoryCheckId) => void
 }
 
-function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered, lotCounts = false, onLotCount, onLotSet, onMoreDates }: RowProps) {
+function ListRow({ product, draft, adornment, columns, countable, copy, scanHit, onAdvance, selecting, locked = false, canViewStock, canViewCounts, priceText, promotionRules, exchangeRate = 4100, t, onOpenProduct, onToggle, onCount, onChecked, onNote, onCountEntered, lotCounts = false, onLotCount, onLotSet, onMoreDates }: RowProps) {
   const tr = makeTr(t)
   const id = String(product.id)
   const counting = selecting && countable
@@ -193,6 +199,16 @@ function ListRow({ product, draft, adornment, columns, countable, copy, scanHit,
   if (barcode) identity.push(['barcode', <span {...copy(barcode)} className="break-all">{barcode}</span>])
   if (product.brand) identity.push(['brand', <span {...copy(product.brand)}>{product.brand}</span>])
   if (product.category) identity.push(['category', <span>{product.category}</span>])
+  // Price details ride the same wrapping line as the barcode and brand (no new line, label inside), from the fields the row already carries.
+  const prices = priceText ? priceFacts(product as unknown as Record<string, unknown>, promotionRules, exchangeRate) : null
+  const priceFact = (key: 'selling' | 'wholesale' | 'promotion', label: string, money: PriceMoney | null) => {
+    if (money && priceText) identity.push([key, <span data-price={key}><span className="text-gray-400 dark:text-gray-500">{label}</span> <strong className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">{priceText(money.usd, money.khr ?? undefined)}</strong></span>])
+  }
+  if (prices) {
+    priceFact('selling', tr('selling_price', 'Selling price'), prices.selling)
+    priceFact('wholesale', tr('wholesale_price', 'Wholesale price'), prices.wholesale)
+    priceFact('promotion', tr('promotion', 'Promotion'), prices.promotion)
+  }
   const dotted = (parts: Array<[string, ReactNode]>) => parts.map(([key, node], index) => <Fragment key={key}>{index > 0 ? <span aria-hidden="true">·</span> : null}{node}</Fragment>)
   const edge = status ? LIST_STATUS[status].edge : 'border-l-transparent'
   const recordedNote = status === 'issue' ? product.check_note : null

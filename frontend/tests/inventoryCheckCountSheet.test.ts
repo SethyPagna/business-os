@@ -56,7 +56,8 @@ const fixture = String.raw`
     2: { check_status: 'issue', check_counted_quantity: 9, check_note: khmer ? 'ធ្លាក់ពីធ្នើ' : 'Fell off the shelf', check_by: 'ben', check_at: '2026-10-31 09:00:00' },
     3: { check_status: 'in_check' },
   }
-  const listProducts = products.map(product => ({ ...product, check_status: 'not_checked', ...(listFacts[product.id] ?? {}) }))
+  // Every list row carries the prices the wired list sends (D1 wave 2): selling, wholesale and a live 10% product discount, on the line that holds the barcode and brand.
+  const listProducts = products.map(product => ({ ...product, check_status: 'not_checked', ...(listFacts[product.id] ?? {}), selling_price_usd: 12.5, wholesale_price_usd: 10, discount_enabled: 1, discount_type: 'percent', discount_percent: 10 }))
   const startState = (product) => ({ product_id: product.id, state: 'unstarted', counted_quantity: null, reason: null, revision: 0, baseline_quantity: product.quantity, current_quantity: product.quantity, stock_changed: false })
   const initial = Object.fromEntries(products.filter(product => product.id !== 20).map(product => [product.id, startState(product)]))
   initial[2] = { ...initial[2], baseline_quantity: 14, stock_changed: true }
@@ -101,6 +102,7 @@ const fixture = String.raw`
         onMarkChecked={() => {}} onClear={() => setDrafts({})} onSubmit={() => { window.__submitted = (window.__submitted || 0) + 1 }} t={t} /> : null}
       <ListModule.InventoryCheckListHeader selecting={editable} canViewStock={showStock} canViewCounts={showStock} t={t} />
       <ListModule.default products={listProducts} drafts={drafts} selecting={editable} canViewStock={showStock} canViewCounts={showStock} focusRequest={focusRequest} t={t} onOpenProduct={() => {}}
+        priceText={usd => '$' + Number(usd).toFixed(2)} promotionRules={[]} exchangeRate={4100}
         onToggle={(product, selected) => patch(product, () => ({ selected }))}
         onCount={(product, value) => patch(product, current => ({ count: value, checked: false, selected: value.trim() !== '' ? true : current.selected }))}
         onChecked={product => patch(product, () => ({ count: String(product.quantity), checked: true, selected: true }))}
@@ -339,6 +341,8 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   // Phone: the image on the left as tall as the facts beside it, the count line full width, every control 44px.
   await browser.open(360, 'lang=en&mode=list', ready, 740)
   await noSidewaysScroll('en 360 list')
+  const phonePrices = await browser.evaluate<string>("Array.from(document.querySelectorAll('" + row(2) + " [data-price]'), node => node.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')")
+  assert.equal(phonePrices, packs.en.selling_price + ' $12.50 | ' + packs.en.wholesale_price + ' $10.00 | ' + packs.en.promotion + ' $11.25', 'a phone row (long name) carries selling, wholesale and the live promotion price, labels inside (' + phonePrices + ')')
   const listFacts = await browser.evaluate<string>("document.querySelector('" + row(1) + " [data-inventory-check-meta]').textContent.replace(/\\s+/g, ' ').trim()")
   assert.ok(listFacts.includes('Checked OK') && listFacts.includes('Counted 10') && listFacts.includes('Last checked @amy'), 'a phone reads the same facts in one line (' + listFacts + ')')
   const tall = await browser.evaluate<{ image: number[]; info: number[]; box: number[]; count: boolean }>("(() => { const r = document.querySelector('" + row(2) + "'); const box = node => { const b = node.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.left), Math.round(b.right)] }; const meta = r.querySelector('[data-inventory-check-meta]'); return { image: box(r.querySelector('[data-check-image]')), info: box(meta.parentElement), box: box(r.querySelector('[data-check-select-box]')), count: r.querySelector('[data-check-count]').getClientRects().length > 0 } })()")
@@ -359,6 +363,8 @@ await browser.run('PASS Inventory count sheet and list: aligned columns, count e
   await browser.khmerRoom('1280px list', '[data-fixture-scroller]', 12)
   await browser.open(360, 'lang=km&mode=list', ready, 740)
   await noSidewaysScroll('km 360 list')
+  const phonePricesKm = await browser.evaluate<string>("Array.from(document.querySelectorAll('" + row(2) + " [data-price]'), node => node.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')")
+  assert.equal(phonePricesKm, packs.km.selling_price + ' $12.50 | ' + packs.km.wholesale_price + ' $10.00 | ' + packs.km.promotion + ' $11.25', 'km: the same three prices with the Khmer labels (' + phonePricesKm + ')')
   await browser.khmerRoom('360px list', '[data-fixture-scroller]', 12)
 
   // ---- 360px, English and Khmer ------------------------------------------------------------------------------------------------
