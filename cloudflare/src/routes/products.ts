@@ -1110,8 +1110,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     ? buildFamilyRelevanceOrderSql(familyOrderSql, familyRelevance)
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
-  const familyOptions: FamilyPaginationOptions = {
   const joinSql = joinsReadBy(joins, [PRODUCT_SEARCH_SELECT_SQL, ...where, effectiveFamilyOrderSql, intraFamilyOrderSql, matchRankSql, rankCteSql, matchTierSql, promotedRankSql, familyMemberWhereSql]).join('\n')
+  const familyOptions: FamilyPaginationOptions = {
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
@@ -1199,6 +1199,17 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   }
 }
 
+// A join is kept only when some finished SQL fragment reads its alias. The selected-branch stock join is read by the stock and
+// issue filters alone; every other statement selects products columns, so a plain page or facet read skips it.
+export function joinsReadBy(joins: readonly string[], fragments: ReadonlyArray<string | undefined>): string[] {
+  const text = fragments.filter((fragment): fragment is string => Boolean(fragment)).join('\n')
+  return joins.filter((join) => {
+    const alias = /^\s*LEFT JOIN\s+\w+\s+(\w+)\s+ON\b/i.exec(join)?.[1]
+    return !alias || new RegExp(`\\b${alias}\\.`).test(text)
+  })
+}
+const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(f.joins, [...f.where, f.matchRankSql, f.rankCteSql, f.matchTierSql, f.familyMemberWhereSql]).join('\n')
+
 // Builds the same WHERE/params shape as backend/src/routes/products.ts's
 // appendProductSearchFilters -- identical SQL, just @param -> our D1 adapter
 // (which itself translates @param to positional ? before binding).
@@ -1216,18 +1227,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // with no stock filter actively selected -- fixed client-side; an empty
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
-function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
-// A join is kept only when some finished SQL fragment reads its alias. The selected-branch stock join is read by the stock and
-// issue filters alone; every other statement selects products columns, so a plain page or facet read skips it.
-export function joinsReadBy(joins: readonly string[], fragments: ReadonlyArray<string | undefined>): string[] {
-  const text = fragments.filter((fragment): fragment is string => Boolean(fragment)).join('\n')
-  return joins.filter((join) => {
-    const alias = /^\s*LEFT JOIN\s+\w+\s+(\w+)\s+ON\b/i.exec(join)?.[1]
-    return !alias || new RegExp(`\\b${alias}\\.`).test(text)
-  })
-}
-const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(f.joins, [...f.where, f.matchRankSql, f.rankCteSql, f.matchTierSql, f.familyMemberWhereSql]).join('\n')
 
+function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
   const where: string[] = [`${catalogProductSql()}`]
   const params: Record<string, unknown> = {}
   const joins: string[] = []
