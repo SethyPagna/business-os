@@ -67,21 +67,25 @@ const DEFAULT_FILE_PAGE_SIZE = 24
 // echoing the filtered total made the client calculate the wrong page count.
 const MAX_FILE_PAGE_SIZE = 100
 
+// The library lists LOGICAL rows: one per (stored object, active product that shows it), or one per object nobody shows. It is built from file_assets outward
+// (each reference is a seek on idx_products_image_path / idx_product_images_image_path) instead of materializing every product reference and probing it per
+// asset, which read about 2.4M rows for an empty search. Two things are load-bearing: public_path is UNIQUE, so one row per (asset, product) equals the old one per
+// (path, product, name); and +p.is_active keeps the planner from seeking idx_products_active_grouped_pg (is_active = ?) once per asset (15M rows a page).
+// Pinned by scripts/test-files-library-logical-rows-native.cjs (old definition vs this one, row for row, plus EXPLAIN).
 const LOGICAL_LIBRARY_CTE = `
-  WITH product_refs AS (
-    SELECT image_path AS public_path, id AS product_id, name AS product_name
-    FROM products
-    WHERE is_active = 1 AND image_path IS NOT NULL AND image_path != ''
+  WITH logical_assets AS (
+    SELECT fa.*, p.id AS reference_product_id, p.name AS reference_product_name
+    FROM file_assets fa CROSS JOIN products p ON p.image_path = fa.public_path
+    WHERE +p.is_active = 1 AND fa.public_path != ''
     UNION
-    SELECT pi.image_path AS public_path, p.id AS product_id, p.name AS product_name
-    FROM product_images pi
-    JOIN products p ON p.id = pi.product_id AND p.is_active = 1
-    WHERE pi.image_path IS NOT NULL AND pi.image_path != ''
-  ),
-  logical_assets AS (
-    SELECT fa.*, refs.product_id AS reference_product_id, refs.product_name AS reference_product_name
+    SELECT fa.*, p.id, p.name
+    FROM file_assets fa CROSS JOIN product_images pi ON pi.image_path = fa.public_path CROSS JOIN products p ON p.id = pi.product_id
+    WHERE +p.is_active = 1 AND fa.public_path != ''
+    UNION ALL
+    SELECT fa.*, NULL, NULL
     FROM file_assets fa
-    LEFT JOIN product_refs refs ON refs.public_path = fa.public_path
+    WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.image_path = fa.public_path AND +p.is_active = 1 AND p.image_path != '')
+      AND NOT EXISTS (SELECT 1 FROM product_images pi CROSS JOIN products p ON p.id = pi.product_id WHERE pi.image_path = fa.public_path AND pi.image_path != '' AND +p.is_active = 1)
   )
 `
 
