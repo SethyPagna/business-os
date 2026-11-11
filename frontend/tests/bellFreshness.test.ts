@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
-  bellPath, bellRelevantInvalidations, noteOwnWriteForBell, peekBellFresh, requestFreshBell, restoreBellFresh, takeBellFresh,
+  bellPath, bellRelevantInvalidations, isSaleWritePath, noteOwnWriteForBell, peekBellFresh, requestFreshBell, restoreBellFresh, takeBellFresh,
 } from '../src/api/bellFreshness.ts'
 import { olderAsOf } from '../src/components/dashboard/stockAsOf.ts'
 import { WRITE_FAMILY_INVALIDATES, invalidationsForWritePath } from '../src/api/writeInvalidation.ts'
@@ -17,18 +17,30 @@ takeBellFresh('summary'); takeBellFresh('items')
 
 // 1. Which writes count. Every family that moves stock or products reaches the 'inventory' or 'products' read prefixes in
 // writeInvalidation.ts; the others (settings, users, fees, shifts...) cannot change a bell count the cache serves.
-const STOCK_OR_PRODUCT_WRITERS = ['sales', 'returns', 'review', 'actionHistory', 'products', 'importJobs', 'inventory', 'batches', 'branches', 'transfers', 'inventoryChecks']
+const STOCK_OR_PRODUCT_WRITERS = ['returns', 'review', 'actionHistory', 'products', 'importJobs', 'inventory', 'batches', 'branches', 'transfers', 'inventoryChecks']
 for (const family of STOCK_OR_PRODUCT_WRITERS) {
   assert.ok(bellRelevantInvalidations(WRITE_FAMILY_INVALIDATES[family]), `${family} can change a bell count: its writer must ask for a fresh read`)
 }
 for (const family of ['settings', 'users', 'fees', 'shifts', 'auth', 'notes', 'telegram', 'files']) {
   assert.ok(!bellRelevantInvalidations(WRITE_FAMILY_INVALIDATES[family]), `${family} changes nothing the cached bell sections read`)
 }
+// Owner, 11 Nov ("Wait"): a till's own SALE no longer arms a fresh read, whatever it invalidates. Every /api/sales write is a sale;
+// returns, products and stock writes are not.
+for (const p of ['/api/sales', '/api/sales/42/items', '/api/sales/42/amendments', '/api/sales/42/status', '/api/sales/bulk-update', '/api/sales?x=1']) {
+  assert.equal(isSaleWritePath(p), true, p)
+  assert.equal(bellRelevantInvalidations(invalidationsForWritePath(p), p), false, `${p} is a sale: the bell may lag`)
+}
+for (const p of ['/api/returns', '/api/salesperson', '/api/products/3', '/api/inventory/adjust']) {
+  assert.equal(isSaleWritePath(p), false, p)
+  assert.equal(bellRelevantInvalidations(invalidationsForWritePath(p), p), true, `${p} still arms a fresh read`)
+}
+noteOwnWriteForBell(invalidationsForWritePath('/api/sales'), '/api/sales')
+assert.equal(peekBellFresh('summary'), false, 'a sale leaves the flag down')
 // An unmapped family clears every cached read (null); the bell is stale then too.
 assert.equal(bellRelevantInvalidations(null), true)
 // A read-only preview POST writes nothing.
 assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/sales/quote')), false)
-assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/sales')), true)
+assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/sales')), true, 'by prefixes alone sales still reach stock; only the path rule exempts them')
 assert.equal(bellRelevantInvalidations(invalidationsForWritePath('/api/never-mapped-family')), true)
 
 // 2. The flag: set by an own write, consumed exactly once per read kind, restored when the read failed.

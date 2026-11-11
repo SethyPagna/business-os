@@ -421,7 +421,7 @@ export function cacheInvalidateWithDerived(prefix: string): void {
 function invalidateAfterMutation(path: string): void {
   const prefixes = invalidationsForWritePath(path)
   // The bell may be 5 minutes old for everyone but the writer: its next read asks the Worker for a fresh answer.
-  noteOwnWriteForBell(prefixes)
+  noteOwnWriteForBell(prefixes, path)
   if (prefixes === null) { cacheInvalidate(''); return }
   for (const prefix of prefixes) cacheInvalidate(prefix)
 }

@@ -1,6 +1,6 @@
 // The notification bell may be up to 5 minutes old (owner, 11 Nov: the Worker answers its inventory, expiry and supplier-credit
 // sections from a cache that ignores data versions, and the panel says "as of HH:MM"). The one exception is the person's OWN
-// write: after a sale, a stock change, a product edit or a lot payment made from this tab, the next bell read must show the
+// write: after a stock change, a product edit or a lot payment made from this tab, the next bell read must show the
 // result, so it asks the Worker for `?fresh=1` (a recompute that also refreshes the entry everyone else reads).
 //
 // No imports: apiFetch (http.ts) calls noteOwnWriteForBell from its after-mutation hook, and notificationSummary.ts imports
@@ -15,12 +15,23 @@ const pending: Record<BellRead, boolean> = { summary: false, items: false }
  * (every writer of the inventory, expiry and supplier-credit inputs reaches the 'inventory' or 'products' read prefixes in
  * api/writeInvalidation.ts), or it is unmapped (null: the caller clears every cached read, so the bell is stale too).
  */
-export function bellRelevantInvalidations(prefixes: readonly string[] | null): boolean {
+export function bellRelevantInvalidations(prefixes: readonly string[] | null, path?: string): boolean {
+  if (path !== undefined && isSaleWritePath(path)) return false
   return prefixes === null || prefixes.includes('inventory') || prefixes.includes('products')
 }
 
-export function noteOwnWriteForBell(prefixes: readonly string[] | null): void {
-  if (!bellRelevantInvalidations(prefixes)) return
+/**
+ * Owner, 11 Nov ("Wait"): a till's own SALE does not arm a fresh bell read; the bell may lag up to the plan lifetime after
+ * it. "A sale" is every write under /api/sales (create, add lines, payments and amendments, status, customer, bulk edits).
+ * Returns (/api/returns) are not sales in this rule and still arm one; so do products, stock, batches, transfers, checks,
+ * imports, review and action history. The panel's refresh button (requestFreshBell) always forces a read.
+ */
+export function isSaleWritePath(path: string): boolean {
+  return /^\/api\/sales(?:[/?#]|$)/.test(String(path || ''))
+}
+
+export function noteOwnWriteForBell(prefixes: readonly string[] | null, path?: string): void {
+  if (!bellRelevantInvalidations(prefixes, path)) return
   pending.summary = true
   pending.items = true
 }

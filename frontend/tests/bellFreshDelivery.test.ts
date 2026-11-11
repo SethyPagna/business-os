@@ -30,15 +30,36 @@ const items = () => calls.filter((c) => c.startsWith('GET /api/notifications/sum
 const PLAIN = 'GET /api/notifications/summary'
 const FRESH = 'GET /api/notifications/summary?fresh=1'
 
-// 1. Bell loaded, own sale, read again within the 20 s client cache.
+// 1. Owner, 11 Nov ("Wait"): a till's own SALE does not force a fresh bell read; the cache holds inside 20 s.
 reset()
 await getNotificationSummary()
 await http.apiFetch('POST', '/api/sales', { a: 1 })
 await getNotificationSummary()
-assert.deepEqual(summaries(), [PLAIN, FRESH], 'own sale then a read inside 20 s reaches the network fresh')
+assert.deepEqual(summaries(), [PLAIN], 'own sale then a read inside 20 s must NOT send ?fresh=1')
+assert.equal(bell.peekBellFresh('summary'), false)
+// every sale-family write behaves the same
+for (const [method, path] of [['POST', '/api/sales/7/items'], ['POST', '/api/sales/7/amendments'], ['PATCH', '/api/sales/7/status']] as const) {
+  reset()
+  await getNotificationSummary()
+  await http.apiFetch(method, path, { a: 1 })
+  await getNotificationSummary()
+  assert.deepEqual(summaries(), [PLAIN], `${method} ${path} is a sale: no fresh read`)
+}
+// a product edit still does
+reset()
+await getNotificationSummary()
+await http.apiFetch('PATCH', '/api/products/9', { a: 1 })
+await getNotificationSummary()
+assert.deepEqual(summaries(), [PLAIN, FRESH], 'a product edit still reaches the network fresh')
 assert.equal(bell.peekBellFresh('summary'), false, 'the flag is consumed')
 await getNotificationSummary()
-assert.deepEqual(summaries(), [PLAIN, FRESH], 'the read after that is served from the cache again (one fresh per write)')
+assert.deepEqual(summaries(), [PLAIN, FRESH], 'one fresh per write')
+// a return is not a sale in this rule
+reset()
+await getNotificationSummary()
+await http.apiFetch('POST', '/api/returns', { a: 1 })
+await getNotificationSummary()
+assert.deepEqual(summaries(), [PLAIN, FRESH], 'returns still arm a fresh read')
 
 // 2. Refresh button within 20 s of opening.
 reset()
@@ -82,12 +103,17 @@ for (const [method, path] of [['POST', '/api/settings'], ['POST', '/api/sales/qu
   assert.deepEqual(summaries(), [PLAIN], `${method} ${path} does not force a fresh read (cache holds)`)
 }
 
-// 6. Five sales in a row coalesce into one fresh read.
+// 6. Five product edits in a row coalesce into one fresh read; five sales add none.
 reset()
 await getNotificationSummary()
-for (let i = 0; i < 5; i++) await http.apiFetch('POST', '/api/sales', { a: 10 + i })
+for (let i = 0; i < 5; i++) await http.apiFetch('PATCH', '/api/products/1', { a: 10 + i })
 await getNotificationSummary()
 await getNotificationSummary()
 assert.deepEqual(summaries(), [PLAIN, FRESH])
+reset()
+await getNotificationSummary()
+for (let i = 0; i < 5; i++) await http.apiFetch('POST', '/api/sales', { a: 20 + i })
+await getNotificationSummary()
+assert.deepEqual(summaries(), [PLAIN])
 
 console.log('bellFreshDelivery.test.ts: ok')
