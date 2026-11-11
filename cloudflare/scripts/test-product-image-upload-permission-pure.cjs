@@ -231,7 +231,7 @@ async function checkAllowed(name, user) {
   assert.equal(state.dbWrites, 1, 'allowed request inserts one file_assets row')
   assert.equal(state.auditWrites, 1)
   assert.equal(state.normalizationCalls, 1)
-  assert.equal(state.versionWrites, 1)
+  assert.equal(state.versionWrites, 0, 'an upload changes no product row: it leaves the product cache version alone (each route that attaches the image bumps it)')
   if (state.waitUntil) await state.waitUntil
   console.log('PASS', name)
 }

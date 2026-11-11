@@ -431,7 +431,7 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "c15a48087480",
+   "7348907ebb1f",
    "WITH matched AS ( SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description, p.selling"
   ],
   [
@@ -469,7 +469,7 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "b3c4a9cfcd55",
+   "00280046e33f",
    "WITH __fts_rank AS MATERIALIZED (SELECT rowid AS id, bm25(products_fts, 10, 10, 10, 4, 3, 1, 1, 1) AS bm25_ran"
   ],
   [
