@@ -1362,8 +1362,10 @@ app.post('/', async (c) => {
     }
     paymentMethodsRawBefore = stored.get('pos_payment_methods')?.value ?? null
     const current = await loadPaymentMethodSetting(c.env)
+    // KHQR round 12 (J2): tolerated against the stored RAW entries read leniently (a list the strict reader refuses, such as case twins, still holds its legacy entries).
+    const storedEntries = parseConfiguredMethods(paymentMethodsRawBefore)
     // KHQR round 11 (H1): a NEW list entry never holds a '+' (an entry the stored list already holds is tolerated, so a stale label never traps an unrelated edit).
-    if (normalized.some((entry) => entry.includes('+') && !(current?.methods ?? []).includes(entry))) {
+    if (normalized.some((entry) => entry.includes('+') && !storedEntries.includes(entry))) {
       return c.json({ error: 'A payment method name cannot contain a plus sign.', code: 'invalid_payment_methods_setting' }, 400)
     }
     if (current) {

@@ -811,17 +811,32 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
       UNION ALL SELECT 'l', CAST(m.sale_id AS TEXT) FROM sale_bulk_members m JOIN online_orders o ON o.sale_id=m.sale_id WHERE m.operation_id=@op`).all<{ k: string; v: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY, op: op.id })
     const stored = rows.find((row) => row.k === 'm')?.v ?? undefined
     const linked = new Set(rows.filter((row) => row.k === 'l').map((row) => Number(row.v)))
-    const labels: string[] = direction === 'redo' ? [String(snapshot.action.target ?? '')] : []
-    for (const member of snapshot.members) {
-      if (!member.changed || linked.has(member.id)) continue
-      const state = direction === 'undo' ? member.before : member.after
-      labels.push(String(state.payment_method ?? ''))
+    const labelsOf = (state: Row): string[] => {
+      const out = [String(state.payment_method ?? '')]
       try {
         const details = state.payment_details ? JSON.parse(String(state.payment_details)) : []
-        if (Array.isArray(details)) for (const detail of details) labels.push(String((detail as { method?: unknown } | null)?.method ?? ''))
+        if (Array.isArray(details)) for (const detail of details) out.push(String((detail as { method?: unknown } | null)?.method ?? ''))
       } catch { /* unreadable details: the summary label stands */ }
+      return out
     }
-    if (labels.some((label) => namesOnlineMethod(configuredOnlineMethod(stored), label)) && await onlineMethodRefusalActive(env, stored)) {
+    const namesM = (label: string): boolean => namesOnlineMethod(configuredOnlineMethod(stored), label)
+    // KHQR round 12 (J1): "never add". A member is refused only when the state being WRITTEN names M and the state it carries NOW (UNDO: its after; REDO: its before, pinned by the
+    // revision fingerprint below) does not, so a sale that already carried M can still be relabelled back. REDO also judges the action's target for members that carried no M.
+    const labels: string[] = []
+    let refused = false
+    for (const member of snapshot.members) {
+      if (!member.changed || linked.has(member.id)) continue
+      const written = labelsOf(direction === 'undo' ? member.before : member.after)
+      const carried = labelsOf(direction === 'undo' ? member.after : member.before)
+      labels.push(...written)
+      if (written.some(namesM) && !carried.some(namesM)) refused = true
+    }
+    if (direction === 'redo') {
+      const target = String(snapshot.action.target ?? '')
+      labels.push(target)
+      if (namesM(target) && snapshot.members.some((member) => member.changed && !linked.has(member.id) && !labelsOf(member.before).some(namesM))) refused = true
+    }
+    if (refused && await onlineMethodRefusalActive(env, stored)) {
       throw new SaleBulkError('The online payment method is only for fulfilling an online order, so sales cannot be relabelled to it.', 409, { code: ONLINE_METHOD_REQUIRES_ORDER_CODE })
     }
     const names = labels.map((label) => label.trim()).filter(Boolean)
