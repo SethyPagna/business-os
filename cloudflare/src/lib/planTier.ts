@@ -365,6 +365,11 @@ export type PlanLimits = {
   // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
   catalogListWindowPages: number
 
+  // routes/notifications.ts: how long the bell's heavy sections (inventory, expiry, supplier credit) may be served from the cache, ignoring the data versions. The owner (11 Nov) accepts a bell up to
+  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute (the inventory pass reads every active product); the actor's own write asks
+  // for a fresh answer (?fresh=1). Free keeps it the 5 minutes the owner allowed (reads are what Free rations), Paid 45 s (the lifetime the version-keyed entry had). Never above 300 on either tier.
+  notificationSectionCacheSeconds: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -466,6 +471,7 @@ const PAID_LIMITS: PlanLimits = {
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
+  notificationSectionCacheSeconds: 45,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -516,6 +522,7 @@ const FREE_LIMITS: PlanLimits = {
   productListCacheSeconds: 3_600,
   possibleDuplicatesCacheSeconds: 3_600,
   catalogListWindowPages: 3,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
