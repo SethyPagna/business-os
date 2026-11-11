@@ -5,8 +5,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "2e9aa0254a5d",
-   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE (phone_n"
+   "8606e180f426",
+   "SELECT id, name, phone, address, membership_number, phone_normalized, updated_at FROM customers WHERE id IN (S"
   ],
   [
    "f9f6aa8e168a",
