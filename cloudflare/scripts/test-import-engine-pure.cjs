@@ -2211,6 +2211,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     for (const [label, stored, sent] of [
       ['exact', 'ABA KHQR', 'ABA KHQR'], ['case', 'ABA KHQR', 'aba khqr'], ['TAB', 'ABA', 'ABA' + U(9)], ['NBSP', 'ABA', 'ABA' + U(0xa0)], ['LF first', 'ABA', U(10) + 'ABA'],
       ['ideographic space', 'ABA', 'ABA' + U(0x3000)], ['non-ASCII case twin', U(0xc9) + 'Pay', U(0xe9) + 'pay'], ['split tender', 'ABA', 'Cash + ABA'],
+      // KHQR round 12 (J6): the preview flags the '+' spellings too (the splitter reads each as the single component).
+      ['plus end', 'ABA KHQR', 'ABA KHQR+'], ['plus start', 'ABA KHQR', '+ABA KHQR'], ['plus space', 'ABA KHQR', 'ABA KHQR + '],
     ]) {
       const result = await classify(stored, sent)
       assert.strictEqual(result.action, 'error', 'online method row flagged: ' + label)
