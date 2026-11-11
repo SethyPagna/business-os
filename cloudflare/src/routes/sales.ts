@@ -773,7 +773,7 @@ app.post('/', async (c) => {
     )]
     // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
     const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
       .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
     return [branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity]))] as const
   })))
@@ -3784,7 +3784,7 @@ app.post('/:id/items', async (c) => {
     for (const branchId of branchIds) {
       const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
       const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
-        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
         .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
       const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
       for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
