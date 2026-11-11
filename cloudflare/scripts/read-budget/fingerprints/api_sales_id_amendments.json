@@ -67,8 +67,8 @@
    "SELECT * FROM sale_items WHERE sale_id=? ORDER BY id"
   ],
   [
-   "b59b5fba9120",
-   "SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'"
+   "f75d32afc326",
+   "SELECT type, name FROM sqlite_master WHERE name IN (SELECT value FROM json_each(?1))"
   ],
   [
    "72bf646e934f",
@@ -115,7 +115,7 @@
    "B| INSERT INTO sale_mutation_guards(id,guard_value) SELECT 2,CASE WHEN EXISTS(SELECT 1 FROM sales s WHERE s.id"
   ],
   [
-   "2fe84e0f0653",
+   "d67119f61def",
    "B| INSERT INTO sale_mutation_receipts( id,actor_id,sale_id,mutation_kind,request_id,request_digest,request_jso"
   ],
   [
@@ -159,7 +159,7 @@
    "B| INSERT INTO sale_amendments ( sale_id, group_id, kind, sale_item_id, product_id, product_name, quantity_bef"
   ],
   [
-   "5ee1527d365c",
+   "50c32feed312",
    "B| UPDATE sale_mutation_receipts SET sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE s"
   ],
   [
