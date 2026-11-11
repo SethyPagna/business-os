@@ -133,6 +133,9 @@ const inventoryRequire = (id) => {
   if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
+  // REAL probe (6.0.1650 lane d1-probes): it is pure, and the route's fail-closed 'operation writes ready' gate
+  // is decided by what it finds in the test database's sqlite_master, so a stub that answers true would hide a missing table.
+  if (id === '../lib/schemaObjectProbe') return loadModule('lib/schemaObjectProbe.ts', (request) => { throw new Error('unexpected probe import '+request) })
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)
   if (id === '../lib/movementCostSnapshot') return movementCostSnapshot

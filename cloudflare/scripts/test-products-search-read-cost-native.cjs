@@ -200,18 +200,24 @@ async function main() {
     assert.ok(indexed.rows > pinned.rows * 1.5, `the indexed predicate reads ${indexed.rows} rows, the pinned one ${pinned.rows}`)
     console.log(`PASS search-index page: pinned ${pinned.rows} rows vs ${indexed.rows} with the indexed predicate`)
 
-    // 5. Customer picker (GET /api/customers?fields=sales_picker): no index serves ORDER BY lower(name), so every
-    // call reads the table twice (scan + sort). The PROPOSED index (not a migration here) is checked on the lab
-    // database: same bytes, a fraction of the rows.
+    // 5. Customer picker (GET /api/customers?fields=sales_picker). Until 11 Nov no index served ORDER BY lower(name), so the
+    // empty picker read the table twice (scan + sort: >= 2 x customers). Migration 0303 (d1-queries S8) added the partial index
+    // idx_customers_sales_picker ON customers (lower(name), id) WHERE COALESCE(is_anonymous, 0) = 0, so the empty search now walks
+    // the index and stops at LIMIT: one row per item, 50 by default. This guards the NEW cost as a ceiling (a page of rows, never a
+    // fraction of the table) and proves the ceiling is the index's doing by dropping it on the lab database: the same call must
+    // then read the table twice again, with the same bytes. If the picker's WHERE term drifts from the index predicate, the planner
+    // stops using the index and the first assertion goes red.
+    const PICKER_LIMIT = 50
     const picker = await world.call('/api/customers?fields=sales_picker')
     assert.equal(picker.status, 200)
-    assert.ok(picker.rows >= CUSTOMERS * 2, `today the picker reads the table twice (${picker.rows} rows for ${CUSTOMERS} customers)`)
-    await world.db.prepare('CREATE INDEX proposed_customers_lower_name_id ON customers (lower(name), id)').run()
-    const indexedPicker = await world.call('/api/customers?fields=sales_picker')
-    assert.equal(indexedPicker.text, picker.text, 'the proposed index changes no byte of the picker')
-    assert.ok(indexedPicker.rows * 20 < picker.rows, `with the index the picker reads ${indexedPicker.rows} rows, not ${picker.rows}`)
-    console.log(`MEASURE customers sales_picker, ${CUSTOMERS} customers: ${picker.rows} rows -> ${indexedPicker.rows} with CREATE INDEX (lower(name), id)`)
-    console.log('PASS the proposed customers index is byte-identical and about 100x cheaper')
+    assert.ok(picker.rows <= PICKER_LIMIT * 2, `the empty picker must walk idx_customers_sales_picker and stop at LIMIT: ${picker.rows} rows read for ${CUSTOMERS} customers (ceiling ${PICKER_LIMIT * 2})`)
+    await world.db.prepare('DROP INDEX idx_customers_sales_picker').run()
+    const unindexedPicker = await world.call('/api/customers?fields=sales_picker')
+    assert.equal(unindexedPicker.text, picker.text, 'the partial index changes no byte of the picker')
+    assert.ok(unindexedPicker.rows >= CUSTOMERS * 2, `control: without the index the picker reads the table twice (${unindexedPicker.rows} rows for ${CUSTOMERS} customers)`)
+    assert.ok(picker.rows * 20 < unindexedPicker.rows, `with the index the picker reads ${picker.rows} rows, not ${unindexedPicker.rows}`)
+    console.log(`MEASURE customers sales_picker, ${CUSTOMERS} customers: ${unindexedPicker.rows} rows without idx_customers_sales_picker -> ${picker.rows} with it`)
+    console.log('PASS the 0303 partial index makes the empty customer picker a LIMIT-sized read, byte-identical')
 
     // 6. Source guards.
     const read = rel => fs.readFileSync(path.join(root, rel), 'utf8')
