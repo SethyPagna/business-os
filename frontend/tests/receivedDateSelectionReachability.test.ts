@@ -101,9 +101,7 @@ test('Sale Add Items preserves unlotted_stock and fails tracking lookup loudly',
   const transport = readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
   assert.match(modal, /\.\.\.\(line\.unlottedStock \? \{ unlotted_stock: true \} : \{\}\)/)
   assert.match(transport, /unlotted_stock\?: boolean/)
-  assert.match(modal, /trackedBatchLookupState === 'failed'/)
-  assert.match(modal, /setTrackedBatchReloadKey\(\(key\) => key \+ 1\)/)
-  assert.match(modal, /trackedBatchProductIds=\{trackedIdsForAddSheet\}/)
+  assert.doesNotMatch(modal, /getTrackedBatchProductIds|trackedBatchLookupState|trackedIdsForAddSheet/, 'the receipt add flow reads no tracked-products list; the sheet reads the picked product own lots')
 })
 
 test('zero-quantity regular and damaged lots are native-disabled and aria-disabled', () => {

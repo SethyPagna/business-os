@@ -3463,7 +3463,7 @@ assert.match(
 // never downloads the customer table (see POS_CUSTOMER_SEARCH_DEBOUNCE_MS).
 assert.match(
   pos,
-  /if \(!isActive \|\| !contactOptionsReady\) return undefined\s*\n\s*if \(!showCustomer && !showAddCustomer\) return undefined[\s\S]*setTimeout\([\s\S]*loadCustomers\('POS customer search', search\)[\s\S]*\}, delay\)/,
+  /if \(!isActive \|\| !contactOptionsReady\) return undefined\s*\n\s*[\s\S]*?const search = posCustomerSearchRequest\([^\n]*showCustomer && showCustomerDrop\)\s*\n\s*if \(search === null\) return undefined[\s\S]*setTimeout\([\s\S]*loadCustomers\('POS customer search', search\)[\s\S]*\}, POS_CUSTOMER_SEARCH_DEBOUNCE_MS\)/,
   'POS customer reads should stay behind an open customer section and a debounced search term',
 )
 assert.match(

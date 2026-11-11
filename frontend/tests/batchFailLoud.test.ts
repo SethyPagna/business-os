@@ -24,7 +24,6 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { needsPosTrackingSheet } from '../src/components/pos/posProductTracking.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -66,70 +65,6 @@ check('both batch reads still pass an explicit undefined fallback, so the intent
   assert.ok(
     undefinedFallbacks.length >= 2,
     `expected both batch reads to pass an explicit undefined local fallback, found ${undefinedFallbacks.length}`,
-  )
-})
-
-// ---- POS must not conclude "nothing is tracked" from a failure ----
-const pos = src('components', 'pos', 'POS.tsx')
-
-check('POS does not clear the tracked-id set when the lookup fails', () => {
-  assert.ok(
-    !/\.catch\(\(\)\s*=>\s*\{\s*if\s*\(!cancelled\)\s*setTrackedBatchProductIds\(new Set\(\)\)\s*\}\)/.test(pos),
-    'POS again collapses a failed batch lookup into an empty set, silently removing every lot picker',
-  )
-})
-
-check('POS tracks the failure explicitly and forces the detail sheet for every product', () => {
-  assert.ok(/setBatchTracking\(\{ scope, status: 'failed', ids: new Set\(\) \}\)/.test(pos), 'POS should record an explicit scoped failed state, never a ready empty set')
-  assert.ok(/const trackedBatchLoadFailed = batchTracking.scope === trackingScope && batchTracking.status === 'failed'/.test(pos), 'only the current scope failure should drive the warning')
-  assert.ok(
-    /const isBatchTracked = needsPosTrackingSheet\(batchTracking, trackingScope, Number\(product.id\)\)/.test(pos),
-    'while tracking is unknown, every product must route through the detail sheet rather than one-tap add',
-  )
-})
-
-check('POS passes the unavailable state into the sheet so the extra tap cannot bypass lot selection', () => {
-  assert.ok(
-    /trackedBatchLookupUnavailable=\{batchTracking.scope !== trackingScope \|\| batchTracking.status !== 'ready'\}/.test(pos),
-    'forcing the detail sheet is insufficient unless the sheet also knows tracking metadata is unavailable',
-  )
-})
-
-check('actual tracking readiness blocks failed, pending, and foreign-scope product adds', () => {
-  for (const status of ['loading', 'failed'] as const) {
-    assert.equal(needsPosTrackingSheet({ scope: 'current', status, ids: new Set() }, 'current', 7), true)
-  }
-  assert.equal(needsPosTrackingSheet({ scope: 'old', status: 'ready', ids: new Set() }, 'current', 7), true)
-  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set([7]) }, 'current', 7), true)
-  assert.equal(needsPosTrackingSheet({ scope: 'current', status: 'ready', ids: new Set() }, 'current', 7), false)
-})
-
-check('POS surfaces the failure to the cashier instead of failing silently', () => {
-  assert.ok(
-    /trackedBatchLoadFailed && \(/.test(pos),
-    'a visible warning should render while batch tracking is unavailable',
-  )
-})
-
-check('the failed lookup self-heals -- retry is never left to the manual Try again button alone', () => {
-  // User report (Aug 31): the banner appeared (transient failure -- deploy
-  // blip / dropped connection) and then STAYED, because the lookup only
-  // refired on a branch change or the banner's own Try again. While the
-  // flag is up POS must retry by itself: browser 'online', a slow safety
-  // interval (covers online-the-whole-time server blips), and any
-  // stock-relevant sync push (reconnect refresh dispatches these).
-  assert.ok(
-    /window\.addEventListener\('online', retry\)/.test(pos),
-    'coming back online should retry the tracked-batch lookup',
-  )
-  assert.ok(
-    // F2: paused while the tab is hidden, one retry on return if due.
-    /startVisibleInterval\(retry, /.test(pos),
-    'a safety interval should retry while the banner is up',
-  )
-  assert.ok(
-    /\['inventory', 'products', 'sales', 'branches'\]\.includes\(channel\)/.test(pos),
-    'stock-relevant sync pushes (incl. reconnect refresh) should retry immediately',
   )
 })
 

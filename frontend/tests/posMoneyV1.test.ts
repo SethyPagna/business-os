@@ -125,7 +125,7 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
     canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError, isSaleRecorded,
     withLoaderTimeout: (run: () => unknown) => run(), POS_CHECKOUT_TIMEOUT_MS: 100,
     setLoading: () => {}, setReceiptQueue: (update: any) => printed.push(...update([])), closeOrder: (...args: unknown[]) => closed.push(args),
-    loadCatalogData: async () => {}, window: { dispatchEvent: () => {} }, CustomEvent: class {},
+    loadCatalogData: async () => {}, emitOwnSalesSync: () => {}, window: { dispatchEvent: () => {} }, CustomEvent: class {},
     t: (key: string) => key, notify: (message: string) => notices.push(message),
     getErrorMessage: (error: Error) => error.message, localizeBranchRuleError: (error: unknown) => error,
     // POS.tsx imports it; the extracted callback runs with the real one.
@@ -298,7 +298,7 @@ for (const name of ['handleAddSaleItems', 'handleAmendSale']) {
       notify: (...args: unknown[]) => notifications.push(args), translateOr: (key: string) => key,
       loadSales: async () => refreshes.push('sales'), loadSalesStats: () => refreshes.push('stats'),
       actionHistory: { refreshServerItems: () => refreshes.push('history') },
-      window: { dispatchEvent: () => {} }, CustomEvent: class { constructor(..._args: unknown[]) {} },
+      emitOwnSalesSync: () => {}, window: { dispatchEvent: () => {} }, CustomEvent: class { constructor(..._args: unknown[]) {} },
       getErrorMessage: (_error: unknown, fallback: string) => fallback,
     })(17, name === 'handleAddSaleItems' ? [{ product_id: 7, quantity: 1 }] : { client_request_id: 'fixed' }, { client_request_id: 'fixed' })
     if (mode === 'late') { assert.equal(result, false); assert.equal(notifications.length, 0); assert.equal(refreshes.length, 0) }
@@ -319,7 +319,7 @@ try {
     lineWriteOwnerRef: { current: null }, captureActorReadScope: () => ({}), isActorReadScopeCurrent: () => true,
     detailScope: 'scope', detailScopeRef: { current: 'scope' }, detailAliveRef: { current: true }, authReady: true, user: { id: 7 }, sale: { id: 17, money_precision_version: 1 }, lineMutationActor: 'origin-runtime:actor7',
     setLineRecoveryBusy: () => {}, setPendingLineMutation: (value: unknown) => pending.push(value), setLineRecoveryError: (value: unknown) => errors.push(value),
-    runSaleLineMutation, getSaleLineReceipt: async () => receipt, window: { localStorage: storage, dispatchEvent: () => {} }, CustomEvent: class {},
+    runSaleLineMutation, getSaleLineReceipt: async () => receipt, emitOwnSalesSync: () => {}, window: { localStorage: storage, dispatchEvent: () => {} }, CustomEvent: class {},
     moneyCapability: { assertReady: () => {} }, onAmend: async (_id: unknown, body: unknown) => { sends.push(body); throw new Error('lost acknowledgement') }, onAddItems: undefined,
     t: (key: string) => key, compareSaleHeaderQuote, headerQuote: editEnv.headerQuote, setLineHeaderConflict: () => {}, setLineReviewConfirm: () => {}, setAmendConfirm: () => {}, setAddConfirmOpen: () => {},
   }
