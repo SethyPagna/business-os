@@ -108,6 +108,11 @@ const withWorld = async (opts, fn) => { const w = await bootWorld({ tier: 'free'
     assert.equal(await stats(world), before, '/stats must answer with the numbers it gave before the corruption')
     const report = await world.send('GET', '/api/reports/overview?startDate=2026-11-11&endDate=2026-11-12', undefined, { miss: true })
     assert.ok(report.status >= 400 && /unsupported money|invalid_saved_money|unsupported_row/i.test(report.text), `the full report must still refuse the corrupt line (got ${report.status} ${report.text.slice(0, 160)})`)
+    // review M4: the Dashboard reads the same lines through the full kernel, so it must refuse the corrupt line as well (never answer with stale-looking figures)
+    for (const url of ['/api/dashboard/startup?startDate=2026-11-11&endDate=2026-11-12&granularity=day', '/api/analytics?startDate=2026-11-11&endDate=2026-11-12']) {
+      const dash = await world.send('GET', url, undefined, { miss: true })
+      assert.ok(dash.status >= 400 && /unsupported money|invalid_saved_money|unsupported_row/i.test(dash.text), `${url} must refuse the corrupt line (got ${dash.status} ${dash.text.slice(0, 160)})`)
+    }
   }))
 
   if (problems.length) { console.error('\n' + problems.length + ' RED:\n  ' + problems.join('\n  ')); process.exit(1) }
