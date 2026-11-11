@@ -3038,6 +3038,8 @@ app.put('/:id', async (c) => {
           if (refusal) return c.json({ error: refusal.message, code: refusal.code }, refusal.status)
           throw error
         }
+        // The identity write is committed whatever the fold below does: announce it, so no refusal after it leaves a stale catalogue.
+        c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
         let foldResult: Awaited<ReturnType<typeof foldDuplicateProductInto>>
         try {
           const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
@@ -3144,6 +3146,8 @@ app.put('/:id', async (c) => {
       summary: `Update product #${id}`,
     })
     if (pendingId != null) {
+      // A group rename carried above is already written: queueing the rest of the edit must not hide it.
+      if (renamedProductIds.length) c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
       return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
     }
   }
@@ -3335,6 +3339,8 @@ app.delete('/:id', async (c) => {
     if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {
       let response: Record<string, unknown> = {}
       try { response = replay.response_json ? JSON.parse(replay.response_json) : {} } catch { response = {} }
+      // The removal committed and its acknowledgement was lost: nothing announced it yet.
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
       return c.json({ success: true, ...response, replayed: true })
     }
     return c.json({ success: false, code: 'review_state_conflict', error: 'The product changed before the removal committed.' }, 409)
@@ -10164,7 +10170,10 @@ app.post('/possible-duplicates/merge', async (c) => {
     // row exists the batch did commit, and only then is this rethrown.
     let applied: unknown = true
     try { applied = await db.prepare(MERGE_APPLIED_PROBE_SQL).get<{ applied: number }>({ operationId }) } catch { applied = true }
-    if (applied) throw error
+    if (applied) {
+      await bumpVersion(c.env, 'products')
+      throw error
+    }
     const errorId = crypto.randomUUID()
     console.error(describeMergeFailure({ method: c.req.method, path: c.req.path, status: 409, productIds: [keeper.id, dup.id], error, errorId }))
     return c.json(mergeFailedBody(errorId), 409)
@@ -10653,7 +10662,7 @@ app.post('/upload-image', async (c) => {
   const asset = await db.prepare(`SELECT * FROM file_assets WHERE id = @id`).get({ id: insert.lastInsertRowid })
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'upload', 'product_image', insert.lastInsertRowid, { original_name: originalName })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  // No products version bump: the upload writes R2 and file_assets only. Each route that attaches the path to a product bumps for itself.
 
   return c.json({
     success: true,
