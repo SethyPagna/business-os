@@ -163,6 +163,8 @@ export const REQUEST_WINDOW_DAYS_MAX = 30
 export function validateOnlineOrderMethod(value: string, configured: readonly string[], kinds?: PaymentMethodKindMap): 'invalid_online_order_payment_method' | 'online_order_method_is_cash' | null {
   const key = value.trim().toLowerCase()
   if (!key) return null
+  // KHQR round 11 (H5): the online method is ONE method, never a combined label ("Card + ABA", "ABA+"): a '+' in it is refused with the existing invalid-method code.
+  if (key.includes('+')) return 'invalid_online_order_payment_method'
   if (!configured.some((method) => String(method).trim().toLowerCase() === key)) return 'invalid_online_order_payment_method'
   return kinds && isCashPaymentMethod(value, kinds) ? 'online_order_method_is_cash' : null
 }

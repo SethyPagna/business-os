@@ -116,7 +116,7 @@ async function main() {
       // the admin list save cannot ADD a combined label that contains the method; an old one already stored never traps an unrelated edit
       await seed(h, { list: LIST, online: 'ABA' })
       const refuse = await h.call('POST', '/api/settings', { pos_payment_methods: JSON.stringify([...LIST, 'Card + ABA']) }, 'list adds a combined label')
-      assert.deepEqual([refuse.status, refuse.body && refuse.body.code], [409, 'online_method_merge_refused'], JSON.stringify(refuse.body))
+      assert.deepEqual([refuse.status, refuse.body && refuse.body.code], [400, 'invalid_payment_methods_setting'], JSON.stringify(refuse.body)) // round 11: a '+' never enters a name (the merge refusal behind it stays as defence)
       assert.equal(await t.list(), JSON.stringify(LIST), 'the list is untouched')
       const fine = await h.call('POST', '/api/settings', { pos_payment_methods: JSON.stringify([...LIST, 'Wing']) }, 'list adds Wing')
       assert.equal(fine.status, 200, 'control: another method is added: ' + JSON.stringify(fine.body))
@@ -129,7 +129,7 @@ async function main() {
       await seed(h, { list: LIST, online: 'ABA' })
       for (const scope of ['settings_only', 'linked']) {
         const r = await h.call('POST', '/api/settings/payment-methods/replace', { from: 'Card', to: 'Card + ABA', scope, ...(scope === 'linked' ? { currentPassword: 'al-money-fixture' } : {}) }, 'replace into a combined label ' + scope)
-        assert.deepEqual([r.status, r.body && r.body.code], [409, 'online_method_merge_refused'], scope + ': ' + JSON.stringify(r.body))
+        assert.deepEqual([r.status, r.body && r.body.code], [400, 'invalid_payment_methods_setting'], scope + ': ' + JSON.stringify(r.body)) // round 11: a '+' never enters a name
       }
       assert.equal(await t.list(), JSON.stringify(LIST), 'nothing rewritten')
       console.log('PASS G1 replace: a method cannot be merged into a combined label that contains the online method')

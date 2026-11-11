@@ -66,8 +66,8 @@ export function effectiveOnlineMethod(stored: unknown, onlineOrdersOn: boolean):
 export function namesOnlineMethod(online: unknown, name: unknown): boolean {
   if (sameOnlineIdentity(online, name)) return true
   // KHQR round 10 (G1): a label is judged by every COMPONENT the system itself splits it into (paymentMethodComponents: "Cash + ABA" and "Cash+ABA" both name ABA), with the same identity.
-  const parts = paymentMethodComponents(name)
-  return parts.length > 1 && parts.some((part) => sameOnlineIdentity(online, part))
+  // KHQR round 11 (H1): EVERY component is judged, whatever their count: the splitter reads "ABA+" / "+ABA" as ["ABA"] (one component), which still names ABA.
+  return paymentMethodComponents(name).some((part) => sameOnlineIdentity(online, part))
 }
 
 /** The same judgement under the name the round-10 callers read best: does this label carry the online method as itself or as any component. */

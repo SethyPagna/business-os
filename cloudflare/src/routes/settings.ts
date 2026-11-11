@@ -701,6 +701,8 @@ app.get('/payment-methods/impact', async (c) => {
     return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
   }
   if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
+  // KHQR round 11 (H1): a payment method NAME never holds a '+' (the system splits a label on it): refused as the list save refuses it.
+  if (to.includes('+')) return c.json({ error: 'A payment method name cannot contain a plus sign.', code: 'invalid_payment_methods_setting' }, 400)
   const setting = await loadPaymentMethodSetting(c.env)
   if (!setting) {
     return c.json({ error: 'Configured payment methods are unreadable. Repair them before renaming a method.', code: 'invalid_payment_methods_setting' }, 409)
@@ -746,6 +748,7 @@ app.post('/payment-methods/replace', async (c) => {
     return c.json({ error: `Source and target payment methods are required and must be at most ${MAX_METHOD_LENGTH} characters.` }, 400)
   }
   if (from === to) return c.json({ error: 'Source and target payment methods are already identical.' }, 400)
+  if (to.includes('+')) return c.json({ error: 'A payment method name cannot contain a plus sign.', code: 'invalid_payment_methods_setting' }, 400)
   // Rewriting the method on every linked sale is a bulk edit of money records,
   // so it asks for the caller's current password, as the other destructive
   // routes (lib/destructiveStepUp.ts). A settings-only rename touches the
@@ -1359,6 +1362,10 @@ app.post('/', async (c) => {
     }
     paymentMethodsRawBefore = stored.get('pos_payment_methods')?.value ?? null
     const current = await loadPaymentMethodSetting(c.env)
+    // KHQR round 11 (H1): a NEW list entry never holds a '+' (an entry the stored list already holds is tolerated, so a stale label never traps an unrelated edit).
+    if (normalized.some((entry) => entry.includes('+') && !(current?.methods ?? []).includes(entry))) {
+      return c.json({ error: 'A payment method name cannot contain a plus sign.', code: 'invalid_payment_methods_setting' }, 400)
+    }
     if (current) {
       const spellingOnlyChange = current.methods.find((method) => {
         const replacement = normalized.find((candidate) => paymentMethodKey(candidate) === paymentMethodKey(method))

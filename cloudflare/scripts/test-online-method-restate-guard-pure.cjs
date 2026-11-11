@@ -32,6 +32,15 @@ ok('namesOnlineMethod judges every component with the same identity', () => {
   assert.equal(inv.namesOnlineMethod('', 'Cash + ABA'), false, 'no method in force names nobody')
   assert.equal(inv.carriesOnlineMethod, inv.namesOnlineMethod)
 })
+ok('round 11 (H1): a label whose ONLY component is the method names it, whatever the number of components', () => {
+  for (const label of ['ABA+', '+ABA', 'ABA +', ' + ABA', 'ABA++', '+ABA+', 'aba+', 'ABA+' + U(9)]) {
+    assert.equal(inv.namesOnlineMethod('ABA', label), true, JSON.stringify(label))
+    assert.equal(inv.carriesOnlineMethodInCombination('ABA', label), true, 'a list save / replace target refuses it: ' + JSON.stringify(label))
+    assert.equal(reg.paymentMethodComponents(label).length, 1, 'the splitter reads one component: ' + JSON.stringify(label))
+  }
+  assert.equal(inv.addedListEntryCombiningOnlineMethod('ABA', ['Cash', 'ABA'], ['Cash', 'ABA', 'ABA+']), 'ABA+')
+  for (const label of ['AB+', 'Bakong+', '+', 'Cash+']) assert.equal(inv.namesOnlineMethod('ABA', label), false, JSON.stringify(label))
+})
 ok('carriesOnlineMethodInCombination: a component only, never the method itself', () => {
   assert.equal(inv.carriesOnlineMethodInCombination('ABA', 'Card + ABA'), true)
   assert.equal(inv.carriesOnlineMethodInCombination('ABA', 'ABA'), false)
