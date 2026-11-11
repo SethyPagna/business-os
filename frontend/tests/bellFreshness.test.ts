@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import {
   bellPath, bellRelevantInvalidations, noteOwnWriteForBell, peekBellFresh, requestFreshBell, restoreBellFresh, takeBellFresh,
 } from '../src/api/bellFreshness.ts'
+import { olderAsOf } from '../src/components/dashboard/stockAsOf.ts'
 import { WRITE_FAMILY_INVALIDATES, invalidationsForWritePath } from '../src/api/writeInvalidation.ts'
 
 // Owner, 11 Nov: the bell may be up to 5 minutes old and shows "as of HH:MM"; the actor's OWN write must never show stale.
@@ -52,20 +53,22 @@ assert.equal(bellPath('/api/notifications/summary', false), '/api/notifications/
 assert.equal(bellPath('/api/notifications/summary', true), '/api/notifications/summary?fresh=1')
 assert.equal(bellPath('/api/notifications/summary/items?section=inventory', true), '/api/notifications/summary/items?section=inventory&fresh=1')
 
-// 4. The wiring (source shape): apiFetch's after-mutation hook notes the write; the transport carries the flag; the panel prints the as-of time and has an icon-only refresh.
-const http = read('../src/api/http.ts')
-assert.match(http, /function invalidateAfterMutation\(path: string\): void \{\s*const prefixes = invalidationsForWritePath\(path\)[\s\S]*?noteOwnWriteForBell\(prefixes\)\s*if \(prefixes === null\)/, 'the hook runs before the unmapped early return')
-const transport = read('../src/api/notificationSummary.ts')
-assert.match(transport, /takeBellFresh\('summary'\)/)
-assert.match(transport, /bellPath\('\/api\/notifications\/summary', fresh\)/)
-assert.match(transport, /takeBellFresh\('items'\)/)
-assert.match(transport, /if \(fresh\) restoreBellFresh\('summary'\)/)
-assert.match(transport, /if \(!peekBellFresh\('summary'\)\) return await notificationSummaryRequestPromise/, 'a read in flight from before the write is not joined')
+// 4. The delivery of ?fresh=1 is proven behaviourally in bellFreshDelivery.test.ts (real http.ts, stub fetch). Here: the panel prints the as-of time and has an icon-only refresh.
 const panel = read('../src/components/shared/NotificationCenter.tsx')
-assert.match(panel, /stockAsOfText\(summary\.generatedAt, tr\('notification_as_of'/)
+assert.match(panel, /stockAsOfText\(olderAsOf\(\[summary\.generatedAt[\s\S]{0,300}tr\('notification_as_of'/)
 assert.match(panel, /generatedAt: typeof result\?\.generatedAt === 'string' \? result\.generatedAt : undefined/)
 assert.match(panel, /requestFreshBell\(\)/)
 assert.match(panel, /aria-label=\{tr\('refresh', 'Refresh'/, 'icon-only refresh keeps a translated label')
+
+assert.match(panel, /olderAsOf\(\[summary\.generatedAt/, 'the header shows the older of the summary and any expanded list')
+assert.match(panel, /data-notification-as-of[\s\S]{0,400}inline-flex h-6 w-6/, 'refresh tap target is at least 24 px')
+
+// 4b. B4: header time = older of the summary and the expanded list (never claims fresher than the oldest number shown).
+assert.equal(olderAsOf(['2026-11-11T07:04:00.000Z', '2026-11-11T07:00:00.000Z']), '2026-11-11T07:00:00.000Z')
+assert.equal(olderAsOf(['2026-11-11T07:00:00.000Z', '2026-11-11T07:04:00.000Z']), '2026-11-11T07:00:00.000Z')
+assert.equal(olderAsOf([undefined, 'garbage', '2026-11-11T07:04:00.000Z']), '2026-11-11T07:04:00.000Z')
+assert.equal(olderAsOf([undefined, 'garbage']), null)
+assert.equal(olderAsOf([]), null)
 
 // 5. Both language packs carry the as-of sentence with its {time} slot, the Khmer one short and not English.
 const en = JSON.parse(read('../src/lang/en.json'))

@@ -21,7 +21,7 @@ import {
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
 import { requestFreshBell } from '../../api/bellFreshness.ts'
-import { stockAsOfText } from '../dashboard/stockAsOf.ts'
+import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
@@ -487,6 +487,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   // "Load more" on a preview section: the whole list for that section, by id. A section stays in
   // `expandedSectionsRef` (and is re-fetched after each summary refresh) until it stops being a preview.
   const [fullSectionItems, setFullSectionItems] = useState<Record<string, NotificationItem[]>>({})
+  // When the Worker computed each expanded list: it can differ from the summary's time by up to the cache lifetime, so the header shows the older.
+  const [fullSectionGeneratedAt, setFullSectionGeneratedAt] = useState<Record<string, string>>({})
   const [loadingMoreIds, setLoadingMoreIds] = useState<Record<string, boolean>>({})
   const expandedSectionsRef = useRef<Set<string>>(new Set())
   // Recently finished import jobs, fetched independently of the server
@@ -526,10 +528,17 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     expandedSectionsRef.current.add(sectionId)
     if (!silent) setLoadingMoreIds((current) => ({ ...current, [sectionId]: true }))
     try {
-      const result = await getNotificationSectionItemsRequest(sectionId) as { items?: NotificationItem[] } | null
+      const result = await getNotificationSectionItemsRequest(sectionId) as { items?: NotificationItem[]; generatedAt?: unknown } | null
       if (!aliveRef.current || !expandedSectionsRef.current.has(sectionId)) return
       const items = Array.isArray(result?.items) ? result.items : null
-      if (items) setFullSectionItems((current) => ({ ...current, [sectionId]: items }))
+      if (items) {
+        setFullSectionItems((current) => ({ ...current, [sectionId]: items }))
+        const listAt = typeof result?.generatedAt === 'string' ? result.generatedAt : ''
+        setFullSectionGeneratedAt((current) => {
+          if (!listAt) { if (!(sectionId in current)) return current; const next = { ...current }; delete next[sectionId]; return next }
+          return { ...current, [sectionId]: listAt }
+        })
+      }
     } catch (error) {
       if (!silent) {
         expandedSectionsRef.current.delete(sectionId)
@@ -596,6 +605,12 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         if (!refreshed?.truncated) {
           expandedSectionsRef.current.delete(sectionId)
           setFullSectionItems((current) => {
+            if (!(sectionId in current)) return current
+            const next = { ...current }
+            delete next[sectionId]
+            return next
+          })
+          setFullSectionGeneratedAt((current) => {
             if (!(sectionId in current)) return current
             const next = { ...current }
             delete next[sectionId]
@@ -871,7 +886,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
 
   const activeAlertCount = Number(summary.unreadCount || 0)
   // "As of 14:05": the counts can be up to 5 minutes old (owner, 11 Nov). Left out when the Worker sent no time; the device clock is never a stand-in.
-  const asOfLine = stockAsOfText(summary.generatedAt, tr('notification_as_of', 'As of {time}', 'ត្រឹម {time}'))
+  const asOfLine = stockAsOfText(olderAsOf([summary.generatedAt, ...Object.entries(fullSectionGeneratedAt).filter(([id]) => id in fullSectionItems).map(([, at]) => at)]), tr('notification_as_of', 'As of {time}', 'ត្រឹម {time}'))
   const refreshNow = useCallback(() => {
     requestFreshBell()
     void loadSummary(false)
@@ -1059,7 +1074,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                   type="button"
                   onClick={refreshNow}
                   disabled={loading}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-blue-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-blue-300"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-blue-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-blue-300"
                   aria-label={tr('refresh', 'Refresh', 'ផ្ទុកឡើងវិញ')}
                   title={tr('refresh', 'Refresh', 'ផ្ទុកឡើងវិញ')}
                 >
