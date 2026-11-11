@@ -1562,6 +1562,10 @@ export type ProductSearchListOptions = {
   lotsAdmitted?: boolean
   taggedLotsAdmitted?: boolean
 }
+// A typed search: text in a search box (a name, a word, a barcode scan) or the list of ids the till ranked itself (rankIds, any length). Its key is unique to the keystroke.
+export function isTypedSearch(query: Record<string, string>): boolean {
+  return String(query.rankIds ?? '').trim() !== '' || String(query.query || query.q || query.search || '').trim() !== ''
+}
 export async function readProductSearchList(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, query: Record<string, string>, options: ProductSearchListOptions = {}) {
   const user = c.get('user')
   const include = options.include ?? productSearchIncludes(query)
@@ -1579,7 +1583,9 @@ export async function readProductSearchList(c: Context<{ Bindings: Env; Variable
   }
   // catalog_ranked_scope ON: no page payload is cached. The ranking of the page's window is (lib/rankedScope.ts) and every row is read live by key, so nothing needs refreshing.
   // A version that cannot be read gives an unsafe token: no key, the ranking is computed for this request and stored nowhere (fail closed, never a stale answer).
-  if (await readSwitch(c.env, 'catalog_ranked_scope')) {
+  // A typed search keeps the page path below: a stored ranking is never read again for a key unique to the keystroke, and the ranked read costs more rows and calls than the page it replaces.
+  // (The Inventory Check lists read the shared ranking and keep it.)
+  if (!(!restricted && isTypedSearch(query)) && await readSwitch(c.env, 'catalog_ranked_scope')) {
     let versions: string, edgeVersions: string
     try {
       const [baseVersion, promotions] = await Promise.all([productSearchCacheVersion(c.env, query), getVersionWithFallback(c.env, 'promotions')])
