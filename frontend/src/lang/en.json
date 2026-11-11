@@ -5633,6 +5633,7 @@
   "read_switch_name_ledger_keyset": "Stock Changes: paging by cursor",
   "read_switch_name_stock_bump_narrow": "Stock: refresh only stock after a Set",
   "read_switch_name_ledger_summary_lean": "Stock Changes: lighter totals",
+  "read_switch_name_products_typed_order_js": "Typed search: order results in the app server",
   "read_switch_stale": "The switches changed elsewhere. Showing the current ones.",
   "read_switch_state_off": "Off",
   "read_switch_state_on": "On",

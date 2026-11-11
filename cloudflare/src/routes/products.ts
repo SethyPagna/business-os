@@ -11,7 +11,7 @@ import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
-import { pageFamiliesByKeys, paginateProductFamilies, rankProductFamilies, type FamilyPaginationOptions } from '../lib/familyPagination'
+import { pageFamiliesByKeys, paginateProductFamilies, paginateRankedIdFamilies, rankProductFamilies, typedOrderDrivenRead, typedOrderEligible, type FamilyPaginationOptions } from '../lib/familyPagination'
 import { nextPromotionEdge, readPromotionEdge, readRankedScope, type RankedScope } from '../lib/rankedScope'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { ImageOnlyQueryError, parseImageOnlyQuery, pushReceivedWindow, type ImageOnlyGrants, type ImageOnlyReceivedWindow } from '../lib/productImageOnlyQuery'
@@ -1040,7 +1040,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, rankedIdDriver } = filters
   // The keyed page fetch pays for itself on catalogue-wide reads and on long ranked-id lists. A by-id read or a short
   // ranked-id hydration (the till's per-keystroke lookup) is already tiny, and the extra CTEs cost it 4-8 ms of SQL
   // time (lab medians: 8 ids 2 -> 7 ms, 60 ids 4 -> 9 ms, 300 ids 13 vs 16 ms, 1,500 ids 130 vs 120 ms), so it keeps
@@ -1140,9 +1140,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   }
   // catalog_ranked_scope: the ranking of the page's WINDOW comes from the shared cache (one ranking serves every page of the window and both pages that read this scope), and
   // only the page's rows are read, by key. The same families, order, rows and total as the seek-page statement; a read that is not a seek-page read keeps its own path.
-  const { items, total, totalPages } = options.ranked && seekPageRead
+  // products_typed_order_js: a typed ranked-id read (the till's keystroke, 300 ids or more) orders its families in the Worker (paginateRankedIdFamilies); every other read, and any read whose
+  // order is not the one that function proves, keeps the statement it always ran. A restricted read (Inventory Check) keeps the ranked scope.
+  const typedOrderRead = rankedIdDriver && typedOrderEligible({ restricted: Boolean(options.ranked), seekPageRead, rankedIdCount, imageOnly: Boolean(options.imageOnly), byId: Object.hasOwn(params, 'byId0'), orderSql: effectiveFamilyOrderSql })
+    ? typedOrderDrivenRead(where, rankedIdDriver) : undefined
+  const typedOrdered = typedOrderRead && await readSwitch(env, 'products_typed_order_js')
+    ? await paginateRankedIdFamilies<Record<string, unknown>>(familyOptions, typedOrderRead) : null
+  const { items, total, totalPages } = typedOrdered ?? (options.ranked && seekPageRead
     ? await paginateRankedFamilies(familyOptions, options.ranked)
-    : await paginateProductFamilies<Record<string, unknown>>(familyOptions)
+    : await paginateProductFamilies<Record<string, unknown>>(familyOptions))
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
@@ -1427,7 +1433,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
   if (options.restrictIdsJson !== undefined) { params.icRestrictIds = options.restrictIdsJson; where.push('p.id IN (SELECT value FROM json_each(@icRestrictIds))') }
   if (options.excludeIdsJson !== undefined) { params.icExcludeIds = options.excludeIdsJson; where.push('p.id NOT IN (SELECT value FROM json_each(@icExcludeIds))') }
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, rankedIdDriver: searchQuery.rankedIdDriver }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {
