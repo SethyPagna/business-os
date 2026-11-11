@@ -236,7 +236,7 @@ export type PlanLimits = {
   // after the scan are still checked on every cold isolate (by id watermark),
   // so this only bounds how long coverage lost some OTHER way (a re-activated
   // product, a deleted branch_stock row, a restore) can go unhealed.
-  // Paid 6 h, Free 24 h.
+  // 24 h on both tiers (Paid was 6 h until 11 Nov): a run reads ~23k rows, so the longer lifetime saves ~70k rows a day on Paid.
   coreInvariantsReverifySeconds: number
 
   // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
@@ -434,7 +434,7 @@ const PAID_LIMITS: PlanLimits = {
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 5 * 60,
-  coreInvariantsReverifySeconds: 6 * 60 * 60,
+  coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
