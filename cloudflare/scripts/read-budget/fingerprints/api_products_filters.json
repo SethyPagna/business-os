@@ -79,27 +79,27 @@
    "SELECT key, value FROM settings WHERE key IN (?,?,?)"
   ],
   [
-   "423fc7f3086c",
-   "SELECT MIN(trim(p.brand)) AS value FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.product_i"
+   "7bfbcf2ec7d4",
+   "SELECT MIN(trim(p.brand)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.brand, '')) <> ''"
   ],
   [
-   "cb3c156dd267",
-   "SELECT MIN(trim(p.category)) AS value FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.produc"
+   "3cc77c93e466",
+   "SELECT MIN(trim(p.category)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.category, ''))"
   ],
   [
-   "6968cb6e3de7",
-   "SELECT MIN(trim(p.unit)) AS value FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.product_id"
+   "a21288f6d3a9",
+   "SELECT MIN(trim(p.unit)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.unit, '')) <> '' G"
   ],
   [
-   "4fcfb7a1408b",
-   "SELECT MIN(trim(p.supplier)) AS value FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.produc"
+   "53f8c56ecb15",
+   "SELECT MIN(trim(p.supplier)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.supplier, ''))"
   ],
   [
-   "f4960b457b0a",
-   "SELECT MIN(trim(p.tag_label)) AS value FROM products p LEFT JOIN branch_stock selected_bs ON selected_bs.produ"
+   "bc95fe4b2742",
+   "SELECT MIN(trim(p.tag_label)) AS value FROM products p WHERE p.is_active = 1 AND trim(COALESCE(p.tag_label, ''"
   ],
   [
-   "cb3c13d40540",
+   "374f95bcb34a",
    "SELECT upper(substr(trim(p.name), 1, 1)) AS initial, COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id"
   ],
   [

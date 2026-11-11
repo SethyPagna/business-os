@@ -552,7 +552,7 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   const { query: _searchTerm, q: _searchTermAlt, search: _searchTermAlias, ...structuralQuery } = query
   const variants = buildFilterVariants(structuralQuery, await loadLowStockConfig(env))
   const sql = (f: ReturnType<typeof buildSearchFilters>) => `WHERE ${f.where.join(' AND ')}`
-  const joinSql = (f: ReturnType<typeof buildSearchFilters>) => f.joins.join('\n')
+  const joinSql = filterJoinSql
 
   // GROUP BY the case/whitespace-normalized value rather than plain DISTINCT
   // -- DISTINCT on trim(p.brand) still compares byte-for-byte, so imported
@@ -731,7 +731,7 @@ async function loadImageOnlyFacets(
     const filters = buildSearchFilters({ ...withoutSearch, [field]: '' }, lowStock)
     pushReceivedWindow(filters.where, filters.params, imageOnly.received)
     return {
-      sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${filters.joins.join('\n')} WHERE ${filters.where.join(' AND ')}
+      sql: `SELECT MIN(trim(p.${field})) AS value FROM products p ${filterJoinSql(filters)} WHERE ${filters.where.join(' AND ')}
         AND trim(COALESCE(p.${field}, '')) <> '' GROUP BY lower(trim(p.${field})) ORDER BY lower(value) ASC`,
       params: filters.params,
     }
@@ -1075,7 +1075,6 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // Image-only received window. Deliberately here and not in buildSearchFilters,
   // which every other product reader shares and which must stay all-time.
   if (options.imageOnly) pushReceivedWindow(where, params, options.imageOnly.received)
-  const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
   // A search term in play takes over the primary sort order (relevance,
@@ -1112,6 +1111,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     : buildFamilyRelevanceOrderSql(familyOrderSql, { ...familyRelevance, promotedFirst: true })
 
   const familyOptions: FamilyPaginationOptions = {
+  const joinSql = joinsReadBy(joins, [PRODUCT_SEARCH_SELECT_SQL, ...where, effectiveFamilyOrderSql, intraFamilyOrderSql, matchRankSql, rankCteSql, matchTierSql, promotedRankSql, familyMemberWhereSql]).join('\n')
     db,
     selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
@@ -1217,6 +1217,17 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 // stockState here means no stock-based filtering at all, same as with no
 // branch selected.
 function buildSearchFilters(query: Record<string, string>, lowStock: LowStockConfig, options: ProductSearchOptions = {}) {
+// A join is kept only when some finished SQL fragment reads its alias. The selected-branch stock join is read by the stock and
+// issue filters alone; every other statement selects products columns, so a plain page or facet read skips it.
+export function joinsReadBy(joins: readonly string[], fragments: ReadonlyArray<string | undefined>): string[] {
+  const text = fragments.filter((fragment): fragment is string => Boolean(fragment)).join('\n')
+  return joins.filter((join) => {
+    const alias = /^\s*LEFT JOIN\s+\w+\s+(\w+)\s+ON\b/i.exec(join)?.[1]
+    return !alias || new RegExp(`\\b${alias}\\.`).test(text)
+  })
+}
+const filterJoinSql = (f: ReturnType<typeof buildSearchFilters>) => joinsReadBy(f.joins, [...f.where, f.matchRankSql, f.rankCteSql, f.matchTierSql, f.familyMemberWhereSql]).join('\n')
+
   const where: string[] = [`${catalogProductSql()}`]
   const params: Record<string, unknown> = {}
   const joins: string[] = []
