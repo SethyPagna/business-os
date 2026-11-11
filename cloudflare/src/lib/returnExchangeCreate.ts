@@ -6,6 +6,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { isAnonymousCustomer } from './anonymousCustomer'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersions } from './cache'
+import { RETURN_WRITE_CACHE_NAMESPACES } from './returnCacheVersions'
 import {
   BranchRetiredNoSuccessorError, branchEffectGuardPredicate, branchEffectGuards, branchEffectRefusal, branchRedirectTarget,
   foldedLotSurvivors, resolveBranchEffect, type BranchEffect,
@@ -663,7 +664,7 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
   const response = JSON.parse(committed.response_json) as ReturnCreateResponse
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: response.id }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
+  c.executionCtx.waitUntil(bumpVersions(c.env, RETURN_WRITE_CACHE_NAMESPACES))
   // The replacement lines deduct stock like a sale does (owner ruling 6 Oct 2026: alert on crossing).
   c.executionCtx.waitUntil(recordStockCrossings(c.env, { saleId: null, lines: priced.lines.map((line) => ({ productId: line.product_id, branchId: line.branch_id, quantity: line.quantity })) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: response.id }))

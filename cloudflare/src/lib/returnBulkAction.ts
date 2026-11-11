@@ -5,7 +5,8 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { getPlanLimits } from './planTier'
-import { bumpVersion } from './cache'
+import { bumpVersions } from './cache'
+import { RETURN_WRITE_CACHE_NAMESPACES } from './returnCacheVersions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
@@ -1349,7 +1350,7 @@ async function buildMembers(db: D1Compat, sent: BulkRequest,redirectTarget: numb
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
   await Promise.allSettled([
-    bumpVersion(env, 'returns'), bumpVersion(env, 'products'), bumpVersion(env, 'sales'),
+    bumpVersions(env, RETURN_WRITE_CACHE_NAMESPACES),
     ...(['returns', 'products', 'inventory', 'sales'] as const).map((channel) => broadcast(env, channel, { action: 'update' })),
   ])
 }
