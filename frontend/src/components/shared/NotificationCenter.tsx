@@ -8,6 +8,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -19,6 +20,8 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
+import { requestFreshBell } from '../../api/bellFreshness.ts'
+import { stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
@@ -112,6 +115,8 @@ type NotificationSummary = {
   unreadCount: number
   sections: NotificationSection[]
   preferences: Record<string, unknown>
+  // When the Worker computed the oldest cached section behind these counts (they may be up to 5 minutes old; ISO).
+  generatedAt?: string
   unavailable?: boolean
   cooldownUntil?: number
 }
@@ -570,6 +575,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
             ...current,
             unreadCount: Number(current?.unreadCount || 0),
             preferences: result?.preferences || current?.preferences || {},
+            generatedAt: current?.generatedAt,
             unavailable: true,
             cooldownUntil: result?.cooldownUntil,
           }
@@ -578,6 +584,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           unreadCount: Number(result?.unreadCount || 0),
           sections: nextSections,
           preferences: result?.preferences || {},
+          generatedAt: typeof result?.generatedAt === 'string' ? result.generatedAt : undefined,
           unavailable: !!result?.unavailable,
           cooldownUntil: result?.cooldownUntil,
         }
@@ -863,6 +870,12 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   }, [loadSummary, notify, saveSettings, savingKey, settings, tr])
 
   const activeAlertCount = Number(summary.unreadCount || 0)
+  // "As of 14:05": the counts can be up to 5 minutes old (owner, 11 Nov). Left out when the Worker sent no time; the device clock is never a stand-in.
+  const asOfLine = stockAsOfText(summary.generatedAt, tr('notification_as_of', 'As of {time}', 'ត្រឹម {time}'))
+  const refreshNow = useCallback(() => {
+    requestFreshBell()
+    void loadSummary(false)
+  }, [loadSummary])
 
   // All current alert items across every non-security section (security has
   // its own quiet-dot tracking above, not the numeric badge). This is the
@@ -1039,6 +1052,19 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                     `${activeAlertCount} ការជូនដំណឹងកំពុងដំណើរការ`,
                   )
                   : tr('notification_all_clear', 'Everything looks calm right now', 'មិនមានការជូនដំណឹងសំខាន់នៅពេលនេះទេ')}
+              </div>
+              <div className="flex items-center gap-1 text-xs leading-5 text-slate-400 dark:text-slate-500" data-notification-as-of>
+                {asOfLine ? <span>{asOfLine}</span> : null}
+                <button
+                  type="button"
+                  onClick={refreshNow}
+                  disabled={loading}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-blue-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-blue-300"
+                  aria-label={tr('refresh', 'Refresh', 'ផ្ទុកឡើងវិញ')}
+                  title={tr('refresh', 'Refresh', 'ផ្ទុកឡើងវិញ')}
+                >
+                  <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+                </button>
               </div>
             </div>
             <button

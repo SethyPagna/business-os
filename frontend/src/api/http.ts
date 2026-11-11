@@ -23,6 +23,7 @@ import {
 } from './httpState.ts'
 import { recordServerSignals } from './serverSignals.ts'
 import { invalidationsForChannelFamily, invalidationsForWritePath } from './writeInvalidation.ts'
+import { noteOwnWriteForBell } from './bellFreshness.ts'
 import { epochEchoCount } from './dataEpoch.ts'
 import {
   READ_BUDGET_PAUSED_KEY, READ_BUDGET_PAUSED_MESSAGE, isReadBudgetCode, noteReadBudgetShed, observeReadBudgetZone, readBudgetHold,
@@ -419,6 +420,8 @@ export function cacheInvalidateWithDerived(prefix: string): void {
 
 function invalidateAfterMutation(path: string): void {
   const prefixes = invalidationsForWritePath(path)
+  // The bell may be 5 minutes old for everyone but the writer: its next read asks the Worker for a fresh answer.
+  noteOwnWriteForBell(prefixes)
   if (prefixes === null) { cacheInvalidate(''); return }
   for (const prefix of prefixes) cacheInvalidate(prefix)
 }
