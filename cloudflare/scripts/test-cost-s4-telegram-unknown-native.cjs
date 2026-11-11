@@ -157,6 +157,9 @@ const telegram = loadReal('lib/telegram.ts', {
   './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
   './businessDateWindow': businessDateWindow, './telegramLang': lang, './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange, './salesAnalytics': analytics, './shiftReconciliation': shiftReconciliation,
+  // lib/telegram.ts imports the online-received overlay since 6.0.1448; this test has no online orders, so the overlay adds nothing and the received figure passes through
+  // (the same figures the lane's base, which has no overlay, composes).
+  './onlineOrderReceived': { onlineReceivedOverlay: async () => ({ method: 'ABA KHQR', paidInWindowUsd: 0, recordedOnSalesUsd: 0 }), receivedWithOnlinePaid: (received) => received },
 })
 
 let passed = 0
