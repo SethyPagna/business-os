@@ -156,7 +156,9 @@ async function runGetPass({ partIndex, analyze = false, analyzeDb = analyze, lab
       let m
       try {
         if (analyze) await fence(world, shape)
-        m = await measureGet(world, shape, { cold: !analyze, statements: Boolean(entry.pins) })
+        // Every shape, ANALYZE pass included, is measured warm after one cold request in the same isolate: a single first request lands on
+        // whatever time-boxed cache an earlier shape happened to leave (Dashboard stock overview, import jobs), and the pass reddened at random.
+        m = await measureGet(world, shape, { cold: true, statements: Boolean(entry.pins) })
       } catch (e) { reds.push(`${shape.id}: threw ${String(e.message).slice(0, 160)}`); continue }
       if (observe) observe(shape, m)
       const problems = [...getProblems(entry, m, { analyze }), ...(m.warm.overDeadline || !entry.pins ? [] : await pinProblems(world, entry, m.statements))]
