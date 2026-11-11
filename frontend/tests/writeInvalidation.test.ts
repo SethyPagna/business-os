@@ -131,6 +131,16 @@ await runTest('writes that do not touch stock keep the product and sales caches 
   assert.equal(cacheGet('products:search:q'), null)
 })
 
+await runTest('a quote or preview POST writes nothing, so it keeps every cached read', async () => {
+  reset()
+  cacheSet('products:search:q', 'kept'); cacheSet('sales:get:page=1', 'kept')
+  for (const apiPath of ['/api/products/resolve/cost-preview', '/api/products/receiving-cost-preview', '/api/returns/quote', '/api/returns/legacy-convert/preview', '/api/inventory/dated-stock-count/preview']) {
+    await apiFetch('POST', apiPath, {})
+    assert.equal(cacheGet('products:search:q'), 'kept', apiPath)
+    assert.equal(cacheGet('sales:get:page=1'), 'kept', apiPath)
+  }
+})
+
 await runTest('a mutation to a family nobody mapped clears every cached read instead of leaving one stale', async () => {
   reset()
   cacheSet('products:search:q', 'old'); cacheSet('sales:get:page=1', 'old')

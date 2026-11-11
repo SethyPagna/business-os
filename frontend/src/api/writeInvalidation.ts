@@ -44,8 +44,13 @@ export function apiFamilyOfPath(path: string): string {
   return match[1].replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
 }
 
+// A POST that only quotes or previews (the confirm dialogs' read-only dry runs) writes nothing, so it clears nothing; a read
+// in flight under the same entity would otherwise be fenced out by the preview that sat beside it.
+const READ_ONLY_POST_PATH = /\/(?:[a-z-]*preview|quote)(?:\/|$)/
+
 /** The cached read prefixes a mutation to `path` invalidates; null when its family is unmapped (the caller clears everything). */
 export function invalidationsForWritePath(path: string): readonly string[] | null {
+  if (READ_ONLY_POST_PATH.test(String(path || '').split('?')[0])) return []
   const family = apiFamilyOfPath(path)
   if (!family) return null
   return Object.prototype.hasOwnProperty.call(WRITE_FAMILY_INVALIDATES, family) ? WRITE_FAMILY_INVALIDATES[family] : null
