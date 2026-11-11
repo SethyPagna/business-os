@@ -46,12 +46,19 @@ function category(sql) {
   if (/FROM settings/.test(sql)) return 'settings'
   return 'other'
 }
+// One-shot seam (B8): runs while the inventory producer's statement is in flight, i.e. a write landing DURING the producer.
+let duringInventoryProducer = null
 const db = {
   prepare(sql) {
     const stmt = raw.prepare(sql)
     const note = (values) => ledger.push({ category: category(sql), rows: values.length, bytes: Buffer.byteLength(JSON.stringify(values)), sql })
     return {
-      all: async (params) => { const rows = stmt.all(params) ?? []; note(rows); return rows },
+      all: async (params) => {
+        const rows = stmt.all(params) ?? []
+        note(rows)
+        if (duringInventoryProducer && category(sql) === 'inventory') { const hook = duringInventoryProducer; duringInventoryProducer = null; await hook() }
+        return rows
+      },
       get: async (params) => { const row = stmt.get(params) ?? null; note(row ? [row] : []); return row },
       run: async (params) => { const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
     }
@@ -323,6 +330,21 @@ async function main() {
     } finally { restoreClock() }
     await ownWriteFresh() // the entries written at the faked later time must not outlive the fake clock
     console.log(`  measured ${env.PLAN_TIER}: bell lifetime ${ttlSeconds} s`)
+  })
+
+  await check('B8: a write that lands DURING the producer on the miss path is shown by the next fresh read (versions are read BEFORE the producer)', async () => {
+    // Cold entries: the next plain read is the miss path. A writer bumps its versions while the inventory producer is running.
+    cacheStore.clear()
+    duringInventoryProducer = async () => { await cacheModule.bumpVersion(env, 'products'); await cacheModule.bumpVersion(env, 'stock') }
+    await summary()
+    assert.equal(duringInventoryProducer, null, 'the write really landed inside the producer')
+    assert.equal(statements('inventory'), 1, 'the miss computed once')
+    // No further write. The stored entry was computed under the OLD versions, so the fresh read must recompute. A build that reads
+    // versions after the producer stamps the entry with the NEW versions and serves the half-old answer here (mutant MB1).
+    await freshSummary()
+    assert.equal(statements('inventory'), 1, 'the fresh read recomputed because the entry predates the version bump')
+    await freshSummary()
+    assert.equal(statements('inventory'), 0, 'and the recompute is then current: a repeat fresh read is served')
   })
 
   await check("a settings save no longer re-walks the catalog by itself, but a changed low-stock config or expiry window is a different entry at once", async () => {
