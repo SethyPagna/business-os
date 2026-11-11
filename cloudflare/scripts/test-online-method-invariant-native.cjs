@@ -37,7 +37,7 @@ const MUTANTS = {
   sql_pin_off: ['lib/onlineMethodInvariant.ts', "WHEN NOT (${ONLINE_METHOD_RAW_SQL} = @expectedMethod", "WHEN 0 AND (${ONLINE_METHOD_RAW_SQL} = @expectedMethod"],
   raw_pin_trimmed: ['lib/onlineMethodInvariant.ts', "WHEN NOT (${ONLINE_METHOD_RAW_SQL} = @expectedMethod", "WHEN NOT (${ONLINE_METHOD_NORMALIZED_SQL} = @expectedMethod"],
 }
-function transformFor(extra) {
+function transformFor(extras) {
   return (file, source) => {
     let out = source
     if (MUTANT) {
@@ -48,7 +48,8 @@ function transformFor(extra) {
         out = out.replace(m[1], () => m[2])
       }
     }
-    if (extra && extra.file === file) {
+    for (const extra of extras || []) {
+      if (extra.file !== file) continue
       if (!extra.at.test(out)) throw new Error('hook anchor missing: ' + extra.at)
       out = out.replace(extra.at, (_m, eol, rest) => `${eol}${extra.line}${eol}${rest}`)
     }
@@ -58,11 +59,14 @@ function transformFor(extra) {
 const POST_AT = { file: 'routes/settings.ts', at: /(\r?\n)(  const db = getDb\(c\.env\)\r?\n  const statements: Array<\{ sql: string; params: Record<string, unknown> \}> = changedKeys\.map)/ }
 const REPLACE_AT = { file: 'routes/settings.ts', at: /(\r?\n)(  const db = getDb\(c\.env\)\r?\n  \/\/ Snapshot the monotonic sale revision)/ }
 const BACKFILL_AT = { file: 'routes/settings.ts', at: /(\r?\n)(  const written = await db\.prepare\()/ }
-const upsertLine = (key, value) => `  await getDb(c.env).prepare("INSERT INTO settings (key,value) VALUES (@hk,@hv) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run({ hk: ${JSON.stringify(key)}, hv: ${JSON.stringify(value)} })`
-const hook = (anchor, ...lines) => ({ ...anchor, line: lines.join('\n') })
+// One world serves every race: the injected line runs the statements a case stores under race_hook_<name> (one settings row), between the route's reads and its batch.
+const hookLine = (name) => `  { const __h = await getDb(c.env).prepare("SELECT value FROM settings WHERE key = 'race_hook_${name}'").get<{ value: string }>(); if (__h && __h.value) await getDb(c.env).batch((JSON.parse(__h.value) as string[]).map((sql) => ({ sql, params: {} }))) }`
+const HOOKS = [{ ...POST_AT, line: hookLine('post') }, { ...REPLACE_AT, line: hookLine('replace') }, { ...BACKFILL_AT, line: hookLine('backfill') }]
+const sqlq = (text) => "'" + String(text).replace(/'/g, "''") + "'"
+const upsertSql = (key, value) => `INSERT INTO settings (key,value) VALUES (${sqlq(key)},${sqlq(value)}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`
 
-async function boot(adminPassword, extra) {
-  const world = await bootWorld({ adminPassword, transformSources: (MUTANT || extra) ? transformFor(extra) : undefined })
+async function boot(adminPassword, extras) {
+  const world = await bootWorld({ adminPassword, transformSources: (MUTANT || extras) ? transformFor(extras) : undefined })
   await world.account('mgr', { roleCode: 'mgr_role', permissions: { settings: true, sales_policy: true } })
   return world
 }
@@ -174,11 +178,11 @@ async function main() {
         if (c.after) for (const [k, v] of Object.entries(c.after)) t.eq(`stored ${k}`, await h.get(k === 'online' ? 'online_order_payment_method' : k), v)
       })
     }
-  } finally { await world.dispose() }
+  } finally { /* disposed after the guard cases, which use the same world */ }
 
   // ---- the guard statement itself: pins, (a) and (c) in SQL, tolerance, and a JS/SQL differential ----------------------------------------------------------------
-  const gworld = await boot(adminPassword)
-  const gh = helpers(gworld)
+  const gworld = world
+  const gh = h
   const inline = (sql, params) => sql.replace(/@(\w+)/g, (_m, name) => {
     const v = params[name]
     return typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`
@@ -226,46 +230,45 @@ async function main() {
       }
       t.ok(`compared ${compared} states`, compared === methods.length * lists.length)
     })
-  } finally { await gworld.dispose() }
+  } finally { await world.dispose() }
 
   // ---- races: a write lands between the route's reads and its batch (source hook, in memory) ---------------------------------------------------------------------
   const races = [
-    { id: 'E4/D2 race: a kinds-only save judged on M "ABA KHQR" while M moves to Bakong', hook: hook(POST_AT, upsertLine('online_order_payment_method', 'Bakong')), setup: {}, call: ['POST', S, { pos_payment_method_kinds: JSON.stringify({ Bakong: 'cash' }) }, MGR],
+    { id: 'E4/D2 race: a kinds-only save judged on M "ABA KHQR" while M moves to Bakong', at: 'post', sql: [upsertSql('online_order_payment_method', 'Bakong')], setup: {}, call: ['POST', S, { pos_payment_method_kinds: JSON.stringify({ Bakong: 'cash' }) }, MGR],
       expect: [409, 'write_conflict'], after: { online: 'Bakong', kinds: null } },
-    { id: 'E6 race: M set to Bakong while the kinds map becomes {Bakong: cash}', hook: hook(POST_AT, upsertLine('pos_payment_method_kinds', '{"Bakong":"cash"}')), setup: {}, call: ['POST', S, { online_order_payment_method: 'Bakong' }],
+    { id: 'E6 race: M set to Bakong while the kinds map becomes {Bakong: cash}', at: 'post', sql: [upsertSql('pos_payment_method_kinds', '{"Bakong":"cash"}')], setup: {}, call: ['POST', S, { online_order_payment_method: 'Bakong' }],
       expect: [409, 'write_conflict'], after: { online: 'ABA KHQR', kinds: '{"Bakong":"cash"}' } },
-    { id: 'list race: a list save dropping Bakong while M moves to Bakong', hook: hook(POST_AT, upsertLine('online_order_payment_method', 'Bakong')), setup: {}, call: ['POST', S, { pos_payment_methods: JSON.stringify(['Cash', 'ABA KHQR']) }, MGR],
+    { id: 'list race: a list save dropping Bakong while M moves to Bakong', at: 'post', sql: [upsertSql('online_order_payment_method', 'Bakong')], setup: {}, call: ['POST', S, { pos_payment_methods: JSON.stringify(['Cash', 'ABA KHQR']) }, MGR],
       expect: [409, 'write_conflict'], after: { online: 'Bakong', list: JSON.stringify(LIST) } },
-    { id: 'E3 race: a MANAGER merges Cash into Bakong while an administrator sets M to Bakong', hook: hook(REPLACE_AT, upsertLine('online_order_payment_method', 'Bakong')), setup: {}, call: ['POST', R, { from: 'Cash', to: 'Bakong', scope: 'settings_only' }, MGR],
+    { id: 'E3 race: a MANAGER merges Cash into Bakong while an administrator sets M to Bakong', at: 'replace', sql: [upsertSql('online_order_payment_method', 'Bakong')], setup: {}, call: ['POST', R, { from: 'Cash', to: 'Bakong', scope: 'settings_only' }, MGR],
       expect: [409, 'write_conflict'], after: { online: 'Bakong', list: JSON.stringify(LIST) } },
-    { id: 'rename race: M renamed to Wing while the kinds map becomes {Wing: cash}', hook: hook(REPLACE_AT, upsertLine('pos_payment_method_kinds', '{"Wing":"cash"}')), setup: {}, call: ['POST', R, { from: 'ABA KHQR', to: 'Wing', scope: 'settings_only' }],
+    { id: 'rename race: M renamed to Wing while the kinds map becomes {Wing: cash}', at: 'replace', sql: [upsertSql('pos_payment_method_kinds', '{"Wing":"cash"}')], setup: {}, call: ['POST', R, { from: 'ABA KHQR', to: 'Wing', scope: 'settings_only' }],
       expect: [409, 'write_conflict'], after: { online: 'ABA KHQR', list: JSON.stringify(LIST) } },
-    { id: 'backfill race: a stale whole-list copy must not undo a rename that landed after its read', hook: hook(BACKFILL_AT, upsertLine('pos_payment_methods', '["Cash","Online"]'), upsertLine('online_order_payment_method', 'Online')), setup: { sales: ['Wing Pay'] }, call: ['POST', '/api/settings/payment-methods/backfill', {}],
+    { id: 'backfill race: a stale whole-list copy must not undo a rename that landed after its read', at: 'backfill', sql: [upsertSql('pos_payment_methods', '["Cash","Online"]'), upsertSql('online_order_payment_method', 'Online')], setup: { sales: ['Wing Pay'] }, call: ['POST', '/api/settings/payment-methods/backfill', {}],
       expect: [409, 'write_conflict'], after: { online: 'Online', list: '["Cash","Online"]' } },
   ]
-  for (const r of races) {
-    const w = await boot(adminPassword, r.hook)
-    const wh = helpers(w)
-    try {
-      await check(r.id, async (t) => {
-        await wh.reset(r.setup)
-        const [method, route, body, opts] = r.call
-        const res = await w.api(method, route, body, opts)
-        t.eq('answer', codeOf(res), r.expect)
-        for (const [k, v] of Object.entries(r.after)) t.eq(`stored ${k}`, await wh.get(k === 'online' ? 'online_order_payment_method' : k === 'list' ? 'pos_payment_methods' : 'pos_payment_method_kinds'), v)
-      })
-    } finally { await w.dispose() }
-  }
-  const control = await boot(adminPassword)
-  const ch = helpers(control)
+  const raceWorld = await boot(adminPassword, HOOKS)
+  const rh = helpers(raceWorld)
   try {
+    for (const r of races) {
+      await check(r.id, async (t) => {
+        await raceWorld.run("DELETE FROM settings WHERE key LIKE 'race_hook_%'")
+        await rh.reset(r.setup)
+        await rh.put('race_hook_' + r.at, JSON.stringify(r.sql))
+        const [method, route, body, opts] = r.call
+        const res = await raceWorld.api(method, route, body, opts)
+        await raceWorld.run("DELETE FROM settings WHERE key LIKE 'race_hook_%'")
+        t.eq('answer', codeOf(res), r.expect)
+        for (const [k, v] of Object.entries(r.after)) t.eq(`stored ${k}`, await rh.get(k === 'online' ? 'online_order_payment_method' : k === 'list' ? 'pos_payment_methods' : 'pos_payment_method_kinds'), v)
+      })
+    }
     await check('backfill control: with no race the missing method is appended', async (t) => {
-      await ch.reset({ list: ['Cash', 'ABA KHQR'], sales: ['Wing Pay'] })
-      const res = await control.api('POST', '/api/settings/payment-methods/backfill', {})
+      await rh.reset({ list: ['Cash', 'ABA KHQR'], sales: ['Wing Pay'] })
+      const res = await raceWorld.api('POST', '/api/settings/payment-methods/backfill', {})
       t.eq('answer', res.status, 200)
-      t.eq('list', await ch.get('pos_payment_methods'), JSON.stringify(['Cash', 'ABA KHQR', 'Wing Pay']))
+      t.eq('list', await rh.get('pos_payment_methods'), JSON.stringify(['Cash', 'ABA KHQR', 'Wing Pay']))
     })
-  } finally { await control.dispose() }
+  } finally { await raceWorld.dispose() }
   finish('online method invariant')
 }
 main().catch((error) => { console.error(error); process.exit(1) })
