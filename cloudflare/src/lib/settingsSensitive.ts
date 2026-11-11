@@ -47,6 +47,21 @@ export function isSystemOwnedSettingKey(key: string): boolean {
 // stale. A test pins this to isSystemOwnedSettingKey.
 export const NOT_SYSTEM_OWNED_SETTING_SQL = String.raw`lower(key) NOT IN ('cron_rotation_state', 'cron_heavy_state') AND lower(key) NOT LIKE '%\_last\_run' ESCAPE '\' AND lower(key) NOT LIKE '%\_last\_run:%' ESCAPE '\'`
 
+// The newest updated_at among the rows that are NOT system-owned, from rows already read: the answer of
+// `SELECT MAX(updated_at) FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}` without a second pass over the table (GET /api/settings). Same ordering as
+// SQLite's MAX: NULL is ignored, any text beats any number, text compares byte-wise (ASCII timestamps), numbers numerically. The JS twin trims the key and the SQL
+// form does not; no stored key has surrounding spaces and POST refuses to create one.
+export function newestNonSystemOwnedStamp(rows: Iterable<{ key: string; updated_at?: unknown }>): string | number | null {
+  let best: string | number | null = null
+  for (const row of rows) {
+    const stamp = row.updated_at
+    if ((typeof stamp !== 'string' && typeof stamp !== 'number') || isSystemOwnedSettingKey(row.key)) continue
+    if (best === null) { best = stamp; continue }
+    if (typeof stamp === 'string' ? (typeof best === 'number' || stamp > best) : (typeof best === 'number' && stamp > best)) best = stamp
+  }
+  return best
+}
+
 export function isSensitiveSettingKey(key: string): boolean {
   const normalized = String(key || '').toLowerCase()
   if (isSystemOwnedSettingKey(normalized)) return true

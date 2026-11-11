@@ -6,7 +6,7 @@
 // and is simply discarded when there is no user.
 //
 // GET /api/settings sent its two settings statements (the rows, then the
-// global MAX(updated_at)) one after the other. They are now one db.batch().
+// global MAX(updated_at)) one after the other. They became one db.batch(), and are now ONE statement (W2-PAGES #7: the stamp is computed from the rows).
 //
 // Security half pinned here too: an unauthenticated bootstrap still returns
 // the bare 401 envelope with no settings in it, and a failing discarded read
@@ -58,6 +58,11 @@ function answer(sql) {
   if (/^SELECT key, value FROM settings$/.test(sql.trim())) {
     if (trace.settingsFail) throw new Error('D1_ERROR: settings read failed')
     return SETTINGS_ROWS.map(({ key, value }) => ({ key, value }))
+  }
+  // GET /api/settings reads the table once (W2-PAGES #7): rows with their stamps; the route derives the newest stamp itself.
+  if (/^SELECT key, value, updated_at FROM settings$/.test(sql.trim())) {
+    if (trace.settingsFail) throw new Error('D1_ERROR: settings read failed')
+    return SETTINGS_ROWS.map(({ key, value, updated_at }) => ({ key, value, updated_at }))
   }
   if (/^SELECT MAX\(updated_at\) AS updated_at FROM settings( WHERE .*)?$/.test(sql.trim())) return [{ updated_at: MAX_UPDATED_AT }]
   throw new Error(`unexpected SQL: ${sql}`)

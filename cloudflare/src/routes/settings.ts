@@ -8,7 +8,7 @@ import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { isSensitiveSettingKey, isSystemOwnedSettingKey, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
+import { isSensitiveSettingKey, isSystemOwnedSettingKey, newestNonSystemOwnedStamp, NOT_SYSTEM_OWNED_SETTING_SQL } from '../lib/settingsSensitive'
 import { canReadSettingKey, settingsVisibleTo } from '../lib/settingsVisibility'
 import { AUDIT_LOG_RETENTION_FLOOR_DAYS, AUDIT_LOG_RETENTION_MAX_DAYS, parseAuditRetentionDays } from '../lib/auditRetentionPolicy'
 // Shared with routes/sales.ts, which folds a method into this list the moment
@@ -114,16 +114,10 @@ async function scopedUpdatedAt(env: Env, stored: Map<string, StoredSettingRow>):
 app.get('/', async (c) => {
   const user = c.get('user')
   const db = getDb(c.env)
-  // One round trip for both reads (perf F5). The second statement is exactly
-  // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
-  // when the table has no timestamp.
-  const [rowsResult, updatedAtResult] = await db.batch([
-    { sql: 'SELECT key, value FROM settings' },
-    { sql: `SELECT MAX(updated_at) AS updated_at FROM settings WHERE ${NOT_SYSTEM_OWNED_SETTING_SQL}` },
-  ])
-  const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
-  const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at
-    || new Date().toISOString()
+  // One statement, one pass over the table: the stamp is getSettingsUpdatedAt()'s unscoped answer (the newest updated_at outside the system-owned rows,
+  // falling back to now when the table has none) computed from the same rows by the JS twin of NOT_SYSTEM_OWNED_SETTING_SQL.
+  const rows = await db.prepare('SELECT key, value, updated_at FROM settings').all<{ key: string; value: string; updated_at: string | null }>()
+  const updatedAt = newestNonSystemOwnedStamp(rows) || new Date().toISOString()
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
