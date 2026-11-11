@@ -1116,6 +1116,8 @@ app.put('/:id', async (c) => {
   }
 
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
+  // Every product row lists the branches (name, is_active) beside its stock, so a branch edit turns the product lists over.
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // The edit re-stamps the branch name on the branch's sales (branchNameSnapshotStatements), which the Expenses list shows on its courier rows.
   c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'update' }))
   if (!committedBranch) throw new Error('The committed branch response is unavailable.')

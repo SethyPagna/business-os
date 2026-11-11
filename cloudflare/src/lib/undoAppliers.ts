@@ -3203,6 +3203,8 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
     }
     throw error
   }
+  // Removing or restoring a product changes the product lists; the generic bump after an applier covers only stock (merge appliers are handled by the caller).
+  { const { bumpVersion } = await import('./cache'); await bumpVersion(ctx.env, 'products').catch(() => {}) }
   await broadcast(ctx.env, 'products', { action: ctx.direction === 'undo' ? 'restore' : 'delete', id: snapshot.plan.product_id })
   await broadcast(ctx.env, 'inventory', { action: 'update' })
   return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: expectedGeneration + 1 }
