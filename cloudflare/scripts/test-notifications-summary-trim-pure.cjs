@@ -1,7 +1,9 @@
 'use strict'
 const { seedStockFixture } = require('./harness/seed-stock-fixture.cjs')
-// GET /api/notifications/summary: counts + a 50-item inventory preview, with the three expensive
-// sections (inventory, expiry, loyalty) answered from the Cache API between writes.
+// GET /api/notifications/summary: counts + a 50-item inventory preview, with the expensive
+// sections answered from the Cache API: loyalty between the writes that bump its versions, and (since the
+// owner's 11 Nov "up to 5 minutes old" decision) inventory, expiry and supplier credit for the plan's
+// notificationSectionCacheSeconds whatever the versions do, recomputed at once for ?fresh=1 (the actor's own write).
 //
 // Loads the REAL routes/notifications.ts and the REAL lib/cache.ts against an in-memory SQLite
 // database with every migration applied. Only Worker seams are stubbed: the session, the Cache API
@@ -44,12 +46,19 @@ function category(sql) {
   if (/FROM settings/.test(sql)) return 'settings'
   return 'other'
 }
+// One-shot seam (B8): runs while the inventory producer's statement is in flight, i.e. a write landing DURING the producer.
+let duringInventoryProducer = null
 const db = {
   prepare(sql) {
     const stmt = raw.prepare(sql)
     const note = (values) => ledger.push({ category: category(sql), rows: values.length, bytes: Buffer.byteLength(JSON.stringify(values)), sql })
     return {
-      all: async (params) => { const rows = stmt.all(params) ?? []; note(rows); return rows },
+      all: async (params) => {
+        const rows = stmt.all(params) ?? []
+        note(rows)
+        if (duringInventoryProducer && category(sql) === 'inventory') { const hook = duringInventoryProducer; duringInventoryProducer = null; await hook() }
+        return rows
+      },
       get: async (params) => { const row = stmt.get(params) ?? null; note(row ? [row] : []); return row },
       run: async (params) => { const info = stmt.run(params); return { changes: info.meta?.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? 0) } },
     }
@@ -123,7 +132,11 @@ async function call(method, pathname, user) {
 const ADMIN = { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', permissions: '{}' }
 const CASHIER = { id: 2, username: 'cashier', name: 'Cashier', role_code: 'staff', permissions: JSON.stringify({ sales: true }) }
 const STOCK_ONLY = { id: 3, username: 'stock', name: 'Stock', role_code: 'staff', permissions: JSON.stringify({ inventory: true }) }
-const summary = (user = ADMIN) => call('GET', '/summary', user)
+const summary = (user = ADMIN, query = '') => call('GET', `/summary${query}`, user)
+const freshSummary = (user = ADMIN) => summary(user, '?fresh=1')
+// What an actor's own write does before the bell asks again: the writer bumps its data versions (a stock move bumps 'stock' and/or 'products') and then ?fresh=1.
+// ?fresh=1 alone recomputes only when a version moved (see the B2 cases), so every case below that changed rows behind the cache goes through this.
+const ownWriteFresh = async (user = ADMIN) => { await cacheModule.bumpVersion(env, 'products'); await cacheModule.bumpVersion(env, 'stock'); return freshSummary(user) }
 const section = (body, id) => (body.json.sections || []).find((entry) => entry.id === id)
 
 // ---- fixtures ---------------------------------------------------------------------------------------
@@ -229,24 +242,116 @@ async function main() {
     assert.deepEqual(again.json.sections, first.json.sections)
   })
 
-  await check('a stock change is NOT visible before its version bump (the cache is real) and IS right after it', async () => {
+  const ttlSeconds = load('lib/planTier.ts').getPlanLimits(env).notificationSectionCacheSeconds
+  const realNow = Date.now
+  const at = (ms) => { Date.now = () => ms }
+  const restoreClock = () => { Date.now = realNow }
+
+  await check('a stock change on ANOTHER device is not recomputed by the version bump (up to 5 minutes old, the owner\'s decision) and the as-of time says so', async () => {
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 0'").run())
+    await cacheModule.bumpVersion(env, 'stock') // what a sale on another till does
+    await cacheModule.bumpVersion(env, 'products')
     const stale = await summary()
-    assert.equal(section(stale, 'inventory').count, 330, 'control: still the cached answer')
-    await cacheModule.bumpVersion(env, 'stock') // what a sale does
-    const fresh = await summary()
-    assert.equal(statements('inventory'), 1, 'inventory re-ran')
-    assert.equal(statements('expiry'), 0, 'a stock bump does not touch the expiry entry')
-    assert.equal(section(fresh, 'inventory').count, 331)
-    assert.equal(section(fresh, 'inventory').summary, '121 out of stock - 210 low stock')
+    assert.equal(section(stale, 'inventory').count, 330, 'control: still the cached answer after the bumps (a version-keyed entry would have re-read)')
+    assert.equal(statements('inventory'), 0, 'no catalog read at all')
+    assert.equal(statements('expiry'), 0)
+    assert.equal(stale.json.generatedAt, first.json.generatedAt, 'generatedAt is when the data was computed, not when it was served')
+    assert.ok(Date.parse(stale.json.generatedAt) < Date.now(), 'and it is not "now"')
   })
 
-  await check("a product edit ('products' bump) re-runs inventory and expiry but not loyalty", async () => {
+  await check('the actor\'s own write: ?fresh=1 recomputes at once, shows the new count and refreshes the entry for everyone', async () => {
+    const fresh = await freshSummary()
+    assert.equal(statements('inventory'), 1, 'inventory re-ran')
+    assert.equal(statements('expiry'), 1, 'so did expiry: one fresh request refreshes every plan-lifetime section')
+    assert.equal(statements('loyalty'), 0, 'loyalty keeps its own version-keyed entry')
+    assert.equal(section(fresh, 'inventory').count, 331)
+    assert.equal(section(fresh, 'inventory').summary, '121 out of stock - 210 low stock')
+    assert.ok(Date.parse(fresh.json.generatedAt) >= Date.parse(first.json.generatedAt))
+    const other = await summary(STOCK_ONLY)
+    assert.equal(statements('inventory'), 0, 'another user is served the refreshed entry')
+    assert.equal(section(other, 'inventory').count, 331)
+    assert.equal(other.json.generatedAt, fresh.json.generatedAt)
+  })
+
+  await check('B2: ?fresh=1 is bounded by real writes: repeated fresh requests with no write in between compute once, a bump of a version the section reads recomputes, an unrelated bump does not', async () => {
+    const base = await freshSummary() // no write since the last fresh above: served from the entry
+    assert.equal(statements('inventory'), 0, 'fresh with no write: no catalog read')
+    assert.equal(statements('expiry'), 0)
+    for (let i = 0; i < 3; i += 1) {
+      const again = await freshSummary()
+      assert.equal(statements('inventory'), 0, 'repeated fresh ' + (i + 1) + ': still no catalog read')
+      assert.equal(statements('expiry'), 0)
+      assert.equal(again.json.generatedAt, base.json.generatedAt, 'the as-of time did not move: nothing was recomputed')
+      assert.deepEqual(again.json.sections, base.json.sections)
+    }
+    const items = (query) => call('GET', '/summary/items?section=inventory' + query, ADMIN)
+    await items('&fresh=1') // computes the full list once (first time it is asked for)
+    await items('&fresh=1')
+    assert.equal(statements('inventory'), 0, 'the expanded list is bounded the same way')
+    for (const unrelated of ['settings', 'sales', 'returns', 'customers']) {
+      await cacheModule.bumpVersion(env, unrelated)
+      await freshSummary()
+      assert.equal(statements('inventory'), 0, unrelated + ' bump: not a version the bell sections read')
+    }
+    // A real write: rows change, the writer bumps its version, the next fresh request recomputes (once) and shows it.
+    const healthyBefore = raw.db.prepare("SELECT stock_quantity AS q FROM products WHERE name = 'Healthy 1'").get().q
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 0 WHERE name = 'Healthy 1'").run())
+    await cacheModule.bumpVersion(env, 'stock')
+    const moved = await freshSummary()
+    assert.equal(statements('inventory'), 1, 'a stock bump: recomputed')
+    assert.equal(section(moved, 'inventory').count, section(base, 'inventory').count + 1)
+    await freshSummary()
+    assert.equal(statements('inventory'), 0, 'and the request after that is served from the refreshed entry')
+    const listed = await items('&fresh=1')
+    assert.equal(statements('inventory'), 1, 'the expanded list read its own versions: one recompute after the bump')
+    assert.equal(listed.json.count, section(moved, 'inventory').count)
+    await items('&fresh=1')
+    assert.equal(statements('inventory'), 0)
+    // A product edit bumps 'products': expiry (which reads products) recomputes too.
     await cacheModule.bumpVersion(env, 'products')
+    await freshSummary()
+    assert.equal(statements('expiry'), 1, 'a products bump re-runs expiry')
+    seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = ? WHERE name = 'Healthy 1'").run(healthyBefore)) // leave the fixture as it was
+    await ownWriteFresh()
+    await items('&fresh=1') // the expanded list's own entry is refreshed too
+  })
+
+  await check('the lifetime is the plan\'s, not a literal: just inside it is a hit, at it is a recompute, and the as-of time is the oldest section', async () => {
+    const t0 = Date.parse((await ownWriteFresh()).json.generatedAt)
+    try {
+      at(t0 + ttlSeconds * 1000 - 1000)
+      const inside = await summary()
+      assert.equal(statements('inventory'), 0, `inside ${ttlSeconds} s: served from the cache`)
+      assert.equal(Date.parse(inside.json.generatedAt), t0, 'as of the compute time')
+      at(t0 + ttlSeconds * 1000 + 1000)
+      const expired = await summary()
+      assert.equal(statements('inventory'), 1, `past ${ttlSeconds} s: recomputed`)
+      assert.equal(Date.parse(expired.json.generatedAt), t0 + ttlSeconds * 1000 + 1000)
+    } finally { restoreClock() }
+    await ownWriteFresh() // the entries written at the faked later time must not outlive the fake clock
+    console.log(`  measured ${env.PLAN_TIER}: bell lifetime ${ttlSeconds} s`)
+  })
+
+  await check('B8: a write that lands DURING the producer on the miss path is shown by the next fresh read (versions are read BEFORE the producer)', async () => {
+    // Cold entries: the next plain read is the miss path. A writer bumps its versions while the inventory producer is running.
+    cacheStore.clear()
+    duringInventoryProducer = async () => { await cacheModule.bumpVersion(env, 'products'); await cacheModule.bumpVersion(env, 'stock') }
     await summary()
-    assert.equal(statements('inventory'), 1)
-    assert.equal(statements('expiry'), 1)
-    assert.equal(statements('loyalty'), 0)
+    assert.equal(duringInventoryProducer, null, 'the write really landed inside the producer')
+    assert.equal(statements('inventory'), 1, 'the miss computed once')
+    // No further write. The stored entry was computed under the OLD versions, so the fresh read must recompute. A build that reads
+    // versions after the producer stamps the entry with the NEW versions and serves the half-old answer here (mutant MB1).
+    await freshSummary()
+    assert.equal(statements('inventory'), 1, 'the fresh read recomputed because the entry predates the version bump')
+    await freshSummary()
+    assert.equal(statements('inventory'), 0, 'and the recompute is then current: a repeat fresh read is served')
+  })
+
+  await check("a settings save no longer re-walks the catalog by itself, but a changed low-stock config or expiry window is a different entry at once", async () => {
+    await cacheModule.bumpVersion(env, 'settings')
+    await summary()
+    assert.equal(statements('inventory'), 0)
+    assert.equal(statements('expiry'), 0)
   })
 
   await check('supplier credit is answered from the cache between writes: a second call reads no lots, a lot or product change re-reads them', async () => {
@@ -255,22 +360,21 @@ async function main() {
       raw.db.prepare(`INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, supplier_name, payment_status, credit_due_date, unit_cost_usd, received_cost_usd, received_quantity)
         VALUES (?, 'sc1', 'SC1', '2026-09-01', 1, 'Bong Long', 'credit', date('now', '-3 day'), 5, 25, 5)`).run(productId)
     })
-    await cacheModule.bumpVersion(env, 'products')
-    const cold = await summary()
+    const cold = await ownWriteFresh()
     assert.equal(statements('supplier_credit'), 1, 'first call reads the lots once')
     assert.equal(section(cold, 'supplier_credit').count, 1)
     const warm = await summary()
     assert.equal(statements('supplier_credit'), 0, 'second call: zero lot statements (was one full lot scan every refresh)')
     assert.deepEqual(section(warm, 'supplier_credit'), section(cold, 'supplier_credit'))
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'paid', credit_due_date = NULL WHERE lot_code = 'SC1'").run())
-    assert.equal(section(await summary(), 'supplier_credit').count, 1, 'control: not visible before the version bump -- the cache is real')
-    await cacheModule.bumpVersion(env, 'products') // what PATCH /api/batches/:id does
-    const paid = await summary()
-    assert.equal(statements('supplier_credit'), 1, 'the bump re-read the lots')
+    assert.equal(section(await summary(), 'supplier_credit').count, 1, 'control: not visible before the fresh request -- the cache is real')
+    await cacheModule.bumpVersion(env, 'products') // what PATCH /api/batches/:id does for the other devices: no recompute any more
+    assert.equal(section(await summary(), 'supplier_credit').count, 1, 'a bump alone does not re-read the lots')
+    const paid = await freshSummary() // the actor who marked it paid
+    assert.equal(statements('supplier_credit'), 1, 'the fresh request re-read the lots')
     assert.equal(section(paid, 'supplier_credit'), undefined, 'marking the lot paid clears the reminder')
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE product_batches SET payment_status = 'credit', credit_due_date = date('now', '-3 day') WHERE lot_code = 'SC1'").run())
-    await cacheModule.bumpVersion(env, 'products')
-    assert.equal(section(await summary(), 'supplier_credit').count, 1)
+    assert.equal(section(await ownWriteFresh(), 'supplier_credit').count, 1)
     assert.equal(section(await summary(CASHIER), 'supplier_credit'), undefined, 'the cache never serves it to a non-admin')
   })
 
@@ -287,11 +391,11 @@ async function main() {
     }
   })
 
-  await check("a settings save re-runs every cached section", async () => {
+  await check("a settings save re-runs loyalty (version-keyed); the plan-lifetime sections key on their inputs", async () => {
     await cacheModule.bumpVersion(env, 'settings')
     await summary()
-    assert.equal(statements('inventory'), 1)
-    assert.equal(statements('expiry'), 1)
+    assert.equal(statements('inventory'), 0)
+    assert.equal(statements('expiry'), 0)
     assert.ok(statements('loyalty') >= 1)
     seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('loyalty_points_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run())
     await cacheModule.bumpVersion(env, 'settings')
@@ -360,8 +464,7 @@ async function main() {
 
   await check('a small shop is unchanged: under 50 flagged products there is no preview marker and every item is present', async () => {
     seedStockFixture(raw.db, () => raw.db.prepare("UPDATE products SET stock_quantity = 500 WHERE is_active=1 AND name NOT IN ('Out 000', 'Low 000', 'Low 001')").run())
-    await cacheModule.bumpVersion(env, 'products')
-    const small = await summary()
+    const small = await ownWriteFresh()
     const inventory = section(small, 'inventory')
     assert.equal(inventory.items.length, inventory.count)
     assert.equal(inventory.truncated, undefined)
@@ -419,10 +522,10 @@ async function main() {
     for (const days of [0, 7, 30, 90]) {
       seedStockFixture(raw.db, () => raw.db.prepare("INSERT INTO settings (key, value) VALUES ('notifications_expiry_days', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(days)))
       await cacheModule.bumpVersion(env, 'settings')
-      const listed = (section(await summary(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
+      const listed = (section(await ownWriteFresh(), 'expiry')?.items || []).map((item) => Number(item.id.replace('expiry-', '')))
       assert.deepEqual(listed, removedFullScan(days), `days=${days}: same rows in the same order`)
     }
-    const names = (section(await summary(), 'expiry')?.items || []).map((item) => item.label)
+    const names = (section(await ownWriteFresh(), 'expiry')?.items || []).map((item) => item.label)
     assert.ok(names.includes('Exp past') && names.includes('Exp legacy stocked') && names.includes('Exp legacy null stocked'), 'the legacy inactive rows with stock are listed: ' + names.join(','))
     for (const name of ['Exp legacy two', 'Exp legacy half', 'Exp legacy neg', 'Exp legacy text']) assert.ok(names.includes(name), `${name}: any is_active other than 1, holding stock, is visible exactly as the old rule said: ` + names.join(','))
     assert.ok(!names.includes('Exp empty two'), 'an empty product with is_active 2 is not')

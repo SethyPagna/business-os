@@ -3161,6 +3161,7 @@
   "notes_untitled": "Untitled note",
   "notification_active_count": "{count} active alerts",
   "notification_all_clear": "Everything looks calm right now",
+  "notification_as_of": "As of {time}",
   "notification_expiry_alerts": "Expiry alerts",
   "notification_expiry_alerts_desc": "Products expiring soon or already expired",
   "notification_expiry_days": "Expiry alert window",

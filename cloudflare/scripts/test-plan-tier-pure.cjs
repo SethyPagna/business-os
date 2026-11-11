@@ -164,6 +164,7 @@ const PAID = {
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogListWindowPages: 4,
+  notificationSectionCacheSeconds: 45,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -213,6 +214,7 @@ const FREE = {
   productListCacheSeconds: 3600,
   possibleDuplicatesCacheSeconds: 3600,
   catalogListWindowPages: 3,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -250,7 +252,9 @@ const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSecon
 // deliberately the LARGER number; Paid keeps its old size so its reads do not change. Their own list, one line apart from the
 // lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
+// The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes, so never above 300 on either tier.
+const FREE_IS_LONGER_BELL = ['notificationSectionCacheSeconds']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
@@ -419,6 +423,14 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.ok(/LOT_LINES_PER_PRODUCT\s*=\s*\d/.test('const LOT_LINES_PER_PRODUCT = 50') && /ids\.length\s*>\s*\d/.test('ids.length > 100'), 'the control: both patterns match what they forbid')
   const free = limitsFresh({ PLAN_TIER: 'free' }), paid = limitsFresh({ PLAN_TIER: 'paid' })
   assert.deepEqual([free.inventoryCheckLotLinesPerProduct, paid.inventoryCheckLotLinesPerProduct], [50, 100])
+})
+
+check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, longer on Free', async () => {
+  for (const tier of ['free', 'paid']) {
+    const seconds = PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds
+    assert.ok(Number.isInteger(seconds) && seconds > 0 && seconds <= 300, tier + ' lifetime ' + seconds + ' must be 1..300 s')
+  }
+  assert.ok(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds > PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {
