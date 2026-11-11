@@ -62,7 +62,7 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SALE_STATUS_BATCH_MAX_STATEMENTS } from '../lib/saleRecordEvents'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
-import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, readSalesReportTotals, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { exportProductSplitFromSnapshot, exportStatusSplitFromSnapshot, readSalesReportSnapshot, readSalesHeaderTotals, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -773,7 +773,7 @@ app.post('/', async (c) => {
     )]
     // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
     const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
       .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
     return [branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity]))] as const
   })))
@@ -3784,7 +3784,7 @@ app.post('/:id/items', async (c) => {
     for (const branchId of branchIds) {
       const idsForBranch = [...new Set(plan.deductions.filter((entry) => entry.branch_id === branchId).map((entry) => entry.product_id))]
       const rows = await selectInChunks(idsForBranch, 1, (chunk) => db
-        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+        .prepare(`SELECT product_id, quantity FROM branch_stock WHERE +branch_id = CAST(? AS INTEGER) AND product_id IN (${chunk.map(() => '?').join(',')})`)
         .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
       const available = new Map(rows.map((row) => [row.product_id, row.quantity]))
       for (const entry of plan.deductions.filter((item) => item.branch_id === branchId)) {
@@ -6402,6 +6402,13 @@ app.get('/stats', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
+  // The clauses above are the report window. The reader applies the identical predicates from the same query values (windowFilter below), so
+  // while they are the ONLY clauses the list scope would merely repeat them: `s.id IN (SELECT ... WHERE <same window>)` is the identity.
+  // Counted from what the helpers pushed (not by matching SQL text); any other clause (cashier, user, status, branch, search) keeps the scope.
+  const windowClauseCount = where.length - 1
+  // Measured exception: with a start date and no end date the unscoped kernel walk reads MORE rows (64,689 vs 37,463 on the lab seed: no upper
+  // bound for the date index), so that one shape keeps the scope; everything else with only the window drops it.
+  const openEndedStart = Boolean(query.startDate) && !query.endDate
   // A cashier saved under a number shows masked, so an account without the grant filters on it as empty (restrictedColumnSql).
   if (query.cashier) { where.push(`${phoneSearchAccessOf(user).fullPhone ? 's.cashier_name' : restrictedColumnSql('s.cashier_name')} LIKE @cashier`); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
@@ -6442,13 +6449,14 @@ app.get('/stats', async (c) => {
     // scope still carries every list predicate, so the cohort is unchanged. Branch, cashier, status and
     // search stay scope-only (the list's branch rule also matches item branches).
     const windowFilter={startDate:query.startDate||null,endDate:query.endDate||null,startTime:query.startTime||null,endTime:query.endTime||null}
-    const report=await readSalesReportTotals(c.env,windowFilter,false,salesListFilterReportScope(where,params))
-    const totals=report.totals
-    const totalCount=report.sale_count+report.cancelled_count
+    const scope = where.length - 1 === windowClauseCount && !openEndedStart ? undefined : salesListFilterReportScope(where, params)
+    // Header-only reader: every number below is sale header + returns (no sale lines are read, and no cost or profit exists on the type).
+    const totals = await readSalesHeaderTotals(c.env, windowFilter, scope)
+    const totalCount=totals.sale_count+totals.cancelled_count
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
     return {
       total_count: totalCount,
-      revenue_count: report.sale_count,
+      revenue_count: totals.sale_count,
       revenue_usd: totals.revenue_usd,
       pending_revenue_usd: totals.pending_revenue_usd,
       revenue_without_not_paid_usd: totals.revenue_without_not_paid_usd,

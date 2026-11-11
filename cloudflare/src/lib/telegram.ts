@@ -19,7 +19,7 @@ import {
 import {
   composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliationAsClosed, readShiftTimeReview,
   refundDrawerKhrSql, refundDrawerUsdSql, SHIFT_REVIEW, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere,
-  type ShiftCashResult, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
+  type ShiftCashResult, type ShiftReadMemo, type ShiftMoney, type ShiftReconciliation, type ShiftTimeReview,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -1655,7 +1655,7 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
   return { invoices: Number(row?.invoices || 0), cancelled: Number(row?.cancelled || 0), edited: Number(row?.edited || 0) }
 }
 
-async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage): Promise<ShiftReportFigures> {
+async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, memo?: ShiftReadMemo): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
   // The two fold labels are the only text this DATA function produces, so they
   // are composed here, in the shop's language, before the awaits -- everything
@@ -1666,15 +1666,16 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
   // 2026: the owner's reference layout has a section for each. They are the
   // SAME kernel entry points routes/reports.ts reads, so the phone message and
   // the Reports hub cannot disagree about a method's takings.
+  // The totals and the payment-method rows read the same window with the same reader: they share one snapshot through the phase memo.
   const [totals, counts, otherExpenses, deliveryFees, reconciliation, payments, couriers] = await Promise.all([
-    getSalesTotals(env, filters),
+    getSalesTotals(env, filters, memo),
     shiftInvoiceCounts(env, shift, nowMs),
     // The per-expense rows list only the OTHER fees: the delivery-typed ones
     // are inside the delivery cost row, as composeShiftFigures splits them.
-    shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }),
+    shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }, memo),
     shiftDeliveryFeeExpenses(env, shift, nowMs),
-    loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel }),
-    getPaymentMethodBreakdown(env, filters),
+    loadShiftReconciliationAsClosed(env, shift, nowMs, { overflowLabel, memo }),
+    getPaymentMethodBreakdown(env, filters, memo),
     getDeliveryContactTotals(env, filters),
   ])
   // Every fee and every courier payout, as the drawer was reconciled against
@@ -1771,7 +1772,9 @@ async function shopName(env: Env): Promise<string> {
 }
 
 async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage, options: ShiftReportOptions = {}): Promise<string> {
-  const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language), shift.id == null ? null : readShiftTimeReview(env, shift.id)])
+  // One memo for this report (one phase): the reconciliation and the report header read the same time review and cash config side by side.
+  const memo: ShiftReadMemo = new Map()
+  const [name, figures, timeReview] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language, memo), shift.id == null ? null : readShiftTimeReview(env, shift.id, memo)])
   return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs, { ...options, timeReview: options.timeReview ?? timeReview }))
 }
 
