@@ -83,6 +83,7 @@ const backup = loadModule(BACKUP_TS, {
   './planTier': loadModule(path.join(SRC, 'planTier.ts')),
   './backupRestoreStream': loadModule(path.join(SRC, 'backupRestoreStream.ts')),
   './customTableName': loadModule(path.join(SRC, 'customTableName.ts')),
+  './onlineMethodInvariant': loadModule(path.join(SRC, 'onlineMethodInvariant.ts'), { './paymentMethodRegistry': loadModule(path.join(SRC, 'paymentMethodRegistry.ts')) }),
   './uploadSecurity': loadModule(path.join(SRC, 'uploadSecurity.ts')),
 })
 // Absent before this fix; the documented 32 MB is used then.

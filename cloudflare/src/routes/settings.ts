@@ -33,7 +33,8 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { PAYMENT_MINUTES_MAX, PAYMENT_MINUTES_MIN, REQUEST_WINDOW_DAYS_MAX, validateOnlineOrderMethod, validateOnlineOrderSettingsWrite } from '../lib/onlineOrders'
-import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_UNCHANGED_GUARD_SQL, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, sameMethod, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { CLEAR_ONLINE_METHOD_GUARD_SQL, methodFold, ONLINE_METHOD_IN_USE_CODE, ONLINE_METHOD_IN_USE_GUARD_SQL, ONLINE_METHOD_IN_FORCE_KEY, ONLINE_PAYMENT_METHOD_KEY, withOnlineMethodInForce } from '../lib/onlineOrderFulfil'
+import { judgeOnlineMethodWrite, normalizeOnlineMethod, ONLINE_METHOD_INVARIANT_KEYS, ONLINE_METHOD_SETTING_KEY, onlineKindChanged, onlineMethodFinalGuard, onlineMethodGuardCode, PAYMENT_METHOD_LIST_SETTING_KEY, rawSettingValue, sameOnlineIdentity } from '../lib/onlineMethodInvariant'
 import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
@@ -663,13 +664,17 @@ app.post('/payment-methods/backfill', async (c) => {
   const rows = await db.prepare(
     "SELECT DISTINCT payment_method FROM sales WHERE payment_method IS NOT NULL AND trim(payment_method) != ''",
   ).all<{ payment_method: string }>()
-  const configured = parseConfiguredMethods((await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>())?.value)
+  const listRow = await db.prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
+  const configured = parseConfiguredMethods(listRow?.value)
   const merged = mergePaymentMethods(configured, rows.flatMap((row) => saleMethodsUsed({ payment_method: row.payment_method })))
   if (!merged.changed) return c.json({ methods: merged.methods, added: [] })
-  await db.prepare(
+  // Writes the whole list from the read above, so it is a compare-and-set on that read: a rename or merge that landed in between (the online method follows it) is never
+  // written over by this stale copy (KHQR round 8; an append only ever adds, so it cannot break the online-method invariant itself).
+  const written = await db.prepare(
     `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-  ).run({ value: JSON.stringify(merged.methods) })
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP WHERE settings.value = @expectedRaw`,
+  ).run({ value: JSON.stringify(merged.methods), expectedRaw: listRow?.value ?? '' })
+  if (!written.changes) return c.json({ error: 'Payment methods changed while this was running. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
   // Sibling of the rename below: the configured list before and after the
   // backfill, in the columns the Audit Log's diff actually reads.
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', 'pos_payment_methods', {
@@ -721,6 +726,8 @@ app.get('/payment-methods/impact', async (c) => {
     historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
   })
 })
+
+const ONLINE_METHOD_IN_USE_TEXT = 'That payment method is already used by recent sales. Choose a method that only online orders will use, such as a separate "ABA KHQR".'
 
 app.post('/payment-methods/replace', async (c) => {
   const denied = denyUnlessPaymentMethodPermission(c)
@@ -775,23 +782,28 @@ app.post('/payment-methods/replace', async (c) => {
   }
   // The online (KHQR) method is an administrator's setting (the settings save says so), so the rename route that carries it along answers the same way, and it
   // never turns the online method into another configured method or into a cash one: both would hand the till's other payments to the online-only method.
+  // ONE identity test (sameOnlineIdentity) decides "is this the online method" for the administrator check and for both merge refusals; the invariant judged below
+  // (lib/onlineMethodInvariant.ts) is the catch-all for whatever the loop below would leave behind. The method and the kinds map ride ONE read.
   const settingDb = getDb(c.env)
-  const storedOnline = String((await settingDb.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: ONLINE_PAYMENT_METHOD_KEY }))?.value ?? '').trim()
+  const onlineRows = await settingDb.prepare('SELECT key, value FROM settings WHERE key IN (@onlineKey, @kindsKey)').all<{ key: string; value: string | null }>({ onlineKey: ONLINE_PAYMENT_METHOD_KEY, kindsKey: PAYMENT_METHOD_KINDS_SETTING })
+  const storedOnlineRaw = rawSettingValue(onlineRows, ONLINE_PAYMENT_METHOD_KEY)
+  const kindsRaw = rawSettingValue(onlineRows, PAYMENT_METHOD_KINDS_SETTING)
+  const storedOnline = normalizeOnlineMethod(storedOnlineRaw)
   if (storedOnline) {
-    const touchesOnline = sameMethod(storedOnline, from) || sameMethod(storedOnline, to)
-    if (touchesOnline && !isAdminControlUser(user)) {
+    const fromIsOnline = sameOnlineIdentity(storedOnline, from)
+    const toIsOnline = sameOnlineIdentity(storedOnline, to)
+    if ((fromIsOnline || toIsOnline) && !isAdminControlUser(user)) {
       return c.json({ error: 'Only an administrator can rename or merge the online payment method.', code: 'online_method_admin_only' }, 403)
     }
     // Merging ANOTHER method into the online one would take that method off the till and, linked, rewrite ordinary sales onto the online-only method.
-    if (sameMethod(storedOnline, to) && !sameMethod(storedOnline, from)) {
+    if (toIsOnline && !fromIsOnline) {
       return c.json({ error: 'Another payment method cannot be merged into the online payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
     }
-    if (sameMethod(storedOnline, from)) {
-      const kinds = parsePaymentMethodKinds((await settingDb.prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: PAYMENT_METHOD_KINDS_SETTING }))?.value)
+    if (fromIsOnline) {
       if (setting.methods.some((method) => paymentMethodKey(method) === toKey && toKey !== fromKey)) {
         return c.json({ error: 'The online payment method cannot be merged into another payment method. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
       }
-      if (isCashPaymentMethod(to, kinds)) {
+      if (isCashPaymentMethod(to, parsePaymentMethodKinds(kindsRaw))) {
         return c.json({ error: 'The online payment method cannot be renamed to a cash method.', code: 'online_order_method_is_cash' }, 409)
       }
     }
@@ -809,6 +821,18 @@ app.post('/payment-methods/replace', async (c) => {
   if (!seen.has(toKey)) next.push(to)
   if (!next.length || next.length > MAX_CONFIGURED_METHODS) {
     return c.json({ error: 'The resulting payment-method list is invalid.', code: 'invalid_payment_methods_setting' }, 400)
+  }
+  // The state this rename leaves behind, judged against the one invariant before any scan: the online method follows its own rename (the UPDATE in the batch below
+  // matches it by methodFold), the list is the merged one, the kinds map is untouched. Whatever the checks above missed (a name another fold calls the same) shows here.
+  const nextRaw = JSON.stringify(next)
+  const onlineAfterRaw = storedOnline && methodFold(storedOnline) === methodFold(from) ? to : storedOnlineRaw
+  const onlineBefore = { method: storedOnlineRaw, listRaw: setting.raw, kindsRaw }
+  const onlineAfter = { method: onlineAfterRaw, listRaw: nextRaw, kindsRaw }
+  const onlineVerdict = judgeOnlineMethodWrite(onlineBefore, onlineAfter)
+  if (onlineVerdict.refused) {
+    return onlineVerdict.refused === 'cash_kind'
+      ? c.json({ error: 'The online payment method cannot be renamed to a cash method.', code: 'online_order_method_is_cash' }, 409)
+      : c.json({ error: 'This would merge the online payment method with another method or take it off the list. Choose a different online method first.', code: 'online_method_merge_refused' }, 409)
   }
   const db = getDb(c.env)
   // Snapshot the monotonic sale revision total before the paged scan. Any
@@ -834,7 +858,6 @@ app.post('/payment-methods/replace', async (c) => {
 
   const stamp = new Date().toISOString()
   const operationId = crypto.randomUUID()
-  const nextRaw = JSON.stringify(next)
   const sourceVariants = JSON.stringify(impact.sourceVariants)
   const identityVariants = JSON.stringify(impact.identityVariants)
   // The configured-methods before/after already existed, but only nested in
@@ -883,7 +906,7 @@ app.post('/payment-methods/replace', async (c) => {
     },
     // The online (KHQR) method follows its own rename, in the same batch, so Fulfil never names a method that no longer exists.
     {
-      sql: `UPDATE settings SET value=@to,updated_at=@stamp WHERE key='online_order_payment_method' AND lower(trim(value))=@fromKey`,
+      sql: `UPDATE settings SET value=@to,updated_at=@stamp WHERE key='${ONLINE_METHOD_SETTING_KEY}' AND lower(trim(value,char(32,9,10,11,12,13)))=@fromKey`,
       params: { to, stamp, fromKey: methodFold(from) },
     },
   ]
@@ -898,10 +921,22 @@ app.post('/payment-methods/replace', async (c) => {
       params: { sourceVariants, identityVariants, target: to, stamp },
     })
   }
+  // Renaming the online method onto a name that recent ordinary sales carry would make its sales inseparable (the settings save refuses the same end state).
+  if (onlineVerdict.identityChanged) {
+    statements.unshift({ sql: ONLINE_METHOD_IN_USE_GUARD_SQL, params: { windowRows: getPlanLimits(c.env).onlineMethodSalesWindow, methodKey: methodFold(to) } })
+  }
+  // The invariant, evaluated in SQL on the rows this batch leaves behind: a write to the online method, the list or the kinds between the reads above and this batch aborts it.
+  statements.push(onlineMethodFinalGuard(onlineAfter, onlineVerdict.tolerated))
   statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
   try {
     await db.batch(statements)
   } catch (error) {
+    if (onlineVerdict.identityChanged && String(error).includes(ONLINE_METHOD_IN_USE_CODE)) {
+      return c.json({ error: ONLINE_METHOD_IN_USE_TEXT, code: ONLINE_METHOD_IN_USE_CODE }, 409)
+    }
+    if (onlineMethodGuardCode(error)) {
+      return c.json({ error: 'The online payment method or the payment-method list changed during the rename. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
+    }
     if (/guard_value/i.test(String(error))) {
       return c.json({ error: 'Payment methods or linked sales changed during the rename. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
     }
@@ -1129,10 +1164,10 @@ app.post('/', async (c) => {
     sentAsText[key] = typeof raw === 'string' ? raw : JSON.stringify(raw)
   }
   // The one read every check below shares (see loadStoredSettingRows).
-  // The online method and the kinds map ride the same statement when this save touches either, or the method list: the dedicated-method checks below read them from here.
+  // The online method, the kinds map and the method list ride the same statement when this save touches any of them: the invariant checks below read them from here.
   const onlineAux = new Map<string, StoredSettingRow>()
   const onlineChecked = attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) || attemptedKeys.includes(PAYMENT_METHOD_KINDS_SETTING) || attemptedKeys.includes('pos_payment_methods')
-  const stored = await loadStoredSettingRows(c.env, attemptedKeys, onlineChecked ? [ONLINE_PAYMENT_METHOD_KEY, PAYMENT_METHOD_KINDS_SETTING] : [], onlineAux)
+  const stored = await loadStoredSettingRows(c.env, attemptedKeys, onlineChecked ? [...ONLINE_METHOD_INVARIANT_KEYS] : [], onlineAux)
 
   // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
   // need administrator control to CHANGE here. An unchanged value -- the
@@ -1398,14 +1433,28 @@ app.post('/', async (c) => {
     return c.json({ error: 'Only an administrator can change the online payment method.', code: 'online_method_admin_only' }, 403)
   }
 
-  // A kinds-only save must not turn the stored online method into a cash-kind one (the same refusal as storing a cash method). Judged from the rows read with the save, and
-  // pinned in the batch below so a method changed in between aborts it. A method that is ALREADY cash-kind never traps an unrelated kinds edit.
-  const storedOnlineForKinds = String(onlineAux.get(ONLINE_PAYMENT_METHOD_KEY)?.value ?? '').trim()
-  const guardsOnlineKinds = changedKeys.includes(PAYMENT_METHOD_KINDS_SETTING) && !attemptedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && storedOnlineForKinds !== ''
-  if (guardsOnlineKinds
-    && isCashPaymentMethod(storedOnlineForKinds, parsePaymentMethodKinds(settingsAfter[PAYMENT_METHOD_KINDS_SETTING]))
-    && !isCashPaymentMethod(storedOnlineForKinds, parsePaymentMethodKinds(onlineAux.get(PAYMENT_METHOD_KINDS_SETTING)?.value))) {
-    return c.json({ error: 'The online payment method cannot be a cash method: it becomes online-only and the till hides it. Choose another online method first.', code: 'online_order_method_is_cash' }, 400)
+  // The online-method invariant (lib/onlineMethodInvariant.ts), judged for EVERY write of the method, the list or the kinds: the state this save leaves behind against the state
+  // it read. A clause the stored state already broke (a stale method) is tolerated and never traps an unrelated edit; a new break is refused here with its friendly code, and the
+  // final guard statement below makes the batch itself abort when any of the three rows is not what was judged (a racing write).
+  let onlineGuard: { sql: string; params: Record<string, unknown> } | null = null
+  if (changedKeys.some((key) => (ONLINE_METHOD_INVARIANT_KEYS as readonly string[]).includes(key))) {
+    const raw = (key: string, afterSave: boolean) => String((afterSave && changedKeys.includes(key) ? settingsAfter[key] : onlineAux.get(key)?.value) ?? '')
+    const before = { method: raw(ONLINE_METHOD_SETTING_KEY, false), listRaw: raw(PAYMENT_METHOD_LIST_SETTING_KEY, false), kindsRaw: raw(PAYMENT_METHOD_KINDS_SETTING, false) }
+    const after = { method: raw(ONLINE_METHOD_SETTING_KEY, true), listRaw: raw(PAYMENT_METHOD_LIST_SETTING_KEY, true), kindsRaw: raw(PAYMENT_METHOD_KINDS_SETTING, true) }
+    const verdict = judgeOnlineMethodWrite(before, after)
+    if (verdict.refused === 'cash_kind') {
+      return c.json({ error: 'The online payment method cannot be a cash method: it becomes online-only and the till hides it. Choose another online method first.', code: 'online_order_method_is_cash' }, 400)
+    }
+    if (verdict.refused === 'not_listed') {
+      return c.json({ error: 'The online payment method must be one of the configured payment methods. Choose another online method first, or rename it instead of removing it.', code: 'invalid_online_order_payment_method' }, 400)
+    }
+    if (verdict.refused === 'duplicate') {
+      return c.json({ error: 'Another payment method in the list is spelled like the online payment method. Merge nothing into it.', code: 'online_method_merge_refused' }, 409)
+    }
+    if (onlineKindChanged(before, after) && !isAdminControlUser(user)) {
+      return c.json({ error: 'Only an administrator can change whether the online payment method is cash.', code: 'online_method_admin_only' }, 403)
+    }
+    onlineGuard = onlineMethodFinalGuard(after, verdict.tolerated)
   }
 
   const db = getDb(c.env)
@@ -1414,7 +1463,7 @@ app.post('/', async (c) => {
           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
     params: { key, value: settingsAfter[key] },
   }))
-  if (guardsOnlineKinds) statements.unshift({ sql: ONLINE_METHOD_UNCHANGED_GUARD_SQL, params: { expected: storedOnlineForKinds } })
+  if (onlineGuard) statements.push(onlineGuard)
   const clearsOnlineMethod = changedKeys.includes(ONLINE_PAYMENT_METHOD_KEY) && !String(settingsAfter[ONLINE_PAYMENT_METHOD_KEY] ?? '').trim()
   if (clearsOnlineMethod) statements.unshift({ sql: CLEAR_ONLINE_METHOD_GUARD_SQL, params: {} })
   // A NEW online method must not be one ordinary sales already use (the till would hide and refuse it). Bounded: only the latest plan-limit window of sales, inside this batch.
@@ -1443,10 +1492,10 @@ app.post('/', async (c) => {
     await db.batch(statements)
   } catch (error) {
     if (setsOnlineMethod && String(error).includes(ONLINE_METHOD_IN_USE_CODE)) {
-      return c.json({ error: 'That payment method is already used by recent sales. Choose a method that only online orders will use, such as a separate "ABA KHQR".', code: ONLINE_METHOD_IN_USE_CODE }, 409)
+      return c.json({ error: ONLINE_METHOD_IN_USE_TEXT, code: ONLINE_METHOD_IN_USE_CODE }, 409)
     }
-    if (guardsOnlineKinds && /online_method_changed/.test(String(error))) {
-      return c.json({ error: 'The online payment method changed while this save was being prepared. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
+    if (onlineGuard && onlineMethodGuardCode(error)) {
+      return c.json({ error: 'The online payment method, the method list or the kinds changed while this save was being prepared. Refresh and try again.', code: 'write_conflict', conflict: true }, 409)
     }
     if (clearsOnlineMethod && /online_method_required/.test(String(error))) {
       return c.json({ error: 'Online orders are on. Turn them off before clearing the online payment method.', code: 'online_method_required' }, 409)

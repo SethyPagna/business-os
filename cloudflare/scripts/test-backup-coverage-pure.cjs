@@ -42,6 +42,7 @@ const backup = loadModule('lib/backup.ts', (id) => {
   if (id === './stockTransaction') return stockTransaction
   if (id === './maintenance') return maintenance
   if (id === './customTableName') return loadModule('lib/customTableName.ts', require)
+  if (id === './onlineMethodInvariant') return loadModule('lib/onlineMethodInvariant.ts', (inner) => inner === './paymentMethodRegistry' ? loadModule('lib/paymentMethodRegistry.ts', require) : require(inner))
   if (id === './planTier') return loadModule('lib/planTier.ts', require)
   if (id === './uploadSecurity') return loadModule('lib/uploadSecurity.ts', require)
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }

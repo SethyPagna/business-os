@@ -161,11 +161,34 @@ async function main() {
         assert.equal((await small.prepare("SELECT value FROM settings WHERE key='proof'").first()).value, 'LIVE')
       }
     }
+    // KHQR round 8: a restore replaces the settings table wholesale, so the online-method invariant (lib/onlineMethodInvariant.ts) is judged on the RESTORED rows. A backup whose
+    // stored online method is unlisted, cash-kind or doubled in the list restores without the method (and says so); a sound one, and one with stray whitespace, keeps it.
+    const online = 'online_order_payment_method', list = 'pos_payment_methods', kinds = 'pos_payment_method_kinds'
+    for (const [label, rows, expected] of [
+      ['sound', [[online, 'ABA KHQR'], [list, '["Cash","ABA KHQR"]']], { kept: 'ABA KHQR', cleared: undefined }],
+      ['unlisted', [[online, 'Nowhere'], [list, '["Cash","ABA KHQR"]']], { kept: null, cleared: ['not_listed'] }],
+      ['cash-kind by the token rule', [[online, 'Cash'], [list, '["Cash","ABA KHQR"]']], { kept: null, cleared: ['cash_kind'] }],
+      ['cash-kind by an explicit kind', [[online, 'ABA KHQR'], [list, '["Cash","ABA KHQR"]'], [kinds, '{"ABA KHQR":"cash"}']], { kept: null, cleared: ['cash_kind'] }],
+      ['doubled in the list', [[online, 'ABA KHQR'], [list, '["ABA KHQR","aba khqr"]']], { kept: null, cleared: ['duplicate'] }],
+      ['a trailing TAB is read through', [[online, 'ABA KHQR	'], [list, '["Cash","ABA KHQR"]']], { kept: 'ABA KHQR	', cleared: undefined }],
+      ['no method stored', [[list, '["Cash"]']], { kept: null, cleared: undefined }],
+    ]) {
+      for (const name of ['fees','custom_tables','settings','d1_migrations','ct_ignore']) await small.prepare('DROP TABLE IF EXISTS "' + name + '"').run()
+      await small.prepare('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)').run()
+      const out = await request({ mode: 'settings', tables: { settings: { columns: ['key', 'value'], rows: rows.map(([key, value]) => ({ key, value })) } } })
+      assert.equal(out.error, null, label)
+      const kept = (await small.prepare('SELECT value FROM settings WHERE key = ?').bind(online).first())?.value ?? null
+      assert.equal(kept, expected.kept, 'online method after a restore: ' + label)
+      assert.deepEqual(out.result.onlineMethodCleared, expected.cleared, 'reported: ' + label)
+      assert.ok(await small.prepare('SELECT value FROM settings WHERE key = ?').bind(list).first(), 'list row present: ' + label + ' ' + JSON.stringify(out.result))
+      assert.equal((await small.prepare('SELECT value FROM settings WHERE key = ?').bind(list).first()).value, rows.find(([key]) => key === list)[1], 'the list is restored as it was: ' + label)
+    }
+    await small.prepare("INSERT OR REPLACE INTO settings VALUES('proof','LIVE')").run()
     const refused = await request({ mode:'wrong-token', restoreToken:'another-owner', tables:{settings:{columns:['key','value'],rows:[{key:'proof',value:'WRONG'}]}} })
     assert.match(refused.error, /restore is already in progress/)
     assert(!refused.calls.some(sql => /^(DELETE|INSERT)/.test(sql)))
     assert.equal((await small.prepare("SELECT value FROM settings WHERE key='proof'").first()).value, 'LIVE')
-    console.log('PASS native D1 full migrated graph equivalence (' + migrations.length + ' migrations, ' + names.length + ' tables, ' + oldRows.length + ' graph rows); 8 actual restore snapshot cases; bounded overflow refusal')
+    console.log('PASS native D1 full migrated graph equivalence (' + migrations.length + ' migrations, ' + names.length + ' tables, ' + oldRows.length + ' graph rows); 8 actual restore snapshot cases; 7 online-method invariant restore cases; bounded overflow refusal')
   } finally { await mf.dispose() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

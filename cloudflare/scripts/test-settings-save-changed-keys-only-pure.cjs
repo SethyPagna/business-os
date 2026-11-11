@@ -224,7 +224,7 @@ async function main() {
     assert.equal(log.batches.length, 0)
   })
 
-  await check('payment methods: unchanged list adds no guard statements; a changed list keeps the three-statement guard', async () => {
+  await check('payment methods: unchanged list adds no guard statements; a changed list keeps the list guard and adds the online-method invariant guard', async () => {
     seed('pos_payment_methods', JSON.stringify(['Cash', 'ABA']))
     const same = await save({ pos_payment_methods: JSON.stringify(['Cash', 'ABA']) })
     assert.equal(same.status, 200, JSON.stringify(same.body))
@@ -232,7 +232,8 @@ async function main() {
     const changed = await save({ pos_payment_methods: JSON.stringify(['Cash', 'ABA', 'Wing']) })
     assert.equal(changed.status, 200, JSON.stringify(changed.body))
     assert.equal(log.batches.length, 1)
-    assert.equal(log.batches[0].length, 4, 'DELETE guard, INSERT guard, the upsert, DELETE guard')
+    assert.equal(log.batches[0].length, 5, 'DELETE guard, INSERT guard, the upsert, the online-method invariant guard (KHQR round 8), DELETE guard')
+    assert.ok(JSON.stringify(log.batches[0][3]).includes('online_method_changed'), 'the invariant guard sits after the writes and before the last DELETE')
     assert.deepEqual(JSON.parse(row('pos_payment_methods').value), ['Cash', 'ABA', 'Wing'])
   })
 

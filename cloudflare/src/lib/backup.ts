@@ -6,6 +6,7 @@ import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
 import { containsEmbeddedMarkup, judgeStoredMedia, otherMediaContentType } from './uploadSecurity'
+import { ONLINE_METHOD_INVARIANT_KEYS, ONLINE_METHOD_SETTING_KEY, onlineMethodAfterRestore, PAYMENT_METHOD_KINDS_SETTING_KEY, PAYMENT_METHOD_LIST_SETTING_KEY, type OnlineMethodViolation } from './onlineMethodInvariant'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -1578,6 +1579,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // trailing summary. Resolve live table presence once after this pass, before
   // pass 2 deletes anything; do not query D1 once per document table.
   const documentTables = new Set<string>()
+  // The three settings rows the online-method invariant reads (lib/onlineMethodInvariant.ts), as the document carries them: the restore replaces the whole settings table with them.
+  const restoredOnlineRows = new Map<string, string>()
   let pass1Summary: BackupPayload['summary'] | null = null
   const admitStockRow = restoreStockAdmission()
   const stockTableOrder = ['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots']
@@ -1593,6 +1596,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
         }
       }
       if (ev.type === 'row') admitStockRow(ev.table, ev.row)
+      if (ev.type === 'row' && ev.table === 'settings' && (ONLINE_METHOD_INVARIANT_KEYS as readonly string[]).includes(String(ev.row?.key))) restoredOnlineRows.set(String(ev.row.key), String(ev.row.value ?? ''))
       if (ev.type === 'row' && ((ev.table === 'products' && ev.row.cost_review_key != null)
         || (ev.table === 'audit_logs' && hasMergeCostReviewEvent(ev.row)))) throw new Error(MERGE_COST_RESTORE_UNSUPPORTED)
       // Custom metadata is backed up, but cannot authorize dropping an
@@ -1777,6 +1781,18 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       && (backupMigrationNumber == null || backupMigrationNumber < PERMISSION_EXTRAS_MIGRATION)
       ? await materializeRestoredPermissionExtras(env, restoreToken || '', source)
       : 0
+    // The online-method invariant after the restore (KHQR round 8). The restored settings must satisfy it as a whole: a backup whose stored online method is unlisted, cash-kind
+    // or doubled in the list restores WITHOUT the method (its row is removed, only if it is still the restored one) and says so, instead of refusing a disaster recovery.
+    let onlineMethodCleared: OnlineMethodViolation[] | undefined
+    if (orderedTables.includes('settings')) {
+      const restoredMethod = restoredOnlineRows.get(ONLINE_METHOD_SETTING_KEY) ?? ''
+      const verdict = onlineMethodAfterRestore({ method: restoredMethod, listRaw: restoredOnlineRows.get(PAYMENT_METHOD_LIST_SETTING_KEY) ?? '', kindsRaw: restoredOnlineRows.get(PAYMENT_METHOD_KINDS_SETTING_KEY) ?? '' })
+      if (verdict.clear) {
+        await env.DB.prepare('DELETE FROM settings WHERE key = ? AND value = ?').bind(ONLINE_METHOD_SETTING_KEY, restoredMethod).run()
+        statementCount += 1
+        onlineMethodCleared = verdict.violations
+      }
+    }
     await onProgress?.({ phase: 'assets' })
 
     // Restore whichever asset bytes this backup actually copied (best-effort;
@@ -1826,6 +1842,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       withheldAssets: withheldAssets.length ? withheldAssets : undefined,
       schemaMigration: backupMigration,
       permissionRowsMaterialized: permissionRowsMaterialized || undefined,
+      onlineMethodCleared,
       schemaMismatch: schemaMismatch || undefined,
       tablesNotInBackup: tablesNotInBackup.length ? tablesNotInBackup : undefined,
     }

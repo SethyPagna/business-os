@@ -77,6 +77,10 @@ const backup = transpile('lib/backup.ts')
 const customTableName = transpile('lib/customTableName.ts')
 const customTableNameModule = { exports: {} }
 new Function('exports', customTableName.outputText)(customTableNameModule.exports)
+const paymentMethodRegistryModule = { exports: {} }
+new Function('exports', transpile('lib/paymentMethodRegistry.ts').outputText)(paymentMethodRegistryModule.exports)
+const onlineMethodInvariantModule = { exports: {} }
+new Function('exports', 'require', transpile('lib/onlineMethodInvariant.ts').outputText)(onlineMethodInvariantModule.exports, (id) => { if (id === './paymentMethodRegistry') return paymentMethodRegistryModule.exports; throw new Error('unexpected import ' + id) })
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
@@ -84,6 +88,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './maintenance') return maintenance
   if (request === './planTier') return planTierModuleObj.exports // real limit tables
   if (request === './customTableName') return customTableNameModule.exports
+  if (request === './onlineMethodInvariant') return onlineMethodInvariantModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
   if (request === './uploadSecurity') return uploadSecurityModuleObj.exports // real upload gate

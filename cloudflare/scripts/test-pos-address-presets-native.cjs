@@ -62,6 +62,7 @@ const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/lowStockSettings': { MAX_LOW_STOCK_THRESHOLD: 1000000, validateLowStockSettingsWrite: () => null },
   '../lib/onlineOrders': { PAYMENT_MINUTES_MAX: 60, PAYMENT_MINUTES_MIN: 3, REQUEST_WINDOW_DAYS_MAX: 30, validateOnlineOrderMethod: () => null, validateOnlineOrderSettingsWrite: () => null },
   '../lib/onlineOrderFulfil': { CLEAR_ONLINE_METHOD_GUARD_SQL: 'SELECT 1', methodFold: (value) => String(value ?? '').trim(), ONLINE_METHOD_IN_FORCE_KEY: 'online_order_method_in_force', ONLINE_PAYMENT_METHOD_KEY: 'online_order_payment_method', withOnlineMethodInForce: (settings) => settings },
+  '../lib/onlineMethodInvariant': loadReal('lib/onlineMethodInvariant.ts', { './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
   '../lib/paymentMethodRegistry': {},
   '../lib/paymentSettlement': {},
   '../lib/permissions': permissions,

@@ -248,8 +248,9 @@ const SALES_READ_CACHE_TTL_SECONDS = 20
  *   response path.
  * - It reads and re-writes the whole array rather than appending, because the
  *   setting IS a JSON array; `mergePaymentMethods` keeps the existing order
- *   and the operator's own capitalisation, so a concurrent Settings edit can
- *   only ever lose the append, never reorder or rename what the operator set.
+ *   and the operator's own capitalisation, and the write is a compare-and-set
+ *   on the array it read, so a concurrent Settings edit or rename can only ever
+ *   lose the append, never reorder or rename what the operator set.
  * - It writes NOTHING when nothing is new. This runs on every checkout; the
  *   common case (a known method) must not produce a settings write, or
  *   `settings.updated_at` would change on every sale and defeat the
@@ -264,11 +265,13 @@ async function registerUsedPaymentMethods(env: Env, sale: { payment_method?: unk
     const configured = parseConfiguredMethods(row?.value)
     const merged = mergePaymentMethods(configured, used)
     if (!merged.changed) return []
-    await runOrdinaryBusinessWrite(db,
+    // A compare-and-set on the list read above (KHQR round 8): a concurrent rename or merge, which the online method follows, is never written over by this stale copy; the
+    // append is what is lost, as the comment above says.
+    const written = await runOrdinaryBusinessWrite(db,
       `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-      { value: JSON.stringify(merged.methods) })
-    return merged.added
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP WHERE settings.value = @expectedRaw`,
+      { value: JSON.stringify(merged.methods), expectedRaw: row?.value ?? '' })
+    return written.changes ? merged.added : []
   } catch (error) {
     const stockGuard = productStockGuardError(error)
     if (stockGuard) throw stockGuard

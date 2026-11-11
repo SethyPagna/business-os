@@ -21,7 +21,7 @@ function load(relative, requireFor) {
 const audit = load('lib/audit.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : require(id)))
 const sw = load('lib/readSwitches.ts', (id) => (id === './db' ? { getDb() { throw new Error('no db') } } : id === './analytics' ? { recordAnalytics() {} } : id === './planTier' ? load('lib/planTier.ts', require) : require(id)))
 
-const fulfil = load('lib/onlineOrderFulfil.ts', (id) => (id === './readSwitches' ? sw : id === './moneyPrecision' ? load('lib/moneyPrecision.ts', require) : require(id)))
+const fulfil = load('lib/onlineOrderFulfil.ts', (id) => (id === './readSwitches' ? sw : id === './moneyPrecision' ? load('lib/moneyPrecision.ts', require) : id === './onlineMethodInvariant' ? load('lib/onlineMethodInvariant.ts', (inner) => (inner === './paymentMethodRegistry' ? load('lib/paymentMethodRegistry.ts', require) : require(inner))) : require(id)))
 const db = openDb(loadAll())
 const MAINTENANCE = JSON.stringify({ mode: 'restore', token: 't', backupKey: 'k', startedAt: '2026-01-01T00:00:00.000Z', startedBy: 'x', phase: 'deleting', updatedAt: '2026-01-01T00:00:00.000Z' })
 const row = () => db.db.prepare("SELECT value FROM system_flags WHERE key = 'read_switches'").get()?.value ?? null

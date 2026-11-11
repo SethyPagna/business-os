@@ -14,8 +14,9 @@ import type { D1Compat } from './db'
 import { roundMoney4, sumMoney4 } from './moneyPrecision'
 import { peekReadSwitch, readSwitch } from './readSwitches'
 import type { Env } from '../index'
+import { methodFold, ONLINE_METHOD_SETTING_KEY } from './onlineMethodInvariant'
 
-export const ONLINE_PAYMENT_METHOD_KEY = 'online_order_payment_method'
+export const ONLINE_PAYMENT_METHOD_KEY = ONLINE_METHOD_SETTING_KEY
 export const ONLINE_PAYMENT_METHOD_DEFAULT = 'ABA KHQR'
 
 export type FulfilRefusal = { status: 403 | 404 | 409 | 400; code: string; error: string }
@@ -38,8 +39,8 @@ export type FulfilPlan = {
   recorded: Array<{ paymentId: number; amountUsd: number }>
 }
 
-/** The fold SQLite's lower(trim(x)) applies: spaces trimmed, A-Z lower-cased, every other character as it is. JS toLowerCase() also folds non-ASCII capitals, so a comparison across JS and SQL must use this on both sides. */
-export const methodFold = (value: unknown): string => String(value ?? '').replace(/^ +| +$/g, '').replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+// The fold itself lives in lib/onlineMethodInvariant.ts, the one module of the online-method invariant; re-exported here for the callers that always imported it from this file.
+export { methodFold }
 
 export const sameMethod = (a: unknown, b: unknown): boolean => methodFold(a) === methodFold(b)
 
@@ -66,9 +67,6 @@ export const ONLINE_ORDERS_SWITCH_ON_SQL = `(SELECT CASE WHEN json_valid(value) 
 
 /** A batch statement that aborts the whole batch while a method is stored and online_orders is ON, so the method cannot be cleared under a switch flipped elsewhere. */
 export const CLEAR_ONLINE_METHOD_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) <> '' AND ${ONLINE_ORDERS_SWITCH_ON_SQL} THEN json_extract('[1]', '$[online_method_required]') ELSE 1 END`
-
-/** A batch statement that aborts the batch when the stored online method is no longer the one (trimmed) the save was judged against: a kinds-only save checked its cash rule on it. */
-export const ONLINE_METHOD_UNCHANGED_GUARD_SQL = `SELECT CASE WHEN trim(COALESCE((SELECT value FROM settings WHERE key = '${ONLINE_PAYMENT_METHOD_KEY}'), '')) = @expected THEN 1 ELSE json_extract('[1]', '$[online_method_changed]') END`
 
 /**
  * Guard statement for storing a NEW online method (KHQR round 7, N1): aborts the batch when one of the most recent `@windowRows` sales (idx_sales_created_pg, no scan) is an ORDINARY
