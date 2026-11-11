@@ -50,7 +50,7 @@ const sha = (token) => crypto.createHash('sha256').update(token).digest('hex')
 
 let db
 let actor
-const authLib = load('lib/auth.ts', { './db': { getDb: (env) => env.DB } })
+const authLib = load('lib/auth.ts', { './planTier': load('lib/planTier.ts'), './db': { getDb: (env) => env.DB } })
 const usersRoute = load('routes/users.ts', {
   '../lib/roleDefaults': load('lib/roleDefaults.ts'),
   hono: require('hono'),

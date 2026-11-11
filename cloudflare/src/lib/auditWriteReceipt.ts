@@ -1,5 +1,5 @@
 import type { D1Compat } from './db'
-import { auditChangeColumns, type AuditFieldChange } from './audit'
+import { auditChangeColumns, requestDeviceColumnSql, requestDeviceParams, type AuditFieldChange } from './audit'
 
 // Idempotency for a configuration write with NO new table. Used today by the promotions
 // routes, whose audit entities are 'promotion' (announcement cards) and 'promotion_rule': the
@@ -108,7 +108,7 @@ export function receiptAuditStatement(args: {
     sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
       SELECT @receiptActor, COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@actorName), '')),
         @receiptAction, @receiptEntity, ${idSql}, @details, @receiptEntity, ${idSql}, @oldValue, @newValue,
-        s.device_name, s.device_tz
+        ${requestDeviceColumnSql('@receiptActor', 'device_name', 's.device_name')}, ${requestDeviceColumnSql('@receiptActor', 'device_tz', 's.device_tz')}
       FROM (SELECT 1 AS one) AS _receipt
       LEFT JOIN users u ON u.id = @receiptActor
       LEFT JOIN (
@@ -119,6 +119,7 @@ export function receiptAuditStatement(args: {
       WHERE changes() = 1`,
     params: {
       ...receiptParams(args.key),
+      ...requestDeviceParams(),
       actorName: args.actorName,
       ...(args.entityIdFromLastInsert ? {} : { entityId: args.entityId ?? null }),
       details,

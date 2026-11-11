@@ -143,6 +143,7 @@ const PAID = {
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 300,
   coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -190,6 +191,7 @@ const FREE = {
   callCountingSwitchApplies: true,
   inventoryCheckApprovalTakeoverSeconds: 900,
   coreInvariantsReverifySeconds: 86400,
+  sessionTouchIntervalSeconds: 900,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,
@@ -253,8 +255,9 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // fixed cost, and made it dearer on exactly the tier that counts reads (E1-F review N2). The Free CPU bound lives in expenseReportFoldMaxRows, which does differ.
 // dashboardOverviewMaxAgeSeconds is the owner's own promise (27 Oct / 1 Nov: the Dashboard stock overview is at most 5 minutes old and says when it was calculated), so it is
 // the same on both tiers; the read switch dash_overview_5m decides whether it is used, and what Free saves is the recompute a sale used to force.
-// coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day).
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds']
+// coreInvariantsReverifySeconds is 24 h on both tiers since 11 Nov (Paid was 6 h: a run reads ~23k rows, four a day). sessionTouchIntervalSeconds is the
+// 15-minute last-seen touch on both tiers (it only bounds a one-row write; nothing reads it to decide).
+const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

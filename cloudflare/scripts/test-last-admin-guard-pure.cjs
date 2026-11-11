@@ -71,7 +71,7 @@ const app = load('routes/users.ts', {
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', sessionUser(Number(c.req.header('x-actor')))); return next() }, revokeUserSessions: noop },
-  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), audit: noop },
+  '../lib/audit': { requestDeviceColumnSql: (actor, column, fallback) => `CASE WHEN @req_dev_user_id IS NOT NULL AND @req_dev_user_id = ${actor} THEN @req_dev_${column === 'device_name' ? 'name' : 'tz'} ELSE ${fallback} END`, requestDeviceParams: () => ({ req_dev_user_id: null, req_dev_name: null, req_dev_tz: null }), changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), audit: noop },
   '../lib/permissions': permissions,
   '../lib/adminControlGuard': load('lib/adminControlGuard.ts', { './permissions': permissions }),
   '../lib/conflictControl': load('lib/conflictControl.ts'),

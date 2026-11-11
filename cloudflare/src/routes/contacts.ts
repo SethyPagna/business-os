@@ -11,7 +11,7 @@ import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { PRODUCT_SUPPLIER_REFUSAL, supplierContactChangeReachesProducts } from '../lib/productSupplierGate'
-import { audit, buildAuditStatement, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields, currentRequestDevice, requestDeviceColumnSql, requestDeviceParams } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -1510,7 +1510,10 @@ function registerContactRoutes(config: ContactConfig) {
       config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
     ])
     let auditDevice: { deviceName: string | null; deviceTz: string | null } = { deviceName: null, deviceTz: null }
-    if (user?.id) {
+    const requestDevice = currentRequestDevice()
+    if (user?.id && requestDevice && requestDevice.userId === Number(user.id)) {
+      auditDevice = { deviceName: requestDevice.deviceName, deviceTz: requestDevice.deviceTz }
+    } else if (user?.id) {
       try {
         const device = await db.prepare(`
           SELECT device_name, device_tz FROM user_sessions
@@ -3411,7 +3414,7 @@ app.post('/customers/:id/points', async (c) => {
             'award_points', 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()), 'customer', @customerId,
             json_set(@details, '$.adjustmentId', last_insert_rowid()),
-            s.device_name, s.device_tz
+            ${requestDeviceColumnSql('@actorId', 'device_name', 's.device_name')}, ${requestDeviceColumnSql('@actorId', 'device_tz', 's.device_tz')}
           FROM (SELECT 1 AS one) AS _receipt
           LEFT JOIN users u ON u.id = @actorId
           LEFT JOIN (
@@ -3420,7 +3423,7 @@ app.post('/customers/:id/points', async (c) => {
             ORDER BY last_seen_at DESC, id DESC LIMIT 1
           ) AS s ON 1 = 1
           WHERE changes() = 1`,
-        params: { ...ledgerParams, details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
+        params: { ...ledgerParams, ...requestDeviceParams(), details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
       },
     ] : [
       anonymousCustomerGuardStatement(customerId),

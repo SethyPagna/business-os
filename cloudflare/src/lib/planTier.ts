@@ -239,6 +239,11 @@ export type PlanLimits = {
   // 24 h on both tiers (Paid was 6 h until 11 Nov): a run reads ~23k rows, so the longer lifetime saves ~70k rows a day on Paid.
   coreInvariantsReverifySeconds: number
 
+  // lib/auth.ts requireAuth: how stale user_sessions.last_seen_at may be before a request writes it again (one row write per touch).
+  // Nothing decides on it (expiry slides on expires_at); it feeds the Devices page and the freshest-session fallback for records written
+  // outside a request. Same on both tiers.
+  sessionTouchIntervalSeconds: number
+
   // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
   // expiry overview. Freshness comes from the 'products' + 'stock' cache
   // versions in its key (every sale and stock write bumps one), so this is
@@ -435,6 +440,7 @@ const PAID_LIMITS: PlanLimits = {
   callCountingSwitchApplies: false,
   inventoryCheckApprovalTakeoverSeconds: 5 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
+  sessionTouchIntervalSeconds: 15 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 5,
@@ -483,6 +489,7 @@ const FREE_LIMITS: PlanLimits = {
   callCountingSwitchApplies: true,
   inventoryCheckApprovalTakeoverSeconds: 15 * 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
+  sessionTouchIntervalSeconds: 15 * 60,
   dashboardStockOverviewCacheSeconds: 300,
   dashboardOverviewMaxAgeSeconds: 300,
   readSwitchMemoSeconds: 15,

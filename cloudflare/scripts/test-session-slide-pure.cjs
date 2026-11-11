@@ -34,7 +34,13 @@ function check(name, fn) {
 
 const SESSION_SLIDE_AFTER_FRACTION = 0.5
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
-const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+// The interval is the plan's (lib/planTier.ts sessionTouchIntervalSeconds), read from the real table, not a copy: 15 minutes on both tiers.
+const planTierModule = { exports: {} }
+new Function('exports', 'module', require('typescript').transpileModule(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'planTier.ts'), 'utf8'), { compilerOptions: { module: 1, target: 7 } }).outputText)(planTierModule.exports, planTierModule)
+const TIERS = planTierModule.exports.PLAN_LIMITS_BY_TIER
+assert.equal(TIERS.paid.sessionTouchIntervalSeconds, 15 * 60)
+assert.equal(TIERS.free.sessionTouchIntervalSeconds, 15 * 60)
+const SESSION_TOUCH_INTERVAL_MS = TIERS.paid.sessionTouchIntervalSeconds * 1000
 
 // Mirrors lib/auth.ts's asUtc exactly.
 function asUtc(value) {
@@ -104,8 +110,10 @@ check('auth reads session metadata once and race-protects a stale touch', () => 
   assert.ok(touchSql, 'conditional last-seen UPDATE must exist')
   assert.match(touchSql[0], /revoked_at IS NULL/)
   assert.match(touchSql[0], /expires_at > @observed_at/)
-  assert.match(touchSql[0], /datetime\(last_seen_at\) < datetime\(@observed_at, '-5 minutes'\)/,
+  assert.match(touchSql[0], /datetime\(last_seen_at\) < datetime\(@observed_at, @touch_window\)/,
     'SQL must repeat the strict stale cutoff to protect concurrent requests')
+  assert.match(source, /touch_window: `-\$\{touchSeconds\} seconds`/, 'the SQL window is the same plan value the code check uses, so the two cannot drift')
+  assert.match(source, /isSessionTouchDue\(lastSeenAt, Date\.parse\(nowIso\), touchSeconds \* 1000\)/)
 })
 
 // --- the timestamp format that would skew everything -------------------

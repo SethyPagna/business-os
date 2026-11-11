@@ -95,7 +95,7 @@ const adapt = (raw) => ({
 const libDb = { getDb: (env) => adapt(env.DB) }
 const cookie = require('hono/cookie')
 const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
-const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
+const authLib = load('lib/auth.ts', { './planTier': load('lib/planTier.ts'), './db': libDb, 'hono/cookie': cookie, '../index': {} })
 const policy = load('lib/passwordPolicy.ts', {})
 const guardOverrides = { './rateLimit': rateLimit, './auth': authLib, './passwordHash': passwordHashStub, 'hono/cookie': cookie, '../index': {} }
 const guard = load('lib/currentPasswordGuard.ts', guardOverrides)
