@@ -162,6 +162,7 @@ const authRoute = load('routes/auth.ts', {
     worstLockoutState: (...states) => states[0] || { locked: false },
   },
   '../lib/deviceTrust': { requiresDeviceApproval: () => false, checkDeviceTrust: async () => ({ status: 'approved' }) },
+  '../lib/deviceCookie': { resolveAndPinDevice: async (_c, _userId, bodyId) => bodyId },
   '../lib/otpReplay': { isOtpStepReplayed: async () => false, markOtpStepUsed: noop },
   '../lib/googleOauth': {},
   '../index': {},

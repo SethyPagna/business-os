@@ -110,7 +110,7 @@ await check('source lock: /otp/verify gates in the right order -- challenge, loc
   // verifyTotpStep (the step-returning form the replay guard needs) since P1-1.
   const verifyAt = body.search(/verifyTotp(?:Step)?\(otpSecret/)
   const failFeedAt = body.indexOf('recordFailedLogin(c.env, usernameLockoutKey)')
-  const deviceAt = body.indexOf('checkDeviceTrust(c.env, user.id, body.deviceId')
+  const deviceAt = body.indexOf('checkDeviceTrust(c.env, user.id, deviceId')
   const clearAt = body.indexOf('clearLoginLockout(c.env, usernameLockoutKey)')
   const consumeAt = body.indexOf('consumeOtpChallenge(c.env, body.otpChallenge)')
   const sessionAt = body.indexOf('createSession(c.env, user.id')
@@ -135,8 +135,8 @@ await check('source lock: the frontend sends the challenge and the persistent de
   assert.ok(/otpChallenge: pendingOtpChallenge/.test(login), 'Login.tsx must send the minted challenge to /otp/verify')
   assert.ok(/setPendingOtpChallenge\((callbackResult|result)\.otpChallenge \|\| ''\)/.test(login), 'Login.tsx must capture the challenge from otpRequired answers')
   const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'authTransport.ts'), 'utf8')
-  const verifyAt = transport.indexOf('export function otpVerify')
-  assert.ok(verifyAt > -1 && /getOrCreatePersistentDeviceId\(\)/.test(transport.slice(verifyAt, verifyAt + 400)), 'otpVerify must carry the persistent deviceId for the re-run device gate')
+  const verifyAt = transport.indexOf('export async function otpVerify')
+  assert.ok(verifyAt > -1 && /getOrCreatePersistentDeviceId\(\)/.test(transport.slice(verifyAt, verifyAt + 700)), 'otpVerify must carry the persistent deviceId for the re-run device gate')
 })
 
 await check('source lock: new OTP enrollment uses the Leang Cosmetics Admin authenticator label', () => {

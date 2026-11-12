@@ -14,7 +14,7 @@ import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import InfoHint from '../shared/InfoHint.tsx'
 import GoogleSignInButton from '../shared/GoogleSignInButton.tsx'
 import { STORAGE_KEYS } from '../../constants'
-import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
+import { adoptDeviceIdFromResponse, getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
 import { requestPasswordSaveAfterSignIn } from '../../utils/passwordManager.ts'
 import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
@@ -77,6 +77,7 @@ interface LoginResult {
   sessionExpiresAt?: string
   deviceApprovalRequired?: boolean
   deviceStatus?: 'pending' | 'rejected'
+  deviceId?: string
   sharedDevice?: boolean
 }
 
@@ -574,6 +575,7 @@ export default function Login() {
           setError(callbackResult.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
           return
         }
+        adoptDeviceIdFromResponse(callbackResult)
         if (callbackResult.deviceApprovalRequired) {
           setDeviceApprovalPending(true)
           setError(callbackResult.deviceStatus === 'rejected'

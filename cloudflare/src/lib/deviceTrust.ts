@@ -2,6 +2,7 @@ import { getDb } from './db'
 import type { Env } from '../index'
 import { isAdminControlUser, type PermissionUser } from './permissions'
 import { audit } from './audit'
+import { isValidDeviceId } from './deviceCookie'
 
 // Device-approval gate. See migrations/0005_trusted_devices.sql for the
 // schema. Non-administrator accounts are enrolled: a device stays trusted
@@ -59,8 +60,9 @@ export async function checkDeviceTrust(
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null },
 ): Promise<{ status: 'approved' } | { status: 'pending' | 'rejected' | 'missing_device_id' }> {
-  if (!deviceId || !deviceId.trim()) {
-    // A client that doesn't send a device id at all (e.g. an old cached
+  if (!isValidDeviceId(deviceId)) {
+    // A client that doesn't send a usable device id (missing, over-long or
+    // outside [A-Za-z0-9_-]; e.g. an old cached
     // frontend build, or a direct API call) can't be recognized or
     // remembered -- fail closed into `pending` rather than silently
     // skipping the check, which would make the feature bypassable just by
@@ -79,9 +81,12 @@ export async function checkDeviceTrust(
     // to bypass an administrator's device-approval policy.
     const initialStatus = 'pending'
 
+    // Two parallel first sign-ins race this insert; the unique index makes the
+    // loser a no-op instead of a 500.
     await db.prepare(`
       INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at)
       VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, @status, @decided_at)
+      ON CONFLICT(user_id, device_id) DO NOTHING
     `).run({
       user_id: userId,
       device_id: deviceId,

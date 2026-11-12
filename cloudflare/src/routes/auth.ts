@@ -21,6 +21,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
+import { resolveAndPinDevice } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
@@ -403,8 +404,14 @@ app.post('/login', async (c) => {
   // Device-approval gate -- every non-administrator role must be approved
   // once per device. Administrator-control accounts remain able to manage
   // approvals after a browser reset or device replacement.
+  // The id the gate, the session and the response all use: the signed device
+  // cookie's id when there is one, else the body's (see lib/deviceCookie.ts).
+  let deviceId = body.deviceId
+  let echoedDeviceId: string | undefined
   if (requiresDeviceApproval(user)) {
-    const trustCheck = await checkDeviceTrust(c.env, user.id, body.deviceId, {
+    deviceId = (await resolveAndPinDevice(c, user.id, body.deviceId)) || body.deviceId
+    echoedDeviceId = deviceId
+    const trustCheck = await checkDeviceTrust(c.env, user.id, deviceId, {
       deviceName: body.deviceName,
       userAgent: c.req.header('user-agent'),
       ip,
@@ -412,11 +419,11 @@ app.post('/login', async (c) => {
     })
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
-        await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId: body.deviceId })
+        await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId })
         return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', code: 'device_rejected', deviceStatus: 'rejected' }, 403)
       }
       await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, {
-        deviceId: body.deviceId,
+        deviceId,
         deviceName: body.deviceName || null,
         userAgent: c.req.header('user-agent') || null,
         ip: ip || null,
@@ -427,6 +434,7 @@ app.post('/login', async (c) => {
       return c.json({
         deviceApprovalRequired: true,
         deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
+        ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
         message: 'This device is awaiting administrator approval before you can sign in.',
       }, 200)
     }
@@ -446,13 +454,13 @@ app.post('/login', async (c) => {
     }
     // The challenge binds the upcoming /otp/verify to THIS successful
     // password (+ device) step -- see the challenge helpers above.
-    return c.json({ otpRequired: true, userId: user.id, otpChallenge: await issueOtpChallenge(c.env, user.id) })
+    return c.json({ otpRequired: true, userId: user.id, otpChallenge: await issueOtpChallenge(c.env, user.id), ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}) })
   }
 
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
     deviceName: body.deviceName,
-    deviceId: body.deviceId,
+    deviceId,
     // deviceTz was sent by the frontend on every /login call but silently
     // dropped here -- /refresh and /session-duration already capture it
     // the same way, so login was the one place a device's timezone never
@@ -501,7 +509,8 @@ app.post('/login', async (c) => {
       must_change_password: (signedInWithLeakedPassword || await accountMustChangePassword(c.env, user.id)) ? 1 : 0,
     },
     sessionExpiresAt: session.expiresAt,
-    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, body.deviceId),
+    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, deviceId),
+    ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
   })
 })
 
@@ -846,8 +855,12 @@ app.post('/otp/verify', async (c) => {
   // Device-approval gate, re-run HERE with the deviceId this request
   // carries -- the /login check ran against the login call's deviceId, and
   // nothing forced the two to match. Same responses as /login's gate.
+  let deviceId = body.deviceId
+  let echoedDeviceId: string | undefined
   if (requiresDeviceApproval(user)) {
-    const trustCheck = await checkDeviceTrust(c.env, user.id, body.deviceId, {
+    deviceId = (await resolveAndPinDevice(c, user.id, body.deviceId)) || body.deviceId
+    echoedDeviceId = deviceId
+    const trustCheck = await checkDeviceTrust(c.env, user.id, deviceId, {
       deviceName: body.deviceName,
       userAgent: c.req.header('user-agent'),
       ip,
@@ -855,13 +868,14 @@ app.post('/otp/verify', async (c) => {
     })
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
-        await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify' })
+        await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId, via: 'otp_verify' })
         return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', code: 'device_rejected', deviceStatus: 'rejected' }, 403)
       }
-      await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify', status: trustCheck.status })
+      await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId, via: 'otp_verify', status: trustCheck.status })
       return c.json({
         deviceApprovalRequired: true,
         deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
+        ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
         message: 'This device is awaiting administrator approval before you can sign in.',
       }, 200)
     }
@@ -876,7 +890,7 @@ app.post('/otp/verify', async (c) => {
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
     deviceName: body.deviceName,
-    deviceId: body.deviceId,
+    deviceId,
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,
@@ -891,7 +905,8 @@ app.post('/otp/verify', async (c) => {
     user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions, must_change_password: (await accountMustChangePassword(c.env, user.id)) ? 1 : 0 },
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
-    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, body.deviceId),
+    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, deviceId),
+    ...(echoedDeviceId ? { deviceId: echoedDeviceId } : {}),
   })
 })
 
@@ -1460,25 +1475,28 @@ app.get('/oauth/callback', async (c) => {
       // from the signed state (set at /oauth/start from the browser's
       // persisted device id, see lib/googleOauth.ts), not from anything
       // Google returns, so it can't be spoofed via the OAuth redirect.
+      let oauthDeviceId = statePayload.deviceId
       let deviceGate: { blocked: false } | { blocked: true; payload: Record<string, unknown> } = { blocked: false }
       if (localUser && requiresDeviceApproval(localUser)) {
-        const trustCheck = await checkDeviceTrust(c.env, localUser.id, statePayload.deviceId, {
+        oauthDeviceId = (await resolveAndPinDevice(c, localUser.id, statePayload.deviceId)) || statePayload.deviceId
+        const trustCheck = await checkDeviceTrust(c.env, localUser.id, oauthDeviceId, {
           deviceName: statePayload.deviceName || 'Google OAuth',
           userAgent: c.req.header('user-agent'),
           ip: c.req.header('cf-connecting-ip') || undefined,
           country: c.req.header('cf-ipcountry'),
         })
         if (trustCheck.status === 'rejected') {
-          await audit(c.env, localUser.id, localUser.username, 'login_device_rejected', 'user', localUser.id, { deviceId: statePayload.deviceId, method: 'google' })
+          await audit(c.env, localUser.id, localUser.username, 'login_device_rejected', 'user', localUser.id, { deviceId: oauthDeviceId, method: 'google' })
           deviceGate = { blocked: true, payload: {
             success: true,
             deviceApprovalRequired: true,
             deviceStatus: 'rejected',
+            deviceId: oauthDeviceId,
             error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.',
           } }
         } else if (trustCheck.status !== 'approved') {
           await audit(c.env, localUser.id, localUser.username, 'login_device_pending', 'user', localUser.id, {
-            deviceId: statePayload.deviceId,
+            deviceId: oauthDeviceId,
             deviceName: statePayload.deviceName || 'Google OAuth',
             userAgent: c.req.header('user-agent') || null,
             ip: c.req.header('cf-connecting-ip') || null,
@@ -1490,6 +1508,7 @@ app.get('/oauth/callback', async (c) => {
             success: true,
             deviceApprovalRequired: true,
             deviceStatus: 'pending',
+            deviceId: oauthDeviceId,
             message: 'This device is awaiting administrator approval before you can sign in.',
           } }
         }
@@ -1516,14 +1535,14 @@ app.get('/oauth/callback', async (c) => {
         } else {
           // Same challenge binding as POST /login's otpRequired branch --
           // the Google identity check is this flow's first factor.
-          callbackPayload = { success: true, otpRequired: true, userId: localUser.id, provider: 'google', otpChallenge: await issueOtpChallenge(c.env, localUser.id) }
+          callbackPayload = { success: true, otpRequired: true, userId: localUser.id, provider: 'google', otpChallenge: await issueOtpChallenge(c.env, localUser.id), ...(requiresDeviceApproval(localUser) ? { deviceId: oauthDeviceId } : {}) }
         }
       } else {
         const synced = await updateLocalUserGoogleIdentity(c.env, localUser.id, googleUser)
         await audit(c.env, synced.id, synced.username, 'login', 'user', synced.id, { method: 'google', email: googleUser.email, google_subject: googleSubject })
-        const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: statePayload.deviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
+        const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: oauthDeviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
         setSessionCookie(c, session.token, session.expiresAt)
-        callbackPayload = { success: true, provider: 'google', user: { ...buildUserPayload(synced), must_change_password: (await accountMustChangePassword(c.env, synced.id)) ? 1 : 0 }, sessionExpiresAt: session.expiresAt, authMode: 'cookie' }
+        callbackPayload = { success: true, provider: 'google', user: { ...buildUserPayload(synced), must_change_password: (await accountMustChangePassword(c.env, synced.id)) ? 1 : 0 }, sessionExpiresAt: session.expiresAt, authMode: 'cookie', ...(requiresDeviceApproval(localUser) ? { deviceId: oauthDeviceId } : {}) }
       }
     }
 
