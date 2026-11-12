@@ -216,7 +216,8 @@ async function suite(mutate, label) {
     assert.deepEqual(live(w.h), [102, 103, 104], 'administrator, personally approved and other-device sessions survive')
     const next = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
     assert.equal(next.body.deviceApprovalRequired, true, 'back to per-account approval')
-    assert.deepEqual(trusted(w.h, 12), [{ device_id: TILL, status: 'pending' }])
+    assert.notEqual(next.body.deviceId, TILL, 'the retired id is replaced by a fresh one')
+    assert.deepEqual(trusted(w.h, 12), [{ device_id: next.body.deviceId, status: 'pending' }])
     assert.equal((await w.call(`/shop/${shopId}/unmark`)).body.idempotent, true, 'unmark twice is harmless')
   })
 
@@ -431,6 +432,31 @@ async function suite(mutate, label) {
     assert.equal(repeatWrote, false, 'a repeat from the same place and time adds no write (no extra D1 call on an ordinary shop sign-in)')
   })
 
+  await check('16. unmarking retires the till id: a copied cookie of it stops working, the till continues under a fresh id that is marked from its pending request (L2)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    assert.equal((await signIn(w, { deviceId: TILL, cookieFor: TILL })).body.success, true)
+    await w.call(`/shop/${shopIdOf(w.h)}/unmark`)
+    const tillNext = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(tillNext.body.deviceApprovalRequired, true)
+    const fresh = tillNext.body.deviceId
+    assert.notEqual(fresh, TILL)
+    const thief = await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })
+    assert.equal(thief.body.deviceApprovalRequired, true, 'the copy gets no access')
+    assert.notEqual(thief.body.deviceId, TILL, 'and no row is ever created for the retired id again')
+    const bodyOnly = await signIn(w, { username: 'sokha', deviceId: TILL })
+    assert.notEqual(bodyOnly.body.deviceId, TILL, 'also for a body-only id')
+    assert.equal(w.h.raw.prepare('SELECT COUNT(*) AS n FROM trusted_devices WHERE device_id = @d').get({ d: TILL }).n, 0)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, @d, 'pending')").run({ d: TILL })
+    const refused = await w.call(`/${rowId(w.h, 12, TILL)}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(refused.status, 409)
+    assert.equal(refused.body.code, 'shop_device_retired')
+    assert.equal((await w.call(`/${rowId(w.h, 12, fresh)}/mark-shop`, 'POST', { label: 'Till 1' })).status, 200, 'the till is marked again from its new pending request')
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: fresh, cookieFor: fresh })).body.success, true, 'the till works under its new id')
+    const stale = await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })
+    assert.equal(stale.body.deviceApprovalRequired, true, 'the copied cookie of the old id still gets nothing')
+  })
+
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
@@ -449,6 +475,8 @@ const mutants = [
   ['mark leaves the waiting requests in the queue', inFile('routes/devices.ts', "DELETE FROM trusted_devices WHERE device_id = @device_id AND status IN ('pending', 'approved') AND changes() = 1", 'DELETE FROM trusted_devices WHERE 0'), ['12.', '13.']],
   ['the shop sign-in records nothing and raises no alert', inFile('lib/deviceTrust.ts', 'await recordShopSignIn(env, userId, deviceId, shopDeviceId, found as NonNullable<typeof found>, meta)', ''), ['15.']],
   ['the shop sign-in writes on every request (no throttle)', inFile('lib/deviceTrust.ts', 'if (recent && ip ===', 'if (false && ip ==='), ['15.']],
+  ['an unmarked till id keeps working (no retirement)', inFile('lib/deviceTrust.ts', 'if (cookiesOn && (retiredShopId ||', 'if (cookiesOn && (false ||'), ['3.', '16.']],
+  ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 

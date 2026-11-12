@@ -528,8 +528,12 @@ app.post('/:id/mark-shop', async (c) => {
     return c.json({ error: `Give the shop device a name of 1 to ${SHOP_LABEL_MAX} characters.`, code: 'shop_label_invalid' }, 400)
   }
   const db = getDb(c.env)
-  const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
+  const device = await db.prepare(`SELECT t.*, (SELECT 1 FROM shop_devices s WHERE s.device_id = t.device_id AND s.unmarked_at IS NOT NULL LIMIT 1) AS shop_retired
+    FROM trusted_devices t WHERE t.id = @id LIMIT 1`).get<TrustedDeviceRow & { shop_retired: number | null }>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.shop_retired) {
+    return c.json({ error: 'This device was a shop device before and is given a new identity when it signs in again. Mark its new request instead.', code: 'shop_device_retired' }, 409)
+  }
   if (device.status !== 'approved' && device.status !== 'pending') return c.json({ error: 'Only a pending or approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
   // Rows for this browser no longer matter once it is a shop device (every
   // employee passes there): waiting requests would stay in the queue and bell,
@@ -574,6 +578,9 @@ app.post('/:id/mark-shop', async (c) => {
 // POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)
 // ends the marking and revokes the sessions the shop path issued (and the
 // sessions re-issued from them), so the next sign-in there needs an approval.
+// The device id is retired for good: its next sign-in is given a fresh id (see
+// checkDeviceTrust), so a copy of its cookie stops working, and the same id can
+// never be marked again.
 app.post('/shop/:shopId/unmark', async (c) => {
   const shopId = Number(c.req.param('shopId'))
   const admin = c.get('user')

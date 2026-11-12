@@ -79,6 +79,9 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
   if (code === 'shop_device_not_approved' || code === 'shop_device_conflict') {
     return tr(t, 'shop_device_conflict', 'The device changed while you were deciding. Reload and try again.')
   }
+  if (code === 'shop_device_retired') {
+    return tr(t, 'shop_device_retired', 'This device was a shop device before. Sign in on it again to give it a new identity, then mark its new request.')
+  }
   if (code === 'shop_label_invalid') {
     return tr(t, 'shop_label_invalid', 'Give the shop device a name of 1 to 60 characters.')
   }
@@ -264,7 +267,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   const unmarkShop = async (shop: ShopDeviceRecord) => {
     const confirmed = await askToConfirm({
       title: tr(t, 'shop_device_unmark_title', 'Remove shop device?'),
-      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device.'),
+      message: tr(t, 'shop_device_unmark_confirm', 'Employees who signed in here through the shop device are signed out now, and each employee needs an approval again to sign in on this device. The device gets a new identity at its next sign-in, so a copied login cookie stops working; to make it a shop device again, mark its new request.'),
       items: [{ label: tr(t, 'shop_device_name', 'Shop device name'), value: shop.label }],
       confirmLabel: tr(t, 'shop_device_unmark', 'Remove shop device'),
       danger: true,

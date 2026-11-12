@@ -38,7 +38,7 @@ assert.match(panel, /shop[.]last_seen_at [?] [(]/, 'the list shows where and whe
 const keys = [
   'shop_device', 'shop_devices', 'shop_devices_intro', 'no_shop_devices', 'shop_device_mark', 'shop_device_mark_title', 'shop_device_mark_confirm',
   'shop_device_name', 'shop_device_name_placeholder', 'shop_device_continue', 'shop_device_marked_done', 'shop_device_marked_by', 'shop_device_unmark',
-  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_label_invalid',
+  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_device_retired', 'shop_label_invalid',
 ]
 for (const key of keys) {
   assert.ok(en[key] && km[key], `both packs carry ${key}`)
@@ -48,5 +48,7 @@ for (const key of keys) {
 const used = new Set([...panel.matchAll(/tr\(t, '(shop_[a-z_]+|no_shop_devices)'/g)].map((m) => m[1]))
 for (const key of used) assert.ok(keys.includes(key), `the panel's ${key} is in the key list under test`)
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
+assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copied login cookie stops working/i, 'the unmark warning says the device gets a new identity and a copied cookie stops')
+assert.match(panel, /code === 'shop_device_retired'/, 'the retired-id refusal is translated by machine code')
 
 console.log('PASS shop devices panel: review dialogs, online-only calls, name cap, bilingual copy')
