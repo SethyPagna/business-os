@@ -368,7 +368,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     return [...byUser.values()].sort((a, b) => a.label.localeCompare(b.label))
   }, [approvedDevices, sessions])
 
-  const renderDeviceMeta = (device: TrustedDeviceRecord) => (
+  // Why the shop button is grey, in words a touch screen can show: an old waiting request is never bound by signing in, so it is approved first.
+  const renderDeviceMeta = (device: TrustedDeviceRecord, showMarkHint = false) => (
     <div className="min-w-0">
       <div className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">
         {device.device_name || tr(t, 'unknown_device', 'Unknown device')}
@@ -387,6 +388,13 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       {device.shared_with && device.shared_with.length > 0 ? (
         <div className="mt-1 detail-scroll-text rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
           {tr(t, 'device_also_here', 'Also on this device')}: {device.shared_with.map((other) => `${other.name} (${other.status === 'approved' ? tr(t, 'approved', 'Approved') : tr(t, 'pending', 'pending')})`).join(', ')}
+        </div>
+      ) : null}
+      {showMarkHint && !device.cookie_bound_at && !device.claimed_approval_ref ? (
+        <div className="mt-1 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
+          {device.status === 'pending'
+            ? tr(t, 'shop_device_unbound_pending', 'To mark this as a shop device: approve the request, sign in on the device once, then mark it.')
+            : tr(t, 'shop_device_unbound', 'Sign in on this device once, then mark it as a shop device.')}
         </div>
       ) : null}
       {device.claimed_approval_ref ? (
@@ -438,7 +446,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                 key={device.id}
                 className="flex flex-col gap-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
               >
-                {renderDeviceMeta(device)}
+                {renderDeviceMeta(device, true)}
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
@@ -518,7 +526,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                         key={`device-${device.id}`}
                         className="flex flex-col gap-2 rounded-lg border border-gray-100 p-2.5 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        {renderDeviceMeta(device)}
+                        {renderDeviceMeta(device, !shopDeviceIds.has(device.device_id))}
                         <div className="flex shrink-0 items-center gap-2">
                           <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
                             {tr(t, 'approved', 'Approved')}
