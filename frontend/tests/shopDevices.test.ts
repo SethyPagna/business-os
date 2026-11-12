@@ -47,8 +47,13 @@ for (const key of keys) {
 }
 const used = new Set([...panel.matchAll(/tr\(t, '(shop_[a-z_]+|no_shop_devices)'/g)].map((m) => m[1]))
 for (const key of used) assert.ok(keys.includes(key), `the panel's ${key} is in the key list under test`)
+// L-4 (release review): the administrator reads no "cookie" or "id" anywhere in the device and shop device copy, in either language.
+for (const [key, text] of [...Object.entries(en), ...Object.entries(km)]) {
+  if (!/^(shop_device|device_)/.test(key) || typeof text !== 'string') continue
+  assert.doesNotMatch(text, /cookie|ids?|ខូគី/i, `${key} says cookie or id`)
+}
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
-assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copied login cookie stops working/i, 'the unmark warning says the device gets a new identity and a copied cookie stops')
+assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copy of its sign-in stops working/i, 'the unmark warning says the device gets a new identity and a copied sign-in stops')
 // M-A (release review): a device whose browser never had the cookie cannot be marked; the buttons are disabled with the reason, and the refusal is translated.
 assert.equal((panel.match(/disabled=\{busyId === device\.id \|\| !device\.cookie_bound_at\}/g) || []).length, 2, 'both mark buttons are disabled until the device has had its cookie')
 assert.match(panel, /code === 'shop_device_unbound'/, 'the unbound refusal is translated by machine code')
