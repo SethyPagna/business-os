@@ -59,7 +59,7 @@ insertSession.run({ id: 20, user: 9, token: 'old-target', device: 'same-device',
 insertSession.run({ id: 21, user: 9, token: 'other-device', device: 'other-device', expires: future })
 insertSession.run({ id: 22, user: 10, token: 'other-user', device: 'same-device', expires: future })
 
-const guardSql = route.match(/SELECT CASE WHEN EXISTS \([\s\S]*?json_extract\(@reapproval_reset_guard_error, '\$'\) END AS device_reapproval_reset_guard/)?.[0]
+const guardSql = resetBlock.match(/SELECT CASE WHEN EXISTS \([\s\S]*?json_extract\(@reapproval_reset_guard_error, '\$'\) END AS device_reapproval_reset_guard/)?.[0]
 const revokeSql = route.match(/UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP\s+WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL[\s\S]*?status = 'rejected'\)/)?.[0]
 const deleteSql = route.match(/DELETE FROM trusted_devices\s+WHERE id = @id AND user_id = @user_id AND device_id = @device_id AND status = 'rejected'/)?.[0]
 assert.ok(guardSql && revokeSql && deleteSql, 'lifted atomic reset batch SQL is present')

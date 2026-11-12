@@ -43,4 +43,17 @@ for (const key of ['device_limit_reached', 'device_approvals_intro', 'device_app
 assert.notEqual(km.device_limit_reached, en.device_limit_reached, 'Khmer cap text is not the English copied')
 assert.doesNotMatch(en.device_approval_pending_desc + en.device_approvals_intro, /for an admin account|admin account must/i, 'approval copy no longer claims the gate is for admin accounts')
 
+// Replace flow: at the cap Approve opens a chooser (least recently seen pre-selected) and the swap is one online call.
+assert.match(transport, /approve-replacing`, \{ revokeId: Number\(revokeId\) \}/, 'replace uses the one atomic Worker route')
+const replaceTransport = transport.slice(transport.indexOf('export function approveDeviceReplacing'), transport.indexOf('export function rejectDevice'))
+assert.doesNotMatch(replaceTransport, /route\(|queue|outbox/i, 'replace stays outside offline replay')
+assert.match(panel, /deviceLimit && choices\.length >= deviceLimit\) \{\s*setReplacing\(\{ device, choices, selectedId: choices\[0\]\.id \}\)/, 'an account at the cap opens the chooser instead of a refused approve')
+assert.match(panel, /\.sort\(\(a, b\) => String\(a\.last_seen_at \|\| ''\)\.localeCompare\(String\(b\.last_seen_at \|\| ''\)\)\)/, 'choices are ordered least recently seen first, so the first is pre-selected')
+assert.match(panel, /approveDeviceReplacing\(device\.id, selectedId\)/, 'confirming sends the chosen device')
+assert.doesNotMatch(panel, /window\.confirm\(/)
+for (const key of ['device_replace_title', 'device_replace_intro', 'device_replace_new', 'device_replace_remove', 'device_replace_least_recent', 'device_replace_confirm', 'device_replace_done', 'device_replace_conflict', 'device_replace_invalid']) {
+  assert.ok(en[key] && km[key], `both packs carry ${key}`)
+  assert.notEqual(en[key], km[key], `Khmer ${key} is not the English copied`)
+}
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
+import Modal from '../shared/Modal.tsx'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import ShieldX from 'lucide-react/dist/esm/icons/shield-x.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
@@ -10,6 +11,7 @@ import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js
 import { fmtDate } from '../../utils/formatters'
 import {
   approveDevice,
+  approveDeviceReplacing,
   getAllDevices,
   getLiveSessions,
   getPendingDevices,
@@ -56,8 +58,15 @@ function readLimit(...responses: Array<{ limit?: unknown } | null | undefined>):
 
 // The Worker's English refusal is a fallback; the panel speaks both languages by the machine code.
 function deviceActionMessage(t: TranslateFn, err: unknown): string {
-  if ((err as { code?: unknown } | null)?.code === 'device_limit_reached') {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'device_limit_reached') {
     return tr(t, 'device_limit_reached', 'This account already has the maximum number of approved devices. Remove one of its devices first, then approve this one.')
+  }
+  if (code === 'device_replace_conflict') {
+    return tr(t, 'device_replace_conflict', 'The devices changed while you were deciding. Reload and try again.')
+  }
+  if (code === 'device_replace_invalid') {
+    return tr(t, 'device_replace_invalid', 'Choose an approved device of the same account to replace.')
   }
   return err instanceof Error ? err.message : tr(t, 'device_action_failed', 'Action failed. Please try again.')
 }
@@ -96,6 +105,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
   // so a session action can't disable an unrelated device button.
   const [busySessionId, setBusySessionId] = useState<number | null>(null)
   const [busyUserId, setBusyUserId] = useState<number | null>(null)
+  // An account already at its cap: the pending device waits for the admin to pick which approved device to replace.
+  const [replacing, setReplacing] = useState<{ device: TrustedDeviceRecord; choices: TrustedDeviceRecord[]; selectedId: number } | null>(null)
 
   const ownsScope = useCallback((scope: ActorReadScope, owner = ownerKey) => mounted.current
     && currentOwner.current.canManage && currentOwner.current.ownerKey === owner
@@ -177,6 +188,24 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     })
     if (!confirmed) return
     void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'), authority)
+  }
+
+  const startApprove = (device: TrustedDeviceRecord) => {
+    const choices = approvedDevices
+      .filter((approved) => approved.user_id === device.user_id)
+      .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
+    if (deviceLimit && choices.length >= deviceLimit) {
+      setReplacing({ device, choices, selectedId: choices[0].id })
+      return
+    }
+    void runAction(device.id, 'approve', tr(t, 'device_approved', 'Device approved.'))
+  }
+
+  const confirmReplace = () => {
+    if (!replacing) return
+    const { device, selectedId } = replacing
+    setReplacing(null)
+    void runOnlineAction('device', device.id, () => approveDeviceReplacing(device.id, selectedId), () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
   }
 
   const runSessionRevoke = (sessionId: number) => runOnlineAction('session', sessionId, () => revokeLiveSession(sessionId), () => tr(t, 'session_revoked_notice', 'Session ended. That device is signed out.'))
@@ -276,7 +305,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     type="button"
                     disabled={busyId === device.id}
                     className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
-                    onClick={() => runAction(device.id, 'approve', tr(t, 'device_approved', 'Device approved.'))}
+                    onClick={() => startApprove(device)}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     {tr(t, 'approve', 'Approve')}
@@ -436,6 +465,47 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
           </div>
         )}
       </div>
+      {replacing ? (
+        <Modal title={tr(t, 'device_replace_title', 'Replace a device')} onClose={() => setReplacing(null)} size="sm" layer="nested" keyboard unsavedChanges={{ dirty: false }}>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {tr(t, 'device_replace_intro', 'This account has reached its device limit. Choose one approved device to remove; it is signed out right away and the new device is approved.')}
+            </p>
+            <div>
+              <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{tr(t, 'device_replace_new', 'New device')}</div>
+              {renderDeviceMeta(replacing.device)}
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{tr(t, 'device_replace_remove', 'Device to remove')}</legend>
+              {replacing.choices.map((choice, index) => (
+                <label
+                  key={choice.id}
+                  className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 ${replacing.selectedId === choice.id ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'}`}
+                >
+                  <input
+                    type="radio"
+                    name="device-to-replace"
+                    className="mt-1"
+                    checked={replacing.selectedId === choice.id}
+                    onChange={() => setReplacing({ ...replacing, selectedId: choice.id })}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-900 dark:text-white">{choice.device_name || tr(t, 'unknown_device', 'Unknown device')}</span>
+                    <span className="block detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
+                      {tr(t, 'last_seen', 'Last seen')} {fmtDate(choice.last_seen_at)}{choice.last_ip || choice.first_ip ? ` \u00b7 ${choice.last_ip || choice.first_ip}` : ''}
+                    </span>
+                    {index === 0 ? <span className="block text-xs text-amber-700 dark:text-amber-300">{tr(t, 'device_replace_least_recent', 'Not used for the longest')}</span> : null}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setReplacing(null)}>{tr(t, 'cancel', 'Cancel')}</button>
+              <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={confirmReplace}>{tr(t, 'device_replace_confirm', 'Replace and approve')}</button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
       {confirmDialog}
     </div>
   )

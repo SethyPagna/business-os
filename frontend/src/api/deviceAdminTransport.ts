@@ -37,6 +37,11 @@ export function approveDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve`, {})
 }
 
+// At the cap: approve this pending device and revoke one approved device of the same account in one atomic step.
+export function approveDeviceReplacing(id: number | string, revokeId: number | string): Promise<{ success?: boolean; revokedSessions?: number }> {
+  return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/approve-replacing`, { revokeId: Number(revokeId) }) as Promise<{ success?: boolean; revokedSessions?: number }>
+}
+
 export function rejectDevice(id: number | string): Promise<unknown> {
   return apiFetch('POST', `/api/auth/devices/${encodeURIComponent(String(id))}/reject`, {})
 }

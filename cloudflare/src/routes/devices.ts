@@ -243,6 +243,111 @@ app.post('/:id/approve', async (c) => {
   return c.json({ success: true })
 })
 
+// POST /api/auth/devices/:id/approve-replacing { revokeId } -- approve a
+// pending device for an account that is at the cap by revoking one of that
+// account's approved devices in the same step. One db.batch (one SQLite
+// transaction): the guard throws, rolling everything back, unless both rows are
+// still in the state this request read; the new row's UPDATE repeats the cap
+// count after the revoke; and a closing guard throws if the approval did not
+// land, so the cap can never be exceeded and a half-done swap cannot persist.
+app.post('/:id/approve-replacing', async (c) => {
+  const id = Number(c.req.param('id'))
+  const admin = c.get('user')
+  const body = await c.req.json<{ revokeId?: unknown }>().catch(() => ({} as { revokeId?: unknown }))
+  const revokeId = Number(body.revokeId)
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(revokeId) || revokeId <= 0 || id === revokeId) {
+    return c.json({ error: 'A pending device and a different approved device are required.', code: 'device_replace_invalid' }, 400)
+  }
+  const db = getDb(c.env)
+  const rows = await db.prepare('SELECT * FROM trusted_devices WHERE id IN (@id, @revoke_id)')
+    .all<TrustedDeviceRow>({ id, revoke_id: revokeId })
+  const device = (rows || []).find((row) => row.id === id)
+  const old = (rows || []).find((row) => row.id === revokeId)
+  if (!device) return c.json({ error: 'Device request not found' }, 404)
+  if (device.status === 'rejected') {
+    return c.json({
+      error: 'This rejected device must be reset before it can request approval again.',
+      code: 'device_reapproval_reset_required',
+    }, 409)
+  }
+  if (device.status === 'approved') return c.json({ success: true, idempotent: true })
+  if (!old || old.user_id !== device.user_id || old.status !== 'approved') {
+    return c.json({ error: 'Choose an approved device of the same account to replace.', code: 'device_replace_invalid' }, 400)
+  }
+
+  const params = {
+    id: device.id,
+    revoke_id: old.id,
+    user_id: device.user_id,
+    old_device_id: old.device_id,
+    admin_id: admin.id,
+    admin_name: admin.name,
+    approved_device_limit: MAX_APPROVED_DEVICES_PER_USER,
+    replace_guard_error: '{',
+  }
+  let results: Array<{ meta?: { changes?: number } }>
+  try {
+    results = await db.batch([
+      {
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND status = 'pending')
+          AND EXISTS (SELECT 1 FROM trusted_devices WHERE id = @revoke_id AND user_id = @user_id AND status = 'approved')
+          THEN 1 ELSE json_extract(@replace_guard_error, '$') END AS device_replace_guard`,
+        params,
+      },
+      {
+        sql: `UPDATE trusted_devices
+          SET status = 'rejected', revoked_at = CURRENT_TIMESTAMP, decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name
+          WHERE id = @revoke_id AND user_id = @user_id AND status = 'approved'`,
+        params,
+      },
+      {
+        sql: `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+          WHERE user_id = @user_id AND revoked_at IS NULL
+            AND (
+              device_id = @old_device_id
+              OR limit_family_id IN (SELECT id FROM user_sessions WHERE user_id = @user_id AND device_id = @old_device_id)
+            )`,
+        params,
+      },
+      {
+        sql: `UPDATE trusted_devices
+          SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by_user_id = @admin_id, decided_by_name = @admin_name, revoked_at = NULL
+          WHERE id = @id AND user_id = @user_id AND status = 'pending'
+            AND (SELECT COUNT(*) FROM trusted_devices
+                 WHERE user_id = @user_id AND status = 'approved' AND id != @id) < @approved_device_limit`,
+        params,
+      },
+      {
+        sql: `SELECT CASE WHEN EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND user_id = @user_id AND status = 'approved')
+          THEN 1 ELSE json_extract(@replace_guard_error, '$') END AS device_replace_landed`,
+        params,
+      },
+    ])
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('malformed JSON')) {
+      return c.json({ error: 'The devices changed while you were deciding. Reload and try again.', code: 'device_replace_conflict' }, 409)
+    }
+    throw error
+  }
+  const revokedSessions = Number(results[2]?.meta?.changes || 0)
+
+  await audit(c.env, admin.id, admin.username, 'device_revoked', 'user', old.user_id, {
+    deviceId: old.device_id, deviceName: old.device_name, userAgent: old.user_agent,
+    firstIp: old.first_ip, lastIp: old.last_ip, firstCountry: old.first_country,
+    lastCountry: old.last_country, targetTrustedDeviceRowId: old.id, revokedSessions,
+    replacedByTrustedDeviceRowId: device.id,
+  })
+  await audit(c.env, admin.id, admin.username, 'device_approved', 'user', device.user_id, {
+    deviceId: device.device_id, deviceName: device.device_name, userAgent: device.user_agent,
+    firstIp: device.first_ip, lastIp: device.last_ip, firstCountry: device.first_country,
+    lastCountry: device.last_country, targetTrustedDeviceRowId: device.id,
+    replacedTrustedDeviceRowId: old.id,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
+
+  return c.json({ success: true, revokedSessions })
+})
+
 // POST /api/auth/devices/:id/reset -- remove one rejected trust row so the
 // same persistent device id can create a new pending request at its next
 // authenticated login. Reset does not approve the device and does not alter

@@ -29,6 +29,7 @@
     {"method":"PUT","route":"/api/ai/providers/:id","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/ai/providers","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/devices/:id/approve","class":"N","reason":"write-not-measured"},
+    {"method":"POST","route":"/api/auth/devices/:id/approve-replacing","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/devices/:id/reject","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/devices/:id/reset","class":"N","reason":"write-not-measured"},
     {"method":"POST","route":"/api/auth/devices/:id/revoke","class":"N","reason":"write-not-measured"},
