@@ -246,6 +246,7 @@ export const PII_COLUMNS = Object.freeze({
   user_sessions: ['device_name', 'device_id', 'user_agent', 'last_ip'],
   portal_sessions: ['user_agent', 'last_ip'],
   trusted_devices: ['device_id', 'device_name', 'user_agent', 'first_ip', 'last_ip', 'decided_by_name'],
+  shop_devices: ['device_id', 'last_ip', 'marked_by_name', 'unmarked_by_name'], // 0304: the same browser id and sign-in address a trusted device carries
   login_lockouts: ['username'],
   portal_auth_lockouts: ['key'], // canonical phone for signin
   rate_limit_events: ['client_key'], // client IP-derived key

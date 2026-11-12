@@ -189,5 +189,6 @@ SELECT
     'stock_crossing_alerts', (SELECT COUNT(*) FROM stock_crossing_alerts),
     'product_conflict_marks', (SELECT COUNT(*) FROM product_conflict_marks),
     'fee_types', (SELECT COUNT(*) FROM fee_types),
-    'fee_labels', (SELECT COUNT(*) FROM fee_labels)
+    'fee_labels', (SELECT COUNT(*) FROM fee_labels),
+    'shop_devices', (SELECT COUNT(*) FROM shop_devices)
   ) AS rows_10;

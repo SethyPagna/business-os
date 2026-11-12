@@ -93,6 +93,7 @@ Masked by default (kept with `--include-pii`):
 | user_sessions | device_name, device_id, user_agent, last_ip |
 | portal_sessions | user_agent, last_ip |
 | trusted_devices | device_id, device_name, user_agent, first_ip, last_ip, decided_by_name |
+| shop_devices | device_id, last_ip, marked_by_name, unmarked_by_name |
 | login_lockouts | username |
 | portal_auth_lockouts | key (canonical phone) |
 | rate_limit_events | client_key |
