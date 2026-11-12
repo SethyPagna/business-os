@@ -21,7 +21,7 @@ import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
-import { isCookieVerifiedDevice, issueDeviceTicket, pinDeviceCookie, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
+import { adoptSessionDeviceCookie, isCookieVerifiedDevice, issueDeviceTicket, pinDeviceCookie, readDeviceTicket, resolveAndPinDevice } from '../lib/deviceCookie'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
@@ -583,6 +583,7 @@ app.get('/me', async (c) => {
   // through that shared middleware, so it needed the identical fix
   // applied separately.
   if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+  if (requiresDeviceApproval(user)) await adoptSessionDeviceCookie(c, user.id)
   return c.json({ user })
 })
 
@@ -598,6 +599,7 @@ app.get('/bootstrap', async (c) => {
   if (!user) {
     return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   }
+  if (requiresDeviceApproval(user)) await adoptSessionDeviceCookie(c, user.id)
   // The data epoch rides the same per-isolate read as the read switches (planTier.ts readSwitchMemoSeconds), and is asked for only once there is a session: a 401 never
   // starts a read it would not wait for. Its tag is the runtime's dataEpoch: a client that sees a different one than it stored (a restore,
   // a cutover) drops its caches and keeps its drafts and carts (api/epochReset.ts). It is deliberately not the runtime's dataRootKey:
