@@ -408,6 +408,28 @@ async function suite(mutate, label) {
     assert.equal(replayAsVictim.body.success, undefined, 'and nothing she holds signs in as the colleague')
   })
 
+  await check('q. L-1 (release review HF): a long session of an account whose approved row on an id is unbound does not get the cookie for that id once another account has bound it; the first-bound account still adopts', async () => {
+    const w = setup(mutate)
+    const V2 = 'colleague-phone-device-02'
+    legacyApproved(w.h, 13, V2)
+    legacyApproved(w.h, 10, V2)
+    addSession(w.h, 10, V2)
+    const victim = browser(w, V2)
+    assert.equal((await victim.go('dara')).body.success, true, 'the colleague signs in on her phone and binds')
+    assert.equal(userRows(w.h, 13)[0].bound, 1)
+    const { res } = await me(w)
+    assert.equal(res.status, 200)
+    assert.deepEqual(cookieValues(res), [], 'no cookie for an id another account holds')
+    assert.equal(userRows(w.h, 10)[0].bound, 0, 'the row stays unbound')
+    const replay = await signIn(w, { deviceId: V2 })
+    assert.equal(replay.body.success, undefined, 'the id alone signs nobody in')
+    const w2 = setup(mutate)
+    legacyApproved(w2.h, 10, V2)
+    addSession(w2.h, 10, V2)
+    const alone = await me(w2)
+    assert.equal(lastCookieId(alone.res), V2, 'control: with nobody else bound the session still adopts')
+  })
+
   await check('i. the session cookie name used by the helper is the one lib/auth.ts sets', () => {
     const auth = fs.readFileSync(path.join(SRC, 'lib/auth.ts'), 'utf8')
     const cookie = fs.readFileSync(path.join(SRC, 'lib/deviceCookie.ts'), 'utf8')
@@ -430,6 +452,7 @@ const mutants = [
   ['binding never happens', inFile('lib/deviceTrust.ts', "cookie_bound_at = COALESCE(cookie_bound_at, CASE WHEN @bind = 1 THEN CURRENT_TIMESTAMP END)", 'cookie_bound_at = cookie_bound_at'), ['a.']],
   ['a new pending row is marked cookie-bound even when no cookie was set (N-1)', inFile('lib/deviceTrust.ts', 'bind: willBind ? 1 : 0,', 'bind: cookiesOn ? 1 : 0,'), ['m.', 'n.']],
   ['the held-by-another-account answer is dropped (N-4)', inFile('lib/deviceTrust.ts', '...(found?.held_by_other ? { heldByOther: true } : {})', ''), ['o.']],
+  ['a session adopts an id another account has bound (L-1, probe HF)', inFile('lib/deviceCookie.ts', 'o.user_id <> trusted_devices.user_id', 'o.user_id = trusted_devices.user_id'), ['q.']],
   ['an approved but unbound row skips the fresh id although a colleague has bound the id (P-1 HB)', inFile('lib/deviceTrust.ts', '(existing.cookie_bound_at || found?.held_bound_by_other) && !meta.cookieVerified', 'existing.cookie_bound_at && !meta.cookieVerified'), ['p.']],
 ]
 

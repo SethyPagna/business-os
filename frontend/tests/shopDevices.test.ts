@@ -18,7 +18,7 @@ assert.match(transport, /\/api\/auth\/devices\/shop\/\$\{encodeURIComponent\(Str
 const shopTransport = transport.slice(transport.indexOf('export type ShopDeviceRecord'), transport.indexOf('// Reset only removes'))
 assert.doesNotMatch(shopTransport, /route\(|queue|outbox/i, 'shop calls stay outside offline replay')
 
-assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, \(\) => markShopDevice\(device\.id, label\)/, 'marking needs the review dialog, then one online call')
+assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, withSharedConfirm\(device, true, \(confirmShared\) => markShopDevice\(device\.id, label, confirmShared\)\)/, 'marking needs the review dialog, then one online call')
 assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_unmark_confirm'[\s\S]*?danger: true,\s*\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', -shop\.id, \(\) => unmarkShopDevice\(shop\.id\)/, 'unmarking is a danger confirmation, then one online call')
 assert.doesNotMatch(panel, /window\.confirm\(/, 'never the native popup')
 assert.match(panel, /shopDeviceIds\.has\(device\.device_id\)/, 'an already marked device shows its badge instead of the mark button')
@@ -31,14 +31,14 @@ assert.equal(panel.split("setMarkingShop({ device, label: '' })").length - 1, 2,
 assert.match(en.shop_device_mark_confirm, /device slot/i, 'the mark dialog says no slot is used')
 assert.match(en.shop_device_mark_confirm, /waiting for this device are removed/i, 'the mark dialog says waiting requests are removed')
 assert.match(en.shop_device_mark_confirm, /individual employees/i, 'the mark dialog says individual approvals are replaced')
-assert.match(panel, /markShopDevice[(]device[.]id, label[)]/, 'the same call serves both rows')
+assert.match(panel, /markShopDevice[(]device[.]id, label, confirmShared[)]/, 'the same call serves both rows')
 
 assert.match(panel, /shop[.]last_seen_at [?] [(]/, 'the list shows where and when a shop device was last used')
 
 const keys = [
   'shop_device', 'shop_devices', 'shop_devices_intro', 'no_shop_devices', 'shop_device_mark', 'shop_device_mark_title', 'shop_device_mark_confirm',
   'shop_device_name', 'shop_device_name_placeholder', 'shop_device_continue', 'shop_device_marked_done', 'shop_device_marked_by', 'shop_device_unmark',
-  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_device_retired', 'shop_device_held', 'shop_device_claimed', 'shop_device_shared_confirm', 'shop_device_unbound', 'shop_label_invalid',
+  'shop_device_unmark_title', 'shop_device_unmark_confirm', 'shop_device_unmarked_done', 'shop_device_exists', 'shop_device_conflict', 'shop_device_retired', 'shop_device_held', 'shop_device_claimed', 'shop_device_shared_confirm', 'shop_device_unbound', 'shop_device_unbound_pending', 'shop_label_invalid',
 ]
 for (const key of keys) {
   assert.ok(en[key] && km[key], `both packs carry ${key}`)
@@ -47,8 +47,13 @@ for (const key of keys) {
 }
 const used = new Set([...panel.matchAll(/tr\(t, '(shop_[a-z_]+|no_shop_devices)'/g)].map((m) => m[1]))
 for (const key of used) assert.ok(keys.includes(key), `the panel's ${key} is in the key list under test`)
+// L-4 (release review): the administrator reads no "cookie" or "id" anywhere in the device and shop device copy, in either language.
+for (const [key, text] of [...Object.entries(en), ...Object.entries(km)]) {
+  if (!/^(shop_device|device_)/.test(key) || typeof text !== 'string') continue
+  assert.doesNotMatch(text, /cookie|ids?|ខូគី/i, `${key} says cookie or id`)
+}
 assert.match(en.shop_device_unmark_confirm, /signed out/i, 'the unmark warning says employees are signed out')
-assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copied login cookie stops working/i, 'the unmark warning says the device gets a new identity and a copied cookie stops')
+assert.match(en.shop_device_unmark_confirm, /new identity[^.]*copy of its sign-in stops working/i, 'the unmark warning says the device gets a new identity and a copied sign-in stops')
 // M-A (release review): a device whose browser never had the cookie cannot be marked; the buttons are disabled with the reason, and the refusal is translated.
 assert.equal((panel.match(/disabled=\{busyId === device\.id \|\| !device\.cookie_bound_at\}/g) || []).length, 2, 'both mark buttons are disabled until the device has had its cookie')
 assert.match(panel, /code === 'shop_device_unbound'/, 'the unbound refusal is translated by machine code')
