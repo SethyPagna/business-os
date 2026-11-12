@@ -8,7 +8,7 @@
 //   write   test-phone-write-guard-native.cjs        a mask must never overwrite a real number
 //   text    test-phone-masked-text-native.cjs        a mask must never overwrite a name, note or label; people-only name masking; no key leaks
 //
-// Run (from cloudflare/): node scripts/test-phone-leak-mutants-crawl-native.cjs   (crawl, write, text)
+// Run (from cloudflare/): node scripts/test-phone-leak-mutants-crawl-native.cjs   (crawl, write, text; also crawl2, crawl3)
 //                          node scripts/test-phone-leak-mutants-oracle-native.cjs  (oracle)
 // Four mutant worlds run at a time; each boots its own Worker under Miniflare.
 const { spawn } = require('node:child_process')
@@ -43,18 +43,20 @@ const RUNS = [
     'search: the legacy deleted reason is read raw', 'search: the legacy deleted cashier filter reads the number'].map((name) => ['text', name, {}]),
 ]
 const FILES = { crawl: 'test-phone-leak-crawl-native.cjs', oracle: 'test-phone-search-oracle-native.cjs', write: 'test-phone-write-guard-native.cjs', text: 'test-phone-masked-text-native.cjs' }
-// The mutants are split over two test files so that each fits the gate's first try (10 min) with margin: one file took 675 s on a loaded machine.
-// Every kind belongs to exactly one group (checked below), so no mutant is dropped by the split.
-// A group is the kinds it runs and, when a kind list is too long for the runner, which part of that list it takes (part, of): the runs are dealt in order, so the parts of
-// one kind list are disjoint and together are the whole list. The GitHub runner is slower than a laptop (the one-file oracle half took 434 s here and timed out there), so
-// no group runs more than 9 mutants of the slow kinds.
+// The mutants are split over several test files so that each fits the gate's first try (10 min) with margin: one file took 675 s on a loaded machine.
+// Every mutant belongs to exactly one group (checked below), so none is dropped by the split.
+// The three FULL_CRAWLS each boot a Worker and crawl every route (83-131 s alone), so each crawl group holds exactly one of them; the other mutants of the same kinds are dealt
+// in order over the crawl groups (part, of). The GitHub runner is slower than a laptop, so no group runs more than 10 mutants of the slow kinds.
+const FULL_CRAWLS = ['no-egress-projection', 'live rule: the grant is required again', 'live rule: a request with no session reads in full']
+const isFullCrawl = ([kind, name]) => kind === 'crawl' && FULL_CRAWLS.includes(name)
 const GROUPS = {
-  'crawl-1': { kinds: ['crawl', 'write', 'text'], part: 1, of: 2 }, 'crawl-2': { kinds: ['crawl', 'write', 'text'], part: 2, of: 2 },
+  'crawl-1': { kinds: ['crawl', 'write', 'text'], part: 1, of: 3, full: 0 }, 'crawl-2': { kinds: ['crawl', 'write', 'text'], part: 2, of: 3, full: 1 }, 'crawl-3': { kinds: ['crawl', 'write', 'text'], part: 3, of: 3, full: 2 },
   'oracle-1': { kinds: ['oracle'], part: 1, of: 3 }, 'oracle-2': { kinds: ['oracle'], part: 2, of: 3 }, 'oracle-3': { kinds: ['oracle'], part: 3, of: 3 },
 }
 const groupRuns = (group) => {
-  const { kinds, part, of } = GROUPS[group]
-  return RUNS.filter(([kind]) => kinds.includes(kind)).filter((_, index, all) => index >= Math.floor((part - 1) * all.length / of) && index < Math.floor(part * all.length / of))
+  const { kinds, part, of, full } = GROUPS[group]
+  const dealt = RUNS.filter(([kind]) => kinds.includes(kind)).filter((run) => !isFullCrawl(run)).filter((_, index, all) => index >= Math.floor((part - 1) * all.length / of) && index < Math.floor(part * all.length / of))
+  return full === undefined ? dealt : [RUNS.find((run) => isFullCrawl(run) && run[1] === FULL_CRAWLS[full]), ...dealt]
 }
 const PARALLEL = Math.max(1, Number(process.env.PHONE_MUTANT_PARALLEL) || 4)
 
