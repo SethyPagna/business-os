@@ -51,6 +51,9 @@ interface DeviceApprovalsProps {
 }
 
 const SHOP_LABEL_MAX = 60
+// What a write answers when the administrator closed the "several accounts" dialog: nothing was sent, so there is nothing to report.
+const SHARED_DECLINED = Symbol('shared-declined')
+const errorCode = (err: unknown) => (err as { code?: unknown } | null)?.code
 
 function tr(t: TranslateFn, key: string, fallback: string): string {
   return t(key) || fallback
@@ -193,6 +196,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     setBusy(id)
     try {
       const result = await write()
+      if (result === SHARED_DECLINED) return
       if (!ownsScope(authority.scope, authority.ownerKey)) return
       notify(successMessage(result), 'success')
       await load()
@@ -204,8 +208,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       if (ownsScope(authority.scope, authority.ownerKey)) setBusy((current) => current === id ? null : current)
     }
   }
-  const runAction = (id: number, action: 'approve' | 'reject' | 'revoke' | 'reset', successMessage: string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => runOnlineAction('device', id, () => {
-    if (action === 'approve') return approveDevice(id)
+  const runAction = (id: number, action: 'reject' | 'revoke' | 'reset', successMessage: string, authority = { scope: captureActorReadScope('devices'), ownerKey }) => runOnlineAction('device', id, () => {
     if (action === 'reject') return rejectDevice(id)
     if (action === 'reset') return resetDeviceForReapproval(id)
     return revokeDevice(id)
@@ -239,6 +242,34 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     danger: true,
   })
   const sharedNames = (device: TrustedDeviceRecord) => (device.shared_with || []).map((other) => other.name).join(', ')
+  // The page's list can be stale: ask the Worker who else is on the device now, so the dialog still names them.
+  const freshSharedNames = async (device: TrustedDeviceRecord) => {
+    try {
+      const fresh = device.status === 'pending' ? await getPendingDevices() : await getAllDevices(device.user_id)
+      const row = (fresh?.devices || []).find((candidate) => candidate.id === device.id)
+      return row ? sharedNames(row) : ''
+    } catch {
+      return ''
+    }
+  }
+  // One action does all of it: send, and when the Worker says another account is on the device, ask and send again with the confirmation.
+  // The dialog and the second send run inside this write, under the action's own key, so nothing is nested and nothing is dropped.
+  const withSharedConfirm = (device: TrustedDeviceRecord, marking: boolean, send: (confirmShared: boolean) => Promise<unknown>, options: { confirmed?: boolean; onConfirmed?: () => void } = {}) => async (): Promise<unknown> => {
+    if (options.confirmed) return send(true)
+    const ask = async (names: string) => {
+      if (!(await confirmSharedDevice(names, marking))) return false
+      options.onConfirmed?.()
+      return true
+    }
+    const known = sharedNames(device)
+    if (known) return (await ask(known)) ? send(true) : SHARED_DECLINED
+    try {
+      return await send(false)
+    } catch (err) {
+      if (errorCode(err) !== 'device_shared_confirm') throw err
+      return (await ask(await freshSharedNames(device))) ? send(true) : SHARED_DECLINED
+    }
+  }
 
   const startApprove = async (device: TrustedDeviceRecord) => {
     const knownShared = Boolean(device.shared_with && device.shared_with.length > 0)
@@ -252,20 +283,17 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     }
     // The page's own copy of the list can be stale: the account may have reached its cap since it loaded. The Worker's
     // refusal then opens the same chooser, from a fresh read of that account's devices, instead of a dead-end message.
-    void runOnlineAction('device', device.id, () => approveDevice(device.id, knownShared), () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
-      const code = (err as { code?: unknown } | null)?.code
-      // The list was stale: another account got this device after it loaded. Ask now, then approve.
-      if (code === 'device_shared_confirm') {
-        if (await confirmSharedDevice('', false)) void runOnlineAction('device', device.id, () => approveDevice(device.id, true), () => tr(t, 'device_approved', 'Device approved.'))
-        return true
-      }
-      if (code !== 'device_limit_reached') return false
+    // If the list was stale about another account, the write asks first; the chooser below then needs no second question.
+    let confirmedNow = knownShared
+    const write = withSharedConfirm(device, false, (confirmShared) => approveDevice(device.id, confirmShared), { confirmed: knownShared, onConfirmed: () => { confirmedNow = true } })
+    void runOnlineAction('device', device.id, write, () => tr(t, 'device_approved', 'Device approved.'), undefined, async (err) => {
+      if (errorCode(err) !== 'device_limit_reached') return false
       const fresh = await getAllDevices(device.user_id)
       const accountChoices = (fresh?.devices || [])
         .filter((row) => row.status === 'approved' && row.user_id === device.user_id)
         .sort((a, b) => String(a.last_seen_at || '').localeCompare(String(b.last_seen_at || '')))
       if (!accountChoices.length) return false
-      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id, confirmShared: knownShared })
+      setReplacing({ device, choices: accountChoices, selectedId: accountChoices[0].id, confirmShared: confirmedNow })
       return true
     })
   }
@@ -274,7 +302,8 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     if (!replacing) return
     const { device, selectedId, confirmShared } = replacing
     setReplacing(null)
-    void runOnlineAction('device', device.id, () => approveDeviceReplacing(device.id, selectedId, confirmShared === true), () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
+    const write = withSharedConfirm(device, false, (confirmed) => approveDeviceReplacing(device.id, selectedId, confirmed), { confirmed: confirmShared === true })
+    void runOnlineAction('device', device.id, write, () => tr(t, 'device_replace_done', 'Device replaced and approved.'))
   }
 
   const reviewMarkShop = async () => {
@@ -293,11 +322,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
       confirmLabel: tr(t, 'shop_device_mark', 'Mark as shop device'),
     })
     if (!confirmed) return
-    void runOnlineAction('device', device.id, () => markShopDevice(device.id, label), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'), undefined, async (err) => {
-      if ((err as { code?: unknown } | null)?.code !== 'device_shared_confirm') return false
-      if (await confirmSharedDevice('', true)) void runOnlineAction('device', device.id, () => markShopDevice(device.id, label, true), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
-      return true
-    })
+    void runOnlineAction('device', device.id, withSharedConfirm(device, true, (confirmShared) => markShopDevice(device.id, label, confirmShared)), () => tr(t, 'shop_device_marked_done', 'Marked as a shop device.'))
   }
 
   const unmarkShop = async (shop: ShopDeviceRecord) => {

@@ -118,6 +118,10 @@ app.post('/sessions/revoke-user', async (c) => {
   return c.json({ success: true, revoked: Number(liveCount?.count || 0) })
 })
 
+// The other accounts with a pending or approved row on the same device, as a sub-select of the statement that lists the rows (no extra D1 call).
+const SHARED_WITH_SQL = `(SELECT json_group_array(json_object('user_id', o.user_id, 'name', COALESCE(NULLIF(ou.name, ''), ou.username), 'status', o.status))
+         FROM trusted_devices o JOIN users ou ON ou.id = o.user_id
+         WHERE o.device_id = td.device_id AND o.user_id != td.user_id AND o.status IN ('pending', 'approved'))`
 export type SharedWith = { user_id: number; name: string; status: 'pending' | 'approved' }
 function parseSharedWith(json: string | null | undefined): SharedWith[] {
   if (!json) return []
@@ -133,9 +137,7 @@ app.get('/pending', async (c) => {
   const rows = await db.prepare(`
     SELECT td.*, u.username, u.name AS user_name,
       (SELECT c.device_name FROM trusted_devices c WHERE c.id = td.claimed_approval_ref) AS claimed_device_name,
-      (SELECT json_group_array(json_object('user_id', o.user_id, 'name', COALESCE(NULLIF(ou.name, ''), ou.username), 'status', o.status))
-         FROM trusted_devices o JOIN users ou ON ou.id = o.user_id
-         WHERE o.device_id = td.device_id AND o.user_id != td.user_id AND o.status IN ('pending', 'approved')) AS shared_with_json
+      ${SHARED_WITH_SQL} AS shared_with_json
     FROM trusted_devices td
     JOIN users u ON u.id = td.user_id
     WHERE td.status = 'pending'
@@ -153,20 +155,21 @@ app.get('/', async (c) => {
   const db = getDb(c.env)
   const rows = userId
     ? await db.prepare(`
-        SELECT td.*, u.username, u.name AS user_name
+        SELECT td.*, u.username, u.name AS user_name, ${SHARED_WITH_SQL} AS shared_with_json
         FROM trusted_devices td
         JOIN users u ON u.id = td.user_id
         WHERE td.user_id = @user_id
         ORDER BY td.requested_at DESC
-      `).all<TrustedDeviceRow & { username: string; user_name: string }>({ user_id: userId })
+      `).all<TrustedDeviceRow & { username: string; user_name: string; shared_with_json?: string | null }>({ user_id: userId })
     : await db.prepare(`
-        SELECT td.*, u.username, u.name AS user_name
+        SELECT td.*, u.username, u.name AS user_name, ${SHARED_WITH_SQL} AS shared_with_json
         FROM trusted_devices td
         JOIN users u ON u.id = td.user_id
         ORDER BY td.requested_at DESC
         LIMIT 200
-      `).all<TrustedDeviceRow & { username: string; user_name: string }>()
-  return c.json({ devices: rows || [], limit: maxApprovedDevicesPerUser(c.env) })
+      `).all<TrustedDeviceRow & { username: string; user_name: string; shared_with_json?: string | null }>()
+  const devices = (rows || []).map(({ shared_with_json, ...row }) => ({ ...row, shared_with: parseSharedWith(shared_with_json) }))
+  return c.json({ devices, limit: maxApprovedDevicesPerUser(c.env) })
 })
 
 // A request on the id of a till that was marked and then unmarked is dead: the id is retired and the browser

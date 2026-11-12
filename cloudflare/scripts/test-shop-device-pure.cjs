@@ -624,6 +624,21 @@ async function suite(mutate, label) {
     assert.equal('shared_with_json' in shared, false, 'the raw column is not leaked')
   })
 
+  await check('23b. L-2: the full device list (all accounts and one account) also names the other accounts on a device, so approved and history cards can say who else is there; a lone device lists nobody', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'shared-phone-0001', 12)
+    approve(w.h, 'shared-phone-0001', 10)
+    approve(w.h, 'lone-phone-0000001', 10)
+    const named = (devices, userId, deviceId) => devices.find((d) => d.user_id === userId && d.device_id === deviceId)
+    const all = (await w.call('/', 'GET')).body.devices
+    assert.deepEqual(named(all, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.deepEqual(named(all, 12, 'shared-phone-0001').shared_with.map((o) => o.user_id), [10])
+    assert.deepEqual(named(all, 10, 'lone-phone-0000001').shared_with, [])
+    const one = (await w.call('/?userId=10', 'GET')).body.devices
+    assert.deepEqual(named(one, 10, 'shared-phone-0001').shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.equal('shared_with_json' in named(one, 10, 'shared-phone-0001'), false, 'the raw column is not leaked')
+  })
+
   await check('24. P-1 HA: approving (and approving-replacing) a request on a device another account already has needs confirmShared: otherwise 409 device_shared_confirm and nothing changes; a request on its own device needs nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'shared-phone-0002', 10)
@@ -756,6 +771,7 @@ const mutants = [
   ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
   ['a request that claims an approved device can be marked as a shop device (N-3)', inFile('routes/devices.ts', "device.status === 'pending' && device.claimed_approval_ref", 'false'), ['22.']],
   ['the pending list forgets who else is on the device (P-1)', inFile('routes/devices.ts', 'shared_with: parseSharedWith(shared_with_json)', 'shared_with: []'), ['23.']],
+  ['the full device list forgets who else is on a device (L-2)', (text, rel) => { if (rel !== 'routes/devices.ts') return text; const s = 'shared_with: parseSharedWith(shared_with_json)'; const at = text.indexOf(s, text.indexOf(s) + 1); return at < 0 ? text : text.slice(0, at) + 'shared_with: []' + text.slice(at + s.length) }, ['23b.']],
   ['approving a request on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(await', 'if (false && !confirmedShared(await'), ['24.']],
   ['approve-replacing on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(body))', 'if (false && !confirmedShared(body))'), ['24.']],
   ['marking a device that several accounts have needs no confirmation (P-1 HC)', inFile('routes/devices.ts', '.size > 1 && !confirmedShared(body)', '.size > 1 && false'), ['25.']],

@@ -18,7 +18,7 @@ assert.match(transport, /\/api\/auth\/devices\/shop\/\$\{encodeURIComponent\(Str
 const shopTransport = transport.slice(transport.indexOf('export type ShopDeviceRecord'), transport.indexOf('// Reset only removes'))
 assert.doesNotMatch(shopTransport, /route\(|queue|outbox/i, 'shop calls stay outside offline replay')
 
-assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, \(\) => markShopDevice\(device\.id, label\)/, 'marking needs the review dialog, then one online call')
+assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_mark_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', device\.id, withSharedConfirm\(device, true, \(confirmShared\) => markShopDevice\(device\.id, label, confirmShared\)\)/, 'marking needs the review dialog, then one online call')
 assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'shop_device_unmark_confirm'[\s\S]*?danger: true,\s*\}\)\s*if \(!confirmed\) return\s*void runOnlineAction\('device', -shop\.id, \(\) => unmarkShopDevice\(shop\.id\)/, 'unmarking is a danger confirmation, then one online call')
 assert.doesNotMatch(panel, /window\.confirm\(/, 'never the native popup')
 assert.match(panel, /shopDeviceIds\.has\(device\.device_id\)/, 'an already marked device shows its badge instead of the mark button')
@@ -31,7 +31,7 @@ assert.equal(panel.split("setMarkingShop({ device, label: '' })").length - 1, 2,
 assert.match(en.shop_device_mark_confirm, /device slot/i, 'the mark dialog says no slot is used')
 assert.match(en.shop_device_mark_confirm, /waiting for this device are removed/i, 'the mark dialog says waiting requests are removed')
 assert.match(en.shop_device_mark_confirm, /individual employees/i, 'the mark dialog says individual approvals are replaced')
-assert.match(panel, /markShopDevice[(]device[.]id, label[)]/, 'the same call serves both rows')
+assert.match(panel, /markShopDevice[(]device[.]id, label, confirmShared[)]/, 'the same call serves both rows')
 
 assert.match(panel, /shop[.]last_seen_at [?] [(]/, 'the list shows where and when a shop device was last used')
 

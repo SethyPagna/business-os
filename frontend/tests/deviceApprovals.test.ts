@@ -49,7 +49,7 @@ const replaceTransport = transport.slice(transport.indexOf('export function appr
 assert.doesNotMatch(replaceTransport, /route\(|queue|outbox/i, 'replace stays outside offline replay')
 assert.match(panel, /deviceLimit && choices\.length >= deviceLimit\) \{\s*setReplacing\(\{ device, choices, selectedId: choices\[0\]\.id, confirmShared: knownShared \}\)/, 'an account at the cap opens the chooser instead of a refused approve')
 assert.match(panel, /\.sort\(\(a, b\) => String\(a\.last_seen_at \|\| ''\)\.localeCompare\(String\(b\.last_seen_at \|\| ''\)\)\)/, 'choices are ordered least recently seen first, so the first is pre-selected')
-assert.match(panel, /approveDeviceReplacing\(device\.id, selectedId, confirmShared === true\)/, 'confirming sends the chosen device')
+assert.match(panel, /withSharedConfirm\(device, false, \(confirmed\) => approveDeviceReplacing\(device\.id, selectedId, confirmed\), \{ confirmed: confirmShared === true \}\)/, 'confirming sends the chosen device')
 assert.doesNotMatch(panel, /window\.confirm\(/)
 for (const key of ['device_replace_title', 'device_replace_intro', 'device_replace_new', 'device_replace_remove', 'device_replace_least_recent', 'device_replace_confirm', 'device_replace_done', 'device_replace_conflict', 'device_replace_invalid']) {
   assert.ok(en[key] && km[key], `both packs carry ${key}`)
@@ -57,8 +57,8 @@ for (const key of ['device_replace_title', 'device_replace_intro', 'device_repla
 }
 
 // L2 (review, 12 Nov 2026): a plain approve refused with device_limit_reached (stale page) reads that account's devices fresh and opens the chooser.
-assert.match(panel, /code !== 'device_limit_reached'\) return false\s*const fresh = await getAllDevices\(device\.user_id\)/, 'the cap refusal triggers a fresh read of that account')
-assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id, confirmShared: knownShared \}\)\s*return true/, 'and opens the replace chooser')
+assert.match(panel, /errorCode[(]err[)] !== 'device_limit_reached'\) return false\s*const fresh = await getAllDevices\(device\.user_id\)/, 'the cap refusal triggers a fresh read of that account')
+assert.match(panel, /setReplacing\(\{ device, choices: accountChoices, selectedId: accountChoices\[0\]\.id, confirmShared: confirmedNow \}\)\s*return true/, 'and opens the replace chooser')
 assert.match(panel, /const handled = onError \? await onError\(err\)\.catch\(\(\) => false\) : false\s*if \(!handled/, 'a handled refusal shows no error toast')
 
 // L4 (review, 13 Nov 2026): a pending request that claimed an approved device's id says so, in both packs.
@@ -92,7 +92,8 @@ for (const key of ['device_also_here']) assert.ok(en[key] && km[key] && en[key] 
 
 // P-1 (review round 5): approving, replacing or marking a device another account has goes through the shared confirm dialog and sends confirmShared.
 assert.ok(panel.includes('if (knownShared && !(await confirmSharedDevice(sharedNames(device), false))) return'), 'Approve asks first when the card lists another account')
-assert.ok(panel.includes("code === 'device_shared_confirm'"), 'a stale list is answered by asking, not by a bare error')
+assert.ok(panel.includes("errorCode(err) !== 'device_shared_confirm'"), 'a stale list is answered by asking, not by a bare error')
+assert.ok(!panel.includes("confirmSharedDevice('', "), 'the confirm never names nobody: the names come from the card or from a fresh read')
 assert.ok(transport.includes('{ confirmShared: true }') && transport.includes('confirmShared = false'), 'the transport sends confirmShared only when confirmed')
 assert.ok(!/(^|[^A-Za-z.])confirm\(/.test(panel), 'never the native confirm()')
 for (const key of ['device_shared_title', 'device_shared_confirm', 'shop_device_shared_confirm']) {
