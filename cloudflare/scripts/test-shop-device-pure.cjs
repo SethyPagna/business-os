@@ -457,6 +457,21 @@ async function suite(mutate, label) {
     assert.equal(stale.body.deviceApprovalRequired, true, 'the copied cookie of the old id still gets nothing')
   })
 
+  await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'claimed-phone-0001', 12)
+    w.h.raw.prepare("UPDATE trusted_devices SET cookie_bound_at = CURRENT_TIMESTAMP, device_name = 'Dara phone'").run({})
+    const claim = await signIn(w, { deviceId: 'claimed-phone-0001' })
+    assert.equal(claim.body.deviceApprovalRequired, true)
+    const plain = await signIn(w, { username: 'sokha', deviceId: 'brand-new-device-9' })
+    assert.equal(plain.body.deviceApprovalRequired, true)
+    const pending = (await w.call('/pending', 'GET')).body.devices
+    const claimed = pending.find((d) => d.user_id === 12)
+    assert.equal(claimed.claimed_approval_ref, rowId(w.h, 12, 'claimed-phone-0001'))
+    assert.equal(claimed.claimed_device_name, 'Dara phone')
+    assert.equal(pending.find((d) => d.user_id === 10).claimed_approval_ref, null)
+  })
+
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
@@ -477,6 +492,7 @@ const mutants = [
   ['the shop sign-in writes on every request (no throttle)', inFile('lib/deviceTrust.ts', 'if (recent && ip ===', 'if (false && ip ==='), ['15.']],
   ['an unmarked till id keeps working (no retirement)', inFile('lib/deviceTrust.ts', 'if (cookiesOn && (retiredShopId ||', 'if (cookiesOn && (false ||'), ['3.', '16.']],
   ['a retired id can be marked again', inFile('routes/devices.ts', 'if (device.shop_retired) {', 'if (false) {'), ['16.']],
+  ['a pending row forgets which approved device it claimed', inFile('lib/deviceTrust.ts', "claimed: existing?.status === 'approved' ? existing.id : null", 'claimed: null'), ['17.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
 

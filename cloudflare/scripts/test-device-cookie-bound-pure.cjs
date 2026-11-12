@@ -118,6 +118,10 @@ async function suite(mutate, label) {
     assert.notEqual(attack.body.deviceId, VICTIM, 'told to adopt a new id')
     assert.equal(lastCookieId(attack), attack.body.deviceId, 'the cookie is pinned to the new id, not the victim id')
     assert.ok(attack.body.deviceTicket, 'a ticket for the new id so the waiting screen works')
+    const approvedRowId = w.h.raw.prepare('SELECT id FROM trusted_devices WHERE device_id = @d').get({ d: VICTIM }).id
+    assert.equal(w.h.raw.prepare('SELECT claimed_approval_ref AS c FROM trusted_devices WHERE device_id = @d').get({ d: attack.body.deviceId }).c, approvedRowId, 'the pending row records which approved device it claimed (L4)')
+    const pendingAudit = w.h.audits.filter((a) => a[3] === 'login_device_pending').pop()
+    assert.equal(pendingAudit[6].claimedTrustedDeviceRowId, approvedRowId, 'and so does its audit row')
     const state = rows(w.h)
     assert.equal(state.find((r) => r.device_id === VICTIM).status, 'approved')
     assert.deepEqual(state.filter((r) => r.device_id !== VICTIM).map((r) => r.status), ['pending'])

@@ -125,12 +125,13 @@ app.post('/sessions/revoke-user', async (c) => {
 app.get('/pending', async (c) => {
   const db = getDb(c.env)
   const rows = await db.prepare(`
-    SELECT td.*, u.username, u.name AS user_name
+    SELECT td.*, u.username, u.name AS user_name,
+      (SELECT c.device_name FROM trusted_devices c WHERE c.id = td.claimed_approval_ref) AS claimed_device_name
     FROM trusted_devices td
     JOIN users u ON u.id = td.user_id
     WHERE td.status = 'pending'
     ORDER BY td.requested_at ASC
-  `).all<TrustedDeviceRow & { username: string; user_name: string }>()
+  `).all<TrustedDeviceRow & { username: string; user_name: string; claimed_device_name: string | null }>()
   return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 

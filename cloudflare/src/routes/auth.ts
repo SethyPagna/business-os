@@ -439,6 +439,7 @@ app.post('/login', async (c) => {
         country: c.req.header('cf-ipcountry') || null,
         status: trustCheck.status,
         roleCode: user.role_code,
+        ...('claimedRowId' in trustCheck && trustCheck.claimedRowId ? { claimedTrustedDeviceRowId: trustCheck.claimedRowId } : {}),
       })
       return c.json({
         deviceApprovalRequired: true,
@@ -913,7 +914,7 @@ app.post('/otp/verify', async (c) => {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId, via: 'otp_verify' })
         return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', code: 'device_rejected', deviceStatus: 'rejected' }, 403)
       }
-      await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId, via: 'otp_verify', status: trustCheck.status })
+      await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId, via: 'otp_verify', status: trustCheck.status, ...('claimedRowId' in trustCheck && trustCheck.claimedRowId ? { claimedTrustedDeviceRowId: trustCheck.claimedRowId } : {}) })
       return c.json({
         deviceApprovalRequired: true,
         deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
@@ -1562,6 +1563,7 @@ app.get('/oauth/callback', async (c) => {
             country: c.req.header('cf-ipcountry') || null,
             status: trustCheck.status,
             method: 'google',
+            ...('claimedRowId' in trustCheck && trustCheck.claimedRowId ? { claimedTrustedDeviceRowId: trustCheck.claimedRowId } : {}),
           })
           deviceGate = { blocked: true, payload: {
             success: true,

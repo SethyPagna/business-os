@@ -323,6 +323,11 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
         {tr(t, 'requested', 'Requested')} {fmtDate(device.requested_at)} · {tr(t, 'last_seen', 'Last seen')} {fmtDate(device.last_seen_at)}
         {device.decided_by_name ? ` · ${tr(t, 'decided_by', 'Decided by')} ${device.decided_by_name}` : ''}
       </div>
+      {device.claimed_approval_ref ? (
+        <div className="mt-1 detail-scroll-text rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          {tr(t, 'device_claimed_id', 'This browser claimed the id of an approved device without its cookie')}: {device.claimed_device_name || `#${device.claimed_approval_ref}`}
+        </div>
+      ) : null}
     </div>
   )
 

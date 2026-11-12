@@ -29,6 +29,7 @@ export type TrustedDeviceRow = {
   last_seen_at: string
   revoked_at: string | null
   cookie_bound_at?: string | null
+  claimed_approval_ref?: number | null
 }
 
 export function requiresDeviceApproval(user: PermissionUser): boolean {
@@ -61,7 +62,7 @@ export async function checkDeviceTrust(
   userId: number,
   deviceId: string | null | undefined,
   meta: { deviceName?: string | null; userAgent?: string | null; ip?: string | null; country?: string | null; cookieVerified?: boolean },
-): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string } | { status: 'rejected' | 'missing_device_id' }> {
+): Promise<{ status: 'approved'; shopDeviceId?: number } | { status: 'pending'; created: boolean; replacedDeviceId?: string; claimedRowId?: number } | { status: 'rejected' | 'missing_device_id' }> {
   if (!isValidDeviceId(deviceId)) {
     // A client that doesn't send a usable device id (missing, over-long or
     // outside [A-Za-z0-9_-]; e.g. an old cached
@@ -99,11 +100,11 @@ export async function checkDeviceTrust(
   if (cookiesOn && (retiredShopId || (existing?.status === 'approved' && existing.cookie_bound_at && !meta.cookieVerified))) {
     const fresh = crypto.randomUUID()
     const made = await db.prepare(`
-      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at)
-      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP)
-    `).run({ user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
+      INSERT INTO trusted_devices (user_id, device_id, device_name, user_agent, first_ip, last_ip, first_country, last_country, status, decided_at, cookie_bound_at, claimed_approval_ref)
+      VALUES (@user_id, @device_id, @device_name, @user_agent, @ip, @ip, @country, @country, 'pending', NULL, CURRENT_TIMESTAMP, @claimed)
+    `).run({ claimed: existing?.status === 'approved' ? existing.id : null, user_id: userId, device_id: fresh, device_name: meta.deviceName || null, user_agent: meta.userAgent || null, ip: meta.ip || null, country: meta.country || null })
     if (Number(made?.changes || 0) > 0) await broadcast(env, 'notifications', { type: 'device_pending' })
-    return { status: 'pending', created: true, replacedDeviceId: fresh }
+    return { status: 'pending', created: true, replacedDeviceId: fresh, ...(existing?.status === 'approved' ? { claimedRowId: existing.id } : {}) }
   }
 
   // Only a refusal an administrator made after marking the device outranks the

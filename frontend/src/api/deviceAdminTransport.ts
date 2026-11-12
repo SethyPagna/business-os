@@ -19,6 +19,8 @@ export type TrustedDeviceRecord = {
   last_seen_at: string
   username: string
   user_name: string
+  claimed_approval_ref?: number | null
+  claimed_device_name?: string | null
 }
 
 // `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.
