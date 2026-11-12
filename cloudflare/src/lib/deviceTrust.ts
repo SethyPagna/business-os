@@ -79,11 +79,11 @@ export async function checkDeviceTrust(
   // The shop join only matches when the id came from the verified device
   // cookie, so a client-chosen body id can never claim a shop device.
   const found = await db.prepare(`
-    SELECT td.*, s.id AS shop_device_row_id
+    SELECT td.*, s.id AS shop_device_row_id, s.marked_at AS shop_marked_at
     FROM (SELECT 1 AS one) base
     LEFT JOIN trusted_devices td ON td.user_id = @user_id AND td.device_id = @device_id
     LEFT JOIN shop_devices s ON @shop_ok = 1 AND s.device_id = @device_id AND s.unmarked_at IS NULL
-  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
+  `).get<(Partial<TrustedDeviceRow> & { shop_device_row_id: number | null; shop_marked_at: string | null }) | undefined>({ user_id: userId, device_id: deviceId, shop_ok: meta.cookieVerified ? 1 : 0 })
   const existing = found && found.id != null ? (found as TrustedDeviceRow) : null
   const shopDeviceId = found?.shop_device_row_id ?? null
   // A device cookie is only ever issued when the signing key exists, so only then is "has had a cookie" a fact about the row.
@@ -101,10 +101,14 @@ export async function checkDeviceTrust(
     return { status: 'pending', created: true, replacedDeviceId: fresh }
   }
 
-  // An administrator's explicit refusal of this account on this device
-  // outranks the shop marking; an approved row of its own is a personal
-  // approval and is used as such.
-  if (shopDeviceId && existing?.status !== 'rejected' && existing?.status !== 'approved') {
+  // Only a refusal an administrator made after marking the device outranks the
+  // shop marking. A decline from before the marking, or a row that a revoke or a
+  // replace at the device cap turned into 'rejected' (revoked_at is set), is
+  // history about a personal approval and never locks an employee out of the till.
+  // An approved row of its own is a personal approval and is used as such.
+  const refusedAfterMarking = existing?.status === 'rejected' && !existing.revoked_at
+    && (!existing.decided_at || !found?.shop_marked_at || existing.decided_at >= found.shop_marked_at)
+  if (shopDeviceId && !refusedAfterMarking && existing?.status !== 'approved') {
     return { status: 'approved', shopDeviceId }
   }
 

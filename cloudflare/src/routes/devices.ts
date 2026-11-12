@@ -525,13 +525,29 @@ app.post('/:id/mark-shop', async (c) => {
   const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
   if (device.status !== 'approved') return c.json({ error: 'Only an approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  // Requests still waiting for this browser no longer matter once it is a shop
+  // device (every employee passes there), so the same batch removes them rather
+  // than leave them in the queue and the bell, where Decline would lock that
+  // employee out of the till.
+  const waiting = await db.prepare(`SELECT id, user_id FROM trusted_devices WHERE device_id = @device_id AND status = 'pending' LIMIT 200`)
+    .all<{ id: number; user_id: number }>({ device_id: device.device_id })
   let inserted: { changes?: number } | undefined
+  let closed = 0
   try {
-    inserted = await db.prepare(`
-      INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
-      SELECT @device_id, @label, @admin_id, @admin_name
-      WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')
-    `).run({ id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name })
+    const results = await db.batch([
+      {
+        sql: `INSERT INTO shop_devices (device_id, label, marked_by_user_id, marked_by_name)
+          SELECT @device_id, @label, @admin_id, @admin_name
+          WHERE EXISTS (SELECT 1 FROM trusted_devices WHERE id = @id AND status = 'approved')`,
+        params: { id, device_id: device.device_id, label, admin_id: admin.id, admin_name: admin.name },
+      },
+      {
+        sql: `DELETE FROM trusted_devices WHERE device_id = @device_id AND status = 'pending' AND changes() = 1`,
+        params: { device_id: device.device_id },
+      },
+    ])
+    inserted = { changes: Number(results[0]?.meta?.changes || 0) }
+    closed = Number(results[1]?.meta?.changes || 0)
   } catch (error) {
     if (error instanceof Error && /UNIQUE/i.test(error.message)) {
       return c.json({ error: 'This device is already marked as a shop device.', code: 'shop_device_exists' }, 409)
@@ -542,7 +558,12 @@ app.post('/:id/mark-shop', async (c) => {
   await audit(c.env, admin.id, admin.username, 'shop_device_marked', 'user', device.user_id, {
     deviceId: device.device_id, deviceName: device.device_name, label, targetTrustedDeviceRowId: device.id,
   })
-  return c.json({ success: true })
+  if (closed > 0) {
+    await audit(c.env, admin.id, admin.username, 'shop_device_pending_closed', 'user', admin.id, {
+      deviceId: device.device_id, label, closedRequests: (waiting || []).map((row) => ({ rowId: row.id, userId: row.user_id })), closedCount: closed,
+    })
+  }
+  return c.json({ success: true, closedPending: closed })
 })
 
 // POST /api/auth/devices/shop/:shopId/unmark -- one batch (one transaction)

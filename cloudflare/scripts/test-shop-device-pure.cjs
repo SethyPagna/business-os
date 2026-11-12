@@ -318,6 +318,50 @@ async function suite(mutate, label) {
     assert.deepEqual(live(w.h), [])
   })
 
+  await check('11. only a decline made after the marking locks an employee out of the till; an earlier decline, a revoke and a replace never do (M2)', async () => {
+    const w = setup(mutate)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.deviceApprovalRequired, true)
+    assert.equal((await w.call(`/${rowId(w.h, 12, TILL)}/reject`)).status, 200, 'declined before the till is marked')
+    w.h.raw.prepare("UPDATE trusted_devices SET decided_at = datetime('now', '-1 minute') WHERE user_id = 12").run({})
+    await markTill(w)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true, 'the earlier decline does not lock her out')
+    w.h.raw.prepare("UPDATE trusted_devices SET status = 'rejected', revoked_at = CURRENT_TIMESTAMP, decided_at = datetime('now', '+1 minute') WHERE user_id = 12").run({})
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.success, true, 'a revoked or replaced row never does, however late')
+    w.h.raw.prepare("UPDATE trusted_devices SET revoked_at = NULL WHERE user_id = 12").run({})
+    const after = await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })
+    assert.equal(after.status, 403, 'a decline made after the marking still outranks it')
+    assert.equal(after.body.code, 'device_rejected')
+  })
+
+  await check('11b. an employee replaced at the device cap on the till still signs in there (replace marks the row rejected)', async () => {
+    const w = setup(mutate)
+    await markTill(w)
+    for (let n = 1; n <= 4; n++) approve(w.h, `own-device-000${n}`, 10)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'new-phone-0001', 'pending')").run({})
+    const replaced = await w.call(`/${rowId(w.h, 10, 'new-phone-0001')}/approve-replacing`, 'POST', { revokeId: rowId(w.h, 10, TILL) })
+    assert.equal(replaced.status, 200, JSON.stringify(replaced.body))
+    assert.equal((await signIn(w, { username: 'sokha', deviceId: TILL, cookieFor: TILL })).body.success, true)
+  })
+
+  await check('12. marking removes the requests still waiting for that browser (any employee), audits them, and leaves other devices alone (M2)', async () => {
+    const w = setup(mutate)
+    assert.equal((await signIn(w, { username: 'dara', deviceId: TILL, cookieFor: TILL })).body.deviceApprovalRequired, true)
+    w.h.addUser({ id: 13, username: 'vanna', name: 'Vanna', roleCode: 'cashier' })
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (13, @d, 'pending'), (12, 'other-phone-0001', 'pending')").run({ d: TILL })
+    approve(w.h, TILL, 10)
+    const approvedRow = rowId(w.h, 10, TILL)
+    const marked = await w.call(`/${approvedRow}/mark-shop`, 'POST', { label: 'Till 1' })
+    assert.equal(marked.status, 200)
+    assert.equal(marked.body.closedPending, 2, 'both waiting requests, not the marking row')
+    const pending = (await w.call('/pending', 'GET')).body.devices || []
+    assert.deepEqual(pending.map((d) => d.device_id), ['other-phone-0001'])
+    const closed = w.audits.find((a) => a[0] === 'shop_device_pending_closed')
+    assert.ok(closed, 'an audit row names what was closed')
+    assert.deepEqual(closed[3].closedRequests.map((r) => r.userId).sort(), [12, 13])
+    const dup = await w.call(`/${approvedRow}/mark-shop`, 'POST', { label: 'Again' })
+    assert.equal(dup.body.code, 'shop_device_exists')
+  })
+
   console.log(`   ${passed} passed, ${failures.length} failed`)
   return [...failures]
 }
@@ -326,12 +370,14 @@ const shopIdOf = (h) => h.raw.prepare('SELECT id FROM shop_devices WHERE unmarke
 const inFile = (file, from, to) => (text, rel) => (rel === file ? text.replace(from, to) : text)
 const mutants = [
   ['body id may claim a shop device (cookie gate removed)', inFile('lib/deviceTrust.ts', '@shop_ok = 1 AND', '1 = 1 AND'), ['2.']],
-  ['shop path removed (pre-slice behaviour)', inFile('lib/deviceTrust.ts', 'if (shopDeviceId && existing', 'if (false && existing'), ['1.', '1b.', '3.']],
+  ['shop path removed (pre-slice behaviour)', inFile('lib/deviceTrust.ts', 'if (shopDeviceId && !refusedAfterMarking', 'if (false && !refusedAfterMarking'), ['1.', '1b.', '3.']],
   ['unmark does not revoke sessions', inFile('routes/devices.ts', 'WHERE revoked_at IS NULL\n          AND (shop_device_id', 'WHERE 0 AND revoked_at IS NULL\n          AND (shop_device_id'), ['3.']],
   ['unmark revokes by device id (kills the admin session too)', inFile('routes/devices.ts', 'AND (shop_device_id = @id OR', 'AND (device_id = (SELECT device_id FROM shop_devices WHERE id = @id) OR'), ['3.']],
   ['admin guard removed from the devices router', inFile('routes/devices.ts', "if (!isAdminControlUser(c.get('user')))", 'if (false)'), ['4.']],
   ['re-issue drops the shop tag', inFile('lib/auth.ts', 'shop_device_id: shopDeviceId > 0 ? shopDeviceId : null', 'shop_device_id: null'), ['10.']],
-  ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "existing?.status !== 'rejected' && existing?.status !== 'approved'", 'true'), ['7.']],
+  ['a rejected account no longer outranks the shop marking', inFile('lib/deviceTrust.ts', "const refusedAfterMarking = existing?.status === 'rejected'", "const refusedAfterMarking = false && existing?.status === 'rejected'"), ['7.', '11.']],
+  ['an earlier decline or a revoke locks an employee out of the till (old rule)', (text, rel) => (rel === 'lib/deviceTrust.ts' ? text.replace(' && !existing.revoked_at', '').replace('existing.decided_at >= found.shop_marked_at', 'true').replace('(!existing.decided_at ||', '(true ||') : text), ['11.', '11b.']],
+  ['mark leaves the waiting requests in the queue', inFile('routes/devices.ts', "DELETE FROM trusted_devices WHERE device_id = @device_id AND status = 'pending' AND changes() = 1", 'DELETE FROM trusted_devices WHERE 0'), ['12.']],
 ]
 
 async function main() {
