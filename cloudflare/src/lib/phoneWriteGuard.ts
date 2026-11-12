@@ -1,17 +1,9 @@
-// A masked phone must never be written over a real one (P2.8, 6.0.1046).
-//
-// An account without `contacts_full_phone` reads `012 *** 678`. The screens that let it edit a contact, pick a customer for
-// a sale or resolve a duplicate send what they were shown back to the Worker; a Worker that saved it would replace a real
-// number with a mask. So a phone that comes back masked is resolved against the record it belongs to: it is accepted only
-// when it is the mask of the number that record holds at the same place (the primary phone; a Contact Option with the same
-// label, else the same position), and then the stored number is kept. Two stored numbers can share their first and last three
-// digits, so a mask is never matched against "any stored number": one that fits two different numbers is refused. Anything
-// else is refused too. A real number typed by the person passes through untouched.
+// A phone value that is a mask (`012 *** 678`) must never be written over a real number; it fires only for a mask already saved or sent by an old tab.
 import { parseStoredContactOptions, serializeContactOptions, type ContactOptionMode } from './contactOptions'
 import { isMaskedPhone, isMaskOf, resolveIncomingPhone } from './phoneMask'
 
 export const MASKED_PHONE_CODE = 'masked_phone_input'
-export const MASKED_PHONE_MESSAGE = 'A phone number in this request is hidden (it shows ***). Type the full number, or leave the phone unchanged.'
+export const MASKED_PHONE_MESSAGE = 'A phone number in this request is incomplete (it shows ***). Type the full number, or leave the phone unchanged.'
 
 export class MaskedPhoneInputError extends Error {
   readonly code = MASKED_PHONE_CODE

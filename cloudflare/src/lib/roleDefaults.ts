@@ -45,7 +45,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     fees: true,
     contacts: true,
     contacts_suppliers: true,
-    // Owner, 2 Nov 2026: seeing a full phone number is its own grant, off for every role but Administrator.
+    // Unused since 12 Nov 2026: every signed-in staff session reads full phone numbers (lib/phoneAccess.ts); kept only as the switch-back.
     contacts_full_phone: false,
     library: true,
     audit_log: true,

@@ -1,19 +1,16 @@
 // An Undo that would have to put back a value the editor could not see is refused, never faked (P2.8-F, 4 Nov 2026).
 //
-// An account without "See full phone numbers" is shown a value that is only a number as `097 *** 822`: a phone, but also a contact saved
-// under its number, a note, a label or a contact person that is one (cloudflare/src/lib/phoneAccess.ts). The edit's Undo replays the
-// snapshot taken before the edit, so for such a field it would replay the MASK. The Worker reads a mask as "the value you already hold"
-// (a value that is only a mask is taken out of the request, lib/phoneMaskMiddleware.ts), so the write would answer 200 and the field
-// would keep its NEW value: a silent non-restore, which is wrong data. So when the edit changed a field that was shown masked, the
-// Undo is refused up front, with a reason, and nothing is written. A field the edit left alone shows the same mask on both sides and
-// is not a reason; a holder's snapshot has the real values and is never refused.
-//
+// Every staff session now reads full numbers, so this only fires for a mask already saved in the database (a phone, a name, a note or a label that is only a number).
+// The edit's Undo replays the snapshot taken before the edit, which would replay that mask: the Worker reads a mask as "the value you already hold",
+// so the write would answer 200 and keep the NEW value, a silent non-restore. So when the edit changed such a field the Undo is refused up front, with a reason, and nothing is written.
+// A field the edit left alone shows the same mask on both sides and is not a reason.
+
 // The shapes are the ones the masker writes (cloudflare/src/lib/phoneMask.ts MASK_SHAPE): up to three digits, `***`, up to three
 // digits, or the bare `***`; and the same inside quotes in a sentence (a reason that quotes a number). A note that merely contains
 // "***" or digits ("call *** later", "ref 4471") is not a mask.
 
 /** The reason shown to the person (pack key `contact_undo_phone_hidden`, en and km). */
-export const UNDO_HIDDEN_VALUE_FALLBACK = 'Undo was refused: this edit changed a number you cannot see (it shows ***), and the old number cannot be put back from here. Nothing was changed. Edit it directly, or ask someone who can see full phone numbers.'
+export const UNDO_HIDDEN_VALUE_FALLBACK = 'Undo was refused: the saved value is incomplete (it shows ***), so the old value cannot be put back from here. Nothing was changed. Edit it directly and enter the correct value again.'
 
 const MASK = '(?:\\*\\*\\*|\\d{1,3} \\*\\*\\* \\d{1,3})'
 const WHOLE_MASK = new RegExp(`^${MASK}$`)

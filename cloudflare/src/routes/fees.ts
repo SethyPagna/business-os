@@ -438,7 +438,7 @@ export type FeeKeyset = { upToId?: number | null; after?: { feeDate: string; id:
  * Search matches label/notes/fee_type, the same "one field, several columns" pattern sales.ts's list endpoint already uses
  * rather than a bespoke per-page search implementation. Throws RangeError for a bad date parameter.
  * routes/feesCatalog.ts calls this for the expense half of the merged list, so the two lists filter identically.
- * `viewer` is the signed-in account: what its search may match depends on the full-phone grant (lib/phoneSearchGuard.ts); absent = without the grant.
+ * `viewer` is the signed-in staff account (lib/phoneSearchGuard.ts); absent = no session, which keeps the restricted search.
  */
 export async function queryFeeList(db: ReturnType<typeof getDb>, query: Record<string, string>, limit: number, offset: number, keyset?: FeeKeyset, viewer?: PhoneActor): Promise<FeeListPage> {
   const { search, fee_type: feeType, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId } = query
