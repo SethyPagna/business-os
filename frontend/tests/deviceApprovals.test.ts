@@ -85,4 +85,9 @@ for (const [lang, pack] of [['en', en], ['km', km]] as const) {
   else assert.ok(!text.includes('កំណត់') && !/ខូគី|\bID\b/i.test(text), 'neutral Khmer: no "mark" verb, cookie or ID')
 }
 
+// P-1 (review round 5): the card says when another account already has the device.
+assert.ok(panel.includes('device.shared_with && device.shared_with.length > 0'), 'the panel shows the other accounts on the same device')
+assert.ok(transport.includes('shared_with?:'), 'the record carries shared_with')
+for (const key of ['device_also_here']) assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}`)
+
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

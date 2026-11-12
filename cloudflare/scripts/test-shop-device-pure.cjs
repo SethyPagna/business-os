@@ -608,6 +608,18 @@ async function suite(mutate, label) {
     assert.equal(ok.status, 200, 'a request that claims nothing is still markable')
   })
 
+  await check('23. P-1: the pending list names the other accounts that already have a row on the same device, with their status, in the same statement; a request on its own id lists nobody', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'shared-phone-0001', 12)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (10, 'shared-phone-0001', 'pending'), (10, 'own-phone-000001', 'pending')").run({})
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status, decided_at, revoked_at) VALUES (12, 'own-phone-000001', 'rejected', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run({})
+    const pending = (await w.call('/pending', 'GET')).body.devices
+    const shared = pending.find((d) => d.device_id === 'shared-phone-0001')
+    assert.deepEqual(shared.shared_with, [{ user_id: 12, name: 'Dara', status: 'approved' }])
+    assert.deepEqual(pending.find((d) => d.device_id === 'own-phone-000001').shared_with, [], 'a rejected row of another account is history, not a sharer')
+    assert.equal('shared_with_json' in shared, false, 'the raw column is not leaked')
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -652,6 +664,7 @@ const mutants = [
   ['the shop new-country alert carries no device name (L-3)', inFile('lib/deviceTrust.ts', 'deviceName: shop.shop_label || null, ', ''), ['15.']],
   ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
   ['a request that claims an approved device can be marked as a shop device (N-3)', inFile('routes/devices.ts', "device.status === 'pending' && device.claimed_approval_ref", 'false'), ['22.']],
+  ['the pending list forgets who else is on the device (P-1)', inFile('routes/devices.ts', 'shared_with: parseSharedWith(shared_with_json)', 'shared_with: []'), ['23.']],
   ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]

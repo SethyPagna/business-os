@@ -329,6 +329,11 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
         {tr(t, 'requested', 'Requested')} {fmtDate(device.requested_at)} · {tr(t, 'last_seen', 'Last seen')} {fmtDate(device.last_seen_at)}
         {device.decided_by_name ? ` · ${tr(t, 'decided_by', 'Decided by')} ${device.decided_by_name}` : ''}
       </div>
+      {device.shared_with && device.shared_with.length > 0 ? (
+        <div className="mt-1 detail-scroll-text rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          {tr(t, 'device_also_here', 'Also on this device')}: {device.shared_with.map((other) => `${other.name} (${other.status === 'approved' ? tr(t, 'approved', 'Approved') : tr(t, 'pending', 'pending')})`).join(', ')}
+        </div>
+      ) : null}
       {device.claimed_approval_ref ? (
         <div className="mt-1 detail-scroll-text rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
           {tr(t, 'device_claimed_id', 'This request says it is an approved device, but could not prove it')}: {device.claimed_device_name || `#${device.claimed_approval_ref}`}

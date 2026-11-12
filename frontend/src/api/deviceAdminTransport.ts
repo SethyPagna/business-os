@@ -21,6 +21,8 @@ export type TrustedDeviceRecord = {
   user_name: string
   claimed_approval_ref?: number | null
   claimed_device_name?: string | null
+  // Other accounts with a pending or approved row on the same device (pending list only).
+  shared_with?: Array<{ user_id: number; name: string; status: 'pending' | 'approved' }>
 }
 
 // `limit` is the per-account approved-device cap the Worker enforces; the panel shows it instead of a number of its own.

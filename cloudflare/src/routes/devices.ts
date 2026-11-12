@@ -118,6 +118,12 @@ app.post('/sessions/revoke-user', async (c) => {
   return c.json({ success: true, revoked: Number(liveCount?.count || 0) })
 })
 
+export type SharedWith = { user_id: number; name: string; status: 'pending' | 'approved' }
+function parseSharedWith(json: string | null | undefined): SharedWith[] {
+  if (!json) return []
+  try { const parsed = JSON.parse(json); return Array.isArray(parsed) ? parsed : [] } catch { return [] }
+}
+
 // GET /api/auth/devices/pending -- devices awaiting a decision, across all
 // admin-control users (not just the caller's own account), so any admin
 // can clear the queue. Small deployments realistically have very few admin
@@ -126,13 +132,18 @@ app.get('/pending', async (c) => {
   const db = getDb(c.env)
   const rows = await db.prepare(`
     SELECT td.*, u.username, u.name AS user_name,
-      (SELECT c.device_name FROM trusted_devices c WHERE c.id = td.claimed_approval_ref) AS claimed_device_name
+      (SELECT c.device_name FROM trusted_devices c WHERE c.id = td.claimed_approval_ref) AS claimed_device_name,
+      (SELECT json_group_array(json_object('user_id', o.user_id, 'name', COALESCE(NULLIF(ou.name, ''), ou.username), 'status', o.status))
+         FROM trusted_devices o JOIN users ou ON ou.id = o.user_id
+         WHERE o.device_id = td.device_id AND o.user_id != td.user_id AND o.status IN ('pending', 'approved')) AS shared_with_json
     FROM trusted_devices td
     JOIN users u ON u.id = td.user_id
     WHERE td.status = 'pending'
     ORDER BY td.requested_at ASC
-  `).all<TrustedDeviceRow & { username: string; user_name: string; claimed_device_name: string | null }>()
-  return c.json({ devices: rows || [], limit: MAX_APPROVED_DEVICES_PER_USER })
+  `).all<TrustedDeviceRow & { username: string; user_name: string; claimed_device_name: string | null; shared_with_json?: string | null }>()
+  // Other accounts that already have a row on the same device: the administrator sees them before approving (review P-1).
+  const devices = (rows || []).map(({ shared_with_json, ...row }) => ({ ...row, shared_with: parseSharedWith(shared_with_json) }))
+  return c.json({ devices, limit: MAX_APPROVED_DEVICES_PER_USER })
 })
 
 // GET /api/auth/devices -- full history (approved/rejected/pending),
