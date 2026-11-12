@@ -133,7 +133,7 @@ export async function checkDeviceTrust(
     // to bypass an administrator's device-approval policy.
     const initialStatus = 'pending'
     // Bound only when a cookie really exists for this id: this response sets one (the cookie already verified, or no other account holds the id,
-    // see pinDeviceAfterGate), or another account's row on it is already bound. Otherwise the browser has no cookie to prove, and marking the row
+    // see the post-gate cookie helper in deviceCookie.ts), or another account's row on it is already bound. Otherwise the browser has no cookie to prove, and marking the row
     // bound would re-ask the whole shared browser after the approval (review N-1).
     const willBind = cookiesOn && (Boolean(meta.cookieVerified) || !found?.held_by_other || Boolean(found?.held_bound_by_other))
 
