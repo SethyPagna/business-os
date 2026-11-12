@@ -30,6 +30,7 @@ async function fixture(role = 'admin') {
       getPendingDevices: () => { const batch = { pending: deferred<{ devices: TrustedDeviceRecord[] }>(), all: deferred<{ devices: TrustedDeviceRecord[] }>(), sessions: deferred<{ sessions: LiveSessionRecord[] }>() }; reads.push(batch); return batch.pending.promise },
       getAllDevices: () => reads.at(-1)!.all.promise,
       getLiveSessions: () => reads.at(-1)!.sessions.promise,
+      getShopDevices: () => Promise.resolve({ shopDevices: [] }),
       approveDevice: (id: number) => write('approve', id), rejectDevice: (id: number) => write('reject', id), revokeDevice: (id: number) => write('revoke', id), resetDeviceForReapproval: (id: number) => write('reset', id), revokeLiveSession: (id: number) => write('session', id), revokeAllUserSessions: (id: number) => write('user', id),
     } },
   })
