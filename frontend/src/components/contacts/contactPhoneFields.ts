@@ -3,9 +3,7 @@ import { UNDO_HIDDEN_VALUE_FALLBACK } from '../../utils/hiddenValueUndo.ts'
 
 // A contact save carries a phone field only when the person changed it (P2.8-F, 3 Nov 2026).
 //
-// An account without "See full phone numbers" is shown `012 *** 678`, and an edit form fills its phone boxes from what it was shown.
-// Sending that mask back on a notes-only save asks the Worker to work out which stored number it hides; when a Contact Option has
-// no unique label and its mask also fits another of the contact's numbers, the Worker cannot, and refuses the whole save
+// A form never sends back a phone field the person did not change: a value already saved as a mask (`012 *** 678`) would be refused by the Worker
 // (400 masked_phone_input, which is right). The save never needed the numbers: it changed the notes. So the forms say which of the
 // two phone fields (the primary `phone`, and `address`, the Contact Options that hold the other numbers) are untouched, and the
 // PUT leaves them out. The Worker reads an absent field as "unchanged" (routes/contacts.ts pickColumns); an empty string is a
@@ -33,7 +31,7 @@ export function untouchedPhoneFields(baseline: PhoneFields, current: PhoneFields
   }
 }
 
-// What an account without "See full phone numbers" is shown for a number: `012 *** 678` (lib/phoneMask.ts). Its edit snapshot holds the mask, not the number.
+// A saved value shaped like `012 *** 678` (lib/phoneMask.ts) is a mask, not a number; every staff session now reads full numbers, so this only matches old saved masks.
 const SHOWN_MASK = /\*\*\*/
 
 /**

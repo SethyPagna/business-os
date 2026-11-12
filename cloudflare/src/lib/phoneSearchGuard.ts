@@ -1,7 +1,4 @@
-// An account without `contacts_full_phone` sees `012 *** 678`, and the owner decided (10 Nov 2026, "Allow partial") that it may still
-// find a customer or contact by typing PART of the number (the last four digits, the first digits). The contact lists, the POS picker,
-// the sales list's customer and the reports' customer therefore search a phone as stored for every account (lib/contactSearch.ts);
-// only the response masks it. This reverses the closed-fragment rule of 6.0.1046 for those customer lookups.
+// Every signed-in staff session reads phones in full (owner, 12 Nov 2026); this guard now only shapes search for a request with no staff session, which stays masked.
 //
 // What stays closed (P2.8): a number saved in a column that is NOT a customer's own name or phone (a sale's note, cashier or branch,
 // a return's supplier or note, a shift or audit text). The response masks it, and a digit-only word for an account without the grant

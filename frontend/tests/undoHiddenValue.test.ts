@@ -93,7 +93,7 @@ console.log('PASS every edit site that offers Undo for a field the Worker masks 
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
   assert.equal(en.contact_undo_phone_hidden, UNDO_HIDDEN_VALUE_FALLBACK, 'the English fallback is the pack text, word for word')
-  assert.ok(/number you cannot see/.test(en.contact_undo_phone_hidden) && !/phone number you cannot see/.test(en.contact_undo_phone_hidden), 'the reason fits a note or a name that is a number, not only a phone')
+  assert.ok(/saved value is incomplete/.test(en.contact_undo_phone_hidden) && !/phone/i.test(en.contact_undo_phone_hidden) && !/who can see/.test(en.contact_undo_phone_hidden), 'the reason fits a note or a name that is a number, not only a phone, and names nobody who sees more')
   assert.ok(typeof km.contact_undo_phone_hidden === 'string' && /[ក-៿]/.test(km.contact_undo_phone_hidden) && km.contact_undo_phone_hidden.includes('***'), 'the Khmer reason is Khmer and says what is hidden')
   assert.notEqual(km.contact_undo_phone_hidden, en.contact_undo_phone_hidden)
   console.log('PASS the reason is in both packs and fits a phone, a name, a note and a label')
