@@ -85,6 +85,9 @@ function deviceActionMessage(t: TranslateFn, err: unknown): string {
   if (code === 'shop_device_held') {
     return tr(t, 'shop_device_held', 'Another account already has this device approved, so this request may be a copy. Decline it, or mark the approved device instead.')
   }
+  if (code === 'shop_device_claimed') {
+    return tr(t, 'shop_device_claimed', 'This request says it comes from an approved device but could not show it. Decline it, or mark the approved device instead.')
+  }
   if (code === 'shop_label_invalid') {
     return tr(t, 'shop_label_invalid', 'Give the shop device a name of 1 to 60 characters.')
   }

@@ -71,9 +71,11 @@ assert.match(km.device_claimed_id, /[ក-៿]/, 'in Khmer script')
 assert.ok(panel.includes('{device.claimed_approval_ref ? null : ('), 'the shop button is hidden on a request flagged as claiming an approved device')
 assert.ok(!/(id|cookie)/i.test(en.device_claimed_id), 'the English warning says no "id" or "cookie"')
 assert.ok(!/ខូគី|ID/i.test(km.device_claimed_id), 'nor the Khmer one')
-for (const key of ['shop_device_held']) {
+for (const key of ['shop_device_held', 'shop_device_claimed']) {
   assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `both packs carry ${key}, Khmer in Khmer script`)
 }
 assert.ok(panel.includes("code === 'shop_device_held'"), 'the server refusal to mark a copied id is explained, not shown as a bare error')
+assert.ok(panel.includes("code === 'shop_device_claimed'"), 'the server refusal to mark a request that claims an approved device is explained too (N-3)')
+
 
 console.log('PASS device re-approval reset transport, history placement, confirmation, and bilingual copy')

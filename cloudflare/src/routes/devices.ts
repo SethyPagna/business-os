@@ -548,6 +548,10 @@ app.post('/:id/mark-shop', async (c) => {
     return c.json({ error: 'This device was a shop device before and is given a new identity when it signs in again. Mark its new request instead.', code: 'shop_device_retired' }, 409)
   }
   if (device.status !== 'approved' && device.status !== 'pending') return c.json({ error: 'Only a pending or approved device can be marked as a shop device.', code: 'shop_device_not_approved' }, 409)
+  // A request that says it comes from an approved device but could not prove it is a browser that learned that id: the panel hides the button, and the server refuses too (review N-3).
+  if (device.status === 'pending' && device.claimed_approval_ref) {
+    return c.json({ error: 'This request says it comes from an approved device but could not show it. Decline it, or mark the approved device instead.', code: 'shop_device_claimed' }, 409)
+  }
   // Rows for this browser no longer matter once it is a shop device (every
   // employee passes there): waiting requests would stay in the queue and bell,
   // and approved rows would hold a slot for nothing. The same batch removes them.
