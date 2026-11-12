@@ -171,10 +171,17 @@ app.get('/', async (c) => {
 
 // A request on the id of a till that was marked and then unmarked is dead: the id is retired and the browser
 // continues under a fresh one, so approving it would be an approval nobody can use (review M-1).
-async function isRetiredShopId(db: ReturnType<typeof getDb>, deviceId: string): Promise<boolean> {
-  const row = await db.prepare('SELECT 1 AS n FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NOT NULL LIMIT 1').get<{ n: number }>({ device_id: deviceId })
-  return Boolean(row)
+// The same read answers both questions an approval asks about the device: was it a shop device that is now retired, and does another account
+// already have a pending or approved row on it (an approval then also proves possession of that device for the other account, review P-1).
+async function deviceFacts(db: ReturnType<typeof getDb>, deviceId: string, userId: number): Promise<{ retired: boolean; others: number }> {
+  const row = await db.prepare(`SELECT (SELECT 1 FROM shop_devices WHERE device_id = @device_id AND unmarked_at IS NOT NULL LIMIT 1) AS retired,
+    (SELECT COUNT(DISTINCT o.user_id) FROM trusted_devices o WHERE o.device_id = @device_id AND o.user_id != @user_id AND o.status IN ('pending', 'approved')) AS others`)
+    .get<{ retired: number | null; others: number | null }>({ device_id: deviceId, user_id: userId })
+  return { retired: Boolean(row?.retired), others: Number(row?.others || 0) }
 }
+
+const SHARED_CONFIRM_ANSWER = { error: 'Another account already uses this device. Confirm to continue.', code: 'device_shared_confirm' } as const
+const confirmedShared = (body: { confirmShared?: unknown } | null | undefined) => body?.confirmShared === true
 
 const RETIRED_SHOP_ID_ANSWER = { error: 'This request is on a shop device that was unmarked, so an approval would not work. Ask the employee to sign in again.', code: 'shop_device_retired' } as const
 
@@ -199,7 +206,9 @@ app.post('/:id/approve', async (c) => {
   // stay idempotent even if the account is now at the approved-device cap.
   if (device.status === 'approved') return c.json({ success: true, idempotent: true })
 
-  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
+  const facts = await deviceFacts(db, device.device_id, device.user_id)
+  if (facts.retired) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
+  if (facts.others > 0 && !confirmedShared(await c.req.json<{ confirmShared?: unknown }>().catch(() => null))) return c.json(SHARED_CONFIRM_ANSWER, 409)
 
   // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (owner
   // rule, 5 since 12 Nov 2026). Excluding this row keeps re-approving an already-approved
@@ -276,7 +285,7 @@ app.post('/:id/approve', async (c) => {
 app.post('/:id/approve-replacing', async (c) => {
   const id = Number(c.req.param('id'))
   const admin = c.get('user')
-  const body = await c.req.json<{ revokeId?: unknown }>().catch(() => ({} as { revokeId?: unknown }))
+  const body = await c.req.json<{ revokeId?: unknown; confirmShared?: unknown }>().catch(() => ({} as { revokeId?: unknown; confirmShared?: unknown }))
   const revokeId = Number(body.revokeId)
   if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(revokeId) || revokeId <= 0 || id === revokeId) {
     return c.json({ error: 'A pending device and a different approved device are required.', code: 'device_replace_invalid' }, 400)
@@ -297,7 +306,9 @@ app.post('/:id/approve-replacing', async (c) => {
   if (!old || old.user_id !== device.user_id || old.status !== 'approved') {
     return c.json({ error: 'Choose an approved device of the same account to replace.', code: 'device_replace_invalid' }, 400)
   }
-  if (await isRetiredShopId(db, device.device_id)) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
+  const facts = await deviceFacts(db, device.device_id, device.user_id)
+  if (facts.retired) return c.json(RETIRED_SHOP_ID_ANSWER, 409)
+  if (facts.others > 0 && !confirmedShared(body)) return c.json(SHARED_CONFIRM_ANSWER, 409)
 
   const params = {
     id: device.id,

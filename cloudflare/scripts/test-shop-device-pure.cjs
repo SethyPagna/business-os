@@ -620,6 +620,35 @@ async function suite(mutate, label) {
     assert.equal('shared_with_json' in shared, false, 'the raw column is not leaked')
   })
 
+  await check('24. P-1 HA: approving (and approving-replacing) a request on a device another account already has needs confirmShared: otherwise 409 device_shared_confirm and nothing changes; a request on its own device needs nothing', async () => {
+    const w = setup(mutate)
+    approve(w.h, 'shared-phone-0002', 10)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, 'shared-phone-0002', 'pending'), (12, 'own-phone-000002', 'pending')").run({})
+    const statusOf = (user, device) => w.h.raw.prepare('SELECT status FROM trusted_devices WHERE user_id = @user AND device_id = @device').get({ user, device }).status
+    const refused = await w.call(`/${rowId(w.h, 12, 'shared-phone-0002')}/approve`)
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'device_shared_confirm')
+    assert.equal(statusOf(12, 'shared-phone-0002'), 'pending', 'nothing changed')
+    const notTrue = await w.call(`/${rowId(w.h, 12, 'shared-phone-0002')}/approve`, 'POST', { confirmShared: 'yes' })
+    assert.equal(notTrue.status, 409, 'only the boolean true confirms')
+    const own = await w.call(`/${rowId(w.h, 12, 'own-phone-000002')}/approve`)
+    assert.equal(own.status, 200, 'a request on its own device needs no confirmation')
+    const ok = await w.call(`/${rowId(w.h, 12, 'shared-phone-0002')}/approve`, 'POST', { confirmShared: true })
+    assert.equal(ok.status, 200)
+    assert.equal(statusOf(12, 'shared-phone-0002'), 'approved')
+    // approve-replacing: the same rule
+    approve(w.h, 'shared-phone-0003', 10)
+    approve(w.h, 'old-phone-0000003', 12)
+    w.h.raw.prepare("INSERT INTO trusted_devices (user_id, device_id, status) VALUES (12, 'shared-phone-0003', 'pending')").run({})
+    const replaceBody = (extra) => ({ revokeId: rowId(w.h, 12, 'old-phone-0000003'), ...extra })
+    const rRefused = await w.call(`/${rowId(w.h, 12, 'shared-phone-0003')}/approve-replacing`, 'POST', replaceBody({}))
+    assert.equal(rRefused.status, 409, JSON.stringify(rRefused.body))
+    assert.equal(rRefused.body.code, 'device_shared_confirm')
+    assert.equal(statusOf(12, 'old-phone-0000003'), 'approved', 'the old device is not revoked by a refused replace')
+    const rOk = await w.call(`/${rowId(w.h, 12, 'shared-phone-0003')}/approve-replacing`, 'POST', replaceBody({ confirmShared: true }))
+    assert.equal(rOk.status, 200, JSON.stringify(rOk.body))
+  })
+
   await check('17. the pending list tells the administrator which approved device a request claimed (L4); a plain new device claims nothing', async () => {
     const w = setup(mutate)
     approve(w.h, 'claimed-phone-0001', 12)
@@ -665,6 +694,8 @@ const mutants = [
   ['a pending request on an id another account holds approved can be marked (L-4)', inFile('routes/devices.ts', "device.status === 'pending' && (waiting || []).some(", "false && (waiting || []).some("), ['21.']],
   ['a request that claims an approved device can be marked as a shop device (N-3)', inFile('routes/devices.ts', "device.status === 'pending' && device.claimed_approval_ref", 'false'), ['22.']],
   ['the pending list forgets who else is on the device (P-1)', inFile('routes/devices.ts', 'shared_with: parseSharedWith(shared_with_json)', 'shared_with: []'), ['23.']],
+  ['approving a request on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(await', 'if (false && !confirmedShared(await'), ['24.']],
+  ['approve-replacing on a shared device needs no confirmation (P-1 HA)', inFile('routes/devices.ts', 'if (facts.others > 0 && !confirmedShared(body))', 'if (false && !confirmedShared(body))'), ['24.']],
   ['the /session-duration route forgets the shop tag when it re-issues (L-5)', (text, rel) => (rel === 'routes/auth.ts' ? text.replace('shopDeviceId: source.shopDeviceId,', '') : text), ['10.']],
   ['marking from a pending request is refused', inFile('routes/devices.ts', "device.status !== 'approved' && device.status !== 'pending'", "device.status !== 'approved'"), ['13.']],
 ]
