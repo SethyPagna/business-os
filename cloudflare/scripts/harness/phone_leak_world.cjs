@@ -49,6 +49,7 @@ const PRODUCT_CODE_MASK = '885 *** 901'
 
 const PROBES = [
   "app.get('/api/__routes', (c) => c.json(app.routes.map((route) => ({ method: route.method, path: route.path }))))",
+  "app.get('/api/__phone-probe', (c) => c.json({ customer_phone: '087 654 321', phone: '098 111 222', note: 'no session reads this masked' }))",
 ].join('\n')
 const PROBE_ANCHOR = "app.route('/api/internal/branch-cutover'"
 const addProbeRoutes = (source) => {
@@ -84,7 +85,23 @@ function leaksIn(text) {
   return found
 }
 
-async function bootPhoneWorld({ extraTransform, transformSources } = {}) {
+// Every signed-in session reads full numbers (owner, 12 Nov 2026), so the masking machinery is only reachable for an account
+// through the switch-back: lib/phoneAccess.ts with canSeeFullPhones replaced by holdsFullPhoneGrant. A world boots under the
+// switch-back unless it asks for the live rule (PHONE_RULE=live): the write, search and masked-text tests and every mutant run there.
+const SWITCH_BACK_HEAD = 'export function canSeeFullPhones(user: PhoneActor): boolean {'
+function switchBack(source) {
+  const at = source.indexOf(SWITCH_BACK_HEAD)
+  if (at < 0) throw new Error('src/lib/phoneAccess.ts no longer declares canSeeFullPhones where the switch-back rewrites it')
+  return source.slice(0, at) + SWITCH_BACK_HEAD + ' return holdsFullPhoneGrant(user) ' + source.slice(source.indexOf('}', at))
+}
+const ruleOf = (rule) => rule || process.env.PHONE_RULE || 'grant'
+
+async function bootPhoneWorld({ extraTransform, transformSources: mutate, rule } = {}) {
+  const live = ruleOf(rule) === 'live'
+  const transformSources = live ? mutate : (file, source) => {
+    const rewritten = mutate ? mutate(file, source) : undefined
+    return file === 'lib/phoneAccess.ts' ? switchBack(rewritten ?? source) : rewritten
+  }
   const world = await bootWorld({
     adminPassword: randomBytes(12).toString('base64url'),
     transformEntry: (source) => (extraTransform ? extraTransform(addProbeRoutes(source)) : addProbeRoutes(source)),
@@ -114,10 +131,10 @@ async function bootPhoneWorld({ extraTransform, transformSources } = {}) {
   await world.run('UPDATE users SET permissions = ? WHERE username = ?', JSON.stringify({ contacts_full_phone: true }), 'person_granted')
   await world.account('person_revoked', { roleCode: 'ph_manager_granted' })
   await world.run('UPDATE users SET permissions = ? WHERE username = ?', JSON.stringify({ contacts_full_phone: false }), 'person_revoked')
-  world.accounts = {
-    denied: ['cashier', 'manager', 'pos_only', 'sales_only', 'person_revoked'],
-    allowed: ['admin', 'cashier_granted', 'manager_granted', 'person_granted'],
-  }
+  world.live = live
+  world.accounts = live
+    ? { denied: [], allowed: ['admin', 'cashier', 'manager', 'pos_only', 'sales_only', 'person_revoked', 'cashier_granted', 'manager_granted', 'person_granted'] }
+    : { denied: ['cashier', 'manager', 'pos_only', 'sales_only', 'person_revoked'], allowed: ['admin', 'cashier_granted', 'manager_granted', 'person_granted'] }
 
   // ---- people, written the way the app writes them (so audit rows, undo payloads and records exist too) ----------------
   const customer = await must('customer', await world.api('POST', '/api/customers', {

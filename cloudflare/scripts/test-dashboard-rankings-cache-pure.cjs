@@ -73,7 +73,12 @@ function makeEnv({ kv = {}, d1 = {} } = {}) {
   return { env, state }
 }
 
-function load(patches = {}) {
+// Every signed-in session reads full numbers (owner, 12 Nov 2026). The grant-keyed behaviour is still there for the switch-back, so the
+// 'grant' rule swaps canSeeFullPhones for holdsFullPhoneGrant and the 'live' rule is the source as it stands.
+const LIVE_RULE = 'export function canSeeFullPhones(user: PhoneActor): boolean {\n  return !!user\n}'
+const SWITCH_BACK = { from: LIVE_RULE, to: 'export function canSeeFullPhones(user: PhoneActor): boolean {\n  return holdsFullPhoneGrant(user)\n}' }
+
+function load(patches = {}, rule = 'live') {
   // 6.0.1048: the key carries the data epoch (lib/readSwitches.ts) and the deployment id (lib/cacheKey.ts); the real key module over a fixed epoch.
   const readSwitches = { readDataEpoch: async () => 'e'.repeat(32) }
   const cacheKey = loadTs('src/lib/cacheKey.ts', { './readSwitches': readSwitches })
@@ -84,7 +89,7 @@ function load(patches = {}) {
   }, patches['src/lib/cache.ts'] || [])
   const phoneMask = loadTs('src/lib/phoneMask.ts', {})
   const permissions = loadTs('src/lib/permissions.ts', {})
-  const phoneAccess = loadTs('src/lib/phoneAccess.ts', { './permissions': permissions, './phoneMask': phoneMask })
+  const phoneAccess = loadTs('src/lib/phoneAccess.ts', { './permissions': permissions, './phoneMask': phoneMask }, rule === 'grant' ? [SWITCH_BACK] : patches['src/lib/phoneAccess.ts'] || [])
   const phoneCache = loadTs('src/lib/phoneCache.ts', { './cache': cacheLib, './phoneAccess': phoneAccess })
   const lib = loadTs('src/lib/dashboardRankingsCache.ts', { './cache': cacheLib, './cacheKey': cacheKey, './readSwitches': readSwitches, './phoneAccess': phoneAccess, './phoneCache': phoneCache }, patches['src/lib/dashboardRankingsCache.ts'] || [])
   return { cacheLib, lib }
@@ -173,7 +178,7 @@ async function versionsBehaviour(patches = {}) {
 // P2.8 (6.0.1046): the top-customers rows carry a phone. The key carries the full-phone grant and the rows stored for an
 // account without it are already masked, so neither account can be served the other's entry (CACHE-LIFECYCLE section 5).
 async function phoneBehaviour(patches = {}) {
-  const { lib } = load(patches)
+  const { lib } = load(patches, 'grant')
   const holder = { id: 1, role_code: 'admin', permissions: '{}', role_permissions: '{}' }
   const cashier = { id: 2, role_code: 'employee', permissions: '{}', role_permissions: JSON.stringify({ dashboard: true }) }
   const granted = { id: 3, role_code: 'employee', permissions: JSON.stringify({ contacts_full_phone: true }), role_permissions: '{}' }
@@ -207,10 +212,34 @@ async function phoneBehaviour(patches = {}) {
   assert.deepEqual(await (await open(holder)).read('top_customers'), customers, 'the holder still reads in full after the other account warmed its own entry')
 }
 
+// The live rule: one full entry for every signed-in account, whoever warms it; only a request with no account is kept apart.
+async function phoneLiveBehaviour(patches = {}) {
+  const { lib } = load(patches, 'live')
+  const admin = { id: 1, role_code: 'admin', permissions: '{}', role_permissions: '{}' }
+  const cashier = { id: 2, role_code: 'employee', permissions: '{}', role_permissions: JSON.stringify({ dashboard: true }) }
+  const revoked = { id: 3, role_code: 'employee', permissions: JSON.stringify({ contacts_full_phone: false }), role_permissions: '{}' }
+  const customers = [{ customer_id: 5, customer_name: 'Fixture Dara', phone: '087 654 321', revenue_usd: 12.5 }]
+  const { env } = makeEnv({ kv: ALL_KV })
+  const cache = makeCache()
+  const waits = []
+  const open = (user) => lib.openDashboardRankingsCache(env, { requestUrl: URL_, waitUntil: (p) => waits.push(p), cache, user }, FILTERS)
+  const drain = async () => { await Promise.all(waits.splice(0)) }
+
+  const warm = await open(cashier)
+  warm.write('top_customers', customers)
+  await drain()
+  for (const [who, user] of [['the account that warmed it', cashier], ['an administrator', admin], ['an account whose grant is switched off', revoked]]) {
+    assert.deepEqual(await (await open(user)).read('top_customers'), customers, `${who} reads the one full entry`)
+  }
+  assert.equal(await (await open(undefined)).read('top_customers'), null, 'no account at all is a MISS on the full entry (masked, never open)')
+  assert.equal([...cache.store.values()].filter((body) => body.includes('087 654 321')).length, 1, 'one stored entry holds the full number')
+}
+
 async function suite(patches = {}) {
   await behaviour(patches)
   await versionsBehaviour(patches)
   await phoneBehaviour(patches)
+  await phoneLiveBehaviour(patches)
 }
 
 const DRC = 'src/lib/dashboardRankingsCache.ts'
@@ -247,6 +276,8 @@ async function main() {
   // ---- mutants ----
   const mutants = [
     ...['sales', 'returns', 'customers', 'products'].map((namespace) => ({ name: `key ignores the ${namespace} version`, patches: { [DRC]: [{ from: 'versions[index]]', to: `namespace === '${namespace}' ? '' : versions[index]]` }] } })),
+    { name: 'the live rule needs the grant again', patches: { 'src/lib/phoneAccess.ts': [{ from: LIVE_RULE, to: SWITCH_BACK.to }] } },
+    { name: 'the live rule opens to a request with no account', patches: { 'src/lib/phoneAccess.ts': [{ from: LIVE_RULE, to: 'export function canSeeFullPhones(user: PhoneActor): boolean {\n  return true\n}' }] } },
     { name: 'key ignores the full-phone grant', patches: { [DRC]: [{ from: "['phone', phoneCacheVariant(ctx.user)]", to: "['phone', 'phone-full']" }] } },
     { name: 'an account without the grant stores the full rows', patches: { [DRC]: [{ from: 'projectPhones(rows, ctx.user)', to: 'rows' }] } },
     { name: 'key ignores the kind', patches: { [DRC]: [{ from: "['kind', kind], ", to: '' }] } },

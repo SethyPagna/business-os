@@ -1,9 +1,9 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getSessionUser, hasSessionCookie } from './auth'
-import { canSeeFullPhones, projectPhones, scrubMaskedRequestText, type PhoneActor } from './phoneAccess'
+import { projectPhones, scrubMaskedRequestText, type PhoneActor } from './phoneAccess'
 
 // Installed once for the whole /api surface (index.ts), ahead of every route, so a route that answers with c.json
-// cannot send a full phone number to an account without `contacts_full_phone`. It wraps c.json the way
+// cannot send a full phone number to a request with no staff session (lib/phoneAccess.ts canSeeFullPhones). It wraps c.json the way
 // acquisitionCostResponses does: the object a handler built (after any cache read) is projected before it is
 // serialized, and nothing is buffered or re-parsed.
 //
@@ -46,7 +46,7 @@ export const phoneMaskResponses: MiddlewareHandler = async (c, next) => {
     if (hasSessionCookie(c)) {
       try { sessionActor = (await getSessionUser(c)) as PhoneActor } catch { sessionActor = null }
     }
-    if (sessionActor && !canSeeFullPhones(sessionActor)) await scrubMaskedWrite(c)
+    if (sessionActor) await scrubMaskedWrite(c)
     const json: Function = c.json
     c.json = ((...args: Parameters<Context['json']>) => {
       const actor = ((c as unknown as { get(key: string): PhoneActor }).get('user') ?? sessionActor) as PhoneActor

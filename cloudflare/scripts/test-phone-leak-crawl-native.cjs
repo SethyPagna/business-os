@@ -1,5 +1,16 @@
 'use strict'
-// P2.8 (6.0.1046): zero full phone numbers reach an account without `contacts_full_phone`, on EVERY route.
+// P2.8 (6.0.1046): the phone projection on EVERY route. Since 12 Nov 2026 (owner: "don't hide in system admin, don't hide for
+// employee") every signed-in staff session reads full numbers and only a request with no session is masked. This file runs two rules:
+//
+//   live rule (default)        every staff account reads full numbers on every route (no mask of a fixture number anywhere, the
+//                              accounts that used to be denied read what the administrator reads), a request with no session or a
+//                              dead cookie is masked, and the shared cache serves every account the one full entry;
+//   switch-back (PHONE_RULE=grant, and every mutant / egress-off / cache run)
+//                              lib/phoneAccess.ts with canSeeFullPhones replaced by holdsFullPhoneGrant: the masking machinery
+//                              below, unchanged, for five accounts that lack the grant and four that hold it
+//                              (test-phone-leak-crawl-switchback-native.cjs runs this pass).
+//
+// The text below describes the switch-back pass: zero full phone numbers reach an account without contacts_full_phone, on EVERY route.
 //
 // Drives the REAL Worker under Miniflare (every middleware, route and lib, bundled with esbuild) on a database that holds
 // synthetic people with phones in every place the app keeps one (customers and their Contact Options, a supplier, a
@@ -38,7 +49,15 @@ const sub = (needle, replacement) => (source) => {
   return source.replace(needle, replacement)
 }
 // Each mutant: the file it rewrites and how. `cacheOnly` ones run in the egress-off world (the cache layer is the only wall).
+const LIVE_RULE_HEAD = 'export function canSeeFullPhones(user: PhoneActor): boolean {'
+const liveRuleBody = (body) => (source) => {
+  const at = source.indexOf(LIVE_RULE_HEAD)
+  if (at < 0) throw new Error('mutant anchor missing: ' + LIVE_RULE_HEAD)
+  return source.slice(0, at) + LIVE_RULE_HEAD + ' ' + body + ' ' + source.slice(source.indexOf('}', at))
+}
 const MUTANTS = {
+  'live rule: the grant is required again': { file: 'lib/phoneAccess.ts', rewrite: liveRuleBody('return holdsFullPhoneGrant(user)'), live: true },
+  'live rule: a request with no session reads in full': { file: 'lib/phoneAccess.ts', rewrite: liveRuleBody('return true'), live: true },
   'no-egress-projection': { file: 'index.ts', rewrite: sub(MIDDLEWARE_LINE, '') },
   'one-route-bypasses-c-json': {
     file: 'routes/sales.ts',
@@ -60,8 +79,10 @@ async function main() {
   const egressOff = process.env.PHONE_WORLD === 'egress-off'
   const cacheMode = process.env.PHONE_MODE === 'cache'
   const only = process.env.PHONE_CRAWL_FILTER || ''
+  const live = (!mutantName || (mutant && mutant.live)) && !egressOff && !cacheMode && process.env.PHONE_RULE !== 'grant'
 
   const world = await bootPhoneWorld({
+    rule: live ? 'live' : 'grant',
     extraTransform: egressOff ? sub(MIDDLEWARE_LINE, '') : undefined,
     transformSources: mutant ? (file, source) => {
       if (file !== mutant.file) return undefined
@@ -81,6 +102,76 @@ async function main() {
   }
 
   const results = {}
+  const MASK_MARK = /\d \*\*\* \d/
+  const noSession = (route, headers = { cookie: '' }) => world.api('GET', route, undefined, { headers })
+
+  // The live rule: every staff account reads the numbers in full, a request with no session stays masked.
+  async function liveChecks() {
+    const staff = world.accounts.allowed
+    await check('live rule: no response to any staff account holds a mask of a number (every account reads in full)', async (t) => {
+      for (const account of staff) {
+        const masked = results[account].filter((r) => MASK_MARK.test(r.text))
+        t.eq(`${account}: responses holding a mask; first ones`, masked.slice(0, 8).map((r) => `${r.route} :: ${(r.text.match(/.{0,40}\d \*\*\* \d.{0,20}/) || [''])[0]}`), [])
+      }
+    })
+    await check('live rule: the accounts that used to be denied read the numbers the administrator reads', async (t) => {
+      const adminRoutes = new Set(results.admin.filter((r) => r.status === 200 && r.leaks.length).map((r) => r.route))
+      for (const account of ['cashier', 'manager', 'pos_only', 'sales_only', 'person_revoked']) {
+        const reads = results[account].filter((r) => r.status === 200 && r.leaks.length && adminRoutes.has(r.route))
+        console.log(`  ${account}: full numbers on ${reads.length} routes`)
+        t.ok(`${account} reads full numbers on ${reads.length} routes (at least 1)`, reads.length >= 1, reads.length)
+      }
+      for (const route of ['/api/customers?fields=sales_picker', '/api/customers?page=1&pageSize=50']) {
+        for (const account of ['cashier', 'manager', 'person_revoked']) {
+          const r = results[account].find((x) => x.route === route)
+          t.ok(`${account} reads ${route} in full`, !!r && r.status === 200 && r.leaks.includes('customer'), r && r.status)
+        }
+      }
+    })
+    await check('live rule: a request with no session or a dead cookie is masked, never open', async (t) => {
+      const probe = '/api/__phone-probe'
+      const without = await noSession(probe)
+      t.eq('no cookie: status', without.status, 200)
+      t.eq('no cookie: no full number', leaksIn(without.text), [])
+      t.ok('no cookie: the mask is shown', /087 \*\*\* 321/.test(without.text), without.text)
+      const dead = await noSession(probe, { cookie: 'bos_session=not-a-session' })
+      t.eq('dead cookie: no full number', leaksIn(dead.text), [])
+      t.ok('dead cookie: the mask is shown', /087 \*\*\* 321/.test(dead.text), dead.text)
+      for (const account of staff) {
+        const r = await get(probe, account)
+        t.ok(`${account} reads the probe in full`, /087 654 321/.test(r.text) && /098 111 222/.test(r.text), r.text)
+      }
+      for (const route of ['/api/customers?fields=sales_picker', '/api/sales?page=1&pageSize=50', '/api/auth/me']) {
+        const r = await noSession(route)
+        t.eq(`no session on ${route}: no full number`, leaksIn(r.text), [])
+      }
+    })
+    await check('live rule: the shared cache serves every account one full entry (whoever warms it)', async (t) => {
+      for (const [first, second] of [['manager', 'cashier'], ['cashier', 'manager_granted'], ['admin', 'person_revoked']]) {
+        for (const base of ['/api/customers?page=1&pageSize=50', '/api/customers?fields=picker']) {
+          const route = `${base}${base.includes('?') ? '&' : '?'}cb=live${first}${second}`
+          const a = await get(route, first)
+          const b = await get(route, second)
+          t.ok(`${first} then ${second} on ${base}: both read full numbers`, leaksIn(a.text).length > 0 && leaksIn(b.text).length > 0 && !MASK_MARK.test(a.text + b.text), `${a.status}/${b.status}`)
+        }
+      }
+    })
+    await check('live rule: a sale made from a form still holding a mask resolves to the real number and answers in full', async (t) => {
+      const sold = await world.placeSale({ as: 'manager', customerId: ids.customer, customerName: 'Fixture Dara', customerPhone: '087 *** 321' })
+      t.ok(`the sale is created (status ${sold.status})`, sold.status === 200 || sold.status === 201, sold.text.slice(0, 300))
+      t.ok('the reply carries the full number', leaksIn(sold.text).includes('customer'), sold.text.slice(0, 300))
+      const saved = await world.first('SELECT customer_phone FROM sales WHERE id = ?', sold.json && (sold.json.id ?? (sold.json.sale && sold.json.sale.id)))
+      t.eq('the saved sale holds the real number (the mask was resolved, not stored)', saved && String(saved.customer_phone).replace(/\D/g, ''), '087654321')
+    })
+    await check('live rule: updating a contact from a row that still holds a mask keeps the stored number and answers in full', async (t) => {
+      const before = await world.first('SELECT phone FROM customers WHERE id = ?', ids.customer)
+      const put = await world.api('PUT', `/api/customers/${ids.customer}`, { name: 'Fixture Dara', phone: '087 *** 321', notes: 'live edit' }, { as: 'cashier' })
+      t.ok(`status ${put.status}`, put.status === 200, put.text.slice(0, 200))
+      const after = await world.first('SELECT phone FROM customers WHERE id = ?', ids.customer)
+      t.eq('the stored number is unchanged', after && after.phone, before && before.phone)
+      t.ok('the reply carries the full number', leaksIn(put.text).includes('customer'), put.text.slice(0, 200))
+    })
+  }
   const phoneQuery = encodeURIComponent(PHONES.customer)
   let routes = []
 
@@ -231,7 +322,7 @@ async function main() {
         for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) compareLeaves(a[key], b[key], `${path}.${key}`, bad)
       } else if (a !== b && (String(a).includes('#') || String(b).includes('#'))) bad.push(`${path}: holder=${String(a).slice(0, 90)} | other=${String(b).slice(0, 90)}`)
     }
-    if (!only) {
+    if (!only && !live) {
       for (const [holder, other] of [['cashier_granted', 'cashier'], ['person_granted', 'cashier'], ['manager_granted', 'manager'], ['manager_granted', 'person_revoked']]) {
         await check(`${holder} (grant) and ${other} (none) differ ONLY in the numbers: the holder keeps today's output`, async (t) => {
           const bad = []
@@ -285,6 +376,8 @@ async function main() {
     }
   }
 
+  if (live) await liveChecks()
+
   // The cached path. Each shape below is read through the Cache API. Separate entries are proved by changing a name straight in
   // the database (no version bump, so a hit stays stale): the holder keeps reading the OLD name from its own entry while the
   // other account's first read is a miss that builds its own entry from the NEW name, and its second read is a hit.
@@ -295,7 +388,7 @@ async function main() {
       ['suppliers list', '/api/suppliers?page=1&pageSize=50', 'suppliers', () => ids.supplier, 'Fixture Supplies'],
       ['delivery contacts list', '/api/delivery-contacts?page=1&pageSize=50', 'delivery_contacts', () => ids.delivery, 'Fixture Courier'],
     ]
-    for (const [label, base, table, idOf, name] of CACHED) {
+    for (const [label, base, table, idOf, name] of (live ? [] : CACHED)) {
       const rename = (value) => world.run(`UPDATE ${table} SET name = ? WHERE id = ?`, value, idOf())
       await check(`cached path, holder warms first: ${label} is masked for the account without the grant, and the entries are separate`, async (t) => {
         const route = `${base}${base.includes('?') ? '&' : '?'}cb=holderfirst`
@@ -322,7 +415,7 @@ async function main() {
         t.eq('and the account without the grant still reads none', leaksIn(again.text), [])
       })
     }
-    await check('cached path: the Sales list entry is split by the grant as well', async (t) => {
+    if (!live) await check('cached path: the Sales list entry is split by the grant as well', async (t) => {
       const route = '/api/sales?page=1&pageSize=50&cb=sales'
       const holder = await get(route, 'manager_granted')
       const other = await get(route, 'manager')

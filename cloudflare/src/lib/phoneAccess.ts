@@ -1,10 +1,11 @@
 // Who sees a full phone number, and the one projection that hides it from everybody else (owner ruling 2 Nov 2026,
 // round 1 Q3; builds on the 14 Oct ruling "full phone number is admin-only").
 //
-// `contacts_full_phone` is a separate, explicit grant (owner, 21 Oct: extras are separate permissions and Full means
-// main access only). It is off for every non-admin role until an administrator grants it to a role or a person; an
-// administrator-control account holds it implicitly. Nothing else implies it: Contacts Full, Sales Full and Settings
-// Full do not.
+// Since 12 Nov 2026 (owner: "don't hide in system admin, don't hide for employee") every signed-in staff session reads full
+// numbers and only an answer with no session is masked (canSeeFullPhones). The older per-account grant, `contacts_full_phone`
+// (owner, 21 Oct: extras are separate permissions; an administrator-control account holds it implicitly; Contacts Full, Sales Full
+// and Settings Full do not imply it), is kept as holdsFullPhoneGrant, the way back: make canSeeFullPhones return it and restore the
+// Users row. The projection and the guards below are unchanged and still run for every answer that has no session.
 //
 // The projection is a rule on the OUTGOING value, not a per-screen edit. Every JSON body leaves the Worker through
 // c.json (lib/phoneMaskMiddleware.ts wraps it for the whole /api surface), so a route added tomorrow inherits the
@@ -25,8 +26,14 @@ export const FULL_PHONE_PERMISSION = 'contacts_full_phone'
 
 export type PhoneActor = (NonNullable<PermissionUser> & { id?: number | string | null }) | null | undefined
 
-export function canSeeFullPhones(user: PhoneActor): boolean {
+/** The explicit grant (an administrator-control account holds it implicitly). Kept as the way back to per-account control: swap it into canSeeFullPhones. */
+export function holdsFullPhoneGrant(user: PhoneActor): boolean {
   return !!user && hasPermission(user, 'contacts_full_phone')
+}
+
+/** Owner, 12 Nov 2026: "don't hide in system admin, don't hide for employee". Every signed-in staff session reads full numbers; no session stays masked. */
+export function canSeeFullPhones(user: PhoneActor): boolean {
+  return !!user
 }
 
 /** What a search box may match for this account (lib/phoneSearchGuard.ts): every call site names it, none can forget. */
